@@ -9,7 +9,7 @@ Validates JSONL files with the following structure:
     {"role": "user", "content": "..."},
     {"role": "assistant", "content": "..."}
   ],
-  "label": "desirable"  // optional
+  "label": true  // optional (true = desirable, false = undesirable)
 }
 
 Usage:
@@ -27,7 +27,7 @@ from typing import Iterable, List, Tuple, Dict, Any, Optional
 
 SESSION_ID_RE = re.compile(r"^session_\d{13}_[a-z0-9]{9}$")
 WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]{9}$")
-ALLOWED_LABELS = {"desirable", "undesirable"}
+# Labels are now boolean: true = desirable, false = undesirable
 ALLOWED_ROLES = {"system", "user", "assistant"}
 MIN_TOOL_CALLS = 2
 
@@ -58,16 +58,16 @@ class ValidationIssue:
 class ExampleReport:
     index: int
     issues: List[ValidationIssue] = field(default_factory=list)
-    label: Optional[str] = None
+    label: Optional[bool] = None
 
     def add(self, level: str, message: str) -> None:
         self.issues.append(ValidationIssue(level, message))
 
     @property
     def is_valid(self) -> bool:
-        # For undesirable examples, we expect them to have errors (they demonstrate bad behavior)
+        # For undesirable examples (label=False), we expect them to have errors (they demonstrate bad behavior)
         # So we only fail validation if there are structural issues, not tool parameter issues
-        if self.label == "undesirable":
+        if self.label is False:  # Explicitly check for False
             # Allow tool parameter errors and schema mismatches in undesirable examples
             structural_errors = [
                 issue for issue in self.issues
@@ -80,7 +80,7 @@ class ExampleReport:
                 ])
             ]
             return len(structural_errors) == 0
-        # For desirable examples, all errors are failures
+        # For desirable examples (label=True), all errors are failures
         return all(issue.level != "ERROR" for issue in self.issues)
 
 
@@ -413,11 +413,10 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
             validate_assistant_content(content, report)
 
     # Label is optional in ChatML format
+    # Labels should now be boolean: true = desirable, false = undesirable
     if label is not None:
-        if not isinstance(label, str):
-            report.add("ERROR", "Label must be a string if present")
-        elif label not in ALLOWED_LABELS:
-            report.add("ERROR", f"Label '{label}' must be one of {sorted(ALLOWED_LABELS)}")
+        if not isinstance(label, bool):
+            report.add("ERROR", f"Label must be a boolean (true/false) if present, got: {type(label).__name__}")
 
     return report
 

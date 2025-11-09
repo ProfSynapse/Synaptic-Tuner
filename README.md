@@ -84,7 +84,7 @@ Each example follows this structure:
       "content": "tool_call: toolName\narguments: {...}\n\nResult: {...}\n\nAssistant's response to user"
     }
   ],
-  "label": "desirable" or "undesirable"
+  "label": true (desirable) or false (undesirable)
 }
 ```
 

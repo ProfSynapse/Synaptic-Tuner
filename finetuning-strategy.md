@@ -136,8 +136,8 @@ KTO applies **Prospect Theory** (Kahneman & Tversky) to LLM alignment:
 
 #### KTO Data Format
 ```jsonl
-{"messages": [...], "label": "desirable"}
-{"messages": [...], "label": "undesirable"}
+{"messages": [...], "label": true (desirable)}
+{"messages": [...], "label": false (undesirable)}
 ```
 
 #### Negative Example Types for Tool Calling
@@ -597,7 +597,7 @@ Without complete flows, models learn to call tools but not how to:
 ```jsonl
 {
   "messages": [...complete multi-turn flow...],
-  "label": "desirable"
+  "label": true (desirable)
 }
 ```
 
@@ -621,7 +621,7 @@ Without complete flows, models learn to call tools but not how to:
     }
     // MISSING: Tool result and assistant response
   ],
-  "label": "undesirable"
+  "label": false (undesirable)
 }
 ```
 
@@ -664,7 +664,7 @@ Without complete flows, models learn to call tools but not how to:
 │                                                               │
 │  - Mutate correct examples to create errors                  │
 │  - Generate 5 error types per example                        │
-│  - Label as "undesirable"                                    │
+│  - Label as false (undesirable)                                    │
 │  - Include incomplete conversation flows                     │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -940,9 +940,9 @@ To keep JSONL creation disciplined, we will operate a single-example cadence plu
 
 #### Operational Rhythm (3 positives → 1 negative → tracker update)
 1. Pick a scenario from the backlog/tracker that needs coverage and note the target agent + mode.
-2. Generate the **positive** multi-turn conversation, grounding every argument/result in the real schema, stamp the record with `"label": "desirable"`, run the Section 6.5 QA checklist, then append it to `Synthetic Conversations/syngen_toolset_v1.0.0.jsonl` (create this file if it does not exist yet; bump the filename version for future dataset iterations).
+2. Generate the **positive** multi-turn conversation, grounding every argument/result in the real schema, stamp the record with `"label": true (desirable)`, run the Section 6.5 QA checklist, then append it to `Synthetic Conversations/syngen_toolset_v1.0.0.jsonl` (create this file if it does not exist yet; bump the filename version for future dataset iterations).
 3. Repeat step 2 until **three** positive examples are completed for the batch; log metadata for each as you go.
-4. Select one of the three scenarios (or a closely-related variant) and craft the paired **negative** example, showing the undesirable behavior for that flow. Set `"label": "undesirable"`, run QA again, and append it after the positives to keep the batch grouped.
+4. Select one of the three scenarios (or a closely-related variant) and craft the paired **negative** example, showing the undesirable behavior for that flow. Set `"label": false (undesirable)`, run QA again, and append it after the positives to keep the batch grouped.
 5. Once the three positives + one negative are written, capture the example IDs in your working notes and update the tracker tables plus the batch log entry below.
 
 #### Logging & Tracker Update Rules
