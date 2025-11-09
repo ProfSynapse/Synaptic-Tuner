@@ -1,0 +1,1510 @@
+{
+  "get_tools": {
+    "tool_name": "get_tools",
+    "agent": "meta",
+    "mode": "get_tools",
+    "class_name": "N/A (defined in connector.ts)",
+    "params_interface": "N/A",
+    "parameters": [
+      {
+        "name": "managers",
+        "optional": false,
+        "type": "array",
+        "description": "Array of manager/agent names to retrieve tool schemas for (e.g., ['vaultManager', 'contentManager'])"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "managers",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/connector.ts",
+    "notes": "Meta-tool for dynamic tool discovery. Does not follow standard agent/mode pattern. Defined directly in connector.ts to access agent registry."
+  },
+  "vaultManager_deleteFolder": {
+    "tool_name": "vaultManager_deleteFolder",
+    "agent": "vaultManager",
+    "mode": "deleteFolder",
+    "class_name": "DeleteFolderMode",
+    "params_interface": "DeleteFolderParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "recursive",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "path"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/deleteFolderMode.ts"
+  },
+  "vaultManager_editFolder": {
+    "tool_name": "vaultManager_editFolder",
+    "agent": "vaultManager",
+    "mode": "editFolder",
+    "class_name": "EditFolderMode",
+    "params_interface": "EditFolderParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "newPath",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "path",
+      "newPath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/editFolderMode.ts"
+  },
+  "vaultManager_deleteNote": {
+    "tool_name": "vaultManager_deleteNote",
+    "agent": "vaultManager",
+    "mode": "deleteNote",
+    "class_name": "DeleteNoteMode",
+    "params_interface": "DeleteNoteParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "path"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/deleteNoteMode.ts"
+  },
+  "vaultManager_listDirectory": {
+    "tool_name": "vaultManager_listDirectory",
+    "agent": "vaultManager",
+    "mode": "listDirectory",
+    "class_name": "ListDirectoryMode",
+    "params_interface": "ListDirectoryParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "filter",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "depth",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "includeFiles",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "includeFolders",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "filesOnly",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "foldersOnly",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "path"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/listDirectoryMode.ts"
+  },
+  "vaultManager_moveNote": {
+    "tool_name": "vaultManager_moveNote",
+    "agent": "vaultManager",
+    "mode": "moveNote",
+    "class_name": "MoveNoteMode",
+    "params_interface": "MoveNoteParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "newPath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "overwrite",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "path",
+      "newPath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/moveNoteMode.ts"
+  },
+  "vaultManager_createFolder": {
+    "tool_name": "vaultManager_createFolder",
+    "agent": "vaultManager",
+    "mode": "createFolder",
+    "class_name": "CreateFolderMode",
+    "params_interface": "CreateFolderParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "path"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/createFolderMode.ts"
+  },
+  "vaultManager_openNote": {
+    "tool_name": "vaultManager_openNote",
+    "agent": "vaultManager",
+    "mode": "openNote",
+    "class_name": "OpenNoteMode",
+    "params_interface": "OpenNoteParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "mode",
+        "optional": true,
+        "type": "'tab' | 'split' | 'window' | 'current'"
+      },
+      {
+        "name": "focus",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "path"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/openNoteMode.ts"
+  },
+  "vaultManager_moveFolder": {
+    "tool_name": "vaultManager_moveFolder",
+    "agent": "vaultManager",
+    "mode": "moveFolder",
+    "class_name": "MoveFolderMode",
+    "params_interface": "MoveFolderParams",
+    "parameters": [
+      {
+        "name": "path",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "newPath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "overwrite",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "path",
+      "newPath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/moveFolderMode.ts"
+  },
+  "vaultManager_duplicateNote": {
+    "tool_name": "vaultManager_duplicateNote",
+    "agent": "vaultManager",
+    "mode": "duplicateNote",
+    "class_name": "DuplicateNoteMode",
+    "params_interface": "DuplicateNoteParams",
+    "parameters": [
+      {
+        "name": "sourcePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "targetPath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "overwrite",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "autoIncrement",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "sourcePath",
+      "targetPath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultManager/modes/duplicateNoteMode.ts"
+  },
+  "agentManager_listModels": {
+    "tool_name": "agentManager_listModels",
+    "agent": "agentManager",
+    "mode": "listModels",
+    "class_name": "ListModelsMode",
+    "params_interface": "ListModelsParams",
+    "parameters": [],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/listModelsMode.ts"
+  },
+  "agentManager_getAgent": {
+    "tool_name": "agentManager_getAgent",
+    "agent": "agentManager",
+    "mode": "getAgent",
+    "class_name": "GetAgentMode",
+    "params_interface": "GetAgentParams",
+    "parameters": [
+      {
+        "name": "id",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/getAgentMode.ts"
+  },
+  "agentManager_listAgents": {
+    "tool_name": "agentManager_listAgents",
+    "agent": "agentManager",
+    "mode": "listAgents",
+    "class_name": "ListAgentsMode",
+    "params_interface": "ListAgentsParams",
+    "parameters": [
+      {
+        "name": "enabledOnly",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/listAgentsMode.ts"
+  },
+  "agentManager_generateImage": {
+    "tool_name": "agentManager_generateImage",
+    "agent": "agentManager",
+    "mode": "generateImage",
+    "class_name": "GenerateImageMode",
+    "params_interface": "GenerateImageParams",
+    "parameters": [
+      {
+        "name": "prompt",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "provider",
+        "optional": false,
+        "type": "'google'"
+      },
+      {
+        "name": "model",
+        "optional": true,
+        "type": "'imagen-4' | 'imagen-4-ultra' | 'imagen-4-fast'"
+      },
+      {
+        "name": "aspectRatio",
+        "optional": true,
+        "type": "AspectRatio"
+      },
+      {
+        "name": "numberOfImages",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "sampleImageSize",
+        "optional": true,
+        "type": "'1K' | '2K'"
+      },
+      {
+        "name": "savePath",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "prompt",
+      "provider",
+      "savePath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/generateImageMode.ts"
+  },
+  "agentManager_updateAgent": {
+    "tool_name": "agentManager_updateAgent",
+    "agent": "agentManager",
+    "mode": "updateAgent",
+    "class_name": "UpdateAgentMode",
+    "params_interface": "UpdateAgentParams",
+    "parameters": [
+      {
+        "name": "id",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "prompt",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "isEnabled",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "id"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/updateAgentMode.ts"
+  },
+  "agentManager_toggleAgent": {
+    "tool_name": "agentManager_toggleAgent",
+    "agent": "agentManager",
+    "mode": "toggleAgent",
+    "class_name": "ToggleAgentMode",
+    "params_interface": "ToggleAgentParams",
+    "parameters": [
+      {
+        "name": "id",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "id"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/toggleAgentMode.ts"
+  },
+  "agentManager_deleteAgent": {
+    "tool_name": "agentManager_deleteAgent",
+    "agent": "agentManager",
+    "mode": "deleteAgent",
+    "class_name": "DeleteAgentMode",
+    "params_interface": "DeleteAgentParams",
+    "parameters": [
+      {
+        "name": "id",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "id"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/deleteAgentMode.ts"
+  },
+  "agentManager_createAgent": {
+    "tool_name": "agentManager_createAgent",
+    "agent": "agentManager",
+    "mode": "createAgent",
+    "class_name": "CreateAgentMode",
+    "params_interface": "CreateAgentParams",
+    "parameters": [
+      {
+        "name": "name",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "description",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "prompt",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "isEnabled",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "name",
+      "description",
+      "prompt"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/createAgentMode.ts"
+  },
+  "vaultLibrarian_batch": {
+    "tool_name": "vaultLibrarian_batch",
+    "agent": "vaultLibrarian",
+    "mode": "batch",
+    "class_name": "BatchMode",
+    "params_interface": "BatchUniversalSearchParams",
+    "parameters": [
+      {
+        "name": "searches",
+        "optional": false,
+        "type": "UniversalSearchParams[]"
+      },
+      {
+        "name": "mergeResults",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "maxConcurrency",
+        "optional": true,
+        "type": "number"
+      }
+    ],
+    "required_params": [
+      "searches"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultLibrarian/modes/batchMode.ts"
+  },
+  "vaultLibrarian_searchMemory": {
+    "tool_name": "vaultLibrarian_searchMemory",
+    "agent": "vaultLibrarian",
+    "mode": "searchMemory",
+    "class_name": "SearchMemoryMode",
+    "params_interface": "SearchMemoryParams",
+    "parameters": [
+      {
+        "name": "query",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "workspaceId",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "memoryTypes",
+        "optional": true,
+        "type": "MemoryType[]"
+      },
+      {
+        "name": "searchMethod",
+        "optional": true,
+        "type": "'semantic' | 'exact' | 'mixed'"
+      },
+      {
+        "name": "sessionFiltering",
+        "optional": true,
+        "type": "SessionFilterOptions"
+      },
+      {
+        "name": "temporalFiltering",
+        "optional": true,
+        "type": "TemporalFilterOptions"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "includeMetadata",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "includeContent",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "workspace",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "dateRange",
+        "optional": true,
+        "type": "DateRange"
+      },
+      {
+        "name": "toolCallFilters",
+        "optional": true,
+        "type": "any"
+      },
+      {
+        "name": "filterBySession",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "query",
+      "workspaceId"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultLibrarian/modes/searchMemoryMode.ts"
+  },
+  "vaultLibrarian_searchContent": {
+    "tool_name": "vaultLibrarian_searchContent",
+    "agent": "vaultLibrarian",
+    "mode": "searchContent",
+    "class_name": "SearchContentMode",
+    "params_interface": "ContentSearchParams",
+    "parameters": [
+      {
+        "name": "query",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "includeContent",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "snippetLength",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "paths",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object"
+      },
+      {
+        "name": "sessionId",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "query",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "workspaceId",
+          "optional": true,
+          "type": "string"
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "toolContext",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "subgoal",
+          "optional": false,
+          "type": "string"
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultLibrarian/modes/searchContentMode.ts"
+  },
+  "vaultLibrarian_searchDirectory": {
+    "tool_name": "vaultLibrarian_searchDirectory",
+    "agent": "vaultLibrarian",
+    "mode": "searchDirectory",
+    "class_name": "SearchDirectoryMode",
+    "params_interface": "SearchDirectoryParams",
+    "parameters": [
+      {
+        "name": "query",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "paths",
+        "optional": false,
+        "type": "string[]"
+      },
+      {
+        "name": "searchType",
+        "optional": true,
+        "type": "'files' | 'folders' | 'both'"
+      },
+      {
+        "name": "fileTypes",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "depth",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "includeContent",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "pattern",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "dateRange",
+        "optional": true,
+        "type": "object"
+      },
+      {
+        "name": "workspaceId",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "query",
+      "paths"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/vaultLibrarian/modes/searchDirectoryMode.ts"
+  },
+  "contentManager_prependContent": {
+    "tool_name": "contentManager_prependContent",
+    "agent": "contentManager",
+    "mode": "prependContent",
+    "class_name": "PrependContentMode",
+    "params_interface": "PrependContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "content",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "content"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/prependContentMode.ts"
+  },
+  "contentManager_replaceByLine": {
+    "tool_name": "contentManager_replaceByLine",
+    "agent": "contentManager",
+    "mode": "replaceByLine",
+    "class_name": "ReplaceByLineMode",
+    "params_interface": "ReplaceByLineParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "startLine",
+        "optional": false,
+        "type": "number"
+      },
+      {
+        "name": "endLine",
+        "optional": false,
+        "type": "number"
+      },
+      {
+        "name": "newContent",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "startLine",
+      "endLine",
+      "newContent"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/replaceByLineMode.ts"
+  },
+  "contentManager_readContent": {
+    "tool_name": "contentManager_readContent",
+    "agent": "contentManager",
+    "mode": "readContent",
+    "class_name": "ReadContentMode",
+    "params_interface": "ReadContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "offset",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "includeLineNumbers",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "filePath"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/readContentMode.ts"
+  },
+  "contentManager_replaceContent": {
+    "tool_name": "contentManager_replaceContent",
+    "agent": "contentManager",
+    "mode": "replaceContent",
+    "class_name": "ReplaceContentMode",
+    "params_interface": "ReplaceContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "oldContent",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "newContent",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "similarityThreshold",
+        "optional": true,
+        "type": "number"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "oldContent",
+      "newContent"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/replaceContentMode.ts"
+  },
+  "contentManager_createContent": {
+    "tool_name": "contentManager_createContent",
+    "agent": "contentManager",
+    "mode": "createContent",
+    "class_name": "CreateContentMode",
+    "params_interface": "CreateContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "content",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "content"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/createContentMode.ts"
+  },
+  "contentManager_deleteContent": {
+    "tool_name": "contentManager_deleteContent",
+    "agent": "contentManager",
+    "mode": "deleteContent",
+    "class_name": "DeleteContentMode",
+    "params_interface": "DeleteContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "content",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "similarityThreshold",
+        "optional": true,
+        "type": "number"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "content"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/deleteContentMode.ts"
+  },
+  "contentManager_findReplaceContent": {
+    "tool_name": "contentManager_findReplaceContent",
+    "agent": "contentManager",
+    "mode": "findReplaceContent",
+    "class_name": "FindReplaceContentMode",
+    "params_interface": "FindReplaceContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "findText",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "replaceText",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "replaceAll",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "caseSensitive",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "wholeWord",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "findText",
+      "replaceText"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/findReplaceContentMode.ts"
+  },
+  "contentManager_appendContent": {
+    "tool_name": "contentManager_appendContent",
+    "agent": "contentManager",
+    "mode": "appendContent",
+    "class_name": "AppendContentMode",
+    "params_interface": "AppendContentParams",
+    "parameters": [
+      {
+        "name": "filePath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "content",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "filePath",
+      "content"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/appendContentMode.ts"
+  },
+  "commandManager_executeCommand": {
+    "tool_name": "commandManager_executeCommand",
+    "agent": "commandManager",
+    "mode": "executeCommand",
+    "class_name": "ExecuteCommandMode",
+    "params_interface": "ExecuteCommandParams",
+    "parameters": [
+      {
+        "name": "commandId",
+        "optional": false,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "commandId"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/commandManager/modes/executeCommandMode.ts"
+  },
+  "commandManager_listCommands": {
+    "tool_name": "commandManager_listCommands",
+    "agent": "commandManager",
+    "mode": "listCommands",
+    "class_name": "ListCommandsMode",
+    "params_interface": "ListCommandsParams",
+    "parameters": [
+      {
+        "name": "filter",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/commandManager/modes/listCommandsMode.ts"
+  },
+  "agentManager_executePrompt": {
+    "tool_name": "agentManager_executePrompt",
+    "agent": "agentManager",
+    "mode": "executePrompt",
+    "class_name": "ExecutePromptMode",
+    "params_interface": "ExecutePromptParams",
+    "parameters": [
+      {
+        "name": "agent",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "filepaths",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "prompt",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "provider",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "model",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "temperature",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "maxTokens",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "returnContent",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "webSearch",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "action",
+        "optional": true,
+        "type": "object"
+      }
+    ],
+    "required_params": [
+      "prompt"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/execute/ExecutePromptMode.ts"
+  },
+  "memoryManager_updateWorkspace": {
+    "tool_name": "memoryManager_updateWorkspace",
+    "agent": "memoryManager",
+    "mode": "updateWorkspace",
+    "class_name": "UpdateWorkspaceMode",
+    "params_interface": "UpdateWorkspaceParameters",
+    "parameters": [
+      {
+        "name": "workspaceId",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "fieldPath",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "newValue",
+        "optional": false,
+        "type": "any"
+      }
+    ],
+    "required_params": [
+      "workspaceId",
+      "fieldPath",
+      "newValue"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/workspaces/UpdateWorkspaceMode.ts"
+  },
+  "memoryManager_listSessions": {
+    "tool_name": "memoryManager_listSessions",
+    "agent": "memoryManager",
+    "mode": "listSessions",
+    "class_name": "ListSessionsMode",
+    "params_interface": "ListSessionsParams",
+    "parameters": [
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "order",
+        "optional": true,
+        "type": "'asc' | 'desc'"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/sessions/ListSessionsMode.ts"
+  },
+  "memoryManager_updateSession": {
+    "tool_name": "memoryManager_updateSession",
+    "agent": "memoryManager",
+    "mode": "updateSession",
+    "class_name": "UpdateSessionMode",
+    "params_interface": "EditSessionParams",
+    "parameters": [
+      {
+        "name": "sessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "targetSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "name",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "sessionGoal",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/sessions/UpdateSessionMode.ts"
+  },
+  "memoryManager_createSession": {
+    "tool_name": "memoryManager_createSession",
+    "agent": "memoryManager",
+    "mode": "createSession",
+    "class_name": "CreateSessionMode",
+    "params_interface": "CreateSessionParams",
+    "parameters": [
+      {
+        "name": "name",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "generateContextTrace",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "sessionGoal",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "previousSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "newSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "workspaceContext",
+        "optional": true,
+        "type": "WorkspaceContext | string"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/sessions/CreateSessionMode.ts"
+  },
+  "memoryManager_loadSession": {
+    "tool_name": "memoryManager_loadSession",
+    "agent": "memoryManager",
+    "mode": "loadSession",
+    "class_name": "LoadSessionMode",
+    "params_interface": "LoadSessionParams",
+    "parameters": [
+      {
+        "name": "sessionId",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "targetSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "sessionName",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "sessionDescription",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "createContinuationSession",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "sessionId"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/sessions/LoadSessionMode.ts"
+  },
+  "memoryManager_loadState": {
+    "tool_name": "memoryManager_loadState",
+    "agent": "memoryManager",
+    "mode": "loadState",
+    "class_name": "LoadStateMode",
+    "params_interface": "LoadStateParams",
+    "parameters": [
+      {
+        "name": "stateId",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "sessionName",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "sessionDescription",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "restorationGoal",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "continueExistingSession",
+        "optional": true,
+        "type": "boolean"
+      }
+    ],
+    "required_params": [
+      "stateId"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/states/LoadStateMode.ts"
+  },
+  "memoryManager_listStates": {
+    "tool_name": "memoryManager_listStates",
+    "agent": "memoryManager",
+    "mode": "listStates",
+    "class_name": "ListStatesMode",
+    "params_interface": "ListStatesParams",
+    "parameters": [
+      {
+        "name": "includeContext",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "targetSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "order",
+        "optional": true,
+        "type": "'asc' | 'desc'"
+      },
+      {
+        "name": "tags",
+        "optional": true,
+        "type": "string[]"
+      }
+    ],
+    "required_params": [],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/states/ListStatesMode.ts"
+  },
+  "memoryManager_createState": {
+    "tool_name": "memoryManager_createState",
+    "agent": "memoryManager",
+    "mode": "createState",
+    "class_name": "CreateStateMode",
+    "params_interface": "CreateStateParams",
+    "parameters": [
+      {
+        "name": "name",
+        "optional": false,
+        "type": "string"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "targetSessionId",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "includeSummary",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "includeFileContents",
+        "optional": true,
+        "type": "boolean"
+      },
+      {
+        "name": "maxFiles",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "maxTraces",
+        "optional": true,
+        "type": "number"
+      },
+      {
+        "name": "tags",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "reason",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "conversationContext",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "activeTask",
+        "optional": true,
+        "type": "string"
+      },
+      {
+        "name": "activeFiles",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "nextSteps",
+        "optional": true,
+        "type": "string[]"
+      },
+      {
+        "name": "reasoning",
+        "optional": true,
+        "type": "string"
+      }
+    ],
+    "required_params": [
+      "name"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/states/CreateStateMode.ts"
+  },
+  "contentManager_batchContent": {
+    "tool_name": "contentManager_batchContent",
+    "agent": "contentManager",
+    "mode": "batchContent",
+    "class_name": "BatchContentMode",
+    "params_interface": "BatchContentParams",
+    "parameters": [
+      {
+        "name": "operations",
+        "optional": false,
+        "type": "ContentOperation[]"
+      }
+    ],
+    "required_params": [
+      "operations"
+    ],
+    "context_schema": null,
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/batch/BatchContentMode.ts"
+  }
+}
