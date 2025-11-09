@@ -1,0 +1,69 @@
+# MLX Fine-Tuning Configuration for Mistral-7B-Instruct-v0.3
+# This file contains all hyperparameters and settings for the fine-tuning process
+
+model:
+  name: "mistralai/Mistral-7B-Instruct-v0.3"
+  cache_dir: "~/.cache/huggingface"
+  dtype: "float16"  # Use float16 for memory efficiency on Metal
+  max_seq_length: 2048
+  trust_remote_code: false
+
+lora:
+  rank: 16  # LoRA rank (r) - controls adapter capacity
+  alpha: 32  # LoRA alpha - scaling factor (typically 2*rank)
+  dropout: 0.05  # Dropout for LoRA layers
+  target_modules:
+    - "q_proj"  # Query projection in attention
+    - "v_proj"  # Value projection in attention
+  bias: "none"  # Options: "none", "all", "lora_only"
+
+training:
+  num_epochs: 1
+  per_device_batch_size: 2
+  gradient_accumulation_steps: 4  # Effective batch size = 2 * 4 = 8
+  learning_rate: 1.0e-4
+  warmup_steps: 100
+  max_grad_norm: 1.0  # Gradient clipping threshold
+  weight_decay: 0.01
+  save_steps: 100  # Save checkpoint every N steps
+  eval_steps: 50  # Evaluate every N steps
+  logging_steps: 10  # Log metrics every N steps
+  max_steps: -1  # -1 means train for full epochs
+  seed: 42
+
+data:
+  dataset_path: "syngen_toolset_v1.0.0_claude.jsonl"
+  train_split: 0.8  # 80% train, 20% validation
+  shuffle: true
+  seed: 42
+  max_seq_length: 2048  # Must match model.max_seq_length
+
+output:
+  checkpoint_dir: "checkpoints"
+  final_model_dir: "outputs/final_model"
+  logs_dir: "logs"
+  metrics_dir: "outputs/metrics"
+  keep_last_n_checkpoints: 3  # Keep last N checkpoints + best
+
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+  console: true
+  file: true
+  json_logs: true  # Enable structured JSON logging
+  log_file: "logs/training.log"
+  json_log_file: "logs/training.jsonl"
+
+evaluation:
+  sample_prompts:
+    - "Can you help me organize my notes?"
+    - "What is the capital of France?"
+    - "Explain quantum computing in simple terms."
+  max_new_tokens: 100
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: true
+
+system:
+  device: "metal"  # Use Metal GPU on Mac
+  memory_limit_gb: 16  # Memory budget
+  num_workers: 0  # MLX doesn't use multiprocessing
