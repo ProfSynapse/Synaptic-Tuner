@@ -8,6 +8,7 @@ mlx-lm>=0.0.5
 # Model and Tokenization
 transformers>=4.35.0
 huggingface-hub>=0.19.0
+sentencepiece>=0.2.0
 
 # Data Processing
 numpy>=1.24.0

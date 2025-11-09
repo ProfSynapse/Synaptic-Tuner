@@ -295,7 +295,8 @@ class TokenizerWrapper:
         attention_mask = mx.array(encoding['attention_mask'][0])
 
         # Create labels (shifted input_ids with padding masked)
-        labels = input_ids.copy()
+        # MLX arrays don't have .copy(), so we create a new array
+        labels = mx.array(input_ids)
         # Mask padding tokens in labels (-100 is ignore index)
         labels = mx.where(attention_mask == 0, -100, labels)
 

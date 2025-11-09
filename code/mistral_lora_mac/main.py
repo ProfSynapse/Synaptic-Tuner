@@ -34,22 +34,50 @@ import traceback
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir / "src"))
 
-from config.config_manager import ConfigurationManager, ConfigurationError
-from src.utils import (
-    setup_logging,
-    MemoryMonitor,
-    get_device_info,
-    ensure_dir,
-    format_time,
-    seed_everything,
-    check_metal_availability
-)
-from src.data_pipeline import DataPipeline
-from src.model_manager import ModelManager
-from src.trainer import Trainer
-from src.evaluator import Evaluator
+# Import with absolute paths
+import importlib.util
+
+def load_module(name, path):
+    """Load a module from an absolute path."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+# Load config manager
+config_manager = load_module("config_manager", current_dir / "config" / "config_manager.py")
+ConfigurationManager = config_manager.ConfigurationManager
+ConfigurationError = config_manager.ConfigurationError
+
+# Load utils
+utils = load_module("utils", current_dir / "src" / "utils.py")
+setup_logging = utils.setup_logging
+MemoryMonitor = utils.MemoryMonitor
+get_device_info = utils.get_device_info
+ensure_dir = utils.ensure_dir
+format_time = utils.format_time
+seed_everything = utils.seed_everything
+check_metal_availability = utils.check_metal_availability
+
+# Load data pipeline
+data_pipeline_mod = load_module("data_pipeline", current_dir / "src" / "data_pipeline.py")
+DataPipeline = data_pipeline_mod.DataPipeline
+
+# Load model manager
+model_manager_mod = load_module("model_manager", current_dir / "src" / "model_manager.py")
+ModelManager = model_manager_mod.ModelManager
+
+# Load trainer
+trainer_mod = load_module("trainer", current_dir / "src" / "trainer.py")
+Trainer = trainer_mod.Trainer
+
+# Load evaluator
+evaluator_mod = load_module("evaluator", current_dir / "src" / "evaluator.py")
+Evaluator = evaluator_mod.Evaluator
 
 
 def parse_args():
@@ -154,7 +182,10 @@ def main():
         ensure_dir(config.output.metrics_dir)
 
         # Setup logging
-        logger = setup_logging(config.logging)
+        # Create a modified logging config with logs_dir from output config
+        logging_config = config.logging
+        logging_config.logs_dir = config.output.logs_dir
+        logger = setup_logging(logging_config)
 
         print_banner(logger)
 
