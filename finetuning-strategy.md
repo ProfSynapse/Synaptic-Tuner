@@ -1,8 +1,8 @@
 # Claudesidian-MCP Fine-Tuning Strategy: Synthetic Data Generation Plan
 
-**Document Version:** 3.0
+**Document Version:** 3.1
 **Created:** 2025-11-07
-**Updated:** 2025-11-07
+**Updated:** 2025-11-09
 **Purpose:** Comprehensive blueprint for generating synthetic training data (multi-turn conversations with complete tool execution flows) for fine-tuning local LLMs to reliably use claudesidian-mcp tools
 
 **Target Framework:** Unsloth (Universal Format)
@@ -139,6 +139,46 @@ KTO applies **Prospect Theory** (Kahneman & Tversky) to LLM alignment:
 {"messages": [...], "label": true (desirable)}
 {"messages": [...], "label": false (undesirable)}
 ```
+
+#### **CRITICAL: Dataset Structure for KTO Training**
+
+**Interleaved Label Requirement**: Due to a bug in TRL's KTOTrainer implementation, datasets **MUST** be structured with alternating desirable/undesirable labels to prevent CUDA errors during training.
+
+**Problem**: TRL's `forward()` method assumes every batch contains both desirable and undesirable examples. When batches are homogeneous (all True or all False), tensor indexing fails with:
+```
+AcceleratorError: CUDA error: invalid configuration argument
+```
+
+**Solution**: Structure datasets in strict alternating pattern:
+```jsonl
+{"messages": [...], "label": true}   # Example 1: desirable
+{"messages": [...], "label": false}  # Example 2: undesirable
+{"messages": [...], "label": true}   # Example 3: desirable
+{"messages": [...], "label": false}  # Example 4: undesirable
+...
+```
+
+**Implementation**:
+1. Generate or collect desirable examples (label=true)
+2. Generate or collect undesirable examples (label=false)
+3. **Balance the counts**: Ensure equal numbers of each (e.g., 254:254)
+4. **Shuffle each group independently** (maintain diversity within each type)
+5. **Interleave**: Alternate True/False when writing to JSONL
+6. **Verify**: First 20-30 examples should show perfect alternation
+
+**Why This Works**:
+- Sequential batch sampling (batch_size=2) creates batches like `[True, False]`, `[True, False]`...
+- Guarantees 100% mixed batches (no homogeneous batches)
+- Matches TRL's official `kto-mix-14k` example dataset structure
+- Eliminates CUDA indexing errors completely
+
+**Example Dataset Stats**:
+- Total: 508 examples
+- Desirable: 254 (every odd index: 0, 2, 4, ...)
+- Undesirable: 254 (every even index: 1, 3, 5, ...)
+- Pattern verification: `all(labels[i] != labels[i+1] for i in range(len(labels)-1))`
+
+**Reference Implementation**: See `syngen_toolset_v1.0.0_claude_balanced_interleaved.jsonl`
 
 #### Negative Example Types for Tool Calling
 1. **Wrong Tool**: Correct intent, wrong tool selected
@@ -1531,7 +1571,8 @@ When adding new batches:
 2. Update the **Current Dataset Stats** (if main dataset changes)
 3. Update **Repository Structure** if files/folders change
 4. Update validator path references (they're currently relative to `tools/`)
-5. Commit changes to git
+5. **CRITICAL**: When creating final KTO dataset, ensure interleaved True/False pattern (see Section 2.3)
+6. Commit changes to git
 
 ---
 
