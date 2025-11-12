@@ -138,18 +138,43 @@ class GradientAccumulator:
         Accumulate gradients.
 
         Args:
-            grads: Dictionary of gradients
+            grads: Dictionary of gradients (can be nested)
         """
         if not self.accumulated_grads:
-            # First accumulation
-            self.accumulated_grads = {k: v for k, v in grads.items()}
+            # First accumulation - deep copy the gradients
+            self.accumulated_grads = self._deep_copy_grads(grads)
         else:
-            # Add to existing
-            for k, v in grads.items():
-                if k in self.accumulated_grads:
-                    self.accumulated_grads[k] = self.accumulated_grads[k] + v
+            # Add to existing - recursive addition for nested dicts
+            self.accumulated_grads = self._add_grad_dicts(self.accumulated_grads, grads)
 
         self.current_step += 1
+
+    def _deep_copy_grads(self, grads: Dict) -> Dict:
+        """Deep copy gradients, handling nested dictionaries."""
+        result = {}
+        for k, v in grads.items():
+            if isinstance(v, dict):
+                result[k] = self._deep_copy_grads(v)
+            else:
+                result[k] = v
+        return result
+
+    def _add_grad_dicts(self, acc: Dict, grads: Dict) -> Dict:
+        """Recursively add gradient dictionaries."""
+        result = {}
+        for k in acc:
+            if k in grads:
+                if isinstance(acc[k], dict) and isinstance(grads[k], dict):
+                    result[k] = self._add_grad_dicts(acc[k], grads[k])
+                elif isinstance(acc[k], list) or isinstance(grads[k], list):
+                    # Skip lists - just use the accumulated value
+                    result[k] = acc[k]
+                else:
+                    # Add mx.arrays
+                    result[k] = acc[k] + grads[k]
+            else:
+                result[k] = acc[k]
+        return result
 
     def should_update(self) -> bool:
         """Check if we should update parameters."""
@@ -162,12 +187,22 @@ class GradientAccumulator:
         Returns:
             Dictionary of averaged gradients
         """
-        # Average gradients
-        avg_grads = {}
-        for k, v in self.accumulated_grads.items():
-            avg_grads[k] = v / self.accumulation_steps
+        # Average gradients (recursive for nested dicts)
+        return self._avg_grad_dicts(self.accumulated_grads)
 
-        return avg_grads
+    def _avg_grad_dicts(self, grads: Dict) -> Dict:
+        """Recursively average gradient dictionaries."""
+        result = {}
+        for k, v in grads.items():
+            if isinstance(v, dict):
+                result[k] = self._avg_grad_dicts(v)
+            elif isinstance(v, list):
+                # Skip lists (these are not gradient arrays)
+                result[k] = v
+            else:
+                # Divide mx.array by the accumulation steps
+                result[k] = v / self.accumulation_steps
+        return result
 
     def reset(self):
         """Reset accumulator."""
@@ -209,25 +244,52 @@ def clip_gradients(grads: Dict[str, mx.array], max_norm: float) -> Tuple[Dict[st
     Clip gradients by global norm.
 
     Args:
-        grads: Dictionary of gradients
+        grads: Dictionary of gradients (can be nested)
         max_norm: Maximum gradient norm
 
     Returns:
         Tuple of (clipped_gradients, total_norm)
     """
-    # Compute total norm
+    # Compute total norm recursively
+    def compute_norm(g):
+        """Compute norm of a gradient value (handles nested dicts)."""
+        if isinstance(g, dict):
+            norm = 0.0
+            for v in g.values():
+                norm += compute_norm(v)
+            return norm
+        elif isinstance(g, (list, tuple)):
+            return 0.0  # Skip non-tensor types
+        else:
+            # mx.array
+            return mx.sum(g * g)
+
     total_norm = 0.0
     for g in grads.values():
-        total_norm += mx.sum(g * g)
+        total_norm += compute_norm(g)
     total_norm = mx.sqrt(total_norm)
 
     # Clip if needed
     clip_coef = max_norm / (total_norm + 1e-6)
     clip_coef = mx.minimum(clip_coef, mx.array(1.0))
 
+    # Apply clipping recursively
+    def clip_grad(g, coef):
+        """Apply clipping to a gradient value (handles nested dicts)."""
+        if isinstance(g, dict):
+            result = {}
+            for k, v in g.items():
+                result[k] = clip_grad(v, coef)
+            return result
+        elif isinstance(g, (list, tuple)):
+            return g  # Return as-is
+        else:
+            # mx.array
+            return g * coef
+
     clipped_grads = {}
     for k, g in grads.items():
-        clipped_grads[k] = g * clip_coef
+        clipped_grads[k] = clip_grad(g, clip_coef)
 
     return clipped_grads, float(total_norm)
 
