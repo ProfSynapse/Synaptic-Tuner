@@ -5,38 +5,56 @@ model:
   name: "mistralai/Mistral-7B-Instruct-v0.3"
   cache_dir: "~/.cache/huggingface"
   dtype: "float16"  # Use float16 for memory efficiency on Metal
-  max_seq_length: 2048
+  max_seq_length: 4096
   trust_remote_code: false
 
 lora:
-  rank: 16  # LoRA rank (r) - controls adapter capacity
-  alpha: 32  # LoRA alpha - scaling factor (typically 2*rank)
+  rank: 32  # LoRA rank (r) - Mistral 7B configuration
+  alpha: 64  # LoRA alpha - scaling factor (2*rank)
   dropout: 0.05  # Dropout for LoRA layers
   target_modules:
     - "q_proj"  # Query projection in attention
+    - "k_proj"  # Key projection in attention
     - "v_proj"  # Value projection in attention
+    - "o_proj"  # Output projection in attention
+    - "gate_proj"  # MLP gate projection
+    - "up_proj"  # MLP up projection
+    - "down_proj"  # MLP down projection
   bias: "none"  # Options: "none", "all", "lora_only"
 
 training:
-  num_epochs: 1
-  per_device_batch_size: 2
-  gradient_accumulation_steps: 4  # Effective batch size = 2 * 4 = 8
-  learning_rate: 1.0e-4
+  num_epochs: 2
+  per_device_batch_size: 8
+  gradient_accumulation_steps: 4  # Effective batch size = 8 * 4 = 32
+  learning_rate: 1.0e-6
   warmup_steps: 100
+  warmup_ratio: 0.05
+  lr_scheduler: "cosine"
   max_grad_norm: 1.0  # Gradient clipping threshold
   weight_decay: 0.01
-  save_steps: 100  # Save checkpoint every N steps
-  eval_steps: 50  # Evaluate every N steps
+  save_steps: 625  # Save at epoch boundary (1250/2)
+  eval_steps: 625  # Evaluate at epoch boundary
   logging_steps: 10  # Log metrics every N steps
-  max_steps: -1  # -1 means train for full epochs
+  max_steps: 1250  # Maximum steps for Mistral 7B
   seed: 42
+
+optimizer:
+  name: "adamw"
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1.0e-8
+
+kto:
+  beta: 0.1  # KTO beta parameter for Mistral 7B
+  lambda_d: 1.0  # Lambda for desirable samples
+  lambda_u: 1.0  # Lambda for undesirable samples
 
 data:
   dataset_path: "syngen_toolset_v1.0.0_claude.jsonl"
   train_split: 0.8  # 80% train, 20% validation
   shuffle: true
   seed: 42
-  max_seq_length: 2048  # Must match model.max_seq_length
+  max_seq_length: 4096  # Must match model.max_seq_length
 
 output:
   checkpoint_dir: "checkpoints"
