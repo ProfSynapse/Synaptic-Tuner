@@ -1506,5 +1506,394 @@
     ],
     "context_schema": null,
     "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/contentManager/modes/batch/BatchContentMode.ts"
+  },
+  "agentManager_batchExecutePrompt": {
+    "tool_name": "agentManager_batchExecutePrompt",
+    "agent": "agentManager",
+    "mode": "batchExecutePrompt",
+    "class_name": "BatchExecutePromptMode",
+    "params_interface": "BatchExecutePromptParams",
+    "parameters": [
+      {
+        "name": "prompts",
+        "optional": false,
+        "type": "array",
+        "description": "Array of batch requests to execute - can be text prompts or image generation requests"
+      },
+      {
+        "name": "mergeResponses",
+        "optional": true,
+        "type": "boolean",
+        "description": "Whether to merge all responses into a single result"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "prompts",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/agentManager/modes/batchExecutePrompt/BatchExecutePromptMode.ts"
+  },
+  "memoryManager_createWorkspace": {
+    "tool_name": "memoryManager_createWorkspace",
+    "agent": "memoryManager",
+    "mode": "createWorkspace",
+    "class_name": "CreateWorkspaceMode",
+    "params_interface": "CreateWorkspaceParameters",
+    "parameters": [
+      {
+        "name": "name",
+        "optional": false,
+        "type": "string",
+        "description": "Workspace name"
+      },
+      {
+        "name": "rootFolder",
+        "optional": false,
+        "type": "string",
+        "description": "Root folder path"
+      },
+      {
+        "name": "purpose",
+        "optional": false,
+        "type": "string",
+        "description": "What is this workspace for?"
+      },
+      {
+        "name": "currentGoal",
+        "optional": false,
+        "type": "string",
+        "description": "What are you trying to accomplish right now?"
+      },
+      {
+        "name": "workflows",
+        "optional": false,
+        "type": "array",
+        "description": "Array of workflows with name, when, and steps properties"
+      },
+      {
+        "name": "keyFiles",
+        "optional": true,
+        "type": "array",
+        "description": "Simple key files list for quick reference"
+      },
+      {
+        "name": "preferences",
+        "optional": true,
+        "type": "string",
+        "description": "User preferences as actionable guidelines"
+      },
+      {
+        "name": "dedicatedAgentId",
+        "optional": true,
+        "type": "string",
+        "description": "ID of dedicated agent for this workspace"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string",
+        "description": "Workspace description"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "name",
+      "rootFolder",
+      "purpose",
+      "currentGoal",
+      "workflows",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/workspaces/CreateWorkspaceMode.ts"
+  },
+  "memoryManager_listWorkspaces": {
+    "tool_name": "memoryManager_listWorkspaces",
+    "agent": "memoryManager",
+    "mode": "listWorkspaces",
+    "class_name": "ListWorkspacesMode",
+    "params_interface": "ListWorkspacesParameters",
+    "parameters": [
+      {
+        "name": "sortBy",
+        "optional": true,
+        "type": "string",
+        "description": "Sort by: name, created, or lastAccessed"
+      },
+      {
+        "name": "order",
+        "optional": true,
+        "type": "string",
+        "description": "Sort order: asc or desc"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number",
+        "description": "Maximum number of workspaces to return"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/workspaces/ListWorkspacesMode.ts"
+  },
+  "memoryManager_loadWorkspace": {
+    "tool_name": "memoryManager_loadWorkspace",
+    "agent": "memoryManager",
+    "mode": "loadWorkspace",
+    "class_name": "LoadWorkspaceMode",
+    "params_interface": "LoadWorkspaceParameters",
+    "parameters": [
+      {
+        "name": "id",
+        "optional": false,
+        "type": "string",
+        "description": "Workspace ID to load"
+      },
+      {
+        "name": "limit",
+        "optional": true,
+        "type": "number",
+        "description": "Limit for sessions, states, and recentActivity (default: 3)"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "id",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/workspaces/LoadWorkspaceMode.ts"
+  },
+  "memoryManager_updateState": {
+    "tool_name": "memoryManager_updateState",
+    "agent": "memoryManager",
+    "mode": "updateState",
+    "class_name": "UpdateStateMode",
+    "params_interface": "EditStateParams",
+    "parameters": [
+      {
+        "name": "stateId",
+        "optional": false,
+        "type": "string",
+        "description": "ID of the state to edit"
+      },
+      {
+        "name": "name",
+        "optional": true,
+        "type": "string",
+        "description": "New state name"
+      },
+      {
+        "name": "description",
+        "optional": true,
+        "type": "string",
+        "description": "New state description"
+      },
+      {
+        "name": "addTags",
+        "optional": true,
+        "type": "array",
+        "description": "Add additional tags to state"
+      },
+      {
+        "name": "removeTags",
+        "optional": true,
+        "type": "array",
+        "description": "Remove specific tags from state"
+      },
+      {
+        "name": "context",
+        "optional": false,
+        "type": "object",
+        "description": "Standard context object required by all tools"
+      }
+    ],
+    "required_params": [
+      "stateId",
+      "context"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "sessionId",
+          "optional": false
+        },
+        {
+          "name": "workspaceId",
+          "optional": false
+        },
+        {
+          "name": "sessionDescription",
+          "optional": false
+        },
+        {
+          "name": "sessionMemory",
+          "optional": false
+        },
+        {
+          "name": "toolContext",
+          "optional": false
+        },
+        {
+          "name": "primaryGoal",
+          "optional": false
+        },
+        {
+          "name": "subgoal",
+          "optional": false
+        }
+      ]
+    },
+    "file_path": ".obsidian/plugins/claudesidian-mcp/src/agents/memoryManager/modes/states/UpdateStateMode.ts"
   }
 }
