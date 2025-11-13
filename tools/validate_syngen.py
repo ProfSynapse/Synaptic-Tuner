@@ -436,9 +436,12 @@ def main() -> None:
     except ValueError as exc:
         sys.exit(str(exc))
 
-    invalid = [r for r in reports if not r.is_valid]
+    # Only count failures from label=true examples (or no label)
+    # label=false examples are intentionally incorrect and should be ignored
+    invalid = [r for r in reports if not r.is_valid and r.label is not False]
+
     for report in reports:
-        if report.issues:
+        if report.issues and report.label is not False:
             print(f"Example line {report.index}:")
             for issue in report.issues:
                 print(f"  [{issue.level}] {issue.message}")
@@ -450,7 +453,9 @@ def main() -> None:
     else:
         print(f"⚠ Schema validation disabled (tool_schemas.json not found)\n", file=sys.stderr)
 
-    summary = f"Validated {len(reports)} example(s): {len(invalid)} failed."
+    # Count label=false examples separately for informational purposes
+    label_false_count = len([r for r in reports if r.label is False])
+    summary = f"Validated {len(reports)} example(s): {len(invalid)} failed (ignoring {label_false_count} label=false examples)."
     if invalid:
         sys.exit(summary)
     print(summary)
