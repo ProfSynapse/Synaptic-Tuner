@@ -293,7 +293,10 @@ def print_report(results):
 
 def main():
     # Analyze the main dataset file
-    dataset_path = Path('/Users/jrosenbaum/Documents/Code/Synthetic Conversations/syngen_toolset_v1.0.0_claude.jsonl')
+    if len(sys.argv) > 1:
+        dataset_path = Path(sys.argv[1])
+    else:
+        dataset_path = Path('syngen_toolset_v1.0.0_claude.jsonl')
 
     if not dataset_path.exists():
         print(f"Error: Dataset file not found at {dataset_path}", file=sys.stderr)
