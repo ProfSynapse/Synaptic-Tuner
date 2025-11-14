@@ -11,6 +11,13 @@ from typing import List
 from unsloth import FastLanguageModel
 from huggingface_hub import HfApi
 
+# Load .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Loads HF_TOKEN from .env file
+except ImportError:
+    pass  # dotenv not required, can use environment variables directly
+
 
 def upload_standard_model(
     model_path: str,
