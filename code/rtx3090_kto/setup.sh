@@ -120,9 +120,9 @@ if [ "$INSTALL_FLASH_ATTN" = true ]; then
     total_ram=$(free -g | awk '/^Mem:/{print $2}')
     if [ "$total_ram" -lt 32 ]; then
         echo "WARNING: Less than 32GB RAM detected. Using MAX_JOBS=2 to limit compilation."
-        MAX_JOBS=2 pip install flash-attn==2.5.9 --no-build-isolation
+        MAX_JOBS=2 pip install flash-attn==2.5.9.post1 --no-build-isolation
     else
-        MAX_JOBS=4 pip install flash-attn==2.5.9 --no-build-isolation
+        MAX_JOBS=4 pip install flash-attn==2.5.9.post1 --no-build-isolation
     fi
 
     echo "✓ Flash Attention installed"

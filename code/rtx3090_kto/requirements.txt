@@ -33,4 +33,4 @@ huggingface-hub>=0.20.0
 # wandb>=0.16.0
 
 # Note: Flash Attention is optional but recommended
-# Install separately: MAX_JOBS=4 pip install flash-attn==2.5.9 --no-build-isolation
+# Install separately: MAX_JOBS=4 pip install flash-attn==2.5.9.post1 --no-build-isolation

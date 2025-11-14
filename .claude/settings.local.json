@@ -17,7 +17,12 @@
       "Bash(python -c:*)",
       "Bash(wait)",
       "Bash(pip uninstall:*)",
-      "Bash(MAX_JOBS=4 pip install:*)"
+      "Bash(MAX_JOBS=4 pip install:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(pip index versions:*)",
+      "Bash(head:*)"
     ],
     "deny": [],
     "ask": []
