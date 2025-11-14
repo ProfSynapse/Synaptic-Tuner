@@ -11,7 +11,11 @@
       "Bash(pip --version:*)",
       "Bash(sudo apt install:*)",
       "Bash(conda --version:*)",
-      "Bash(conda create:*)"
+      "Bash(conda create:*)",
+      "Bash(pip install:*)",
+      "Bash(conda activate:*)",
+      "Bash(python -c:*)",
+      "Bash(wait)"
     ],
     "deny": [],
     "ask": []
