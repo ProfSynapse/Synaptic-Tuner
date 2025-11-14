@@ -1,7 +1,7 @@
-# Installation Fixes Applied - November 2024
+# Installation Fixes Applied - November 2025
 
 ## Summary
-This document describes the fixes applied to ensure reliable installation of the RTX 3090 KTO training environment.
+This document describes the critical fixes applied to ensure reliable installation of the RTX 3090 KTO training environment. The most important fix is changing `--index-url` to `--extra-index-url` in requirements.txt, which was preventing pip from finding any PyPI packages.
 
 ## Key Changes Made
 
@@ -57,12 +57,32 @@ pip install --no-deps xformers==0.0.27.post2
 
 ## Why These Changes Matter
 
+### The --index-url vs --extra-index-url Fix (MOST CRITICAL)
+**Problem:** Using `--index-url` in requirements.txt restricts pip to searching ONLY the specified repository (PyTorch's wheel server). This means pip cannot find any packages from PyPI like transformers, datasets, accelerate, etc.
+
+**Solution:** Change to `--extra-index-url` which tells pip to search PyPI (the default) FIRST, then ALSO search the PyTorch repository for CUDA-enabled wheels.
+
+**Impact:** This was preventing `bash setup.sh` from working at all. The error "Could not find a version that satisfies the requirement transformers==4.45.2" was caused by pip only looking at PyTorch's repository.
+
+**Technical Details:**
+- `--index-url URL`: Replaces default PyPI with URL (exclusive)
+- `--extra-index-url URL`: Adds URL to search in addition to PyPI (inclusive)
+
 ### The HuggingFace Hub 0.25.0 Requirement
 **Problem:** Unsloth 2024.9 imports from `huggingface_hub.utils._token` which was removed in newer versions (0.36.0+).
 
 **Solution:** Pin to version 0.25.0 which contains the required internal module.
 
 **Source:** https://github.com/unslothai/unsloth/issues/1148
+
+### The sentencepiece and protobuf Dependencies
+**Problem:** These dependencies were not listed in requirements.txt but are required by the tokenizer and Unsloth respectively.
+
+**Solution:** Added `sentencepiece>=0.1.99` and `protobuf<4.0.0` to requirements.txt.
+
+**Impact:** Without these, the training script fails during model loading with:
+- "Cannot instantiate this tokenizer... make sure you have sentencepiece installed"
+- "ModuleNotFoundError: No module named 'google'" (protobuf missing)
 
 ### The --no-deps Strategy
 **Problem:** When installing Unsloth normally, it tries to manage its own dependencies and can:
@@ -105,6 +125,8 @@ conda create -p ./venv python=3.10
 ✓ HuggingFace Hub: 0.25.0 ⚠️ CRITICAL VERSION
 ✓ Unsloth: 2024.9
 ✓ Xformers: 0.0.27.post2
+✓ SentencePiece: 0.1.99+ (tokenizer dependency)
+✓ Protobuf: <4.0.0 (Unsloth dependency)
 
 ## Next Time Setup
 
@@ -135,8 +157,10 @@ bash setup.sh
 ## Contact
 
 If you encounter issues with this setup, check:
-1. Python version (should be 3.10.x)
-2. HuggingFace Hub version (must be 0.25.0)
-3. All packages installed with correct versions from requirements.txt
+1. requirements.txt line 9 uses `--extra-index-url` (NOT `--index-url`)
+2. Python version (should be 3.10.x)
+3. HuggingFace Hub version (must be 0.25.0)
+4. sentencepiece and protobuf are installed
+5. All packages installed with correct versions from requirements.txt
 
-Last Updated: November 14, 2024
+Last Updated: November 14, 2025
