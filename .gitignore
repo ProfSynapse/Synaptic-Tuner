@@ -60,3 +60,7 @@ models--*/
 
 # Testing
 test_dataset.jsonl
+
+unsloth_compiled_cache/
+
+.history/

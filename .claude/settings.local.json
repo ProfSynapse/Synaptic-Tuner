@@ -15,7 +15,9 @@
       "Bash(pip install:*)",
       "Bash(conda activate:*)",
       "Bash(python -c:*)",
-      "Bash(wait)"
+      "Bash(wait)",
+      "Bash(pip uninstall:*)",
+      "Bash(MAX_JOBS=4 pip install:*)"
     ],
     "deny": [],
     "ask": []
