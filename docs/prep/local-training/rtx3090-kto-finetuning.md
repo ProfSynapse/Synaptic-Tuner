@@ -152,10 +152,10 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 # Add LoRA adapters
 model = FastLanguageModel.get_peft_model(
     model,
-    r=16,  # LoRA rank (8-32 recommended, lower = less memory)
+    r=64,  # LoRA rank - Mistral 7B recommended (previously 32→64)
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                     "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
+    lora_alpha=128,  # LoRA alpha - Mistral 7B recommended (previously 64→128)
     lora_dropout=0.05,
     bias="none",
     use_gradient_checkpointing="unsloth",
@@ -258,8 +258,8 @@ model = prepare_model_for_kbit_training(model)
 
 # Configure LoRA
 lora_config = LoraConfig(
-    r=16,
-    lora_alpha=16,
+    r=64,  # Mistral 7B recommended (previously 32→64)
+    lora_alpha=128,  # Mistral 7B recommended (previously 64→128)
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                     "gate_proj", "up_proj", "down_proj"],
     lora_dropout=0.05,
@@ -437,20 +437,21 @@ lora_config = LoraConfig(
 )
 ```
 
-**Balanced configuration**:
+**Balanced configuration (7B models)**:
 ```python
 lora_config = LoraConfig(
-    r=16,
-    lora_alpha=16,
+    r=64,  # Mistral 7B (32→64)
+    lora_alpha=128,  # Mistral 7B (64→128)
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # All attention
 )
 ```
 
-**Full configuration** (more VRAM required):
+**Full configuration for larger models** (more VRAM required):
 ```python
+# For GPT-OSS 20B or similar large models
 lora_config = LoraConfig(
-    r=32,
-    lora_alpha=32,
+    r=128,  # GPT-OSS 20B (48→128)
+    lora_alpha=256,  # GPT-OSS 20B (96→256)
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                     "gate_proj", "up_proj", "down_proj"],  # Attention + FFN
 )

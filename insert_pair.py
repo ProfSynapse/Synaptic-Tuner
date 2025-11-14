@@ -66,11 +66,11 @@ true_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Which workspaces have I not used in a while?"
+            "content": "Generate thumbnail images for video."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104500104_q1r2s3t4u", "workspaceId": "ws_1731104500104_v5w6x7y8z", "sessionDescription": "Find unused workspaces", "sessionMemory": "User wants to find neglected workspaces", "toolContext": "Sort by lastAccessed ascending", "primaryGoal": "List workspaces", "subgoal": "Oldest accessed"}, "sortBy": "lastAccessed", "order": "asc", "limit": 5}\n\nResult: {"success": true, "workspaces": [{"id": "ws_004", "name": "Blog Writing", "lastAccessed": "2024-09-20"}, {"id": "ws_002", "name": "Research Project", "lastAccessed": "2024-10-02"}, {"id": "ws_005", "name": "Client Portal", "lastAccessed": "2024-10-15"}, {"id": "ws_011", "name": "Training Materials", "lastAccessed": "2024-10-22"}, {"id": "ws_006", "name": "Podcast Production", "lastAccessed": "2024-10-28"}], "total": 5}\n\nYour 5 least recently used workspaces: Blog Writing (Sept 20), Research Project (Oct 2), Client Portal (Oct 15), Training Materials (Oct 22), Podcast Production (Oct 28).'
+            "content": 'tool_call: agentManager_generateImage\narguments: {"context": {"sessionId": "session_1731104500192_m5n6o7p8q", "workspaceId": "ws_1731104500192_r9s0t1u2v", "sessionDescription": "Video thumbnail", "sessionMemory": "User creating thumbnails", "toolContext": "Thumbnail generation", "primaryGoal": "Generate image", "subgoal": "Video content"}, "prompt": "Eye-catching YouTube thumbnail, bold text overlay space, exciting action shot, vibrant colors, high contrast", "provider": "google", "aspectRatio": "16:9", "numberOfImages": 4, "savePath": "./thumbnails/video_thumb.png"}\n\nResult: {"success": true, "imageUrls": ["./thumbnails/video_thumb_1.png", "./thumbnails/video_thumb_2.png", "./thumbnails/video_thumb_3.png", "./thumbnails/video_thumb_4.png"], "count": 4}\n\nGenerated 4 thumbnail variations for video.'
         }
     ],
     "label": True
@@ -81,11 +81,11 @@ false_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Use decimal number for limit."
+            "content": "Generate without context."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104500105_a9b0c1d2e", "workspaceId": "ws_1731104500105_f3g4h5i6j", "sessionDescription": "Decimal limit", "sessionMemory": "Testing fractional limit", "toolContext": "limit must be integer", "primaryGoal": "List workspaces", "subgoal": "Type error"}, "limit": 5.5}\n\nResult: {"success": false, "error": "Parameter limit must be an integer, not decimal", "errorCode": "INVALID_TYPE"}\n\nThe limit parameter must be a whole number (integer), not a decimal.'
+            "content": 'tool_call: agentManager_generateImage\narguments: {"prompt": "Simple background image", "provider": "google", "savePath": "./images/bg.png"}\n\nResult: {"success": false, "error": "Missing required field: context", "errorCode": "MISSING_REQUIRED_FIELD"}\n\nThe context object is required for all tool calls.'
         }
     ],
     "label": False
