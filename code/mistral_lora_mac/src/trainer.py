@@ -555,13 +555,13 @@ class Trainer:
         policy_chosen_logps = compute_log_probs(policy_chosen_logits, chosen_labels, chosen_attention_mask)
         policy_rejected_logps = compute_log_probs(policy_rejected_logits, rejected_labels, rejected_attention_mask)
 
-        # Compute log probabilities for reference model (no gradients)
-        with mx.no_grad():
-            ref_chosen_logits = self.reference_model(chosen_input_ids)
-            ref_rejected_logits = self.reference_model(rejected_input_ids)
+        # Compute log probabilities for reference model (no gradients needed - model is frozen)
+        # MLX doesn't need no_grad() context - frozen models don't compute gradients
+        ref_chosen_logits = self.reference_model(chosen_input_ids)
+        ref_rejected_logits = self.reference_model(rejected_input_ids)
 
-            ref_chosen_logps = compute_log_probs(ref_chosen_logits, chosen_labels, chosen_attention_mask)
-            ref_rejected_logps = compute_log_probs(ref_rejected_logits, rejected_labels, rejected_attention_mask)
+        ref_chosen_logps = compute_log_probs(ref_chosen_logits, chosen_labels, chosen_attention_mask)
+        ref_rejected_logps = compute_log_probs(ref_rejected_logits, rejected_labels, rejected_attention_mask)
 
         # Compute KTO loss
         kto_loss = compute_kto_loss(
