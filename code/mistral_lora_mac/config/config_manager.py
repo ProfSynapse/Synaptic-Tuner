@@ -277,6 +277,40 @@ class EvaluationConfig:
 
 
 @dataclass
+class KTOConfig:
+    """Configuration for KTO (Kahneman-Tversky Optimization)."""
+    beta: float = 0.1
+    lambda_d: float = 1.0
+    lambda_u: float = 1.0
+
+    def validate(self) -> List[str]:
+        """Validate KTO configuration and return list of warnings."""
+        warnings = []
+
+        if self.beta <= 0:
+            raise ConfigurationError(
+                f"KTO beta must be positive, got {self.beta}"
+            )
+
+        if self.beta > 1.0:
+            warnings.append(
+                f"KTO beta={self.beta} is high. Typical range is (0, 0.5]"
+            )
+
+        if self.lambda_d <= 0:
+            raise ConfigurationError(
+                f"KTO lambda_d must be positive, got {self.lambda_d}"
+            )
+
+        if self.lambda_u <= 0:
+            raise ConfigurationError(
+                f"KTO lambda_u must be positive, got {self.lambda_u}"
+            )
+
+        return warnings
+
+
+@dataclass
 class SystemConfig:
     """Configuration for system settings."""
     device: str = "metal"
@@ -310,6 +344,7 @@ class Config:
     output: OutputConfig
     logging: LoggingConfig
     evaluation: EvaluationConfig
+    kto: KTOConfig
     system: SystemConfig
 
     def validate(self) -> List[str]:
@@ -324,6 +359,7 @@ class Config:
         all_warnings.extend(self.output.validate())
         all_warnings.extend(self.logging.validate())
         all_warnings.extend(self.evaluation.validate())
+        all_warnings.extend(self.kto.validate())
         all_warnings.extend(self.system.validate())
 
         # Cross-validation
@@ -406,6 +442,7 @@ class ConfigurationManager:
         output_config = OutputConfig(**yaml_config.get('output', {}))
         logging_config = LoggingConfig(**yaml_config.get('logging', {}))
         evaluation_config = EvaluationConfig(**yaml_config.get('evaluation', {}))
+        kto_config = KTOConfig(**yaml_config.get('kto', {}))
         system_config = SystemConfig(**yaml_config.get('system', {}))
 
         return Config(
@@ -416,6 +453,7 @@ class ConfigurationManager:
             output=output_config,
             logging=logging_config,
             evaluation=evaluation_config,
+            kto=kto_config,
             system=system_config
         )
 
@@ -458,6 +496,7 @@ class ConfigurationManager:
             'output': asdict(self.config.output),
             'logging': asdict(self.config.logging),
             'evaluation': asdict(self.config.evaluation),
+            'kto': asdict(self.config.kto),
             'system': asdict(self.config.system),
         }
 

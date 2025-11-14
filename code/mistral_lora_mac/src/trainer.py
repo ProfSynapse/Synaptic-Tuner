@@ -210,9 +210,102 @@ class GradientAccumulator:
         self.current_step = 0
 
 
-def compute_loss(logits: mx.array, labels: mx.array, attention_mask: mx.array) -> mx.array:
+def compute_log_probs(logits: mx.array, labels: mx.array, attention_mask: mx.array) -> mx.array:
     """
-    Compute cross-entropy loss.
+    Compute log probabilities for given labels.
+
+    Args:
+        logits: Model logits (batch_size, seq_length, vocab_size)
+        labels: Target labels (batch_size, seq_length)
+        attention_mask: Attention mask (batch_size, seq_length)
+
+    Returns:
+        Log probabilities per sequence (batch_size,)
+    """
+    # Get log probabilities via log_softmax
+    log_probs = nn.log_softmax(logits, axis=-1)
+
+    # Gather log probs for the actual labels
+    # For each position, get the log prob of the correct token
+    batch_size, seq_length, vocab_size = logits.shape
+
+    # Create indices for gathering
+    batch_indices = mx.arange(batch_size)[:, None]
+    seq_indices = mx.arange(seq_length)[None, :]
+
+    # Gather log probs for actual labels
+    # Handle padding tokens (labels == -100)
+    valid_labels = mx.where(labels == -100, mx.zeros_like(labels), labels)
+    selected_log_probs = log_probs[batch_indices, seq_indices, valid_labels]
+
+    # Mask out padding tokens
+    valid_mask = (labels != -100).astype(selected_log_probs.dtype)
+    masked_log_probs = selected_log_probs * valid_mask
+
+    # Sum over sequence length to get per-sequence log prob
+    # Only sum over valid (non-padding) tokens
+    per_seq_log_probs = mx.sum(masked_log_probs, axis=1) / (mx.sum(valid_mask, axis=1) + 1e-8)
+
+    return per_seq_log_probs
+
+
+def compute_kto_loss(
+    policy_chosen_logps: mx.array,
+    policy_rejected_logps: mx.array,
+    reference_chosen_logps: mx.array,
+    reference_rejected_logps: mx.array,
+    beta: float,
+    lambda_d: float,
+    lambda_u: float
+) -> mx.array:
+    """
+    Compute KTO (Kahneman-Tversky Optimization) loss.
+
+    Based on the paper "KTO: Model Alignment as Prospect Theoretic Optimization"
+    (https://arxiv.org/abs/2402.01306)
+
+    Args:
+        policy_chosen_logps: Log probs from policy model for desirable examples
+        policy_rejected_logps: Log probs from policy model for undesirable examples
+        reference_chosen_logps: Log probs from reference model for desirable examples
+        reference_rejected_logps: Log probs from reference model for undesirable examples
+        beta: KTO beta parameter (controls deviation from reference)
+        lambda_d: Weight for desirable examples
+        lambda_u: Weight for undesirable examples
+
+    Returns:
+        Scalar loss value
+    """
+    # Compute KL divergence estimates
+    # KL is clamped to minimum of 0
+    chosen_KL = mx.maximum((policy_chosen_logps - reference_chosen_logps).mean(), mx.array(0.0))
+    rejected_KL = mx.maximum((policy_rejected_logps - reference_rejected_logps).mean(), mx.array(0.0))
+
+    # Compute log ratios
+    chosen_logratios = policy_chosen_logps - reference_chosen_logps
+    rejected_logratios = policy_rejected_logps - reference_rejected_logps
+
+    # Compute losses using sigmoid as approximation of Kahneman-Tversky value function
+    # For desirable examples: penalize when policy is worse than reference
+    chosen_losses = 1.0 - mx.sigmoid(beta * (chosen_logratios - chosen_KL))
+
+    # For undesirable examples: penalize when policy is better than reference
+    rejected_losses = 1.0 - mx.sigmoid(beta * (rejected_KL - rejected_logratios))
+
+    # Combine losses with weights
+    # Weight the losses to handle imbalanced data
+    total_chosen_loss = lambda_d * mx.mean(chosen_losses) if chosen_losses.size > 0 else mx.array(0.0)
+    total_rejected_loss = lambda_u * mx.mean(rejected_losses) if rejected_losses.size > 0 else mx.array(0.0)
+
+    # Final loss is combination of both
+    loss = total_chosen_loss + total_rejected_loss
+
+    return loss
+
+
+def compute_cross_entropy_loss(logits: mx.array, labels: mx.array, attention_mask: mx.array) -> mx.array:
+    """
+    Compute cross-entropy loss (fallback for non-KTO training).
 
     Args:
         logits: Model logits (batch_size, seq_length, vocab_size)

@@ -27,9 +27,7 @@ training:
   per_device_batch_size: 8
   gradient_accumulation_steps: 4  # Effective batch size = 8 * 4 = 32
   learning_rate: 1.0e-6
-  warmup_steps: 125  # 10% of max_steps (1250 * 0.10)
-  warmup_ratio: 0.10  # Changed from 0.05 to 0.10
-  lr_scheduler: "cosine"
+  warmup_steps: 100  # Mistral 7B specification (10% of 1250 max_steps)
   max_grad_norm: 1.0  # Gradient clipping threshold
   weight_decay: 0.01
   save_steps: 625  # Save at epoch boundary (1250/2)
@@ -37,17 +35,6 @@ training:
   logging_steps: 10  # Log metrics every N steps
   max_steps: 1250  # Maximum steps for Mistral 7B
   seed: 42
-
-optimizer:
-  name: "adamw"
-  beta1: 0.9
-  beta2: 0.999
-  epsilon: 1.0e-8
-
-kto:
-  beta: 0.1  # KTO beta parameter for Mistral 7B
-  lambda_d: 1.0  # Lambda for desirable samples
-  lambda_u: 1.0  # Lambda for undesirable samples
 
 data:
   dataset_path: "syngen_toolset_v1.0.0_claude.jsonl"
