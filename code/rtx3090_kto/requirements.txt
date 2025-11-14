@@ -45,3 +45,4 @@ protobuf<4.0.0  # Required by Unsloth
 
 # Note: Flash Attention is optional but recommended
 # Install separately: MAX_JOBS=4 pip install flash-attn==2.5.9.post1 --no-build-isolation
+python-dotenv

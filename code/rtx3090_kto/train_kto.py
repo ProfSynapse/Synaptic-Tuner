@@ -45,6 +45,10 @@ def setup_environment():
     # Disable tokenizer parallelism warnings
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+    # Suppress verbose logging - we have our custom table
+    import logging
+    logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
+
     print("=" * 60)
     print("RTX 3090 KTO TRAINING")
     print("=" * 60)
@@ -335,7 +339,7 @@ def main():
 
     # Initialize callbacks
     callbacks = [
-        MetricsTableCallback(log_every_n_steps=5),
+        MetricsTableCallback(log_every_n_steps=5, output_dir=config.training.output_dir),
         CheckpointMonitorCallback()
     ]
 
@@ -344,7 +348,7 @@ def main():
     trainer = KTOTrainer(
         model=model,
         args=training_args,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,  # Use 'tokenizer' for TRL 0.11.4
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         callbacks=callbacks,

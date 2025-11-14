@@ -31,7 +31,10 @@
       "Bash(python train_kto.py:*)",
       "Bash(conda env list:*)",
       "Bash(./venv/bin/python:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(python check_config.py:*)",
+      "Bash(find:*)",
+      "Bash(requirements.txt)"
     ],
     "deny": [],
     "ask": []
