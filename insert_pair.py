@@ -66,11 +66,11 @@ true_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Generate thumbnail images for video."
+            "content": "Delete the old-drafts folder and everything in it."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: agentManager_generateImage\narguments: {"context": {"sessionId": "session_1731104500192_m5n6o7p8q", "workspaceId": "ws_1731104500192_r9s0t1u2v", "sessionDescription": "Video thumbnail", "sessionMemory": "User creating thumbnails", "toolContext": "Thumbnail generation", "primaryGoal": "Generate image", "subgoal": "Video content"}, "prompt": "Eye-catching YouTube thumbnail, bold text overlay space, exciting action shot, vibrant colors, high contrast", "provider": "google", "aspectRatio": "16:9", "numberOfImages": 4, "savePath": "./thumbnails/video_thumb.png"}\n\nResult: {"success": true, "imageUrls": ["./thumbnails/video_thumb_1.png", "./thumbnails/video_thumb_2.png", "./thumbnails/video_thumb_3.png", "./thumbnails/video_thumb_4.png"], "count": 4}\n\nGenerated 4 thumbnail variations for video.'
+            "content": 'tool_call: vaultManager_deleteFolder\narguments: {"context": {"sessionId": "session_1731104500282_x5y6z7a8b", "workspaceId": "ws_1731104500282_c9d0e1f2g", "sessionDescription": "Deleting folder", "sessionMemory": "User cleaning vault", "toolContext": "Remove old folder", "primaryGoal": "Clean vault", "subgoal": "Delete folder"}, "path": "old-drafts", "recursive": true}\n\nResult: {"success": true, "path": "old-drafts", "deleted": true, "filesRemoved": 12, "recursive": true}\n\nDeleted old-drafts folder and 12 files inside.'
         }
     ],
     "label": True
@@ -81,11 +81,11 @@ false_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Generate without context."
+            "content": "Delete folder without path."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: agentManager_generateImage\narguments: {"prompt": "Simple background image", "provider": "google", "savePath": "./images/bg.png"}\n\nResult: {"success": false, "error": "Missing required field: context", "errorCode": "MISSING_REQUIRED_FIELD"}\n\nThe context object is required for all tool calls.'
+            "content": 'tool_call: vaultManager_deleteFolder\narguments: {"context": {"sessionId": "session_1731104500283_h3i4j5k6l", "workspaceId": "ws_1731104500283_m7n8o9p0q", "sessionDescription": "Missing path", "sessionMemory": "Testing missing param", "toolContext": "path is required", "primaryGoal": "Delete folder", "subgoal": "Missing param"}, "recursive": true}\n\nResult: {"success": false, "error": "Missing required parameter: path", "errorCode": "MISSING_PARAMETER"}\n\nThe path parameter is required to specify which folder to delete.'
         }
     ],
     "label": False
