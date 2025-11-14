@@ -22,7 +22,14 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:pypi.org)",
       "Bash(pip index versions:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(=1.24.0 pandas)",
+      "Bash(=2.0.0 tqdm)",
+      "Bash(=4.65.0 huggingface-hub)",
+      "Bash(=0.20.0 psutil safetensors regex requests packaging pyyaml)",
+      "Bash(=0.20.0 psutil safetensors regex requests packaging pyyaml -q)",
+      "Bash(python train_kto.py:*)",
+      "Bash(conda env list:*)"
     ],
     "deny": [],
     "ask": []

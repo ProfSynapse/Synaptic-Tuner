@@ -13,12 +13,12 @@ torchaudio==2.4.1
 
 # Core ML libraries (tested compatible versions)
 transformers==4.45.2
-datasets==2.14.0
+datasets==2.16.1
 accelerate==0.27.0
 
 # Quantization and LoRA
 bitsandbytes==0.43.0
-peft==0.7.0
+peft==0.7.1
 
 # TRL for KTO Training (compatible with transformers 4.45.2)
 trl==0.11.4
@@ -27,7 +27,16 @@ trl==0.11.4
 numpy>=1.24.0
 pandas>=2.0.0
 tqdm>=4.65.0
-huggingface-hub>=0.20.0
+
+# CRITICAL: huggingface-hub 0.25.0 required for Unsloth 2024.9 compatibility
+# DO NOT upgrade - newer versions break Unsloth due to missing _token module
+huggingface-hub==0.25.0
+
+# Additional dependencies for datasets and transformers
+tokenizers>=0.20,<0.21
+fsspec[http]>=2023.1.0,<=2023.10.0
+pyarrow>=14.0.0
+pyarrow_hotfix
 
 # Optional: Weights & Biases
 # wandb>=0.16.0

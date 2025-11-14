@@ -35,8 +35,14 @@ python_version=$(python3 --version 2>&1 | awk '{print $2}')
 echo "Python version: $python_version"
 
 if ! python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)"; then
-    echo "ERROR: Python 3.9+ required (3.10+ recommended)"
+    echo "ERROR: Python 3.9+ required (3.10 recommended for best compatibility)"
     exit 1
+fi
+
+# Recommend Python 3.10 for best compatibility
+if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+    echo "WARNING: Python 3.11+ detected. Python 3.10 is recommended for best compatibility."
+    echo "Consider using: conda create -p ./venv python=3.10"
 fi
 
 echo "✓ Python version OK"
@@ -105,11 +111,19 @@ else
     exit 1
 fi
 
-# Install Unsloth (special installation)
-echo -e "\n[8/8] Installing Unsloth..."
-echo "Installing Unsloth for PyTorch 2.4.1 + CUDA 12.1 + Ampere..."
-pip install "unsloth[cu121-ampere-torch240] @ git+https://github.com/unslothai/unsloth.git"
+# Install Unsloth and Xformers (special installation)
+echo -e "\n[8/8] Installing Unsloth and Xformers..."
+echo "Installing Unsloth 2024.9 (stable version)..."
+pip install --no-deps unsloth==2024.9
 echo "✓ Unsloth installed"
+
+echo "Installing Xformers 0.0.27.post2 (attention backend)..."
+pip install --no-deps xformers==0.0.27.post2
+echo "✓ Xformers installed"
+
+echo ""
+echo "NOTE: Unsloth will use Xformers for efficient attention."
+echo "Flash Attention 2 can be installed separately if needed (see below)."
 
 # Optional: Install Flash Attention
 if [ "$INSTALL_FLASH_ATTN" = true ]; then
@@ -144,8 +158,12 @@ echo ""
 echo "Installation Summary:"
 python -c "import torch; print(f'  PyTorch: {torch.__version__}')"
 python -c "import transformers; print(f'  Transformers: {transformers.__version__}')"
+python -c "import datasets; print(f'  Datasets: {datasets.__version__}')"
+python -c "import peft; print(f'  PEFT: {peft.__version__}')"
 python -c "import trl; print(f'  TRL: {trl.__version__}')"
-python -c "from unsloth import FastLanguageModel; print('  Unsloth: ✓ Installed')"
+python -c "import huggingface_hub; print(f'  HuggingFace Hub: {huggingface_hub.__version__} (CRITICAL: must be 0.25.0)')"
+python -c "from unsloth import FastLanguageModel; print('  Unsloth: 2024.9 ✓')"
+python -c "import xformers; print(f'  Xformers: {xformers.__version__}')"
 if [ "$INSTALL_FLASH_ATTN" = true ]; then
     python -c "import flash_attn; print(f'  Flash Attention: {flash_attn.__version__}')" 2>/dev/null || echo "  Flash Attention: ✗ Not installed"
 fi
