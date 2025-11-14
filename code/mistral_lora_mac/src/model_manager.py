@@ -191,6 +191,7 @@ class ModelManager:
         self.config = config
         self.logger = logger
         self.model = None
+        self.reference_model = None
         self.tokenizer = None
 
     def load_base_model(self):
@@ -472,3 +473,58 @@ class ModelManager:
         """Set model to evaluation mode."""
         if self.model is not None:
             self.model.eval()
+
+    def create_reference_model(self):
+        """
+        Create a frozen reference model for KTO training.
+
+        This creates a deep copy of the current model state (before LoRA training)
+        and freezes all parameters. The reference model is used to compute KL
+        divergence in KTO loss.
+
+        Returns:
+            Frozen reference model
+        """
+        if self.model is None:
+            raise ValueError("Model not loaded. Call load_base_model() first.")
+
+        self.logger.info("Creating frozen reference model for KTO...")
+
+        # Import copy functionality
+        import copy
+
+        # Create a deep copy of the current model
+        # This preserves the model architecture and current weights
+        self.reference_model = copy.deepcopy(self.model)
+
+        # Freeze all parameters in the reference model
+        self._freeze_all_parameters(self.reference_model)
+
+        # Set reference model to eval mode (permanently)
+        self.reference_model.eval()
+
+        self.logger.info("Reference model created and frozen")
+
+        return self.reference_model
+
+    def _freeze_all_parameters(self, model):
+        """
+        Freeze all parameters in a model.
+
+        Args:
+            model: Model to freeze
+        """
+        # In MLX, we freeze parameters by calling .freeze() on the model
+        # This prevents gradients from being computed for these parameters
+        model.freeze()
+
+        self.logger.debug("All parameters frozen in reference model")
+
+    def get_reference_model(self):
+        """
+        Get the reference model (for KTO training).
+
+        Returns:
+            Reference model or None if not created
+        """
+        return self.reference_model

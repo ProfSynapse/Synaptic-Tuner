@@ -242,6 +242,11 @@ def main():
 
         memory_monitor.log_memory("after_lora_application")
 
+        # Create reference model for KTO training (before any training occurs)
+        reference_model = model_manager.create_reference_model()
+
+        memory_monitor.log_memory("after_reference_model_creation")
+
         # Get tokenizer
         tokenizer = data_pipeline.tokenizer
 
@@ -267,7 +272,7 @@ def main():
 
         # Initialize trainer
         logger.info("=" * 80)
-        logger.info("Initializing Trainer")
+        logger.info("Initializing Trainer (KTO Mode)")
         logger.info("=" * 80)
 
         trainer = Trainer(
@@ -276,8 +281,15 @@ def main():
             val_loader=val_loader,
             config=config,
             logger=logger,
-            memory_monitor=memory_monitor
+            memory_monitor=memory_monitor,
+            reference_model=reference_model,
+            use_kto=True  # Enable KTO training
         )
+
+        logger.info(f"Training mode: KTO (Kahneman-Tversky Optimization)")
+        logger.info(f"KTO beta: {config.kto.beta}")
+        logger.info(f"KTO lambda_d (desirable weight): {config.kto.lambda_d}")
+        logger.info(f"KTO lambda_u (undesirable weight): {config.kto.lambda_u}")
 
         # Resume from checkpoint if provided
         if args.resume:

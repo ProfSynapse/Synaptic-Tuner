@@ -36,6 +36,11 @@ training:
   max_steps: 1250  # Maximum steps for Mistral 7B
   seed: 42
 
+kto:
+  beta: 0.1  # KTO beta parameter for Mistral 7B
+  lambda_d: 1.0  # Lambda for desirable samples
+  lambda_u: 1.0  # Lambda for undesirable samples
+
 data:
   dataset_path: "syngen_toolset_v1.0.0_claude.jsonl"
   train_split: 0.8  # 80% train, 20% validation

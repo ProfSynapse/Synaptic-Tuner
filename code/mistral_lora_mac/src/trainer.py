@@ -406,7 +406,9 @@ class Trainer:
         val_loader,
         config,
         logger,
-        memory_monitor
+        memory_monitor,
+        reference_model=None,
+        use_kto=False
     ):
         """
         Initialize trainer.
@@ -418,13 +420,17 @@ class Trainer:
             config: Config object
             logger: StructuredLogger
             memory_monitor: MemoryMonitor
+            reference_model: Optional reference model for KTO training
+            use_kto: Whether to use KTO training (default: False for standard SFT)
         """
         self.model = model
+        self.reference_model = reference_model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.config = config
         self.logger = logger
         self.memory_monitor = memory_monitor
+        self.use_kto = use_kto
 
         # Training state
         self.state = TrainingState(
@@ -499,14 +505,76 @@ class Trainer:
         Returns:
             Loss value
         """
-        # Forward pass - MLX models don't require attention_mask as a separate parameter
-        # The model handles masking internally through the token embeddings
-        logits = model(batch.input_ids)
+        if self.use_kto and self.reference_model is not None:
+            # KTO training mode
+            return self.kto_loss_fn(model, batch)
+        else:
+            # Standard supervised fine-tuning mode
+            logits = model(batch.input_ids)
+            loss = compute_cross_entropy_loss(logits, batch.labels, batch.attention_mask)
+            return loss
 
-        # Compute loss
-        loss = compute_loss(logits, batch.labels, batch.attention_mask)
+    def kto_loss_fn(self, model, batch):
+        """
+        KTO loss function using policy and reference models.
 
-        return loss
+        Args:
+            model: Policy model (being trained)
+            batch: Training batch with labels in metadata
+
+        Returns:
+            KTO loss value
+        """
+        # Get labels from batch metadata
+        batch_labels = batch.metadata['labels']  # List of True/False
+
+        # Separate into chosen (desirable) and rejected (undesirable) indices
+        chosen_indices = [i for i, label in enumerate(batch_labels) if label is True]
+        rejected_indices = [i for i, label in enumerate(batch_labels) if label is False]
+
+        # Handle edge cases: if batch has only chosen or only rejected
+        if len(chosen_indices) == 0 or len(rejected_indices) == 0:
+            # Fall back to standard cross-entropy loss
+            self.logger.warning(f"Batch has only {'chosen' if len(rejected_indices)==0 else 'rejected'} examples, using cross-entropy")
+            logits = model(batch.input_ids)
+            return compute_cross_entropy_loss(logits, batch.labels, batch.attention_mask)
+
+        # Get chosen and rejected batches
+        chosen_input_ids = batch.input_ids[chosen_indices]
+        chosen_labels = batch.labels[chosen_indices]
+        chosen_attention_mask = batch.attention_mask[chosen_indices]
+
+        rejected_input_ids = batch.input_ids[rejected_indices]
+        rejected_labels = batch.labels[rejected_indices]
+        rejected_attention_mask = batch.attention_mask[rejected_indices]
+
+        # Compute log probabilities for policy model
+        policy_chosen_logits = model(chosen_input_ids)
+        policy_rejected_logits = model(rejected_input_ids)
+
+        policy_chosen_logps = compute_log_probs(policy_chosen_logits, chosen_labels, chosen_attention_mask)
+        policy_rejected_logps = compute_log_probs(policy_rejected_logits, rejected_labels, rejected_attention_mask)
+
+        # Compute log probabilities for reference model (no gradients)
+        with mx.no_grad():
+            ref_chosen_logits = self.reference_model(chosen_input_ids)
+            ref_rejected_logits = self.reference_model(rejected_input_ids)
+
+            ref_chosen_logps = compute_log_probs(ref_chosen_logits, chosen_labels, chosen_attention_mask)
+            ref_rejected_logps = compute_log_probs(ref_rejected_logits, rejected_labels, rejected_attention_mask)
+
+        # Compute KTO loss
+        kto_loss = compute_kto_loss(
+            policy_chosen_logps=policy_chosen_logps,
+            policy_rejected_logps=policy_rejected_logps,
+            reference_chosen_logps=ref_chosen_logps,
+            reference_rejected_logps=ref_rejected_logps,
+            beta=self.config.kto.beta,
+            lambda_d=self.config.kto.lambda_d,
+            lambda_u=self.config.kto.lambda_u
+        )
+
+        return kto_loss
 
     def train_step(self, batch) -> StepMetrics:
         """
