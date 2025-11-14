@@ -34,6 +34,7 @@ from src.model_loader import (
     apply_lora_adapters,
     check_gpu_memory
 )
+from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback
 
 
 def setup_environment():
@@ -322,11 +323,21 @@ def main():
     print(f"  FP16: {training_args.fp16}")
     print(f"  BF16: {training_args.bf16}")
     print(f"  Gradient checkpointing: {config.training.gradient_checkpointing}")
+    print(f"\nCheckpointing & Logging:")
+    print(f"  Log metrics every: {config.training.logging_steps} steps")
+    print(f"  Save checkpoint every: {config.training.save_steps} steps")
+    print(f"  Keep last: {config.training.save_total_limit} checkpoints")
     print("=" * 60 + "\n")
 
     if args.dry_run:
         print("✓ Dry run completed. Exiting without training.")
         return
+
+    # Initialize callbacks
+    callbacks = [
+        MetricsTableCallback(log_every_n_steps=5),
+        CheckpointMonitorCallback()
+    ]
 
     # Initialize KTO Trainer
     print("Initializing KTO Trainer...")
@@ -336,9 +347,10 @@ def main():
         processing_class=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        callbacks=callbacks,
     )
 
-    print("✓ KTO trainer initialized\n")
+    print("✓ KTO trainer initialized with metrics tracking\n")
 
     # Start training
     print("=" * 60)

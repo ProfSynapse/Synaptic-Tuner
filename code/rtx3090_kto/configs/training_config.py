@@ -58,12 +58,12 @@ class KTOTrainingConfig:
     # Output directory
     output_dir: str = "./kto_output_rtx3090"
 
-    # Batch size configuration
-    # For 3B models: batch_size=8, accumulation=4 (effective=32)
-    # For 7B models: batch_size=4, accumulation=8 (effective=32)
-    # For 13B models: batch_size=2, accumulation=16 (effective=32)
-    per_device_train_batch_size: int = 4  # For 7B models
-    gradient_accumulation_steps: int = 8  # Effective batch size = 32
+    # Batch size configuration - OPTIMIZED FOR 24GB VRAM
+    # For 3B models: batch_size=16, accumulation=2 (effective=32)
+    # For 7B models: batch_size=8, accumulation=4 (effective=32) - USES ~20GB VRAM
+    # For 13B models: batch_size=4, accumulation=8 (effective=32)
+    per_device_train_batch_size: int = 8  # 2x increase for 7B models (uses ~20GB)
+    gradient_accumulation_steps: int = 4  # Reduced since batch is larger
 
     # KTO-specific parameters
     beta: float = 0.1  # KTO beta parameter (0.01-0.5, default 0.1)
@@ -90,9 +90,9 @@ class KTOTrainingConfig:
     warmup_ratio: float = 0.1  # 10% warmup
 
     # Logging and saving
-    logging_steps: int = 10
-    save_steps: int = 250
-    save_total_limit: int = 2  # Keep only 2 checkpoints
+    logging_steps: int = 5  # Log every 5 steps for table display
+    save_steps: int = 50  # Save checkpoint every 50 steps
+    save_total_limit: int = 3  # Keep last 3 checkpoints
 
     # Performance
     dataloader_num_workers: int = 4  # 2-4 workers (set to 0 on Windows)
@@ -143,14 +143,14 @@ class Config:
 
 # Preset configurations for different model sizes
 def get_3b_config() -> Config:
-    """Configuration optimized for 3B models (fast iteration)."""
+    """Configuration optimized for 3B models (fast iteration) - USES ~16GB VRAM."""
     config = Config()
     config.model.model_name = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
     config.model.max_seq_length = 2048
     config.lora.r = 32
     config.lora.lora_alpha = 64
-    config.training.per_device_train_batch_size = 8
-    config.training.gradient_accumulation_steps = 4
+    config.training.per_device_train_batch_size = 16  # Increased for 24GB VRAM
+    config.training.gradient_accumulation_steps = 2   # Reduced (still effective=32)
     config.training.max_length = 2048
     config.training.max_prompt_length = 1024
     config.training.gradient_checkpointing = False
@@ -158,14 +158,14 @@ def get_3b_config() -> Config:
 
 
 def get_7b_config() -> Config:
-    """Configuration optimized for 7B models (production quality)."""
+    """Configuration optimized for 7B models (production quality) - USES ~20GB VRAM."""
     config = Config()
     config.model.model_name = "unsloth/mistral-7b-v0.3-bnb-4bit"
     config.model.max_seq_length = 2048
     config.lora.r = 64
     config.lora.lora_alpha = 128
-    config.training.per_device_train_batch_size = 4
-    config.training.gradient_accumulation_steps = 8
+    config.training.per_device_train_batch_size = 8  # 2x increase for 24GB VRAM
+    config.training.gradient_accumulation_steps = 4  # Reduced (still effective=32)
     config.training.max_length = 2048
     config.training.max_prompt_length = 1024
     config.training.gradient_checkpointing = False
@@ -173,17 +173,17 @@ def get_7b_config() -> Config:
 
 
 def get_13b_config() -> Config:
-    """Configuration optimized for 13B models (advanced)."""
+    """Configuration optimized for 13B models (advanced) - USES ~22GB VRAM."""
     config = Config()
     config.model.model_name = "unsloth/llama-2-13b-bnb-4bit"
     config.model.max_seq_length = 2048
     config.lora.r = 64
     config.lora.lora_alpha = 128
-    config.training.per_device_train_batch_size = 2
-    config.training.gradient_accumulation_steps = 16
+    config.training.per_device_train_batch_size = 4  # Increased for 24GB VRAM
+    config.training.gradient_accumulation_steps = 8  # Reduced (still effective=32)
     config.training.max_length = 2048
     config.training.max_prompt_length = 1024
-    config.training.gradient_checkpointing = True  # Needed for 13B
+    config.training.gradient_checkpointing = True  # Still needed for 13B
     return config
 
 
