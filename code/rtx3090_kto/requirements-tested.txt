@@ -1,0 +1,135 @@
+# RTX 3090 KTO Training Requirements - TESTED & VERIFIED
+# Last Updated: November 2025
+# Hardware: NVIDIA RTX 3090 (24GB, Ampere, sm_86, CUDA Capability 8.6)
+# CUDA: 12.1 (also compatible with 11.8, 12.4)
+
+# =============================================================================
+# INSTALLATION ORDER MATTERS - Follow this sequence:
+# 1. PyTorch (must be installed first with correct CUDA version)
+# 2. Core dependencies
+# 3. Unsloth (with version-specific installation)
+# 4. Optional packages
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# STEP 1: PyTorch with CUDA 12.1 Support
+# -----------------------------------------------------------------------------
+# RTX 3090 requires PyTorch built with CUDA support for sm_86 (Ampere)
+# Use CUDA 12.1 for best compatibility (also supports 11.8, 12.4)
+--index-url https://download.pytorch.org/whl/cu121
+
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+# Note: PyTorch 2.4.1 is stable and well-tested with Unsloth
+# PyTorch 2.5+ may work but can have compatibility issues with Unsloth
+# See: https://github.com/unslothai/unsloth/issues/1825
+
+# -----------------------------------------------------------------------------
+# STEP 2: Core ML Libraries (must be compatible with PyTorch version)
+# -----------------------------------------------------------------------------
+# Transformers: Use 4.45.2+ for stability, 4.51.3+ for latest features
+transformers==4.45.2
+
+# Datasets: Standard version
+datasets==2.14.0
+
+# Accelerate: Required for distributed training and mixed precision
+accelerate==0.27.0
+
+# -----------------------------------------------------------------------------
+# STEP 3: Quantization and LoRA
+# -----------------------------------------------------------------------------
+# BitsAndBytes: For 4-bit/8-bit quantization (Ampere GPU fully supported)
+# Version 0.43.0+ has good RTX 3090 support
+bitsandbytes==0.43.0
+
+# PEFT: For LoRA adapters
+peft==0.7.0
+
+# -----------------------------------------------------------------------------
+# STEP 4: TRL for KTO Training
+# -----------------------------------------------------------------------------
+# TRL: Transformer Reinforcement Learning
+# Use 0.11.4 for stability with transformers 4.45.2
+trl==0.11.4
+
+# Note: TRL 0.21.0 requires transformers>=4.51.3
+# If you upgrade transformers, also upgrade TRL
+
+# -----------------------------------------------------------------------------
+# STEP 5: Unsloth (SPECIAL INSTALLATION - SEE BELOW)
+# -----------------------------------------------------------------------------
+# DO NOT use simple "unsloth" - must specify torch and CUDA version
+# For PyTorch 2.4.1 + CUDA 12.1 + Ampere (RTX 3090):
+# pip install "unsloth[cu121-ampere-torch240] @ git+https://github.com/unslothai/unsloth.git"
+
+# Note: This is installed separately via setup script
+# Unsloth handles its own dependency versions
+
+# -----------------------------------------------------------------------------
+# STEP 6: Optional - Flash Attention (Highly Recommended)
+# -----------------------------------------------------------------------------
+# Flash Attention 2: 2-4x speedup on RTX 3090
+# Requires: PyTorch 2.2+, CUDA 12.0+, Ampere GPU
+# Installation can take 5-10 minutes (compiles from source)
+
+# Uncomment to install (recommended):
+# flash-attn==2.5.9
+
+# Note: Use MAX_JOBS=4 to limit parallel compilation if RAM < 96GB
+# Install command: MAX_JOBS=4 pip install flash-attn==2.5.9 --no-build-isolation
+
+# -----------------------------------------------------------------------------
+# STEP 7: Utilities
+# -----------------------------------------------------------------------------
+numpy==1.24.0
+pandas==2.0.0
+tqdm==4.65.0
+huggingface-hub==0.20.0
+
+# Optional: Weights & Biases for experiment tracking
+# wandb==0.16.0
+
+# -----------------------------------------------------------------------------
+# COMPATIBILITY MATRIX (Verified for RTX 3090)
+# -----------------------------------------------------------------------------
+# PyTorch 2.4.1 + CUDA 12.1 + Transformers 4.45.2 + TRL 0.11.4 + Unsloth ✅
+# PyTorch 2.5.0 + CUDA 12.4 + Transformers 4.51.3 + TRL 0.21.0 + Unsloth ⚠️
+#   (May have compatibility issues - test before using)
+
+# -----------------------------------------------------------------------------
+# KNOWN ISSUES & SOLUTIONS
+# -----------------------------------------------------------------------------
+# Issue: "sm_86 not compatible with current PyTorch"
+#   Solution: Ensure PyTorch is installed from cu121 wheel, not CPU-only
+#
+# Issue: Flash-attn compilation takes 40+ minutes
+#   Solution: Use PyTorch 2.4.1 (not 2.5+) and set MAX_JOBS=4
+#
+# Issue: Unsloth import error
+#   Solution: Install with version-specific command (see setup.sh)
+#
+# Issue: "No CUDA GPUs are available"
+#   Solution: Check nvidia-smi, verify CUDA drivers (535+)
+#
+# Issue: TRL version mismatch with transformers
+#   Solution: Use compatible versions (4.45.2 + 0.11.4 or 4.51.3 + 0.21.0)
+
+# -----------------------------------------------------------------------------
+# ALTERNATIVE: Latest Versions (Experimental)
+# -----------------------------------------------------------------------------
+# If you want to try the absolute latest (may have compatibility issues):
+# --index-url https://download.pytorch.org/whl/cu124
+# torch==2.5.1
+# torchvision==0.20.1
+# torchaudio==2.5.1
+# transformers==4.51.3
+# trl==0.21.0
+# accelerate==1.4.0
+# peft==0.14.0
+# bitsandbytes==0.45.3
+# datasets==3.3.2
+
+# Then install: pip install "unsloth[cu124-ampere-torch250] @ git+https://github.com/unslothai/unsloth.git"

@@ -1,33 +1,36 @@
-# RTX 3090 KTO Training Requirements
-# Based on rtx3090-kto-finetuning.md specification
+# RTX 3090 KTO Training Requirements - STABLE VERSIONS
+# Hardware: NVIDIA RTX 3090 (24GB, Ampere, CUDA Capability 8.6)
+# Last Updated: November 2025
 
-# PyTorch with CUDA 12.1 support
+# IMPORTANT: Do NOT install Unsloth from this file
+# Unsloth requires special installation - see setup.sh
+
+# PyTorch with CUDA 12.1 support (stable for RTX 3090)
 --index-url https://download.pytorch.org/whl/cu121
-torch>=2.2.0
-torchvision>=0.17.0
-torchaudio>=2.2.0
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
 
-# Core ML libraries
-transformers>=4.40.0
-datasets>=2.14.0
-accelerate>=0.27.0
+# Core ML libraries (tested compatible versions)
+transformers==4.45.2
+datasets==2.14.0
+accelerate==0.27.0
 
-# Unsloth (handles compatible versions automatically)
-unsloth
+# Quantization and LoRA
+bitsandbytes==0.43.0
+peft==0.7.0
 
-# Training and optimization
-trl>=0.8.0
-peft>=0.7.0
-bitsandbytes>=0.43.0
-
-# Optional: Flash Attention (recommended for RTX 3090)
-flash-attn>=2.5.0
+# TRL for KTO Training (compatible with transformers 4.45.2)
+trl==0.11.4
 
 # Utilities
 numpy>=1.24.0
 pandas>=2.0.0
 tqdm>=4.65.0
-wandb  # Optional: for experiment tracking
-
-# HuggingFace Hub
 huggingface-hub>=0.20.0
+
+# Optional: Weights & Biases
+# wandb>=0.16.0
+
+# Note: Flash Attention is optional but recommended
+# Install separately: MAX_JOBS=4 pip install flash-attn==2.5.9 --no-build-isolation
