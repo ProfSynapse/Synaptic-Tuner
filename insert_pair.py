@@ -6,11 +6,11 @@ true_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Remove agent_backup_writer since we're using the main one now. ID: agent_7777777777"
+            "content": "Create Bug Tracker workspace in /Development/Bugs for tracking and resolving software bugs. Current goal is setting up bug triage process. Workflows: bug reporting with reproduction steps and severity, then bug resolution with fix, test, and release."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: agentManager_deleteAgent\narguments: {"context": {"sessionId": "session_1731101500031_o1p2q3r4s", "workspaceId": "ws_1731101500031_t5u6v7w8x", "sessionDescription": "Delete backup agent", "sessionMemory": "Main agent working well", "toolContext": "Backup agent redundant, cleaning up", "primaryGoal": "Remove backup agent", "subgoal": "Delete by ID"}, "id": "agent_7777777777"}\n\nResult: {"success": true, "deletedAgentId": "agent_7777777777"}\n\nRemoved the backup writer agent. You\'re all set with the main one.'
+            "content": 'tool_call: memoryManager_createWorkspace\narguments: {"context": {"sessionId": "session_1731104000081_u7v8w9x0y", "workspaceId": "ws_1731104000081_z1a2b3c4d", "sessionDescription": "Create bug tracking workspace", "sessionMemory": "User managing software bugs", "toolContext": "Setting up bug management system", "primaryGoal": "Create bug tracker", "subgoal": "Set up triage process"}, "name": "Bug Tracker", "rootFolder": "/Development/Bugs", "purpose": "Track and resolve software bugs through systematic triage and resolution workflows", "currentGoal": "Set up bug triage process and prioritization system", "workflows": [{"name": "Bug Reporting", "when": "New bug discovered", "steps": ["Document reproduction steps", "Assign severity", "Categorize bug type", "Assign to developer"]}, {"name": "Bug Resolution", "when": "Fixing bug", "steps": ["Fix code", "Write tests", "Verify fix", "Release patch"]}]}\n\nResult: {"success": true, "workspaceId": "ws_1731104000081_z1a2b3c4d", "name": "Bug Tracker", "created": "2024-11-10T17:50:00Z"}\n\nCreated Bug Tracker workspace with reporting and resolution workflows.'
         }
     ],
     "label": True
@@ -21,11 +21,71 @@ false_example = {
     "conversations": [
         {
             "role": "user",
-            "content": "Delete my image generator agent with ID agent_img_999."
+            "content": "Create workspace with empty name."
         },
         {
             "role": "assistant",
-            "content": 'tool_call: agentManager_removeAgent\narguments: {"context": {"sessionId": "session_1731101500032_y9z0a1b2c", "workspaceId": "ws_1731101500032_d3e4f5g6h", "sessionDescription": "Remove image agent", "sessionMemory": "", "toolContext": "Using wrong tool name", "primaryGoal": "Delete agent", "subgoal": "Call non-existent tool"}, "id": "agent_img_999"}\n\nResult: {"success": false, "error": "Tool \'agentManager_removeAgent\' not found. Did you mean \'agentManager_deleteAgent\'?", "errorCode": "TOOL_NOT_FOUND"}\n\nI used the wrong tool name. Let me use deleteAgent instead.'
+            "content": 'tool_call: memoryManager_createWorkspace\narguments: {"context": {"sessionId": "session_1731104000082_e5f6g7h8i", "workspaceId": "ws_1731104000082_j9k0l1m2n", "sessionDescription": "Create workspace with empty name", "sessionMemory": "Testing empty name", "toolContext": "Name cannot be empty", "primaryGoal": "Test error", "subgoal": "Empty name"}, "name": "", "rootFolder": "/Test", "purpose": "Testing", "currentGoal": "Test", "workflows": [{"name": "Test", "when": "Testing", "steps": ["Test"]}]}\n\nResult: {"success": false, "error": "Parameter name cannot be empty string.", "errorCode": "INVALID_VALUE"}\n\nWorkspace name must have a value.'
+        }
+    ],
+    "label": False
+}
+
+# TRUE example (desirable)
+true_example = {
+    "conversations": [
+        {
+            "role": "user",
+            "content": "Show my workspaces sorted by name."
+        },
+        {
+            "role": "assistant",
+            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104400089_w1x2y3z4a", "workspaceId": "ws_1731104400089_b5c6d7e8f", "sessionDescription": "List workspaces sorted by name", "sessionMemory": "User wants alphabetical list", "toolContext": "Sort by name in ascending order", "primaryGoal": "List workspaces", "subgoal": "Alphabetical sorting"}, "sortBy": "name", "order": "asc"}\n\nResult: {"success": true, "workspaces": [{"id": "ws_002", "name": "Bug Tracker"}, {"id": "ws_001", "name": "Marketing Campaign"}, {"id": "ws_003", "name": "Newsletter"}], "total": 3}\n\nWorkspaces alphabetically: Bug Tracker, Marketing Campaign, Newsletter.'
+        }
+    ],
+    "label": True
+}
+
+# FALSE example (undesirable - has intentional errors)
+false_example = {
+    "conversations": [
+        {
+            "role": "user",
+            "content": "Sort workspaces by invalid field."
+        },
+        {
+            "role": "assistant",
+            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104400090_g9h0i1j2k", "workspaceId": "ws_1731104400090_l3m4n5o6p", "sessionDescription": "List with invalid sort", "sessionMemory": "User requested invalid sort field", "toolContext": "Using invalid sortBy value", "primaryGoal": "List workspaces", "subgoal": "Invalid sort"}, "sortBy": "popularity"}\n\nResult: {"success": false, "error": "Invalid sortBy value. Must be name, created, or lastAccessed.", "errorCode": "INVALID_VALUE"}\n\nCan only sort by name, created, or lastAccessed.'
+        }
+    ],
+    "label": False
+}
+
+# TRUE example (desirable)
+true_example = {
+    "conversations": [
+        {
+            "role": "user",
+            "content": "Which workspaces have I not used in a while?"
+        },
+        {
+            "role": "assistant",
+            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104500104_q1r2s3t4u", "workspaceId": "ws_1731104500104_v5w6x7y8z", "sessionDescription": "Find unused workspaces", "sessionMemory": "User wants to find neglected workspaces", "toolContext": "Sort by lastAccessed ascending", "primaryGoal": "List workspaces", "subgoal": "Oldest accessed"}, "sortBy": "lastAccessed", "order": "asc", "limit": 5}\n\nResult: {"success": true, "workspaces": [{"id": "ws_004", "name": "Blog Writing", "lastAccessed": "2024-09-20"}, {"id": "ws_002", "name": "Research Project", "lastAccessed": "2024-10-02"}, {"id": "ws_005", "name": "Client Portal", "lastAccessed": "2024-10-15"}, {"id": "ws_011", "name": "Training Materials", "lastAccessed": "2024-10-22"}, {"id": "ws_006", "name": "Podcast Production", "lastAccessed": "2024-10-28"}], "total": 5}\n\nYour 5 least recently used workspaces: Blog Writing (Sept 20), Research Project (Oct 2), Client Portal (Oct 15), Training Materials (Oct 22), Podcast Production (Oct 28).'
+        }
+    ],
+    "label": True
+}
+
+# FALSE example (undesirable - has intentional errors)
+false_example = {
+    "conversations": [
+        {
+            "role": "user",
+            "content": "Use decimal number for limit."
+        },
+        {
+            "role": "assistant",
+            "content": 'tool_call: memoryManager_listWorkspaces\narguments: {"context": {"sessionId": "session_1731104500105_a9b0c1d2e", "workspaceId": "ws_1731104500105_f3g4h5i6j", "sessionDescription": "Decimal limit", "sessionMemory": "Testing fractional limit", "toolContext": "limit must be integer", "primaryGoal": "List workspaces", "subgoal": "Type error"}, "limit": 5.5}\n\nResult: {"success": false, "error": "Parameter limit must be an integer, not decimal", "errorCode": "INVALID_TYPE"}\n\nThe limit parameter must be a whole number (integer), not a decimal.'
         }
     ],
     "label": False
