@@ -1,0 +1,363 @@
+{"timestamp": "2025-11-14T08:46:29.205996", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.206107", "level": "INFO", "logger": "mlx_finetuning", "message": "MLX Fine-Tuning System - Logging Initialized"}
+{"timestamp": "2025-11-14T08:46:29.206155", "level": "INFO", "logger": "mlx_finetuning", "message": "Log level: INFO"}
+{"timestamp": "2025-11-14T08:46:29.206195", "level": "INFO", "logger": "mlx_finetuning", "message": "Log directory: test_logs_minimal"}
+{"timestamp": "2025-11-14T08:46:29.206231", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.206278", "level": "INFO", "logger": "mlx_finetuning", "message": "\n    \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n    \u2551                                                              \u2551\n    \u2551           MLX Fine-Tuning System v1.0.0                      \u2551\n    \u2551           Mistral-7B-Instruct-v0.3 + LoRA                    \u2551\n    \u2551           Optimized for Apple Silicon (M4)                   \u2551\n    \u2551                                                              \u2551\n    \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n    "}
+{"timestamp": "2025-11-14T08:46:29.206323", "level": "INFO", "logger": "mlx_finetuning", "message": "Checking system requirements..."}
+{"timestamp": "2025-11-14T08:46:29.206651", "level": "INFO", "logger": "mlx_finetuning", "message": "Platform: darwin"}
+{"timestamp": "2025-11-14T08:46:29.206690", "level": "INFO", "logger": "mlx_finetuning", "message": "Python Version: 3.13.9 (v3.13.9:8183fa5e3f7, Oct 14 2025, 10:27:13) [Clang 16.0.0 (clang-1600.0.26.6)]"}
+{"timestamp": "2025-11-14T08:46:29.206728", "level": "INFO", "logger": "mlx_finetuning", "message": "Total RAM: 24.00 GB"}
+{"timestamp": "2025-11-14T08:46:29.206768", "level": "INFO", "logger": "mlx_finetuning", "message": "Metal Available: True"}
+{"timestamp": "2025-11-14T08:46:29.206803", "level": "INFO", "logger": "mlx_finetuning", "message": "System requirements check passed."}
+{"timestamp": "2025-11-14T08:46:29.206840", "level": "INFO", "logger": "mlx_finetuning", "message": "Setting random seed: 42"}
+{"timestamp": "2025-11-14T08:46:29.342748", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (startup): | RAM: 6.90GB / 24.00GB (51.6%) | Metal: 0.00GB active, 0.00GB cache", "context": "startup", "ram_used_gb": 6.9042816162109375, "ram_percent": 51.6, "metal_active_gb": 7.450580596923828e-09}
+{"timestamp": "2025-11-14T08:46:29.342934", "level": "INFO", "logger": "mlx_finetuning", "message": "Dataset path: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:46:29.342995", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.343046", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Data Pipeline"}
+{"timestamp": "2025-11-14T08:46:29.343092", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.343141", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing data pipeline..."}
+{"timestamp": "2025-11-14T08:46:29.343224", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading tokenizer: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:46:29.787236", "level": "WARNING", "logger": "mlx_finetuning", "message": "pad_token not set, using eos_token"}
+{"timestamp": "2025-11-14T08:46:29.789853", "level": "INFO", "logger": "mlx_finetuning", "message": "Tokenizer loaded. Vocab size: 32768"}
+{"timestamp": "2025-11-14T08:46:29.789932", "level": "INFO", "logger": "mlx_finetuning", "message": "Special tokens: PAD=2, EOS=2, BOS=1"}
+{"timestamp": "2025-11-14T08:46:29.790018", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading dataset from: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:46:29.790950", "level": "INFO", "logger": "mlx_finetuning", "message": "Loaded 100 valid examples, 0 errors"}
+{"timestamp": "2025-11-14T08:46:29.790996", "level": "INFO", "logger": "mlx_finetuning", "message": "Preparing examples: formatting and tokenizing..."}
+{"timestamp": "2025-11-14T08:46:29.867487", "level": "INFO", "logger": "mlx_finetuning", "message": "Prepared 100 examples"}
+{"timestamp": "2025-11-14T08:46:29.867621", "level": "INFO", "logger": "mlx_finetuning", "message": "Splitting dataset: 90% train, 10% validation"}
+{"timestamp": "2025-11-14T08:46:29.867680", "level": "INFO", "logger": "mlx_finetuning", "message": "Desirable examples: 50"}
+{"timestamp": "2025-11-14T08:46:29.867732", "level": "INFO", "logger": "mlx_finetuning", "message": "Undesirable examples: 50"}
+{"timestamp": "2025-11-14T08:46:29.867841", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set: 90 examples"}
+{"timestamp": "2025-11-14T08:46:29.867889", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set: 10 examples"}
+{"timestamp": "2025-11-14T08:46:29.867937", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set label distribution:"}
+{"timestamp": "2025-11-14T08:46:29.867986", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 45"}
+{"timestamp": "2025-11-14T08:46:29.868028", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 45"}
+{"timestamp": "2025-11-14T08:46:29.868062", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set label distribution:"}
+{"timestamp": "2025-11-14T08:46:29.868098", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 5"}
+{"timestamp": "2025-11-14T08:46:29.868141", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 5"}
+{"timestamp": "2025-11-14T08:46:29.868189", "level": "INFO", "logger": "mlx_finetuning", "message": "Created data loaders: 90 train batches, 10 validation batches"}
+{"timestamp": "2025-11-14T08:46:29.868282", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_data_loading): | RAM: 6.95GB / 24.00GB (51.7%) | Metal: 0.00GB active, 0.00GB cache", "context": "after_data_loading", "ram_used_gb": 6.94818115234375, "ram_percent": 51.7, "metal_active_gb": 0.0003829672932624817}
+{"timestamp": "2025-11-14T08:46:29.868335", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.868376", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Model"}
+{"timestamp": "2025-11-14T08:46:29.868409", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:29.868460", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading model: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:46:29.868501", "level": "INFO", "logger": "mlx_finetuning", "message": "Note: Using MLX-specific model loading"}
+{"timestamp": "2025-11-14T08:46:29.876383", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading MLX model from: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:46:36.225733", "level": "INFO", "logger": "mlx_finetuning", "message": "Model loaded successfully"}
+{"timestamp": "2025-11-14T08:46:36.227396", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_model_loading): | RAM: 4.00GB / 24.00GB (89.8%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_model_loading", "ram_used_gb": 4.0030975341796875, "ram_percent": 89.8, "metal_active_gb": 13.500878877937794}
+{"timestamp": "2025-11-14T08:46:36.228729", "level": "INFO", "logger": "mlx_finetuning", "message": "Applying LoRA adapters..."}
+{"timestamp": "2025-11-14T08:46:36.229770", "level": "INFO", "logger": "mlx_finetuning", "message": "Target modules: ['q_proj']"}
+{"timestamp": "2025-11-14T08:46:36.230300", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA rank: 4"}
+{"timestamp": "2025-11-14T08:46:36.230587", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA alpha: 8"}
+{"timestamp": "2025-11-14T08:46:36.230728", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA dropout: 0.05"}
+{"timestamp": "2025-11-14T08:46:36.231373", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.31.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.238681", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.30.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.238821", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.29.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.240639", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.28.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.241482", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.27.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.241706", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.26.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.242107", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.25.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.242357", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.24.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.242687", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.23.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.242812", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.22.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.242988", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.21.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.243283", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.20.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.243508", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.19.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.243639", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.18.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.243771", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.17.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.244012", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.16.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.244198", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.15.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.244518", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.14.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.244669", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.13.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.244889", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.12.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.245146", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.11.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.245272", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.10.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.245697", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.9.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.246007", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.8.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.246296", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.7.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.246595", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.6.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.246929", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.5.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.247202", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.4.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.247471", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.3.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.247766", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.2.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.248084", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.1.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.248219", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.0.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:46:36.248445", "level": "INFO", "logger": "mlx_finetuning", "message": "Applied LoRA to 32 modules"}
+{"timestamp": "2025-11-14T08:46:36.249314", "level": "INFO", "logger": "mlx_finetuning", "message": "Total parameters: 7,785,943,040"}
+{"timestamp": "2025-11-14T08:46:36.249363", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable parameters: 1,048,576"}
+{"timestamp": "2025-11-14T08:46:36.249624", "level": "INFO", "logger": "mlx_finetuning", "message": "Frozen parameters: 7,784,894,464"}
+{"timestamp": "2025-11-14T08:46:36.249911", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable: 0.01%"}
+{"timestamp": "2025-11-14T08:46:36.250187", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_lora_application): | RAM: 4.01GB / 24.00GB (89.6%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_lora_application", "ram_used_gb": 4.010986328125, "ram_percent": 89.6, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:46:36.250526", "level": "INFO", "logger": "mlx_finetuning", "message": "Creating frozen reference model for KTO..."}
+{"timestamp": "2025-11-14T08:46:36.255708", "level": "DEBUG", "logger": "mlx_finetuning", "message": "All parameters frozen in reference model"}
+{"timestamp": "2025-11-14T08:46:36.256466", "level": "INFO", "logger": "mlx_finetuning", "message": "Reference model created and frozen"}
+{"timestamp": "2025-11-14T08:46:36.256574", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_reference_model_creation): | RAM: 4.01GB / 24.00GB (89.5%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_reference_model_creation", "ram_used_gb": 4.01080322265625, "ram_percent": 89.5, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:46:36.256733", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.257041", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Trainer (KTO Mode)"}
+{"timestamp": "2025-11-14T08:46:36.257322", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.257933", "level": "INFO", "logger": "mlx_finetuning", "message": "Optimizer will update 0 parameter tensors"}
+{"timestamp": "2025-11-14T08:46:36.258119", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainer initialized:"}
+{"timestamp": "2025-11-14T08:46:36.258246", "level": "INFO", "logger": "mlx_finetuning", "message": "  Total steps: 20"}
+{"timestamp": "2025-11-14T08:46:36.258507", "level": "INFO", "logger": "mlx_finetuning", "message": "  Steps per epoch: 90"}
+{"timestamp": "2025-11-14T08:46:36.258796", "level": "INFO", "logger": "mlx_finetuning", "message": "  Warmup steps: 2"}
+{"timestamp": "2025-11-14T08:46:36.259110", "level": "INFO", "logger": "mlx_finetuning", "message": "  Gradient accumulation: 2"}
+{"timestamp": "2025-11-14T08:46:36.259406", "level": "INFO", "logger": "mlx_finetuning", "message": "  Effective batch size: 2"}
+{"timestamp": "2025-11-14T08:46:36.259646", "level": "INFO", "logger": "mlx_finetuning", "message": "Training mode: KTO (Kahneman-Tversky Optimization)"}
+{"timestamp": "2025-11-14T08:46:36.260211", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO beta: 0.1"}
+{"timestamp": "2025-11-14T08:46:36.260275", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_d (desirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:46:36.260407", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_u (undesirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:46:36.260633", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.260987", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:46:36.261260", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.262411", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.262905", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:46:36.263264", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:46:36.263534", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (before_training): | RAM: 4.01GB / 24.00GB (89.4%) | Metal: 13.50GB active, 0.00GB cache", "context": "before_training", "ram_used_gb": 4.005859375, "ram_percent": 89.4, "metal_active_gb": 13.500879723578691}
+{"timestamp": "2025-11-14T08:46:36.263763", "level": "INFO", "logger": "mlx_finetuning", "message": "\nEpoch 1/1"}
+{"timestamp": "2025-11-14T08:46:36.263893", "level": "INFO", "logger": "mlx_finetuning", "message": "--------------------------------------------------------------------------------"}
+{"timestamp": "2025-11-14T08:46:36.267340", "level": "WARNING", "logger": "mlx_finetuning", "message": "Batch has only rejected examples, using cross-entropy"}
+{"timestamp": "2025-11-14T08:47:15.599354", "level": "INFO", "logger": "mlx_finetuning", "message": "Step 0 | loss: 15.875000 | lr: 0.000050 | step_time: 39.332214 | tokens_per_sec: 6.508660"}
+{"timestamp": "2025-11-14T08:47:15.599688", "level": "METRICS", "logger": "mlx_finetuning", "message": "Training metrics", "step": 0, "metrics": {"loss": 15.875, "lr": 4.999999873689376e-05, "step_time": 39.33221411705017, "tokens_per_sec": 6.508659777915382}}
+{"timestamp": "2025-11-14T08:47:15.600930", "level": "WARNING", "logger": "mlx_finetuning", "message": "Batch has only chosen examples, using cross-entropy"}
+{"timestamp": "2025-11-14T08:48:21.889206", "level": "INFO", "logger": "mlx_finetuning", "message": "Step 1 | loss: 16.250000 | lr: 0.000025 | step_time: 66.271407 | tokens_per_sec: 3.862903"}
+{"timestamp": "2025-11-14T08:48:21.891710", "level": "METRICS", "logger": "mlx_finetuning", "message": "Training metrics", "step": 1, "metrics": {"loss": 16.25, "lr": 2.499999936844688e-05, "step_time": 66.27140712738037, "tokens_per_sec": 3.8629027373440556}}
+{"timestamp": "2025-11-14T08:48:21.898365", "level": "WARNING", "logger": "mlx_finetuning", "message": "Batch has only rejected examples, using cross-entropy"}
+{"timestamp": "2025-11-14T08:49:39.474977", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.475271", "level": "INFO", "logger": "mlx_finetuning", "message": "MLX Fine-Tuning System - Logging Initialized"}
+{"timestamp": "2025-11-14T08:49:39.475333", "level": "INFO", "logger": "mlx_finetuning", "message": "Log level: INFO"}
+{"timestamp": "2025-11-14T08:49:39.475379", "level": "INFO", "logger": "mlx_finetuning", "message": "Log directory: test_logs_minimal"}
+{"timestamp": "2025-11-14T08:49:39.475419", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.475462", "level": "INFO", "logger": "mlx_finetuning", "message": "\n    \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n    \u2551                                                              \u2551\n    \u2551           MLX Fine-Tuning System v1.0.0                      \u2551\n    \u2551           Mistral-7B-Instruct-v0.3 + LoRA                    \u2551\n    \u2551           Optimized for Apple Silicon (M4)                   \u2551\n    \u2551                                                              \u2551\n    \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n    "}
+{"timestamp": "2025-11-14T08:49:39.475502", "level": "INFO", "logger": "mlx_finetuning", "message": "Checking system requirements..."}
+{"timestamp": "2025-11-14T08:49:39.475747", "level": "INFO", "logger": "mlx_finetuning", "message": "Platform: darwin"}
+{"timestamp": "2025-11-14T08:49:39.475785", "level": "INFO", "logger": "mlx_finetuning", "message": "Python Version: 3.13.9 (v3.13.9:8183fa5e3f7, Oct 14 2025, 10:27:13) [Clang 16.0.0 (clang-1600.0.26.6)]"}
+{"timestamp": "2025-11-14T08:49:39.475823", "level": "INFO", "logger": "mlx_finetuning", "message": "Total RAM: 24.00 GB"}
+{"timestamp": "2025-11-14T08:49:39.475860", "level": "INFO", "logger": "mlx_finetuning", "message": "Metal Available: True"}
+{"timestamp": "2025-11-14T08:49:39.475896", "level": "INFO", "logger": "mlx_finetuning", "message": "System requirements check passed."}
+{"timestamp": "2025-11-14T08:49:39.475932", "level": "INFO", "logger": "mlx_finetuning", "message": "Setting random seed: 42"}
+{"timestamp": "2025-11-14T08:49:39.489297", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (startup): | RAM: 4.32GB / 24.00GB (21.5%) | Metal: 0.00GB active, 0.00GB cache", "context": "startup", "ram_used_gb": 4.3211212158203125, "ram_percent": 21.5, "metal_active_gb": 7.450580596923828e-09}
+{"timestamp": "2025-11-14T08:49:39.489466", "level": "INFO", "logger": "mlx_finetuning", "message": "Dataset path: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:49:39.489519", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.489595", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Data Pipeline"}
+{"timestamp": "2025-11-14T08:49:39.489638", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.489683", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing data pipeline..."}
+{"timestamp": "2025-11-14T08:49:39.489725", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading tokenizer: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:49:39.817873", "level": "WARNING", "logger": "mlx_finetuning", "message": "pad_token not set, using eos_token"}
+{"timestamp": "2025-11-14T08:49:39.820606", "level": "INFO", "logger": "mlx_finetuning", "message": "Tokenizer loaded. Vocab size: 32768"}
+{"timestamp": "2025-11-14T08:49:39.820696", "level": "INFO", "logger": "mlx_finetuning", "message": "Special tokens: PAD=2, EOS=2, BOS=1"}
+{"timestamp": "2025-11-14T08:49:39.820783", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading dataset from: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:49:39.821246", "level": "INFO", "logger": "mlx_finetuning", "message": "Loaded 100 valid examples, 0 errors"}
+{"timestamp": "2025-11-14T08:49:39.821314", "level": "INFO", "logger": "mlx_finetuning", "message": "Preparing examples: formatting and tokenizing..."}
+{"timestamp": "2025-11-14T08:49:39.865053", "level": "INFO", "logger": "mlx_finetuning", "message": "Prepared 100 examples"}
+{"timestamp": "2025-11-14T08:49:39.865200", "level": "INFO", "logger": "mlx_finetuning", "message": "Splitting dataset: 90% train, 10% validation"}
+{"timestamp": "2025-11-14T08:49:39.865268", "level": "INFO", "logger": "mlx_finetuning", "message": "Desirable examples: 50"}
+{"timestamp": "2025-11-14T08:49:39.865318", "level": "INFO", "logger": "mlx_finetuning", "message": "Undesirable examples: 50"}
+{"timestamp": "2025-11-14T08:49:39.865423", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set: 90 examples"}
+{"timestamp": "2025-11-14T08:49:39.865470", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set: 10 examples"}
+{"timestamp": "2025-11-14T08:49:39.865519", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set label distribution:"}
+{"timestamp": "2025-11-14T08:49:39.865570", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 45"}
+{"timestamp": "2025-11-14T08:49:39.865619", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 45"}
+{"timestamp": "2025-11-14T08:49:39.865665", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set label distribution:"}
+{"timestamp": "2025-11-14T08:49:39.865710", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 5"}
+{"timestamp": "2025-11-14T08:49:39.865755", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 5"}
+{"timestamp": "2025-11-14T08:49:39.865813", "level": "INFO", "logger": "mlx_finetuning", "message": "Created data loaders: 23 train batches, 3 validation batches"}
+{"timestamp": "2025-11-14T08:49:39.865916", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_data_loading): | RAM: 4.36GB / 24.00GB (21.6%) | Metal: 0.00GB active, 0.00GB cache", "context": "after_data_loading", "ram_used_gb": 4.3600006103515625, "ram_percent": 21.6, "metal_active_gb": 0.0003829672932624817}
+{"timestamp": "2025-11-14T08:49:39.865973", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.866017", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Model"}
+{"timestamp": "2025-11-14T08:49:39.866059", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:39.866147", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading model: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:49:39.866189", "level": "INFO", "logger": "mlx_finetuning", "message": "Note: Using MLX-specific model loading"}
+{"timestamp": "2025-11-14T08:49:39.874616", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading MLX model from: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:49:44.547670", "level": "INFO", "logger": "mlx_finetuning", "message": "Model loaded successfully"}
+{"timestamp": "2025-11-14T08:49:44.548797", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_model_loading): | RAM: 7.03GB / 24.00GB (78.3%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_model_loading", "ram_used_gb": 7.0304718017578125, "ram_percent": 78.3, "metal_active_gb": 13.500878877937794}
+{"timestamp": "2025-11-14T08:49:44.548878", "level": "INFO", "logger": "mlx_finetuning", "message": "Applying LoRA adapters..."}
+{"timestamp": "2025-11-14T08:49:44.548932", "level": "INFO", "logger": "mlx_finetuning", "message": "Target modules: ['q_proj']"}
+{"timestamp": "2025-11-14T08:49:44.548979", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA rank: 4"}
+{"timestamp": "2025-11-14T08:49:44.549026", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA alpha: 8"}
+{"timestamp": "2025-11-14T08:49:44.549073", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA dropout: 0.05"}
+{"timestamp": "2025-11-14T08:49:44.549554", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.31.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552609", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.30.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552723", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.29.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552789", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.28.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552847", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.27.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552899", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.26.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552947", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.25.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.552997", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.24.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553045", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.23.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553089", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.22.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553133", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.21.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553177", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.20.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553221", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.19.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553265", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.18.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553308", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.17.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553351", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.16.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553422", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.15.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553463", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.14.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553505", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.13.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553550", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.12.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553590", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.11.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553630", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.10.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553669", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.9.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553711", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.8.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553751", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.7.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553792", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.6.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553831", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.5.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553870", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.4.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553909", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.3.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553948", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.2.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.553987", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.1.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.554026", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.0.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:49:44.554112", "level": "INFO", "logger": "mlx_finetuning", "message": "Applied LoRA to 32 modules"}
+{"timestamp": "2025-11-14T08:49:44.554826", "level": "INFO", "logger": "mlx_finetuning", "message": "Total parameters: 7,785,943,040"}
+{"timestamp": "2025-11-14T08:49:44.554878", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable parameters: 1,048,576"}
+{"timestamp": "2025-11-14T08:49:44.554921", "level": "INFO", "logger": "mlx_finetuning", "message": "Frozen parameters: 7,784,894,464"}
+{"timestamp": "2025-11-14T08:49:44.554965", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable: 0.01%"}
+{"timestamp": "2025-11-14T08:49:44.555029", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_lora_application): | RAM: 7.03GB / 24.00GB (78.3%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_lora_application", "ram_used_gb": 7.03106689453125, "ram_percent": 78.3, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:49:44.555073", "level": "INFO", "logger": "mlx_finetuning", "message": "Creating frozen reference model for KTO..."}
+{"timestamp": "2025-11-14T08:49:44.559368", "level": "DEBUG", "logger": "mlx_finetuning", "message": "All parameters frozen in reference model"}
+{"timestamp": "2025-11-14T08:49:44.560083", "level": "INFO", "logger": "mlx_finetuning", "message": "Reference model created and frozen"}
+{"timestamp": "2025-11-14T08:49:44.560165", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_reference_model_creation): | RAM: 7.03GB / 24.00GB (78.3%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_reference_model_creation", "ram_used_gb": 7.0311737060546875, "ram_percent": 78.3, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:49:44.560244", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.560286", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Trainer (KTO Mode)"}
+{"timestamp": "2025-11-14T08:49:44.560324", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.560592", "level": "INFO", "logger": "mlx_finetuning", "message": "Optimizer will update 0 parameter tensors"}
+{"timestamp": "2025-11-14T08:49:44.560838", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainer initialized:"}
+{"timestamp": "2025-11-14T08:49:44.560878", "level": "INFO", "logger": "mlx_finetuning", "message": "  Total steps: 20"}
+{"timestamp": "2025-11-14T08:49:44.560914", "level": "INFO", "logger": "mlx_finetuning", "message": "  Steps per epoch: 23"}
+{"timestamp": "2025-11-14T08:49:44.560951", "level": "INFO", "logger": "mlx_finetuning", "message": "  Warmup steps: 2"}
+{"timestamp": "2025-11-14T08:49:44.560987", "level": "INFO", "logger": "mlx_finetuning", "message": "  Gradient accumulation: 1"}
+{"timestamp": "2025-11-14T08:49:44.561024", "level": "INFO", "logger": "mlx_finetuning", "message": "  Effective batch size: 4"}
+{"timestamp": "2025-11-14T08:49:44.561059", "level": "INFO", "logger": "mlx_finetuning", "message": "Training mode: KTO (Kahneman-Tversky Optimization)"}
+{"timestamp": "2025-11-14T08:49:44.561107", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO beta: 0.1"}
+{"timestamp": "2025-11-14T08:49:44.561143", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_d (desirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:49:44.561178", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_u (undesirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:49:44.561212", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.561247", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:49:44.561280", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.561315", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.561348", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:49:44.561381", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:49:44.561428", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (before_training): | RAM: 7.03GB / 24.00GB (78.3%) | Metal: 13.50GB active, 0.00GB cache", "context": "before_training", "ram_used_gb": 7.0317535400390625, "ram_percent": 78.3, "metal_active_gb": 13.500879723578691}
+{"timestamp": "2025-11-14T08:49:44.561467", "level": "INFO", "logger": "mlx_finetuning", "message": "\nEpoch 1/1"}
+{"timestamp": "2025-11-14T08:49:44.561501", "level": "INFO", "logger": "mlx_finetuning", "message": "--------------------------------------------------------------------------------"}
+{"timestamp": "2025-11-14T08:51:32.543455", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.543540", "level": "INFO", "logger": "mlx_finetuning", "message": "MLX Fine-Tuning System - Logging Initialized"}
+{"timestamp": "2025-11-14T08:51:32.543589", "level": "INFO", "logger": "mlx_finetuning", "message": "Log level: INFO"}
+{"timestamp": "2025-11-14T08:51:32.543652", "level": "INFO", "logger": "mlx_finetuning", "message": "Log directory: test_logs_minimal"}
+{"timestamp": "2025-11-14T08:51:32.543737", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.543803", "level": "INFO", "logger": "mlx_finetuning", "message": "\n    \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n    \u2551                                                              \u2551\n    \u2551           MLX Fine-Tuning System v1.0.0                      \u2551\n    \u2551           Mistral-7B-Instruct-v0.3 + LoRA                    \u2551\n    \u2551           Optimized for Apple Silicon (M4)                   \u2551\n    \u2551                                                              \u2551\n    \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n    "}
+{"timestamp": "2025-11-14T08:51:32.543849", "level": "INFO", "logger": "mlx_finetuning", "message": "Checking system requirements..."}
+{"timestamp": "2025-11-14T08:51:32.543967", "level": "INFO", "logger": "mlx_finetuning", "message": "Platform: darwin"}
+{"timestamp": "2025-11-14T08:51:32.544006", "level": "INFO", "logger": "mlx_finetuning", "message": "Python Version: 3.13.9 (v3.13.9:8183fa5e3f7, Oct 14 2025, 10:27:13) [Clang 16.0.0 (clang-1600.0.26.6)]"}
+{"timestamp": "2025-11-14T08:51:32.544046", "level": "INFO", "logger": "mlx_finetuning", "message": "Total RAM: 24.00 GB"}
+{"timestamp": "2025-11-14T08:51:32.544084", "level": "INFO", "logger": "mlx_finetuning", "message": "Metal Available: True"}
+{"timestamp": "2025-11-14T08:51:32.544119", "level": "INFO", "logger": "mlx_finetuning", "message": "System requirements check passed."}
+{"timestamp": "2025-11-14T08:51:32.544187", "level": "INFO", "logger": "mlx_finetuning", "message": "Setting random seed: 42"}
+{"timestamp": "2025-11-14T08:51:32.553159", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (startup): | RAM: 7.15GB / 24.00GB (35.6%) | Metal: 0.00GB active, 0.00GB cache", "context": "startup", "ram_used_gb": 7.15411376953125, "ram_percent": 35.6, "metal_active_gb": 7.450580596923828e-09}
+{"timestamp": "2025-11-14T08:51:32.553295", "level": "INFO", "logger": "mlx_finetuning", "message": "Dataset path: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:51:32.553341", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.553381", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Data Pipeline"}
+{"timestamp": "2025-11-14T08:51:32.553417", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.553456", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing data pipeline..."}
+{"timestamp": "2025-11-14T08:51:32.553493", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading tokenizer: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:51:32.865613", "level": "WARNING", "logger": "mlx_finetuning", "message": "pad_token not set, using eos_token"}
+{"timestamp": "2025-11-14T08:51:32.868557", "level": "INFO", "logger": "mlx_finetuning", "message": "Tokenizer loaded. Vocab size: 32768"}
+{"timestamp": "2025-11-14T08:51:32.868649", "level": "INFO", "logger": "mlx_finetuning", "message": "Special tokens: PAD=2, EOS=2, BOS=1"}
+{"timestamp": "2025-11-14T08:51:32.868737", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading dataset from: /Users/jrosenbaum/Documents/Code/Synthetic Conversations/code/mistral_lora_mac/test_dataset_kto.jsonl"}
+{"timestamp": "2025-11-14T08:51:32.869814", "level": "INFO", "logger": "mlx_finetuning", "message": "Loaded 100 valid examples, 0 errors"}
+{"timestamp": "2025-11-14T08:51:32.869860", "level": "INFO", "logger": "mlx_finetuning", "message": "Preparing examples: formatting and tokenizing..."}
+{"timestamp": "2025-11-14T08:51:32.907277", "level": "INFO", "logger": "mlx_finetuning", "message": "Prepared 100 examples"}
+{"timestamp": "2025-11-14T08:51:32.907401", "level": "INFO", "logger": "mlx_finetuning", "message": "Splitting dataset: 90% train, 10% validation"}
+{"timestamp": "2025-11-14T08:51:32.907466", "level": "INFO", "logger": "mlx_finetuning", "message": "Desirable examples: 50"}
+{"timestamp": "2025-11-14T08:51:32.907518", "level": "INFO", "logger": "mlx_finetuning", "message": "Undesirable examples: 50"}
+{"timestamp": "2025-11-14T08:51:32.907606", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set: 90 examples"}
+{"timestamp": "2025-11-14T08:51:32.907647", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set: 10 examples"}
+{"timestamp": "2025-11-14T08:51:32.907691", "level": "INFO", "logger": "mlx_finetuning", "message": "Train set label distribution:"}
+{"timestamp": "2025-11-14T08:51:32.907732", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 45"}
+{"timestamp": "2025-11-14T08:51:32.907775", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 45"}
+{"timestamp": "2025-11-14T08:51:32.907814", "level": "INFO", "logger": "mlx_finetuning", "message": "Validation set label distribution:"}
+{"timestamp": "2025-11-14T08:51:32.907853", "level": "INFO", "logger": "mlx_finetuning", "message": "  desirable: 5"}
+{"timestamp": "2025-11-14T08:51:32.907888", "level": "INFO", "logger": "mlx_finetuning", "message": "  undesirable: 5"}
+{"timestamp": "2025-11-14T08:51:32.907936", "level": "INFO", "logger": "mlx_finetuning", "message": "Created data loaders: 23 train batches, 3 validation batches"}
+{"timestamp": "2025-11-14T08:51:32.908018", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_data_loading): | RAM: 7.18GB / 24.00GB (35.7%) | Metal: 0.00GB active, 0.00GB cache", "context": "after_data_loading", "ram_used_gb": 7.179962158203125, "ram_percent": 35.7, "metal_active_gb": 0.0003829672932624817}
+{"timestamp": "2025-11-14T08:51:32.908066", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.908103", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Model"}
+{"timestamp": "2025-11-14T08:51:32.908139", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:32.908186", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading model: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:51:32.908221", "level": "INFO", "logger": "mlx_finetuning", "message": "Note: Using MLX-specific model loading"}
+{"timestamp": "2025-11-14T08:51:32.912143", "level": "INFO", "logger": "mlx_finetuning", "message": "Loading MLX model from: mistralai/Mistral-7B-Instruct-v0.3"}
+{"timestamp": "2025-11-14T08:51:37.518899", "level": "INFO", "logger": "mlx_finetuning", "message": "Model loaded successfully"}
+{"timestamp": "2025-11-14T08:51:37.519700", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_model_loading): | RAM: 5.68GB / 24.00GB (81.7%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_model_loading", "ram_used_gb": 5.68145751953125, "ram_percent": 81.7, "metal_active_gb": 13.500878877937794}
+{"timestamp": "2025-11-14T08:51:37.519817", "level": "INFO", "logger": "mlx_finetuning", "message": "Applying LoRA adapters..."}
+{"timestamp": "2025-11-14T08:51:37.520047", "level": "INFO", "logger": "mlx_finetuning", "message": "Target modules: ['q_proj']"}
+{"timestamp": "2025-11-14T08:51:37.520280", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA rank: 4"}
+{"timestamp": "2025-11-14T08:51:37.520511", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA alpha: 8"}
+{"timestamp": "2025-11-14T08:51:37.520750", "level": "INFO", "logger": "mlx_finetuning", "message": "LoRA dropout: 0.05"}
+{"timestamp": "2025-11-14T08:51:37.521386", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.31.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521547", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.30.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521622", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.29.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521684", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.28.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521726", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.27.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521796", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.26.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521888", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.25.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.521969", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.24.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522014", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.23.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522072", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.22.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522136", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.21.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522177", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.20.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522282", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.19.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522373", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.18.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522437", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.17.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522484", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.16.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522559", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.15.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522616", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.14.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522665", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.13.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522809", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.12.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.522907", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.11.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523308", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.10.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523391", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.9.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523440", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.8.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523490", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.7.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523537", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.6.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523586", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.5.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523634", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.4.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523729", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.3.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523801", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.2.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523856", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.1.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523906", "level": "DEBUG", "logger": "mlx_finetuning", "message": "Applying LoRA to: model.layers.0.self_attn.q_proj"}
+{"timestamp": "2025-11-14T08:51:37.523991", "level": "INFO", "logger": "mlx_finetuning", "message": "Applied LoRA to 32 modules"}
+{"timestamp": "2025-11-14T08:51:37.524512", "level": "INFO", "logger": "mlx_finetuning", "message": "Total parameters: 7,785,943,040"}
+{"timestamp": "2025-11-14T08:51:37.524553", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable parameters: 1,048,576"}
+{"timestamp": "2025-11-14T08:51:37.524589", "level": "INFO", "logger": "mlx_finetuning", "message": "Frozen parameters: 7,784,894,464"}
+{"timestamp": "2025-11-14T08:51:37.524623", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainable: 0.01%"}
+{"timestamp": "2025-11-14T08:51:37.524696", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_lora_application): | RAM: 5.68GB / 24.00GB (81.6%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_lora_application", "ram_used_gb": 5.681640625, "ram_percent": 81.6, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:51:37.524756", "level": "INFO", "logger": "mlx_finetuning", "message": "Creating frozen reference model for KTO..."}
+{"timestamp": "2025-11-14T08:51:37.529319", "level": "DEBUG", "logger": "mlx_finetuning", "message": "All parameters frozen in reference model"}
+{"timestamp": "2025-11-14T08:51:37.530095", "level": "INFO", "logger": "mlx_finetuning", "message": "Reference model created and frozen"}
+{"timestamp": "2025-11-14T08:51:37.530153", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (after_reference_model_creation): | RAM: 5.68GB / 24.00GB (81.6%) | Metal: 13.50GB active, 0.00GB cache", "context": "after_reference_model_creation", "ram_used_gb": 5.681640625, "ram_percent": 81.6, "metal_active_gb": 13.50087971240282}
+{"timestamp": "2025-11-14T08:51:37.530202", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.530250", "level": "INFO", "logger": "mlx_finetuning", "message": "Initializing Trainer (KTO Mode)"}
+{"timestamp": "2025-11-14T08:51:37.530361", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.530667", "level": "INFO", "logger": "mlx_finetuning", "message": "Optimizer will update 0 parameter tensors"}
+{"timestamp": "2025-11-14T08:51:37.530814", "level": "INFO", "logger": "mlx_finetuning", "message": "Trainer initialized:"}
+{"timestamp": "2025-11-14T08:51:37.530883", "level": "INFO", "logger": "mlx_finetuning", "message": "  Total steps: 20"}
+{"timestamp": "2025-11-14T08:51:37.530923", "level": "INFO", "logger": "mlx_finetuning", "message": "  Steps per epoch: 23"}
+{"timestamp": "2025-11-14T08:51:37.531008", "level": "INFO", "logger": "mlx_finetuning", "message": "  Warmup steps: 2"}
+{"timestamp": "2025-11-14T08:51:37.531056", "level": "INFO", "logger": "mlx_finetuning", "message": "  Gradient accumulation: 1"}
+{"timestamp": "2025-11-14T08:51:37.531157", "level": "INFO", "logger": "mlx_finetuning", "message": "  Effective batch size: 4"}
+{"timestamp": "2025-11-14T08:51:37.531196", "level": "INFO", "logger": "mlx_finetuning", "message": "Training mode: KTO (Kahneman-Tversky Optimization)"}
+{"timestamp": "2025-11-14T08:51:37.531303", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO beta: 0.1"}
+{"timestamp": "2025-11-14T08:51:37.531445", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_d (desirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:51:37.531532", "level": "INFO", "logger": "mlx_finetuning", "message": "KTO lambda_u (undesirable weight): 1.0"}
+{"timestamp": "2025-11-14T08:51:37.531628", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.531689", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:51:37.531782", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.531871", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.531914", "level": "INFO", "logger": "mlx_finetuning", "message": "Starting Training"}
+{"timestamp": "2025-11-14T08:51:37.531964", "level": "INFO", "logger": "mlx_finetuning", "message": "================================================================================"}
+{"timestamp": "2025-11-14T08:51:37.532035", "level": "INFO", "logger": "mlx_finetuning", "message": "Memory (before_training): | RAM: 5.68GB / 24.00GB (81.6%) | Metal: 13.50GB active, 0.00GB cache", "context": "before_training", "ram_used_gb": 5.681640625, "ram_percent": 81.6, "metal_active_gb": 13.500879723578691}
+{"timestamp": "2025-11-14T08:51:37.532073", "level": "INFO", "logger": "mlx_finetuning", "message": "\nEpoch 1/1"}
+{"timestamp": "2025-11-14T08:51:37.532116", "level": "INFO", "logger": "mlx_finetuning", "message": "--------------------------------------------------------------------------------"}
+{"timestamp": "2025-11-14T08:52:50.500131", "level": "INFO", "logger": "mlx_finetuning", "message": "Step 1 | loss: 1.000000 | lr: 0.000025 | step_time: 72.966355 | tokens_per_sec: 14.033865"}
+{"timestamp": "2025-11-14T08:52:50.500452", "level": "METRICS", "logger": "mlx_finetuning", "message": "Training metrics", "step": 1, "metrics": {"loss": 1.0, "lr": 2.499999936844688e-05, "step_time": 72.96635484695435, "tokens_per_sec": 14.033865363670998}}
