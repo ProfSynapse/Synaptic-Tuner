@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi:*)",
+      "Bash(bash:*)",
+      "Bash(dos2unix:*)",
+      "Bash(sed:*)",
+      "Bash(python3.10:*)",
+      "Bash(rm:*)",
+      "Bash(source:*)",
+      "Bash(pip --version:*)",
+      "Bash(sudo apt install:*)",
+      "Bash(conda --version:*)",
+      "Bash(conda create:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
