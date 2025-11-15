@@ -11,12 +11,9 @@ eval "$(conda shell.bash hook)"
 conda activate base
 
 echo "============================================"
-echo "KTO-S TRAINING: SIGN Correction Enabled"
+echo "KTO TRAINING"
 echo "============================================"
 echo "All settings from configs/training_config.py"
-echo "  - KTO-S: Enabled (stable KL divergence)"
-echo "  - LR: Constant 5e-7"
-echo "  - Adaptive Memory: Auto-tuned"
 echo ""
 echo "Using: $(which python)"
 echo "Python version: $(python --version)"

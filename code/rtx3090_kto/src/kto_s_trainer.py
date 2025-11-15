@@ -68,7 +68,9 @@ class KTOSTrainer(KTOTrainer):
         rejected_rewards = policy_rejected_logps - reference_rejected_logps
 
         if self.use_sign_correction:
-            # KTO-S: Apply SIGN correction
+            # KTO-S: Apply SIGN correction (from paper)
+            # Desirable:   σ(β * (r + S*z_0))
+            # Undesirable: σ(β * (-S*z_0 - r))
             S_chosen = torch.sign(chosen_rewards)
             S_rejected = torch.sign(rejected_rewards)
 
@@ -76,7 +78,7 @@ class KTOSTrainer(KTOTrainer):
                 self.beta * (chosen_rewards + S_chosen * KL_chosen)
             )
             rejected_losses = -F.logsigmoid(
-                self.beta * (S_rejected * KL_rejected - rejected_rewards)
+                self.beta * (-S_rejected * KL_rejected - rejected_rewards)
             )
         else:
             # Standard KTO: Original formulation

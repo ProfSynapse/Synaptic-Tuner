@@ -78,7 +78,7 @@ class MetricsTableCallback(TrainerCallback):
         self._save_metrics_to_file(logs, state.global_step)
 
         # Check training health and warn if needed
-        self._check_training_health(logs, state.global_step)
+        self._check_training_health(logs, state.global_step, args.max_grad_norm)
 
         # Only print table at specified intervals
         if state.global_step % self.log_every_n_steps != 0:
@@ -148,7 +148,7 @@ class MetricsTableCallback(TrainerCallback):
         print(f"  Log file: {self.log_file}")
         print(f"  Steps included: 0-{previous_entries[-1]['step'] if previous_entries else 0}\n")
 
-    def _check_training_health(self, logs: Dict[str, Any], step: int):
+    def _check_training_health(self, logs: Dict[str, Any], step: int, max_grad_norm: float = None):
         """Check if training metrics are healthy and warn if not."""
         warnings = []
 
@@ -168,17 +168,24 @@ class MetricsTableCallback(TrainerCallback):
         if abs(chosen) < 0.001 and abs(rejected) < 0.001 and step > 10:
             warnings.append("⚠ Reward collapse detected (both rewards near zero)")
 
-        # Check gradient norm (very high = instability)
+        # Check gradient norm (show both raw and clipped values)
         grad_norm = logs.get('grad_norm', 0.0)
         if grad_norm > 100.0:
-            warnings.append(f"⚠ High gradient norm: {grad_norm:.2f} (may cause instability)")
+            if max_grad_norm is not None:
+                clipped_norm = min(grad_norm, max_grad_norm)
+                warnings.append(
+                    f"⚠ High gradient norm: {grad_norm:.2f} → {clipped_norm:.2f} (clipped)"
+                )
+            else:
+                warnings.append(f"⚠ High gradient norm: {grad_norm:.2f} (may cause instability)")
 
         # Print warnings if any
         if warnings:
             print("\n" + "!" * 100)
             for warning in warnings:
                 print(f"  {warning}")
-            print("  Consider: reducing learning rate or reverting to last checkpoint")
+            if max_grad_norm is None or grad_norm > max_grad_norm * 10:
+                print("  Consider: reducing learning rate or using tighter gradient clipping")
             print("!" * 100 + "\n")
 
     def on_save(self, args, state, control, **kwargs):

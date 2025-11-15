@@ -34,7 +34,10 @@
       "Bash(chmod:*)",
       "Bash(python check_config.py:*)",
       "Bash(find:*)",
-      "Bash(requirements.txt)"
+      "Bash(requirements.txt)",
+      "Bash(python3:*)",
+      "Bash(for f in /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/code/rtx3090_kto/kto_output_rtx3090/202511*/logs/logs/*.jsonl)",
+      "Bash(git show:*)"
     ],
     "deny": [],
     "ask": []

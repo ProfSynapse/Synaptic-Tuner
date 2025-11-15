@@ -62,14 +62,15 @@ class KTOTrainingConfig:
     gradient_accumulation_steps: int = 4  # Increased to maintain effective batch size of 32  
 
     # KTO-specific parameters
-    beta: float = 0.2
+    beta: float = 0.15  # Compromise between 0.10 and 0.20
     desirable_weight: float = 1.0
     undesirable_weight: float = 1.0
 
-    # Learning rate
-    learning_rate: float = 5e-7  # Conservative for KTO (5e-7 to 1e-6)
-    max_grad_norm: float = 1.0  # Run 8: Back to default (0.5 had no effect in Run 7)
+    # Learning rate - BACK TO RUN 5's CONFIG
+    learning_rate: float = 5e-7  # Run 5's proven LR (was 2.5e-7)
+    max_grad_norm: float = 0.5  # Moderate gradient clipping
     lr_scheduler_type: str = "cosine"
+    adam_epsilon: float = 1e-6  # Adam optimizer epsilon for numerical stability
 
     # ============================================================================
     # RUN 8: TWO-STAGE LEARNING RATE SCHEDULE
@@ -108,7 +109,7 @@ class KTOTrainingConfig:
     #
     # To disable: Set use_kto_s = False (not recommended for base models)
     # ============================================================================
-    use_kto_s: bool = True  # Enable SIGN correction (recommended for stable training)
+    use_kto_s: bool = False  # DISABLED - Testing standard KTO with LR=2.5e-7, clip=0.3
     # ============================================================================
 
     # Sequence lengths
@@ -123,7 +124,7 @@ class KTOTrainingConfig:
 
     # Training schedule
     num_train_epochs: int = 1  # Adjust based on dataset size
-    warmup_ratio: float = 0.1  # 10% warmup
+    warmup_ratio: float = 0.15  # 15% warmup for stability
 
     # Logging and saving
     logging_steps: int = 5  # Log every 5 steps for table display

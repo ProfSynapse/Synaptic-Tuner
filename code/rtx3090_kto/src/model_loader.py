@@ -164,6 +164,57 @@ def check_gpu_memory():
         print("CUDA not available")
 
 
+def create_reference_model(
+    model_name: str,
+    max_seq_length: int = 2048,
+    dtype: Optional[str] = None,
+    load_in_4bit: bool = True,
+    hf_token: Optional[str] = None
+):
+    """
+    Create a reference model for KTO training.
+
+    The reference model is a frozen copy of the base model used to compute
+    KL divergence. It should NOT have LoRA adapters applied.
+
+    Args:
+        model_name: HuggingFace model name or path
+        max_seq_length: Maximum sequence length
+        dtype: Data type (None for auto-detection)
+        load_in_4bit: Whether to use 4-bit quantization
+        hf_token: HuggingFace token for gated models
+
+    Returns:
+        Reference model (frozen, no LoRA)
+    """
+    print("\n" + "=" * 60)
+    print("CREATING REFERENCE MODEL FOR KTO")
+    print("=" * 60)
+    print(f"Model: {model_name}")
+    print("Note: Reference model will be frozen (no LoRA)")
+
+    # Load reference model (same as policy model but will stay frozen)
+    ref_model, _ = FastLanguageModel.from_pretrained(
+        model_name=model_name,
+        max_seq_length=max_seq_length,
+        dtype=dtype,
+        load_in_4bit=load_in_4bit,
+        token=hf_token,
+    )
+
+    # Freeze reference model
+    for param in ref_model.parameters():
+        param.requires_grad = False
+
+    # Set to eval mode
+    ref_model.eval()
+
+    print("✓ Reference model created and frozen")
+    print("=" * 60)
+
+    return ref_model
+
+
 def prepare_model_for_inference(model, tokenizer, chat_template: str = "chatml"):
     """
     Prepare model for inference by setting it to inference mode

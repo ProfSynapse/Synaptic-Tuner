@@ -42,6 +42,7 @@ from src.data_loader import load_and_prepare_dataset, validate_kto_dataset, prin
 from src.model_loader import (
     load_model_and_tokenizer,
     apply_lora_adapters,
+    create_reference_model,
     check_gpu_memory
 )
 from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback
@@ -519,7 +520,27 @@ def main():
         hf_token=args.hf_token
     )
 
-    # Apply LoRA adapters
+    # Create reference model for KTO (frozen copy of base model, no LoRA)
+    # For 7B+ models with limited VRAM, we can let TRL handle reference model internally
+    ref_model = None
+
+    # Only create explicit reference model if requested via env var
+    # This uses ~8GB extra VRAM but provides more stable KL computation
+    import os
+    if os.getenv("USE_EXPLICIT_REF_MODEL", "false").lower() == "true":
+        print("\n⚠️  Creating explicit reference model (uses ~8GB extra VRAM)")
+        ref_model = create_reference_model(
+            model_name=config.model.model_name,
+            max_seq_length=config.model.max_seq_length,
+            dtype=config.model.dtype,
+            load_in_4bit=config.model.load_in_4bit,
+            hf_token=args.hf_token
+        )
+    else:
+        print("\n✓ Using implicit reference model (TRL manages internally)")
+        print("  To use explicit ref model: USE_EXPLICIT_REF_MODEL=true ./train.sh ...")
+
+    # Apply LoRA adapters to policy model only (not reference)
     model = apply_lora_adapters(
         model,
         r=config.lora.r,
@@ -641,6 +662,7 @@ def main():
         print("Initializing KTO-S Trainer (with SIGN correction)...")
         trainer = KTOSTrainer(
             model=model,
+            ref_model=ref_model,  # Explicit reference model
             args=training_args,
             tokenizer=tokenizer,  # Use 'tokenizer' for TRL 0.11.4
             train_dataset=train_dataset,
@@ -653,6 +675,7 @@ def main():
         print("⚠️  Warning: Standard KTO may have KL spikes with base models")
         trainer = KTOTrainer(
             model=model,
+            ref_model=ref_model,  # Explicit reference model
             args=training_args,
             tokenizer=tokenizer,  # Use 'tokenizer' for TRL 0.11.4
             train_dataset=train_dataset,
@@ -660,7 +683,12 @@ def main():
             callbacks=callbacks,
         )
 
-    print("✓ KTO trainer initialized with metrics tracking\n")
+    print("✓ KTO trainer initialized with metrics tracking")
+    if ref_model is not None:
+        print("✓ Explicit reference model provided for stable KL computation")
+    else:
+        print("✓ Using TRL's implicit reference model (shared base model)")
+    print()
 
     # Start training
     print("=" * 60)
