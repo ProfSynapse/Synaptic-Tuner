@@ -47,6 +47,7 @@ from src.model_loader import (
 )
 from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback
 from src.adaptive_memory import AdaptiveMemoryManager, get_adaptive_settings
+from src.debug_logger import TrainingDebugger
 
 
 def setup_wandb():
@@ -80,6 +81,13 @@ def setup_environment():
 
     # Disable tokenizer parallelism warnings
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    # ============================================================================
+    # CUDA MEMORY OPTIMIZATION: Reduce fragmentation
+    # ============================================================================
+    # expandable_segments reduces memory fragmentation by consolidating allocations
+    # This can reduce memory usage by ~30% and prevent OOM errors
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     # Suppress verbose logging - we have our custom table
     import logging
@@ -193,9 +201,9 @@ def main():
     parser.add_argument(
         "--model-size",
         type=str,
-        default="7b",
-        choices=["3b", "7b", "13b", "20b"],
-        help="Model size preset (default: 7b)"
+        default=None,
+        choices=["3b", "7b", "13b", "20b", None],
+        help="Model size preset (optional - if not provided, uses config defaults)"
     )
     parser.add_argument(
         "--model-name",
@@ -357,6 +365,11 @@ def main():
         action="store_true",
         help="Setup and validate without training"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable detailed debug logging to diagnose freezes/hangs"
+    )
 
     args = parser.parse_args()
 
@@ -400,8 +413,12 @@ def main():
     wandb_auto_enabled = setup_wandb()
 
     # Get configuration
-    print(f"Using {args.model_size.upper()} model configuration\n")
-    config = get_config_by_size(args.model_size)
+    if args.model_size:
+        print(f"Using {args.model_size.upper()} model preset configuration\n")
+        config = get_config_by_size(args.model_size)
+    else:
+        print("Using config defaults from configs/training_config.py\n")
+        config = Config()
 
     # Create timestamped run directory
     from datetime import datetime
@@ -521,7 +538,8 @@ def main():
     )
 
     # Create reference model for KTO (frozen copy of base model, no LoRA)
-    # For 7B+ models with limited VRAM, we can let TRL handle reference model internally
+    # For 7B+ models with limited VRAM, we let TRL handle reference model internally
+    # This saves ~8GB VRAM by sharing weights between policy and reference model
     ref_model = None
 
     # Only create explicit reference model if requested via env var
@@ -538,7 +556,8 @@ def main():
         )
     else:
         print("\n✓ Using implicit reference model (TRL manages internally)")
-        print("  To use explicit ref model: USE_EXPLICIT_REF_MODEL=true ./train.sh ...")
+        print("  Saves ~8GB VRAM by sharing weights with policy model")
+        print("  To use explicit ref model: USE_EXPLICIT_REF_MODEL=true")
 
     # Apply LoRA adapters to policy model only (not reference)
     model = apply_lora_adapters(
@@ -631,6 +650,17 @@ def main():
         print("✓ Dry run completed. Exiting without training.")
         return
 
+    # Setup debug logger if requested
+    debugger = None
+    if args.debug:
+        print("\n" + "=" * 60)
+        print("DEBUG MODE ENABLED")
+        print("=" * 60)
+        print(f"Debug log will be saved to: {logs_dir}/training_debug.log")
+        print("This will show exactly where training freezes if issues occur")
+        print("=" * 60 + "\n")
+        debugger = TrainingDebugger(log_file=str(logs_dir / "training_debug.log"))
+
     # Extract previous log entries if resuming from checkpoint
     previous_log_entries = None
     if args.resume_from_checkpoint:
@@ -699,7 +729,14 @@ def main():
     print("=" * 60 + "\n")
 
     try:
+        if debugger:
+            debugger.log_step_start(0)
+            print("Debug: Training about to start...")
+
         trainer_output = trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+
+        if debugger:
+            debugger.log_step_end(trainer.state.global_step)
 
         print("\n" + "=" * 60)
         print("✓ TRAINING COMPLETED SUCCESSFULLY!")
@@ -710,18 +747,37 @@ def main():
         print()
         check_gpu_memory()
 
+    except KeyboardInterrupt:
+        print("\n" + "=" * 60)
+        print("⚠ TRAINING INTERRUPTED BY USER")
+        print("=" * 60)
+        if debugger:
+            debugger.log_exception(trainer.state.global_step if hasattr(trainer, 'state') else -1,
+                                  KeyboardInterrupt("User interrupted"))
+            debugger.close()
+        raise
     except Exception as e:
         print("\n" + "=" * 60)
         print("✗ TRAINING FAILED")
         print("=" * 60)
         print(f"Error type: {type(e).__name__}")
         print(f"Error message: {e}")
+
+        if debugger:
+            step = trainer.state.global_step if hasattr(trainer, 'state') else -1
+            debugger.log_exception(step, e)
+            debugger.close()
+            print(f"\nDebug log saved to: {logs_dir}/training_debug.log")
+            print("Check this file to see exactly where it failed")
+
         print("\nTroubleshooting:")
         print("  1. Check dataset has mixed True/False labels")
         print("  2. Reduce batch_size if OOM error")
         print("  3. Reduce max_length if OOM error")
         print("  4. Check GPU has sufficient memory")
         print("  5. Review logs above for specific error")
+        if debugger:
+            print(f"  6. Check debug log: {logs_dir}/training_debug.log")
         raise
 
     # Save final model
@@ -736,6 +792,10 @@ def main():
     print(f"✓ Model saved to: {output_path}")
     print("\nTo upload to HuggingFace:")
     print(f"  model.push_to_hub_merged('username/model-name', tokenizer, save_method='merged_16bit')")
+    if debugger:
+        debugger.close()
+        print(f"\nDebug log saved to: {logs_dir}/training_debug.log")
+
     print("\n" + "=" * 60)
     print("✓ ALL DONE!")
     print("=" * 60)

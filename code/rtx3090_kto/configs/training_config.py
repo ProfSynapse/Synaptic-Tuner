@@ -58,8 +58,8 @@ class KTOTrainingConfig:
     # Output directory
     output_dir: str = "./kto_output_rtx3090"
 
-    per_device_train_batch_size: int = 8  # Reduced from 8 for safer memory usage
-    gradient_accumulation_steps: int = 4  # Increased to maintain effective batch size of 32  
+    per_device_train_batch_size: int = 6  
+    gradient_accumulation_steps: int = 4  
 
     # KTO-specific parameters
     beta: float = 0.15  # Compromise between 0.10 and 0.20
@@ -67,10 +67,10 @@ class KTOTrainingConfig:
     undesirable_weight: float = 1.0
 
     # Learning rate - BACK TO RUN 5's CONFIG
-    learning_rate: float = 5e-7  # Run 5's proven LR (was 2.5e-7)
+    learning_rate: float = 1e-7  # Run 5's proven LR (was 2.5e-7)
     max_grad_norm: float = 0.5  # Moderate gradient clipping
     lr_scheduler_type: str = "cosine"
-    adam_epsilon: float = 1e-6  # Adam optimizer epsilon for numerical stability
+    # adam_epsilon: float = 1e-6  # Adam optimizer epsilon for numerical stability
 
     # ============================================================================
     # RUN 8: TWO-STAGE LEARNING RATE SCHEDULE
@@ -132,9 +132,9 @@ class KTOTrainingConfig:
     save_total_limit: int = 3  # Keep last 3 checkpoints
 
     # Performance
-    dataloader_num_workers: int = 4  # 2-4 workers (set to 0 on Windows)
+    dataloader_num_workers: int = 0  # MUST be 0 on WSL2 (multiprocessing hangs)
     dataloader_pin_memory: bool = True
-    group_by_length: bool = False
+    group_by_length: bool = False  # Can cause hangs with multiprocessing
 
     # Evaluation (optional)
     eval_strategy: str = "no"  # "steps" or "no"
