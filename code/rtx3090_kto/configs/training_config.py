@@ -25,7 +25,7 @@ class ModelConfig:
     # model_name: str = "unsloth/llama-2-13b-bnb-4bit"
 
     # Model parameters
-    max_seq_length: int = 4096  # Increased from 2048 for better context
+    max_seq_length: int = 2048  # Optimized based on dataset analysis (99th percentile: 1506 tokens)
     dtype: Optional[str] = None  # Auto-detection
     load_in_4bit: bool = True  # Essential for memory efficiency
 
@@ -58,8 +58,8 @@ class KTOTrainingConfig:
     # Output directory
     output_dir: str = "./kto_output_rtx3090"
 
-    per_device_train_batch_size: int = 6  
-    gradient_accumulation_steps: int = 4  
+    per_device_train_batch_size: int = 6
+    gradient_accumulation_steps: int = 6  # Increased from 4 (effective batch: 36)  
 
     # KTO-specific parameters
     beta: float = 0.15  # Compromise between 0.10 and 0.20
@@ -113,8 +113,8 @@ class KTOTrainingConfig:
     # ============================================================================
 
     # Sequence lengths
-    max_length: int = 4096  # Must match ModelConfig.max_seq_length
-    max_prompt_length: int = 2048  # Should be ≤ max_length / 2
+    max_length: int = 2048  # Must match ModelConfig.max_seq_length
+    max_prompt_length: int = 1024  # Should be ≤ max_length / 2
 
     # Memory optimizations
     gradient_checkpointing: bool = False  # Not needed with 24GB for 7B

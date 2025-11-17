@@ -39,6 +39,7 @@ class MetricsTableCallback(TrainerCallback):
         self.latest_log = self.logs_dir / "training_latest.jsonl"
 
         self.start_time = None
+        self.last_log_time = None
         self.step_times = []
         self.header_printed = False
 
@@ -49,6 +50,7 @@ class MetricsTableCallback(TrainerCallback):
     def on_train_begin(self, args, state, control, **kwargs):
         """Called at the beginning of training."""
         self.start_time = datetime.now()
+        self.last_log_time = datetime.now()
         self.header_printed = False
 
         # Create symlink to latest log for easy access
@@ -74,8 +76,13 @@ class MetricsTableCallback(TrainerCallback):
         if logs is None:
             return
 
-        # Save full metrics to file (every step)
-        self._save_metrics_to_file(logs, state.global_step)
+        # Calculate time since last log
+        current_time = datetime.now()
+        interval_time = (current_time - self.last_log_time).total_seconds() if self.last_log_time else 0
+        self.last_log_time = current_time
+
+        # Save full metrics to file (every step) with interval time
+        self._save_metrics_to_file(logs, state.global_step, interval_time)
 
         # Check training health and warn if needed
         self._check_training_health(logs, state.global_step, args.max_grad_norm)
@@ -90,7 +97,8 @@ class MetricsTableCallback(TrainerCallback):
             self.header_printed = True
 
         # Calculate metrics
-        elapsed = (datetime.now() - self.start_time).total_seconds()
+        current_time = datetime.now()
+        elapsed = (current_time - self.start_time).total_seconds()
         steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0
         samples_per_sec = (state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps) / elapsed if elapsed > 0 else 0
 
@@ -120,13 +128,14 @@ class MetricsTableCallback(TrainerCallback):
         # Print table row
         print(f" {progress:>12} | {loss:>8.4f} | {learning_rate:>9.2e} | "
               f"{kto_chosen:>6.3f} | {kto_rejected:>6.3f} | {kto_margin:>6.3f} | "
-              f"{gpu_mem:>8} | {samples_per_sec:>8.1f} | {eta:>9} ")
+              f"{gpu_mem:>8} | {interval_time:>7.1f}s | {samples_per_sec:>8.1f} | {eta:>9} ")
 
-    def _save_metrics_to_file(self, logs: Dict[str, Any], step: int):
+    def _save_metrics_to_file(self, logs: Dict[str, Any], step: int, interval_time: float):
         """Save detailed metrics to JSONL file."""
         log_entry = {
             "step": step,
             "timestamp": datetime.now().isoformat(),
+            "interval_time": interval_time,
             **logs
         }
 
@@ -208,11 +217,11 @@ class MetricsTableCallback(TrainerCallback):
 
     def _print_header(self):
         """Print the table header."""
-        print("\n" + "=" * 100)
-        print(" " * 42 + "TRAINING METRICS")
-        print("=" * 100)
-        print("   Step      |   Loss   |    LR     | Chosen | Reject | Margin | GPU Mem  | Samp/sec |    ETA    ")
-        print("-" * 100)
+        print("\n" + "=" * 110)
+        print(" " * 47 + "TRAINING METRICS")
+        print("=" * 110)
+        print("   Step      |   Loss   |    LR     | Chosen | Reject | Margin | GPU Mem  | Time/5s | Samp/sec |    ETA    ")
+        print("-" * 110)
 
     def _format_time(self, seconds: float) -> str:
         """Format seconds into human-readable time."""

@@ -26,7 +26,6 @@ sys.path.insert(0, str(Path(__file__).parent / "code" / "rtx3090_kto"))
 from configs.training_config import Config
 from src.data_loader import load_and_prepare_dataset, validate_kto_dataset
 from src.model_loader import load_model_and_tokenizer, apply_lora_adapters, check_gpu_memory
-from src.adaptive_memory import AdaptiveMemoryManager
 from src.training_callbacks import MetricsTableCallback
 from trl import KTOConfig, KTOTrainer
 from unsloth import is_bfloat16_supported
@@ -103,36 +102,6 @@ def main():
     )
 
     check_gpu_memory()
-
-    # Adaptive memory management (CRITICAL for preventing OOM)
-    print("\n" + "=" * 60)
-    print("ADAPTIVE MEMORY OPTIMIZATION")
-    print("=" * 60)
-
-    memory_manager = AdaptiveMemoryManager(target_utilization=0.80)
-    mem_info = memory_manager.get_gpu_memory_info()
-
-    print(f"GPU Memory Status:")
-    print(f"  Total: {mem_info['total']:.1f} GB")
-    print(f"  Reserved: {mem_info['reserved']:.1f} GB")
-    print(f"  Free: {mem_info['free']:.1f} GB")
-
-    # Calculate optimal batch size for 7B model
-    optimal_batch, optimal_grad_accum = memory_manager.calculate_optimal_batch_size(
-        base_batch_size=training_config.per_device_train_batch_size,
-        model_size="7b"
-    )
-
-    print(f"\nMemory-Optimized Settings:")
-    print(f"  Original batch size: {training_config.per_device_train_batch_size}")
-    print(f"  Optimal batch size: {optimal_batch}")
-    print(f"  Gradient accumulation: {optimal_grad_accum}")
-
-    # Override with optimal settings
-    training_config.per_device_train_batch_size = optimal_batch
-    training_config.gradient_accumulation_steps = optimal_grad_accum
-
-    print("=" * 60)
 
     # Load dataset using existing data_loader
     train_dataset, eval_dataset = load_and_prepare_dataset(
