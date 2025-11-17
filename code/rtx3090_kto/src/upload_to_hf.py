@@ -3,8 +3,40 @@ Upload trained model to HuggingFace Hub.
 Supports both standard and GGUF formats.
 """
 
-import argparse
+# IMPORTANT: Apply Windows patches BEFORE importing unsloth
+import sys
 import os
+
+# Apply Windows compatibility patches if needed
+if sys.platform == 'win32':
+    print("Applying Windows compatibility patches...")
+    # Add patches inline to avoid import issues
+    from dataclasses import dataclass, fields
+    import dataclasses
+
+    # Patch 1: Wrap fields() for non-dataclasses
+    original_fields = fields
+    def patched_fields(class_or_instance):
+        try:
+            return original_fields(class_or_instance)
+        except TypeError:
+            return ()
+    dataclasses.fields = patched_fields
+
+    # Patch 2: Disable torch.compile
+    os.environ['PYTORCH_JIT'] = '0'
+    os.environ['TORCH_COMPILE_DISABLE'] = '1'
+
+    # Patch 3: Pre-patch torch._inductor
+    try:
+        import torch._inductor.runtime.hints
+        if not hasattr(torch._inductor.runtime.hints, 'attr_desc_fields'):
+            torch._inductor.runtime.hints.attr_desc_fields = set()
+    except: pass
+
+    print("✓ Windows patches applied")
+
+import argparse
 import subprocess
 from pathlib import Path
 from typing import List
