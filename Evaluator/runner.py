@@ -60,6 +60,22 @@ def evaluate_cases(
             continue
 
         validator_result = validate_assistant_response(response.message)
+
+        # Check if expected tools were actually called
+        if case.expected_tools:
+            called_tool_names = {tc.name for tc in validator_result.tool_calls}
+            missing_tools = set(case.expected_tools) - called_tool_names
+
+            if missing_tools:
+                from .schema_validator import ValidatorIssue
+                validator_result.passed = False
+                validator_result.issues.append(
+                    ValidatorIssue(
+                        level="error",
+                        message=f"Expected tools not called: {', '.join(sorted(missing_tools))}"
+                    )
+                )
+
         records.append(
             EvaluationRecord(
                 case=case,
