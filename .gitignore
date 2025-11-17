@@ -64,3 +64,19 @@ test_dataset.jsonl
 unsloth_compiled_cache/
 
 .history/
+
+# Claude export data (large files)
+data-*/
+*.json
+!tool_schemas.json
+!package.json
+
+# Generated analysis files
+conversation_analysis_*.json
+conversation_analysis_*.txt
+*_analysis_*.json
+*_analysis_*.txt
+
+# Converted datasets (keep originals tracked)
+claude_conversations_chatml.jsonl
+personal conversations/
