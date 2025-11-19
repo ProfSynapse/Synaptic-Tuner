@@ -12,7 +12,7 @@ model:
   model_name: "unsloth/mistral-7b-v0.3-bnb-4bit"
 
   # Model parameters
-  max_seq_length: 2048  # Dataset 99th percentile: 1506 tokens
+  max_seq_length: 2048 
   dtype: null  # Auto-detection
   load_in_4bit: true  # Essential for memory efficiency
 
