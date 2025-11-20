@@ -60,7 +60,21 @@ def evaluate_cases(
             )
             continue
 
-        validator_result = validate_assistant_response(response.message)
+        try:
+            validator_result = validate_assistant_response(response.message)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Validation failed - record the error but continue evaluation
+            records.append(
+                EvaluationRecord(
+                    case=case,
+                    response_text=response.message,
+                    validator=None,
+                    latency_s=response.latency_s,
+                    raw_response=response.raw,
+                    error=f"Validation error: {exc}",
+                )
+            )
+            continue
 
         # Check if expected tools were actually called
         if case.expected_tools:

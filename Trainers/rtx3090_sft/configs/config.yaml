@@ -18,8 +18,8 @@ model:
 
 # LoRA Adapter Configuration
 lora:
-  r: 32
-  lora_alpha: 64
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0.05
   bias: "none"
   target_modules:
