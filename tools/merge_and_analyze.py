@@ -12,19 +12,23 @@ def load_scored_batches():
     review_dir = Path(__file__).parent.parent / "Datasets" / "quality_review"
     examples = []
 
-    for i in range(1, 16):  # Updated to load batches 1-15
+    for i in range(1, 31):  # Updated to load batches 1-30 (all 4 rounds)
         batch_file = review_dir / f"scored_batch_{i}.jsonl"
         if not batch_file.exists():
             print(f"Warning: {batch_file.name} not found")
             continue
 
         with open(batch_file, 'r', encoding='utf-8') as f:
-            for line in f:
+            for line_num, line in enumerate(f, start=1):
                 line = line.strip()
                 if not line:
                     continue
-                example = json.loads(line)
-                examples.append(example)
+                try:
+                    example = json.loads(line)
+                    examples.append(example)
+                except json.JSONDecodeError as e:
+                    print(f"Warning: JSON error in {batch_file.name} line {line_num}: {e}")
+                    continue
 
     return examples
 
