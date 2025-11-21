@@ -88,3 +88,10 @@ manual_score_batch*.py
 Datasets/quality_review/batch_*_summary.txt
 Datasets/quality_review/batch_*_summary.md
 Datasets/quality_review/score_batch*.py
+
+# Temporary improvement batch artifacts (created by parallel agents)
+improve_batch*.py
+Datasets/quality_review/improvement_batches/
+Datasets/quality_review/improved_batches/
+Datasets/quality_review/improved_examples_all.jsonl
+Datasets/quality_review/improved_examples_only.jsonl

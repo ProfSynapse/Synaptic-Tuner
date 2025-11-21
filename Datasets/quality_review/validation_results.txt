@@ -1,0 +1,3657 @@
+Example line 129:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+
+Example line 141:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 143:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 145:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 225:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'limit' not in schema
+
+Example line 263:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'filePath' not in schema
+
+Example line 313:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 317:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 319:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 323:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 487:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 491:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 495:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 499:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 501:
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'filters' not in schema
+
+Example line 503:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'reason' not in schema
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'graceful' not in schema
+
+Example line 505:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+
+Example line 737:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 739:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 741:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 743:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 745:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 747:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 749:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 751:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 753:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 755:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 757:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 759:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 761:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 763:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 765:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 767:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 769:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 771:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 773:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 775:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 777:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 781:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 783:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 785:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 787:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 789:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 791:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 793:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 795:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 797:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 799:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 803:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 805:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 809:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 811:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 813:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 817:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 819:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 821:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 823:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 825:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 827:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 829:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 831:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 833:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 835:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 839:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 841:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 843:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 845:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 847:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 849:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 851:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 853:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 855:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 857:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 859:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 861:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 863:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 865:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 867:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 869:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 871:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 873:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 875:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 877:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 879:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 881:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 883:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 885:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 887:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 889:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 891:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 893:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 895:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 897:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 899:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 901:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 903:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 905:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 907:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 909:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 911:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 913:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 915:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 917:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 919:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 921:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 923:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 925:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 927:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 929:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 931:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 933:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'sortBy' not in schema
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'sortOrder' not in schema
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'includeSubfolders' not in schema
+
+Example line 935:
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'workspaceId' not in schema
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'sortBy' not in schema
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'sortOrder' not in schema
+
+Example line 937:
+  [WARN] Tool call #1 (vaultLibrarian_searchFiles): No schema found for this tool
+
+Example line 939:
+  [WARN] Tool call #1 (memoryManager_listWorkspaces): Unexpected parameter 'sortOrder' not in schema
+
+Example line 941:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 943:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'sortBy' not in schema
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'sortOrder' not in schema
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'includeSubfolders' not in schema
+
+Example line 945:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 947:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 951:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 953:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 955:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'memoryUpdate' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 957:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 959:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 961:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 963:
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'workspaceId' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 965:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 967:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 969:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 971:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 973:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 975:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 977:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 979:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 981:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 983:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 985:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 987:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 989:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 991:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 993:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 995:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 997:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 999:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1001:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1003:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1005:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1007:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1009:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1011:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1013:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1015:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1017:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1019:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1021:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1023:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1025:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1027:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1029:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1031:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1033:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1035:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1037:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1039:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1041:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1043:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1045:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1047:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1049:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1051:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1053:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1055:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1057:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1059:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1061:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1063:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1065:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1067:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1069:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1071:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1073:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1075:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1077:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1079:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1081:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1083:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1085:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1087:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1089:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1091:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1093:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1095:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1097:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1099:
+  [ERROR] Assistant content has 'tool_call:' marker but no valid tool calls found
+
+Example line 1841:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1843:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1845:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1847:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1849:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1851:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1853:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1855:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1857:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1859:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1861:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1863:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1865:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1867:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1869:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1871:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1873:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1875:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1877:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1879:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1881:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1883:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1885:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1887:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1889:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1891:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1893:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1895:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1897:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1899:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1901:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1903:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1905:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1907:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1909:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1911:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1913:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1915:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1917:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1919:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1921:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1923:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1925:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1927:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1929:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1931:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1933:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1935:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1937:
+  [WARN] Tool call #1 (memoryManager_createState): Unexpected parameter 'data' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1939:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1941:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1943:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1945:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1947:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1949:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1951:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1953:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1955:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1957:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1959:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'updates' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1961:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1963:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1965:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1967:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1969:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1971:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1973:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1975:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'updates' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1977:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1979:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1981:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1983:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1985:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1987:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1989:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1991:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1993:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1995:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1997:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 1999:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2001:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2003:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2005:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2007:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2009:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2011:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2013:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2015:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2017:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2019:
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'filters' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2021:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2023:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2025:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2027:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2029:
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'filters' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2031:
+  [WARN] Tool call #1 (memoryManager_listWorkspaces): Unexpected parameter 'filters' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2033:
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'filters' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2035:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2037:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2039:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'reason' not in schema
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'graceful' not in schema
+
+Example line 2041:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 2045:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2047:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2049:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2051:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2053:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'memoryUpdate' not in schema
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2055:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2057:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2059:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2061:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2063:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2065:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2067:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2069:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2071:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2073:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2075:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2077:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2079:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2081:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2083:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2085:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2087:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2089:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2091:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2093:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2095:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2097:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2099:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2101:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2103:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2105:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2107:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2109:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2111:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2113:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2115:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2117:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2119:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2121:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2123:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2125:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2127:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2129:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2131:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2133:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2135:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2137:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2139:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2141:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2143:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2145:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2147:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2149:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2151:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2153:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2155:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2157:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2159:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2161:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2163:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2165:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2167:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2169:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2171:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2173:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2175:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2177:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2179:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2181:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2183:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2185:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2187:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2189:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2191:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2193:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2195:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2197:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2199:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2201:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2203:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2205:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2207:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2245:
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'id' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'name' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'description' not in schema
+
+Example line 2299:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2327:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2349:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 2589:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'id' not in schema
+
+Example line 2683:
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'query' not in schema
+  [WARN] Tool call #1 (memoryManager_listSessions): Unexpected parameter 'includeContent' not in schema
+
+Example line 2913:
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'query' not in schema
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'includeContent' not in schema
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'snippetLength' not in schema
+
+Example line 2981:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3053:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3071:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'id' not in schema
+
+Example line 3075:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3091:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3139:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3173:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3241:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3261:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3293:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3295:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3477:
+  [ERROR] context missing field 'sessionId'
+  [ERROR] context missing field 'workspaceId'
+  [ERROR] context missing field 'sessionDescription'
+  [ERROR] Tool call #1 (contentManager_deleteContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_deleteContent): Missing required parameter 'content'
+
+Example line 3553:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'id' not in schema
+
+Example line 3611:
+  [WARN] Tool call #1 (vaultLibrarian_searchDirectory): Unexpected parameter 'path' not in schema
+
+Example line 3617:
+  [ERROR] Tool call #1 (memoryManager_updateWorkspace): Missing required parameter 'fieldPath'
+  [ERROR] Tool call #1 (memoryManager_updateWorkspace): Missing required parameter 'newValue'
+  [WARN] Tool call #1 (memoryManager_updateWorkspace): Unexpected parameter 'searchMethod' not in schema
+  [WARN] Tool call #1 (memoryManager_updateWorkspace): Unexpected parameter 'limit' not in schema
+  [WARN] Tool call #1 (memoryManager_updateWorkspace): Unexpected parameter 'includeMetadata' not in schema
+  [WARN] Tool call #1 (memoryManager_updateWorkspace): Unexpected parameter 'includeContent' not in schema
+  [WARN] Tool call #1 (memoryManager_updateWorkspace): Unexpected parameter 'temporalFiltering' not in schema
+
+Example line 3699:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3703:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3715:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3737:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3741:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3759:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3761:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3763:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3765:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3767:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3769:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3771:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3773:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3775:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3777:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3779:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3781:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3783:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3785:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3787:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3789:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3793:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3795:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3797:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3799:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3801:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3803:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3805:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3807:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3809:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3811:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3813:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3815:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3817:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3819:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3821:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3823:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3825:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3827:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3829:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3831:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3833:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3835:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3837:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3839:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3841:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3843:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3845:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3847:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3849:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3851:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3855:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3857:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3859:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3861:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3863:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3865:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3867:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3869:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3871:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3873:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3875:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 3915:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 3919:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 3921:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'updates' not in schema
+
+Example line 3923:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 3927:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 3931:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 3933:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 3939:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 3943:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 3945:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 3947:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 3951:
+  [WARN] Tool call #1 (memoryManager_createState): Unexpected parameter 'data' not in schema
+
+Example line 3953:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 3961:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 3967:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 3971:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 3981:
+  [WARN] Tool call #1 (memoryManager_createState): Unexpected parameter 'data' not in schema
+
+Example line 3983:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 3985:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'initialData' not in schema
+
+Example line 3993:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 3995:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 3999:
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'id' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'enabled' not in schema
+
+Example line 4005:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4007:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4011:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 4017:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 4019:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 4021:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4029:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4031:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4039:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4041:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4043:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 4049:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4051:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4053:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4055:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4057:
+  [ERROR] Tool call #1 (vaultManager_deleteFolder): Missing required parameter 'path'
+
+Example line 4061:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4063:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4065:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4067:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4069:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4071:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4073:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4077:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4079:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4081:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4083:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4085:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4089:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4091:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4093:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4095:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4097:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4099:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4101:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4103:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4105:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4107:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4109:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4111:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4113:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4117:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4121:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4123:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4125:
+  [WARN] Tool call #1 (vaultManager_renameFolder): No schema found for this tool
+
+Example line 4127:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4131:
+  [ERROR] Tool call #1 (agentManager_deleteAgent): Missing required parameter 'id'
+
+Example line 4137:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4139:
+  [ERROR] Tool call #1 (agentManager_executePrompt): Missing required parameter 'prompt'
+
+Example line 4141:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4145:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4147:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4149:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4151:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4153:
+  [ERROR] Tool call #1 (vaultManager_deleteFolder): Missing required parameter 'path'
+
+Example line 4155:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4157:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4161:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4163:
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'content'
+
+Example line 4165:
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'content'
+
+Example line 4167:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4169:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4171:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4173:
+  [ERROR] Tool call #1 (agentManager_deleteAgent): Missing required parameter 'id'
+
+Example line 4175:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4177:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4179:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4181:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4183:
+  [ERROR] Tool call #1 (vaultManager_deleteFolder): Missing required parameter 'path'
+
+Example line 4185:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4187:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4189:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 4191:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4195:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4199:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4201:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4203:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4205:
+  [ERROR] Tool call #1 (agentManager_executePrompt): Missing required parameter 'prompt'
+
+Example line 4207:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4209:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4211:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4215:
+  [ERROR] Tool call #1 (agentManager_executePrompt): Missing required parameter 'prompt'
+
+Example line 4217:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4219:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4221:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4223:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4225:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'name'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'rootFolder'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'purpose'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'workflows'
+
+Example line 4227:
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'content'
+
+Example line 4229:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4233:
+  [ERROR] Tool call #1 (memoryManager_updateState): Missing required parameter 'stateId'
+
+Example line 4235:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4237:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4239:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4241:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4243:
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'content'
+
+Example line 4245:
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'content'
+
+Example line 4247:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4249:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4251:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4253:
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'content'
+
+Example line 4255:
+  [ERROR] Tool call #1 (memoryManager_updateState): Missing required parameter 'stateId'
+
+Example line 4257:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4259:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'name'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'rootFolder'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'purpose'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'workflows'
+
+Example line 4261:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4263:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4265:
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_createContent): Missing required parameter 'content'
+
+Example line 4267:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4269:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 4271:
+  [ERROR] Tool call #1 (memoryManager_updateState): Missing required parameter 'stateId'
+
+Example line 4275:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4277:
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'content'
+
+Example line 4279:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4283:
+  [ERROR] Tool call #1 (vaultManager_deleteFolder): Missing required parameter 'path'
+
+Example line 4285:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4287:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4289:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4291:
+  [ERROR] Tool call #1 (agentManager_updateAgent): Missing required parameter 'id'
+
+Example line 4293:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4295:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'name'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'rootFolder'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'purpose'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'workflows'
+
+Example line 4297:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 4299:
+  [ERROR] Tool call #1 (vaultManager_createFolder): Missing required parameter 'path'
+
+Example line 4301:
+  [ERROR] Tool call #1 (agentManager_updateAgent): Missing required parameter 'id'
+
+Example line 4303:
+  [ERROR] Tool call #1 (vaultManager_deleteFolder): Missing required parameter 'path'
+
+Example line 4305:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4307:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4309:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4317:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4319:
+  [ERROR] Tool call #1 (memoryManager_updateState): Missing required parameter 'stateId'
+
+Example line 4325:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4327:
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'name'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'description'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'prompt'
+
+Example line 4329:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4331:
+  [ERROR] Tool call #1 (memoryManager_loadSession): Missing required parameter 'sessionId'
+
+Example line 4333:
+  [ERROR] Tool call #1 (memoryManager_loadWorkspace): Missing required parameter 'id'
+
+Example line 4335:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4337:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4339:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4341:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4343:
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'name'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'description'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'prompt'
+
+Example line 4345:
+  [ERROR] Tool call #1 (agentManager_toggleAgent): Missing required parameter 'id'
+
+Example line 4347:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 4349:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'name'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'rootFolder'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'purpose'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'workflows'
+
+Example line 4351:
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'content'
+
+Example line 4353:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4355:
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'name'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'description'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'prompt'
+
+Example line 4359:
+  [ERROR] Tool call #1 (memoryManager_loadSession): Missing required parameter 'sessionId'
+
+Example line 4361:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'name'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'rootFolder'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'purpose'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'workflows'
+
+Example line 4363:
+  [ERROR] Tool call #1 (contentManager_readContent): Missing required parameter 'filePath'
+
+Example line 4365:
+  [ERROR] Tool call #1 (vaultManager_listDirectory): Missing required parameter 'path'
+
+Example line 4367:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4369:
+  [ERROR] Tool call #1 (agentManager_updateAgent): Missing required parameter 'id'
+
+Example line 4375:
+  [ERROR] Tool call #1 (memoryManager_updateState): Missing required parameter 'stateId'
+
+Example line 4377:
+  [ERROR] Tool call #1 (memoryManager_loadWorkspace): Missing required parameter 'id'
+
+Example line 4379:
+  [ERROR] Tool call #1 (contentManager_replaceContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_replaceContent): Missing required parameter 'oldContent'
+  [ERROR] Tool call #1 (contentManager_replaceContent): Missing required parameter 'newContent'
+
+Example line 4381:
+  [ERROR] Tool call #1 (vaultLibrarian_searchContent): Missing required parameter 'query'
+
+Example line 4383:
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveNote): Missing required parameter 'newPath'
+
+Example line 4385:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4387:
+  [ERROR] Tool call #1 (agentManager_updateAgent): Missing required parameter 'id'
+
+Example line 4389:
+  [ERROR] Tool call #1 (agentManager_executePrompt): Missing required parameter 'prompt'
+
+Example line 4393:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 4395:
+  [ERROR] Tool call #1 (memoryManager_loadWorkspace): Missing required parameter 'id'
+
+Example line 4397:
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'filePath'
+  [ERROR] Tool call #1 (contentManager_appendContent): Missing required parameter 'content'
+
+Example line 4399:
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'query'
+  [ERROR] Tool call #1 (vaultLibrarian_searchDirectory): Missing required parameter 'paths'
+
+Example line 4401:
+  [ERROR] Tool call #1 (vaultManager_deleteNote): Missing required parameter 'path'
+
+Example line 4403:
+  [ERROR] Tool call #1 (vaultManager_openNote): Missing required parameter 'path'
+
+Example line 4405:
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_editFolder): Missing required parameter 'newPath'
+
+Example line 4407:
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'name'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'description'
+  [ERROR] Tool call #1 (agentManager_createAgent): Missing required parameter 'prompt'
+
+Example line 4415:
+  [ERROR] Tool call #1 (memoryManager_createState): Missing required parameter 'name'
+
+Example line 5141:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5153:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5155:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5157:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5159:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5161:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5163:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5165:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5167:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5169:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5171:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5173:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5175:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5177:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5179:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5181:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5183:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5185:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5187:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5189:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5191:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5193:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5195:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5197:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5199:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5201:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5203:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5205:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5207:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5209:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5211:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5213:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5215:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5217:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5219:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5221:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5223:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5225:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5227:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5229:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5231:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5233:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5235:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5237:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5239:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5241:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5243:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5245:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5247:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5249:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5251:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5253:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5255:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5257:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5259:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5261:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5263:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5265:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5267:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5269:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5271:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5273:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5275:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5277:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5279:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5281:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5283:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5285:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5287:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5289:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5291:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5293:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5295:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5297:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5299:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5301:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5303:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5305:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5307:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5309:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5311:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5313:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5315:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5317:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5319:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5321:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5323:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5325:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5327:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5329:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5331:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5333:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5335:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5337:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5339:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5341:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5343:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5345:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5347:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5349:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5351:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5353:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5355:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5357:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5359:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5361:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5363:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5365:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5367:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5369:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5371:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5373:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5375:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5377:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5379:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5381:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5383:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5385:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5387:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5389:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5391:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5393:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5395:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5397:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5399:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5401:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5403:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5405:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5407:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5409:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5411:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5413:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5415:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5417:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5419:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5421:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5423:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5425:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5427:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5429:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5431:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5433:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5435:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5437:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5439:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5441:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5443:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5445:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5447:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5449:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5451:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5453:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5455:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5457:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5459:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5461:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5463:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5465:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5467:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5469:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5471:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5473:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5475:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5477:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5479:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5481:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5483:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5485:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5487:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5489:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5491:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5493:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5495:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5497:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5499:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5501:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5503:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5505:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5507:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5509:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5511:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5513:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5515:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5517:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5519:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5585:
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'query' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'paths' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'searchType' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'includeContent' not in schema
+  [WARN] Tool call #1 (agentManager_listAgents): Unexpected parameter 'limit' not in schema
+
+Example line 5889:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5891:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5893:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5895:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5897:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5899:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5901:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5903:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5905:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5907:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5909:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5911:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5913:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5915:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5917:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5919:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5921:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5923:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5925:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5927:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5929:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5931:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5933:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5935:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5937:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5939:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5941:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5943:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5945:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5947:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5949:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5951:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5953:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5955:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5957:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5959:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5961:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5963:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5965:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5967:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5969:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5971:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5973:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5975:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5977:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5979:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5981:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5983:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5985:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5987:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5989:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5991:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5993:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5995:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5997:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 5999:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6001:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6003:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6005:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6007:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6009:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6011:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6013:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6015:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6017:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6019:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6021:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6023:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6025:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6027:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6029:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6031:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6033:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6035:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6037:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6039:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6041:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6043:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6045:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6047:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6049:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6051:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6053:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6055:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6057:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6059:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6061:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6063:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6065:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6067:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6069:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6071:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6073:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6075:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6077:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6079:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6081:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6083:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6085:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6087:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6089:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6091:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6093:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6095:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6097:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6099:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6101:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6103:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6105:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6107:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6109:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6111:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6113:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6115:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6117:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6119:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6121:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6123:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6125:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6127:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6129:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6131:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6133:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6135:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6137:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6139:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6141:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6143:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6145:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6147:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6149:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6151:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6153:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6155:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6157:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6159:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6161:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6163:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6165:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6167:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6169:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6171:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6173:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6175:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6177:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6179:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6181:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6183:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6185:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6187:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6189:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6191:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6193:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6195:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6197:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6199:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6201:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6203:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6205:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6207:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6209:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6211:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6213:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6215:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6217:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6219:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6221:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6223:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6225:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6227:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6229:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6231:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6233:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6235:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6237:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6239:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6241:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6243:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6245:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6247:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6249:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6251:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6253:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6255:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 6289:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6291:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 6295:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 6303:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'initialData' not in schema
+
+Example line 6309:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6311:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'initialData' not in schema
+
+Example line 6315:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6317:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'updates' not in schema
+
+Example line 6319:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6325:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+
+Example line 6329:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6331:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6339:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6343:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6345:
+  [WARN] Tool call #1 (memoryManager_createState): Unexpected parameter 'data' not in schema
+
+Example line 6349:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6351:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+
+Example line 6359:
+  [ERROR] Tool call #1 (agentManager_updateAgent): Missing required parameter 'id'
+
+Example line 6361:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'initialData' not in schema
+
+Example line 6367:
+  [ERROR] Tool call #1 (vaultManager_moveFolder): Missing required parameter 'path'
+  [ERROR] Tool call #1 (vaultManager_moveFolder): Missing required parameter 'newPath'
+
+Example line 6369:
+  [ERROR] Tool call #1 (agentManager_executePrompt): Missing required parameter 'prompt'
+
+Example line 6373:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 6379:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 6383:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+
+Example line 6387:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 6389:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 6393:
+  [WARN] Tool call #1 (memoryManager_updateState): Unexpected parameter 'updates' not in schema
+
+Example line 6395:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6399:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 6403:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 6405:
+  [WARN] Tool call #1 (vaultManager_listDirectory): Unexpected parameter 'recursive' not in schema
+
+Example line 6411:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6413:
+  [WARN] Tool call #1 (memoryManager_listWorkspaces): Unexpected parameter 'filters' not in schema
+
+Example line 6415:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6419:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6421:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6423:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6431:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6433:
+  [WARN] Tool call #1 (memoryManager_listWorkspaces): Unexpected parameter 'filters' not in schema
+
+Example line 6435:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6441:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6445:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6451:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6457:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6459:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6461:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6463:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6465:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6471:
+  [WARN] Tool call #1 (memoryManager_listStates): Unexpected parameter 'filters' not in schema
+
+Example line 6475:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6477:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6483:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6487:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6491:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6493:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6495:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6497:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6499:
+  [WARN] Tool call #1 (vaultManager_createFolder): Unexpected parameter 'createParents' not in schema
+
+Example line 6505:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6507:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'sessionName' not in schema
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'workspaceId' not in schema
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'metadata' not in schema
+
+Example line 6509:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6513:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6515:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'permanent' not in schema
+
+Example line 6517:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 6519:
+  [WARN] Tool call #1 (memoryManager_updateSession): Unexpected parameter 'updates' not in schema
+
+Example line 6521:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 6523:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6525:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'fileTypes' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'wholeWord' not in schema
+
+Example line 6527:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6529:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6533:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'updates' not in schema
+
+Example line 6535:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6537:
+  [WARN] Tool call #1 (vaultManager_deleteNote): Unexpected parameter 'permanent' not in schema
+
+Example line 6555:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+
+Example line 6559:
+  [WARN] Tool call #1 (memoryManager_loadSessionState): No schema found for this tool
+
+Example line 6563:
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'folder' not in schema
+  [WARN] Tool call #1 (vaultLibrarian_searchContent): Unexpected parameter 'caseSensitive' not in schema
+
+Example line 6573:
+  [WARN] Tool call #1 (memoryManager_createSession): Unexpected parameter 'workspaceId' not in schema
+
+Example line 6581:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 6583:
+  [WARN] Tool call #1 (agentManager_toggleAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 7061:
+  [ERROR] Tool call #1 (memoryManager_createWorkspace): Missing required parameter 'currentGoal'
+
+Example line 7077:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'id' not in schema
+
+Example line 7241:
+  [WARN] Tool call #1 (agentManager_createAgent): Unexpected parameter 'model' not in schema
+  [WARN] Tool call #1 (agentManager_createAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 7245:
+  [WARN] Tool call #1 (agentManager_updateAgent): Unexpected parameter 'systemPrompt' not in schema
+
+Example line 7257:
+  [WARN] Tool call #1 (agentManager_listModels): Unexpected parameter 'provider' not in schema
+
+Example line 7259:
+  [WARN] Tool call #1 (agentManager_createAgent): Unexpected parameter 'model' not in schema
+  [WARN] Tool call #1 (agentManager_createAgent): Unexpected parameter 'enabled' not in schema
+
+Example line 7313:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+Example line 7315:
+  [WARN] Tool calls present but no 'Result:' markers found
+
+✓ Schema validation enabled (47 tool schemas loaded)
+
+Validated 7361 example(s): 312 failed (ignoring 3681 label=false examples).
