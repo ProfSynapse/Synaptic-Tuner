@@ -12,7 +12,7 @@ def load_scored_batches():
     review_dir = Path(__file__).parent.parent / "Datasets" / "quality_review"
     examples = []
 
-    for i in range(1, 31):  # Updated to load batches 1-30 (all 4 rounds)
+    for i in range(1, 61):  # Updated to load batches 1-60 (all 5 rounds)
         batch_file = review_dir / f"scored_batch_{i}.jsonl"
         if not batch_file.exists():
             print(f"Warning: {batch_file.name} not found")
