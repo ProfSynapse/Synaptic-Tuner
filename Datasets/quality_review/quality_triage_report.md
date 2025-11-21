@@ -1,9 +1,9 @@
 # Interaction Quality Review Report
 
 **Date:** 2025-11-21
-**Total Examples Scored:** 300
+**Total Examples Scored:** 450
 **Dataset:** syngen_tools_sft_merged_complete_11.21.25.jsonl (5,505 total)
-**Sample Strategy:** Stratified systematic sampling across 2 rounds (300 examples, ~5.4% coverage)
+**Sample Strategy:** Stratified systematic sampling across 3 rounds (450 examples, ~8.2% coverage)
 
 ---
 
@@ -13,10 +13,10 @@
 
 | Metric | Score |
 |--------|-------|
-| **Mean** | **2.91** / 5.0 |
+| **Mean** | **2.92** / 5.0 |
 | **Median** | 2.8 / 5.0 |
 | **Range** | 1.6 - 4.8 |
-| **Std Dev** | 0.58 |
+| **Std Dev** | 0.57 |
 
 **Interpretation:** The dataset shows **fair to good quality** (2.88 avg) with significant room for improvement, especially in context fields and response structures.
 
@@ -24,12 +24,12 @@
 
 | Tier | Count | Percentage | Description |
 |------|-------|------------|-------------|
-| **Excellent** (4.0-5.0) | 20 | 6.7% | Best examples - use as templates |
-| **Good** (3.0-3.9) | 112 | 37.3% | Minor improvements needed |
-| **Fair** (2.0-2.9) | 160 | 53.3% | Needs enhancement |
-| **Poor** (1.0-1.9) | 8 | 2.7% | Major rework required |
+| **Excellent** (4.0-5.0) | 25 | 5.6% | Best examples - use as templates |
+| **Good** (3.0-3.9) | 177 | 39.3% | Minor improvements needed |
+| **Fair** (2.0-2.9) | 237 | 52.7% | Needs enhancement |
+| **Poor** (1.0-1.9) | 11 | 2.4% | Major rework required |
 
-**Key Finding:** 168 examples (56.0%) need improvement.
+**Key Finding:** 248 examples (55.1%) need improvement.
 
 ---
 
@@ -39,23 +39,23 @@
 
 | Dimension | Mean | Median | Range | Assessment |
 |-----------|------|--------|-------|------------|
-| **prompt_naturalness** | 3.89 | 4.0 | 1-5 | 🟡 Average |
-| **goal_coherence** | 3.51 | 4.0 | 1-5 | 🟡 Average |
-| **sessionMemory_quality** | 2.64 | 3.0 | 1-5 | 🟠 Weak |
-| **toolContext_quality** | 2.48 | 2.0 | 1-5 | 🟠 Weak |
-| **response_realism** | 2.05 | 2.0 | 1-5 | 🟠 Weak |
+| **prompt_naturalness** | 3.86 | 4.0 | 1-5 | 🟡 Average |
+| **goal_coherence** | 3.43 | 4.0 | 1-5 | 🟡 Average |
+| **sessionMemory_quality** | 2.62 | 3.0 | 1-5 | 🟠 Weak |
+| **toolContext_quality** | 2.53 | 2.0 | 1-5 | 🟠 Weak |
+| **response_realism** | 2.14 | 2.0 | 1-5 | 🟠 Weak |
 
 
 ### Key Insights
 
 **🟢 Strengths:**
-- **prompt_naturalness** (3.89): Users write natural, conversational requests
-- **goal_coherence** (3.51): Clear hierarchies between primaryGoal and subgoal
+- **prompt_naturalness** (3.86): Users write natural, conversational requests
+- **goal_coherence** (3.43): Clear hierarchies between primaryGoal and subgoal
 
 **🔴 Critical Weaknesses:**
-- **sessionMemory_quality** (2.64): Many empty or generic entries
-- **response_realism** (2.05): Missing Result objects and metadata
-- **toolContext_quality** (2.48): Generic descriptions lacking workflow reasoning
+- **sessionMemory_quality** (2.62): Many empty or generic entries
+- **response_realism** (2.14): Missing Result objects and metadata
+- **toolContext_quality** (2.53): Generic descriptions lacking workflow reasoning
 
 ---
 
@@ -63,18 +63,18 @@
 
 | Issue | Occurrences | % of Sample |
 |-------|-------------|-------------|
-| **Missing Results** | 205 | 68.3% |
-| **Empty sessionMemory** | 82 | 27.3% |
-| **Generic toolContext** | 1 | 0.3% |
-| **Minimal metadata** | 8 | 2.7% |
-| **Weak goal hierarchy** | 4 | 1.3% |
-| **Command-style prompts** | 22 | 7.3% |
+| **Missing Results** | 284 | 63.1% |
+| **Empty sessionMemory** | 116 | 25.8% |
+| **Generic toolContext** | 1 | 0.2% |
+| **Minimal metadata** | 8 | 1.8% |
+| **Weak goal hierarchy** | 10 | 2.2% |
+| **Command-style prompts** | 37 | 8.2% |
 
 ---
 
 ## Priority Triage
 
-### Bottom 20% - High Priority Fixes (60 examples)
+### Bottom 20% - High Priority Fixes (90 examples)
 
 Examples most in need of enhancement:
 
@@ -101,6 +101,15 @@ Examples most in need of enhancement:
 
 - **Score 1.8**: "Result: {"success": true, "state": "qa-ready"}..."
   - Issues: sessionMemory 'QA testing in progress' (23 chars) shows relevant context (score=3). toolContext 'Modifying state' is too generic (score=1). Goals 'QA ...
+
+- **Score 1.8**: "Result: {"success": true, "images": [{"path": "landing-page/hero-hands.png"}]}..."
+  - Issues: sessionMemory is empty - automatic score of 1. toolContext 'User needs AI-generated image' is generic and doesn't explain why or provide workflow reas...
+
+- **Score 1.8**: "Result: {"sessions": [{"sessionId": "session_1731384000000_k1l2m3n4o", "descript..."
+  - Issues: sessionMemory is an empty array [] instead of string - wrong data type, this violates schema and is a critical error (score=1). toolContext is an obje...
+
+- **Score 1.8**: "Create a new agent called 'Code Reviewer' with description 'Reviews code for bug..."
+  - Issues: sessionMemory is empty string (score=1). toolContext 'User wants to create new agent' is extremely generic, just restates the obvious action (score=2)...
 
 - **Score 2.0**: "Move Studios/Boards/LightRay into Studios/Archive/LightRay and open Hero.md from..."
   - Issues: sessionMemory is empty string earning automatic score=1. toolContext 'Move board folder' is generic, doesn't explain the archival workflow or why movi...
@@ -146,6 +155,21 @@ Examples most in need of enhancement:
 
 - **Score 2.0**: "Find all folders that have 'archive' in their name...."
   - Issues: sessionMemory is empty string (score=1). toolContext 'User locating archives' is generic without workflow reasoning (score=2). primaryGoal 'Search for...
+
+- **Score 2.0**: "List the two newest design snapshot states and log them in Design/Snapshots/Stat..."
+  - Issues: sessionMemory is empty string = automatic 1. toolContext 'List novel states' is terse and describes WHAT not WHY (score=2). Goals: 'Fetch latest check...
+
+- **Score 2.0**: "Find files matching a specific pattern in my notes folder...."
+  - Issues: sessionMemory is empty string = automatic 1. toolContext 'User needs specific file pattern' states need but doesn't explain why or workflow reasoning ...
+
+- **Score 2.0**: "Open the project plan document...."
+  - Issues: sessionMemory empty = 1. toolContext 'User wants to open project plan document' just restates the prompt without explaining workflow (score=2). Goals ...
+
+- **Score 2.0**: "Generate icon designs for app...."
+  - Issues: sessionMemory 'User designing app icons' is very brief and generic (score=2). toolContext 'Icon design' is just two words with no workflow explanation...
+
+- **Score 2.0**: "Rename Photos/2025/Autumn Dump to Photos/2025/Autumn-Moods...."
+  - Issues: sessionMemory is empty string (score=1). toolContext 'Rename Autumn Dump' is extremely short (only 3 words), doesn't explain why renaming or any workf...
 
 - **Score 2.2**: "List the latest evening-pages states, load the rooftop one, and note it...."
   - Issues: sessionMemory is empty string '' earning automatic score=1. toolContext 'List evening states' is generic and just describes WHAT not WHY earning score...
@@ -200,6 +224,33 @@ Examples most in need of enhancement:
 
 - **Score 2.2**: "Result: {"success": true, "agent": {"id": "agent_monitor_001", "status": "active..."
   - Issues: sessionMemory 'Agent created, now enabling' (28 chars) shows good continuity from prior action (score=4). toolContext 'Toggling agent status' describe...
+
+- **Score 2.2**: "Create a new Projects folder in my workspace..."
+  - Issues: sessionMemory is empty string earning automatic score=1. toolContext 'User setting up workspace structure' explains purpose but is generic and doesn't...
+
+- **Score 2.2**: "Update lines 10-15 in my README.md with the new project description...."
+  - Issues: sessionMemory empty = 1. toolContext 'User improving documentation' is generic and doesn't explain why these specific lines (score=2). Goals 'Replace ...
+
+- **Score 2.2**: "Switch to my photography portfolio workspace...."
+  - Issues: sessionMemory empty = 1. toolContext 'User wants photography workspace' states desire but doesn't explain why listing sessions is the right approach (...
+
+- **Score 2.2**: "Get a list of AI models I can choose from...."
+  - Issues: sessionMemory 'User selecting model' is very brief and generic (score=2). toolContext 'Model selection' is just two words, minimal explanation (score=...
+
+- **Score 2.2**: "Result: {"success": true, "agent": {"id": "agent_neonpour", "name": "NeonPour", ..."
+  - Issues: sessionMemory is very short (27 chars) and generic 'Captured NeonPour details' without concrete specifics (score=2). toolContext 'Document agent' is e...
+
+- **Score 2.2**: "List all my enabled agents..."
+  - Issues: sessionMemory is empty string which violates the never-empty requirement (score=1). toolContext 'User wants to see enabled agents' simply restates the...
+
+- **Score 2.2**: "Result: {"success": true, "results": [{"filePath": "Research/Redwood/Signals.md"..."
+  - Issues: sessionMemory 'Snippet captured' is very short (~16 chars) and generic, doesn't reference what was found or from where (score=2). toolContext 'Documen...
+
+- **Score 2.2**: "Execute a prompt to generate API client code from my OpenAPI spec...."
+  - Issues: sessionMemory 'Creating SDK' is very short and generic, under 20 chars (score=2). toolContext 'Running code generation' describes WHAT action not WHY ...
+
+- **Score 2.2**: "Find all SQL files with DELETE statements for safety review...."
+  - Issues: sessionMemory 'Safety audit' is very short and generic, under 20 chars (score=2). toolContext 'Searching SQL' describes WHAT not WHY or workflow reaso...
 
 - **Score 2.4**: "Show me all the saved snapshots I've created so I can pick one to restore...."
   - Issues: sessionMemory is empty string earning automatic score=1. toolContext 'User wants to view all saved snapshots' restates the obvious from prompt without...
@@ -258,8 +309,47 @@ Examples most in need of enhancement:
 - **Score 2.4**: "Result: {"success": true, "results": [{"file": "Reviews/Q2-Marketing-Review.md",..."
   - Issues: Multi-turn. sessionMemory is empty string - automatic score 1. toolContext 'Opening found Q2 marketing review' explains immediate action in sequence b...
 
+- **Score 2.4**: "Write a blog post about productivity tips using the Content Creator agent..."
+  - Issues: sessionMemory is empty string - automatic score 1. toolContext 'Running agent with user task' is extremely generic and could apply to any agent call -...
 
-### Top 10% - Template Examples (30 examples)
+- **Score 2.4**: "Update my workspace to track the new project repository location..."
+  - Issues: sessionMemory is empty string - automatic score 1. toolContext 'User updating workspace' is extremely generic - score 2. Goals 'Update workspace confi...
+
+- **Score 2.4**: "Delete the temporary scratch folder...."
+  - Issues: sessionMemory 'Cleaning up workspace' (21 chars) is generic but shows context (score=3). toolContext 'Removing temporary files' describes WHAT action ...
+
+- **Score 2.4**: "List all workspaces I've created for this project...."
+  - Issues: sessionMemory 'Reviewing workspace organization' (32 chars) is generic but contextually relevant (score=3). toolContext 'Getting workspace list' descr...
+
+- **Score 2.4**: "Result: {"error": "Path '/exports/data.json' not found"}..."
+  - Issues: sessionMemory 'Export path missing' (20 chars) is minimal but shows error response context (score=3). toolContext 'Creating missing directory' describ...
+
+- **Score 2.4**: "Execute the security analysis prompt with the security-scanner agent..."
+  - Issues: sessionMemory 'Performing routine security check' (35 chars) is generic but contextually relevant (score=3). toolContext 'Executing agent prompt' is t...
+
+- **Score 2.4**: "Update the session goal to reflect current work..."
+  - Issues: sessionMemory 'Refining session objectives' (28 chars) is generic (score=3). toolContext 'Modifying session' is extremely generic, just restates tool ...
+
+- **Score 2.4**: "Append the release notes to the documentation..."
+  - Issues: sessionMemory 'Documenting v2.0 release' (25 chars) shows specific context with version number (score=3). toolContext 'Appending to docs' describes WH...
+
+- **Score 2.4**: "Result: {"success": true, "stateId": "state_1731076740110_evening", "restored": ..."
+  - Issues: sessionMemory 'Loaded rooftop state' is brief but specific with 21 chars, references prior action (score=3). toolContext 'Log state' is extremely ters...
+
+- **Score 2.4**: "Search for files modified in the last 7 days...."
+  - Issues: sessionMemory is empty - automatic score of 1. toolContext 'User tracking recent changes' is generic without workflow reasoning (score=2). Goals 'Find...
+
+- **Score 2.4**: "Result: {"success": true, "oldPath": "Documentation/API-Guide.md", "newPath": "D..."
+  - Issues: sessionMemory is empty - automatic score of 1. toolContext 'Moving files to Docs folder' is brief and describes action but lacks strategic reasoning (...
+
+- **Score 2.4**: "Delete my old task list and verify it's gone...."
+  - Issues: sessionMemory is empty - automatic score of 1. toolContext 'User removing old file' is generic with no workflow reasoning (score=2). Goals 'Delete old...
+
+- **Score 2.4**: "Can you disable the CinematicColor agent that's spamming palettes and jot the ch..."
+  - Issues: sessionMemory is empty - automatic score of 1. toolContext 'List all studio agents' doesn't match user request to disable agent (score=2). Goals 'Revi...
+
+
+### Top 10% - Template Examples (45 examples)
 
 Highest quality examples to use as templates:
 
@@ -268,6 +358,12 @@ Highest quality examples to use as templates:
 
 - **Score 4.6**: "Result: {"success": false, "error": {"code": "CONTENT_NOT_FOUND", "message": "Co..."
   - Why excellent: sessionMemory 'Failed to delete content - need exact text. Reading file to find precise content.' references prior failure with specifics and explains...
+
+- **Score 4.2**: "Show me the details for agent agent_203...."
+  - Why excellent: sessionMemory 'Retrieving agent configuration information. Agent info retrieval in progress.' provides good context (4). toolContext 'User wants to vi...
+
+- **Score 4.2**: "I need to finalize my renovation plans before construction starts..."
+  - Why excellent: sessionMemory 'Contractor selected and paid deposit. Materials ordered and arriving. Need final review of plans.' is rich with 103 chars, provides mul...
 
 - **Score 4.2**: "Create a backup of my important research paper before I make major edits...."
   - Why excellent: sessionMemory 'User is about to make significant edits and wants a safety copy' provides good context explaining the motivation (65 chars, specific re...
@@ -283,6 +379,15 @@ Highest quality examples to use as templates:
 
 - **Score 4.2**: "Let me see my Japan trip planning workspace..."
   - Why excellent: sessionMemory is rich with specific details: flight codes (LAX-NRT), dates (April 15-29, 2026), numbers (25+ hotels, shortlisted 8), budget ($8K total...
+
+- **Score 4.0**: "I need to access my Mediterranean diet meal planning workspace..."
+  - Why excellent: sessionMemory is excellent: mentions specific week (Week 3), concrete numbers (15 recipes, 5 containers, $200/week, 4 lbs), multiple dimensions (recip...
+
+- **Score 4.0**: "Result: {"success": true, "results": [{"filePath": "Studios/Color/Moodboards/Del..."
+  - Why excellent: sessionMemory 'Verified path via vaultLibrarian_searchContent' is specific and references the prior tool call by name (score=5). toolContext 'Move not...
+
+- **Score 4.0**: "I need to update the goal of my current design sprint session to reflect that we..."
+  - Why excellent: sessionMemory 'Team decided to pivot from mobile app to web app during design sprint.' is specific with 72 chars, captures key decision and context (s...
 
 - **Score 4.0**: "Show me the details for agent agent_202...."
   - Why excellent: sessionMemory 'Retrieving agent configuration information. Agent info retrieval in progress.' is specific (~75 chars, score=4). toolContext 'User want...
@@ -323,6 +428,39 @@ Highest quality examples to use as templates:
 - **Score 4.0**: "Update my conference planning session to reflect that we've finalized the venue ..."
   - Why excellent: sessionMemory 'Conference planning has progressed from venue search to speaker outreach phase' captures transition between phases with good context (s...
 
+- **Score 3.8**: "In readme.md, replace 'Version 1.0' with 'Version 2.0'...."
+  - Why excellent: sessionMemory 'Replacing content in existing notes. Content update in progress.' is generic (3). toolContext 'User wants to replace text in note' expl...
+
+- **Score 3.8**: "Move Resources/Temp to Archive/Resources...."
+  - Why excellent: sessionMemory 'Moving folders to improve vault organization. Restructuring in progress.' provides good context (4). toolContext 'User wants to relocat...
+
+- **Score 3.8**: "Run multiple searches across the vault...."
+  - Why excellent: sessionMemory 'Running batch search operations across vault. Batch search session in progress.' provides good context (4). toolContext 'User wants to ...
+
+- **Score 3.8**: "Delete agent agent_103...."
+  - Why excellent: sessionMemory 'Removing unused agents from system. Agent cleanup in progress.' provides good context (4). toolContext 'User wants to delete unused age...
+
+- **Score 3.8**: "Create a new folder called Archive...."
+  - Why excellent: sessionMemory 'Creating folder structure for project organization. Session in progress.' provides good context (4). toolContext 'User wants to create ...
+
+- **Score 3.8**: "Save my progress on chapter 18 editing as a checkpoint..."
+  - Why excellent: sessionMemory is excellent with rich context: mentions specific chapters (1-18, 15-18), concrete actions (character consistency, dialog, pacing), and ...
+
+- **Score 3.8**: "Replace the project deadline in the roadmap from 'March 2026' to 'February 2026'..."
+  - Why excellent: sessionMemory 'Project timeline has been accelerated by one month' is specific and explains the context of why this change (score=4). toolContext 'Cha...
+
+- **Score 3.8**: "Update the description of my current session to reflect that we've finished the ..."
+  - Why excellent: sessionMemory 'User completed API integration phase and is transitioning to frontend development work' is specific and captures state transition with ...
+
+- **Score 3.8**: "Result: {"success": true, "results": [{"filePath": "Crosslinks/Mirelune/Command ..."
+  - Why excellent: sessionMemory 'Mirelune LED sync snippet retrieved from Crosslinks' is specific and references prior action (score=4). toolContext 'Append deck note' ...
+
+- **Score 3.8**: "Clean up agent agent_deprecated_2023 since we migrated to the new version...."
+  - Why excellent: sessionMemory 'Migration to new version complete' is brief with 37 chars but specific about prior context (score=3). toolContext 'Old agent version no...
+
+- **Score 3.8**: "Create a new recipe note for the pasta dish I want to try...."
+  - Why excellent: sessionMemory 'User wants to save a pasta recipe for future reference.' is relevant with 56 chars, provides context but somewhat generic (score=3). to...
+
 - **Score 3.8**: "List contents of Reviews...."
   - Why excellent: sessionMemory 'Browsing folder contents to locate files. Directory exploration in progress.' is specific (~75 chars, score=4). toolContext 'User wants...
 
@@ -350,9 +488,6 @@ Highest quality examples to use as templates:
 - **Score 3.8**: "Result: {"success": true, "data": {"workspaceId": "ws_1731051100000_c0n7en7c4", ..."
   - Why excellent: sessionMemory 'Loaded calendar, week 4 needs 3 more pieces (2/5 slots filled)' is excellent (66 chars) - references prior tool call, includes specific...
 
-- **Score 3.8**: "Result: {"success": true, "path": "Meetings/2025-09-02 Quarterly Review.md", "ne..."
-  - Why excellent: sessionMemory is excellent (61 chars) - references prior action 'Created Q3-2025 archive folder' and concrete detail 'found 6 Q3 meeting files' showin...
-
 
 ---
 
@@ -360,12 +495,12 @@ Highest quality examples to use as templates:
 
 ### Immediate Actions (High Impact)
 
-1. **Add Result structures to all examples** (205 need this)
+1. **Add Result structures to all examples** (284 need this)
    - Include realistic metadata: executionTime, totalResults, searchCapabilities
    - Add realistic scores/confidence values (not always 1.0)
    - Show edge cases: warnings, partial results, informative failures
 
-2. **Enrich sessionMemory fields** (82 empty)
+2. **Enrich sessionMemory fields** (116 empty)
    - Replace empty strings with contextual information
    - Reference specific prior tool calls: "Searched 23 files via vaultLibrarian_searchContent"
    - Include concrete details: numbers, paths, results
@@ -384,7 +519,7 @@ Highest quality examples to use as templates:
    - Result counts (totalResults, displayed, filtered)
    - Capability flags (semanticSearch, workspaceFiltering)
 
-5. **Strengthen goal hierarchies** (4 weak)
+5. **Strengthen goal hierarchies** (10 weak)
    - Ensure primaryGoal and subgoal are distinct
    - Show strategic decomposition, not just restatement
    - Subgoal should indicate current step in larger workflow
@@ -417,14 +552,16 @@ Highest quality examples to use as templates:
 ## Appendix: Scoring Methodology
 
 - **Rubric:** 5-point scale across 5 dimensions
-- **Sample Size:** 300 examples (5.4% of 5,505)
-- **Sampling:** Stratified systematic across 2 rounds
+- **Sample Size:** 450 examples (8.2% of 5,505)
+- **Statistical Target:** 408 examples (achieved 110.3%)
+- **Sampling:** Stratified systematic across 3 rounds
   - Round 1: 150 examples (batches 1-5)
   - Round 2: 150 examples (batches 6-10)
-- **Scoring:** 10 parallel agents (5 per round) following detailed rubric
+  - Round 3: 150 examples (batches 11-15)
+- **Scoring:** 15 parallel agents (5 per round) following detailed rubric
 - **Output:** Scored examples with detailed reasoning notes
 
 **Files Generated:**
-- `scored_batch_[1-10].jsonl` - Individual batch scores
-- `scored_complete.jsonl` - Merged scored dataset (300 examples)
+- `scored_batch_[1-15].jsonl` - Individual batch scores
+- `scored_complete.jsonl` - Merged scored dataset (450 examples)
 - `quality_triage_report.md` - This report
