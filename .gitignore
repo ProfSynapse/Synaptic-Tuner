@@ -81,3 +81,10 @@ claude_conversations_chatml.jsonl
 personal conversations/
 sft_output_rtx3090/
 results/
+
+# Temporary quality review scoring scripts (created by parallel agents)
+score_batch*.py
+manual_score_batch*.py
+Datasets/quality_review/batch_*_summary.txt
+Datasets/quality_review/batch_*_summary.md
+Datasets/quality_review/score_batch*.py
