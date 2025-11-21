@@ -95,3 +95,12 @@ Datasets/quality_review/improvement_batches/
 Datasets/quality_review/improved_batches/
 Datasets/quality_review/improved_examples_all.jsonl
 Datasets/quality_review/improved_examples_only.jsonl
+BATCH_*_IMPROVEMENT*.md
+BATCH_*_IMPROVEMENT*.txt
+BATCH_*_EXAMPLES.md
+Datasets/quality_review/BATCH_*_IMPROVEMENT*.md
+Datasets/quality_review/BATCH_*_IMPROVEMENT*.txt
+Datasets/quality_review/BATCH_*_EXAMPLES*.md
+Datasets/quality_review/improvement_report_batch_*.md
+tools/auto_improve_mechanical.py
+tools/improve_batch_template.py
