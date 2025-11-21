@@ -12,7 +12,7 @@ def load_scored_batches():
     review_dir = Path(__file__).parent.parent / "Datasets" / "quality_review"
     examples = []
 
-    for i in range(1, 61):  # Updated to load batches 1-60 (all 5 rounds)
+    for i in range(1, 121):  # Updated to load batches 1-120 (all 6 rounds)
         batch_file = review_dir / f"scored_batch_{i}.jsonl"
         if not batch_file.exists():
             print(f"Warning: {batch_file.name} not found")
@@ -138,7 +138,7 @@ def generate_markdown_report(examples, analysis, categories, issues):
 **Date:** 2025-11-21
 **Total Examples Scored:** {analysis['total_scored']}
 **Dataset:** syngen_tools_sft_merged_complete_11.21.25.jsonl (5,505 total)
-**Sample Strategy:** Stratified systematic sampling across 3 rounds (450 examples, ~8.2% coverage)
+**Sample Strategy:** Stratified systematic sampling across 6 rounds ({analysis['total_scored']} examples, ~{analysis['total_scored']/5505*100:.1f}% coverage)
 
 ---
 
@@ -337,18 +337,19 @@ Highest quality examples to use as templates:
 ## Appendix: Scoring Methodology
 
 - **Rubric:** 5-point scale across 5 dimensions
-- **Sample Size:** 450 examples (8.2% of 5,505)
-- **Statistical Target:** 408 examples (achieved 110.3%)
-- **Sampling:** Stratified systematic across 3 rounds
-  - Round 1: 150 examples (batches 1-5)
-  - Round 2: 150 examples (batches 6-10)
-  - Round 3: 150 examples (batches 11-15)
-- **Scoring:** 15 parallel agents (5 per round) following detailed rubric
+- **Sample Size:** {analysis['total_scored']} examples ({analysis['total_scored']/5505*100:.1f}% of 5,505)
+- **Statistical Target:** 408 examples (achieved {analysis['total_scored']/408*100:.1f}%)
+- **Sampling:** Stratified systematic across 6 rounds
+  - Rounds 1-3: 450 examples (batches 1-15, 5 agents per round)
+  - Round 4: 450 examples (batches 16-30, 15 agents)
+  - Round 5: 900 examples (batches 31-60, 30 agents)
+  - Round 6: 1,800 examples (batches 61-120, 60 agents)
+- **Scoring:** {analysis['total_scored']//30} parallel agents following detailed rubric
 - **Output:** Scored examples with detailed reasoning notes
 
 **Files Generated:**
-- `scored_batch_[1-15].jsonl` - Individual batch scores
-- `scored_complete.jsonl` - Merged scored dataset (450 examples)
+- `scored_batch_[1-120].jsonl` - Individual batch scores
+- `scored_complete.jsonl` - Merged scored dataset ({analysis['total_scored']} examples)
 - `quality_triage_report.md` - This report
 """
 
