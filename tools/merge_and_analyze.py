@@ -12,7 +12,7 @@ def load_scored_batches():
     review_dir = Path(__file__).parent.parent / "Datasets" / "quality_review"
     examples = []
 
-    for i in range(1, 6):
+    for i in range(1, 11):  # Updated to load batches 1-10
         batch_file = review_dir / f"scored_batch_{i}.jsonl"
         if not batch_file.exists():
             print(f"Warning: {batch_file.name} not found")
@@ -134,7 +134,7 @@ def generate_markdown_report(examples, analysis, categories, issues):
 **Date:** 2025-11-21
 **Total Examples Scored:** {analysis['total_scored']}
 **Dataset:** syngen_tools_sft_merged_complete_11.21.25.jsonl (5,505 total)
-**Sample Strategy:** Stratified systematic sampling (every ~37th example)
+**Sample Strategy:** Stratified systematic sampling across 2 rounds (300 examples, ~5.4% coverage)
 
 ---
 
@@ -333,14 +333,16 @@ Highest quality examples to use as templates:
 ## Appendix: Scoring Methodology
 
 - **Rubric:** 5-point scale across 5 dimensions
-- **Sample Size:** 150 examples (2.7% of 5,505)
-- **Sampling:** Stratified systematic (every ~37th example)
-- **Scoring:** 5 parallel agents following detailed rubric
+- **Sample Size:** 300 examples (5.4% of 5,505)
+- **Sampling:** Stratified systematic across 2 rounds
+  - Round 1: 150 examples (batches 1-5)
+  - Round 2: 150 examples (batches 6-10)
+- **Scoring:** 10 parallel agents (5 per round) following detailed rubric
 - **Output:** Scored examples with detailed reasoning notes
 
 **Files Generated:**
-- `scored_batch_[1-5].jsonl` - Individual batch scores
-- `scored_complete.jsonl` - Merged scored dataset
+- `scored_batch_[1-10].jsonl` - Individual batch scores
+- `scored_complete.jsonl` - Merged scored dataset (300 examples)
 - `quality_triage_report.md` - This report
 """
 
