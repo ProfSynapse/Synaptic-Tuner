@@ -61,18 +61,6 @@
     "expected_tools": ["agentManager_updateAgent"]
   },
   {
-    "id": "commandManager_executeCommand",
-    "question": "Run the \"publish_status\" command to push the current rollout summary to the shared status board.",
-    "tags": ["commandManager", "single-tool"],
-    "expected_tools": ["commandManager_executeCommand"]
-  },
-  {
-    "id": "commandManager_listCommands",
-    "question": "List the available CLI-style commands so I know what automation hooks we have.",
-    "tags": ["commandManager", "single-tool"],
-    "expected_tools": ["commandManager_listCommands"]
-  },
-  {
     "id": "contentManager_appendContent",
     "question": "Append a short note to Projects/Rollouts/Atlas.md letting everyone know the monitoring probes just turned green again.",
     "tags": ["contentManager", "single-tool"],
@@ -275,12 +263,5 @@
     "question": "Open Projects/Runbooks/Backup.md because I want to read it inside Obsidian.",
     "tags": ["vaultManager", "single-tool"],
     "expected_tools": ["vaultManager_openNote"]
-  },
-  {
-    "id": "meta_get_tools",
-    "question": "Before we try anything else, call the meta get_tools endpoint to fetch the latest schemas for vaultManager, contentManager, and memoryManager.",
-    "tags": ["meta", "single-tool"],
-    "expected_tools": ["get_tools"],
-    "notes": "Ensures meta tool path is covered."
   }
 ]

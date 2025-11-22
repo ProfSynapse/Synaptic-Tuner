@@ -38,8 +38,11 @@ if sys.platform == 'win32':
 
 import argparse
 import subprocess
+import json
+import shutil
+from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 from unsloth import FastLanguageModel
 from huggingface_hub import HfApi
 
@@ -51,12 +54,88 @@ except ImportError:
     pass  # dotenv not required, can use environment variables directly
 
 
+def save_local_copy(
+    model_path: str,
+    output_dir: Path,
+    save_method: str,
+    format_subdir: str
+) -> Path:
+    """
+    Save a local copy of the model in the organized output directory.
+
+    Args:
+        model_path: Path to the model to save
+        output_dir: Base output directory for this upload
+        save_method: Save method (merged_16bit, merged_4bit, or lora)
+        format_subdir: Subdirectory name (e.g., 'lora', 'merged_16bit')
+
+    Returns:
+        Path to the saved model
+    """
+    import tempfile
+
+    save_dir = output_dir / format_subdir
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Saving local copy to: {save_dir}")
+
+    # For LoRA, just copy the adapters
+    if save_method == "lora":
+        shutil.copytree(model_path, save_dir, dirs_exist_ok=True)
+        print(f"✓ LoRA adapters copied")
+        return save_dir
+
+    # For merged models, need to load and save
+    # Check if we're on Windows filesystem
+    model_path_obj = Path(model_path).resolve()
+    is_windows_fs = str(model_path_obj).startswith('/mnt/')
+
+    temp_dir = None
+    working_path = model_path
+
+    if is_windows_fs:
+        print("⚠ Detected Windows filesystem - copying to WSL native filesystem...")
+        temp_dir = tempfile.mkdtemp(prefix='hf_save_', dir=str(Path.home() / 'tmp'))
+        temp_model_path = Path(temp_dir) / 'model'
+        shutil.copytree(model_path, temp_model_path)
+        working_path = str(temp_model_path)
+        print("✓ Copy complete")
+
+    try:
+        original_cwd = os.getcwd()
+        if temp_dir:
+            os.chdir(temp_dir)
+
+        # Load and save merged model
+        print("Loading model for local save...")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=working_path,
+            max_seq_length=2048,
+            dtype=None,
+            load_in_4bit=False if save_method == "merged_16bit" else True,
+        )
+
+        model.save_pretrained_merged(str(save_dir), tokenizer, save_method=save_method)
+        print(f"✓ Model saved locally")
+
+        if temp_dir:
+            os.chdir(original_cwd)
+
+    finally:
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir)
+
+    return save_dir
+
+
 def upload_standard_model(
     model_path: str,
     repo_id: str,
     hf_token: str,
     save_method: str = "merged_16bit",
-    private: bool = False
+    private: bool = False,
+    output_dir: Path = None,
+    save_local: bool = True
 ):
     """
     Upload standard model to HuggingFace Hub.
@@ -67,10 +146,10 @@ def upload_standard_model(
         hf_token: HuggingFace write token
         save_method: Save method (merged_16bit, merged_4bit, or lora)
         private: Whether to make repo private
+        output_dir: Directory to save local copy (optional)
+        save_local: Whether to save a local copy
     """
-    import shutil
     import tempfile
-    from pathlib import Path
 
     print("=" * 60)
     print("UPLOADING STANDARD MODEL")
@@ -81,6 +160,13 @@ def upload_standard_model(
     print(f"Private: {private}")
     print()
 
+    # Save local copy first if requested
+    if save_local and output_dir:
+        format_subdir = save_method.replace("_", "-")  # e.g., "merged-16bit"
+        if save_method == "lora":
+            format_subdir = "lora"
+        save_local_copy(model_path, output_dir, save_method, format_subdir)
+
     # Check if we're on Windows filesystem (can cause I/O errors during save)
     model_path_obj = Path(model_path).resolve()
     is_windows_fs = str(model_path_obj).startswith('/mnt/')
@@ -89,7 +175,7 @@ def upload_standard_model(
     working_path = model_path
 
     if is_windows_fs:
-        print("⚠ Detected Windows filesystem (/mnt/c) - copying to WSL native filesystem for reliability...")
+        print("\n⚠ Detected Windows filesystem (/mnt/c) - copying to WSL native filesystem for reliability...")
         temp_dir = tempfile.mkdtemp(prefix='hf_upload_', dir=str(Path.home() / 'tmp'))
         temp_model_path = Path(temp_dir) / 'model'
         print(f"Copying model to: {temp_model_path}")
@@ -139,20 +225,24 @@ def upload_standard_model(
 
 def create_gguf_versions(
     model_path: str,
-    output_dir: str,
-    quantizations: List[str] = None
+    output_dir: Path,
+    quantizations: List[str] = None,
+    cleanup: bool = True
 ) -> List[str]:
     """
     Create GGUF versions of the model.
 
     Args:
         model_path: Path to model directory
-        output_dir: Directory to save GGUF files
+        output_dir: Directory to save GGUF files (will create gguf/ subdirectory)
         quantizations: List of quantization methods (e.g., ["Q4_K_M", "Q5_K_M"])
+        cleanup: Whether to cleanup temporary files after creation
 
     Returns:
         List of created GGUF file paths
     """
+    import tempfile
+
     if quantizations is None:
         quantizations = ["Q4_K_M", "Q5_K_M", "Q8_0"]
 
@@ -164,106 +254,120 @@ def create_gguf_versions(
     print(f"Quantizations: {', '.join(quantizations)}")
     print()
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Create gguf subdirectory
+    gguf_dir = output_dir / "gguf"
+    gguf_dir.mkdir(parents=True, exist_ok=True)
 
-    # First, save merged model locally if not already merged
-    merged_dir = output_dir / "merged_model"
-    print("[1/4] Saving merged model locally...")
+    # Use temp directory for intermediate files
+    temp_work_dir = Path(tempfile.mkdtemp(prefix='gguf_work_', dir=str(Path.home() / 'tmp')))
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=str(model_path),
-        max_seq_length=2048,
-        dtype=None,
-        load_in_4bit=False,  # Need full precision for GGUF
-    )
-    model.save_pretrained_merged(str(merged_dir), tokenizer, save_method="merged_16bit")
-    print(f"✓ Merged model saved to: {merged_dir}")
+    try:
+        # First, save merged model to temp location
+        merged_dir = temp_work_dir / "merged_model"
+        print("[1/4] Saving merged model locally...")
 
-    # Clone llama.cpp if needed
-    print("\n[2/4] Setting up llama.cpp...")
-    llamacpp_dir = output_dir / "llama.cpp"
-
-    if not llamacpp_dir.exists():
-        print("Cloning llama.cpp repository...")
-        subprocess.run(
-            ["git", "clone", "https://github.com/ggerganov/llama.cpp", str(llamacpp_dir)],
-            check=True,
-            capture_output=True
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=str(model_path),
+            max_seq_length=2048,
+            dtype=None,
+            load_in_4bit=False,  # Need full precision for GGUF
         )
-        print("Building llama.cpp...")
+        model.save_pretrained_merged(str(merged_dir), tokenizer, save_method="merged_16bit")
+        print(f"✓ Merged model saved to temporary location")
 
-        # Build using CMake on Windows, make on Linux/Mac
-        if sys.platform == 'win32':
-            print("  Using CMake for Windows build...")
-            build_dir = llamacpp_dir / "build"
-            build_dir.mkdir(exist_ok=True)
+        # Clone llama.cpp if needed
+        print("\n[2/4] Setting up llama.cpp...")
+        llamacpp_dir = temp_work_dir / "llama.cpp"
 
-            # Configure with CMake
+        if not llamacpp_dir.exists():
+            print("Cloning llama.cpp repository...")
             subprocess.run(
-                ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release"],
-                cwd=str(build_dir),
+                ["git", "clone", "https://github.com/ggerganov/llama.cpp", str(llamacpp_dir)],
                 check=True,
                 capture_output=True
             )
+            print("Building llama.cpp...")
 
-            # Build
-            subprocess.run(
-                ["cmake", "--build", ".", "--config", "Release"],
-                cwd=str(build_dir),
-                check=True,
-                capture_output=True
-            )
-        else:
-            # Use make on Linux/Mac
-            subprocess.run(
-                ["make", "-j"],
-                cwd=str(llamacpp_dir),
-                check=True,
-                capture_output=True
-            )
-    print(f"✓ llama.cpp ready at: {llamacpp_dir}")
+            # Build using CMake on Windows, make on Linux/Mac
+            if sys.platform == 'win32':
+                print("  Using CMake for Windows build...")
+                build_dir = llamacpp_dir / "build"
+                build_dir.mkdir(exist_ok=True)
 
-    # Convert to GGUF base format
-    print("\n[3/4] Converting to GGUF base format (f16)...")
-    base_gguf = output_dir / "model-unsloth.gguf"
+                # Configure with CMake
+                subprocess.run(
+                    ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release"],
+                    cwd=str(build_dir),
+                    check=True,
+                    capture_output=True
+                )
 
-    subprocess.run([
-        "python",
-        str(llamacpp_dir / "convert_hf_to_gguf.py"),
-        str(merged_dir),
-        "--outfile", str(base_gguf),
-        "--outtype", "f16"
-    ], check=True)
+                # Build
+                subprocess.run(
+                    ["cmake", "--build", ".", "--config", "Release"],
+                    cwd=str(build_dir),
+                    check=True,
+                    capture_output=True
+                )
+            else:
+                # Use make on Linux/Mac
+                subprocess.run(
+                    ["make", "-j"],
+                    cwd=str(llamacpp_dir),
+                    check=True,
+                    capture_output=True
+                )
+        print(f"✓ llama.cpp ready")
 
-    print(f"✓ Base GGUF created: {base_gguf}")
-
-    # Create quantized versions
-    print(f"\n[4/4] Creating {len(quantizations)} quantized versions...")
-    gguf_files = [base_gguf]
-
-    # Find llama-quantize executable (different paths on Windows vs Linux)
-    if sys.platform == 'win32':
-        quantize_exe = llamacpp_dir / "build" / "bin" / "Release" / "llama-quantize.exe"
-    else:
-        quantize_exe = llamacpp_dir / "llama-quantize"
-
-    for quant in quantizations:
-        output_file = output_dir / f"model-unsloth-{quant}.gguf"
-        print(f"  Creating {quant} quantization...")
+        # Convert to GGUF base format in final location
+        print("\n[3/4] Converting to GGUF base format (f16)...")
+        base_gguf = gguf_dir / "model-unsloth.gguf"
 
         subprocess.run([
-            str(quantize_exe),
-            str(base_gguf),
-            str(output_file),
-            quant
+            "python",
+            str(llamacpp_dir / "convert_hf_to_gguf.py"),
+            str(merged_dir),
+            "--outfile", str(base_gguf),
+            "--outtype", "f16"
         ], check=True)
 
-        gguf_files.append(output_file)
-        print(f"  ✓ {output_file.name}")
+        print(f"✓ Base GGUF created: {base_gguf.name}")
 
-    print(f"\n✓ All GGUF files created: {len(gguf_files)} total")
-    return [str(f) for f in gguf_files]
+        # Create quantized versions in final location
+        print(f"\n[4/4] Creating {len(quantizations)} quantized versions...")
+        gguf_files = [base_gguf]
+
+        # Find llama-quantize executable (different paths on Windows vs Linux)
+        if sys.platform == 'win32':
+            quantize_exe = llamacpp_dir / "build" / "bin" / "Release" / "llama-quantize.exe"
+        else:
+            quantize_exe = llamacpp_dir / "llama-quantize"
+
+        for quant in quantizations:
+            output_file = gguf_dir / f"model-unsloth-{quant}.gguf"
+            print(f"  Creating {quant} quantization...")
+
+            subprocess.run([
+                str(quantize_exe),
+                str(base_gguf),
+                str(output_file),
+                quant
+            ], check=True)
+
+            gguf_files.append(output_file)
+            print(f"  ✓ {output_file.name}")
+
+        print(f"\n✓ All GGUF files created: {len(gguf_files)} total")
+        print(f"Saved to: {gguf_dir}")
+
+        return [str(f) for f in gguf_files]
+
+    finally:
+        # Cleanup temporary work directory
+        if cleanup and temp_work_dir.exists():
+            print(f"\nCleaning up temporary files...")
+            shutil.rmtree(temp_work_dir)
+            print("✓ Temporary files removed")
 
 
 def upload_gguf_files(
@@ -306,18 +410,143 @@ def upload_gguf_files(
     print(f"View at: https://huggingface.co/{repo_id}/tree/main")
 
 
+def create_upload_manifest(
+    output_dir: Path,
+    repo_id: str,
+    training_run: str,
+    formats_created: List[str],
+    gguf_files: List[str] = None
+) -> Path:
+    """
+    Create an upload manifest JSON file with metadata.
+
+    Args:
+        output_dir: Directory to save manifest
+        repo_id: HuggingFace repo ID
+        training_run: Training run timestamp (e.g., "20251122_143000")
+        formats_created: List of formats created (e.g., ["lora", "merged_16bit", "gguf"])
+        gguf_files: List of GGUF file names (optional)
+
+    Returns:
+        Path to manifest file
+    """
+    manifest = {
+        "upload_timestamp": datetime.now().isoformat(),
+        "training_run": training_run,
+        "model_name": repo_id,
+        "huggingface_url": f"https://huggingface.co/{repo_id}",
+        "formats_created": formats_created,
+        "directory_structure": {
+            "lora": "lora/" if "lora" in formats_created else None,
+            "merged_16bit": "merged-16bit/" if "merged_16bit" in formats_created else None,
+            "merged_4bit": "merged-4bit/" if "merged_4bit" in formats_created else None,
+            "gguf": "gguf/" if "gguf" in formats_created else None
+        }
+    }
+
+    if gguf_files:
+        manifest["gguf_quantizations"] = [Path(f).name for f in gguf_files]
+
+    manifest_path = output_dir / "upload_manifest.json"
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
+
+    print(f"✓ Upload manifest created: {manifest_path}")
+    return manifest_path
+
+
+def create_readme(
+    output_dir: Path,
+    repo_id: str,
+    training_run: str,
+    formats_created: List[str]
+) -> Path:
+    """
+    Create a simple README.md file in the output directory.
+
+    Args:
+        output_dir: Directory to save README
+        repo_id: HuggingFace repo ID
+        training_run: Training run timestamp
+        formats_created: List of formats created
+
+    Returns:
+        Path to README file
+    """
+    model_name = repo_id.split('/')[-1]
+
+    readme_content = f"""# {model_name}
+
+**Training Run:** `{training_run}`
+**HuggingFace:** [https://huggingface.co/{repo_id}](https://huggingface.co/{repo_id})
+
+## Available Formats
+
+"""
+
+    for fmt in formats_created:
+        if fmt == "lora":
+            readme_content += "- **LoRA Adapters** (`lora/`) - Use with base model\n"
+        elif fmt == "merged_16bit":
+            readme_content += "- **Merged 16-bit** (`merged-16bit/`) - Full quality merged model (~14GB)\n"
+        elif fmt == "merged_4bit":
+            readme_content += "- **Merged 4-bit** (`merged-4bit/`) - Quantized merged model (~3.5GB)\n"
+        elif fmt == "gguf":
+            readme_content += "- **GGUF Quantizations** (`gguf/`) - For llama.cpp/Ollama\n"
+
+    readme_content += f"""
+## Directory Structure
+
+```
+{model_name}/
+"""
+
+    for fmt in formats_created:
+        subdir = fmt.replace("_", "-") if fmt != "lora" else "lora"
+        if fmt == "gguf":
+            readme_content += f"""├── {subdir}/
+│   ├── model-unsloth.gguf (f16)
+│   ├── model-unsloth-Q4_K_M.gguf
+│   ├── model-unsloth-Q5_K_M.gguf
+│   └── model-unsloth-Q8_0.gguf
+"""
+        else:
+            readme_content += f"├── {subdir}/\n"
+
+    readme_content += """├── upload_manifest.json
+└── README.md
+```
+
+## Usage
+
+See the HuggingFace model card for detailed usage instructions.
+"""
+
+    readme_path = output_dir / "README.md"
+    with open(readme_path, 'w') as f:
+        f.write(readme_content)
+
+    print(f"✓ README created: {readme_path}")
+    return readme_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Upload model to HuggingFace Hub")
 
     parser.add_argument(
         "model_path",
         type=str,
-        help="Path to saved model directory"
+        help="Path to saved model directory (e.g., sft_output_rtx3090/20251122_143000/final_model)"
     )
     parser.add_argument(
         "repo_id",
         type=str,
         help="HuggingFace repo ID (username/model-name)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="Output directory for organized artifacts (default: auto-detect from model_path)"
     )
     parser.add_argument(
         "--token",
@@ -344,12 +573,6 @@ def main():
         help="GGUF quantization methods"
     )
     parser.add_argument(
-        "--gguf-output-dir",
-        type=str,
-        default="./gguf_output",
-        help="Directory for GGUF conversion files"
-    )
-    parser.add_argument(
         "--private",
         action="store_true",
         help="Make repository private"
@@ -363,28 +586,61 @@ def main():
     args = parser.parse_args()
 
     # Get HuggingFace token
-    hf_token = args.token or os.environ.get("HF_TOKEN")
+    hf_token = args.token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
     if not hf_token:
         print("Error: HuggingFace token required. Provide via --token or HF_TOKEN env var")
         print("Get token from: https://huggingface.co/settings/tokens")
         return
 
+    # Determine output directory
+    model_path = Path(args.model_path)
+    model_name = args.repo_id.split('/')[-1]
+
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        # Auto-detect: find training run directory
+        # Pattern: sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model
+        # We want: sft_output_rtx3090/YYYYMMDD_HHMMSS/model-name/
+        if model_path.name == "final_model" and model_path.parent.parent.name in ["sft_output_rtx3090", "kto_output_rtx3090"]:
+            training_run_dir = model_path.parent
+            output_dir = training_run_dir / model_name
+        else:
+            # Fallback: create in same directory as model
+            output_dir = model_path.parent / model_name
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Extract training run timestamp for manifest
+    training_run = output_dir.parent.name if output_dir.parent.name != "." else "unknown"
+
+    print(f"\nOrganized output directory: {output_dir}")
+    print(f"Model name: {model_name}")
+    print(f"Training run: {training_run}\n")
+
+    formats_created = []
+    gguf_files = None
+
     # Upload standard model
     if not args.skip_standard:
         upload_standard_model(
-            model_path=args.model_path,
+            model_path=str(model_path),
             repo_id=args.repo_id,
             hf_token=hf_token,
             save_method=args.save_method,
-            private=args.private
+            private=args.private,
+            output_dir=output_dir,
+            save_local=True
         )
+        formats_created.append(args.save_method)
 
     # Create and upload GGUF versions
     if args.create_gguf:
         gguf_files = create_gguf_versions(
-            model_path=args.model_path,
-            output_dir=args.gguf_output_dir,
-            quantizations=args.gguf_quantizations
+            model_path=str(model_path),
+            output_dir=output_dir,
+            quantizations=args.gguf_quantizations,
+            cleanup=True
         )
 
         upload_gguf_files(
@@ -392,10 +648,41 @@ def main():
             repo_id=args.repo_id,
             hf_token=hf_token
         )
+        formats_created.append("gguf")
 
+    # Create manifest and README
+    print("\n" + "=" * 60)
+    print("CREATING DOCUMENTATION")
+    print("=" * 60)
+
+    create_upload_manifest(
+        output_dir=output_dir,
+        repo_id=args.repo_id,
+        training_run=training_run,
+        formats_created=formats_created,
+        gguf_files=gguf_files
+    )
+
+    create_readme(
+        output_dir=output_dir,
+        repo_id=args.repo_id,
+        training_run=training_run,
+        formats_created=formats_created
+    )
+
+    # Final summary
     print("\n" + "=" * 60)
     print("✓ ALL UPLOADS COMPLETE!")
     print("=" * 60)
+    print(f"\nLocal artifacts saved to: {output_dir}")
+    print(f"HuggingFace model: https://huggingface.co/{args.repo_id}")
+    print(f"\nDirectory structure:")
+    print(f"  {output_dir}/")
+    for fmt in formats_created:
+        subdir = fmt.replace("_", "-") if fmt not in ["lora", "gguf"] else fmt
+        print(f"  ├── {subdir}/")
+    print(f"  ├── upload_manifest.json")
+    print(f"  └── README.md")
 
 
 if __name__ == "__main__":

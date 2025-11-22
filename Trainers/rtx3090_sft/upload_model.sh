@@ -1,57 +1,156 @@
 #!/bin/bash
-# Quick upload script for trained model to HuggingFace
-# Usage: ./upload_model.sh username/model-name
+# Interactive upload script for trained models to HuggingFace
+# Supports selecting training runs and configuring upload options
 
 set -e  # Exit on error
 
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}HuggingFace Model Upload${NC}"
+echo -e "${BLUE}HuggingFace Model Upload (Interactive)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo
 
-# Check if repo ID provided
-if [ -z "$1" ]; then
-    echo -e "${RED}Error: Repository ID required${NC}"
-    echo
-    echo "Usage:"
-    echo "  ./upload_model.sh username/model-name"
-    echo
-    echo "Example:"
-    echo "  ./upload_model.sh professorsynapse/claudesidian-tools-7b-v1"
-    echo
+# Find available training runs
+OUTPUT_DIR="./sft_output_rtx3090"
+
+if [ ! -d "$OUTPUT_DIR" ]; then
+    echo -e "${RED}Error: Output directory not found: $OUTPUT_DIR${NC}"
+    echo "No training runs available."
     exit 1
 fi
 
-REPO_ID="$1"
-MODEL_PATH="./kto_output_rtx3090/final_model"
-CREATE_GGUF="${2:-no}"  # Optional second argument for GGUF creation
+# Get list of training runs that have final_model directory
+echo -e "${BLUE}Available training runs:${NC}"
+echo
 
-# Check if model exists
-if [ ! -d "$MODEL_PATH" ]; then
-    echo -e "${RED}Error: Model not found at $MODEL_PATH${NC}"
-    echo
-    echo "Make sure training has completed and model is saved."
+runs=()
+run_paths=()
+index=1
+
+for run_dir in "$OUTPUT_DIR"/*/; do
+    if [ -d "${run_dir}final_model" ]; then
+        run_name=$(basename "$run_dir")
+        runs+=("$run_name")
+        run_paths+=("${run_dir}final_model")
+        echo "  [$index] $run_name"
+        index=$((index + 1))
+    fi
+done
+
+if [ ${#runs[@]} -eq 0 ]; then
+    echo -e "${RED}No training runs with final_model found in $OUTPUT_DIR${NC}"
     exit 1
 fi
 
-# Check if .env exists in root directory (../../.env)
+echo
+read -p "Select training run number: " run_selection
+
+# Validate selection
+if ! [[ "$run_selection" =~ ^[0-9]+$ ]] || [ "$run_selection" -lt 1 ] || [ "$run_selection" -gt ${#runs[@]} ]; then
+    echo -e "${RED}Invalid selection${NC}"
+    exit 1
+fi
+
+# Get selected run (arrays are 0-indexed)
+selected_run="${runs[$((run_selection - 1))]}"
+model_path="${run_paths[$((run_selection - 1))]}"
+
+echo
+echo -e "${GREEN}✓${NC} Selected: $selected_run"
+echo -e "${GREEN}✓${NC} Model path: $model_path"
+echo
+
+# Get model name
+echo -e "${BLUE}Enter model details:${NC}"
+read -p "Model name (without username): " model_name
+
+if [ -z "$model_name" ]; then
+    echo -e "${RED}Error: Model name required${NC}"
+    exit 1
+fi
+
+# Get username (default to professorsynapse)
+read -p "HuggingFace username [professorsynapse]: " username
+username=${username:-professorsynapse}
+
+repo_id="$username/$model_name"
+
+echo
+echo -e "${GREEN}✓${NC} Repository: $repo_id"
+echo
+
+# Select save method
+echo -e "${BLUE}Select save method:${NC}"
+echo "  [1] merged_16bit (recommended, ~14GB, full quality)"
+echo "  [2] merged_4bit (~3.5GB, quantized)"
+echo "  [3] lora (~320MB, adapters only)"
+echo
+read -p "Select [1-3]: " save_method_selection
+
+case $save_method_selection in
+    1)
+        save_method="merged_16bit"
+        ;;
+    2)
+        save_method="merged_4bit"
+        ;;
+    3)
+        save_method="lora"
+        ;;
+    *)
+        echo -e "${RED}Invalid selection, using merged_16bit${NC}"
+        save_method="merged_16bit"
+        ;;
+esac
+
+echo -e "${GREEN}✓${NC} Save method: $save_method"
+echo
+
+# Ask about GGUF creation
+read -p "Create GGUF quantizations? (y/n): " create_gguf
+
+echo
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}Upload Summary${NC}"
+echo -e "${YELLOW}========================================${NC}"
+echo "Training run:  $selected_run"
+echo "Model path:    $model_path"
+echo "Repository:    $repo_id"
+echo "Save method:   $save_method"
+if [[ "$create_gguf" =~ ^[Yy]$ ]]; then
+    echo "GGUF:          Yes (Q4_K_M, Q5_K_M, Q8_0)"
+else
+    echo "GGUF:          No"
+fi
+echo
+echo "Output will be organized in:"
+echo "  $OUTPUT_DIR/$selected_run/$model_name/"
+echo "    ├── $save_method/"
+if [[ "$create_gguf" =~ ^[Yy]$ ]]; then
+    echo "    ├── gguf/"
+fi
+echo "    ├── upload_manifest.json"
+echo "    └── README.md"
+echo -e "${YELLOW}========================================${NC}"
+echo
+
+# Check if .env exists
 ENV_PATH="../../.env"
 if [ ! -f "$ENV_PATH" ]; then
-    # Fallback to local .env
     ENV_PATH=".env"
     if [ ! -f "$ENV_PATH" ]; then
         echo -e "${RED}Error: .env file not found${NC}"
         echo
         echo "Create .env file with your HuggingFace token:"
-        echo "  In root directory: /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/.env"
-        echo "  Or locally: cp .env.example .env"
-        echo "  # Add: HF_TOKEN=hf_your_token_here or HF_API_KEY=hf_your_token_here"
+        echo "  In root directory: ../../.env"
+        echo "  Or locally: .env"
+        echo "  Add: HF_TOKEN=hf_your_token_here"
         echo
         echo "Get token from: https://huggingface.co/settings/tokens"
         exit 1
@@ -61,18 +160,12 @@ fi
 # Load environment variables
 export $(grep -v '^#' "$ENV_PATH" | xargs)
 
-echo -e "${GREEN}✓${NC} Model found: $MODEL_PATH"
 echo -e "${GREEN}✓${NC} .env file found: $ENV_PATH"
-echo -e "${GREEN}✓${NC} Uploading to: $REPO_ID"
-if [[ "$CREATE_GGUF" == "yes" || "$CREATE_GGUF" == "y" ]]; then
-    echo -e "${GREEN}✓${NC} GGUF creation: Enabled"
-else
-    echo -e "${BLUE}ℹ${NC} GGUF creation: Disabled (use './upload_model.sh $REPO_ID yes' to enable)"
-fi
 echo
 
-# Ask for confirmation
-read -p "Continue with upload? (y/n) " -n 1 -r
+# Final confirmation
+read -p "Proceed with upload? (y/n): " -n 1 -r
+echo
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Upload cancelled."
@@ -80,19 +173,22 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # Activate conda environment
-echo
 echo -e "${BLUE}Activating environment...${NC}"
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ./venv
 
+# Build upload command
+upload_cmd="python src/upload_to_hf.py \"$model_path\" \"$repo_id\" --save-method $save_method"
+
+if [[ "$create_gguf" =~ ^[Yy]$ ]]; then
+    upload_cmd="$upload_cmd --create-gguf"
+fi
+
 # Run upload
 echo
-echo -e "${BLUE}Uploading model...${NC}"
-if [[ "$CREATE_GGUF" == "yes" || "$CREATE_GGUF" == "y" ]]; then
-    python src/upload_to_hf.py "$MODEL_PATH" "$REPO_ID" --save-method merged_16bit --create-gguf
-else
-    python src/upload_to_hf.py "$MODEL_PATH" "$REPO_ID" --save-method merged_16bit
-fi
+echo -e "${BLUE}Running upload...${NC}"
+echo
+eval $upload_cmd
 
 echo
 echo -e "${GREEN}========================================${NC}"
@@ -100,5 +196,8 @@ echo -e "${GREEN}✓ Upload complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo
 echo "View your model at:"
-echo "  https://huggingface.co/$REPO_ID"
+echo "  https://huggingface.co/$repo_id"
+echo
+echo "Local artifacts saved to:"
+echo "  $OUTPUT_DIR/$selected_run/$model_name/"
 echo

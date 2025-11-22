@@ -5,13 +5,12 @@ import argparse
 import io
 import os
 import sys
+import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
 from configs.config_loader import load_config
 from huggingface_hub import HfApi
-
-from src.upload_to_hf import upload_standard_model
 
 # -- CLI -------------------------------------------------------------------- #
 
@@ -64,6 +63,61 @@ def print_banner() -> None:
         lines = [color(line, "magenta") for line in lines]
     print("\n".join(lines) + "\n")
 
+
+
+
+def run_pip(args: list[str], label: str) -> bool:
+    cmd = [sys.executable, "-m", "pip"] + args
+    print(color(f"Installing {label}: {' '.join(args)}", "cyan"))
+    proc = subprocess.run(cmd, check=False)
+    if proc.returncode != 0:
+        print(color(f"pip install for {label} failed (exit {proc.returncode})", "red"))
+        return False
+    return True
+
+
+TORCH_DEFAULT_SPEC = "torch==2.3.1+cu121 torchvision==0.18.1+cu121 torchaudio==2.3.1+cu121"
+TORCH_DEFAULT_INDEX = "https://download.pytorch.org/whl/cu121"
+
+def install_cuda_stack() -> bool:
+    spec = os.getenv("TORCH_CUDA_SPEC", TORCH_DEFAULT_SPEC)
+    index = os.getenv("TORCH_CUDA_INDEX", TORCH_DEFAULT_INDEX)
+    args = spec.split() + ["-f", index]
+    ok = run_pip(args, "CUDA PyTorch stack")
+    if not ok:
+        return False
+    return run_pip(["unsloth[cuda]"], "Unsloth (CUDA)")
+
+
+def ensure_cuda_tooling() -> bool:
+    try:
+        import torch  # type: ignore
+        if torch.cuda.is_available():
+            return True
+        print(color("PyTorch found but CUDA not available; installing CUDA build...", "yellow"))
+    except Exception:
+        print(color("PyTorch not found; installing CUDA build...", "yellow"))
+
+    if not install_cuda_stack():
+        return False
+
+    try:
+        import torch  # type: ignore
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(color(f"PyTorch import failed after install: {exc}", "red"))
+        return False
+
+    if not torch.cuda.is_available():
+        print(color("CUDA still unavailable after install. Check NVIDIA drivers or pick a GPU runtime.", "red"))
+        return False
+
+    try:
+        import unsloth  # type: ignore  # noqa: F401
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(color(f"Unsloth import failed after install: {exc}", "red"))
+        return False
+
+    return True
 
 def resolve_path(path_str: str, base_dir: Path) -> Path:
     path = Path(path_str)
@@ -310,6 +364,12 @@ def maybe_upload(config, run_info: dict) -> None:
     if choice not in ("y", "yes"):
         return
 
+    try:
+        from src.upload_to_hf import upload_standard_model  # Import lazily to avoid early Unsloth load
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(color(f"Unable to import upload helper: {exc}", "red"))
+        return
+
     repo_id = prompt_repo_id(default_repo_id(config))
     save_method = prompt_save_method()
     private = prompt_private(default=False)
@@ -322,7 +382,8 @@ def maybe_upload(config, run_info: dict) -> None:
         return
 
     model_path = run_info.get("final_model_dir")
-    print(color(f"\nUploading {model_path} -> {repo_id} ({save_method})", "cyan"))
+    print(color(f"
+Uploading {model_path} -> {repo_id} ({save_method})", "cyan"))
     upload_standard_model(
         model_path=model_path,
         repo_id=repo_id,
@@ -331,10 +392,11 @@ def maybe_upload(config, run_info: dict) -> None:
         private=private,
     )
 
-    print(color("\nPushing model card...", "cyan"))
+    print(color("
+Pushing model card...", "cyan"))
     card = build_model_card(repo_id, config, run_info)
     push_model_card(repo_id, hf_token, card, private)
-    print(color("✓ Upload complete with model card.", "green"))
+    print(color("?? Upload complete with model card.", "green"))
 
 
 # -- Main ------------------------------------------------------------------- #
@@ -349,13 +411,16 @@ def main(argv: List[str] | None = None) -> int:
     if not config_path.is_absolute():
         config_path = (base_dir / config_path).resolve()
 
+    if not ensure_cuda_tooling():
+        return 1
+
     if not config_path.exists():
         print(color(f"Config file not found: {config_path}", "red"), file=sys.stderr)
         return 1
 
     try:
         config = load_config(str(config_path))
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable-broad-exception-caught
         print(color(f"Unable to load config: {exc}", "red"), file=sys.stderr)
         return 1
 
@@ -372,7 +437,7 @@ def main(argv: List[str] | None = None) -> int:
 
     try:
         import train_sft
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable-broad-exception-caught
         print(color(f"Unable to import training module: {exc}", "red"), file=sys.stderr)
         return 1
 

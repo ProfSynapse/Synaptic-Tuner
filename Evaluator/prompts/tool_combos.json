@@ -21,16 +21,6 @@
     ]
   },
   {
-    "id": "combo_tool_discovery",
-    "question": "Fetch the latest schemas for vaultManager and contentManager, list what is inside Projects/Clients/Northwind/, then open whichever note looks like the main kickoff plan and read it back.",
-    "tags": ["multi-step", "discovery"],
-    "expected_tools": [
-      "get_tools",
-      "vaultManager_listDirectory",
-      "contentManager_readContent"
-    ]
-  },
-  {
     "id": "combo_agent_image",
     "question": "Check which agent models can generate images, render a three-panel storyboard for the Atlas onboarding journey, and append that generated asset's description to Projects/Briefings/Atlas.md.",
     "tags": ["multi-step", "agentManager"],
@@ -48,16 +38,6 @@
       "vaultManager_listDirectory",
       "vaultManager_moveFolder",
       "vaultManager_deleteNote"
-    ]
-  },
-  {
-    "id": "combo_command_runbook",
-    "question": "List our automation commands, run the one that posts the latest runbook to Confluence, and then update the \"Runbook Publishing\" workspace description to mention that the push happened today.",
-    "tags": ["multi-step", "commandManager"],
-    "expected_tools": [
-      "commandManager_listCommands",
-      "commandManager_executeCommand",
-      "memoryManager_updateWorkspace"
     ]
   },
   {

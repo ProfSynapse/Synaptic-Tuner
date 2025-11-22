@@ -96,7 +96,7 @@ Write-Host ""
 # ============================================================================
 Write-Host "[3/6] Checking disk space..." -ForegroundColor Yellow
 
-$Drive = Get-PSDrive C
+$Drive = Get-PSDrive F
 $FreeSpaceGB = [math]::Round($Drive.Free / 1GB, 2)
 $RequiredGB = 30
 

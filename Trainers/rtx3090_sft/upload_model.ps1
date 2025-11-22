@@ -1,8 +1,8 @@
-# Upload to HuggingFace - PowerShell Script for KTO Models
+# Upload to HuggingFace - PowerShell Script for SFT Models
 # Interactive model upload with folder selection
 
 Write-Host "==========================================" -ForegroundColor Blue
-Write-Host "HuggingFace Model Upload (KTO)" -ForegroundColor Blue
+Write-Host "HuggingFace Model Upload (SFT)" -ForegroundColor Blue
 Write-Host "==========================================" -ForegroundColor Blue
 Write-Host ""
 
@@ -45,7 +45,7 @@ Write-Host ""
 Write-Host "Available trained models:" -ForegroundColor Cyan
 Write-Host ""
 
-$OutputDir = ".\kto_output_rtx3090"
+$OutputDir = ".\sft_output_rtx3090"
 if (-not (Test-Path $OutputDir)) {
     Write-Host "Error: Output directory not found: $OutputDir" -ForegroundColor Red
     exit 1
