@@ -1,218 +1,466 @@
-# Claudesidian-MCP Synthetic Training Data Repository
+# Toolset-Training
 
-High-quality synthetic training dataset for fine-tuning local LLMs to reliably use the Claudesidian-MCP tool suite for Obsidian vault operations.
+**Synthetic dataset generation and LLM fine-tuning system** for training local language models to reliably use the **Claudesidian-MCP toolset** for Obsidian vault operations.
 
-## Repository Structure
+> Train small, local models (3B-20B parameters) to call tools as reliably as Claude, ChatGPT, or Copilot using supervised fine-tuning (SFT) and preference learning (KTO).
 
-```
-Synthetic Conversations/
-├── README.md                                    # This file
-├── finetuning-strategy.md                      # Master strategy document
-├── syngen_toolset_v1.0.0_claude.jsonl          # Main Claude-generated dataset (853 examples)
-├── syngen_toolset_v1.0.0_chatgpt.jsonl         # ChatGPT-generated dataset
-├── syngen_toolset_v1.0.0_copilot.jsonl         # Copilot-generated dataset
-├── docs/                                        # Documentation
-│   ├── WORKSPACE_README.md                     # Workspace structure overview
-│   ├── WORKSPACE_ANALYSIS_REPORT.md            # Detailed workspace schema
-│   ├── WORKSPACE_ARCHITECTURE_DIAGRAM.md       # Visual diagrams
-│   ├── WORKSPACE_KEY_FILES_REFERENCE.md        # Source code mapping
-│   ├── WORKSPACE_DOCUMENTATION_INDEX.md        # Navigation guide
-│   ├── SCHEMA_VERIFICATION_REFERENCE.md        # Tool schema reference
-│   └── TOOL_SCHEMA_REFERENCE.md                # Tool definitions
-└── tools/                                       # Validation & utilities
-    ├── validate_syngen.py                      # Validator script
-    └── tool_schemas.json                       # Tool schema definitions
-```
+---
 
-## Dataset Overview
+## 🚀 Quick Start
 
-### Current Stats (v1.0.0)
-- **Total Examples:** 853
-- **Desirable Examples:** 634 (74.4%)
-- **Undesirable Examples:** 215 (25.2%)
-- **Ratio:** 2.95:1 (target 3:1)
-- **Format:** ChatML (no system message)
+### Option 1: Colab Notebooks (Easiest - No Setup Required)
 
-### Coverage
+**For beginners and quick experiments:**
 
-#### Batch Set A: Core Tool Categories (144 examples)
-- **Batch 52:** vaultManager tools (file/folder operations)
-- **Batch 53:** contentManager tools (CRUD operations)
-- **Batch 54:** memoryManager tools (sessions/states/workspace)
+1. **SFT Training** (Recommended for first-time users):
+   - Open [`Trainers/notebooks/sft_colab_beginner.ipynb`](Trainers/notebooks/sft_colab_beginner.ipynb) in Google Colab
+   - Free T4 GPU included
+   - ~45 minutes training time
+   - Produces a 7B model that understands tool calling
 
-#### Batch Set B: Advanced & Multi-Step (144 examples)
-- **Batch 55:** vaultLibrarian tools (advanced search, batch operations)
-- **Batch 56:** agentManager tools (agent lifecycle, image generation)
-- **Batch 57:** Multi-step workflows (2-3 tool chaining with context accumulation)
+2. **Advanced SFT Training** (For tool-calling datasets):
+   - Open [`Trainers/notebooks/sft_colab_tool_calling.ipynb`](Trainers/notebooks/sft_colab_tool_calling.ipynb)
+   - Optimized for Claudesidian-MCP dataset format
+   - Includes HuggingFace upload and GGUF export
 
-#### Batch Set C: Advanced Scenarios (144 examples)
-- **Batch 58:** Tool discovery (get_tools meta-tool usage)
-- **Batch 59:** Error recovery (handling failures and retry logic)
-- **Batch 60:** Clarification scenarios (handling ambiguous requests)
+3. **KTO Refinement** (After SFT):
+   - Open [`Trainers/notebooks/kto_colab_notebook.ipynb`](Trainers/notebooks/kto_colab_notebook.ipynb)
+   - Preference learning to refine model quality
+   - Requires contrastive dataset (positive + negative examples)
 
-#### Future Batches: Workspace-Aware Workflows (in progress)
-- **Batch 61:** Workspace selection & loading
-- **Batch 62:** Workspace-informed actions (read files → perform action)
-- **Batch 63:** Workspace state checkpointing
+**Why notebooks first?**
+- ✅ No local setup required
+- ✅ Free GPU access (Google Colab T4)
+- ✅ Visual progress tracking
+- ✅ Automatic checkpoint management
+- ✅ One-click HuggingFace upload
 
-## Quick Start
+### Option 2: Local Training (For Production)
 
-### Validate Dataset
+**Prerequisites:**
+- NVIDIA GPU with 10GB+ VRAM (RTX 3090 recommended)
+- WSL2 (Ubuntu) or native Linux
+- CUDA 12.1+
+
+**Setup & Training:**
+
 ```bash
-python3 tools/validate_syngen.py syngen_toolset_v1.0.0_claude.jsonl
+# 1. Clone repository
+git clone https://github.com/ProfSynapse/Toolset-Training.git
+cd Toolset-Training
+
+# 2. Setup environment (one-time)
+cd Trainers/rtx3090_sft
+bash setup.sh
+
+# 3. Train with SFT (supervised fine-tuning)
+./train.sh --model-size 7b
+
+# 4. (Optional) Refine with KTO (preference learning)
+cd ../rtx3090_kto
+./train.sh --model-size 7b
 ```
 
-### Generate New Batches
-Use the task-based agents to generate new synthetic examples:
+**See full local setup guide:** [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
+
+### Option 3: Evaluate Trained Models
+
+**Using LM Studio (Recommended - Visual Interface):**
+
 ```bash
-# Agents will write to /tmp/batchXX_claude.jsonl
-# Then merge into main dataset
+# 1. Load your model in LM Studio (http://localhost:1234)
+
+# 2. Run interactive evaluation
+python evaluator.py
+
+# OR use the CLI directly
+python -m Evaluator.lmstudio_cli run --model your-model-name
+
+# 3. Results saved to Evaluator/results/
 ```
 
-### Understanding the Data
+**Using Ollama (CLI-focused):**
 
-Each example follows this structure:
+```bash
+# 1. Serve model via Ollama
+ollama run your-model-name
+
+# 2. Run evaluation
+python -m Evaluator.cli \
+  --model your-model-name \
+  --prompt-set Evaluator/prompts/full_coverage.json \
+  --output Evaluator/results/run_$(date +%s).json \
+  --markdown Evaluator/results/report.md
+```
+
+**Evaluation outputs:**
+- JSON with per-prompt results, validator scores, and latency
+- Markdown report with success/failure breakdown
+- Tool coverage analysis
+
+**See evaluation guide:** [Evaluator/README.md](Evaluator/README.md)
+
+---
+
+## 📁 Repository Structure
+
+```
+Toolset-Training/
+├── Trainers/
+│   ├── notebooks/              # 🎯 START HERE - Colab notebooks
+│   │   ├── sft_colab_beginner.ipynb           # ⭐ Best for first-time users
+│   │   ├── sft_colab_tool_calling.ipynb       # Advanced SFT training
+│   │   ├── kto_colab_notebook.ipynb           # KTO preference learning
+│   │   └── kto_tool_calling_notebook.ipynb    # KTO for tool calling
+│   ├── rtx3090_sft/            # Local SFT training (initial learning)
+│   │   ├── train.sh            # Training wrapper script
+│   │   ├── train_sft.py        # Main training script
+│   │   ├── setup.sh            # Environment setup
+│   │   └── configs/            # Training configurations
+│   ├── rtx3090_kto/            # Local KTO training (refinement)
+│   │   ├── train.sh            # Training wrapper script
+│   │   ├── train_kto.py        # Main training script
+│   │   └── configs/            # Training configurations
+│   └── mistral_lora_mac/       # Apple Silicon (M1/M2/M3) training
+│
+├── Datasets/                   # Training data (ChatML format)
+│   ├── syngen_tools_sft_11.22.25.jsonl        # ⭐ Latest SFT dataset (2,889 examples)
+│   ├── syngen_tools_11.18.25.jsonl            # KTO dataset (4,649 examples)
+│   └── syngen_toolset_v1.0.0_*.jsonl          # Legacy datasets
+│
+├── Evaluator/                  # Model testing harness
+│   ├── cli.py                  # Generic evaluation CLI
+│   ├── lmstudio_cli.py         # LM Studio-specific CLI
+│   ├── interactive_cli.py      # Interactive evaluation
+│   ├── prompts/                # Test prompt sets
+│   │   ├── full_coverage.json  # One prompt per tool (47 prompts)
+│   │   ├── baseline.json       # General scenarios
+│   │   └── tool_combos.json    # Multi-step workflows
+│   └── results/                # Evaluation outputs (JSON + Markdown)
+│
+├── tools/                      # Validation utilities
+│   ├── validate_syngen.py      # Dataset validator
+│   ├── analyze_tool_coverage.py # Tool coverage analysis
+│   └── tool_schemas.json       # Tool definitions (47+ tools)
+│
+└── docs/                       # Architecture & guides
+    ├── SCHEMA_VERIFICATION_REFERENCE.md
+    └── WORKSPACE_*.md          # Workspace documentation
+```
+
+---
+
+## 🎓 Training Guide
+
+### SFT First, KTO Second
+
+**Training Pipeline:**
+1. **SFT (Supervised Fine-Tuning)** - Teaches WHAT tool calling is
+   - Uses positive examples only
+   - Higher learning rate (2e-4)
+   - 3 epochs
+   - Result: Model learns tool syntax and formatting
+
+2. **KTO (Preference Learning)** - Teaches WHICH tool calls are better
+   - Uses positive + negative examples
+   - Very low learning rate (2e-7)
+   - 1 epoch
+   - Result: Model prefers high-quality tool calls
+
+### Training Methods Comparison
+
+| Aspect | SFT (rtx3090_sft) | KTO (rtx3090_kto) |
+|--------|------------------|-------------------|
+| **Purpose** | Initial training | Refinement |
+| **Dataset** | Positive examples only | Positive + negative |
+| **Learning Rate** | 2e-4 (high) | 2e-7 (very low) |
+| **Epochs** | 3 | 1 |
+| **Batch Size** | 6 | 4 |
+| **Training Time** | ~45 min | ~15 min |
+| **Use When** | Starting from scratch | Improving existing model |
+
+### Notebook Training (Colab)
+
+**Start here if you're new:**
+
+1. **Open notebook:** [`Trainers/notebooks/sft_colab_beginner.ipynb`](Trainers/notebooks/sft_colab_beginner.ipynb)
+2. **Connect to free GPU:** Click "Connect" → Runtime → Change runtime type → T4 GPU
+3. **Run all cells:** Click Runtime → Run all
+4. **Wait ~45 minutes:** Progress bars show training status
+5. **Download model:** Final cell exports to HuggingFace or Google Drive
+
+**Advanced users:**
+- Use [`sft_colab_tool_calling.ipynb`](Trainers/notebooks/sft_colab_tool_calling.ipynb) for tool-calling datasets
+- Use [`kto_colab_notebook.ipynb`](Trainers/notebooks/kto_colab_notebook.ipynb) for preference learning
+
+### Local Training (RTX 3090)
+
+**Full setup instructions:** See [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
+
+**Quick start:**
+
+```bash
+# SFT Training (initial learning)
+cd Trainers/rtx3090_sft
+./train.sh --model-size 7b
+
+# KTO Training (refinement)
+cd ../rtx3090_kto
+./train.sh --model-size 7b --local-file ../../Datasets/syngen_tools_11.18.25.jsonl
+```
+
+**Configuration:**
+- Edit `configs/training_config.py` for advanced settings
+- Model sizes: 3b (fast), 7b (recommended), 13b (quality), 20b (specialized)
+- Monitor logs: `tail -f sft_output_rtx3090/*/logs/training_latest.jsonl`
+
+**VRAM Requirements:**
+- 3B: ~8-10 GB
+- 7B: ~9-11 GB
+- 13B: ~14-16 GB
+- 20B: ~18-20 GB
+
+---
+
+## 📊 Datasets
+
+### Current Datasets
+
+| Dataset | Examples | Type | Purpose |
+|---------|----------|------|---------|
+| `syngen_tools_sft_11.22.25.jsonl` | 2,889 | SFT | ⭐ **Latest SFT training** |
+| `syngen_tools_11.18.25.jsonl` | 4,649 | KTO | Interleaved True/False |
+| `syngen_toolset_v1.0.0_claude.jsonl` | 5,120 | Legacy | Original Claude dataset |
+| `syngen_toolset_v1.0.0_chatgpt.jsonl` | 1,088 | Legacy | ChatGPT dataset |
+
+### Dataset Format (ChatML)
+
 ```json
 {
   "conversations": [
     {
       "role": "user",
-      "content": "User request or question"
+      "content": "User request"
     },
     {
       "role": "assistant",
-      "content": "tool_call: toolName\narguments: {...}\n\nResult: {...}\n\nAssistant's response to user"
+      "content": "tool_call: toolName\narguments: {...}\n\nResult: {...}\n\nResponse to user"
     }
   ],
-  "label": true (desirable) or false (undesirable)
+  "label": true
 }
 ```
 
-**Key Requirements:**
-- ✓ NO system message (starts directly with user role)
-- ✓ Context object as FIRST parameter in all tool calls
-- ✓ Complete context with all 7 fields:
-  - `sessionId`: `session_<13 digits>_<9 chars>`
-  - `workspaceId`: `ws_<13 digits>_<9 chars>`
-  - `sessionDescription`: Brief summary
-  - `sessionMemory`: NEVER empty, 1-2 sentences of prior context
-  - `toolContext`: Why this tool is being called
-  - `primaryGoal`: User's overall objective
-  - `subgoal`: What this specific call achieves
-- ✓ Tool results between tool calls and response
+**Key requirements:**
+- ✅ NO system message (starts with user role)
+- ✅ Context object as FIRST parameter in all tool calls
+- ✅ All 7 context fields required (sessionId, workspaceId, sessionDescription, sessionMemory, toolContext, primaryGoal, subgoal)
+- ✅ `sessionMemory` never empty
+- ✅ Single-turn conversations (multi-turn removed in 11/18/25)
 
-## Context Objects
+### Validate Dataset
 
-Every tool call must include a context object as the FIRST parameter:
-
-```json
-{
-  "context": {
-    "sessionId": "session_1731015400000_a1b2c3d4e",
-    "workspaceId": "ws_1731015400000_f5g6h7i8j",
-    "sessionDescription": "What this session is about",
-    "sessionMemory": "Prior context from earlier interactions",
-    "toolContext": "Why we're calling this specific tool",
-    "primaryGoal": "User's main objective",
-    "subgoal": "What this tool call achieves"
-  },
-  "otherParam": "value"
-}
+```bash
+python tools/validate_syngen.py Datasets/syngen_tools_sft_11.22.25.jsonl
 ```
 
-## Labels Explained
+---
 
-### Desirable Examples (634)
-Demonstrate **correct** tool usage:
-- Proper tool selection for the task
-- Accurate parameter types and values
-- Complete context objects
-- Realistic use cases
-- Multi-step workflows with proper chaining
-- Good error handling and clarification
+## 🔍 Evaluation
 
-### Undesirable Examples (215)
-Demonstrate **common mistakes** for contrastive learning:
-- Missing required parameters
-- Wrong tool for task
-- Empty or missing sessionMemory
-- Context objects in wrong position
-- Inconsistent sessionIds in multi-step workflows
-- Poor error recovery
-- Over/under clarification
+### Quick Evaluation (Interactive)
 
-## Validator Details
+```bash
+# Interactive prompt - choose model from LM Studio
+python evaluator.py
+```
 
-The validator checks:
-- ✓ JSON validity
-- ✓ ChatML format (no system message)
-- ✓ Context object presence and format
-- ✓ SessionId/workspaceId format correctness
-- ✓ All 7 context fields present
-- ✓ SessionMemory never empty
-- ✓ Context as first parameter
-- ✓ Tool schema compliance
-- ✓ Desirable vs undesirable labeling
+### LM Studio CLI (Recommended)
 
-**Special Handling:** Undesirable examples are allowed to have intentional errors in tool parameters (for training), but structural issues (missing context fields) must follow the pattern.
+```bash
+# List available models
+python -m Evaluator.lmstudio_cli list-models
 
-## Tools & Schemas
+# Run full coverage evaluation (47 prompts, one per tool)
+python -m Evaluator.lmstudio_cli run --model your-model-name
 
-See `tools/tool_schemas.json` for complete tool definitions including:
-- 42+ tool schemas across 5 agents
-- Required/optional parameters
-- Parameter types and descriptions
-- Context schema requirements
-- Tool categories and agent mappings
+# Results saved to:
+# - Evaluator/results/your-model-name_full_coverage_TIMESTAMP.json
+# - Evaluator/results/your-model-name_full_coverage_TIMESTAMP.md
+```
 
-## Documentation
+### Advanced Evaluation
 
-### For Understanding Workspaces
-1. Start: `docs/WORKSPACE_README.md`
-2. Details: `docs/WORKSPACE_ANALYSIS_REPORT.md`
-3. Visuals: `docs/WORKSPACE_ARCHITECTURE_DIAGRAM.md`
-4. Code: `docs/WORKSPACE_KEY_FILES_REFERENCE.md`
-5. Navigation: `docs/WORKSPACE_DOCUMENTATION_INDEX.md`
+```bash
+# Custom prompt set
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model your-model-name \
+  --prompt-set Evaluator/prompts/tool_combos.json \
+  --output Evaluator/results/combos_$(date +%s).json \
+  --markdown Evaluator/results/combos_report.md
 
-### For Understanding Datasets
-- `finetuning-strategy.md` - Master strategy document
-- `docs/SCHEMA_VERIFICATION_REFERENCE.md` - Tool schema reference
-- `docs/TOOL_SCHEMA_REFERENCE.md` - Tool definitions
+# Using Ollama instead
+python -m Evaluator.cli \
+  --backend ollama \
+  --model your-model-name \
+  --prompt-set Evaluator/prompts/baseline.json \
+  --output Evaluator/results/run.json
+```
 
-## Batch Generation Process
+### Prompt Sets
 
-1. **Plan** - Determine focus area and example count
-2. **Generate** - Use Task agents to create examples
-3. **Validate** - Run validator on generated batch
-4. **Merge** - Add validated examples to main dataset
-5. **Check Stats** - Verify ratio and count targets
+- **`full_coverage.json`** - One prompt per tool (47 prompts)
+- **`baseline.json`** - General scenarios
+- **`tool_combos.json`** - Multi-step workflows
 
-## Contributing New Batches
+**See full evaluation guide:** [Evaluator/README.md](Evaluator/README.md)
 
-When generating new batches:
-1. Follow the ChatML format strictly (no system message)
-2. Always include complete context objects
+---
+
+## 🛠 Tool Coverage
+
+**47+ tools across 5 agent categories:**
+
+- **vaultManager** - File/folder operations (create, read, update, delete, move, copy)
+- **contentManager** - CRUD operations for notes and content
+- **memoryManager** - Session/state/workspace management
+- **vaultLibrarian** - Advanced search, batch operations, metadata queries
+- **agentManager** - Agent lifecycle, prompt execution, image generation
+
+**Schema source:** `tools/tool_schemas.json`
+
+---
+
+## 📚 Documentation
+
+### Getting Started
+- **[This README]** - Overview and quick start
+- **[Trainers/notebooks/sft_colab_beginner.ipynb]** - Interactive training tutorial
+- **[Evaluator/README.md]** - Evaluation guide
+
+### Advanced Training
+- **[Trainers/rtx3090_sft/README.md]** - Local SFT training
+- **[Trainers/rtx3090_kto/README.md]** - Local KTO training
+- **[CLAUDE.md]** - Comprehensive development guide
+
+### Reference
+- **[docs/SCHEMA_VERIFICATION_REFERENCE.md]** - Tool schema reference
+- **[finetuning-strategy.md]** - Master strategy document (203KB)
+- **[KTO_TRAINING_REFERENCE.md]** - KTO-specific notes
+
+---
+
+## 🖥 Platform Support
+
+| Platform | SFT | KTO | Notebooks | Status |
+|----------|-----|-----|-----------|--------|
+| **Google Colab** | ✅ | ✅ | ✅ | ⭐ Recommended for beginners |
+| **WSL2 / Linux** | ✅ | ✅ | ✅ | ⭐ Best for production |
+| **Windows PowerShell** | ⚠️ | ⚠️ | ❌ | Limited (use WSL2) |
+| **macOS (Apple Silicon)** | ✅ | ❌ | ✅ | MLX-based (see mistral_lora_mac) |
+
+**Windows users:** Strongly recommend WSL2 for full compatibility. PowerShell has known issues with multiprocessing.
+
+---
+
+## 🔧 Troubleshooting
+
+### CUDA Out of Memory
+
+**Reduce batch size:**
+```bash
+python train_sft.py --model-size 7b --batch-size 4 --gradient-accumulation 6
+```
+
+**Or reduce sequence length:**
+```bash
+python train_sft.py --model-size 7b --max-seq-length 1024
+```
+
+### Training Logs Not Appearing
+
+**Fixed in 11/18/25.** Logs now correctly write to:
+- `sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_YYYYMMDD_HHMMSS.jsonl`
+- `kto_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_YYYYMMDD_HHMMSS.jsonl`
+
+**Monitor in real-time:**
+```bash
+tail -f sft_output_rtx3090/*/logs/training_latest.jsonl
+```
+
+### Model Outputs Generic Text Instead of Tool Calls
+
+**Diagnosis:** Wrong training method for initial training.
+
+**Solution:** Use SFT first, then optionally refine with KTO.
+1. Train with `rtx3090_sft` using positive examples (teaches tool syntax)
+2. Optionally refine with `rtx3090_kto` using contrastive examples
+
+### Dataset Validation Failures
+
+**Common issues:**
+- Missing context object (must be first parameter)
+- Empty `sessionMemory` field (never allowed)
+- Incorrect ID format (must match: `session_<13digits>_<9chars>`)
+- Multi-turn conversations (removed in 11/18/25 update)
+
+**Fix:**
+```bash
+python tools/validate_syngen.py your_dataset.jsonl
+```
+
+---
+
+## 📦 Environment Setup
+
+**Create `.env` file in repository root:**
+
+```bash
+# HuggingFace (required for uploads, optional for training)
+HF_TOKEN=hf_your_token_here
+
+# Weights & Biases (optional)
+WANDB_API_KEY=your_wandb_key
+```
+
+**Getting tokens:**
+- HuggingFace: https://huggingface.co/settings/tokens (create with "write" access)
+- W&B: https://wandb.ai/authorize
+
+---
+
+## 🤝 Contributing
+
+### Adding New Datasets
+
+1. Follow ChatML format (no system message)
+2. Include complete context objects (all 7 fields)
 3. Never leave sessionMemory empty
 4. Use proper ID formats (13 digits_9 chars)
-5. Ensure no duplicates from existing dataset
-6. Maintain ~3:1 desirable:undesirable ratio
-7. Test with validator before merging
+5. Validate before merging:
+   ```bash
+   python tools/validate_syngen.py your_new_dataset.jsonl
+   ```
 
-## Training Usage
+### Reporting Issues
 
-This dataset is optimized for:
-- **Unsloth universal format** - Simple prompt/completion pairs
-- **KTO training** - Paired desirable/undesirable examples
-- **Tool calling focus** - No general conversation, only tool use
-- **Multi-turn completeness** - Full execution cycles with results
-- **Context accumulation** - Learning to track state across steps
+- GitHub Issues: https://github.com/ProfSynapse/Toolset-Training/issues
+- Include: dataset version, training logs, error messages
 
-## License & Attribution
+---
+
+## 📜 License
 
 Generated using Claude (Anthropic) for the Claudesidian-MCP project.
 
 ---
 
-**Last Updated:** 2025-11-09
-**Total Commits:** See `.git` for full history
-**Next Target:** 1,000+ examples with workspace-aware workflows
+## 🎯 Next Steps
+
+1. **New users:** Start with [`Trainers/notebooks/sft_colab_beginner.ipynb`](Trainers/notebooks/sft_colab_beginner.ipynb)
+2. **Advanced users:** Setup local training with [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
+3. **Evaluation:** Use LM Studio CLI: `python -m Evaluator.lmstudio_cli run`
+4. **Questions:** Check [CLAUDE.md](CLAUDE.md) for comprehensive development guide
+
+**Last Updated:** 2025-11-22
