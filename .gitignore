@@ -88,3 +88,6 @@ manual_score_batch*.py
 Datasets/quality_review/batch_*_summary.txt
 Datasets/quality_review/batch_*_summary.md
 Datasets/quality_review/score_batch*.py
+
+# Archive directory (legacy files, not actively maintained)
+archive/
