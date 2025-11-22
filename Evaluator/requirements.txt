@@ -1,0 +1,13 @@
+# Evaluator Dependencies
+# Python 3.10+ required
+
+# HTTP client for backend communication
+requests>=2.31.0
+
+# Note: The evaluator also requires one of these backends to be running:
+# - Ollama (https://ollama.com/) - for local model serving
+# - LM Studio (https://lmstudio.ai/) - for local model serving
+#
+# The evaluator validates tool calls against schemas defined in:
+# - tools/tool_schemas.json (47 tools across 5 agent categories)
+# - tools/validate_syngen.py (validation logic)

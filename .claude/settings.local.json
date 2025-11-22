@@ -49,7 +49,9 @@
       "Bash(cp:*)",
       "WebFetch(domain:platform.openai.com)",
       "Read(//mnt/wsl/**)",
-      "Read(//mnt/c/Users/Joseph/Documents/Code/Toolset-Training/Trainers/rtx3090_sft/**)"
+      "Read(//mnt/c/Users/Joseph/Documents/Code/Toolset-Training/Trainers/rtx3090_sft/**)",
+      "Bash(timeout 5 python3:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []
