@@ -220,9 +220,9 @@ def validate_tool_call_structure(content: str, report: ExampleReport) -> None:
         except json.JSONDecodeError as e:
             report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Failed to parse arguments JSON - {e}")
 
-        # 4. Validate Result presence and format
+        # 4. Validate Result format if present
         if "Result:" not in section:
-            report.add("WARN", f"Tool call #{tool_call_num} ({tool_name}): Missing 'Result:' response")
+            # Results are optional - tool calls can exist without results
             continue
 
         result_idx = section.find("Result:")
@@ -384,10 +384,6 @@ def validate_assistant_content(content: str, report: ExampleReport) -> None:
             validate_context(args, report)
             # Validate against actual tool schema
             validate_tool_against_schema(tool_name, args, report, idx)
-
-        # Check that tool results are present if tool calls exist
-        if "Result:" not in content:
-            report.add("WARN", "Tool calls present but no 'Result:' markers found")
 
 
 def validate_example(idx: int, example: dict) -> ExampleReport:
