@@ -7,6 +7,12 @@ from typing import Tuple, Optional
 import torch
 
 
+# Mistral-specific chat template (for models using [INST] format)
+# Official Mistral format: <s>[INST] user [/INST] assistant</s>
+# System messages are prepended before first [INST] (Mistral doesn't have native system support)
+MISTRAL_CHAT_TEMPLATE = """{{ bos_token }}{% for message in messages %}{% if message['role'] == 'system' %}{% if loop.index == 1 %}{{ message['content'] + ' ' }}{% endif %}{% elif message['role'] == 'user' %}{{ '[INST] ' + message['content'] + ' [/INST]' }}{% elif message['role'] == 'assistant' %}{{ ' ' + message['content'] + eos_token }}{% endif %}{% endfor %}"""
+
+# Generic fallback template for other models (Zephyr/ChatML style)
 DEFAULT_CHAT_TEMPLATE = """{% for message in messages %}
 {% if message['role'] == 'user' %}
 {{ '<|user|>\n' + message['content'] + eos_token }}
@@ -19,6 +25,12 @@ DEFAULT_CHAT_TEMPLATE = """{% for message in messages %}
 {{ '<|assistant|>' }}
 {% endif %}
 {% endfor %}"""
+
+
+def _is_mistral_model(model_name: str) -> bool:
+    """Detect if a model is a Mistral model based on name."""
+    model_name_lower = model_name.lower()
+    return 'mistral' in model_name_lower
 
 
 def load_model_and_tokenizer(
@@ -60,10 +72,19 @@ def load_model_and_tokenizer(
 
     # Add chat template if missing
     if tokenizer.chat_template is None:
-        print("\n⚠ No chat template found, adding default ChatML template")
-        tokenizer.chat_template = DEFAULT_CHAT_TEMPLATE
+        # Detect model type and use appropriate template
+        if _is_mistral_model(model_name):
+            print("\n⚠ No chat template found, adding Mistral [INST] template")
+            tokenizer.chat_template = MISTRAL_CHAT_TEMPLATE
+            print("   Format: <s>[INST] user [/INST] assistant</s>")
+        else:
+            print("\n⚠ No chat template found, adding default template")
+            tokenizer.chat_template = DEFAULT_CHAT_TEMPLATE
     else:
         print("✓ Chat template already configured")
+        # Optionally display what format is being used
+        if _is_mistral_model(model_name):
+            print("   Detected Mistral model - ensure template uses [INST] format")
 
     # Verify model loaded correctly
     print(f"\n✓ Model loaded: {model.config._name_or_path}")
