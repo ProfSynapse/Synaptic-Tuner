@@ -1,5 +1,7 @@
 # Dataset Enhancement Specification
 
+**Version:** 1.1 (Updated 2025-11-22 after Round 1 feedback)
+
 ## Mission
 
 Enhance low-quality synthetic tool-calling examples by fixing issues identified in quality scores. Each example has been scored across 5 dimensions and marked as `label: false` (undesirable). Your task is to create improved versions that would score higher and be marked as `label: true` (desirable).
@@ -300,6 +302,107 @@ You have been assigned: **batch_XXX.jsonl**
    - Examples enhanced: XX/50
    - Validation status: PASS/FAIL
    - Common issues fixed: [list]
+
+## sessionMemory Best Practices
+
+**Minimum:** 50 characters
+**Target:** 80-120 characters
+**Maximum:** 150 characters (avoid excessive length)
+
+**Content Guidelines:**
+- Reference specific prior actions with concrete details
+- Include numbers, file names, folder paths when relevant
+- Show workflow continuity ("Previously X, now Y")
+- Avoid generic placeholders ("User context", "Previous session")
+
+**Good Examples:**
+- "User organized Projects folder. Created 3 subfolders for redesign workflow. Previously reviewed 47 files for migration."
+- "Completed authentication module. UI components 60% done. Backend API endpoints 80% complete."
+
+## toolContext Templates by Tool Category
+
+### Search/List Operations
+**Template:** "Using [tool] to locate [target] before [next action]. Searching enables [workflow benefit]."
+
+**Example:** "Using vaultLibrarian_searchContent to locate research notes before organizing files. Search results will guide folder structure decisions."
+
+### Create Operations
+**Template:** "Creating [resource] to establish [purpose]. New [item] enables [workflow capability]."
+
+**Example:** "Creating Project folder to establish workspace organization. New structure enables systematic file management."
+
+### Update/Modify Operations
+**Template:** "Modifying [target] to [purpose]. Using [method] instead of [alternative] to preserve [what]."
+
+**Example:** "Appending to README to add documentation. Using append instead of replace to preserve existing content and history."
+
+### Load/Retrieve Operations
+**Template:** "Loading [resource] to continue [workflow] from [prior state]. Restoration enables [benefit]."
+
+**Example:** "Loading Friday session to continue project work from last session. Restoration provides context and continuity."
+
+## Common Pitfalls to Avoid
+
+### ❌ DON'T: Copy quality_scores into enhanced examples
+- Remove ALL metadata: quality_scores, _index, _line_number, relabeled
+- Output should ONLY have: conversations and label
+
+### ❌ DON'T: Add Result objects to assistant completions
+- Assistant message = tool_call + arguments ONLY
+- NO Result objects, NO response text, NO preamble
+
+### ❌ DON'T: Keep empty sessionMemory
+- Every example must have sessionMemory ≥ 50 chars
+- "Starting new session" is NOT acceptable (too generic)
+
+### ❌ DON'T: Use objects for toolContext
+- toolContext MUST be STRING type
+- {"currentPath": "..."} → "Listing sessions to locate work context"
+
+### ❌ DON'T: Keep "Result:" in user messages
+- Convert to natural requests
+- "Result: {...}" → "Please help me with..."
+
+### ✅ DO: Validate your batch
+- Run: `python tools/validate_syngen.py [your_file].jsonl`
+- Expect "Result:" warnings (this is correct - see below)
+- Fix any ERROR messages (warnings are OK)
+
+## Expected Validation Warnings
+
+When validating enhanced batches, you will see warnings about **"Tool calls present but no 'Result:' markers found"**. This is **expected and correct** behavior.
+
+**Why this happens:**
+- Single-turn format intentionally omits Result objects
+- Validator warns because it expects multi-turn conversations
+- These warnings do NOT indicate errors
+
+**Action:** Ignore these warnings - they confirm proper single-turn structure.
+
+## Handling Unknown Tool Parameters
+
+Some original examples may include parameters not in tool_schemas.json (e.g., `folder`, `provider`, `fileTypes`).
+
+**What to do:**
+- **Keep parameters if they're contextually relevant** (even if not in schema)
+- **Remove parameters if they're clearly wrong** (typos, inappropriate for tool)
+- **Validation warnings are OK** - they don't fail validation
+
+The validator will warn about unexpected parameters, but this doesn't affect training quality.
+
+## Pre-Submission Checklist
+
+Before reporting your batch as complete, verify:
+
+- [ ] All 50 examples have `label: true`
+- [ ] All sessionMemory ≥ 50 chars with specific details
+- [ ] All toolContext are STRING type (no objects)
+- [ ] NO Result objects in assistant completions
+- [ ] NO metadata fields (quality_scores, _index, etc.)
+- [ ] Validation passed with 0 errors (warnings OK)
+- [ ] Assistant format: `tool_call: toolName\narguments: {...}` only
+- [ ] User prompts are natural (no "Result:" JSON)
+- [ ] All 7 context fields present in every example
 
 ## Reference Files
 
