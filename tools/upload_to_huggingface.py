@@ -13,14 +13,14 @@ from huggingface_hub import HfApi, create_repo
 load_dotenv()
 
 # Get Hugging Face token
-HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+HF_TOKEN = os.getenv("HF_API_KEY") or os.getenv("HUGGINGFACE_TOKEN")
 if not HF_TOKEN:
-    print("Error: HUGGINGFACE_TOKEN not found in .env file")
+    print("Error: HF_API_KEY or HUGGINGFACE_TOKEN not found in .env file")
     sys.exit(1)
 
 # Configuration
-REPO_ID = "jrosenbaum/claudesidian-synthetic-dataset"  # Change this to your desired repo name
-DATASET_FILE = "syngen_toolset_v1.0.0_claude.jsonl"
+REPO_ID = "professorsynapse/claudesidian-synthetic-dataset"
+DATASET_FILE = "Datasets/syngen_tools_sft_11.23.25_toolcall.jsonl"
 REPO_TYPE = "dataset"  # This is a dataset, not a model
 
 def upload_dataset():
@@ -55,16 +55,17 @@ def upload_dataset():
             print(f"Note: {e}")
 
         # Upload the file
+        filename = Path(DATASET_FILE).name
         print(f"\nUploading {DATASET_FILE}...")
         info = api.upload_file(
             path_or_fileobj=DATASET_FILE,
-            path_in_repo=DATASET_FILE,
+            path_in_repo=filename,
             repo_id=REPO_ID,
             repo_type=REPO_TYPE,
             token=HF_TOKEN
         )
         print(f"✓ File uploaded successfully!")
-        print(f"  URL: https://huggingface.co/datasets/{REPO_ID}/blob/main/{DATASET_FILE}")
+        print(f"  URL: https://huggingface.co/datasets/{REPO_ID}/blob/main/{filename}")
 
         # Create README.md if it doesn't exist
         print("\nCreating/updating README.md...")
@@ -225,7 +226,7 @@ These synthetic examples are provided for research and training purposes.
         print(f"  https://huggingface.co/datasets/{REPO_ID}")
         print(f"\nYou can load it with:")
         print(f"  from datasets import load_dataset")
-        print(f"  ds = load_dataset('{REPO_ID}', data_files='syngen_toolset_v1.0.0_claude.jsonl')")
+        print(f"  ds = load_dataset('{REPO_ID}', data_files='{filename}')")
 
     except Exception as e:
         print(f"Error during upload: {e}")

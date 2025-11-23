@@ -100,10 +100,10 @@ class DatasetConfig:
 
     # Dataset source
     dataset_name: str = "professorsynapse/claudesidian-synthetic-dataset"
-    dataset_file: str = "syngen_tools_sft_pingpong_11.18.25.jsonl"  # Ping-pong restructured (5,841 examples)
+    dataset_file: str = "syngen_tools_sft_11.23.25_toolcall.jsonl"  # Tool call format (OpenAI-compatible)
 
     # Use local file (relative to project root)
-    local_file: Optional[str] = "../../Datasets/syngen_tools_sft_pingpong_11.18.25.jsonl"
+    local_file: Optional[str] = "../../Datasets/syngen_tools_sft_11.23.25_toolcall.jsonl"
 
     # Dataset processing
     num_proc: int = 1  # Set to 1 on Windows to avoid multiprocessing issues
