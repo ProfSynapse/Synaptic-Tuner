@@ -1,146 +1,65 @@
-# ============================================================================
-# KTO Training Configuration for RTX 3090
-# Kahneman-Tversky Optimization for preference learning
-# ============================================================================
-
-# Model Configuration
 model:
-  # Model selection - Tier 2 (7B) recommended for production
-  # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
-  # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
-  # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "unsloth/mistral-7b-instruct-v0.3-bnb-4bit"
-
-  # Model parameters
-  max_seq_length: 2048  # Dataset 99th percentile: 1506 tokens
-  dtype: null  # Auto-detection
-  load_in_4bit: true  # Essential for memory efficiency
-
-# LoRA Adapter Configuration
+  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\sft_output_rtx3090\20251123_090722\merged_model
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: true
 lora:
   r: 32
   lora_alpha: 64
   lora_dropout: 0.05
-  bias: "none"
+  bias: none
   target_modules:
-    - "q_proj"
-    - "k_proj"
-    - "v_proj"
-    - "o_proj"
-    - "gate_proj"
-    - "up_proj"
-    - "down_proj"
-  use_gradient_checkpointing: "unsloth"  # Unsloth's optimized version
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+  use_gradient_checkpointing: unsloth
   random_state: 3407
-
-# KTO Training Configuration
+  use_rslora: false
+  use_dora: false
 training:
-  # Output directory
-  output_dir: "./kto_output_rtx3090"
-
-  # Batch configuration
+  output_dir: ./kto_output_rtx3090
   per_device_train_batch_size: 6
-  gradient_accumulation_steps: 4  # Effective batch = 24
-
-  # KTO-specific parameters
-  beta: 0.2  # KTO beta parameter for preference learning
-  desirable_weight: 0.70  # Weight for desirable (label=true) examples (58.8% of dataset)
-  undesirable_weight: 1.0  # Weight for undesirable (label=false) examples (41.2% of dataset)
-
-  # Learning rate - VERY LOW for preference learning
-  learning_rate: 2e-7  # (much lower than SFT's 2e-4)
-  max_grad_norm: 0.5  # Tighter clipping than SFT
-  lr_scheduler_type: "cosine"
-
-  # ============================================================================
-  # KTO-S: SIGN CORRECTION FOR STABLE KL DIVERGENCE
-  # ============================================================================
-  # Fixes gradient scaling bug in standard KTO that causes early KL spikes
-  # Research shows KTO has instability when training from base models
-  #
-  # Standard KTO: Higher-KL responses get STRONGER updates (bug!)
-  # KTO-S:        SIGN correction fixes gradient direction
-  #
-  # Expected results with KTO-S:
-  #   Step 10: KL < 0.1 (vs ~0.2 without)
-  #   Step 20: KL < 0.1 (vs ~2.0 explosion without)
-  #
-  # To disable: Set use_kto_s to false (not recommended for base models)
-  # ============================================================================
-  use_kto_s: false  # DISABLED - Testing standard KTO
-
-  # ============================================================================
-  # TWO-STAGE LEARNING RATE SCHEDULE
-  # ============================================================================
-  # Preemptively reduces LR at a specific step to prevent instability
-  # Theory: Optimizer builds momentum, then overshoots at certain steps
-  # Solution: Reduce LR before the instability zone
-  #
-  # To disable: Set use_two_stage_lr to false
-  # To tune: Adjust lr_reduction_step and lr_reduction_factor
-  # ============================================================================
-  use_two_stage_lr: false  # Disabled - using KTO-S instead
-  lr_reduction_step: 50  # Reduce LR at this step
-  lr_reduction_factor: 0.5  # Multiply LR by this factor (50% reduction)
-
-  # Sequence lengths
-  max_length: 2048  # Maximum total sequence length
-  max_prompt_length: 1024  # Should be ≤ max_length / 2
-
-  # Memory optimizations
-  gradient_checkpointing: true  # REQUIRED to prevent memory leak
-  optim: "adamw_8bit"  # 8-bit optimizer saves ~2GB VRAM
-  fp16: false  # Set dynamically based on GPU
-  bf16: true  # RTX 3090 supports BF16 (Ampere)
-
-  # Training schedule - Single epoch for preference learning
-  num_train_epochs: 1  # KTO converges faster than SFT
-  warmup_ratio: 0.15  # 15% warmup for stability
-
-  # Logging and saving
-  logging_steps: 5  # Log every 5 steps
-  save_steps: 50  # Save checkpoint every 50 steps
-  save_total_limit: 3  # Keep last 3 checkpoints
-
-  # Performance
-  dataloader_num_workers: 0  # MUST be 0 on WSL2 (multiprocessing hangs)
+  gradient_accumulation_steps: 4
+  beta: 0.2
+  desirable_weight: 0.7
+  undesirable_weight: 1.0
+  learning_rate: 5e-7
+  max_grad_norm: 0.5
+  lr_scheduler_type: cosine
+  use_kto_s: false
+  use_two_stage_lr: false
+  lr_reduction_step: 50
+  lr_reduction_factor: 0.5
+  max_length: 2048
+  max_prompt_length: 1024
+  gradient_checkpointing: true
+  optim: adamw_8bit
+  fp16: false
+  bf16: true
+  num_train_epochs: 1
+  warmup_ratio: 0.15
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+  dataloader_num_workers: 0
   dataloader_pin_memory: true
-  group_by_length: false  # Can cause hangs with multiprocessing
-
-  # Evaluation (optional)
-  eval_strategy: "no"  # "steps" or "no"
+  group_by_length: false
+  eval_strategy: 'no'
   eval_steps: 100
-
-# Dataset Configuration
 dataset:
-  # Dataset source
-  dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "behavior_merged_kto_11.23.25.jsonl"  # Behavior dataset (1,572 examples)
-
-  # Use local file (relative to Trainers/rtx3090_kto/)
-  local_file: "../../Datasets/behavior_merged_kto_11.23.25.jsonl"
-
-  # Dataset processing
-  num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
-  test_size: 0.1  # For train/validation split (optional)
-
-  # Format settings
-  chat_template: "chatml"  # or "mistral", "llama", etc.
-
-# Weights & Biases (optional)
+  dataset_name: professorsynapse/claudesidian-synthetic-dataset
+  dataset_file: behavior_merged_kto_11.23.25.jsonl
+  local_file: ../../Datasets/behavior_merged_kto_11.23.25.jsonl
+  num_proc: 1
+  test_size: 0.1
+  chat_template: chatml
 wandb:
-  enabled: false  # Set to true to enable W&B logging
-  project: "kto-finetuning"  # W&B project name
-  run_name: null  # Run name (auto-generated if null)
-  entity: null  # W&B entity/team
-
-# Random seed
+  enabled: false
+  project: kto-finetuning
+  run_name: null
+  entity: null
 seed: 42
-
-# Notes:
-# - This is optimized for RTX 3090 24GB VRAM
-# - Expected VRAM usage: ~9-11GB for 7B model (includes reference model)
-# - Training time: ~15 minutes for 1 epoch with 4,649 examples
-# - For 3B models: increase batch_size to 8, reduce to ~10GB VRAM
-# - For 13B models: reduce batch_size to 2, expect ~16GB VRAM
-# - KTO requires interleaved dataset (True/False/True/False pattern)

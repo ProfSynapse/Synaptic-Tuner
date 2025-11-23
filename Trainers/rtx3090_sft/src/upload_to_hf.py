@@ -259,7 +259,9 @@ def create_gguf_versions(
     gguf_dir.mkdir(parents=True, exist_ok=True)
 
     # Use temp directory for intermediate files
-    temp_work_dir = Path(tempfile.mkdtemp(prefix='gguf_work_', dir=str(Path.home() / 'tmp')))
+    tmp_base = Path.home() / 'tmp'
+    tmp_base.mkdir(parents=True, exist_ok=True)  # Ensure tmp directory exists
+    temp_work_dir = Path(tempfile.mkdtemp(prefix='gguf_work_', dir=str(tmp_base)))
 
     try:
         # First, save merged model to temp location
@@ -294,9 +296,13 @@ def create_gguf_versions(
                 build_dir = llamacpp_dir / "build"
                 build_dir.mkdir(exist_ok=True)
 
-                # Configure with CMake
+                # Configure with CMake (disable CURL and GPU to minimize dependencies)
                 subprocess.run(
-                    ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release"],
+                    ["cmake", "..",
+                     "-DCMAKE_BUILD_TYPE=Release",
+                     "-DLLAMA_CURL=OFF",
+                     "-DGGML_CUDA=OFF",
+                     "-DGGML_METAL=OFF"],
                     cwd=str(build_dir),
                     check=True,
                     capture_output=True
@@ -366,8 +372,13 @@ def create_gguf_versions(
         # Cleanup temporary work directory
         if cleanup and temp_work_dir.exists():
             print(f"\nCleaning up temporary files...")
-            shutil.rmtree(temp_work_dir)
-            print("✓ Temporary files removed")
+            try:
+                shutil.rmtree(temp_work_dir)
+                print("✓ Temporary files removed")
+            except PermissionError as e:
+                print(f"⚠ Could not remove some temporary files (Windows file lock): {temp_work_dir}")
+                print(f"  You can manually delete this directory later if needed")
+                # Continue anyway - GGUF files are already saved
 
 
 def upload_gguf_files(

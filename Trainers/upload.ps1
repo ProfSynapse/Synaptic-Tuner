@@ -1,24 +1,22 @@
 # ============================================================================
-# Training Launcher - Quick Access to SFT and KTO Trainers
+# Model Upload Launcher - Quick Access to SFT and KTO Upload Scripts
 # ============================================================================
 
 Clear-Host
 Write-Host "============================================================================" -ForegroundColor Cyan
-Write-Host "            Toolset Training - Trainer Selection                          " -ForegroundColor Cyan
+Write-Host "            Model Upload - Select Trainer Type                            " -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "Select a trainer:" -ForegroundColor Yellow
+Write-Host "Which model do you want to upload?" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  1) SFT (Supervised Fine-Tuning)" -ForegroundColor White
-Write-Host "     - Teaches tool-calling from scratch" -ForegroundColor Gray
-Write-Host "     - Uses positive examples only" -ForegroundColor Gray
-Write-Host "     - Higher learning rate (2e-4), 3 epochs" -ForegroundColor Gray
+Write-Host "  1) SFT Model" -ForegroundColor White
+Write-Host "     - Upload models from rtx3090_sft/sft_output_rtx3090/" -ForegroundColor Gray
+Write-Host "     - Merge LoRA adapters and create GGUF versions" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  2) KTO (Preference Learning)" -ForegroundColor White
-Write-Host "     - Refines existing models" -ForegroundColor Gray
-Write-Host "     - Uses positive + negative examples" -ForegroundColor Gray
-Write-Host "     - Lower learning rate (2e-7), 1 epoch" -ForegroundColor Gray
+Write-Host "  2) KTO Model" -ForegroundColor White
+Write-Host "     - Upload models from rtx3090_kto/kto_output_rtx3090/" -ForegroundColor Gray
+Write-Host "     - Merge LoRA adapters and create GGUF versions" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  3) Exit" -ForegroundColor White
 Write-Host ""
@@ -28,17 +26,17 @@ $Choice = Read-Host "Enter choice [1-3]"
 switch ($Choice) {
     "1" {
         Write-Host ""
-        Write-Host "Launching SFT trainer..." -ForegroundColor Green
+        Write-Host "Launching SFT model upload..." -ForegroundColor Green
         Write-Host ""
         Set-Location "rtx3090_sft"
-        & .\train.ps1
+        & .\upload_model.ps1
     }
     "2" {
         Write-Host ""
-        Write-Host "Launching KTO trainer..." -ForegroundColor Green
+        Write-Host "Launching KTO model upload..." -ForegroundColor Green
         Write-Host ""
         Set-Location "rtx3090_kto"
-        & .\train.ps1
+        & .\upload_model.ps1
     }
     "3" {
         Write-Host ""

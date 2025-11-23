@@ -150,12 +150,12 @@ Write-Host "  Output Directory:" -ForegroundColor Yellow
 Write-Host "    $OutputDir\$($SelectedFolder.Name)\$ModelName\" -ForegroundColor Gray
 $SaveMethodDir = $SaveMethod.Replace("_", "-")
 if ($SaveMethod -eq "lora") { $SaveMethodDir = "lora" }
-Write-Host "      ├── $SaveMethodDir/" -ForegroundColor Gray
+Write-Host "      - $SaveMethodDir/" -ForegroundColor Gray
 if ($CreateGGUF) {
-    Write-Host "      ├── gguf/" -ForegroundColor Gray
+    Write-Host "      - gguf/" -ForegroundColor Gray
 }
-Write-Host "      ├── upload_manifest.json" -ForegroundColor Gray
-Write-Host "      └── README.md" -ForegroundColor Gray
+Write-Host "      - upload_manifest.json" -ForegroundColor Gray
+Write-Host "      - README.md" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Process:" -ForegroundColor Yellow
 Write-Host "    1. Save local copy in organized directory" -ForegroundColor Gray
@@ -163,8 +163,10 @@ Write-Host "    2. Upload to HuggingFace" -ForegroundColor Gray
 if ($CreateGGUF) {
     Write-Host "    3. Create GGUF versions (Q4_K_M, Q5_K_M, Q8_0)" -ForegroundColor Gray
     Write-Host "    4. Upload GGUF files" -ForegroundColor Gray
+    Write-Host "    5. Create manifest and README" -ForegroundColor Gray
+} else {
+    Write-Host "    3. Create manifest and README" -ForegroundColor Gray
 }
-Write-Host "    $($CreateGGUF ? '5' : '3'). Create manifest and README" -ForegroundColor Gray
 Write-Host "==========================================" -ForegroundColor Blue
 Write-Host ""
 
