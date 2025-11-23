@@ -20,7 +20,7 @@ if not HF_TOKEN:
 
 # Configuration
 REPO_ID = "professorsynapse/claudesidian-synthetic-dataset"
-DATASET_FILE = "Datasets/syngen_tools_sft_11.23.25_toolcall.jsonl"
+DATASET_FILE = "Datasets/syngen_tools_sft_11.23.25_workspace_aware.jsonl"
 REPO_TYPE = "dataset"  # This is a dataset, not a model
 
 def upload_dataset():
