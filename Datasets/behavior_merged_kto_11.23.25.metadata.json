@@ -1,5 +1,5 @@
 {
-  "created": "2025-11-23T02:11:21.205224",
+  "created": "2025-11-23T02:15:52.651933",
   "source": "behavior_datasets merge",
   "behaviors": [
     "context_continuity",
@@ -21,8 +21,8 @@
       "negative": 83
     },
     "intellectual_humility": {
-      "total": 216,
-      "positive": 108,
+      "total": 260,
+      "positive": 152,
       "negative": 108
     },
     "strategic_tool_selection": {
@@ -41,10 +41,10 @@
       "negative": 105
     }
   },
-  "total_examples": 1528,
-  "positive_examples": 881,
+  "total_examples": 1572,
+  "positive_examples": 925,
   "negative_examples": 647,
   "interleaved": true,
-  "consecutive_same_labels": 233,
+  "consecutive_same_labels": 277,
   "format": "KTO-compatible ChatML with interleaved labels"
 }
