@@ -102,14 +102,30 @@ def print_dataset_samples(dataset: Dataset, num_samples: int = 3):
             print(f"Format: Conversational ({len(example['conversations'])} messages)")
             for msg in example['conversations']:
                 role = msg['role']
-                content = msg['content'][:100]
-                print(f"  [{role}]: {content}...")
+                # Handle both text content and tool calls
+                if msg.get('content'):
+                    content = msg['content'][:100]
+                    print(f"  [{role}]: {content}...")
+                elif msg.get('tool_calls'):
+                    num_tools = len(msg['tool_calls'])
+                    tool_names = [tc['function']['name'] for tc in msg['tool_calls']]
+                    print(f"  [{role}]: <{num_tools} tool call(s): {', '.join(tool_names[:2])}...>")
+                else:
+                    print(f"  [{role}]: <empty>")
         elif "messages" in example:
             print(f"Format: Conversational ({len(example['messages'])} messages)")
             for msg in example['messages']:
                 role = msg['role']
-                content = msg['content'][:100]
-                print(f"  [{role}]: {content}...")
+                # Handle both text content and tool calls
+                if msg.get('content'):
+                    content = msg['content'][:100]
+                    print(f"  [{role}]: {content}...")
+                elif msg.get('tool_calls'):
+                    num_tools = len(msg['tool_calls'])
+                    tool_names = [tc['function']['name'] for tc in msg['tool_calls']]
+                    print(f"  [{role}]: <{num_tools} tool call(s): {', '.join(tool_names[:2])}...>")
+                else:
+                    print(f"  [{role}]: <empty>")
         elif "text" in example:
             print(f"Format: Text")
             print(f"Content: {example['text'][:200]}...")
