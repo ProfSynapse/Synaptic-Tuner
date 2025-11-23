@@ -57,7 +57,9 @@
       "Bash(powershell.exe -File train_fixed.ps1)",
       "Bash(s/\"/\"\"/g\" /mnt/f/Code/Toolset-Training/Trainers/train.ps1)",
       "Bash(unix2dos:*)",
-      "Bash(powershell.exe -File rtx3090_sft/train.ps1)"
+      "Bash(powershell.exe -File rtx3090_sft/train.ps1)",
+      "Bash(git --version)",
+      "Bash(powershell.exe -Command:*)"
     ],
     "deny": [],
     "ask": []

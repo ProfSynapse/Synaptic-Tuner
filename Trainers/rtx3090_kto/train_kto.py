@@ -65,10 +65,7 @@ from src.kto_s_trainer import KTOSTrainer
 
 from configs.config_loader import (
     Config,
-    get_3b_config,
-    get_7b_config,
-    get_13b_config,
-    get_20b_config
+    load_config
 )
 from src.data_loader import load_and_prepare_dataset, validate_kto_dataset, print_dataset_samples
 from src.model_loader import (
@@ -140,19 +137,6 @@ def setup_environment():
     print("=" * 60 + "\n")
 
 
-def get_config_by_size(model_size: str) -> Config:
-    """Get configuration based on model size."""
-    configs = {
-        "3b": get_3b_config,
-        "7b": get_7b_config,
-        "13b": get_13b_config,
-        "20b": get_20b_config
-    }
-
-    if model_size not in configs:
-        raise ValueError(f"Invalid model size: {model_size}. Choose from: {list(configs.keys())}")
-
-    return configs[model_size]()
 
 
 def extract_previous_log_entries(checkpoint_path: str) -> list:
@@ -444,13 +428,9 @@ def main():
     # Auto-setup W&B if API key present in .env
     wandb_auto_enabled = setup_wandb()
 
-    # Get configuration
-    if args.model_size:
-        print(f"Using {args.model_size.upper()} model preset configuration\n")
-        config = get_config_by_size(args.model_size)
-    else:
-        print("Using config defaults from configs/training_config.py\n")
-        config = Config()
+    # Get configuration - always load from YAML
+    print("Loading configuration from configs/config.yaml\n")
+    config = load_config()
 
     # Create timestamped run directory
     from datetime import datetime
@@ -542,11 +522,13 @@ def main():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size}-{timestamp}"
 
-    # Load dataset
+    # Load dataset - prioritize local_file from args, then config, then HuggingFace
+    local_file_path = args.local_file or config.dataset.local_file
+
     train_dataset, eval_dataset = load_and_prepare_dataset(
-        dataset_name=config.dataset.dataset_name if not args.local_file else None,
-        data_files=config.dataset.dataset_file if not args.local_file else None,
-        local_file=args.local_file,
+        dataset_name=config.dataset.dataset_name if not local_file_path else None,
+        data_files=config.dataset.dataset_file if not local_file_path else None,
+        local_file=local_file_path,
         num_proc=config.dataset.num_proc,
         test_size=config.dataset.test_size,
         split_dataset=args.split_dataset

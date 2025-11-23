@@ -154,6 +154,7 @@ def apply_lora_adapters(
         bias=bias,
         use_gradient_checkpointing=use_gradient_checkpointing,
         random_state=random_state,
+        use_rslora=False,  # Explicitly set to default value
     )
 
     # Print trainable parameters
