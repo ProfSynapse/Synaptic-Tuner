@@ -44,6 +44,7 @@
 
 **Setup & Training:**
 
+**Linux/WSL2:**
 ```bash
 # 1. Clone repository
 git clone https://github.com/ProfSynapse/Toolset-Training.git
@@ -53,17 +54,24 @@ cd Toolset-Training
 cd Trainers/rtx3090_sft
 bash setup.sh
 
-# 3a. Automated pipeline (SFT → KTO chained)
+# 3. Automated pipeline (SFT → KTO chained)
 cd ../
 ./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
+```
 
-# OR 3b. Manual step-by-step
-cd rtx3090_sft
-./train.sh --model-size 7b
+**Windows PowerShell:**
+```powershell
+# 1. Clone repository
+git clone https://github.com/ProfSynapse/Toolset-Training.git
+cd Toolset-Training
 
-# Then refine with KTO (optional)
-cd ../rtx3090_kto
-./train.sh --model-size 7b --model-name ../rtx3090_sft/sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model
+# 2. Setup environment (one-time)
+cd Trainers\rtx3090_sft
+# Follow setup instructions in README
+
+# 3. Automated pipeline (SFT → KTO chained)
+cd ..\
+.\train_sft_to_kto_pipeline.ps1
 ```
 
 **Automated Pipeline Features:**
@@ -72,6 +80,7 @@ cd ../rtx3090_kto
 - ✅ Uses YAML configs from each trainer
 - ✅ KTO config auto-updated with SFT output path
 - ✅ Single command for complete training workflow
+- ✅ Available on both Linux/WSL2 and Windows PowerShell
 
 **See full local setup guide:** [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
 

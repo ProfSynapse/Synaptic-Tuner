@@ -17,12 +17,22 @@ Production-ready implementation of KTO (Kahneman-Tversky Optimization) fine-tuni
 
 **KTO is designed for refinement**, not initial training. For best results, use an SFT-trained model:
 
+**Option 1: Automated Pipeline (Linux/WSL2)**
 ```bash
-# Option 1: Automated pipeline (runs SFT then KTO)
-cd ../../  # Go to Trainers/ directory
+# Go to Trainers/ directory
+cd ../../
 ./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
+```
 
-# Option 2: Manual chaining
+**Option 1: Automated Pipeline (Windows PowerShell)**
+```powershell
+# Go to Trainers\ directory
+cd ..\..\
+.\train_sft_to_kto_pipeline.ps1
+```
+
+**Option 2: Manual Chaining (Linux/WSL2)**
+```bash
 # Step 1: Train SFT first
 cd rtx3090_sft
 ./train.sh --model-size 7b
@@ -33,10 +43,23 @@ python train_kto.py --model-size 7b \
   --model-name ../rtx3090_sft/sft_output_rtx3090/20251123_143000/final_model
 ```
 
+**Option 2: Manual Chaining (Windows PowerShell)**
+```powershell
+# Step 1: Train SFT first
+cd rtx3090_sft
+.\train.ps1
+
+# Step 2: Use SFT output for KTO
+cd ..\rtx3090_kto
+python train_kto.py --model-size 7b `
+  --model-name "..\rtx3090_sft\sft_output_rtx3090\20251123_143000\final_model"
+```
+
 **Why SFT → KTO?**
 - SFT teaches tool-calling syntax (WHAT to do)
 - KTO refines quality (WHICH calls are better)
 - Combined approach produces best results
+- Automated pipeline available on both platforms
 
 ### 1. Installation
 

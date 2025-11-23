@@ -46,20 +46,27 @@ python train_sft.py --model-size 7b --dry-run
 
 ### Automated Pipeline (Recommended)
 
-Use the automated pipeline script to chain SFT and KTO training:
-
+**Linux/WSL2:**
 ```bash
 # From Trainers/ directory
 cd ..
 ./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
 ```
 
+**Windows PowerShell:**
+```powershell
+# From Trainers\ directory
+cd ..
+.\train_sft_to_kto_pipeline.ps1
+```
+
 **What it does:**
-1. Runs SFT training with `configs/config.yaml`
-2. Captures SFT output path
-3. Updates KTO config to use SFT model as base
-4. Runs KTO refinement automatically
-5. Produces final refined model
+1. Finds Python from unsloth_env automatically
+2. Runs SFT training with `configs/config.yaml`
+3. Captures SFT output path
+4. Updates KTO config to use SFT model as base
+5. Runs KTO refinement automatically
+6. Produces final refined model
 
 **Configuration:**
 - Edit `configs/config.yaml` to customize SFT settings
@@ -70,6 +77,7 @@ cd ..
 
 If you prefer step-by-step control:
 
+**Linux/WSL2:**
 ```bash
 # Step 1: Train SFT
 ./train.sh --model-size 7b
@@ -82,8 +90,7 @@ python train_kto.py --model-size 7b \
   --model-name ../rtx3090_sft/sft_output_rtx3090/20251123_143000/final_model
 ```
 
-### Windows PowerShell
-
+**Windows PowerShell:**
 ```powershell
 # Step 1: Run SFT
 cd Trainers\rtx3090_sft
@@ -96,8 +103,6 @@ cd ..\rtx3090_kto
 python train_kto.py --model-size 7b `
   --model-name "..\rtx3090_sft\sft_output_rtx3090\20251123_143000\final_model"
 ```
-
-**Note:** PowerShell scripts work with CLI arguments but don't have an automated pipeline yet.
 
 ## Model Sizes
 
