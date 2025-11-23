@@ -53,13 +53,25 @@ cd Toolset-Training
 cd Trainers/rtx3090_sft
 bash setup.sh
 
-# 3. Train with SFT (supervised fine-tuning)
+# 3a. Automated pipeline (SFT → KTO chained)
+cd ../
+./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
+
+# OR 3b. Manual step-by-step
+cd rtx3090_sft
 ./train.sh --model-size 7b
 
-# 4. (Optional) Refine with KTO (preference learning)
+# Then refine with KTO (optional)
 cd ../rtx3090_kto
-./train.sh --model-size 7b
+./train.sh --model-size 7b --model-name ../rtx3090_sft/sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model
 ```
+
+**Automated Pipeline Features:**
+- ✅ Runs SFT first (teaches tool-calling syntax)
+- ✅ Automatically chains KTO second (refines quality)
+- ✅ Uses YAML configs from each trainer
+- ✅ KTO config auto-updated with SFT output path
+- ✅ Single command for complete training workflow
 
 **See full local setup guide:** [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
 

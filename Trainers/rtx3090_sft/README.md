@@ -42,6 +42,63 @@ python train_sft.py --model-size 7b --dry-run
 
 **Recommendation:** Use SFT first to teach tool-calling, then optionally use KTO for refinement.
 
+## Chaining SFT → KTO
+
+### Automated Pipeline (Recommended)
+
+Use the automated pipeline script to chain SFT and KTO training:
+
+```bash
+# From Trainers/ directory
+cd ..
+./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
+```
+
+**What it does:**
+1. Runs SFT training with `configs/config.yaml`
+2. Captures SFT output path
+3. Updates KTO config to use SFT model as base
+4. Runs KTO refinement automatically
+5. Produces final refined model
+
+**Configuration:**
+- Edit `configs/config.yaml` to customize SFT settings
+- Edit `../rtx3090_kto/configs/config.yaml` for KTO settings
+- Pipeline uses YAML configs (no CLI overrides needed)
+
+### Manual Chaining
+
+If you prefer step-by-step control:
+
+```bash
+# Step 1: Train SFT
+./train.sh --model-size 7b
+
+# Note the output path (e.g., sft_output_rtx3090/20251123_143000/)
+
+# Step 2: Train KTO with SFT output
+cd ../rtx3090_kto
+python train_kto.py --model-size 7b \
+  --model-name ../rtx3090_sft/sft_output_rtx3090/20251123_143000/final_model
+```
+
+### Windows PowerShell
+
+```powershell
+# Step 1: Run SFT
+cd Trainers\rtx3090_sft
+.\train.ps1
+
+# Note the output path from console
+
+# Step 2: Run KTO with SFT output
+cd ..\rtx3090_kto
+python train_kto.py --model-size 7b `
+  --model-name "..\rtx3090_sft\sft_output_rtx3090\20251123_143000\final_model"
+```
+
+**Note:** PowerShell scripts work with CLI arguments but don't have an automated pipeline yet.
+
 ## Model Sizes
 
 | Size | Model | VRAM | Batch Size | Speed |
