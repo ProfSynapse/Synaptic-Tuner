@@ -51,7 +51,13 @@
       "Read(//mnt/wsl/**)",
       "Read(//mnt/c/Users/Joseph/Documents/Code/Toolset-Training/Trainers/rtx3090_sft/**)",
       "Bash(timeout 5 python3:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(xxd:*)",
+      "Bash(powershell.exe -Command \"Get-Content train.ps1 -Raw | Set-Content train_fixed.ps1 -Encoding UTF8\")",
+      "Bash(powershell.exe -File train_fixed.ps1)",
+      "Bash(s/\"/\"\"/g\" /mnt/f/Code/Toolset-Training/Trainers/train.ps1)",
+      "Bash(unix2dos:*)",
+      "Bash(powershell.exe -File rtx3090_sft/train.ps1)"
     ],
     "deny": [],
     "ask": []
