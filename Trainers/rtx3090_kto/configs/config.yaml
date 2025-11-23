@@ -9,7 +9,7 @@ model:
   # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
   # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
   # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "unsloth/mistral-7b-v0.3-bnb-4bit"
+  model_name: "unsloth/mistral-7b-instruct-v0.3-bnb-4bit"
 
   # Model parameters
   max_seq_length: 2048  # Dataset 99th percentile: 1506 tokens
@@ -39,13 +39,13 @@ training:
   output_dir: "./kto_output_rtx3090"
 
   # Batch configuration
-  per_device_train_batch_size: 4
-  gradient_accumulation_steps: 6  # Effective batch = 24
+  per_device_train_batch_size: 6
+  gradient_accumulation_steps: 4  # Effective batch = 24
 
   # KTO-specific parameters
-  beta: 0.3  # KTO beta parameter for preference learning
-  desirable_weight: 1.0  # Weight for desirable (label=true) examples
-  undesirable_weight: 1.0  # Weight for undesirable (label=false) examples
+  beta: 0.2  # KTO beta parameter for preference learning
+  desirable_weight: 0.70  # Weight for desirable (label=true) examples (58.8% of dataset)
+  undesirable_weight: 1.0  # Weight for undesirable (label=false) examples (41.2% of dataset)
 
   # Learning rate - VERY LOW for preference learning
   learning_rate: 2e-7  # (much lower than SFT's 2e-4)
@@ -115,10 +115,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "syngen_tools_11.18.25.jsonl"  # Interleaved True/False (4,649 examples)
+  dataset_file: "behavior_merged_kto_11.23.25.jsonl"  # Behavior dataset (1,572 examples)
 
   # Use local file (relative to Trainers/rtx3090_kto/)
-  local_file: "../../Datasets/syngen_tools_11.18.25.jsonl"
+  local_file: "../../Datasets/behavior_merged_kto_11.23.25.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

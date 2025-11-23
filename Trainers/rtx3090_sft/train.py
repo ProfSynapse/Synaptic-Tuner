@@ -360,13 +360,13 @@ def maybe_upload(config, run_info: dict) -> None:
         print(color("Upload skipped: no run information available.", "yellow"))
         return
 
-    choice = input("Upload merged model to Hugging Face? [y/N]: ").strip().lower()
+    choice = input("Upload merged model to Hugging Face? [y/N]: " ).strip().lower()
     if choice not in ("y", "yes"):
         return
 
     try:
         from src.upload_to_hf import upload_standard_model  # Import lazily to avoid early Unsloth load
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         return
 
     repo_id = prompt_repo_id(default_repo_id(config))
@@ -375,13 +375,12 @@ def maybe_upload(config, run_info: dict) -> None:
 
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
     if not hf_token:
-        hf_token = input("HF token (write): ").strip()
+        hf_token = input("HF token (write): " ).strip()
     if not hf_token:
         return
 
     model_path = run_info.get("final_model_dir")
-    print(color(f"
-Uploading {model_path} -> {repo_id} ({save_method})", "cyan"))
+    print(color(f"\nUploading {model_path} -> {repo_id} ({save_method})", "cyan"))
     upload_standard_model(
         model_path=model_path,
         repo_id=repo_id,
@@ -390,8 +389,7 @@ Uploading {model_path} -> {repo_id} ({save_method})", "cyan"))
         private=private,
     )
 
-    print(color("
-Pushing model card...", "cyan"))
+    print(color("\nPushing model card...", "cyan"))
     card = build_model_card(repo_id, config, run_info)
     push_model_card(repo_id, hf_token, card, private)
     print(color("Upload complete with model card.", "green"))
