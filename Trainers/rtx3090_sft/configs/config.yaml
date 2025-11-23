@@ -82,10 +82,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "syngen_tools_sft_11.22.25.jsonl"  # Ping-pong restructured (5,841 examples)
+  dataset_file: "syngen_tools_sft_11.23.25_workspace_aware.jsonl"  # Ping-pong restructured (5,841 examples)
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/syngen_tools_sft_11.22.25.jsonl"
+  local_file: "../../Datasets/syngen_tools_sft_11.23.25_workspace_aware.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
