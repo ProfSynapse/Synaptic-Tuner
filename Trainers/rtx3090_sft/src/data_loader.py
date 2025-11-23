@@ -56,6 +56,11 @@ def load_and_prepare_dataset(
 
     print(f"\nRaw dataset size: {len(raw_datasets)} examples")
 
+    # Convert 'conversations' to 'messages' (TRL 0.15.0+ requirement)
+    if "conversations" in raw_datasets.column_names and "messages" not in raw_datasets.column_names:
+        print("Converting 'conversations' key to 'messages' (TRL 0.15.0+ requirement)")
+        raw_datasets = raw_datasets.rename_column("conversations", "messages")
+
     # Optional: Filter for desirable examples only
     if filter_desirable and "label" in raw_datasets.column_names:
         print("\nFiltering for desirable examples (label=True)...")
