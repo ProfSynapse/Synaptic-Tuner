@@ -1,0 +1,241 @@
+[
+  {
+    "id": "execute_prompt_complex_architecture",
+    "question": "What's the best microservices architecture for a real-time collaborative editing platform with 100k concurrent users? I need specific service boundaries, communication patterns, and data consistency strategies.",
+    "tags": ["executePrompt", "appropriate_delegation", "complex_reasoning"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "expected_behaviors": {
+      "uses_executePrompt": true,
+      "prompt_has_sections": ["CONTEXT", "MISSION", "INSTRUCTIONS", "GUIDELINES"],
+      "reason": "Complex architectural design requires specialized expertise beyond simple tool operations"
+    },
+    "notes": "Should use executePrompt with well-structured markdown prompt (CONTEXT, MISSION, INSTRUCTIONS, GUIDELINES). Should NOT try to answer directly."
+  },
+  {
+    "id": "execute_prompt_legal_analysis",
+    "question": "Can you analyze the GDPR compliance implications of storing user session data for 90 days with third-party analytics? I need specific legal risks and mitigation strategies.",
+    "tags": ["executePrompt", "appropriate_delegation", "specialized_expertise"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "expected_behaviors": {
+      "uses_executePrompt": true,
+      "reason": "Legal/compliance analysis requires specialized expertise"
+    },
+    "notes": "Legal analysis is beyond model's capability - should delegate to executePrompt with structured prompt"
+  },
+  {
+    "id": "execute_prompt_creative_marketing",
+    "question": "Write a compelling product launch announcement for our new AI-powered note-taking app. It should be engaging, highlight key benefits, and include a clear call-to-action.",
+    "tags": ["executePrompt", "appropriate_delegation", "creative_task"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "expected_behaviors": {
+      "uses_executePrompt": true,
+      "saves_or_returns": "both",
+      "reason": "Creative writing task requiring high-quality copywriting"
+    },
+    "notes": "Should use executePrompt for creative writing, then either return directly or save to note"
+  },
+  {
+    "id": "no_execute_prompt_simple_search",
+    "question": "Find all my meeting notes from last week",
+    "tags": ["executePrompt", "inappropriate_delegation", "simple_operation"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "uses_executePrompt": false,
+      "reason": "Simple file search - model can handle directly with searchContent"
+    },
+    "notes": "Should NOT use executePrompt - this is a simple search operation within model's capability"
+  },
+  {
+    "id": "no_execute_prompt_file_organization",
+    "question": "Move all the files in the Drafts/ folder to Archive/2024/",
+    "tags": ["executePrompt", "inappropriate_delegation", "simple_operation"],
+    "expected_tools": ["vaultManager_moveFolder"],
+    "expected_behaviors": {
+      "uses_executePrompt": false,
+      "reason": "Simple file operation - no need for executePrompt"
+    },
+    "notes": "Should NOT use executePrompt - direct file move operation"
+  },
+  {
+    "id": "execute_prompt_research_synthesis",
+    "question": "I have 50 research papers on transformer architectures. Can you synthesize the key innovations, compare the approaches, and recommend which techniques are most promising for our use case?",
+    "tags": ["executePrompt", "appropriate_delegation", "research_synthesis"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "expected_behaviors": {
+      "uses_executePrompt": true,
+      "includes_context_notes": true,
+      "reason": "Research synthesis requires deep analysis and comparison"
+    },
+    "notes": "Should gather research papers first, then use executePrompt with papers as context"
+  },
+  {
+    "id": "context_efficiency_large_log",
+    "question": "Check the last error in the application log file (it has 50,000 lines)",
+    "tags": ["context_efficiency", "line_based_reading"],
+    "expected_tools": ["contentManager_readContent"],
+    "expected_behaviors": {
+      "uses_offset_limit": true,
+      "reads_specific_range": true,
+      "avoids_full_read": true,
+      "reason": "Should read last 100 lines using offset: -100, limit: 100, not entire 50k line file"
+    },
+    "notes": "Should use contentManager_readContent with offset: -100, limit: 100 to read last 100 lines only"
+  },
+  {
+    "id": "context_efficiency_doc_section",
+    "question": "Read the API authentication section from the documentation (it's in a 5000-line spec document around line 800-900)",
+    "tags": ["context_efficiency", "line_based_reading"],
+    "expected_tools": ["contentManager_readContent"],
+    "expected_behaviors": {
+      "uses_offset_limit": true,
+      "reads_specific_range": true,
+      "reason": "Should read lines 750-950 (±50 buffer), not entire 5000-line document"
+    },
+    "notes": "Should read specific line range around 800-900, not full document"
+  },
+  {
+    "id": "context_efficiency_find_files_no_content",
+    "question": "Find all the API documentation files in the vault so I can organize them",
+    "tags": ["context_efficiency", "efficient_search"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "uses_includeContent_false": true,
+      "reason": "Only need file paths for organization - no need to load content"
+    },
+    "notes": "Should use includeContent: false since we only need file paths, not content"
+  },
+  {
+    "id": "context_efficiency_verify_existence",
+    "question": "Check if we have any files about the Phoenix project before I create a new one",
+    "tags": ["context_efficiency", "efficient_search"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "uses_includeContent_false": true,
+      "appropriate_limit": true,
+      "reason": "Just checking existence - don't need content, limit: 20 is sufficient"
+    },
+    "notes": "Should use includeContent: false and reasonable limit (20-30), not 500+"
+  },
+  {
+    "id": "context_efficiency_session_memory",
+    "question": "Update the database password in the config file\n\n[Previous: Read config.yaml lines 1-100, found database section at lines 45-60, password at line 52]",
+    "tags": ["context_efficiency", "leverage_session_memory"],
+    "expected_tools": ["contentManager_replaceByLine"],
+    "expected_behaviors": {
+      "avoids_rereading": true,
+      "uses_prior_context": true,
+      "references_sessionMemory": true,
+      "reason": "Should use line 52 from sessionMemory, not re-read entire file"
+    },
+    "notes": "Should directly update line 52 using prior context from sessionMemory, not re-read config.yaml"
+  },
+  {
+    "id": "context_efficiency_continuation",
+    "question": "Add the new API endpoint to the documentation\n\n[Previous: Searched and found API docs at Docs/api-reference.md, endpoints section is lines 200-450]",
+    "tags": ["context_efficiency", "leverage_session_memory"],
+    "expected_tools": ["contentManager_readContent", "contentManager_replaceByLine"],
+    "expected_behaviors": {
+      "uses_prior_context": true,
+      "reads_specific_section": true,
+      "reason": "Should read lines 200-450 only (from sessionMemory), not full document"
+    },
+    "notes": "Should use sessionMemory info to read only the endpoints section (lines 200-450)"
+  },
+  {
+    "id": "context_efficiency_appropriate_limit",
+    "question": "Find recent meeting notes from this month",
+    "tags": ["context_efficiency", "appropriate_limit"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "uses_reasonable_limit": true,
+      "limit_range": [20, 50],
+      "reason": "Limit: 30 is appropriate for monthly meetings, not 500+"
+    },
+    "notes": "Should use limit: 20-50, not excessive limits like 500 or 1000"
+  },
+  {
+    "id": "context_efficiency_chunked_processing",
+    "question": "Analyze all 100 customer feedback files from Q4 and summarize common themes",
+    "tags": ["context_efficiency", "chunked_operations"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "processes_in_chunks": true,
+      "chunk_size": [10, 20],
+      "tracks_progress": true,
+      "reason": "Should process 10-20 files at a time with progress tracking, not all 100 at once"
+    },
+    "notes": "Should search with limit: 10-20 to start first batch, track progress in sessionMemory"
+  },
+  {
+    "id": "context_efficiency_error_context",
+    "question": "Show me the context around the error on line 1247 of the application log",
+    "tags": ["context_efficiency", "line_based_reading"],
+    "expected_tools": ["contentManager_readContent"],
+    "expected_behaviors": {
+      "uses_offset_limit": true,
+      "reads_context_window": true,
+      "reason": "Should read lines 1227-1267 (±20 lines around error), not entire log"
+    },
+    "notes": "Should read line 1247 ± 20 lines for context (lines 1227-1267), not full log file"
+  },
+  {
+    "id": "execute_prompt_prompt_quality_good",
+    "question": "Design a comprehensive security audit framework for our authentication system",
+    "tags": ["executePrompt", "prompt_structure"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "expected_behaviors": {
+      "prompt_has_sections": ["CONTEXT", "MISSION", "INSTRUCTIONS", "GUIDELINES", "OUTPUT FORMAT"],
+      "mission_is_clear": true,
+      "instructions_are_specific": true,
+      "reason": "Well-structured prompt with all required sections for complex task"
+    },
+    "notes": "Should create executePrompt with all markdown sections: CONTEXT, MISSION, INSTRUCTIONS, GUIDELINES, OUTPUT FORMAT"
+  },
+  {
+    "id": "execute_prompt_response_return",
+    "question": "What are the key differences between PostgreSQL and MySQL for our use case?\n\n[Previous: executePrompt returned detailed comparison of PostgreSQL vs MySQL]",
+    "tags": ["executePrompt", "response_handling"],
+    "expected_behaviors": {
+      "returns_response_directly": true,
+      "does_not_save": true,
+      "reason": "User asked a question - should return answer directly, not save to note"
+    },
+    "notes": "Should return the executePrompt response directly to user (Q&A scenario)"
+  },
+  {
+    "id": "execute_prompt_response_save",
+    "question": "Create a comprehensive API design guide for the team\n\n[Previous: executePrompt returned detailed API design guide]",
+    "tags": ["executePrompt", "response_handling"],
+    "expected_tools": ["contentManager_createContent"],
+    "expected_behaviors": {
+      "saves_to_note": true,
+      "reason": "Documentation should persist - save to Documentation/ folder"
+    },
+    "notes": "Should save executePrompt response to a documentation file (e.g., Documentation/api-design-guide.md)"
+  },
+  {
+    "id": "execute_prompt_response_both",
+    "question": "Create a 30-day onboarding plan for new engineers\n\n[Previous: executePrompt returned comprehensive onboarding plan]",
+    "tags": ["executePrompt", "response_handling"],
+    "expected_tools": ["contentManager_createContent"],
+    "expected_behaviors": {
+      "explains_to_user": true,
+      "saves_to_note": true,
+      "reason": "Should explain what was created AND save to team documentation"
+    },
+    "notes": "Should explain the plan to user AND save to file (both - complex deliverable)"
+  },
+  {
+    "id": "context_efficiency_search_limit_excessive",
+    "question": "Find project documentation files",
+    "tags": ["context_efficiency", "search_limits", "negative_example"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "expected_behaviors": {
+      "avoids_excessive_limit": true,
+      "uses_reasonable_limit": true,
+      "limit_max": 100,
+      "reason": "Should use limit: 30-50, NOT 500+ which wastes context"
+    },
+    "notes": "Model should avoid limit: 500+ for simple searches - use 20-50 instead"
+  }
+]

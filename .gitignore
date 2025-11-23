@@ -91,3 +91,7 @@ Datasets/quality_review/score_batch*.py
 
 # Archive directory (legacy files, not actively maintained)
 archive/
+
+# Backup files
+*.backup
+*.bak

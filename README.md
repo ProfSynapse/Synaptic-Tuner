@@ -44,6 +44,7 @@
 
 **Setup & Training:**
 
+**Linux/WSL2:**
 ```bash
 # 1. Clone repository
 git clone https://github.com/ProfSynapse/Toolset-Training.git
@@ -53,13 +54,43 @@ cd Toolset-Training
 cd Trainers/rtx3090_sft
 bash setup.sh
 
-# 3. Train with SFT (supervised fine-tuning)
-./train.sh --model-size 7b
+# 3. Interactive training CLI (recommended)
+cd ../
+./train.sh
 
-# 4. (Optional) Refine with KTO (preference learning)
-cd ../rtx3090_kto
-./train.sh --model-size 7b
+# The CLI will let you choose:
+#   1) SFT Only - Supervised Fine-Tuning
+#   2) KTO Only - Preference Learning
+#   3) SFT → KTO Pipeline - Full training (recommended)
 ```
+
+**Windows PowerShell:**
+```powershell
+# 1. Clone repository
+git clone https://github.com/ProfSynapse/Toolset-Training.git
+cd Toolset-Training
+
+# 2. Setup environment (one-time)
+cd Trainers\rtx3090_sft
+# Follow setup instructions in README
+
+# 3. Interactive training CLI (recommended)
+cd ..\
+.\train.ps1
+
+# The CLI will let you choose:
+#   1) SFT Only - Supervised Fine-Tuning
+#   2) KTO Only - Preference Learning
+#   3) SFT → KTO Pipeline - Full training (recommended)
+```
+
+**Interactive CLI Features:**
+- 📋 **Choose training mode** - SFT, KTO, or combined pipeline
+- ⚙️ **Configure W&B logging** - Enable/disable with custom project names
+- 📊 **Configuration preview** - See all settings before starting
+- ✅ **Auto-detection** - Finds Python, verifies CUDA automatically
+- 🔗 **Seamless chaining** - Pipeline mode auto-updates configs
+- 💻 **Cross-platform** - Identical experience on Linux and Windows
 
 **See full local setup guide:** [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
 
