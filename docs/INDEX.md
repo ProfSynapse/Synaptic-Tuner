@@ -12,16 +12,33 @@ docs/
 ├── WORKSPACE_ARCHITECTURE_DIAGRAM.md
 ├── WORKSPACE_DOCUMENTATION_INDEX.md
 ├── WORKSPACE_KEY_FILES_REFERENCE.md
-└── local-training/
-    ├── QUICK_REFERENCE.txt ⭐ Start here!
-    ├── LOCAL_TRAINING_SETUP.md
-    ├── 00-preparation-summary.md
-    ├── mac-m4-kto-finetuning.md
-    ├── rtx3070-kto-finetuning.md
-    └── platform-comparison-analysis.md
+├── local-training/
+│   ├── QUICK_REFERENCE.txt ⭐ Start here for local!
+│   ├── LOCAL_TRAINING_SETUP.md
+│   ├── 00-preparation-summary.md
+│   ├── mac-m4-kto-finetuning.md
+│   ├── rtx3070-kto-finetuning.md
+│   └── platform-comparison-analysis.md
+└── cloud-training/
+    ├── NEBIUS_QUICKSTART.md ⭐ Start here for cloud!
+    ├── NEBIUS_INTEGRATION_SUMMARY.md
+    ├── nebius-integration-guide.md
+    ├── nebius_training_notebook.ipynb
+    └── nebius_skypilot_config.yaml
 ```
 
 ## 📚 Quick Navigation
+
+### For Cloud GPU Training (Nebius AI) 🆕
+
+**Start with**: `NEBIUS_QUICKSTART.md` - 10-minute setup guide
+
+Then choose your approach:
+- **JupyterHub** - Interactive notebooks, fastest start (10 min)
+- **Compute VM** - Production training, full control (30 min)
+- **SkyPilot** - Multi-node orchestration, cost optimization (1 hour)
+
+**Cost:** $0.50-1.50 per full training run (3x faster than local RTX 3090)
 
 ### For Local Hardware Training Setup
 
@@ -38,6 +55,49 @@ Then read based on your hardware:
 - `WORKSPACE_ARCHITECTURE_DIAGRAM.md` - System architecture
 - `WORKSPACE_KEY_FILES_REFERENCE.md` - Important files reference
 - `WORKSPACE_DOCUMENTATION_INDEX.md` - All documentation
+
+## ☁️ Cloud Training Documentation (Nebius AI) 🆕
+
+### Why Use Nebius?
+- ✅ **3x faster** than local RTX 3090 (H100 GPUs)
+- ✅ **No code changes** - existing scripts work as-is
+- ✅ **Cost-effective** - $0.50-1.50 per full SFT+KTO pipeline
+- ✅ **Explorer Tier** - $1.50/GPU-hour for first 1,000 hours/month
+- ✅ **80GB VRAM** - vs 24GB local (run larger models, bigger batches)
+
+### Integration Approaches
+
+| Approach | Setup | Cost/Run | Best For |
+|----------|-------|----------|----------|
+| **JupyterHub** | 10 min | $0.38-1.50 | Testing, experimentation |
+| **Compute VM** | 30 min | $0.38-1.50 | Production, automation |
+| **SkyPilot** | 1 hour | $0.20-1.50 | Multi-node, cost optimization |
+
+### Documentation Files
+
+| File | Purpose | Audience |
+|------|---------|----------|
+| `NEBIUS_QUICKSTART.md` | Fast-track guide to get started | Everyone |
+| `NEBIUS_INTEGRATION_SUMMARY.md` | Research summary and recommendations | Decision makers |
+| `nebius-integration-guide.md` | Comprehensive setup guide (10,000+ words) | Implementation |
+| `nebius_training_notebook.ipynb` | Ready-to-use Jupyter notebook | JupyterHub users |
+| `nebius_skypilot_config.yaml` | SkyPilot infrastructure-as-code | Advanced users |
+
+### Quick Start
+
+1. **Sign up** at [nebius.com](https://nebius.com/)
+2. **Read** `NEBIUS_QUICKSTART.md` (10 min)
+3. **Deploy** JupyterHub with H100 GPU
+4. **Upload** `nebius_training_notebook.ipynb`
+5. **Run** training (15 min for 7B SFT)
+6. **Cost:** ~$0.38 for first test run
+
+### Performance Comparison
+
+| Hardware | SFT (7B) | KTO (7B) | VRAM | Cost |
+|----------|----------|----------|------|------|
+| RTX 3090 (local) | 45 min | 15 min | 24GB | Free (power) |
+| **H100 (Nebius)** | **15 min** | **5 min** | **80GB** | **$0.38-0.50** |
 
 ## 🎯 Local Training Documentation
 
@@ -128,14 +188,30 @@ Both platform guides include code for loading and formatting this dataset.
 
 ## 💡 Common Questions
 
-**Q: Which platform should I use?**
+**Q: Should I use cloud (Nebius) or local training?**
+A:
+- **Cloud (Nebius):** 3x faster, no hardware needed, ~$0.50-1.50 per run
+- **Local:** Free after hardware cost, good for learning/experimentation
+- **Recommendation:** Try Nebius JupyterHub first ($0.38 test), then decide
+
+**Q: Which platform should I use for local training?**
 A: For KTO specifically → RTX 3070. For general fine-tuning → Mac M4 (faster with LoRA).
+
+**Q: Can I use my existing training scripts on Nebius?**
+A: Yes! No code changes needed. Your `train.sh` scripts work as-is on Nebius VMs.
+
+**Q: How much does Nebius cost?**
+A: Explorer tier = $1.50/GPU-hour (first 1,000 hours/month). Full SFT+KTO pipeline = $0.50-1.50.
 
 **Q: Can I run KTO on my Mac?**
 A: PyTorch+MPS technically yes, but slow. MLX LoRA is recommended instead (similar benefits).
 
 **Q: How long does training take?**
-A: ~5-8 hours for 1000 examples on RTX 3070, ~4-6 hours on Mac M4 with MLX.
+A:
+- **Nebius H100:** SFT ~15 min, KTO ~5 min (7B model)
+- **RTX 3090 (local):** SFT ~45 min, KTO ~15 min (7B model)
+- **RTX 3070:** ~5-8 hours for 1000 examples
+- **Mac M4 (MLX):** ~4-6 hours for 1000 examples
 
 **Q: What model should I start with?**
 A: 3B parameter models for testing, 7B for production. See platform guide for recommendations.
