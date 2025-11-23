@@ -142,10 +142,10 @@ class DatasetConfig:
 
     # Dataset source
     dataset_name: str = "professorsynapse/claudesidian-synthetic-dataset"
-    dataset_file: str = "syngen_tools_11.14.25.jsonl"
+    dataset_file: str = "behavior_merged_kto_11.23.25.jsonl"
 
     # Use local file (relative to project root)
-    local_file: Optional[str] = "../../Datasets/syngen_tools_11.14.25.jsonl"
+    local_file: Optional[str] = "../../Datasets/behavior_merged_kto_11.23.25.jsonl"
 
     # Dataset processing
     num_proc: int = 1  # Set to 1 on Windows to avoid multiprocessing issues
