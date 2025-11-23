@@ -1,0 +1,127 @@
+# SkyPilot Configuration for Toolset Training on Nebius AI Cloud
+#
+# Usage:
+#   sky launch nebius_skypilot_config.yaml
+#   sky logs toolset-training
+#   sky ssh toolset-training
+#   sky down toolset-training
+#
+# Multi-node distributed training:
+#   Edit num_nodes below and launch
+#
+# Spot instances (cost savings):
+#   sky launch --use-spot nebius_skypilot_config.yaml
+
+name: toolset-training
+
+resources:
+  cloud: nebius
+  accelerators: H100:8  # 8x H100 GPUs (80GB each)
+  # For smaller experiments:
+  # accelerators: H100:1  # Single GPU
+  # accelerators: L40S:4  # More economical option
+
+  # For multi-node distributed training:
+  # num_nodes: 2  # 16 GPUs total
+
+  disk_size: 500  # GB - enough for models, datasets, and checkpoints
+
+  # Optional: Use spot instances for cost savings
+  # use_spot: true
+  # spot_recovery: failover  # Automatically failover to on-demand if spot unavailable
+
+# Mount local files to remote instance
+file_mounts:
+  /workspace:
+    name: training-workspace
+    mode: COPY
+    source: .  # Current directory (Toolset-Training repo)
+
+  # Optional: Mount specific datasets if they're large
+  # /datasets:
+  #   name: training-data
+  #   mode: COPY
+  #   source: ./Datasets
+
+# Environment setup (runs once when instance is created)
+setup: |
+  set -e  # Exit on error
+
+  echo "=== Starting environment setup ==="
+
+  # Install Miniconda
+  if [ ! -d "$HOME/miniconda3" ]; then
+    echo "Installing Miniconda..."
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3.sh
+    bash ~/miniconda3.sh -b -p $HOME/miniconda3
+    rm ~/miniconda3.sh
+  fi
+
+  # Initialize conda
+  eval "$($HOME/miniconda3/bin/conda shell.bash hook)"
+
+  # Setup training environment
+  echo "Setting up training environment..."
+  cd /workspace/Trainers/rtx3090_sft
+
+  # Run the existing setup script (quick mode, no verification)
+  bash setup.sh --quick
+
+  # Verify GPU
+  nvidia-smi
+
+  echo "=== Setup complete ==="
+
+# Main training run (executes when you launch or resume)
+run: |
+  set -e
+
+  # Activate conda environment
+  eval "$($HOME/miniconda3/bin/conda shell.bash hook)"
+  conda activate unsloth_env
+
+  # Navigate to trainer directory
+  cd /workspace/Trainers/rtx3090_sft
+
+  # Optional: Set environment variables
+  export WANDB_PROJECT="nebius-toolset-training"
+  # export WANDB_API_KEY="your-key-here"  # Or load from .env
+
+  echo "=== Starting training ==="
+  echo "Model: 7B"
+  echo "Dataset: syngen_tools_sft_11.18.25.jsonl"
+  echo "GPUs: $(nvidia-smi --list-gpus | wc -l)"
+
+  # Run training
+  # Note: For multi-node, you'd need to modify train.sh to support distributed training
+  ./train.sh --model-size 7b --wandb --wandb-project nebius-toolset
+
+  # After training, optionally upload to HuggingFace
+  # Uncomment and set your HF_TOKEN
+  # export HF_TOKEN="hf_your_token_here"
+  # ./upload_model.sh
+
+  echo "=== Training complete ==="
+
+  # Show results
+  echo "Output directory:"
+  ls -lh sft_output_rtx3090/
+
+  # Show latest logs
+  echo "Latest logs:"
+  find sft_output_rtx3090/ -name "training_*.jsonl" -type f -exec tail -20 {} \;
+
+# Workdir - where commands execute
+workdir: /workspace/Trainers/rtx3090_sft
+
+# Optional: Environment variables
+envs:
+  # Set these or load from .env file
+  # HF_TOKEN: hf_your_token_here
+  # WANDB_API_KEY: your_wandb_key
+  CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"  # All 8 GPUs
+  TOKENIZERS_PARALLELISM: "false"  # Avoid tokenizer warnings
+
+# Optional: Lifecycle management
+# Stop instance after 2 hours if idle (cost savings)
+# idle_minutes_to_autostop: 120

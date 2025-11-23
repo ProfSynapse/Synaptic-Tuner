@@ -13,6 +13,38 @@ Production-ready implementation of KTO (Kahneman-Tversky Optimization) fine-tuni
 
 ## Quick Start
 
+### Interactive CLI (Recommended)
+
+**KTO is designed for refinement**, not initial training. Use the interactive CLI for best results:
+
+**Linux/WSL2:**
+```bash
+# Go to Trainers/ directory
+cd ../
+./train.sh
+
+# Choose option:
+#   2) KTO Only - If you already have an SFT model
+#   3) SFT → KTO Pipeline - Complete training (recommended)
+```
+
+**Windows PowerShell:**
+```powershell
+# Go to Trainers\ directory
+cd ..\
+.\train.ps1
+
+# Choose option:
+#   2) KTO Only - If you already have an SFT model
+#   3) SFT → KTO Pipeline - Complete training (recommended)
+```
+
+**Why SFT → KTO Pipeline?**
+- 📚 SFT teaches tool-calling syntax (WHAT to do)
+- ✨ KTO refines quality (WHICH calls are better)
+- 🎯 Combined approach produces best results
+- ⚙️ Interactive CLI configures everything automatically
+
 ### 1. Installation
 
 ```bash

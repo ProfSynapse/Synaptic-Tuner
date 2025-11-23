@@ -4,10 +4,32 @@ Supervised Fine-Tuning (SFT) for tool-calling instruction learning using Unsloth
 
 ## Quick Start
 
+### Interactive CLI (Recommended)
+
+**Linux/WSL2:**
 ```bash
 # Setup environment (first time only)
 bash setup.sh
 
+# Run interactive training CLI
+cd ../
+./train.sh
+
+# Choose option 1 (SFT Only) or 3 (SFT → KTO Pipeline)
+```
+
+**Windows PowerShell:**
+```powershell
+# Run interactive training CLI
+cd ..\
+.\train.ps1
+
+# Choose option 1 (SFT Only) or 3 (SFT → KTO Pipeline)
+```
+
+### Direct Commands (Advanced)
+
+```bash
 # Train with default 7B model
 ./train.sh --model-size 7b
 
@@ -41,6 +63,22 @@ python train_sft.py --model-size 7b --dry-run
 | **Use case** | Learn new behaviors | Refine existing knowledge |
 
 **Recommendation:** Use SFT first to teach tool-calling, then optionally use KTO for refinement.
+
+## Chaining SFT → KTO
+
+The interactive CLI (see Quick Start above) handles this automatically. When you choose **option 3 (SFT → KTO Pipeline)**, it will:
+
+1. Run SFT training with `configs/config.yaml`
+2. Capture SFT output path automatically
+3. Update KTO config to use SFT model as base
+4. Run KTO refinement
+5. Produce final refined model
+
+**To customize settings:**
+- Edit `configs/config.yaml` for SFT configuration
+- Edit `../rtx3090_kto/configs/config.yaml` for KTO configuration
+- Run `./train.sh` (Linux) or `.\train.ps1` (Windows) from `Trainers/` directory
+- Choose option 3 and follow prompts
 
 ## Model Sizes
 
