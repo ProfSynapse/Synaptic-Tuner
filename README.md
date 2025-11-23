@@ -54,9 +54,14 @@ cd Toolset-Training
 cd Trainers/rtx3090_sft
 bash setup.sh
 
-# 3. Automated pipeline (SFT → KTO chained)
+# 3. Interactive training CLI (recommended)
 cd ../
-./train_sft_to_kto_pipeline.sh --wandb --wandb-project my-project
+./train.sh
+
+# The CLI will let you choose:
+#   1) SFT Only - Supervised Fine-Tuning
+#   2) KTO Only - Preference Learning
+#   3) SFT → KTO Pipeline - Full training (recommended)
 ```
 
 **Windows PowerShell:**
@@ -69,18 +74,23 @@ cd Toolset-Training
 cd Trainers\rtx3090_sft
 # Follow setup instructions in README
 
-# 3. Automated pipeline (SFT → KTO chained)
+# 3. Interactive training CLI (recommended)
 cd ..\
-.\train_sft_to_kto_pipeline.ps1
+.\train.ps1
+
+# The CLI will let you choose:
+#   1) SFT Only - Supervised Fine-Tuning
+#   2) KTO Only - Preference Learning
+#   3) SFT → KTO Pipeline - Full training (recommended)
 ```
 
-**Automated Pipeline Features:**
-- ✅ Runs SFT first (teaches tool-calling syntax)
-- ✅ Automatically chains KTO second (refines quality)
-- ✅ Uses YAML configs from each trainer
-- ✅ KTO config auto-updated with SFT output path
-- ✅ Single command for complete training workflow
-- ✅ Available on both Linux/WSL2 and Windows PowerShell
+**Interactive CLI Features:**
+- 📋 **Choose training mode** - SFT, KTO, or combined pipeline
+- ⚙️ **Configure W&B logging** - Enable/disable with custom project names
+- 📊 **Configuration preview** - See all settings before starting
+- ✅ **Auto-detection** - Finds Python, verifies CUDA automatically
+- 🔗 **Seamless chaining** - Pipeline mode auto-updates configs
+- 💻 **Cross-platform** - Identical experience on Linux and Windows
 
 **See full local setup guide:** [Trainers/rtx3090_sft/README.md](Trainers/rtx3090_sft/README.md)
 

@@ -4,10 +4,32 @@ Supervised Fine-Tuning (SFT) for tool-calling instruction learning using Unsloth
 
 ## Quick Start
 
+### Interactive CLI (Recommended)
+
+**Linux/WSL2:**
 ```bash
 # Setup environment (first time only)
 bash setup.sh
 
+# Run interactive training CLI
+cd ../
+./train.sh
+
+# Choose option 1 (SFT Only) or 3 (SFT → KTO Pipeline)
+```
+
+**Windows PowerShell:**
+```powershell
+# Run interactive training CLI
+cd ..\
+.\train.ps1
+
+# Choose option 1 (SFT Only) or 3 (SFT → KTO Pipeline)
+```
+
+### Direct Commands (Advanced)
+
+```bash
 # Train with default 7B model
 ./train.sh --model-size 7b
 
