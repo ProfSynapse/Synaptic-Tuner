@@ -2,6 +2,14 @@
 
 Evaluation harness for tool-calling models served via [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/). The Evaluator issues curated prompts, captures model replies, and validates tool-call structure using the same schema rules enforced in `tools/validate_syngen.py`.
 
+## Documentation
+
+- **[SUMMARY.md](SUMMARY.md)** - Overview of all evaluation options ⭐ **START HERE**
+- **[QUICKSTART.md](QUICKSTART.md)** - Quick CLI reference
+- **[INTERACTIVE_MODE.md](INTERACTIVE_MODE.md)** - Interactive mode guide
+- **[BEHAVIOR_EVALUATION_GUIDE.md](BEHAVIOR_EVALUATION_GUIDE.md)** - Comprehensive behavior testing guide
+- **[README.md](README.md)** (this file) - Full technical details
+
 ## Quick Start (Platform-Specific)
 
 ### macOS / Linux
@@ -98,9 +106,40 @@ Both backends support environment variables and CLI overrides:
 - Optional Markdown export surfaces quick human-readable diffs.
 - Use `--markdown <path>` to generate a Markdown summary.
 
+## Prompt Sets
+
+Four evaluation prompt sets are available:
+
+### 1. **behavior_rubric.json** (43 prompts) - **Recommended for trained models**
+Tests behavior patterns from the training rubric:
+- Intellectual Humility (8 prompts)
+- Verification Before Action (6 prompts)
+- Context Continuity (7 prompts)
+- Strategic Tool Selection (6 prompts)
+- Error Recovery (4 prompts)
+- Workspace Awareness (3 prompts)
+- Multi-Behavior (4 prompts)
+- Anti-Patterns (5 prompts)
+
+```bash
+python -m Evaluator.cli \
+  --model your-model \
+  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --markdown results/behavior_report.md
+```
+
+### 2. **baseline.json** (6 prompts) - Quick functionality check
+General-purpose prompts with behavior expectations.
+
+### 3. **full_coverage.json** (45 prompts) - Every tool tested once
+One scenario per tool (no commandManager or get_tools).
+
+### 4. **tool_combos.json** (7 prompts) - Multi-step workflows
+Complex sequences requiring multiple tools.
+
 ## Prompt Set Format
 
-`Evaluator/prompts/baseline.json` follows this schema (more formats supported later):
+Each prompt can include behavior expectations:
 
 ```json
 [
@@ -109,13 +148,15 @@ Both backends support environment variables and CLI overrides:
     "question": "Can you find every note mentioning the delayed workspace migration?",
     "tags": ["vaultLibrarian", "search"],
     "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "sessionMemory_min_chars": 80,
+      "toolContext_explains_why": true,
+      "should_use_batch_operation": false
+    },
     "notes": "New scenario, not part of the dataset"
   }
 ]
 ```
-
-- **`full_coverage.json`** — one single-tool scenario for every tool defined in `tools/tool_schemas.json` (47 prompts total). Helpful for sanity-checking individual tool schemas.
-- **`tool_combos.json`** — curated multi-step workflows that require chaining two or more tools; the order of entries in `expected_tools` reflects the preferred call sequence.
 
 > `expected_tools` is always an ordered list. Single-entry lists imply a dedicated tool, while multi-entry lists indicate the recommended execution order for chained evaluations.
 

@@ -367,7 +367,6 @@ def maybe_upload(config, run_info: dict) -> None:
     try:
         from src.upload_to_hf import upload_standard_model  # Import lazily to avoid early Unsloth load
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        print(color(f"Unable to import upload helper: {exc}", "red"))
         return
 
     repo_id = prompt_repo_id(default_repo_id(config))
@@ -378,7 +377,6 @@ def maybe_upload(config, run_info: dict) -> None:
     if not hf_token:
         hf_token = input("HF token (write): ").strip()
     if not hf_token:
-        print(color("HF token is required to upload. Skipping upload.", "red"))
         return
 
     model_path = run_info.get("final_model_dir")
@@ -396,7 +394,7 @@ Uploading {model_path} -> {repo_id} ({save_method})", "cyan"))
 Pushing model card...", "cyan"))
     card = build_model_card(repo_id, config, run_info)
     push_model_card(repo_id, hf_token, card, private)
-    print(color("?? Upload complete with model card.", "green"))
+    print(color("Upload complete with model card.", "green"))
 
 
 # -- Main ------------------------------------------------------------------- #

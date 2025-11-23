@@ -38,13 +38,30 @@ def main(argv: List[str] | None = None) -> int:
 
     _print_banner()
 
-    prompt_path = expand_path(args.prompt_set)
+    # Select prompt set interactively if not provided via CLI
+    if args.prompt_set == str(DEFAULT_PROMPT_SET):
+        # User didn't specify, let them choose
+        prompt_set_selection = _select_prompt_set()
+    else:
+        # User specified via --prompt-set
+        prompt_set_selection = args.prompt_set
+
+    # Handle "Run All" option
+    if isinstance(prompt_set_selection, list):
+        prompt_set_paths = [expand_path(p) for p in prompt_set_selection]
+        run_all_suites = True
+    else:
+        prompt_set_paths = [expand_path(prompt_set_selection)]
+        run_all_suites = False
+
     results_dir = expand_path(args.output_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    if not prompt_path.exists():
-        print(f"Prompt set not found: {prompt_path}", file=sys.stderr)
-        return 1
+    # Validate all prompt paths exist
+    for prompt_path in prompt_set_paths:
+        if not prompt_path.exists():
+            print(f"Prompt set not found: {prompt_path}", file=sys.stderr)
+            return 1
 
     list_client = LMStudioClient(
         settings=LMStudioSettings(model="__list__", **_settings_kwargs(args)),
@@ -67,65 +84,82 @@ def main(argv: List[str] | None = None) -> int:
     )
     client = LMStudioClient(settings=settings, timeout=args.timeout, retries=args.retries)
 
-    try:
-        base_config = EvaluatorConfig(
-            prompts_path=prompt_path,
-            output_path=None,  # Set per run
-            save_markdown=True,
-            filter=PromptFilter(),
-            retries=args.retries,
-            request_timeout=args.timeout,
-            dry_run=args.dry_run,
-        )
-        base_config.validate()
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        print(f"Invalid configuration: {exc}", file=sys.stderr)
-        return 1
-
-    cases = load_prompt_cases(base_config.prompts_path)
     any_errors = False
     any_failures = False
 
-    print(color(f"\nRunning full coverage for: {model_name}", "cyan"))
-    print(color(f"Prompt set: {prompt_path}", "cyan"))
-    print(color(f"Runs: {run_count}\n", "cyan"))
+    # Run each test suite
+    for suite_idx, prompt_path in enumerate(prompt_set_paths, 1):
+        try:
+            base_config = EvaluatorConfig(
+                prompts_path=prompt_path,
+                output_path=None,  # Set per run
+                save_markdown=True,
+                filter=PromptFilter(),
+                retries=args.retries,
+                request_timeout=args.timeout,
+                dry_run=args.dry_run,
+            )
+            base_config.validate()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Invalid configuration: {exc}", file=sys.stderr)
+            return 1
 
-    for idx in range(run_count):
-        json_path, md_path = run_output_paths(model_name, results_dir, idx, run_count)
+        cases = load_prompt_cases(base_config.prompts_path)
 
-        config = EvaluatorConfig(
-            prompts_path=base_config.prompts_path,
-            output_path=json_path,
-            save_markdown=True,
-            filter=base_config.filter,
-            retries=base_config.retries,
-            request_timeout=base_config.request_timeout,
-            dry_run=base_config.dry_run,
-        )
-        config.ensure_output_parent()
-        md_path.parent.mkdir(parents=True, exist_ok=True)
+        # Get friendly name for prompt set
+        prompt_set_name = prompt_path.stem.replace('_', ' ').title()
 
-        print(color(f"--- Run {idx + 1}/{run_count} ---", "magenta"))
-        records = evaluate_cases(
-            cases,
-            client=client,
-            dry_run=config.dry_run,
-            on_record=_print_record_progress,
-        )
+        if run_all_suites:
+            print(color(f"\n{'='*60}", "cyan"))
+            print(color(f"Test Suite {suite_idx}/{len(prompt_set_paths)}: {prompt_set_name}", "cyan"))
+            print(color(f"{'='*60}", "cyan"))
 
-        metadata = build_metadata(config, settings, len(cases), len(cases), backend="lmstudio")
-        payload = build_run_payload(records, metadata=metadata)
-        write_json(config.output_path, payload)
-        md_path.write_text(render_markdown(records), encoding="utf-8")
+        print(color(f"\nRunning evaluation for: {model_name}", "cyan"))
+        print(color(f"Test suite: {prompt_set_name} ({len(cases)} prompts)", "cyan"))
+        print(color(f"Prompt file: {prompt_path}", "cyan"))
+        print(color(f"Runs: {run_count}\n", "cyan"))
 
-        print(color(console_summary(records), _passfail_color(records)))
-        print(color(f"JSON: {json_path}", "yellow"))
-        print(color(f"Markdown: {md_path}\n", "yellow"))
+        for idx in range(run_count):
+            # Generate unique output paths for each suite
+            if run_all_suites:
+                suite_suffix = f"_{prompt_path.stem}"
+                json_path, md_path = run_output_paths_with_suffix(model_name, results_dir, idx, run_count, suite_suffix)
+            else:
+                json_path, md_path = run_output_paths(model_name, results_dir, idx, run_count)
 
-        if any(record.error for record in records):
-            any_errors = True
-        if any((record.validator and not record.validator.passed) for record in records if record.error is None):
-            any_failures = True
+            config = EvaluatorConfig(
+                prompts_path=base_config.prompts_path,
+                output_path=json_path,
+                save_markdown=True,
+                filter=base_config.filter,
+                retries=base_config.retries,
+                request_timeout=base_config.request_timeout,
+                dry_run=base_config.dry_run,
+            )
+            config.ensure_output_parent()
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+
+            print(color(f"--- Run {idx + 1}/{run_count} ---", "magenta"))
+            records = evaluate_cases(
+                cases,
+                client=client,
+                dry_run=config.dry_run,
+                on_record=_print_record_progress,
+            )
+
+            metadata = build_metadata(config, settings, len(cases), len(cases), backend="lmstudio")
+            payload = build_run_payload(records, metadata=metadata)
+            write_json(config.output_path, payload)
+            md_path.write_text(render_markdown(records), encoding="utf-8")
+
+            print(color(console_summary(records), _passfail_color(records)))
+            print(color(f"JSON: {json_path}", "yellow"))
+            print(color(f"Markdown: {md_path}\n", "yellow"))
+
+            if any(record.error for record in records):
+                any_errors = True
+            if any((record.validator and not record.validator.passed) for record in records if record.error is None):
+                any_failures = True
 
     if any_errors:
         return 3
@@ -137,6 +171,24 @@ def main(argv: List[str] | None = None) -> int:
 def run_output_paths(model_name: str, results_dir: Path, run_index: int, total_runs: int) -> Tuple[Path, Path]:
     """Create per-run JSON/MD paths, suffixed when multiple runs are requested."""
     json_path, md_path = default_output_paths(model_name, results_dir)
+    if total_runs > 1:
+        json_path = json_path.parent / f"{json_path.stem}_run{run_index + 1}{json_path.suffix}"
+        md_path = md_path.parent / f"{md_path.stem}_run{run_index + 1}{md_path.suffix}"
+    return json_path, md_path
+
+
+def run_output_paths_with_suffix(model_name: str, results_dir: Path, run_index: int, total_runs: int, suffix: str) -> Tuple[Path, Path]:
+    """Create per-run JSON/MD paths with custom suffix for multi-suite runs."""
+    json_path, md_path = default_output_paths(model_name, results_dir)
+    # Insert suffix before timestamp
+    stem_parts = json_path.stem.rsplit('_', 1)  # Split off timestamp
+    new_stem = f"{stem_parts[0]}{suffix}_{stem_parts[1]}"
+    json_path = json_path.parent / f"{new_stem}{json_path.suffix}"
+
+    stem_parts = md_path.stem.rsplit('_', 1)
+    new_stem = f"{stem_parts[0]}{suffix}_{stem_parts[1]}"
+    md_path = md_path.parent / f"{new_stem}{md_path.suffix}"
+
     if total_runs > 1:
         json_path = json_path.parent / f"{json_path.stem}_run{run_index + 1}{json_path.suffix}"
         md_path = md_path.parent / f"{md_path.stem}_run{run_index + 1}{md_path.suffix}"
@@ -176,9 +228,64 @@ def _select_model(client: LMStudioClient) -> str | None:
         print(f"Please pick a value between 1 and {len(models)}.", file=sys.stderr)
 
 
+def _select_prompt_set() -> str | list:
+    """Let user choose which test suite to run. Returns path string or list of paths for 'all'."""
+    prompt_sets = {
+        "1": {
+            "name": "Behavior Rubric Tests",
+            "path": "Evaluator/prompts/behavior_rubric.json",
+            "desc": "43 prompts testing all 6 behavior patterns (Recommended)",
+        },
+        "2": {
+            "name": "Full Tool Coverage",
+            "path": "Evaluator/prompts/full_coverage.json",
+            "desc": "45 prompts - one test per tool",
+        },
+        "3": {
+            "name": "Baseline Tests",
+            "path": "Evaluator/prompts/baseline.json",
+            "desc": "6 general prompts with behavior expectations",
+        },
+        "4": {
+            "name": "Multi-Step Workflows",
+            "path": "Evaluator/prompts/tool_combos.json",
+            "desc": "7 prompts testing complex tool sequences",
+        },
+        "5": {
+            "name": "Run All Tests",
+            "path": "ALL",
+            "desc": "Run all 4 test suites sequentially (101 total prompts)",
+        },
+    }
+
+    print(color("\nSelect test suite:", "magenta"))
+    for key in sorted(prompt_sets.keys()):
+        pset = prompt_sets[key]
+        print(f"{color(f'[{key}]', 'yellow')} {pset['name']}")
+        print(f"     {color(pset['desc'], 'cyan')}")
+
+    while True:
+        choice = input("\nEnter a number (default 1): ").strip()
+        if not choice:
+            return prompt_sets["1"]["path"]
+        if choice in prompt_sets:
+            selected = prompt_sets[choice]
+            print(color(f"Selected: {selected['name']}", "green"))
+            if selected["path"] == "ALL":
+                # Return all test suites
+                return [
+                    prompt_sets["1"]["path"],
+                    prompt_sets["2"]["path"],
+                    prompt_sets["3"]["path"],
+                    prompt_sets["4"]["path"],
+                ]
+            return selected["path"]
+        print("Please enter a valid option (1-5).", file=sys.stderr)
+
+
 def _prompt_run_count(default: int = 1) -> int:
     while True:
-        raw = input(f"How many runs? (default {default}): ").strip()
+        raw = input(f"\nHow many runs? (default {default}): ").strip()
         if not raw:
             return default
         try:
@@ -253,8 +360,8 @@ def color(text: str, name: str) -> str:
 def _print_banner() -> None:
     width = 38
     top = "+" + "=" * (width - 2) + "+"
-    mid1 = "|" + "LM Studio Full Coverage".center(width - 2) + "|"
-    mid2 = "|" + "Evaluator CLI".center(width - 2) + "|"
+    mid1 = "|" + "LM Studio Evaluator".center(width - 2) + "|"
+    mid2 = "|" + "Interactive CLI".center(width - 2) + "|"
 
     lines = [top, mid1, mid2, top]
     if supports_ansi():
