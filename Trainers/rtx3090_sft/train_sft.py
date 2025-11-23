@@ -312,6 +312,8 @@ def run(args: argparse.Namespace):
     check_gpu_memory()
 
     # Configure SFT training arguments
+    # Note: For conversational format (messages key), SFTTrainer auto-detects and applies chat template
+    # No dataset_text_field needed for messages format (TRL 0.15.0+)
     training_args = SFTConfig(
         output_dir=config.training.output_dir,
         per_device_train_batch_size=config.training.per_device_train_batch_size,
@@ -321,7 +323,6 @@ def run(args: argparse.Namespace):
         lr_scheduler_type=config.training.lr_scheduler_type,
         max_seq_length=config.training.max_seq_length,
         packing=config.training.packing,
-        dataset_text_field="text" if "text" in train_dataset.column_names else None,
         gradient_checkpointing=config.training.gradient_checkpointing,
         optim=config.training.optim,
         fp16=not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
