@@ -59,7 +59,8 @@
       "Bash(unix2dos:*)",
       "Bash(powershell.exe -File rtx3090_sft/train.ps1)",
       "Bash(git --version)",
-      "Bash(powershell.exe -Command:*)"
+      "Bash(powershell.exe -Command:*)",
+      "Bash(code/mistral_lora_mac/venv/bin/python:*)"
     ],
     "deny": [],
     "ask": []

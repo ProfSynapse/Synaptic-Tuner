@@ -1,41 +1,146 @@
-# strategic tool selection Dataset
+---
+language:
+- en
+license: mit
+task_categories:
+- text-generation
+- conversational
+tags:
+- synthetic
+- tool-calling
+- openai-format
+- behavior-modeling
+- strategic-tool-selection
+size_categories:
+- n<1K
+---
 
-**Behavior:** strategic_tool_selection
-**Rubric:** `../../behavior_rubrics/strategic_tool_selection.yaml`
+# Claudesidian Behavioral Dataset - Strategic Tool Selection
 
-## Quick Reference
+## Dataset Description
 
-See the main rubric file for:
-- Detailed positive/negative indicators
-- Tool patterns and sequences
-- Trigger scenarios
-- Example pairs
-- Validation criteria
+This dataset contains synthetic training examples demonstrating **strategic tool selection** behavior patterns for training language models to use the Claudesidian-MCP toolset effectively with Obsidian vaults.
 
-## Files
+### Behavior Focus: Strategic Tool Selection
 
-- `seed_pairs_v1.0.jsonl` - Manual seed examples (10-20 pairs)
-- `pairs_v1.0.jsonl` - Full dataset (generated + seed)
-- `interleaved_v1.0.jsonl` - Ready for training
-- `validation_report_v1.0.md` - Validation results
 
-## Validation
+This behavior focuses on **choosing the most efficient and appropriate tool for each task**.
 
-```bash
-# Schema validation
-python tools/validate_syngen.py \
-  Datasets/behavior_datasets/strategic_tool_selection/pairs_v1.0.jsonl
+**Positive patterns:**
+- Using batch operations for multiple similar tasks
+- Choosing searchDirectory over searchContent for file listing
+- Using batchExecutePrompt for parallel AI operations
+- Selecting tools based on task requirements
+
+**Negative patterns:**
+- Sequential operations when batch available
+- Wrong tool for the task type
+- Inefficient tool chains
+- Missing opportunities for optimization
+
+
+## Dataset Structure
+
+### Format
+- **OpenAI-compatible tool calling format** (ChatML)
+- Each example includes:
+  - User message
+  - Assistant response with tool calls
+  - Tool call metadata (id, type, function name, arguments)
+  - Behavioral label (true/false for KTO training)
+  - Behavior classification tag
+
+### Example Structure
+```json
+{
+  "conversations": [
+    {
+      "role": "user",
+      "content": "User request..."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "abc123def",
+          "type": "function",
+          "function": {
+            "name": "toolName",
+            "arguments": "{\"context\": {...}, ...}"
+          }
+        }
+      ]
+    }
+  ],
+  "label": true,
+  "behavior": "strategic_tool_selection"
+}
 ```
 
-## Status
+## Statistics
+- **Total Examples**: 262
+- **Positive Examples**: 153
+- **Negative Examples**: 109
 
-- [ ] Seed pairs created
-- [ ] Full generation complete
-- [ ] Schema validation passed
-- [ ] Manual review complete
-- [ ] Interleaved for training
-- [ ] Ready for KTO
+## Usage
 
-## Notes
+### Loading the Dataset
+```python
+from datasets import load_dataset
 
-_Add generation notes and observations here_
+dataset = load_dataset("ProfSynapse/claudesidian-behavior-strategic_tool_selection")
+```
+
+### Training with TRL
+```python
+from trl import SFTTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("unsloth/mistral-7b-v0.3")
+tokenizer = AutoTokenizer.from_pretrained("unsloth/mistral-7b-v0.3")
+
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    train_dataset=dataset["train"],
+    dataset_text_field="conversations",
+    max_seq_length=2048,
+)
+trainer.train()
+```
+
+## Dataset Creation
+
+This dataset was synthetically generated using Claude 3.5 Sonnet to demonstrate proper and improper usage patterns of specific behavioral patterns in tool-calling scenarios.
+
+### Generation Process
+1. Behavior rubric definition
+2. Synthetic conversation generation
+3. Format conversion to OpenAI-compatible structure
+4. Quality validation and verification
+
+## License
+
+MIT License - Free to use for research and commercial applications.
+
+## Citation
+
+```bibtex
+@dataset{claudesidian_behavior_strategic_tool_selection,
+  title={Claudesidian Behavioral Dataset - Strategic Tool Selection},
+  author={ProfSynapse},
+  year={2025},
+  publisher={Hugging Face},
+  howpublished={\url{https://huggingface.co/datasets/ProfSynapse/claudesidian-behavior-strategic_tool_selection}}
+}
+```
+
+## Related Datasets
+
+- [Claudesidian Merged Behaviors](https://huggingface.co/datasets/ProfSynapse/claudesidian-behaviors-merged) - All behaviors combined
+- [Claudesidian Base Dataset](https://huggingface.co/datasets/ProfSynapse/claudesidian-toolset) - Main tool-calling dataset
+
+## Contact
+
+- GitHub: [ProfSynapse/Toolset-Training](https://github.com/ProfSynapse/Toolset-Training)

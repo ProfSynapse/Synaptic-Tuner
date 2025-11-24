@@ -140,12 +140,12 @@ class KTOTrainingConfig:
 class DatasetConfig:
     """Dataset configuration."""
 
-    # Dataset source
-    dataset_name: str = "professorsynapse/claudesidian-synthetic-dataset"
-    dataset_file: str = "behavior_merged_kto_11.23.25.jsonl"
+    # Dataset source (HuggingFace Hub)
+    # Updated to v1.1: OpenAI-compatible format, 8 behaviors, 1,852 examples
+    dataset_name: str = "professorsynapse/claudesidian-behaviors-merged"
 
-    # Use local file (relative to project root)
-    local_file: Optional[str] = "../../Datasets/behavior_merged_kto_11.23.25.jsonl"
+    # Use local file (relative to project root) - v1.1 with all 8 behaviors
+    local_file: Optional[str] = "../../Datasets/behavior_merged_kto_v1.1.jsonl"
 
     # Dataset processing
     num_proc: int = 1  # Set to 1 on Windows to avoid multiprocessing issues

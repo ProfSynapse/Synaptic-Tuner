@@ -1,41 +1,147 @@
-# context continuity Dataset
+---
+language:
+- en
+license: mit
+task_categories:
+- text-generation
+- conversational
+tags:
+- synthetic
+- tool-calling
+- openai-format
+- behavior-modeling
+- context-continuity
+size_categories:
+- n<1K
+---
 
-**Behavior:** context_continuity
-**Rubric:** `../../behavior_rubrics/context_continuity.yaml`
+# Claudesidian Behavioral Dataset - Context Continuity
 
-## Quick Reference
+## Dataset Description
 
-See the main rubric file for:
-- Detailed positive/negative indicators
-- Tool patterns and sequences
-- Trigger scenarios
-- Example pairs
-- Validation criteria
+This dataset contains synthetic training examples demonstrating **context continuity** behavior patterns for training language models to use the Claudesidian-MCP toolset effectively with Obsidian vaults.
 
-## Files
+### Behavior Focus: Context Continuity
 
-- `seed_pairs_v1.0.jsonl` - Manual seed examples (10-20 pairs)
-- `pairs_v1.0.jsonl` - Full dataset (generated + seed)
-- `interleaved_v1.0.jsonl` - Ready for training
-- `validation_report_v1.0.md` - Validation results
 
-## Validation
+This behavior focuses on **maintaining context and continuity across multi-turn interactions**.
 
-```bash
-# Schema validation
-python tools/validate_syngen.py \
-  Datasets/behavior_datasets/context_continuity/pairs_v1.0.jsonl
+**Positive patterns:**
+- Building on previous conversation context
+- Referencing prior tool results
+- Maintaining consistent goal pursuit
+- Updating sessionMemory appropriately
+- Coherent multi-step workflows
+
+**Negative patterns:**
+- Ignoring previous context
+- Generic responses without continuity
+- Forgetting stated goals
+- Not building on prior work
+
+
+## Dataset Structure
+
+### Format
+- **OpenAI-compatible tool calling format** (ChatML)
+- Each example includes:
+  - User message
+  - Assistant response with tool calls
+  - Tool call metadata (id, type, function name, arguments)
+  - Behavioral label (true/false for KTO training)
+  - Behavior classification tag
+
+### Example Structure
+```json
+{
+  "conversations": [
+    {
+      "role": "user",
+      "content": "User request..."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "abc123def",
+          "type": "function",
+          "function": {
+            "name": "toolName",
+            "arguments": "{\"context\": {...}, ...}"
+          }
+        }
+      ]
+    }
+  ],
+  "label": true,
+  "behavior": "context_continuity"
+}
 ```
 
-## Status
+## Statistics
+- **Total Examples**: 266
+- **Positive Examples**: 133
+- **Negative Examples**: 133
 
-- [ ] Seed pairs created
-- [ ] Full generation complete
-- [ ] Schema validation passed
-- [ ] Manual review complete
-- [ ] Interleaved for training
-- [ ] Ready for KTO
+## Usage
 
-## Notes
+### Loading the Dataset
+```python
+from datasets import load_dataset
 
-_Add generation notes and observations here_
+dataset = load_dataset("ProfSynapse/claudesidian-behavior-context_continuity")
+```
+
+### Training with TRL
+```python
+from trl import SFTTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("unsloth/mistral-7b-v0.3")
+tokenizer = AutoTokenizer.from_pretrained("unsloth/mistral-7b-v0.3")
+
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    train_dataset=dataset["train"],
+    dataset_text_field="conversations",
+    max_seq_length=2048,
+)
+trainer.train()
+```
+
+## Dataset Creation
+
+This dataset was synthetically generated using Claude 3.5 Sonnet to demonstrate proper and improper usage patterns of specific behavioral patterns in tool-calling scenarios.
+
+### Generation Process
+1. Behavior rubric definition
+2. Synthetic conversation generation
+3. Format conversion to OpenAI-compatible structure
+4. Quality validation and verification
+
+## License
+
+MIT License - Free to use for research and commercial applications.
+
+## Citation
+
+```bibtex
+@dataset{claudesidian_behavior_context_continuity,
+  title={Claudesidian Behavioral Dataset - Context Continuity},
+  author={ProfSynapse},
+  year={2025},
+  publisher={Hugging Face},
+  howpublished={\url{https://huggingface.co/datasets/ProfSynapse/claudesidian-behavior-context_continuity}}
+}
+```
+
+## Related Datasets
+
+- [Claudesidian Merged Behaviors](https://huggingface.co/datasets/ProfSynapse/claudesidian-behaviors-merged) - All behaviors combined
+- [Claudesidian Base Dataset](https://huggingface.co/datasets/ProfSynapse/claudesidian-toolset) - Main tool-calling dataset
+
+## Contact
+
+- GitHub: [ProfSynapse/Toolset-Training](https://github.com/ProfSynapse/Toolset-Training)
