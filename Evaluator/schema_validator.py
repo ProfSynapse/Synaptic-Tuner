@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 import sys
 from pathlib import Path
 
@@ -40,18 +40,46 @@ class ValidationResult:
         }
 
 
-def validate_assistant_response(content: str) -> ValidationResult:
-    """Validate a single assistant response string."""
+def validate_assistant_response(content: Union[str, Dict[str, Any]]) -> ValidationResult:
+    """
+    Validate a single assistant response.
+
+    Supports both formats:
+    - ChatML: string content with "tool_call:" markers
+    - OpenAI: dict with "tool_calls" array
+    """
     report = dataset_validator.ExampleReport(index=0, label=True)
-    dataset_validator.validate_assistant_content(content, report)
-    issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
-    # Extract tool calls even if validation failed to help debugging.
     tool_calls: List[ToolCall] = []
-    if "tool_call:" in content:
-        try:
-            for name, args in dataset_validator.extract_tool_calls(content):
-                tool_calls.append(ToolCall(name=name, arguments=args))
-        except Exception:
-            # extractor raises ValueError for broken JSON; already surfaced as issue
-            pass
+
+    # Detect format and validate accordingly
+    if isinstance(content, dict):
+        # OpenAI format with structured tool_calls
+        if "tool_calls" in content:
+            dataset_validator.validate_assistant_message_openai(content, report)
+            # Extract tool calls
+            try:
+                tool_calls_array = content.get("tool_calls", [])
+                for name, args in dataset_validator.extract_tool_calls_openai(tool_calls_array):
+                    tool_calls.append(ToolCall(name=name, arguments=args))
+            except Exception:
+                # Extraction errors already surfaced as validation issues
+                pass
+        else:
+            # Dict without tool_calls - invalid
+            report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
+    elif isinstance(content, str):
+        # ChatML format with content string
+        dataset_validator.validate_assistant_content(content, report)
+        # Extract tool calls even if validation failed to help debugging.
+        if "tool_call:" in content:
+            try:
+                for name, args in dataset_validator.extract_tool_calls(content):
+                    tool_calls.append(ToolCall(name=name, arguments=args))
+            except Exception:
+                # extractor raises ValueError for broken JSON; already surfaced as issue
+                pass
+    else:
+        report.add("ERROR", f"Assistant response must be string or dict, got {type(content).__name__}")
+
+    issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
     return ValidationResult(passed=report.is_valid, issues=issues, tool_calls=tool_calls)

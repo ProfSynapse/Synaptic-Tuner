@@ -119,18 +119,24 @@ def validate_conversations_array(conversations: list, report: ExampleReport) -> 
 
         role = msg.get("role")
         content = msg.get("content")
+        tool_calls = msg.get("tool_calls")  # OpenAI format
 
         if not role:
             report.add("ERROR", f"Message at index {idx} missing 'role' field")
         elif role not in ALLOWED_ROLES:
             report.add("ERROR", f"Message at index {idx} has invalid role '{role}' (must be system/user/assistant)")
 
-        if not isinstance(content, str):
+        # For OpenAI format, assistant can have null content if tool_calls present
+        if role == "assistant" and tool_calls is not None:
+            # OpenAI format: content can be null when tool_calls is present
+            if content is not None and not isinstance(content, str):
+                report.add("ERROR", f"Message at index {idx} has invalid 'content' field (must be string or null)")
+        elif not isinstance(content, str):
             report.add("ERROR", f"Message at index {idx} missing or invalid 'content' field (must be string)")
 
 
 def extract_tool_calls(content: str) -> List[Tuple[str, dict]]:
-    """Extract tool calls from assistant content, returning (tool_name, arguments_dict) tuples."""
+    """Extract tool calls from ChatML format assistant content, returning (tool_name, arguments_dict) tuples."""
     entries: List[Tuple[str, dict]] = []
     marker = "tool_call:"
     pos = 0
@@ -152,6 +158,36 @@ def extract_tool_calls(content: str) -> List[Tuple[str, dict]]:
             raise ValueError(f"Failed to parse arguments JSON for tool {tool_name}")
         entries.append((tool_name, args))
         pos = end_index
+    return entries
+
+
+def extract_tool_calls_openai(tool_calls_array: list) -> List[Tuple[str, dict]]:
+    """Extract tool calls from OpenAI format, returning (tool_name, arguments_dict) tuples."""
+    entries: List[Tuple[str, dict]] = []
+    for tool_call in tool_calls_array:
+        if not isinstance(tool_call, dict):
+            continue
+
+        # OpenAI format has nested function object
+        function = tool_call.get("function", {})
+        if not isinstance(function, dict):
+            continue
+
+        tool_name = function.get("name", "")
+        arguments_str = function.get("arguments", "{}")
+
+        # Arguments might be a string that needs parsing
+        if isinstance(arguments_str, str):
+            try:
+                args = json.loads(arguments_str, strict=False)
+            except json.JSONDecodeError:
+                raise ValueError(f"Failed to parse arguments JSON for tool {tool_name}")
+        elif isinstance(arguments_str, dict):
+            args = arguments_str
+        else:
+            raise ValueError(f"Invalid arguments format for tool {tool_name}")
+
+        entries.append((tool_name, args))
     return entries
 
 
@@ -365,7 +401,7 @@ def validate_context(args: dict, report: ExampleReport) -> None:
 
 
 def validate_assistant_content(content: str, report: ExampleReport) -> None:
-    """Validate assistant message content, including tool calls if present."""
+    """Validate ChatML format assistant message content, including tool calls if present."""
     if not content.strip():
         report.add("ERROR", "Assistant content may not be empty")
         return
@@ -384,6 +420,36 @@ def validate_assistant_content(content: str, report: ExampleReport) -> None:
             validate_context(args, report)
             # Validate against actual tool schema
             validate_tool_against_schema(tool_name, args, report, idx)
+
+
+def validate_assistant_message_openai(msg: dict, report: ExampleReport) -> None:
+    """Validate OpenAI format assistant message with tool_calls array."""
+    tool_calls_array = msg.get("tool_calls")
+    if not isinstance(tool_calls_array, list):
+        report.add("ERROR", "tool_calls must be an array")
+        return
+
+    if len(tool_calls_array) == 0:
+        report.add("ERROR", "tool_calls array must not be empty if present")
+        return
+
+    try:
+        tool_calls = extract_tool_calls_openai(tool_calls_array)
+    except ValueError as e:
+        report.add("ERROR", str(e))
+        return
+
+    if not tool_calls:
+        report.add("ERROR", "No valid tool calls found in tool_calls array")
+        return
+
+    # Validate each tool call
+    for idx, (tool_name, args) in enumerate(tool_calls, 1):
+        if not tool_name:
+            report.add("ERROR", f"Tool call #{idx} missing name")
+        validate_context(args, report)
+        # Validate against actual tool schema
+        validate_tool_against_schema(tool_name, args, report, idx)
 
 
 def validate_example(idx: int, example: dict) -> ExampleReport:
@@ -405,8 +471,14 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
     # Validate assistant messages specifically
     for msg in conversations:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
-            content = msg.get("content", "")
-            validate_assistant_content(content, report)
+            # Check format: OpenAI (tool_calls array) or ChatML (content string)
+            if "tool_calls" in msg:
+                # OpenAI format
+                validate_assistant_message_openai(msg, report)
+            else:
+                # ChatML format
+                content = msg.get("content", "")
+                validate_assistant_content(content, report)
 
     # Label is optional in ChatML format
     # Labels should now be boolean: true = desirable, false = undesirable

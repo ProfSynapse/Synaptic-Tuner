@@ -17,7 +17,7 @@ class OllamaError(RuntimeError):
 
 @dataclass
 class OllamaResponse:
-    message: str
+    message: Any  # Can be str (ChatML) or Dict (OpenAI format with tool_calls)
     raw: Dict[str, Any]
     latency_s: float
 
@@ -70,10 +70,24 @@ class OllamaClient:
         }
 
     @staticmethod
-    def _extract_message(payload: Mapping[str, Any]) -> str:
+    def _extract_message(payload: Mapping[str, Any]) -> Any:
+        """
+        Extract message from Ollama response.
+
+        Returns:
+            - Dict with tool_calls if present (OpenAI format)
+            - String content otherwise (ChatML format)
+        """
         message = payload.get("message")
         if not isinstance(message, Mapping):
             raise OllamaError(f"Unexpected Ollama response payload: {json.dumps(payload)[:200]}")
+
+        # Check if this is OpenAI format with tool_calls
+        if "tool_calls" in message:
+            # Return full message object for OpenAI format
+            return dict(message)
+
+        # ChatML format - return content string
         content = message.get("content")
         if not isinstance(content, str):
             raise OllamaError("Ollama response missing 'message.content'")

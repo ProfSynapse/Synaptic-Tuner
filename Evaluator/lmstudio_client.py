@@ -17,7 +17,7 @@ class LMStudioError(RuntimeError):
 
 @dataclass
 class LMStudioResponse:
-    message: str
+    message: Any  # Can be str (ChatML) or Dict (OpenAI format with tool_calls)
     raw: Dict[str, Any]
     latency_s: float
 
@@ -85,7 +85,14 @@ class LMStudioClient:
         return payload
 
     @staticmethod
-    def _extract_message(payload: Mapping[str, Any]) -> str:
+    def _extract_message(payload: Mapping[str, Any]) -> Any:
+        """
+        Extract message from LM Studio response.
+
+        Returns:
+            - Dict with tool_calls if present (OpenAI format)
+            - String content otherwise (ChatML format)
+        """
         choices = payload.get("choices")
         if not isinstance(choices, list) or len(choices) == 0:
             raise LMStudioError(f"Unexpected LM Studio response payload: {json.dumps(payload)[:200]}")
@@ -94,6 +101,12 @@ class LMStudioClient:
         if not isinstance(message, Mapping):
             raise LMStudioError("LM Studio response missing valid message object")
 
+        # Check if this is OpenAI format with tool_calls
+        if "tool_calls" in message:
+            # Return full message object for OpenAI format
+            return dict(message)
+
+        # ChatML format - return content string
         content = message.get("content")
         if not isinstance(content, str):
             raise LMStudioError("LM Studio response missing 'choices[0].message.content'")
