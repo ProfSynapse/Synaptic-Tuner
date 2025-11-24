@@ -52,7 +52,7 @@ if sys.platform == 'win32':
     except:
         pass
 
-    print("✓ Windows patches applied")
+    print("[OK] Windows patches applied")
 # ============================================================================
 
 # Add src to path
@@ -90,10 +90,10 @@ def setup_wandb():
         # Login with API key from .env
         wandb.login(key=wandb_key, relogin=True, force=True)
 
-        print("✓ W&B: Logged in automatically (using WANDB_API_KEY from .env)")
+        print("[OK] W&B: Logged in automatically (using WANDB_API_KEY from .env)")
         return True
     except Exception as e:
-        print(f"⚠ W&B: Login failed ({e})")
+        print(f"[WARN] W&B: Login failed ({e})")
         return False
 
 
@@ -311,9 +311,33 @@ def run(args: argparse.Namespace):
     # Check initial GPU memory
     check_gpu_memory()
 
+    def format_chat_template(batch):
+        """Apply the model chat template to each example for TRL's SFTTrainer."""
+        messages_key = "messages" if "messages" in batch else "conversations"
+        conversations = batch.get(messages_key)
+        if conversations is None:
+            raise ValueError("Dataset must contain 'messages' or 'conversations' columns")
+
+        # TRL calls formatting_func with batched examples; handle both batched and single-example shapes
+        if isinstance(conversations, dict):
+            conversations = [conversations]
+        elif len(conversations) > 0 and isinstance(conversations[0], dict):
+            conversations = [conversations]
+
+        formatted = []
+        for msgs in conversations:
+            if not isinstance(msgs, list):
+                raise ValueError(f"Expected list of messages, got {type(msgs)}")
+            formatted.append(
+                tokenizer.apply_chat_template(
+                    msgs,
+                    tokenize=False,
+                    add_generation_prompt=False,
+                )
+            )
+        return formatted
+
     # Configure SFT training arguments
-    # Note: For conversational format (messages key), SFTTrainer auto-detects and applies chat template
-    # No dataset_text_field needed for messages format (TRL 0.15.0+)
     training_args = SFTConfig(
         output_dir=config.training.output_dir,
         per_device_train_batch_size=config.training.per_device_train_batch_size,
@@ -340,6 +364,7 @@ def run(args: argparse.Namespace):
         report_to="wandb" if config.use_wandb else "none",
         run_name=config.wandb_run_name if config.use_wandb else None,
         seed=config.seed,
+        dataset_kwargs={"add_special_tokens": False},
     )
 
     # Print training configuration
@@ -380,7 +405,7 @@ def run(args: argparse.Namespace):
     print("=" * 60 + "\n")
 
     if args.dry_run:
-        print("✓ Dry run completed. Exiting without training.")
+        print("[OK] Dry run completed. Exiting without training.")
         return run_metadata
 
     # Extract previous log entries if resuming from checkpoint
@@ -407,9 +432,10 @@ def run(args: argparse.Namespace):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         callbacks=callbacks,
+        formatting_func=format_chat_template,
     )
 
-    print("✓ SFT trainer initialized with metrics tracking")
+    print("[OK] SFT trainer initialized with metrics tracking")
     print()
 
     # Check memory before training
@@ -431,7 +457,7 @@ def run(args: argparse.Namespace):
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
 
-    print(f"\n✓ Training complete!")
+    print(f"\n[OK] Training complete!")
     print(f"  Model saved to: {final_model_path}")
     print(f"  Logs saved to: {logs_dir}/")
 
