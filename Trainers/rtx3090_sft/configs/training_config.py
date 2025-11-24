@@ -100,10 +100,10 @@ class DatasetConfig:
 
     # Dataset source
     dataset_name: str = "professorsynapse/claudesidian-synthetic-dataset"
-    dataset_file: str = "syngen_tools_sft_11.24.25.jsonl"  # Fixed tool call IDs for Mistral compatibility
+    dataset_file: str = "syngen_tools_sft_11.24.25_with_tools.jsonl"  # Fixed with tools field for proper function calling
 
     # Use local file (relative to project root)
-    local_file: Optional[str] = "../../Datasets/syngen_tools_sft_11.24.25.jsonl"
+    local_file: Optional[str] = "../../Datasets/syngen_tools_sft_11.24.25_with_tools.jsonl"
 
     # Dataset processing
     num_proc: int = 1  # Set to 1 on Windows to avoid multiprocessing issues

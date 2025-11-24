@@ -90,8 +90,8 @@ class LMStudioClient:
         Extract message from LM Studio response.
 
         Returns:
-            - Dict with tool_calls if present (OpenAI format)
-            - String content otherwise (ChatML format)
+            - Dict with tool_calls if present and non-empty (OpenAI format)
+            - String content otherwise (ChatML format or [TOOL_CALLS] format)
         """
         choices = payload.get("choices")
         if not isinstance(choices, list) or len(choices) == 0:
@@ -101,12 +101,13 @@ class LMStudioClient:
         if not isinstance(message, Mapping):
             raise LMStudioError("LM Studio response missing valid message object")
 
-        # Check if this is OpenAI format with tool_calls
-        if "tool_calls" in message:
+        # Check if this is OpenAI format with tool_calls (must be non-empty)
+        tool_calls = message.get("tool_calls")
+        if tool_calls and isinstance(tool_calls, list) and len(tool_calls) > 0:
             # Return full message object for OpenAI format
             return dict(message)
 
-        # ChatML format - return content string
+        # ChatML format or [TOOL_CALLS] format - return content string
         content = message.get("content")
         if not isinstance(content, str):
             raise LMStudioError("LM Studio response missing 'choices[0].message.content'")

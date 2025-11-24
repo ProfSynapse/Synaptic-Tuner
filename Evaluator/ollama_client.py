@@ -75,19 +75,20 @@ class OllamaClient:
         Extract message from Ollama response.
 
         Returns:
-            - Dict with tool_calls if present (OpenAI format)
-            - String content otherwise (ChatML format)
+            - Dict with tool_calls if present and non-empty (OpenAI format)
+            - String content otherwise (ChatML format or [TOOL_CALLS] format)
         """
         message = payload.get("message")
         if not isinstance(message, Mapping):
             raise OllamaError(f"Unexpected Ollama response payload: {json.dumps(payload)[:200]}")
 
-        # Check if this is OpenAI format with tool_calls
-        if "tool_calls" in message:
+        # Check if this is OpenAI format with tool_calls (must be non-empty)
+        tool_calls = message.get("tool_calls")
+        if tool_calls and isinstance(tool_calls, list) and len(tool_calls) > 0:
             # Return full message object for OpenAI format
             return dict(message)
 
-        # ChatML format - return content string
+        # ChatML format or [TOOL_CALLS] format - return content string
         content = message.get("content")
         if not isinstance(content, str):
             raise OllamaError("Ollama response missing 'message.content'")

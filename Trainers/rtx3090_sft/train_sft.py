@@ -318,19 +318,33 @@ def run(args: argparse.Namespace):
         if conversations is None:
             raise ValueError("Dataset must contain 'messages' or 'conversations' columns")
 
+        # Get tools if present (required for tool calling)
+        tools = batch.get("tools")
+
         # TRL calls formatting_func with batched examples; handle both batched and single-example shapes
         if isinstance(conversations, dict):
             conversations = [conversations]
         elif len(conversations) > 0 and isinstance(conversations[0], dict):
             conversations = [conversations]
 
+        # Handle tools for batched processing
+        tools_list = None
+        if tools is not None:
+            if isinstance(tools, list) and len(tools) > 0:
+                # If tools is a list of tool arrays (batched), use first one
+                # (all examples should have same tools)
+                tools_list = tools[0] if isinstance(tools[0], list) else tools
+
         formatted = []
         for msgs in conversations:
             if not isinstance(msgs, list):
                 raise ValueError(f"Expected list of messages, got {type(msgs)}")
+
+            # Pass tools parameter for proper tool calling formatting
             formatted.append(
                 tokenizer.apply_chat_template(
                     msgs,
+                    tools=tools_list,  # Pass tools for proper function calling format
                     tokenize=False,
                     add_generation_prompt=False,
                 )
