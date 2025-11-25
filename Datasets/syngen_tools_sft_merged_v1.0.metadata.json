@@ -1,0 +1,50 @@
+{
+  "created": "2025-11-25T09:56:33.225023",
+  "source": "tools_datasets merge",
+  "version": "1.0",
+  "agents": [
+    "vaultManager",
+    "contentManager",
+    "memoryManager",
+    "vaultLibrarian",
+    "agentManager"
+  ],
+  "agent_stats": {
+    "vaultManager": {
+      "total": 1140,
+      "positive": 699,
+      "negative": 0,
+      "no_label": 441
+    },
+    "contentManager": {
+      "total": 1194,
+      "positive": 745,
+      "negative": 0,
+      "no_label": 449
+    },
+    "memoryManager": {
+      "total": 1341,
+      "positive": 836,
+      "negative": 0,
+      "no_label": 505
+    },
+    "vaultLibrarian": {
+      "total": 844,
+      "positive": 521,
+      "negative": 0,
+      "no_label": 323
+    },
+    "agentManager": {
+      "total": 770,
+      "positive": 493,
+      "negative": 0,
+      "no_label": 277
+    }
+  },
+  "total_examples": 5289,
+  "positive_examples": 3294,
+  "negative_examples": 0,
+  "no_label_examples": 1995,
+  "shuffled": true,
+  "format": "SFT-compatible ChatML"
+}

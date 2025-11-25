@@ -1,0 +1,85 @@
+{
+  "created": "2025-11-25T09:56:12.437410",
+  "source": "syngen_tools_sft_11.24.25_cleaned.jsonl",
+  "total_examples": 5289,
+  "invalid_entries": 14,
+  "agent_stats": {
+    "memoryManager": {
+      "total": 1341,
+      "tools": {
+        "memoryManager_loadWorkspace": 292,
+        "memoryManager_listSessions": 187,
+        "memoryManager_createState": 174,
+        "memoryManager_updateSession": 124,
+        "memoryManager_loadSession": 113,
+        "memoryManager_createSession": 109,
+        "memoryManager_listStates": 75,
+        "memoryManager_updateState": 60,
+        "memoryManager_createWorkspace": 54,
+        "memoryManager_loadState": 53,
+        "memoryManager_updateWorkspace": 44,
+        "memoryManager_listWorkspaces": 35,
+        "memoryManager_updateSessionMetadata": 15,
+        "memoryManager_deleteWorkspace": 4,
+        "memoryManager_restoreState": 1,
+        "memoryManager_deleteState": 1
+      }
+    },
+    "vaultLibrarian": {
+      "total": 844,
+      "tools": {
+        "vaultLibrarian_searchContent": 555,
+        "vaultLibrarian_searchDirectory": 165,
+        "vaultLibrarian_searchMemory": 66,
+        "vaultLibrarian_batch": 47,
+        "vaultLibrarian_searchFiles": 6,
+        "vaultLibrarian_batchFileOperation": 5
+      }
+    },
+    "contentManager": {
+      "total": 1194,
+      "tools": {
+        "contentManager_appendContent": 348,
+        "contentManager_createContent": 260,
+        "contentManager_readContent": 248,
+        "contentManager_replaceContent": 98,
+        "contentManager_batchContent": 62,
+        "contentManager_findReplaceContent": 55,
+        "contentManager_prependContent": 44,
+        "contentManager_replaceByLine": 44,
+        "contentManager_deleteContent": 35
+      }
+    },
+    "vaultManager": {
+      "total": 1140,
+      "tools": {
+        "vaultManager_createFolder": 227,
+        "vaultManager_moveNote": 198,
+        "vaultManager_listDirectory": 175,
+        "vaultManager_duplicateNote": 119,
+        "vaultManager_deleteFolder": 97,
+        "vaultManager_openNote": 93,
+        "vaultManager_deleteNote": 88,
+        "vaultManager_moveFolder": 67,
+        "vaultManager_editFolder": 67,
+        "vaultManager_renameFolder": 9
+      }
+    },
+    "agentManager": {
+      "total": 770,
+      "tools": {
+        "agentManager_executePrompt": 109,
+        "agentManager_toggleAgent": 105,
+        "agentManager_updateAgent": 102,
+        "agentManager_createAgent": 91,
+        "agentManager_listAgents": 90,
+        "agentManager_getAgent": 81,
+        "agentManager_deleteAgent": 62,
+        "agentManager_listModels": 54,
+        "agentManager_generateImage": 49,
+        "agentManager_batchExecutePrompt": 26,
+        "agentManager_executeAgent": 1
+      }
+    }
+  }
+}
