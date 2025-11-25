@@ -182,10 +182,10 @@ sft_output_rtx3090/YYYYMMDD_HHMMSS/
     ├── merged-16bit/         # Full merged model (if selected)
     ├── merged-4bit/          # 4-bit quantized (if selected)
     ├── gguf/                 # GGUF quantizations (if created)
-    │   ├── model-unsloth.gguf (f16)
-    │   ├── model-unsloth-Q4_K_M.gguf
-    │   ├── model-unsloth-Q5_K_M.gguf
-    │   └── model-unsloth-Q8_0.gguf
+    │   ├── your-model-name.gguf (f16)
+    │   ├── your-model-name-Q4_K_M.gguf
+    │   ├── your-model-name-Q5_K_M.gguf
+    │   └── your-model-name-Q8_0.gguf
     ├── upload_manifest.json  # Upload metadata
     └── README.md             # Auto-generated docs
 ```
@@ -272,10 +272,10 @@ GGUF creation is now fully integrated into the upload process. When you select "
 **Output location:**
 ```
 sft_output_rtx3090/YYYYMMDD_HHMMSS/model-name/gguf/
-├── model-unsloth.gguf         (f16, ~14GB)
-├── model-unsloth-Q4_K_M.gguf  (~4GB)
-├── model-unsloth-Q5_K_M.gguf  (~5GB)
-└── model-unsloth-Q8_0.gguf    (~8GB)
+├── model-name.gguf         (f16, ~14GB)
+├── model-name-Q4_K_M.gguf  (~4GB)
+├── model-name-Q5_K_M.gguf  (~5GB)
+└── model-name-Q8_0.gguf    (~8GB)
 ```
 
 **Why this is better:**
@@ -900,10 +900,10 @@ sft_output_rtx3090/YYYYMMDD_HHMMSS/
     ├── merged-16bit/         # Full merged model (if created)
     ├── merged-4bit/          # 4-bit quantized (if created)
     ├── gguf/                 # GGUF quantizations (if created)
-    │   ├── model-unsloth.gguf
-    │   ├── model-unsloth-Q4_K_M.gguf
-    │   ├── model-unsloth-Q5_K_M.gguf
-    │   └── model-unsloth-Q8_0.gguf
+    │   ├── your-model-name.gguf
+    │   ├── your-model-name-Q4_K_M.gguf
+    │   ├── your-model-name-Q5_K_M.gguf
+    │   └── your-model-name-Q8_0.gguf
     ├── upload_manifest.json  # Metadata about upload
     └── README.md             # Auto-generated documentation
 ```
@@ -936,10 +936,10 @@ sft_output_rtx3090/YYYYMMDD_HHMMSS/
     "gguf": "gguf/"
   },
   "gguf_quantizations": [
-    "model-unsloth.gguf",
-    "model-unsloth-Q4_K_M.gguf",
-    "model-unsloth-Q5_K_M.gguf",
-    "model-unsloth-Q8_0.gguf"
+    "model-name.gguf",
+    "model-name-Q4_K_M.gguf",
+    "model-name-Q5_K_M.gguf",
+    "model-name-Q8_0.gguf"
   ]
 }
 ```

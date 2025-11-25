@@ -18,8 +18,8 @@ model:
 
 # LoRA Adapter Configuration
 lora:
-  r: 32
-  lora_alpha: 64
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0.05
   bias: "none"
   target_modules:
@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "syngen_tools_sft_11.24.25_with_tools.jsonl"
+  dataset_file: "syngen_tools_sft_11.25.25_context.jsonl"
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/syngen_tools_sft_11.24.25_with_tools.jsonl"
+  local_file: "../../Datasets/syngen_tools_sft_11.25.25_context.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

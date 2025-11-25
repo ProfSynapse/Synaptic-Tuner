@@ -167,28 +167,32 @@ def upload_standard_model(
             format_subdir = "lora"
         save_local_copy(model_path, output_dir, save_method, format_subdir)
 
-    # Check if we're on Windows filesystem (can cause I/O errors during save)
+    # Always use temp directory for upload to prevent push_to_hub_merged from
+    # creating extra local copies in the current working directory
     model_path_obj = Path(model_path).resolve()
     is_windows_fs = str(model_path_obj).startswith('/mnt/')
 
-    temp_dir = None
-    working_path = model_path
+    # Create temp directory in WSL native filesystem for reliability
+    tmp_base = Path.home() / 'tmp'
+    tmp_base.mkdir(parents=True, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix='hf_upload_', dir=str(tmp_base))
 
     if is_windows_fs:
-        print("\n⚠ Detected Windows filesystem (/mnt/c) - copying to WSL native filesystem for reliability...")
-        temp_dir = tempfile.mkdtemp(prefix='hf_upload_', dir=str(Path.home() / 'tmp'))
+        print("\n⚠ Detected Windows filesystem - copying to WSL native filesystem...")
         temp_model_path = Path(temp_dir) / 'model'
         print(f"Copying model to: {temp_model_path}")
         shutil.copytree(model_path, temp_model_path)
         working_path = str(temp_model_path)
         print("✓ Copy complete\n")
+    else:
+        working_path = model_path
 
     try:
-        # Change to WSL native directory to avoid I/O issues during merge
+        # Change to temp directory to ensure push_to_hub_merged saves there
+        # (it creates a local copy named after repo_id that we want cleaned up)
         original_cwd = os.getcwd()
-        if temp_dir:
-            os.chdir(temp_dir)
-            print(f"Changed working directory to: {os.getcwd()}\n")
+        os.chdir(temp_dir)
+        print(f"Working directory: {os.getcwd()}\n")
 
         # Load model and tokenizer
         print("Loading model and tokenizer...")
@@ -213,19 +217,19 @@ def upload_standard_model(
         print(f"View at: https://huggingface.co/{repo_id}")
 
         # Restore original directory
-        if temp_dir:
-            os.chdir(original_cwd)
+        os.chdir(original_cwd)
 
     finally:
-        # Clean up temp directory if we created one
-        if temp_dir and Path(temp_dir).exists():
-            print(f"\nCleaning up temporary directory: {temp_dir}")
+        # Clean up temp directory (always created to prevent stray local copies)
+        if Path(temp_dir).exists():
+            print(f"\nCleaning up temporary directory...")
             shutil.rmtree(temp_dir)
 
 
 def create_gguf_versions(
     model_path: str,
     output_dir: Path,
+    model_name: str,
     quantizations: List[str] = None,
     cleanup: bool = True
 ) -> List[str]:
@@ -235,6 +239,7 @@ def create_gguf_versions(
     Args:
         model_path: Path to model directory
         output_dir: Directory to save GGUF files (will create gguf/ subdirectory)
+        model_name: Name for the GGUF files (e.g., "my-model" -> "my-model.gguf")
         quantizations: List of quantization methods (e.g., ["Q4_K_M", "Q5_K_M"])
         cleanup: Whether to cleanup temporary files after creation
 
@@ -327,7 +332,7 @@ def create_gguf_versions(
 
         # Convert to GGUF base format in final location
         print("\n[3/4] Converting to GGUF base format (f16)...")
-        base_gguf = gguf_dir / "model-unsloth.gguf"
+        base_gguf = gguf_dir / f"{model_name}.gguf"
 
         subprocess.run([
             "python",
@@ -350,7 +355,7 @@ def create_gguf_versions(
             quantize_exe = llamacpp_dir / "llama-quantize"
 
         for quant in quantizations:
-            output_file = gguf_dir / f"model-unsloth-{quant}.gguf"
+            output_file = gguf_dir / f"{model_name}-{quant}.gguf"
             print(f"  Creating {quant} quantization...")
 
             subprocess.run([
@@ -470,7 +475,8 @@ def create_readme(
     output_dir: Path,
     repo_id: str,
     training_run: str,
-    formats_created: List[str]
+    formats_created: List[str],
+    model_name: str
 ) -> Path:
     """
     Create a simple README.md file in the output directory.
@@ -480,12 +486,11 @@ def create_readme(
         repo_id: HuggingFace repo ID
         training_run: Training run timestamp
         formats_created: List of formats created
+        model_name: Name of the model for GGUF file references
 
     Returns:
         Path to README file
     """
-    model_name = repo_id.split('/')[-1]
-
     readme_content = f"""# {model_name}
 
 **Training Run:** `{training_run}`
@@ -516,10 +521,10 @@ def create_readme(
         subdir = fmt.replace("_", "-") if fmt != "lora" else "lora"
         if fmt == "gguf":
             readme_content += f"""├── {subdir}/
-│   ├── model-unsloth.gguf (f16)
-│   ├── model-unsloth-Q4_K_M.gguf
-│   ├── model-unsloth-Q5_K_M.gguf
-│   └── model-unsloth-Q8_0.gguf
+│   ├── {model_name}.gguf (f16)
+│   ├── {model_name}-Q4_K_M.gguf
+│   ├── {model_name}-Q5_K_M.gguf
+│   └── {model_name}-Q8_0.gguf
 """
         else:
             readme_content += f"├── {subdir}/\n"
@@ -650,6 +655,7 @@ def main():
         gguf_files = create_gguf_versions(
             model_path=str(model_path),
             output_dir=output_dir,
+            model_name=model_name,
             quantizations=args.gguf_quantizations,
             cleanup=True
         )
@@ -678,7 +684,8 @@ def main():
         output_dir=output_dir,
         repo_id=args.repo_id,
         training_run=training_run,
-        formats_created=formats_created
+        formats_created=formats_created,
+        model_name=model_name
     )
 
     # Final summary
