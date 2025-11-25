@@ -294,8 +294,7 @@ def _check_expectation(
 
         # Check for question patterns if asking user
         if "asks" in expectation or "offers" in expectation:
-            has_question = "?" in text or any(kw in text.lower() for kw in
-                ["would you", "which", "what would", "do you want", "should i", "let me know"])
+            has_question = _check_asks_for_input(text)
             passed = has_meaningful_text and has_question if value else True
             return BehaviorIssue(
                 check=expectation,
@@ -451,3 +450,205 @@ def _get_text_content(response: Union[str, Dict[str, Any]]) -> str:
 def _get_text_length(response: Union[str, Dict[str, Any]]) -> int:
     """Get length of text content in response."""
     return len(_get_text_content(response))
+
+
+# Comprehensive keywords for detecting "asks for user input" patterns
+_USER_INPUT_KEYWORDS = [
+    # Direct questions - modal verbs
+    "would you like",
+    "would you prefer",
+    "would you want",
+    "would you rather",
+    "do you want",
+    "do you need",
+    "do you prefer",
+    "should i",
+    "shall i",
+    "can i",
+    "may i",
+    "could i",
+    "could you",
+    "can you",
+    "will you",
+
+    # Question starters
+    "which one",
+    "which file",
+    "which folder",
+    "which option",
+    "which would",
+    "which do you",
+    "which should",
+    "what would you",
+    "what do you",
+    "what should",
+    "where would you",
+    "where should",
+    "where do you",
+    "how would you",
+    "how should",
+    "how do you",
+    "when should",
+    "when would",
+
+    # Request phrases
+    "let me know",
+    "please let me know",
+    "please specify",
+    "please confirm",
+    "please tell me",
+    "please indicate",
+    "please select",
+    "please choose",
+    "please clarify",
+    "please provide",
+    "kindly specify",
+    "kindly confirm",
+    "kindly let me know",
+
+    # Choice/selection language
+    "your choice",
+    "your preference",
+    "your decision",
+    "you choose",
+    "you select",
+    "you pick",
+    "you decide",
+    "you prefer",
+    "prefer to",
+    "choice between",
+    "choose between",
+    "select from",
+    "pick from",
+    "decide between",
+    "option to",
+    "options are",
+    "options include",
+    "alternatives are",
+    "alternatives include",
+
+    # Confirmation requests
+    "confirm that",
+    "confirm if",
+    "confirm whether",
+    "verify that",
+    "verify if",
+    "clarify what",
+    "clarify which",
+    "clarify if",
+    "specify which",
+    "specify what",
+    "specify the",
+    "indicate which",
+    "indicate what",
+    "indicate your",
+
+    # Conditional offers
+    "if you'd like",
+    "if you would like",
+    "if you want",
+    "if you prefer",
+    "if you need",
+    "if you wish",
+    "if that works",
+    "if that's okay",
+    "if that sounds good",
+
+    # Alternative suggestions
+    "alternatively",
+    "or would you",
+    "or should i",
+    "or i could",
+    "or i can",
+    "or do you",
+    "or perhaps",
+    "otherwise",
+    "instead",
+    "on the other hand",
+
+    # Offers of assistance
+    "i can also",
+    "i could also",
+    "i'm able to",
+    "i am able to",
+    "i'd be happy to",
+    "i would be happy to",
+    "happy to help",
+    "glad to help",
+
+    # Waiting for input
+    "waiting for",
+    "awaiting your",
+    "ready when you",
+    "whenever you're ready",
+    "when you're ready",
+    "at your convenience",
+    "up to you",
+    "your call",
+    "you decide",
+
+    # Numbered/listed options indicators
+    "option 1",
+    "option 2",
+    "choice 1",
+    "choice 2",
+    "1.",
+    "2.",
+    "a)",
+    "b)",
+    "(1)",
+    "(2)",
+    "first option",
+    "second option",
+    "either",
+    "or",
+
+    # Direct ask patterns
+    "what next",
+    "what now",
+    "what else",
+    "anything else",
+    "something else",
+    "any other",
+    "more help",
+    "further assistance",
+    "need anything",
+    "want me to",
+    "like me to",
+    "need me to",
+
+    # Uncertainty acknowledgment + ask
+    "not sure which",
+    "unclear which",
+    "ambiguous",
+    "multiple options",
+    "several options",
+    "few options",
+    "different options",
+    "various options",
+]
+
+
+def _check_asks_for_input(text: str) -> bool:
+    """
+    Check if text contains patterns indicating the model is asking for user input.
+
+    Returns True if:
+    - Text contains a question mark AND meaningful content, OR
+    - Text contains any of the comprehensive user input keywords
+    """
+    if not text:
+        return False
+
+    text_lower = text.lower()
+
+    # Check for question mark with meaningful content
+    if "?" in text and len(text) > 20:
+        return True
+
+    # Check for any user input keywords
+    for keyword in _USER_INPUT_KEYWORDS:
+        if keyword in text_lower:
+            return True
+
+    return False
