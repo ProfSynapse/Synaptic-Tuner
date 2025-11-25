@@ -8,9 +8,43 @@ from datasets import load_dataset, Dataset
 import os
 
 
+def format_tool_calls(tool_calls: List[Dict]) -> str:
+    """
+    Format OpenAI-style tool_calls into a text completion.
+
+    Args:
+        tool_calls: List of tool call dictionaries with 'function' key
+
+    Returns:
+        Formatted string representing the tool calls
+    """
+    import json
+
+    formatted_parts = []
+    for call in tool_calls:
+        func = call.get("function", {})
+        name = func.get("name", "unknown")
+        args_str = func.get("arguments", "{}")
+
+        # Parse and pretty-format the arguments
+        try:
+            args = json.loads(args_str) if isinstance(args_str, str) else args_str
+            args_formatted = json.dumps(args, indent=2)
+        except json.JSONDecodeError:
+            args_formatted = args_str
+
+        formatted_parts.append(f"tool_call: {name}\narguments: {args_formatted}")
+
+    return "\n\n".join(formatted_parts)
+
+
 def prepare_kto_format(example: Dict) -> Optional[Dict]:
     """
     Convert ChatML format to KTO format.
+
+    Supports both:
+    - Standard ChatML: assistant content in 'content' field
+    - OpenAI tool_calls: assistant content in 'tool_calls' field with null content
 
     Args:
         example: Dictionary with 'conversations' and 'label' keys
@@ -29,9 +63,26 @@ def prepare_kto_format(example: Dict) -> Optional[Dict]:
     if not user_msgs or not assistant_msgs:
         return None
 
+    # Get completion from assistant message
+    assistant_msg = assistant_msgs[0]
+    completion = assistant_msg.get("content")
+
+    # If content is None, check for tool_calls (OpenAI format)
+    if completion is None:
+        tool_calls = assistant_msg.get("tool_calls", [])
+        if tool_calls:
+            completion = format_tool_calls(tool_calls)
+        else:
+            # No content and no tool_calls - skip this example
+            return None
+
+    # Skip if completion is still empty
+    if not completion or not completion.strip():
+        return None
+
     return {
         "prompt": user_msgs[0]["content"],
-        "completion": assistant_msgs[0]["content"],
+        "completion": completion,
         "label": example["label"]
     }
 
@@ -149,9 +200,9 @@ def validate_kto_dataset(dataset: Dataset) -> bool:
 
     print(f"✓ All required columns present: {required_cols}")
 
-    # Check for empty examples
-    empty_prompts = sum(1 for ex in dataset if not ex["prompt"].strip())
-    empty_completions = sum(1 for ex in dataset if not ex["completion"].strip())
+    # Check for empty examples (handle None values safely)
+    empty_prompts = sum(1 for ex in dataset if not ex["prompt"] or not ex["prompt"].strip())
+    empty_completions = sum(1 for ex in dataset if not ex["completion"] or not ex["completion"].strip())
 
     if empty_prompts > 0:
         print(f"⚠ Warning: {empty_prompts} examples with empty prompts")
