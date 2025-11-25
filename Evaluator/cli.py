@@ -58,6 +58,11 @@ Backend Configuration:
     parser.add_argument("--output", help="Where to write JSON results (defaults to Evaluator/results/run_<ts>.json)")
     parser.add_argument("--markdown", help="Optional Markdown summary output path")
     parser.add_argument("--dry-run", action="store_true", help="Skip backend calls (for smoke tests)")
+    parser.add_argument(
+        "--inject-context",
+        action="store_true",
+        help="Inject system prompts with session/workspace IDs and validate model uses them correctly",
+    )
     return parser.parse_args(argv)
 
 
@@ -114,7 +119,12 @@ def main(argv: List[str] | None = None) -> int:
     )
 
     # Run evaluation
-    records = evaluate_cases(selected_cases, client=client, dry_run=config.dry_run)
+    records = evaluate_cases(
+        selected_cases,
+        client=client,
+        dry_run=config.dry_run,
+        inject_context=args.inject_context,
+    )
 
     # Build and save results
     metadata = build_metadata(config, settings, len(cases), len(selected_cases), args.backend)
