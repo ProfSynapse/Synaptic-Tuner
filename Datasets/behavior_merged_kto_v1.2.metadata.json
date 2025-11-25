@@ -1,5 +1,5 @@
 {
-  "created": "2025-11-25T12:41:49.233022",
+  "created": "2025-11-25T12:56:51.261803",
   "source": "behavior_datasets merge (includes response_patterns)",
   "behaviors": [
     "context_continuity",
@@ -41,8 +41,8 @@
       "negative": 70
     },
     "error_recovery": {
-      "total": 262,
-      "positive": 179,
+      "total": 261,
+      "positive": 178,
       "negative": 83
     },
     "execute_prompt_usage": {
@@ -51,18 +51,18 @@
       "negative": 50
     },
     "intellectual_humility": {
-      "total": 260,
-      "positive": 152,
+      "total": 258,
+      "positive": 150,
       "negative": 108
     },
     "strategic_tool_selection": {
-      "total": 262,
-      "positive": 153,
+      "total": 259,
+      "positive": 150,
       "negative": 109
     },
     "verification_before_action": {
-      "total": 262,
-      "positive": 153,
+      "total": 254,
+      "positive": 145,
       "negative": 109
     },
     "workspace_awareness": {
@@ -86,10 +86,10 @@
       "negative": 75
     }
   },
-  "total_examples": 2302,
-  "positive_examples": 1310,
+  "total_examples": 2288,
+  "positive_examples": 1296,
   "negative_examples": 992,
   "interleaved": true,
-  "consecutive_same_labels": 317,
+  "consecutive_same_labels": 303,
   "format": "KTO-compatible ChatML with interleaved labels"
 }
