@@ -100,10 +100,10 @@ class DatasetConfig:
 
     # Dataset source
     dataset_name: str = "professorsynapse/claudesidian-synthetic-dataset"
-    dataset_file: str = "syngen_tools_sft_11.25.25_context.jsonl"  # With system prompts for context IDs
+    dataset_file: str = "syngen_combined_sft_11.25.25.jsonl"  # Tools + behavioral + response patterns (7,574 examples)
 
     # Use local file (relative to project root)
-    local_file: Optional[str] = "../../Datasets/syngen_tools_sft_11.25.25_context.jsonl"
+    local_file: Optional[str] = "../../Datasets/syngen_combined_sft_11.25.25.jsonl"
 
     # Dataset processing
     num_proc: int = 1  # Set to 1 on Windows to avoid multiprocessing issues
