@@ -17,10 +17,11 @@ from .config import (
     EvaluatorConfig,
     LMStudioSettings,
     OllamaSettings,
+    VLLMSettings,
     expand_path,
 )
 from .enums import BackendType
-from .lmstudio_client import LMStudioClient, LMStudioError
+from .protocols import BackendError, ModelListingClient
 from .prompt_sets import PromptCase, load_prompt_cases
 from .runner import EvaluationRecord
 
@@ -82,11 +83,11 @@ def passfail_color(records: Sequence[EvaluationRecord]) -> str:
 # Model Selection
 # ---------------------------------------------------------------------------
 
-def select_model(client: LMStudioClient, prompt_text: str = "Select a model to evaluate:") -> Optional[str]:
-    """Interactively select a model from LM Studio.
+def select_model(client: ModelListingClient, prompt_text: str = "Select a model to evaluate:") -> Optional[str]:
+    """Interactively select a model from backend server.
 
     Args:
-        client: LMStudioClient configured for model listing
+        client: Any client that implements ModelListingClient protocol
         prompt_text: Text to display before model list
 
     Returns:
@@ -94,12 +95,12 @@ def select_model(client: LMStudioClient, prompt_text: str = "Select a model to e
     """
     try:
         models = client.list_models()
-    except LMStudioError as exc:
-        print(f"Unable to list models from LM Studio: {exc}", file=sys.stderr)
+    except BackendError as exc:
+        print(f"Unable to list models: {exc}", file=sys.stderr)
         return None
 
     if not models:
-        print("LM Studio did not return any models.", file=sys.stderr)
+        print("Server did not return any models.", file=sys.stderr)
         return None
 
     if len(models) == 1:
@@ -200,7 +201,7 @@ def model_output_paths(
 
 def build_metadata(
     config: EvaluatorConfig,
-    settings: Union[OllamaSettings, LMStudioSettings],
+    settings: Union[OllamaSettings, LMStudioSettings, VLLMSettings],
     total_prompts: int,
     selected_prompts: int,
     backend: str,
