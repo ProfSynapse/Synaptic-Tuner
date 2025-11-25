@@ -53,6 +53,15 @@ def _env_lmstudio_port() -> int:
     return _env_int("LMSTUDIO_PORT", 1234)
 
 
+# Default getters for vLLM
+def _env_vllm_host() -> str:
+    return _env_str("VLLM_HOST", "127.0.0.1")
+
+
+def _env_vllm_port() -> int:
+    return _env_int("VLLM_PORT", 8000)
+
+
 # ---------------------------------------------------------------------------
 # Backend Settings Classes
 # ---------------------------------------------------------------------------
@@ -111,6 +120,30 @@ class LMStudioSettings(BaseBackendSettings):
 
     host: str = field(default_factory=_env_lmstudio_host)
     port: int = field(default_factory=_env_lmstudio_port)
+
+
+@dataclass
+class VLLMSettings(BaseBackendSettings):
+    """Connection and generation parameters for vLLM.
+
+    vLLM uses an OpenAI-compatible API but may be configured with
+    additional parameters like model_path for local models.
+
+    Environment variables:
+    - VLLM_HOST: Server hostname (default: 127.0.0.1)
+    - VLLM_PORT: Server port (default: 8000)
+
+    Attributes:
+        model_path: Path to local model (for server startup)
+        lora_adapter: Path to LoRA adapter directory (optional)
+        gpu_memory_utilization: GPU memory fraction (0.0-1.0, default 0.9)
+    """
+
+    host: str = field(default_factory=_env_vllm_host)
+    port: int = field(default_factory=_env_vllm_port)
+    model_path: Optional[str] = None
+    lora_adapter: Optional[str] = None
+    gpu_memory_utilization: float = 0.9
 
 
 # ---------------------------------------------------------------------------
