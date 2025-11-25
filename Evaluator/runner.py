@@ -8,6 +8,7 @@ from .lmstudio_client import LMStudioClient
 from .ollama_client import OllamaClient
 from .prompt_sets import PromptCase
 from .schema_validator import ValidationResult, validate_assistant_response
+from .behavior_validator import BehaviorValidationResult, validate_behavior
 
 
 @dataclass
@@ -18,10 +19,29 @@ class EvaluationRecord:
     latency_s: Optional[float]
     raw_response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    behavior: Optional[BehaviorValidationResult] = None
 
     @property
     def passed(self) -> bool:
+        """Check if evaluation passed all validations."""
+        if self.error is not None:
+            return False
+        if self.validator is None or not self.validator.passed:
+            return False
+        # If behavior expectations exist, behavior validation must also pass
+        if self.behavior is not None and not self.behavior.passed:
+            return False
+        return True
+
+    @property
+    def schema_passed(self) -> bool:
+        """Check if schema validation passed (ignoring behavior)."""
         return self.error is None and self.validator is not None and self.validator.passed
+
+    @property
+    def behavior_passed(self) -> bool:
+        """Check if behavior validation passed (or not applicable)."""
+        return self.behavior is None or self.behavior.passed
 
 
 def evaluate_cases(
@@ -98,6 +118,34 @@ def evaluate_cases(
                     )
                 )
 
+        # Run behavior validation if expectations are defined
+        behavior_result: Optional[BehaviorValidationResult] = None
+        behavior_expectations = case.metadata.get("behavior_expectations")
+        expected_response_type = case.metadata.get("expected_response_type")
+        anti_patterns = case.metadata.get("anti_patterns_to_avoid")
+
+        if behavior_expectations or expected_response_type or anti_patterns:
+            try:
+                behavior_result = validate_behavior(
+                    response=response.message,
+                    behavior_expectations=behavior_expectations,
+                    expected_response_type=expected_response_type,
+                    anti_patterns=anti_patterns,
+                )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                # Behavior validation error - don't fail the whole evaluation
+                from .behavior_validator import BehaviorValidationResult, BehaviorIssue
+                behavior_result = BehaviorValidationResult(
+                    passed=False,
+                    issues=[BehaviorIssue(
+                        check="validation_error",
+                        expected="successful validation",
+                        actual=str(exc),
+                        passed=False,
+                        message=f"Behavior validation error: {exc}"
+                    )]
+                )
+
         records.append(
             record := EvaluationRecord(
                 case=case,
@@ -106,6 +154,7 @@ def evaluate_cases(
                 latency_s=response.latency_s,
                 raw_response=response.raw,
                 error=None,
+                behavior=behavior_result,
             )
         )
         if on_record:
