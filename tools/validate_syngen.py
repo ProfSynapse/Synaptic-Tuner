@@ -191,6 +191,58 @@ def extract_tool_calls_openai(tool_calls_array: list) -> List[Tuple[str, dict]]:
     return entries
 
 
+def extract_tool_calls_mistral(content: str) -> List[Tuple[str, dict]]:
+    """Extract tool calls from Mistral [TOOL_CALLS] format, returning (tool_name, arguments_dict) tuples.
+
+    Mistral format: [TOOL_CALLS] [{"name": "tool_name", "arguments": "{...}", "id": "..."}]
+    """
+    entries: List[Tuple[str, dict]] = []
+
+    if "[TOOL_CALLS]" not in content:
+        return entries
+
+    # Split on marker and get the JSON part
+    parts = content.split("[TOOL_CALLS]", 1)
+    if len(parts) < 2:
+        return entries
+
+    json_part = parts[1].strip()
+    if not json_part.startswith("["):
+        return entries
+
+    # Find the matching closing bracket for the array
+    try:
+        json_blob, _ = extract_json_block(json_part, 0)
+        tool_calls_array = json.loads(json_blob, strict=False)
+    except (ValueError, json.JSONDecodeError) as e:
+        raise ValueError(f"Failed to parse Mistral tool calls JSON: {e}")
+
+    if not isinstance(tool_calls_array, list):
+        raise ValueError("Mistral tool calls must be an array")
+
+    for tool_call in tool_calls_array:
+        if not isinstance(tool_call, dict):
+            continue
+
+        tool_name = tool_call.get("name", "")
+        arguments = tool_call.get("arguments", {})
+
+        # Arguments might be a string that needs parsing
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments, strict=False)
+            except json.JSONDecodeError:
+                raise ValueError(f"Failed to parse arguments JSON for tool {tool_name}")
+        elif isinstance(arguments, dict):
+            args = arguments
+        else:
+            raise ValueError(f"Invalid arguments format for tool {tool_name}")
+
+        entries.append((tool_name, args))
+
+    return entries
+
+
 def validate_tool_call_structure(content: str, report: ExampleReport) -> None:
     """Validate the structure and formatting of tool calls in assistant content."""
     tool_call_positions = []
@@ -401,25 +453,49 @@ def validate_context(args: dict, report: ExampleReport) -> None:
 
 
 def validate_assistant_content(content: str, report: ExampleReport) -> None:
-    """Validate ChatML format assistant message content, including tool calls if present."""
+    """Validate assistant message content, including tool calls if present.
+
+    Supports multiple formats:
+    - ChatML format: tool_call: toolName\\narguments: {...}
+    - Mistral format: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
+    """
     if not content.strip():
         report.add("ERROR", "Assistant content may not be empty")
         return
 
-    # Check if this message contains tool calls
-    if "tool_call:" in content:
-        tool_calls = extract_tool_calls(content)
+    tool_calls = []
+
+    # Check for Mistral format first (more specific marker)
+    if "[TOOL_CALLS]" in content:
+        try:
+            tool_calls = extract_tool_calls_mistral(content)
+        except ValueError as e:
+            report.add("ERROR", f"Invalid Mistral tool call format: {e}")
+            return
+
+        if not tool_calls:
+            report.add("ERROR", "Assistant content has '[TOOL_CALLS]' marker but no valid tool calls found")
+            return
+
+    # Check for ChatML format
+    elif "tool_call:" in content:
+        try:
+            tool_calls = extract_tool_calls(content)
+        except ValueError as e:
+            report.add("ERROR", f"Invalid ChatML tool call format: {e}")
+            return
+
         if not tool_calls:
             report.add("ERROR", "Assistant content has 'tool_call:' marker but no valid tool calls found")
             return
 
-        # Validate each tool call
-        for idx, (tool_name, args) in enumerate(tool_calls, 1):
-            if not tool_name:
-                report.add("ERROR", "Tool call missing name")
-            validate_context(args, report)
-            # Validate against actual tool schema
-            validate_tool_against_schema(tool_name, args, report, idx)
+    # Validate each tool call (if any were found)
+    for idx, (tool_name, args) in enumerate(tool_calls, 1):
+        if not tool_name:
+            report.add("ERROR", f"Tool call #{idx} missing name")
+        validate_context(args, report)
+        # Validate against actual tool schema
+        validate_tool_against_schema(tool_name, args, report, idx)
 
 
 def validate_assistant_message_openai(msg: dict, report: ExampleReport) -> None:
