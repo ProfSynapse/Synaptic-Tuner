@@ -1,5 +1,5 @@
 model:
-  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\sft_output_rtx3090\20251123_090722\merged_model
+  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\nexus-tools_v0.1.10
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -22,12 +22,12 @@ lora:
   use_dora: false
 training:
   output_dir: ./kto_output_rtx3090
-  per_device_train_batch_size: 6
+  per_device_train_batch_size: 4
   gradient_accumulation_steps: 4
-  beta: 0.2
+  beta: 0.3
   desirable_weight: 0.7
   undesirable_weight: 1.0
-  learning_rate: 5e-7
+  learning_rate: 3e-7
   max_grad_norm: 0.5
   lr_scheduler_type: cosine
   use_kto_s: false
@@ -43,7 +43,7 @@ training:
   num_train_epochs: 1
   warmup_ratio: 0.15
   logging_steps: 5
-  save_steps: 50
+  save_steps: 25
   save_total_limit: 3
   dataloader_num_workers: 0
   dataloader_pin_memory: true
