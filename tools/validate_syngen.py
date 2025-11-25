@@ -448,7 +448,8 @@ def validate_context(args: dict, report: ExampleReport) -> None:
     if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
         report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
     ws_id = ctx.get("workspaceId")
-    if isinstance(ws_id, str) and not WORKSPACE_ID_RE.match(ws_id):
+    # Accept "default" as a valid workspaceId (used for default workspace)
+    if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
         report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
 
 

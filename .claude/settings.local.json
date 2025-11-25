@@ -61,7 +61,8 @@
       "Bash(git --version)",
       "Bash(powershell.exe -Command:*)",
       "Bash(code/mistral_lora_mac/venv/bin/python:*)",
-      "WebFetch(domain:docs.mistral.ai)"
+      "WebFetch(domain:docs.mistral.ai)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []
