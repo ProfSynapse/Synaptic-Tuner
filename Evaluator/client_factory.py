@@ -11,26 +11,29 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Type, Union
 
-from .config import LMStudioSettings, OllamaSettings
+from .config import LMStudioSettings, OllamaSettings, VLLMSettings
 from .enums import BackendType
 from .lmstudio_client import LMStudioClient
 from .ollama_client import OllamaClient
+from .vllm_client import VLLMClient
 from .protocols import BackendClient, BackendSettings
 
 # Type alias for settings types
-SettingsType = Union[OllamaSettings, LMStudioSettings]
-ClientType = Union[OllamaClient, LMStudioClient]
+SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings]
+ClientType = Union[OllamaClient, LMStudioClient, VLLMClient]
 
 
 # Registry mapping backend types to their client and settings classes
 _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
     BackendType.OLLAMA: OllamaClient,
     BackendType.LMSTUDIO: LMStudioClient,
+    BackendType.VLLM: VLLMClient,
 }
 
 _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
     BackendType.OLLAMA: OllamaSettings,
     BackendType.LMSTUDIO: LMStudioSettings,
+    BackendType.VLLM: VLLMSettings,
 }
 
 

@@ -48,6 +48,9 @@ class BackendType(str, Enum):
     LMSTUDIO = "lmstudio"
     """LM Studio local inference server (OpenAI-compatible API)."""
 
+    VLLM = "vllm"
+    """vLLM high-performance inference server (OpenAI-compatible API)."""
+
     def __str__(self) -> str:
         return self.value
 
