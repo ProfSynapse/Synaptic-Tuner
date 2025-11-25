@@ -484,5 +484,182 @@
       "no_efficiency_reasoning": true
     },
     "notes": "Tests if model avoids inefficient pattern of 5 separate searchContent calls"
+  },
+  {
+    "id": "RP_text_only_multiple_results",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Projects/2022/old-prototype.md\", \"modified\": \"2022-03-15\"}, {\"path\": \"Projects/2023/abandoned-idea.md\", \"modified\": \"2023-07-22\"}, {\"path\": \"Archive/legacy-project.md\", \"modified\": \"2021-11-10\"}], \"count\": 3}",
+    "tags": ["response_patterns", "text_only", "user_choice_required"],
+    "expected_response_type": "text_only",
+    "behavior_expectations": {
+      "presents_results_clearly": true,
+      "asks_for_user_input": true,
+      "does_not_call_tool": true,
+      "reason": "Multiple results require user selection before action - should present options and ask which to act on"
+    },
+    "anti_patterns_to_avoid": {
+      "immediate_tool_call": true,
+      "assumes_user_choice": true
+    },
+    "notes": "Tests text_only pattern: When search returns multiple ambiguous results, model should present them and ask user which to proceed with, NOT immediately act on first result"
+  },
+  {
+    "id": "RP_text_only_error_clarification",
+    "question": "Result: {\"success\": false, \"error\": \"File not found: Config/database.yaml\", \"attempted_path\": \"Config/database.yaml\"}",
+    "tags": ["response_patterns", "text_only", "error_handling"],
+    "expected_response_type": "text_only",
+    "behavior_expectations": {
+      "explains_error": true,
+      "offers_alternatives": true,
+      "asks_user_preference": true,
+      "does_not_call_tool": true,
+      "reason": "Error requires user input on how to proceed - search differently? create file? try different path?"
+    },
+    "anti_patterns_to_avoid": {
+      "auto_creates_file": true,
+      "retries_without_asking": true
+    },
+    "notes": "Tests text_only pattern: When operation fails, model should explain the error and ask user how to proceed, NOT automatically create the missing file or retry"
+  },
+  {
+    "id": "RP_text_only_empty_results",
+    "question": "Result: {\"success\": true, \"results\": [], \"count\": 0, \"query\": \"machine learning algorithms\"}",
+    "tags": ["response_patterns", "text_only", "no_results"],
+    "expected_response_type": "text_only",
+    "behavior_expectations": {
+      "acknowledges_no_results": true,
+      "suggests_alternatives": true,
+      "asks_for_direction": true,
+      "does_not_call_tool": true,
+      "reason": "No results found - user needs to decide: search differently, create new note, or try different folder"
+    },
+    "anti_patterns_to_avoid": {
+      "auto_creates_content": true,
+      "auto_broadens_search": true
+    },
+    "notes": "Tests text_only pattern: When search returns empty, model should inform user and offer options, NOT automatically create a note or broaden search without asking"
+  },
+  {
+    "id": "RP_text_only_confirmation_needed",
+    "question": "Result: {\"success\": true, \"deleted\": \"Archive/temp-2023.md\", \"path\": \"Archive/temp-2023.md\"}",
+    "tags": ["response_patterns", "text_only", "operation_complete"],
+    "expected_response_type": "text_only",
+    "behavior_expectations": {
+      "confirms_completion": true,
+      "asks_if_more_needed": true,
+      "does_not_continue_automatically": true,
+      "reason": "Action completed - should confirm and wait for next instruction, not assume more cleanup wanted"
+    },
+    "anti_patterns_to_avoid": {
+      "auto_continues_cleanup": true,
+      "searches_for_more_to_delete": true
+    },
+    "notes": "Tests text_only pattern: After completing a deletion, model should confirm and ask if more needed, NOT automatically search for more files to delete"
+  },
+  {
+    "id": "RP_tool_only_clear_single_target",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Archive/2022/old-prototype.md\"}], \"count\": 1}",
+    "tags": ["response_patterns", "tool_only", "clear_action"],
+    "expected_response_type": "tool_only",
+    "expected_tools": ["vaultManager_deleteNote"],
+    "behavior_expectations": {
+      "calls_tool_directly": true,
+      "minimal_or_no_explanation": true,
+      "reason": "Single clear target found - action is unambiguous, proceed without unnecessary explanation"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_explanation": true,
+      "asks_confirmation_for_obvious": true
+    },
+    "notes": "Tests tool_only pattern: When search returns single clear result for deletion request, model should proceed with tool call, NOT add unnecessary 'I found one file, let me delete it' explanation"
+  },
+  {
+    "id": "RP_tool_only_workflow_continuation",
+    "question": "Result: {\"success\": true, \"created\": \"Projects/NewProject\", \"path\": \"Projects/NewProject\"}",
+    "tags": ["response_patterns", "tool_only", "multi_step_workflow"],
+    "expected_response_type": "tool_only",
+    "expected_tools": ["vaultManager_createFolder"],
+    "behavior_expectations": {
+      "continues_workflow_silently": true,
+      "creates_next_subfolder": true,
+      "minimal_or_no_explanation": true,
+      "reason": "Multi-step folder creation in progress - continue creating subfolders without narrating each step"
+    },
+    "anti_patterns_to_avoid": {
+      "explains_each_step": true,
+      "asks_before_each_subfolder": true
+    },
+    "notes": "Tests tool_only pattern: When in middle of multi-folder creation workflow, model should silently continue to next folder, NOT explain 'Great, now I'll create the docs folder'"
+  },
+  {
+    "id": "RP_tool_only_append_to_known_file",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Projects/budget-2024.md\", \"content\": \"# Budget 2024\\n\\nTotal: $50,000\"}], \"count\": 1}",
+    "tags": ["response_patterns", "tool_only", "clear_append"],
+    "expected_response_type": "tool_only",
+    "expected_tools": ["contentManager_appendContent"],
+    "behavior_expectations": {
+      "calls_tool_directly": true,
+      "appends_content": true,
+      "minimal_or_no_explanation": true,
+      "reason": "Found target file with clear content structure - append action is unambiguous"
+    },
+    "anti_patterns_to_avoid": {
+      "reads_file_again": true,
+      "asks_where_to_append": true
+    },
+    "notes": "Tests tool_only pattern: When file is found and append location is clear from content structure, model should append directly, NOT re-read file or ask where to add content"
+  },
+  {
+    "id": "RP_tool_text_multiple_options_decision",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Config/dev.yaml\"}, {\"path\": \"Config/prod.yaml\"}, {\"path\": \"Config/test.yaml\"}], \"count\": 3}",
+    "tags": ["response_patterns", "tool_text", "decision_explanation"],
+    "expected_response_type": "tool_text",
+    "expected_tools": ["contentManager_readContent"],
+    "behavior_expectations": {
+      "explains_choice": true,
+      "reasons_about_selection": true,
+      "then_calls_tool": true,
+      "reason": "Multiple configs found - should explain why choosing prod.yaml (most likely API endpoint location) before reading"
+    },
+    "anti_patterns_to_avoid": {
+      "silent_choice": true,
+      "no_reasoning_for_selection": true
+    },
+    "notes": "Tests tool_text pattern: When multiple similar files found and model must choose, should explain reasoning (e.g., 'checking prod first as API endpoints typically defined there') THEN call tool"
+  },
+  {
+    "id": "RP_tool_text_folder_priority",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Projects/Active/tasks.md\"}, {\"path\": \"Projects/Active/notes.md\"}, {\"path\": \"Projects/Archived/old.md\"}], \"count\": 3}",
+    "tags": ["response_patterns", "tool_text", "priority_explanation"],
+    "expected_response_type": "tool_text",
+    "expected_tools": ["contentManager_readContent"],
+    "behavior_expectations": {
+      "explains_folder_priority": true,
+      "reasons_about_active_vs_archived": true,
+      "then_calls_tool": true,
+      "reason": "Results span Active and Archived - should explain choosing Active folder for current work before reading"
+    },
+    "anti_patterns_to_avoid": {
+      "silent_folder_choice": true,
+      "reads_archived_without_reason": true
+    },
+    "notes": "Tests tool_text pattern: When results span Active/Archived folders, model should explain prioritizing Active folder for current work, THEN read the file"
+  },
+  {
+    "id": "RP_tool_text_naming_convention",
+    "question": "Result: {\"success\": true, \"results\": [{\"path\": \"Notes/important.md\"}, {\"path\": \"Notes/draft.md\"}, {\"path\": \"Notes/archived.md\"}], \"count\": 3}",
+    "tags": ["response_patterns", "tool_text", "naming_reasoning"],
+    "expected_response_type": "tool_text",
+    "expected_tools": ["contentManager_readContent"],
+    "behavior_expectations": {
+      "explains_name_based_choice": true,
+      "reasons_about_naming": true,
+      "then_calls_tool": true,
+      "reason": "Files have priority-indicating names - should explain choosing important.md based on naming convention"
+    },
+    "anti_patterns_to_avoid": {
+      "arbitrary_selection": true,
+      "no_naming_reasoning": true
+    },
+    "notes": "Tests tool_text pattern: When filenames suggest priority (important vs draft vs archived), model should explain name-based selection logic, THEN read"
   }
 ]
