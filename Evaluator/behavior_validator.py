@@ -95,6 +95,53 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
         return "empty"
 
 
+def extract_arguments_from_response(response: Union[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Extract full arguments dict from tool call.
+
+    Supports multiple formats:
+    - OpenAI format: dict with "tool_calls" array
+    - ChatML format: string with "tool_call:" and "arguments:" markers
+    - Mistral format: string with "[TOOL_CALLS]" marker followed by JSON array
+
+    Returns the full arguments dict, or None if extraction fails.
+    """
+    try:
+        if isinstance(response, dict):
+            tool_calls = response.get("tool_calls") or []
+            if tool_calls:
+                args = tool_calls[0].get("function", {}).get("arguments", "{}")
+                if isinstance(args, str):
+                    args = json.loads(args)
+                return args if isinstance(args, dict) else None
+        elif isinstance(response, str):
+            if "[TOOL_CALLS]" in response:
+                parts = response.split("[TOOL_CALLS]", 1)
+                if len(parts) > 1:
+                    json_part = parts[1].strip()
+                    if json_part.startswith("["):
+                        bracket_count = 0
+                        for i, char in enumerate(json_part):
+                            if char == "[":
+                                bracket_count += 1
+                            elif char == "]":
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    tool_calls = json.loads(json_part[:i + 1])
+                                    if tool_calls and isinstance(tool_calls, list):
+                                        args = tool_calls[0].get("arguments", {})
+                                        if isinstance(args, str):
+                                            args = json.loads(args)
+                                        return args if isinstance(args, dict) else None
+                                    break
+            elif "tool_call:" in response:
+                match = re.search(r'arguments:\s*(\{.*?\})\s*(?:\n\n|Result:|$)', response, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError):
+        pass
+    return None
+
+
 def extract_context_from_response(response: Union[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Extract context object from tool call arguments.
 
@@ -102,53 +149,12 @@ def extract_context_from_response(response: Union[str, Dict[str, Any]]) -> Optio
     - OpenAI format: dict with "tool_calls" array
     - ChatML format: string with "tool_call:" and "arguments:" markers
     - Mistral format: string with "[TOOL_CALLS]" marker followed by JSON array
+
+    Uses extract_arguments_from_response internally.
     """
-    try:
-        if isinstance(response, dict):
-            # OpenAI format
-            tool_calls = response.get("tool_calls") or []
-            if tool_calls:
-                args = tool_calls[0].get("function", {}).get("arguments", "{}")
-                if isinstance(args, str):
-                    args = json.loads(args)
-                return args.get("context")
-        elif isinstance(response, str):
-            # Check for Mistral format: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
-            if "[TOOL_CALLS]" in response:
-                parts = response.split("[TOOL_CALLS]", 1)
-                if len(parts) > 1:
-                    json_part = parts[1].strip()
-                    # Find the JSON array
-                    if json_part.startswith("["):
-                        # Extract the JSON array
-                        bracket_count = 0
-                        end_idx = 0
-                        for i, char in enumerate(json_part):
-                            if char == "[":
-                                bracket_count += 1
-                            elif char == "]":
-                                bracket_count -= 1
-                                if bracket_count == 0:
-                                    end_idx = i + 1
-                                    break
-                        if end_idx > 0:
-                            tool_calls_json = json_part[:end_idx]
-                            tool_calls = json.loads(tool_calls_json)
-                            if tool_calls and isinstance(tool_calls, list):
-                                first_call = tool_calls[0]
-                                args = first_call.get("arguments", {})
-                                if isinstance(args, str):
-                                    args = json.loads(args)
-                                return args.get("context") if isinstance(args, dict) else None
-            # ChatML format: tool_call: toolName\narguments: {...}
-            elif "tool_call:" in response:
-                # Extract arguments from ChatML format - use more robust extraction
-                match = re.search(r'arguments:\s*(\{.*?\})\s*(?:\n\n|Result:|$)', response, re.DOTALL)
-                if match:
-                    args = json.loads(match.group(1))
-                    return args.get("context")
-    except (json.JSONDecodeError, KeyError, TypeError, IndexError):
-        pass
+    args = extract_arguments_from_response(response)
+    if args:
+        return args.get("context")
     return None
 
 
@@ -351,6 +357,51 @@ def _check_expectation(
             message=f"{expectation}: {'PASS' if passed else 'FAIL'}"
         )
 
+    # Context efficiency expectations (limit usage)
+    if expectation == "uses_appropriate_limit":
+        limit_value = _extract_limit_from_response(response)
+        # Appropriate limit is between 10 and 100
+        is_appropriate = limit_value is not None and 10 <= limit_value <= 100
+        passed = is_appropriate if value else True
+        return BehaviorIssue(
+            check=expectation,
+            expected="limit between 10-100",
+            actual=f"limit={limit_value}" if limit_value else "no limit found",
+            passed=passed,
+            message=f"uses_appropriate_limit: {'PASS' if passed else 'FAIL'} - limit={limit_value}"
+        )
+
+    if expectation in ("explains_limit_reasoning", "sessionMemory_explains_limit_choice",
+                       "sessionMemory_explains_temporal_limit", "limit_matches_expected_count"):
+        # These require sessionMemory to explain the limit choice
+        if context:
+            session_memory = context.get("sessionMemory", "")
+            # Should mention limit reasoning (numbers, reasoning about count)
+            has_limit_reasoning = any(word in session_memory.lower() for word in
+                ["limit", "typically", "usually", "expect", "approximate", "estimate", "reasonable"])
+            passed = has_limit_reasoning if value else True
+            return BehaviorIssue(
+                check=expectation,
+                expected="sessionMemory explains limit choice",
+                actual=f"has_reasoning={has_limit_reasoning}",
+                passed=passed,
+                message=f"{expectation}: {'PASS' if passed else 'FAIL'}"
+            )
+        return None
+
+    # Execute prompt usage expectations (delegation)
+    if expectation in ("delegates_complex_task", "uses_execute_prompt"):
+        tool_name = _extract_tool_name_from_response(response)
+        uses_execute_prompt = tool_name == "agentManager_executePrompt"
+        passed = uses_execute_prompt if value else True
+        return BehaviorIssue(
+            check=expectation,
+            expected="agentManager_executePrompt",
+            actual=tool_name or "no tool",
+            passed=passed,
+            message=f"{expectation}: {'PASS' if passed else 'FAIL'} - tool={tool_name}"
+        )
+
     # Default: return None for unhandled expectations (don't fail on unknown)
     return None
 
@@ -429,6 +480,37 @@ def _check_anti_pattern(
             message=f"Anti-pattern {pattern}: needs manual review (tool_call={has_tool})"
         )
 
+    # Context efficiency anti-patterns
+    if pattern in ("excessive_limit", "no_limit_reasoning", "loads_unnecessary_content",
+                   "no_efficiency_reasoning", "ignores_temporal_scope"):
+        limit_value = _extract_limit_from_response(response)
+        # Excessive limit is > 200
+        is_excessive = limit_value is not None and limit_value > 200
+        passed = not is_excessive  # Pass if NOT excessive
+        return BehaviorIssue(
+            check=f"anti:{pattern}",
+            expected="limit <= 200",
+            actual=f"limit={limit_value}" if limit_value else "no limit",
+            passed=passed,
+            message=f"Anti-pattern {pattern}: {'PASS (avoided)' if passed else 'FAIL'} - limit={limit_value}"
+        )
+
+    # Execute prompt usage anti-patterns
+    if pattern in ("creates_shallow_content_directly", "handles_complex_task_without_delegation",
+                   "gives_legal_advice_without_delegation", "superficial_marketing_plan",
+                   "superficial_comparison", "oversimplified_license_advice"):
+        tool_name = _extract_tool_name_from_response(response)
+        # Anti-pattern: using contentManager_createContent instead of agentManager_executePrompt
+        uses_shallow_tool = tool_name in ("contentManager_createContent", "contentManager_writeContent")
+        passed = not uses_shallow_tool  # Pass if NOT using shallow content creation
+        return BehaviorIssue(
+            check=f"anti:{pattern}",
+            expected="should use agentManager_executePrompt",
+            actual=f"tool={tool_name}",
+            passed=passed,
+            message=f"Anti-pattern {pattern}: {'PASS (avoided)' if passed else 'FAIL'} - tool={tool_name}"
+        )
+
     return None
 
 
@@ -450,6 +532,57 @@ def _get_text_content(response: Union[str, Dict[str, Any]]) -> str:
 def _get_text_length(response: Union[str, Dict[str, Any]]) -> int:
     """Get length of text content in response."""
     return len(_get_text_content(response))
+
+
+def _extract_limit_from_response(response: Union[str, Dict[str, Any]]) -> Optional[int]:
+    """Extract the 'limit' parameter from tool call arguments.
+
+    Reuses extract_arguments_from_response for argument extraction.
+    """
+    args = extract_arguments_from_response(response)
+    if args and "limit" in args:
+        try:
+            return int(args["limit"])
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _extract_tool_name_from_response(response: Union[str, Dict[str, Any]]) -> Optional[str]:
+    """Extract the tool name from a tool call response.
+
+    Reuses the same parsing logic as extract_context_from_response.
+    """
+    try:
+        if isinstance(response, dict):
+            tool_calls = response.get("tool_calls") or []
+            if tool_calls:
+                return tool_calls[0].get("function", {}).get("name")
+        elif isinstance(response, str):
+            if "[TOOL_CALLS]" in response:
+                parts = response.split("[TOOL_CALLS]", 1)
+                if len(parts) > 1:
+                    json_part = parts[1].strip()
+                    if json_part.startswith("["):
+                        # Find matching bracket
+                        bracket_count = 0
+                        for i, char in enumerate(json_part):
+                            if char == "[":
+                                bracket_count += 1
+                            elif char == "]":
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    tool_calls = json.loads(json_part[:i + 1])
+                                    if tool_calls:
+                                        return tool_calls[0].get("name")
+                                    break
+            elif "tool_call:" in response:
+                match = re.search(r'tool_call:\s*(\w+)', response)
+                if match:
+                    return match.group(1)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return None
 
 
 # Comprehensive keywords for detecting "asks for user input" patterns
