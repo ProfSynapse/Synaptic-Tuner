@@ -31,6 +31,15 @@ WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]{9}$")
 ALLOWED_ROLES = {"system", "user", "assistant"}
 MIN_TOOL_CALLS = 2
 
+# System prompt context extraction patterns
+SESSION_CONTEXT_RE = re.compile(r'<session_context>(.*?)</session_context>', re.DOTALL)
+AVAILABLE_WORKSPACES_RE = re.compile(r'<available_workspaces>(.*?)</available_workspaces>', re.DOTALL)
+AVAILABLE_AGENTS_RE = re.compile(r'<available_agents>(.*?)</available_agents>', re.DOTALL)
+SESSION_ID_EXTRACT_RE = re.compile(r'sessionId:\s*["\']([^"\']+)["\']')
+WORKSPACE_ID_EXTRACT_RE = re.compile(r'workspaceId:\s*["\']([^"\']+)["\']')
+WORKSPACE_LIST_RE = re.compile(r'\(id:\s*["\']([^"\']+)["\']\)')
+AGENT_LIST_RE = re.compile(r'\(id:\s*["\']([^"\']+)["\']\)')
+
 # Load tool schemas
 TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {}
 SCHEMAS_FILE = Path(__file__).parent / "tool_schemas.json"
@@ -76,12 +85,130 @@ class ExampleReport:
                     "Unexpected parameter",
                     "Invalid parameter value",
                     "Missing required 'context'",  # Allow missing context in undesirable
-                    "Context object must be the first field"  # Allow context ordering issues
+                    "Context object must be the first field",  # Allow context ordering issues
+                    "does not match system prompt"  # Allow ID mismatches in undesirable
                 ])
             ]
             return len(structural_errors) == 0
         # For desirable examples (label=True), all errors are failures
         return all(issue.level != "ERROR" for issue in self.issues)
+
+
+@dataclass
+class SystemPromptContext:
+    """Extracted context from system prompt for validation."""
+    session_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    available_workspace_ids: List[str] = field(default_factory=list)
+    available_agent_ids: List[str] = field(default_factory=list)
+    has_system_prompt: bool = False
+
+
+def extract_system_prompt_context(conversations: list) -> SystemPromptContext:
+    """Extract IDs from system prompt for cross-validation with tool calls."""
+    ctx = SystemPromptContext()
+
+    # Find system message
+    system_msg = None
+    for msg in conversations:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            system_msg = msg.get("content", "")
+            ctx.has_system_prompt = True
+            break
+
+    if not system_msg:
+        return ctx
+
+    # Extract session context
+    session_match = SESSION_CONTEXT_RE.search(system_msg)
+    if session_match:
+        session_content = session_match.group(1)
+
+        # Extract sessionId
+        sid_match = SESSION_ID_EXTRACT_RE.search(session_content)
+        if sid_match:
+            ctx.session_id = sid_match.group(1)
+
+        # Extract workspaceId
+        wid_match = WORKSPACE_ID_EXTRACT_RE.search(session_content)
+        if wid_match:
+            ctx.workspace_id = wid_match.group(1)
+
+    # Extract available workspaces
+    workspaces_match = AVAILABLE_WORKSPACES_RE.search(system_msg)
+    if workspaces_match:
+        workspaces_content = workspaces_match.group(1)
+        ctx.available_workspace_ids = WORKSPACE_LIST_RE.findall(workspaces_content)
+
+    # Extract available agents
+    agents_match = AVAILABLE_AGENTS_RE.search(system_msg)
+    if agents_match:
+        agents_content = agents_match.group(1)
+        ctx.available_agent_ids = AGENT_LIST_RE.findall(agents_content)
+
+    return ctx
+
+
+def validate_ids_match_system_prompt(
+    tool_name: str,
+    args: dict,
+    system_ctx: SystemPromptContext,
+    report: ExampleReport,
+    tool_call_num: int
+) -> None:
+    """Validate that tool call IDs match those provided in the system prompt."""
+    if not system_ctx.has_system_prompt:
+        return  # No system prompt to validate against
+
+    context = args.get("context", {})
+    if not isinstance(context, dict):
+        return
+
+    # Validate sessionId matches
+    tool_session_id = context.get("sessionId")
+    if tool_session_id and system_ctx.session_id:
+        if tool_session_id != system_ctx.session_id:
+            report.add("ERROR",
+                f"Tool call #{tool_call_num} ({tool_name}): sessionId '{tool_session_id}' "
+                f"does not match system prompt sessionId '{system_ctx.session_id}'")
+
+    # Validate workspaceId matches
+    tool_workspace_id = context.get("workspaceId")
+    if tool_workspace_id and system_ctx.workspace_id:
+        # workspaceId in tool should match either:
+        # 1. The workspaceId in session_context, OR
+        # 2. One of the available_workspace_ids (for workspace operations)
+        valid_workspace_ids = [system_ctx.workspace_id] + system_ctx.available_workspace_ids
+
+        if tool_workspace_id not in valid_workspace_ids:
+            report.add("ERROR",
+                f"Tool call #{tool_call_num} ({tool_name}): workspaceId '{tool_workspace_id}' "
+                f"does not match system prompt (expected one of: {valid_workspace_ids})")
+
+    # For workspace operations, validate the target workspace ID
+    if "id" in args and tool_name.startswith("memoryManager_"):
+        target_id = args.get("id")
+        if target_id and system_ctx.available_workspace_ids:
+            # For loadWorkspace, createWorkspace, etc. the target should be in available list
+            # or be a new workspace being created
+            if target_id.startswith("ws_") and target_id not in system_ctx.available_workspace_ids:
+                # Only warn for loadWorkspace (should exist), not createWorkspace (new)
+                if "load" in tool_name.lower():
+                    report.add("WARN",
+                        f"Tool call #{tool_call_num} ({tool_name}): target workspace '{target_id}' "
+                        f"not in available_workspaces list")
+
+    # For agent operations, validate agent IDs
+    if tool_name.startswith("agentManager_"):
+        # Check 'id' parameter for updateAgent, deleteAgent, getAgent, toggleAgent
+        agent_id = args.get("id")
+        if agent_id and system_ctx.available_agent_ids:
+            if agent_id.startswith("agent_") and agent_id not in system_ctx.available_agent_ids:
+                # Only warn - agent might be newly created
+                if any(op in tool_name.lower() for op in ["update", "delete", "get", "toggle"]):
+                    report.add("WARN",
+                        f"Tool call #{tool_call_num} ({tool_name}): agent '{agent_id}' "
+                        f"not in available_agents list")
 
 
 def load_jsonl(path: Path) -> Iterable[Tuple[int, dict]]:
@@ -453,7 +580,7 @@ def validate_context(args: dict, report: ExampleReport) -> None:
         report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
 
 
-def validate_assistant_content(content: str, report: ExampleReport) -> None:
+def validate_assistant_content(content: str, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
     """Validate assistant message content, including tool calls if present.
 
     Supports multiple formats:
@@ -497,9 +624,12 @@ def validate_assistant_content(content: str, report: ExampleReport) -> None:
         validate_context(args, report)
         # Validate against actual tool schema
         validate_tool_against_schema(tool_name, args, report, idx)
+        # Validate IDs match system prompt context
+        if system_ctx:
+            validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
 
 
-def validate_assistant_message_openai(msg: dict, report: ExampleReport) -> None:
+def validate_assistant_message_openai(msg: dict, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:
     """Validate OpenAI format assistant message with tool_calls array."""
     tool_calls_array = msg.get("tool_calls")
     if not isinstance(tool_calls_array, list):
@@ -527,6 +657,9 @@ def validate_assistant_message_openai(msg: dict, report: ExampleReport) -> None:
         validate_context(args, report)
         # Validate against actual tool schema
         validate_tool_against_schema(tool_name, args, report, idx)
+        # Validate IDs match system prompt context
+        if system_ctx:
+            validate_ids_match_system_prompt(tool_name, args, system_ctx, report, idx)
 
 
 def validate_example(idx: int, example: dict) -> ExampleReport:
@@ -545,17 +678,20 @@ def validate_example(idx: int, example: dict) -> ExampleReport:
     # Validate conversations array structure
     validate_conversations_array(conversations, report)
 
+    # Extract system prompt context for ID validation
+    system_ctx = extract_system_prompt_context(conversations)
+
     # Validate assistant messages specifically
     for msg in conversations:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
             # Check format: OpenAI (tool_calls array) or ChatML (content string)
             if "tool_calls" in msg:
                 # OpenAI format
-                validate_assistant_message_openai(msg, report)
+                validate_assistant_message_openai(msg, report, system_ctx)
             else:
                 # ChatML format
                 content = msg.get("content", "")
-                validate_assistant_content(content, report)
+                validate_assistant_content(content, report, system_ctx)
 
     # Label is optional in ChatML format
     # Labels should now be boolean: true = desirable, false = undesirable
