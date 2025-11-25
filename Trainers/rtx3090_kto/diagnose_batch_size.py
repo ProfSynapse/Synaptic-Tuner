@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Quick diagnostic to show what batch size will be used"""
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+from configs.config_loader import load_config
 
-from configs.training_config import get_7b_config
-
-config = get_7b_config()
+config = load_config()
 
 print("=" * 60)
 print("BATCH SIZE DIAGNOSTIC")
