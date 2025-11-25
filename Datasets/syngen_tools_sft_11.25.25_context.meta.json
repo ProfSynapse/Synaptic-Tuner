@@ -1,5 +1,5 @@
 {
-  "created": "2025-11-25T16:24:18.560664",
+  "created": "2025-11-25T16:38:49.192552",
   "source_files": [
     "agentManager/tools_v1.1.jsonl",
     "contentManager/tools_v1.1.jsonl",
@@ -7,13 +7,13 @@
     "vaultLibrarian/tools_v1.1.jsonl",
     "vaultManager/tools_v1.1.jsonl"
   ],
-  "total_examples": 5289,
+  "total_examples": 5286,
   "per_manager": {
-    "agentManager": 770,
-    "contentManager": 1194,
+    "agentManager": 769,
+    "contentManager": 1193,
     "memoryManager": 1341,
     "vaultLibrarian": 844,
-    "vaultManager": 1140
+    "vaultManager": 1139
   },
   "features": [
     "System prompts with <session_context>",
