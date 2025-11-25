@@ -68,10 +68,18 @@ def validate_assistant_response(content: Union[str, Dict[str, Any]]) -> Validati
             # Dict without tool_calls - invalid
             report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
     elif isinstance(content, str):
-        # ChatML format with content string
+        # ChatML or Mistral format with content string
         dataset_validator.validate_assistant_content(content, report)
         # Extract tool calls even if validation failed to help debugging.
-        if "tool_call:" in content:
+        # Check for Mistral format first (more specific marker)
+        if "[TOOL_CALLS]" in content:
+            try:
+                for name, args in dataset_validator.extract_tool_calls_mistral(content):
+                    tool_calls.append(ToolCall(name=name, arguments=args))
+            except Exception:
+                # extractor raises ValueError for broken JSON; already surfaced as issue
+                pass
+        elif "tool_call:" in content:
             try:
                 for name, args in dataset_validator.extract_tool_calls(content):
                     tool_calls.append(ToolCall(name=name, arguments=args))

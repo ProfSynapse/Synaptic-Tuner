@@ -1,59 +1,55 @@
-"""Thin HTTP client for interacting with an Ollama server."""
+"""HTTP client for interacting with an Ollama server.
+
+This module provides the OllamaClient for sending chat requests to Ollama's
+/api/chat endpoint. It inherits from BaseBackendClient for shared retry logic.
+"""
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
-import requests
-
+from .base_client import BaseBackendClient, extract_message_content
 from .config import OllamaSettings
+from .protocols import BackendError, BackendResponse
 
 
-class OllamaError(RuntimeError):
+class OllamaError(BackendError):
     """Raised when the Ollama API returns an error or malformatted payload."""
+    pass
 
 
-@dataclass
-class OllamaResponse:
-    message: Any  # Can be str (ChatML) or Dict (OpenAI format with tool_calls)
-    raw: Dict[str, Any]
-    latency_s: float
+# Backwards compatibility alias
+OllamaResponse = BackendResponse
 
 
-class OllamaClient:
-    """Simple chat wrapper around Ollama's /api/chat endpoint."""
+class OllamaClient(BaseBackendClient):
+    """Chat client for Ollama's /api/chat endpoint.
 
-    def __init__(self, settings: OllamaSettings, timeout: float = 60.0, retries: int = 2) -> None:
-        self.settings = settings
-        self.timeout = timeout
-        self.retries = max(0, retries)
+    Ollama uses a custom API format that differs from OpenAI:
+    - Endpoint: /api/chat
+    - Options nested under 'options' key
+    - Response message directly in 'message' key
 
-    def chat(self, messages: Sequence[Mapping[str, str]]) -> OllamaResponse:
-        """Send a chat conversation to the configured model."""
-        payload = self._build_payload(messages)
-        url = f"{self.settings.base_url()}/api/chat"
+    Example usage:
+        settings = OllamaSettings(model="llama2")
+        client = OllamaClient(settings=settings)
+        response = client.chat([{"role": "user", "content": "Hello"}])
+    """
 
-        last_err: Exception | None = None
-        for attempt in range(self.retries + 1):
-            start = time.perf_counter()
-            try:
-                response = requests.post(url, json=payload, timeout=self.timeout)
-                response.raise_for_status()
-                data = response.json()
-                message = self._extract_message(data)
-                latency_s = time.perf_counter() - start
-                return OllamaResponse(message=message, raw=data, latency_s=latency_s)
-            except (requests.RequestException, ValueError, OllamaError) as exc:
-                last_err = exc
-                if attempt == self.retries:
-                    break
-                # Basic exponential backoff
-                time.sleep(min(2 ** attempt, 5))
-        raise OllamaError(f"Ollama request failed after {self.retries + 1} attempts: {last_err}")
+    settings: OllamaSettings  # Type narrowing for IDE support
+
+    @property
+    def _client_name(self) -> str:
+        return "Ollama"
 
     def _build_payload(self, messages: Sequence[Mapping[str, str]]) -> Dict[str, Any]:
+        """Build Ollama-specific request payload.
+
+        Ollama uses:
+        - 'options' dict for generation parameters
+        - 'num_predict' instead of 'max_tokens'
+        - 'stream': False for non-streaming
+        """
         options: Dict[str, Any] = {
             "temperature": self.settings.temperature,
             "top_p": self.settings.top_p,
@@ -69,26 +65,36 @@ class OllamaClient:
             "options": options,
         }
 
-    @staticmethod
-    def _extract_message(payload: Mapping[str, Any]) -> Any:
-        """
-        Extract message from Ollama response.
+    def _get_chat_url(self) -> str:
+        """Return Ollama chat endpoint URL."""
+        return f"{self.settings.base_url()}/api/chat"
 
-        Returns:
-            - Dict with tool_calls if present (OpenAI format)
-            - String content otherwise (ChatML format)
+    def _extract_response(self, data: Dict[str, Any], latency_s: float) -> BackendResponse:
+        """Extract response from Ollama's response format.
+
+        Ollama returns:
+        {
+            "message": {
+                "role": "assistant",
+                "content": "...",
+                "tool_calls": [...]  // optional
+            },
+            ...
+        }
         """
-        message = payload.get("message")
+        message = data.get("message")
         if not isinstance(message, Mapping):
-            raise OllamaError(f"Unexpected Ollama response payload: {json.dumps(payload)[:200]}")
+            raise OllamaError(
+                f"Unexpected Ollama response payload: {json.dumps(data)[:200]}"
+            )
 
-        # Check if this is OpenAI format with tool_calls
-        if "tool_calls" in message:
-            # Return full message object for OpenAI format
-            return dict(message)
+        try:
+            content = extract_message_content(message)
+        except ValueError as exc:
+            raise OllamaError(f"Ollama response missing 'message.content': {exc}") from exc
 
-        # ChatML format - return content string
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise OllamaError("Ollama response missing 'message.content'")
-        return content
+        return BackendResponse(message=content, raw=data, latency_s=latency_s)
+
+    def _create_error(self, message: str) -> BackendError:
+        """Create an OllamaError."""
+        return OllamaError(message)

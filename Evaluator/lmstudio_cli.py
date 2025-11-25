@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
-from .cli import build_metadata
+from .cli_utils import (
+    build_metadata,
+    build_settings_kwargs,
+    determine_exit_code,
+    model_output_paths,
+    select_model,
+)
 from .config import EvaluatorConfig, LMStudioSettings, PromptFilter, expand_path
 from .lmstudio_client import LMStudioClient, LMStudioError
 from .prompt_sets import load_prompt_cases
@@ -19,6 +24,7 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Run full-coverage evaluations against LM Studio models.",
         epilog="Tip: run `python -m Evaluator.lmstudio_cli list-models` to see what's loaded in LM Studio.",
@@ -56,6 +62,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 
 def main(argv: List[str] | None = None) -> int:
+    """Main entry point."""
     args = parse_args(argv or sys.argv[1:])
 
     if args.command == "list-models":
@@ -67,8 +74,10 @@ def main(argv: List[str] | None = None) -> int:
 
 
 def list_models_command(args: argparse.Namespace) -> int:
+    """List models available in LM Studio."""
+    settings_kwargs = build_settings_kwargs(args)
     client = LMStudioClient(
-        settings=LMStudioSettings(model="__list__", **_settings_kwargs(args)),
+        settings=LMStudioSettings(model="__list__", **settings_kwargs),
         timeout=args.timeout,
         retries=args.retries,
     )
@@ -85,16 +94,20 @@ def list_models_command(args: argparse.Namespace) -> int:
 
 
 def run_full_coverage_command(args: argparse.Namespace) -> int:
+    """Run full coverage evaluation."""
     prompt_path = expand_path(args.prompt_set)
     results_dir = expand_path(args.output_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    settings_kwargs = build_settings_kwargs(args)
+
+    # Create client for model selection
     base_client = LMStudioClient(
-        settings=LMStudioSettings(model=args.model or "__list__", **_settings_kwargs(args)),
+        settings=LMStudioSettings(model=args.model or "__list__", **settings_kwargs),
         timeout=args.timeout,
         retries=args.retries,
     )
-    model_name = args.model or _select_model(base_client)
+    model_name = args.model or select_model(base_client)
     if not model_name:
         return 1
 
@@ -104,17 +117,16 @@ def run_full_coverage_command(args: argparse.Namespace) -> int:
         top_p=args.top_p,
         max_tokens=args.max_tokens,
         seed=args.seed,
-        **_settings_kwargs(args),
+        **settings_kwargs,
     )
     client = LMStudioClient(settings=settings, timeout=args.timeout, retries=args.retries)
 
-    json_path, md_path = default_output_paths(model_name, results_dir)
-    prompt_filter = PromptFilter()
+    json_path, md_path = model_output_paths(model_name, results_dir)
     config = EvaluatorConfig(
         prompts_path=prompt_path,
         output_path=json_path,
         save_markdown=True,
-        filter=prompt_filter,
+        filter=PromptFilter(),
         retries=args.retries,
         request_timeout=args.timeout,
         dry_run=args.dry_run,
@@ -122,7 +134,7 @@ def run_full_coverage_command(args: argparse.Namespace) -> int:
 
     try:
         config.validate()
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except Exception as exc:
         print(f"Invalid configuration: {exc}", file=sys.stderr)
         return 1
     config.ensure_output_parent()
@@ -140,63 +152,7 @@ def run_full_coverage_command(args: argparse.Namespace) -> int:
     print(f"\nJSON results: {json_path}")
     print(f"Markdown summary: {md_path}")
 
-    any_errors = any(record.error for record in records)
-    any_failures = any((record.validator and not record.validator.passed) for record in records if record.error is None)
-    if any_errors:
-        return 3
-    if any_failures:
-        return 2
-    return 0
-
-
-def default_output_paths(model_name: str, results_dir: Path) -> Tuple[Path, Path]:
-    """Build timestamped JSON/Markdown artifact paths."""
-    cleaned_model = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in model_name)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = results_dir / f"{cleaned_model}_full_coverage_{stamp}"
-    return base.with_suffix(".json"), base.with_suffix(".md")
-
-
-def _select_model(client: LMStudioClient) -> str | None:
-    try:
-        models = client.list_models()
-    except LMStudioError as exc:
-        print(f"Unable to list models from LM Studio: {exc}", file=sys.stderr)
-        return None
-
-    if not models:
-        print("LM Studio did not return any models.", file=sys.stderr)
-        return None
-
-    if len(models) == 1:
-        print(f"Using only available model: {models[0]}")
-        return models[0]
-
-    print("Select a model to evaluate:")
-    for idx, model in enumerate(models, start=1):
-        print(f"[{idx}] {model}")
-
-    while True:
-        choice = input("Enter a number (default 1): ").strip()
-        if not choice:
-            return models[0]
-        try:
-            index = int(choice)
-        except ValueError:
-            print("Please enter a valid number.", file=sys.stderr)
-            continue
-        if 1 <= index <= len(models):
-            return models[index - 1]
-        print(f"Please pick a value between 1 and {len(models)}.", file=sys.stderr)
-
-
-def _settings_kwargs(args: argparse.Namespace) -> dict:
-    opts = {}
-    if args.host:
-        opts["host"] = args.host
-    if args.port is not None:
-        opts["port"] = args.port
-    return opts
+    return determine_exit_code(records)
 
 
 if __name__ == "__main__":

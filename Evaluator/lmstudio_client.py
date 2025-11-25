@@ -1,78 +1,68 @@
-"""Thin HTTP client for interacting with LM Studio server."""
+"""HTTP client for interacting with LM Studio server.
+
+This module provides the LMStudioClient for sending chat requests to
+LM Studio's OpenAI-compatible API. It inherits from BaseBackendClient
+for shared retry logic.
+"""
 from __future__ import annotations
 
 import json
-import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Sequence
 
 import requests
 
+from .base_client import (
+    BaseBackendClient,
+    extract_message_content,
+    extract_models_from_list,
+)
 from .config import LMStudioSettings
+from .protocols import BackendError, BackendResponse
 
 
-class LMStudioError(RuntimeError):
+class LMStudioError(BackendError):
     """Raised when the LM Studio API returns an error or malformatted payload."""
+    pass
 
 
-@dataclass
-class LMStudioResponse:
-    message: Any  # Can be str (ChatML) or Dict (OpenAI format with tool_calls)
-    raw: Dict[str, Any]
-    latency_s: float
+# Backwards compatibility alias
+LMStudioResponse = BackendResponse
 
 
-class LMStudioClient:
-    """Simple chat wrapper around LM Studio's OpenAI-compatible /v1/chat/completions endpoint."""
+class LMStudioClient(BaseBackendClient):
+    """Chat client for LM Studio's OpenAI-compatible /v1/chat/completions endpoint.
 
-    def __init__(self, settings: LMStudioSettings, timeout: float = 60.0, retries: int = 2) -> None:
-        self.settings = settings
-        self.timeout = timeout
-        self.retries = max(0, retries)
+    LM Studio implements the OpenAI API format:
+    - Endpoint: /v1/chat/completions
+    - Generation params at top level
+    - Response in choices[0].message
 
-    def chat(self, messages: Sequence[Mapping[str, str]]) -> LMStudioResponse:
-        """Send a chat conversation to the configured model."""
-        payload = self._build_payload(messages)
-        url = f"{self.settings.base_url()}/v1/chat/completions"
+    Also supports model listing via /v1/models endpoint.
 
-        last_err: Exception | None = None
-        for attempt in range(self.retries + 1):
-            start = time.perf_counter()
-            try:
-                response = requests.post(url, json=payload, timeout=self.timeout)
-                response.raise_for_status()
-                data = response.json()
-                message = self._extract_message(data)
-                latency_s = time.perf_counter() - start
-                return LMStudioResponse(message=message, raw=data, latency_s=latency_s)
-            except (requests.RequestException, ValueError, LMStudioError) as exc:
-                last_err = exc
-                if attempt == self.retries:
-                    break
-                # Basic exponential backoff
-                time.sleep(min(2 ** attempt, 5))
-        raise LMStudioError(f"LM Studio request failed after {self.retries + 1} attempts: {last_err}")
+    Example usage:
+        settings = LMStudioSettings(model="local-model")
+        client = LMStudioClient(settings=settings)
+        response = client.chat([{"role": "user", "content": "Hello"}])
 
-    def list_models(self) -> List[str]:
-        """Return the list of model IDs exposed by the LM Studio server."""
-        url = f"{self.settings.base_url()}/v1/models"
-        last_err: Exception | None = None
+        # List available models
+        models = client.list_models()
+    """
 
-        for attempt in range(self.retries + 1):
-            try:
-                response = requests.get(url, timeout=self.timeout)
-                response.raise_for_status()
-                data = response.json()
-                return self._extract_models(data)
-            except (requests.RequestException, ValueError, LMStudioError) as exc:
-                last_err = exc
-                if attempt == self.retries:
-                    break
-                time.sleep(min(2 ** attempt, 5))
-        raise LMStudioError(f"Unable to list LM Studio models after {self.retries + 1} attempts: {last_err}")
+    settings: LMStudioSettings  # Type narrowing for IDE support
+
+    @property
+    def _client_name(self) -> str:
+        return "LM Studio"
 
     def _build_payload(self, messages: Sequence[Mapping[str, str]]) -> Dict[str, Any]:
-        payload = {
+        """Build OpenAI-compatible request payload.
+
+        LM Studio uses standard OpenAI format:
+        - Generation params at top level
+        - 'max_tokens' for output limit
+        - Optional 'seed' for reproducibility
+        """
+        payload: Dict[str, Any] = {
             "model": self.settings.model,
             "messages": list(messages),
             "stream": False,
@@ -84,46 +74,68 @@ class LMStudioClient:
             payload["seed"] = self.settings.seed
         return payload
 
-    @staticmethod
-    def _extract_message(payload: Mapping[str, Any]) -> Any:
-        """
-        Extract message from LM Studio response.
+    def _get_chat_url(self) -> str:
+        """Return LM Studio chat endpoint URL."""
+        return f"{self.settings.base_url()}/v1/chat/completions"
 
-        Returns:
-            - Dict with tool_calls if present (OpenAI format)
-            - String content otherwise (ChatML format)
+    def _extract_response(self, data: Dict[str, Any], latency_s: float) -> BackendResponse:
+        """Extract response from OpenAI-format response.
+
+        LM Studio returns:
+        {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "...",
+                    "tool_calls": [...]  // optional
+                }
+            }],
+            ...
+        }
         """
-        choices = payload.get("choices")
+        choices = data.get("choices")
         if not isinstance(choices, list) or len(choices) == 0:
-            raise LMStudioError(f"Unexpected LM Studio response payload: {json.dumps(payload)[:200]}")
+            raise LMStudioError(
+                f"Unexpected LM Studio response payload: {json.dumps(data)[:200]}"
+            )
 
         message = choices[0].get("message")
         if not isinstance(message, Mapping):
             raise LMStudioError("LM Studio response missing valid message object")
 
-        # Check if this is OpenAI format with tool_calls
-        if "tool_calls" in message:
-            # Return full message object for OpenAI format
-            return dict(message)
+        try:
+            content = extract_message_content(message)
+        except ValueError as exc:
+            raise LMStudioError(
+                f"LM Studio response missing 'choices[0].message.content': {exc}"
+            ) from exc
 
-        # ChatML format - return content string
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise LMStudioError("LM Studio response missing 'choices[0].message.content'")
-        return content
+        return BackendResponse(message=content, raw=data, latency_s=latency_s)
 
-    @staticmethod
-    def _extract_models(payload: Mapping[str, Any]) -> List[str]:
-        data = payload.get("data")
-        if not isinstance(data, list):
-            raise LMStudioError(f"Unexpected LM Studio model list payload: {json.dumps(payload)[:200]}")
+    def _create_error(self, message: str) -> BackendError:
+        """Create an LMStudioError."""
+        return LMStudioError(message)
 
-        models: List[str] = []
-        for entry in data:
-            model_id = entry.get("id") if isinstance(entry, Mapping) else None
-            if isinstance(model_id, str):
-                models.append(model_id)
+    def list_models(self) -> List[str]:
+        """Return the list of model IDs exposed by the LM Studio server.
 
-        if not models:
-            raise LMStudioError("LM Studio returned no models")
-        return models
+        Uses the OpenAI-compatible /v1/models endpoint.
+
+        Returns:
+            List of model ID strings
+
+        Raises:
+            LMStudioError: If the request fails or no models are returned
+        """
+        url = f"{self.settings.base_url()}/v1/models"
+
+        def fetch_models() -> List[str]:
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+            return extract_models_from_list(data)
+
+        return self._execute_with_retry(
+            operation=fetch_models,
+            error_message="Unable to list LM Studio models",
+        )

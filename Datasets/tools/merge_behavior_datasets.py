@@ -67,8 +67,8 @@ def create_interleaved_dataset(examples: List[Dict]) -> List[Dict]:
 
 def main():
     # Configuration
-    behavior_datasets_dir = Path(__file__).parent / "behavior_datasets"
-    output_file = Path(__file__).parent / "behavior_merged_kto_v1.1.jsonl"
+    behavior_datasets_dir = Path(__file__).parent.parent / "behavior_datasets"
+    output_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.2.jsonl"
 
     # Behavior categories
     behaviors = [
@@ -80,6 +80,13 @@ def main():
         "strategic_tool_selection",
         "verification_before_action",
         "workspace_awareness"
+    ]
+
+    # Response pattern datasets (new - teaches when to respond with text vs continue with tools)
+    response_patterns = [
+        "response_patterns/text_only",
+        "response_patterns/tool_only",
+        "response_patterns/tool_text"
     ]
 
     # Load all datasets
@@ -105,6 +112,32 @@ def main():
                 print(f"  {behavior}: {len(examples)} examples ({positive} positive, {negative} negative)")
             except Exception as e:
                 print(f"  ERROR processing {behavior}: {e}")
+                raise
+        else:
+            print(f"  WARNING: {file_path} not found")
+
+    # Load response pattern datasets
+    print("\nLoading response pattern datasets...")
+    for pattern in response_patterns:
+        # Pattern format: "response_patterns/text_only" -> "text_only_pairs_v1.0.jsonl"
+        pattern_name = pattern.split('/')[-1]
+        file_path = behavior_datasets_dir / "response_patterns" / f"{pattern_name}_pairs_v1.0.jsonl"
+        if file_path.exists():
+            examples = load_dataset(file_path)
+            all_examples.extend(examples)
+
+            # Track stats
+            try:
+                positive = sum(1 for ex in examples if ex.get('label') is True)
+                negative = sum(1 for ex in examples if ex.get('label') is False)
+                behavior_stats[pattern] = {
+                    "total": len(examples),
+                    "positive": positive,
+                    "negative": negative
+                }
+                print(f"  {pattern_name}: {len(examples)} examples ({positive} positive, {negative} negative)")
+            except Exception as e:
+                print(f"  ERROR processing {pattern}: {e}")
                 raise
         else:
             print(f"  WARNING: {file_path} not found")
@@ -139,10 +172,13 @@ def main():
             f.write(json.dumps(example, ensure_ascii=False) + '\n')
 
     # Write metadata file
+    all_datasets = behaviors + response_patterns
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "behavior_datasets merge",
+        "source": "behavior_datasets merge (includes response_patterns)",
         "behaviors": behaviors,
+        "response_patterns": response_patterns,
+        "all_datasets": all_datasets,
         "behavior_stats": behavior_stats,
         "total_examples": len(interleaved),
         "positive_examples": total_positive,

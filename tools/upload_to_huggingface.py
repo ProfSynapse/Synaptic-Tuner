@@ -20,7 +20,7 @@ if not HF_TOKEN:
 
 # Configuration
 REPO_ID = "professorsynapse/claudesidian-synthetic-dataset"
-DATASET_FILE = "Datasets/syngen_tools_sft_11.24.25.jsonl"
+DATASET_FILE = "Datasets/syngen_tools_sft_11.24.25_with_tools.jsonl"
 REPO_TYPE = "dataset"  # This is a dataset, not a model
 
 def upload_dataset():
@@ -71,16 +71,14 @@ def upload_dataset():
         print("\nCreating/updating README.md...")
         readme_content = """# Claudesidian Synthetic Training Dataset
 
-High-quality synthetic training dataset (1,000 examples) for fine-tuning local LLMs to reliably use the Claudesidian-MCP tool suite for Obsidian vault operations.
+High-quality synthetic training dataset for fine-tuning local LLMs to reliably use the Claudesidian-MCP tool suite for Obsidian vault operations.
 
 ## Dataset Overview
 
-- **Total Examples**: 1,000
-- **Desirable Examples**: 742 (74.2%)
-- **Undesirable Examples**: 254 (25.4%)
-- **Ratio**: 2.92:1 (near target 3:1)
-- **Format**: ChatML (no system message, user/assistant roles)
-- **Labels**: Boolean (true/false) for desirable/undesirable
+- **Total Examples**: 5,303
+- **Format**: OpenAI-compatible (with tool_calls)
+- **Tools Included**: 47 tool schemas in OpenAI function calling format
+- **Use Case**: Training models to internalize tool calling without requiring schemas at inference
 
 ## Coverage
 
@@ -106,32 +104,47 @@ This dataset covers:
 | F (67-70) | 61 | Cross-workspace coordination |
 | Final | 39 | Utility patterns |
 
-## Usage
+## Dataset Format
 
-The dataset is formatted as JSONL with the following structure:
+The dataset is formatted as JSONL with OpenAI-compatible structure:
 
 ```json
 {
   "conversations": [
     {"role": "user", "content": "User request"},
-    {"role": "assistant", "content": "tool_call: toolName\\narguments: {...}\\n\\nResult: {...}\\n\\nResponse"}
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_id",
+        "type": "function",
+        "function": {
+          "name": "toolName",
+          "arguments": "{...json...}"
+        }
+      }]
+    }
   ],
-  "label": true  // or false for undesirable examples
+  "tools": [
+    // All 47 tool schemas in OpenAI format
+    {"type": "function", "function": {"name": "...", "parameters": {...}}}
+  ]
 }
 ```
 
-### For KTO Training
+## Usage
+
+### For SFT Training (Recommended)
 
 ```python
 from datasets import load_dataset
 
 # Load the dataset
-dataset = load_dataset("jrosenbaum/claudesidian-synthetic-dataset",
-                       data_files="syngen_toolset_v1.0.0_claude.jsonl")
+dataset = load_dataset("professorsynapse/claudesidian-synthetic-dataset",
+                       data_files="syngen_tools_sft_11.24.25_with_tools.jsonl")
 
-# Split by label for KTO training
-desirable = dataset.filter(lambda x: x["label"] == True)
-undesirable = dataset.filter(lambda x: x["label"] == False)
+# The dataset includes both messages and tools for proper training
+# Your training code should pass tools to tokenizer.apply_chat_template()
 ```
 
 ### For Fine-tuning
@@ -202,9 +215,18 @@ These synthetic examples are provided for research and training purposes.
 
 ---
 
-**Last Updated**: November 9, 2025
-**Total Size**: ~2.5 MB
-**Format**: JSONL (ChatML)
+**Last Updated**: November 24, 2025
+**Total Size**: ~113 MB
+**Format**: JSONL (OpenAI-compatible with tools)
+**Examples**: 5,303
+**Tools**: 47 function schemas included
+
+## Key Features
+
+- **Internalized Tool Calling**: Train models to use tools without providing schemas at inference
+- **Complete Tool Schemas**: All 47 tools included in OpenAI function calling format
+- **Proper Formatting**: Compatible with TRL SFTTrainer and Mistral's tool calling tokens
+- **Production Ready**: Optimized for training models that "know" their tools by heart
 """
 
         try:
