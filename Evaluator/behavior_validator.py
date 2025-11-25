@@ -45,6 +45,11 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
     """
     Detect the response type from model output.
 
+    Supports multiple formats:
+    - OpenAI format: dict with "tool_calls" array
+    - ChatML format: string with "tool_call:" markers
+    - Mistral format: string with "[TOOL_CALLS]" marker
+
     Returns:
         "text_only" - Response has text content but no tool calls
         "tool_only" - Response has tool calls but no/minimal text
@@ -61,8 +66,14 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
         tool_calls = response.get("tool_calls") or []
         has_tool = len(tool_calls) > 0
     elif isinstance(response, str):
-        # ChatML format - check for tool_call markers
-        if "tool_call:" in response:
+        # Check for Mistral format: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
+        if "[TOOL_CALLS]" in response:
+            has_tool = True
+            # Extract text before [TOOL_CALLS]
+            parts = response.split("[TOOL_CALLS]", 1)
+            text_content = parts[0].strip()
+        # Check for ChatML format: tool_call: toolName
+        elif "tool_call:" in response:
             has_tool = True
             # Extract text before first tool_call
             parts = response.split("tool_call:", 1)
@@ -85,22 +96,58 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
 
 
 def extract_context_from_response(response: Union[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Extract context object from tool call arguments."""
+    """Extract context object from tool call arguments.
+
+    Supports multiple formats:
+    - OpenAI format: dict with "tool_calls" array
+    - ChatML format: string with "tool_call:" and "arguments:" markers
+    - Mistral format: string with "[TOOL_CALLS]" marker followed by JSON array
+    """
     try:
         if isinstance(response, dict):
+            # OpenAI format
             tool_calls = response.get("tool_calls") or []
             if tool_calls:
                 args = tool_calls[0].get("function", {}).get("arguments", "{}")
                 if isinstance(args, str):
                     args = json.loads(args)
                 return args.get("context")
-        elif isinstance(response, str) and "tool_call:" in response:
-            # Extract arguments from ChatML format
-            match = re.search(r'arguments:\s*(\{.*?\})\s*(?:\n\n|$)', response, re.DOTALL)
-            if match:
-                args = json.loads(match.group(1))
-                return args.get("context")
-    except (json.JSONDecodeError, KeyError, TypeError):
+        elif isinstance(response, str):
+            # Check for Mistral format: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
+            if "[TOOL_CALLS]" in response:
+                parts = response.split("[TOOL_CALLS]", 1)
+                if len(parts) > 1:
+                    json_part = parts[1].strip()
+                    # Find the JSON array
+                    if json_part.startswith("["):
+                        # Extract the JSON array
+                        bracket_count = 0
+                        end_idx = 0
+                        for i, char in enumerate(json_part):
+                            if char == "[":
+                                bracket_count += 1
+                            elif char == "]":
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    end_idx = i + 1
+                                    break
+                        if end_idx > 0:
+                            tool_calls_json = json_part[:end_idx]
+                            tool_calls = json.loads(tool_calls_json)
+                            if tool_calls and isinstance(tool_calls, list):
+                                first_call = tool_calls[0]
+                                args = first_call.get("arguments", {})
+                                if isinstance(args, str):
+                                    args = json.loads(args)
+                                return args.get("context") if isinstance(args, dict) else None
+            # ChatML format: tool_call: toolName\narguments: {...}
+            elif "tool_call:" in response:
+                # Extract arguments from ChatML format - use more robust extraction
+                match = re.search(r'arguments:\s*(\{.*?\})\s*(?:\n\n|Result:|$)', response, re.DOTALL)
+                if match:
+                    args = json.loads(match.group(1))
+                    return args.get("context")
+    except (json.JSONDecodeError, KeyError, TypeError, IndexError):
         pass
     return None
 
@@ -387,11 +434,15 @@ def _check_anti_pattern(
 
 
 def _get_text_content(response: Union[str, Dict[str, Any]]) -> str:
-    """Extract text content from response."""
+    """Extract text content from response (excluding tool call markers)."""
     if isinstance(response, dict):
         return response.get("content") or ""
     elif isinstance(response, str):
-        if "tool_call:" in response:
+        # Check for Mistral format first
+        if "[TOOL_CALLS]" in response:
+            return response.split("[TOOL_CALLS]", 1)[0].strip()
+        # Then ChatML format
+        elif "tool_call:" in response:
             return response.split("tool_call:", 1)[0].strip()
         return response.strip()
     return ""
