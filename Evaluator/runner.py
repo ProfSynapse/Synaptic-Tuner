@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .behavior_validator import BehaviorIssue, BehaviorValidationResult, validate_behavior
-from .context_injection import EvaluationContext, create_evaluation_context, inject_context_into_prompt
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
 from .schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
@@ -65,7 +64,7 @@ def evaluate_cases(
     client: BackendClient,
     dry_run: bool = False,
     on_record: Callable[[EvaluationRecord], None] | None = None,
-    inject_context: bool = False,
+    validate_context: bool = False,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -74,8 +73,8 @@ def evaluate_cases(
         client: Backend client implementing BackendClient protocol
         dry_run: Skip backend calls (for testing)
         on_record: Optional callback for each completed record
-        inject_context: If True, inject system prompts with realistic IDs
-                       and validate that model uses them correctly
+        validate_context: If True, validate that model uses IDs from
+                         expected_context in prompt metadata
 
     Returns:
         List of evaluation records
@@ -83,7 +82,7 @@ def evaluate_cases(
     records: List[EvaluationRecord] = []
 
     for case in cases:
-        record = _evaluate_single_case(case, client, dry_run, inject_context)
+        record = _evaluate_single_case(case, client, dry_run, validate_context)
         records.append(record)
         if on_record:
             on_record(record)
@@ -95,7 +94,7 @@ def _evaluate_single_case(
     case: PromptCase,
     client: BackendClient,
     dry_run: bool,
-    inject_context: bool = False,
+    validate_context: bool = False,
 ) -> EvaluationRecord:
     """Evaluate a single prompt case.
 
@@ -103,7 +102,7 @@ def _evaluate_single_case(
         case: The prompt case to evaluate
         client: Backend client
         dry_run: Skip backend calls
-        inject_context: If True, inject context into prompt and validate IDs
+        validate_context: If True, validate IDs against expected_context in metadata
 
     Returns:
         EvaluationRecord with results
@@ -119,27 +118,12 @@ def _evaluate_single_case(
             error=None,
         )
 
-    # Optionally inject context into the prompt
+    # Get expected_context from prompt metadata (if validation enabled)
+    # The system prompt is already in case.metadata["system"] and will be
+    # included via case.chat_messages()
     eval_context = None
-    if inject_context:
-        # Create evaluation context with realistic IDs
-        context = create_evaluation_context(
-            use_default_workspace=False,
-            num_workspaces=2,
-            num_agents=1,
-        )
-        # Inject into case metadata (creates system prompt)
-        updated_metadata = inject_context_into_prompt(case.metadata, context)
-        # Create modified case with injected context
-        case = PromptCase(
-            case_id=case.case_id,
-            question=case.question,
-            tags=case.tags,
-            expected_tools=case.expected_tools,
-            metadata=updated_metadata,
-        )
-        # Store eval context for validation
-        eval_context = updated_metadata.get("_eval_context")
+    if validate_context:
+        eval_context = case.metadata.get("expected_context")
 
     # Make request to backend
     try:

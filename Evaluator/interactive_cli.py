@@ -47,9 +47,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--retries", type=int, default=2, help="Retry attempts for LM Studio calls.")
     parser.add_argument("--dry-run", action="store_true", help="Skip backend calls (schema validation only).")
     parser.add_argument(
-        "--inject-context",
+        "--validate-context",
         action="store_true",
-        help="Inject system prompts with session/workspace IDs and validate model uses them correctly",
+        help="Validate that model uses IDs from system prompt (requires prompts with expected_context)",
     )
     return parser.parse_args(argv)
 
@@ -167,7 +167,7 @@ def main(argv: List[str] | None = None) -> int:
                 client=client,
                 dry_run=config.dry_run,
                 on_record=print_record_progress,
-                inject_context=args.inject_context,
+                validate_context=args.validate_context,
             )
             all_records.extend(records)
 

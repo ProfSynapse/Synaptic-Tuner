@@ -59,9 +59,9 @@ Backend Configuration:
     parser.add_argument("--markdown", help="Optional Markdown summary output path")
     parser.add_argument("--dry-run", action="store_true", help="Skip backend calls (for smoke tests)")
     parser.add_argument(
-        "--inject-context",
+        "--validate-context",
         action="store_true",
-        help="Inject system prompts with session/workspace IDs and validate model uses them correctly",
+        help="Validate that model uses IDs from system prompt (requires prompts with expected_context)",
     )
     return parser.parse_args(argv)
 
@@ -123,7 +123,7 @@ def main(argv: List[str] | None = None) -> int:
         selected_cases,
         client=client,
         dry_run=config.dry_run,
-        inject_context=args.inject_context,
+        validate_context=args.validate_context,
     )
 
     # Build and save results

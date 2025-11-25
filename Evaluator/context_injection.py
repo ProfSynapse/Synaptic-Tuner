@@ -1,17 +1,16 @@
-"""Context injection for evaluation prompts.
+"""Context injection utilities for evaluation prompts.
 
-This module generates system prompts that mirror production SystemPromptBuilder output,
-providing session context, available workspaces, and available agents to the model.
+This module provides dataclasses and utilities for building system prompts
+that match the production SystemPromptBuilder format.
 
-The model should use the IDs from this context rather than hallucinating new ones.
+NOTE: For evaluation, system prompts and expected_context should be defined
+directly in the prompt set JSON files, not generated at runtime.
+Use add_context_to_prompts.py to add context to prompt sets.
 """
 from __future__ import annotations
 
-import random
-import string
-import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -33,7 +32,11 @@ class AgentInfo:
 
 @dataclass
 class EvaluationContext:
-    """Context to inject into evaluation prompts."""
+    """Context for evaluation prompts.
+
+    This dataclass can be used to programmatically build system prompts
+    when creating new prompt sets.
+    """
     session_id: str
     workspace_id: str  # Current workspace (can be "default")
     workspaces: List[WorkspaceInfo] = field(default_factory=list)
@@ -96,155 +99,11 @@ class EvaluationContext:
         prompt += "</available_agents>"
         return prompt
 
-
-def generate_session_id() -> str:
-    """Generate a realistic session ID."""
-    timestamp = int(time.time() * 1000)
-    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=9))
-    return f"session_{timestamp}_{suffix}"
-
-
-def generate_workspace_id() -> str:
-    """Generate a realistic workspace ID."""
-    timestamp = int(time.time() * 1000)
-    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=9))
-    return f"ws_{timestamp}_{suffix}"
-
-
-def generate_agent_id(name: str) -> str:
-    """Generate a realistic agent ID based on name."""
-    timestamp = int(time.time() * 1000)
-    # Convert name to lowercase with underscores
-    name_part = name.lower().replace(" ", "_").replace("-", "_")[:20]
-    return f"agent_{timestamp}_{name_part}"
-
-
-# Predefined workspace templates for realistic evaluation
-WORKSPACE_TEMPLATES = [
-    ("Budget Tracker", "Monthly budget and expense tracking", "Finance/"),
-    ("Research Hub", "Academic research and paper management", "Research/"),
-    ("Project Management", "Project tracking and task management", "Projects/"),
-    ("Content Hub", "Blog posts and content creation", "Content/"),
-    ("Meeting Notes", "Meeting recordings and action items", "Meetings/"),
-    ("Recipe Collection", "Personal recipes and meal planning", "Recipes/"),
-    ("Fitness Tracker", "Workout logs and health metrics", "Fitness/"),
-    ("Learning Center", "Course materials and study notes", "Courses/"),
-    ("Client Work", "Client projects and deliverables", "Clients/"),
-    ("Development", "Code documentation and dev notes", "Dev/"),
-]
-
-# Predefined agent templates for realistic evaluation
-AGENT_TEMPLATES = [
-    ("Research Assistant", "Helps with deep research and analysis tasks"),
-    ("Code Reviewer", "Reviews code for quality and best practices"),
-    ("Writing Coach", "Assists with writing and editing"),
-    ("Data Analyst", "Analyzes data and creates reports"),
-    ("Task Manager", "Helps organize and prioritize tasks"),
-]
-
-
-def create_evaluation_context(
-    use_default_workspace: bool = False,
-    num_workspaces: int = 2,
-    num_agents: int = 1,
-    include_specific_workspace: Optional[str] = None,
-) -> EvaluationContext:
-    """Create an evaluation context with realistic IDs.
-
-    Args:
-        use_default_workspace: If True, use "default" as current workspace
-        num_workspaces: Number of available workspaces to include
-        num_agents: Number of available agents to include
-        include_specific_workspace: If set, include a workspace with this name
-
-    Returns:
-        EvaluationContext with generated IDs
-    """
-    session_id = generate_session_id()
-
-    # Generate workspaces
-    workspaces = []
-    workspace_templates = random.sample(WORKSPACE_TEMPLATES, min(num_workspaces, len(WORKSPACE_TEMPLATES)))
-
-    for name, desc, folder in workspace_templates:
-        ws_id = generate_workspace_id()
-        workspaces.append(WorkspaceInfo(
-            id=ws_id,
-            name=name,
-            description=desc,
-            root_folder=folder,
-        ))
-
-    # Add specific workspace if requested
-    if include_specific_workspace:
-        ws_id = generate_workspace_id()
-        workspaces.append(WorkspaceInfo(
-            id=ws_id,
-            name=include_specific_workspace,
-            description=f"Workspace for {include_specific_workspace.lower()}",
-            root_folder=f"{include_specific_workspace.replace(' ', '')}/"
-        ))
-
-    # Set current workspace
-    if use_default_workspace or not workspaces:
-        workspace_id = "default"
-    else:
-        workspace_id = workspaces[0].id
-
-    # Generate agents
-    agents = []
-    agent_templates = random.sample(AGENT_TEMPLATES, min(num_agents, len(AGENT_TEMPLATES)))
-
-    for name, desc in agent_templates:
-        agent_id = generate_agent_id(name)
-        agents.append(AgentInfo(
-            id=agent_id,
-            name=name,
-            description=desc,
-        ))
-
-    return EvaluationContext(
-        session_id=session_id,
-        workspace_id=workspace_id,
-        workspaces=workspaces,
-        agents=agents,
-    )
-
-
-def inject_context_into_prompt(
-    prompt_metadata: Dict[str, Any],
-    context: Optional[EvaluationContext] = None,
-) -> Dict[str, Any]:
-    """Inject evaluation context into prompt metadata.
-
-    Args:
-        prompt_metadata: Original prompt metadata dict
-        context: EvaluationContext to inject (creates new one if None)
-
-    Returns:
-        Updated metadata dict with system prompt
-    """
-    if context is None:
-        context = create_evaluation_context()
-
-    # Create a copy to avoid modifying original
-    updated = dict(prompt_metadata)
-
-    # Set or append to system prompt
-    existing_system = updated.get("system", "")
-    context_prompt = context.to_system_prompt()
-
-    if existing_system:
-        updated["system"] = f"{context_prompt}\n\n{existing_system}"
-    else:
-        updated["system"] = context_prompt
-
-    # Store context IDs for validation
-    updated["_eval_context"] = {
-        "session_id": context.session_id,
-        "workspace_id": context.workspace_id,
-        "workspace_ids": [ws.id for ws in context.workspaces],
-        "agent_ids": [a.id for a in context.agents],
-    }
-
-    return updated
+    def to_expected_context(self) -> Dict[str, Any]:
+        """Convert to expected_context dict for validation."""
+        return {
+            "session_id": self.session_id,
+            "workspace_id": self.workspace_id,
+            "workspace_ids": [ws.id for ws in self.workspaces],
+            "agent_ids": [a.id for a in self.agents],
+        }
