@@ -52,8 +52,8 @@ training:
   eval_steps: 100
 dataset:
   dataset_name: professorsynapse/claudesidian-synthetic-dataset
-  dataset_file: behavior_merged_kto_v1.1.jsonl
-  local_file: ../../Datasets/behavior_merged_kto_v1.1.jsonl
+  dataset_file: syngen_behavior_kto_11.25.25.jsonl  # Behavioral + response patterns with system prompts (2,288 examples)
+  local_file: ../../Datasets/syngen_behavior_kto_11.25.25.jsonl
   num_proc: 1
   test_size: 0.1
   chat_template: chatml
