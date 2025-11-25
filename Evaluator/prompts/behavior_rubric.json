@@ -661,5 +661,170 @@
       "no_naming_reasoning": true
     },
     "notes": "Tests tool_text pattern: When filenames suggest priority (important vs draft vs archived), model should explain name-based selection logic, THEN read"
+  },
+  {
+    "id": "CE_appropriate_search_limit",
+    "question": "Find my meeting notes from this month",
+    "tags": ["context_efficiency", "search", "limit_usage"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "uses_appropriate_limit": true,
+      "explains_limit_reasoning": true,
+      "sessionMemory_explains_limit_choice": true,
+      "reason": "Monthly meeting notes typically number 10-30. Should use limit 20-50, NOT 500+"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_limit": true,
+      "no_limit_reasoning": true
+    },
+    "notes": "Tests context_efficiency: Model should use reasonable limit (20-50) with reasoning, NOT excessive limit (500+)"
+  },
+  {
+    "id": "CE_project_files_limit",
+    "question": "Show me the recent project files",
+    "tags": ["context_efficiency", "search", "limit_usage"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "uses_appropriate_limit": true,
+      "toolContext_mentions_efficiency": true,
+      "reason": "Recent project files are typically 10-40. Should use moderate limit, not load entire vault"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_limit": true,
+      "loads_unnecessary_content": true
+    },
+    "notes": "Tests context_efficiency: Should limit results to recent/active files, not fetch entire vault"
+  },
+  {
+    "id": "CE_api_docs_search",
+    "question": "Look up the API documentation",
+    "tags": ["context_efficiency", "search", "limit_usage"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "uses_appropriate_limit": true,
+      "sessionMemory_min_chars": 60,
+      "reason": "API docs typically 10-25 files. Should explain why limit chosen based on expected result count"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_limit": true,
+      "generic_toolContext": true
+    },
+    "notes": "Tests context_efficiency: Model explains limit reasoning in sessionMemory/toolContext"
+  },
+  {
+    "id": "CE_config_files_search",
+    "question": "List the configuration files",
+    "tags": ["context_efficiency", "search", "limit_usage"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "uses_appropriate_limit": true,
+      "limit_matches_expected_count": true,
+      "reason": "Config files typically 5-15 per project. Should use limit ~20, not 500+"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_limit": true,
+      "no_efficiency_reasoning": true
+    },
+    "notes": "Tests context_efficiency: Limit should match expected result count (not excessive)"
+  },
+  {
+    "id": "CE_error_logs_search",
+    "question": "Find error logs from this week",
+    "tags": ["context_efficiency", "search", "limit_usage", "temporal"],
+    "expected_tools": ["vaultLibrarian_searchContent"],
+    "behavior_expectations": {
+      "uses_appropriate_limit": true,
+      "sessionMemory_explains_temporal_limit": true,
+      "reason": "Weekly logs ~20-30 entries. Should calculate limit based on time period, not use arbitrary high value"
+    },
+    "anti_patterns_to_avoid": {
+      "excessive_limit": true,
+      "ignores_temporal_scope": true
+    },
+    "notes": "Tests context_efficiency: Should reason about time period when setting limit"
+  },
+  {
+    "id": "EPU_architecture_design",
+    "question": "Design a microservices architecture for our e-commerce platform with high availability and scalability requirements",
+    "tags": ["execute_prompt_usage", "delegation", "architecture"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "behavior_expectations": {
+      "delegates_complex_task": true,
+      "uses_execute_prompt": true,
+      "toolContext_explains_why_delegating": true,
+      "reason": "Complex architectural decisions require expertise - should delegate to stronger model via executePrompt"
+    },
+    "anti_patterns_to_avoid": {
+      "creates_shallow_content_directly": true,
+      "handles_complex_task_without_delegation": true
+    },
+    "notes": "Tests execute_prompt_usage: Should delegate complex architecture to executePrompt, NOT create shallow doc directly"
+  },
+  {
+    "id": "EPU_legal_compliance",
+    "question": "Review our user data handling practices for GDPR compliance. We collect email, name, location, and usage analytics.",
+    "tags": ["execute_prompt_usage", "delegation", "legal"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "behavior_expectations": {
+      "delegates_complex_task": true,
+      "uses_execute_prompt": true,
+      "sessionMemory_acknowledges_expertise_needed": true,
+      "reason": "Legal compliance requires specialized knowledge - must delegate, not generate superficial checklist"
+    },
+    "anti_patterns_to_avoid": {
+      "creates_shallow_content_directly": true,
+      "gives_legal_advice_without_delegation": true
+    },
+    "notes": "Tests execute_prompt_usage: GDPR compliance requires legal expertise - must use executePrompt"
+  },
+  {
+    "id": "EPU_strategic_planning",
+    "question": "Develop a go-to-market strategy for our new AI-powered code review tool targeting enterprise development teams",
+    "tags": ["execute_prompt_usage", "delegation", "strategy"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "behavior_expectations": {
+      "delegates_complex_task": true,
+      "uses_execute_prompt": true,
+      "prompt_includes_context": true,
+      "reason": "GTM strategy requires strategic expertise - should delegate with comprehensive context"
+    },
+    "anti_patterns_to_avoid": {
+      "creates_shallow_content_directly": true,
+      "superficial_marketing_plan": true
+    },
+    "notes": "Tests execute_prompt_usage: Strategic planning should use executePrompt for expert guidance"
+  },
+  {
+    "id": "EPU_competitive_analysis",
+    "question": "Create a competitive analysis for our project management tool. Main competitors are Asana, Monday.com, and Linear.",
+    "tags": ["execute_prompt_usage", "delegation", "analysis"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "behavior_expectations": {
+      "delegates_complex_task": true,
+      "uses_execute_prompt": true,
+      "toolContext_mentions_analysis_expertise": true,
+      "reason": "Competitive analysis requires market knowledge and strategic thinking - delegate for quality insights"
+    },
+    "anti_patterns_to_avoid": {
+      "creates_shallow_content_directly": true,
+      "superficial_comparison": true
+    },
+    "notes": "Tests execute_prompt_usage: Should delegate competitive analysis to get substantive insights"
+  },
+  {
+    "id": "EPU_license_compatibility",
+    "question": "Analyze license compatibility - we want to use MIT, Apache 2.0, and LGPL libraries in our proprietary SaaS product",
+    "tags": ["execute_prompt_usage", "delegation", "legal"],
+    "expected_tools": ["agentManager_executePrompt"],
+    "behavior_expectations": {
+      "delegates_complex_task": true,
+      "uses_execute_prompt": true,
+      "reason": "License compatibility has legal implications - requires expert analysis via executePrompt"
+    },
+    "anti_patterns_to_avoid": {
+      "creates_shallow_content_directly": true,
+      "oversimplified_license_advice": true
+    },
+    "notes": "Tests execute_prompt_usage: License analysis needs legal expertise - must delegate"
   }
 ]

@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Exit code 0 if everything passed, 2 if any failures, 3 if request errors.
     any_errors = any(record.error for record in records)
-    any_failures = any((record.validator and not record.validator.passed) for record in records if record.error is None)
+    any_failures = any(not record.passed for record in records if record.error is None)
     if any_errors:
         return 3
     if any_failures:

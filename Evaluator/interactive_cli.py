@@ -158,7 +158,8 @@ def main(argv: List[str] | None = None) -> int:
 
             if any(record.error for record in records):
                 any_errors = True
-            if any((record.validator and not record.validator.passed) for record in records if record.error is None):
+            # Use record.passed which includes both schema AND behavior validation
+            if any(not record.passed for record in records if record.error is None):
                 any_failures = True
 
     if any_errors:
@@ -228,33 +229,81 @@ def _select_model(client: LMStudioClient) -> str | None:
         print(f"Please pick a value between 1 and {len(models)}.", file=sys.stderr)
 
 
+def _count_prompts(path_str: str) -> int:
+    """Dynamically count prompts in a JSON file."""
+    try:
+        path = expand_path(path_str)
+        if path.exists():
+            cases = load_prompt_cases(path)
+            return len(cases)
+    except Exception:
+        pass
+    return 0
+
+
+def _count_behavior_patterns(path_str: str) -> int:
+    """Count unique behavior patterns in a prompt set by examining tags."""
+    try:
+        path = expand_path(path_str)
+        if path.exists():
+            cases = load_prompt_cases(path)
+            # Extract unique behavior tags (excluding generic tags)
+            behavior_tags = set()
+            behavior_prefixes = {
+                "intellectual_humility", "verification_before_action", "context_continuity",
+                "strategic_tool_selection", "error_recovery", "workspace_awareness",
+                "response_patterns", "context_efficiency", "execute_prompt_usage"
+            }
+            for case in cases:
+                for tag in (case.tags or []):
+                    if tag in behavior_prefixes:
+                        behavior_tags.add(tag)
+            return len(behavior_tags)
+    except Exception:
+        pass
+    return 0
+
+
 def _select_prompt_set() -> str | list:
     """Let user choose which test suite to run. Returns path string or list of paths for 'all'."""
+    # Define paths first
+    paths = {
+        "1": "Evaluator/prompts/behavior_rubric.json",
+        "2": "Evaluator/prompts/full_coverage.json",
+        "3": "Evaluator/prompts/baseline.json",
+        "4": "Evaluator/prompts/tool_combos.json",
+    }
+
+    # Dynamically count prompts
+    counts = {k: _count_prompts(v) for k, v in paths.items()}
+    behavior_pattern_count = _count_behavior_patterns(paths["1"])
+    total_count = sum(counts.values())
+
     prompt_sets = {
         "1": {
             "name": "Behavior Rubric Tests",
-            "path": "Evaluator/prompts/behavior_rubric.json",
-            "desc": "43 prompts testing all 6 behavior patterns (Recommended)",
+            "path": paths["1"],
+            "desc": f"{counts['1']} prompts testing {behavior_pattern_count} behavior patterns (Recommended)",
         },
         "2": {
             "name": "Full Tool Coverage",
-            "path": "Evaluator/prompts/full_coverage.json",
-            "desc": "45 prompts - one test per tool",
+            "path": paths["2"],
+            "desc": f"{counts['2']} prompts - one test per tool",
         },
         "3": {
             "name": "Baseline Tests",
-            "path": "Evaluator/prompts/baseline.json",
-            "desc": "6 general prompts with behavior expectations",
+            "path": paths["3"],
+            "desc": f"{counts['3']} general prompts with behavior expectations",
         },
         "4": {
             "name": "Multi-Step Workflows",
-            "path": "Evaluator/prompts/tool_combos.json",
-            "desc": "7 prompts testing complex tool sequences",
+            "path": paths["4"],
+            "desc": f"{counts['4']} prompts testing complex tool sequences",
         },
         "5": {
             "name": "Run All Tests",
             "path": "ALL",
-            "desc": "Run all 4 test suites sequentially (101 total prompts)",
+            "desc": f"Run all 4 test suites sequentially ({total_count} total prompts)",
         },
     }
 
@@ -315,16 +364,21 @@ def _print_record_progress(record) -> None:
     if record.error:
         suffix = f" ({record.error})"
     elif record.validator and record.validator.issues and not record.validator.passed:
-        suffix = f" ({len(record.validator.issues)} issue(s))"
+        suffix = f" ({len(record.validator.issues)} schema issue(s))"
+    elif record.behavior and record.behavior.issues and not record.behavior.passed:
+        # Show behavior validation failures
+        failed_issues = [i for i in record.behavior.issues if not i.passed]
+        suffix = f" ({len(failed_issues)} behavior issue(s))"
     print(f"{color(f'[{status}]', color_name)} {label}{suffix}")
 
 
 def _record_status(record) -> tuple[str, str]:
     if record.error:
         return "ERROR", "red"
-    if record.validator and not record.validator.passed:
+    # Use record.passed which includes both schema AND behavior validation
+    if not record.passed:
         return "FAIL", "red"
-    if record.validator and record.validator.passed:
+    if record.passed:
         return "PASS", "green"
     # Dry-run or missing validator
     return "SKIP", "yellow"
@@ -371,7 +425,8 @@ def _print_banner() -> None:
 
 def _passfail_color(records) -> str:
     any_errors = any(r.error for r in records)
-    any_fail = any((r.validator and not r.validator.passed) for r in records if r.error is None)
+    # Use r.passed which includes both schema AND behavior validation
+    any_fail = any(not r.passed for r in records if r.error is None)
     if any_errors or any_fail:
         return "red"
     return "green"
