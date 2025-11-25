@@ -268,7 +268,8 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
             host=host,
             port=port,
             lora_modules=lora_modules,
-            timeout=180,  # 3 minutes for large models
+            timeout=600,  # 10 minutes for model download + load
+            show_logs=True,
         ):
             print(color("Failed to start vLLM server.", "red"))
             return 1

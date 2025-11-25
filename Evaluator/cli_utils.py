@@ -269,24 +269,31 @@ def determine_exit_code(records: Sequence[EvaluationRecord]) -> int:
 # ---------------------------------------------------------------------------
 
 def print_record_progress(record: EvaluationRecord) -> None:
-    """Print one-line status for a completed evaluation.
+    """Print detailed status for a completed evaluation.
+
+    Shows pass/fail, model output (truncated), and failure reasons.
 
     Args:
         record: Completed evaluation record
     """
     status, color_name = _get_record_status(record)
     label = record.case.case_id
-    suffix = ""
 
+    # Print status line
+    print(f"\n{color(f'[{status}]', color_name)} {color(label, 'bold')}")
+
+    # Print model output (truncated)
+    if record.response_text is not None:
+        output_preview = _format_model_output(record.response_text)
+        print(f"  {color('Model output:', 'cyan')}")
+        for line in output_preview.split('\n'):
+            print(f"    {line}")
+
+    # Print failure reasons
     if record.error:
-        suffix = f" ({record.error})"
-    elif record.validator and record.validator.issues and not record.validator.passed:
-        suffix = f" ({len(record.validator.issues)} schema issue(s))"
-    elif record.behavior and record.behavior.issues and not record.behavior.passed:
-        failed_issues = [i for i in record.behavior.issues if not i.passed]
-        suffix = f" ({len(failed_issues)} behavior issue(s))"
-
-    print(f"{color(f'[{status}]', color_name)} {label}{suffix}")
+        print(f"  {color('Error:', 'red')} {record.error}")
+    elif not record.passed:
+        _print_failure_reasons(record)
 
 
 def _get_record_status(record: EvaluationRecord) -> Tuple[str, str]:
@@ -305,6 +312,64 @@ def _get_record_status(record: EvaluationRecord) -> Tuple[str, str]:
     if record.passed:
         return "PASS", "green"
     return "SKIP", "yellow"
+
+
+def _format_model_output(response_text: Any, max_length: int = 500) -> str:
+    """Format model output for display, truncating if necessary.
+
+    Args:
+        response_text: Model response (string or dict)
+        max_length: Maximum characters to show
+
+    Returns:
+        Formatted string for display
+    """
+    import json
+
+    if response_text is None:
+        return color("(no output)", "yellow")
+
+    # Convert dict to JSON string for display
+    if isinstance(response_text, dict):
+        try:
+            text = json.dumps(response_text, indent=2)
+        except (TypeError, ValueError):
+            text = str(response_text)
+    else:
+        text = str(response_text)
+
+    # Clean up and truncate
+    text = text.strip()
+    if len(text) > max_length:
+        text = text[:max_length] + color(f"... ({len(text) - max_length} more chars)", "yellow")
+
+    return text
+
+
+def _print_failure_reasons(record: EvaluationRecord) -> None:
+    """Print detailed failure reasons for a failed evaluation.
+
+    Args:
+        record: Failed evaluation record
+    """
+    # Schema validation issues
+    if record.validator and record.validator.issues:
+        failed_schema_issues = [i for i in record.validator.issues if i.level == "ERROR"]
+        if failed_schema_issues:
+            print(f"  {color('Schema issues:', 'red')}")
+            for issue in failed_schema_issues:
+                print(f"    - {issue.message}")
+
+    # Behavior validation issues
+    if record.behavior and record.behavior.issues:
+        failed_behavior_issues = [i for i in record.behavior.issues if not i.passed]
+        if failed_behavior_issues:
+            print(f"  {color('Behavior issues:', 'red')}")
+            for issue in failed_behavior_issues:
+                print(f"    - {color(issue.check, 'yellow')}: {issue.message}")
+                if issue.expected != issue.actual:
+                    print(f"      Expected: {issue.expected}")
+                    print(f"      Actual: {issue.actual}")
 
 
 # ---------------------------------------------------------------------------

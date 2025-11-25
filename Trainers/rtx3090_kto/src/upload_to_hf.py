@@ -464,7 +464,7 @@ def create_upload_manifest(
         manifest["gguf_quantizations"] = [Path(f).name for f in gguf_files]
 
     manifest_path = output_dir / "upload_manifest.json"
-    with open(manifest_path, 'w') as f:
+    with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2)
 
     print(f"✓ Upload manifest created: {manifest_path}")
@@ -539,7 +539,7 @@ See the HuggingFace model card for detailed usage instructions.
 """
 
     readme_path = output_dir / "README.md"
-    with open(readme_path, 'w') as f:
+    with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme_content)
 
     print(f"✓ README created: {readme_path}")

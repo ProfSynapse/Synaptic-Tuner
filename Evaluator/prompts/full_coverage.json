@@ -107,7 +107,7 @@
   },
   {
     "id": "agentManager_generateImage",
-    "question": "Ask whichever image-capable agent we have to render a quick storyboard for the onboarding checklist (three frames covering capture, review, publish).",
+    "question": "Create an image of a dog playing fetch with a frisbee.",
     "tags": [
       "agentManager",
       "single-tool"

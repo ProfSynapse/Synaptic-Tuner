@@ -350,6 +350,7 @@ def start_vllm_server(
     lora_modules: Optional[dict] = None,
     wait_for_ready: bool = True,
     timeout: int = 120,
+    show_logs: bool = True,
 ) -> bool:
     """Start the vLLM server.
 
@@ -361,6 +362,7 @@ def start_vllm_server(
         lora_modules: Dict of lora_name -> lora_path
         wait_for_ready: Wait for server to be ready
         timeout: Timeout in seconds for server startup
+        show_logs: Show live server logs during startup
 
     Returns:
         True if server started successfully
@@ -376,23 +378,39 @@ def start_vllm_server(
         "--gpu-memory-utilization", str(gpu_memory_utilization),
     ]
 
+    # Add Mistral-specific tokenizer mode for proper [TOOL_CALLS] handling
+    if "mistral" in model.lower():
+        cmd.extend(["--tokenizer-mode", "mistral"])
+        print("[vLLM] Using Mistral tokenizer mode for proper tool call handling")
+
     # Add LoRA modules if specified
     if lora_modules:
         cmd.append("--enable-lora")
+        cmd.extend(["--max-lora-rank", "64"])  # Support higher LoRA ranks from training
         for name, path in lora_modules.items():
             cmd.extend(["--lora-modules", f"{name}={path}"])
 
+    print(f"\n[vLLM] Command: {' '.join(cmd)}")
+
+    # Set environment to disable torch.compile (avoids nvcc requirement in WSL)
+    env = os.environ.copy()
+    env["TORCH_COMPILE_DISABLE"] = "1"
+    env["VLLM_USE_V1"] = "0"  # Use V0 engine which is more stable
+    print("[vLLM] Disabled torch.compile for WSL compatibility\n")
+
     try:
-        # Start server process
+        # Start server process with live output
         _server_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,  # Line buffered
+            env=env,  # Use modified environment
         )
 
         if wait_for_ready:
-            return _wait_for_server(host, port, timeout)
+            return _wait_for_server(host, port, timeout, show_logs=show_logs)
         return True
 
     except Exception as e:
@@ -400,39 +418,86 @@ def start_vllm_server(
         return False
 
 
-def _wait_for_server(host: str, port: int, timeout: int) -> bool:
-    """Wait for server to become ready.
+def _wait_for_server(host: str, port: int, timeout: int, show_logs: bool = True) -> bool:
+    """Wait for server to become ready while showing live logs.
 
     Args:
         host: Server host
         port: Server port
         timeout: Timeout in seconds
+        show_logs: Show live server output
 
     Returns:
         True if server is ready
     """
+    import select
+
     url = f"http://{host}:{port}/v1/models"
     start_time = time.time()
 
     print(f"Waiting for vLLM server to start (timeout: {timeout}s)...")
+    if show_logs:
+        print("-" * 60)
+        print("[vLLM Server Output]")
+        print("-" * 60)
 
     while time.time() - start_time < timeout:
+        # Read and display any available output from vLLM
+        if show_logs and _server_process and _server_process.stdout:
+            try:
+                # Use select to check if there's data to read (non-blocking)
+                import os
+                import fcntl
+
+                # Make stdout non-blocking
+                fd = _server_process.stdout.fileno()
+                flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+                fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+                # Read available lines
+                while True:
+                    try:
+                        line = _server_process.stdout.readline()
+                        if line:
+                            print(f"[vLLM] {line.rstrip()}")
+                        else:
+                            break
+                    except (IOError, BlockingIOError):
+                        break
+            except Exception:
+                pass  # Continue even if log reading fails
+
+        # Check if server is ready
         try:
-            response = requests.get(url, timeout=5)
+            response = requests.get(url, timeout=2)
             if response.status_code == 200:
-                print("vLLM server is ready!")
+                if show_logs:
+                    print("-" * 60)
+                print("\nvLLM server is ready!")
                 return True
         except requests.RequestException:
             pass
 
         # Check if process died
         if _server_process and _server_process.poll() is not None:
-            print("vLLM server process exited unexpectedly")
+            # Read any remaining output
+            if show_logs and _server_process.stdout:
+                remaining = _server_process.stdout.read()
+                if remaining:
+                    for line in remaining.splitlines():
+                        print(f"[vLLM] {line}")
+                print("-" * 60)
+            print("\nvLLM server process exited unexpectedly!")
+            print(f"Exit code: {_server_process.returncode}")
             return False
 
-        time.sleep(2)
+        time.sleep(1)
 
-    print(f"Timeout waiting for vLLM server (>{timeout}s)")
+    # Timeout - show any remaining output
+    if show_logs:
+        print("-" * 60)
+    print(f"\nTimeout waiting for vLLM server (>{timeout}s)")
+    print("The server may still be loading the model. Check GPU memory usage.")
     return False
 
 

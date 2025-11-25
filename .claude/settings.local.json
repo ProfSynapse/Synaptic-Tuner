@@ -87,7 +87,13 @@
       "Bash(git commit -m \"$(cat <<''EOF''\nMerge remote changes, keep local configs\n\n- Accept remote: Evaluator refactor, datasets, tools\n- Keep local: SFT configs, training scripts, .gitignore\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git stash:*)",
       "Bash(git apply:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(/home/profsynapse/miniconda3/bin/python:*)",
+      "Bash(/home/profsynapse/.conda/envs/unsloth_env/bin/python:*)",
+      "Bash(timeout 5 python:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/venv/bin/python:*)",
+      "Bash(pip show:*)",
+      "Bash(ollama list:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,5 +1,5 @@
 model:
-  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\nexus-tools_v0.1.10
+  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\sft_output_rtx3090\20251125_123254\nexus-tools-sft15\merged-16bit
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -40,7 +40,7 @@ training:
   optim: adamw_8bit
   fp16: false
   bf16: true
-  num_train_epochs: 1
+  num_train_epochs: 2
   warmup_ratio: 0.15
   logging_steps: 5
   save_steps: 25
