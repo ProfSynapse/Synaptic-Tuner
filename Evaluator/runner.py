@@ -64,6 +64,7 @@ def evaluate_cases(
     client: BackendClient,
     dry_run: bool = False,
     on_record: Callable[[EvaluationRecord], None] | None = None,
+    validate_context: bool = False,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -72,6 +73,8 @@ def evaluate_cases(
         client: Backend client implementing BackendClient protocol
         dry_run: Skip backend calls (for testing)
         on_record: Optional callback for each completed record
+        validate_context: If True, validate that model uses IDs from
+                         expected_context in prompt metadata
 
     Returns:
         List of evaluation records
@@ -79,7 +82,7 @@ def evaluate_cases(
     records: List[EvaluationRecord] = []
 
     for case in cases:
-        record = _evaluate_single_case(case, client, dry_run)
+        record = _evaluate_single_case(case, client, dry_run, validate_context)
         records.append(record)
         if on_record:
             on_record(record)
@@ -91,6 +94,7 @@ def _evaluate_single_case(
     case: PromptCase,
     client: BackendClient,
     dry_run: bool,
+    validate_context: bool = False,
 ) -> EvaluationRecord:
     """Evaluate a single prompt case.
 
@@ -98,6 +102,7 @@ def _evaluate_single_case(
         case: The prompt case to evaluate
         client: Backend client
         dry_run: Skip backend calls
+        validate_context: If True, validate IDs against expected_context in metadata
 
     Returns:
         EvaluationRecord with results
@@ -113,6 +118,13 @@ def _evaluate_single_case(
             error=None,
         )
 
+    # Get expected_context from prompt metadata (if validation enabled)
+    # The system prompt is already in case.metadata["system"] and will be
+    # included via case.chat_messages()
+    eval_context = None
+    if validate_context:
+        eval_context = case.metadata.get("expected_context")
+
     # Make request to backend
     try:
         response = client.chat(case.chat_messages())
@@ -126,9 +138,9 @@ def _evaluate_single_case(
             error=str(exc),
         )
 
-    # Run schema validation
+    # Run schema validation (with optional context validation)
     try:
-        validator_result = validate_assistant_response(response.message)
+        validator_result = validate_assistant_response(response.message, eval_context)
     except Exception as exc:
         return EvaluationRecord(
             case=case,

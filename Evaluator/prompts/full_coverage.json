@@ -2,266 +2,954 @@
   {
     "id": "agentManager_batchExecutePrompt",
     "question": "Send a single \"housekeeping reminder\" prompt to every active capture agent so they log blockers for the Phoenix migration, and include in the report whether any agent failed to respond.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_batchExecutePrompt"],
-    "notes": "Ensures batch broadcast behavior."
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_batchExecutePrompt"
+    ],
+    "notes": "Ensures batch broadcast behavior.",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_createAgent",
     "question": "Create a lightweight agent called \"Vault Curator\" that specializes in culling outdated workspace docs for the Atlas program. Give it the same default model as our other curation helpers.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_createAgent"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_createAgent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_deleteAgent",
     "question": "Retire the sandbox agent named \"QA Prototype\" so it stops cluttering the agent list.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_deleteAgent"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_deleteAgent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_executePrompt",
     "question": "Have the \"Workspace Auditor\" agent summarize this week's incidents related to sync failures and return the raw response.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_executePrompt"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_executePrompt"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_generateImage",
     "question": "Ask whichever image-capable agent we have to render a quick storyboard for the onboarding checklist (three frames covering capture, review, publish).",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_generateImage"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_generateImage"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_getAgent",
     "question": "Pull the latest configuration for the \"Release Briefing\" agent so I can see its temperature and tool permissions.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_getAgent"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_getAgent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_listAgents",
     "question": "List every registered agent so I can confirm who is enabled for the Odyssey workspace.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_listAgents"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_listAgents"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_listModels",
     "question": "Show me the foundation models available to our agents along with their parameter sizes. I need to pick one for quick drafting.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_listModels"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_listModels"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_toggleAgent",
     "question": "Disable the \"Legacy Intake\" agent for now because we paused that workflow.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_toggleAgent"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_toggleAgent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "agentManager_updateAgent",
     "question": "Update the \"Incident Scribe\" agent so it defaults to the claudesidian coder model and bump its temperature down to 0.2.",
-    "tags": ["agentManager", "single-tool"],
-    "expected_tools": ["agentManager_updateAgent"]
+    "tags": [
+      "agentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "agentManager_updateAgent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following custom agents are available:\n\n- Workspace Auditor (id: \"agent_1732300800000_workspace_auditor\")\n  Audits workspace contents and reports issues\n\n- Release Briefing (id: \"agent_1732300800001_release_briefing\")\n  Generates release briefing summaries\n\n- Incident Scribe (id: \"agent_1732300800002_incident_scribe\")\n  Documents incidents and post-mortems\n\n- Legacy Intake (id: \"agent_1732300800003_legacy_intake\")\n  Processes legacy system data intake\n\n- QA Prototype (id: \"agent_1732300800004_qa_prototype\")\n  Prototype agent for QA testing\n\n</available_agents>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": [
+        "agent_1732300800000_workspace_auditor",
+        "agent_1732300800001_release_briefing",
+        "agent_1732300800002_incident_scribe",
+        "agent_1732300800003_legacy_intake",
+        "agent_1732300800004_qa_prototype"
+      ]
+    }
   },
   {
     "id": "contentManager_appendContent",
     "question": "Append a short note to Projects/Rollouts/Atlas.md letting everyone know the monitoring probes just turned green again.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_appendContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_appendContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_batchContent",
     "question": "Apply the \"trim whitespace\" batch operation to both Projects/Rollouts/Atlas.md and Projects/Rollouts/Phoenix.md so the formatting is clean before publishing.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_batchContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_batchContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_createContent",
     "question": "Create Projects/Decisions/2025-Strategy-Retrospective.md with headings for Highlights, Risks, and Action Items.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_createContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_createContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_deleteContent",
     "question": "Delete the draft note under Scratch/Temp-Migration-Checklist.md because we're redoing it from scratch.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_deleteContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_deleteContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_findReplaceContent",
     "question": "Run a find-and-replace in Projects/Rollouts/Phoenix.md to rename every instance of \"Phase 2\" to \"Stabilization Sprint\".",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_findReplaceContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_findReplaceContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_prependContent",
     "question": "Add a \"Last updated today\" banner to the top of Projects/Decisions/Data-Lake-Postmortem.md.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_prependContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_prependContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_readContent",
     "question": "Read Projects/Incidents/Sync-Loop.md and summarize the root cause paragraph for me.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_readContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_readContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_replaceByLine",
     "question": "In Projects/Runbooks/Backup.md replace line 12 with \"5. Validate restores weekly on staging.\" and leave the other lines untouched.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_replaceByLine"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_replaceByLine"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "contentManager_replaceContent",
     "question": "Overwrite the body of Projects/Briefings/Weekly-Exec.md with a fresh outline: Objectives, Progress, Risks, and Next Steps.",
-    "tags": ["contentManager", "single-tool"],
-    "expected_tools": ["contentManager_replaceContent"]
+    "tags": [
+      "contentManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "contentManager_replaceContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_createSession",
     "question": "Start a brand new session focused on \"Workspace hardening initiatives\" so we can track these discussions separately.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_createSession"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_createSession"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_createState",
     "question": "Create a saved state called \"atlas_context_snapshot\" that captures the current session notes before we pivot.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_createState"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_createState"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_createWorkspace",
     "question": "Spin up a new workspace entry for the \"Helios\" customer rollout so we can start populating notes.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_createWorkspace"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_createWorkspace"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_listSessions",
     "question": "List every open session along with their descriptions so I can choose which one to resume.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_listSessions"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_listSessions"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_listStates",
     "question": "Show me all saved states for this session so I can restore the right checkpoint.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_listStates"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_listStates"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_listWorkspaces",
     "question": "List the workspaces we have on record, especially anything related to customer onboarding.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_listWorkspaces"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_listWorkspaces"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_loadSession",
     "question": "Load the session titled \"Northwind cleanup\" before we do anything else so context is fresh.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_loadSession"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_loadSession"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_loadState",
     "question": "Restore the saved state called \"phoenix_pre_mortem\" to bring back that conversation snapshot.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_loadState"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_loadState"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_loadWorkspace",
     "question": "Load the workspace labeled \"Atlas rollout\" so the rest of this session stays scoped correctly.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_loadWorkspace"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_loadWorkspace"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_updateSession",
     "question": "Update the description of this session to mention that we're now focusing on \"Atlas resiliency\".",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_updateSession"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_updateSession"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_updateState",
     "question": "Rename the saved state \"checkpoint_A\" to \"checkpoint_archived_dependencies\" and include a note that it predates the security review.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_updateState"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_updateState"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "memoryManager_updateWorkspace",
     "question": "Update the workspace entry for \"Northwind\" so its description highlights the upcoming compliance audit.",
-    "tags": ["memoryManager", "single-tool"],
-    "expected_tools": ["memoryManager_updateWorkspace"]
+    "tags": [
+      "memoryManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "memoryManager_updateWorkspace"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultLibrarian_batch",
     "question": "Run a batch librarian query that finds all notes mentioning \"Atlas\" and \"rollout risks\" within the Projects directory, then summarize how many hits came back per folder.",
-    "tags": ["vaultLibrarian", "single-tool"],
-    "expected_tools": ["vaultLibrarian_batch"]
+    "tags": [
+      "vaultLibrarian",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultLibrarian_batch"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultLibrarian_searchContent",
     "question": "Search for every note referencing \"workspace crash\" so we can review the remediation steps.",
-    "tags": ["vaultLibrarian", "single-tool"],
-    "expected_tools": ["vaultLibrarian_searchContent"]
+    "tags": [
+      "vaultLibrarian",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultLibrarian_searchContent"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultLibrarian_searchDirectory",
     "question": "List everything currently stored under Projects/Rollouts/ so I can decide what to archive.",
-    "tags": ["vaultLibrarian", "single-tool"],
-    "expected_tools": ["vaultLibrarian_searchDirectory"]
+    "tags": [
+      "vaultLibrarian",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultLibrarian_searchDirectory"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultLibrarian_searchMemory",
     "question": "Search our conversation memory for earlier mentions of \"Atlas workspace\" and summarize what we promised the customer.",
-    "tags": ["vaultLibrarian", "single-tool"],
-    "expected_tools": ["vaultLibrarian_searchMemory"]
+    "tags": [
+      "vaultLibrarian",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultLibrarian_searchMemory"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_createFolder",
     "question": "Create a folder at Projects/Retrospectives/2025/Q1 so we have a place for the new notes.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_createFolder"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_createFolder"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_deleteFolder",
     "question": "Delete the empty folder Scratch/Old-Prototypes because it's no longer used.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_deleteFolder"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_deleteFolder"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_deleteNote",
     "question": "Remove Projects/Ideas/Outdated-Risks.md entirely; we consolidated it elsewhere.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_deleteNote"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_deleteNote"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_duplicateNote",
     "question": "Duplicate Projects/Runbooks/Incident-Response.md into Projects/Runbooks/Incident-Response-Template.md so we can customize it for a customer.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_duplicateNote"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_duplicateNote"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_editFolder",
     "question": "Rename Projects/Initiatives/LegacyCleanup to Projects/Initiatives/Legacy-Modernization to match the new naming scheme.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_editFolder"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_editFolder"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_listDirectory",
     "question": "List the contents of Projects/Decisions/ so I know which RFCs are already filed.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_listDirectory"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_listDirectory"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_moveFolder",
     "question": "Move Projects/Initiatives/Atlas to Archives/2025/Initiatives/Atlas without losing any children.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_moveFolder"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_moveFolder"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_moveNote",
     "question": "Move Projects/Rollouts/Odyssey.md into Projects/Clients/Odyssey.md and overwrite any existing draft there.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_moveNote"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_moveNote"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   },
   {
     "id": "vaultManager_openNote",
     "question": "Open Projects/Runbooks/Backup.md because I want to read it inside Obsidian.",
-    "tags": ["vaultManager", "single-tool"],
-    "expected_tools": ["vaultManager_openNote"]
+    "tags": [
+      "vaultManager",
+      "single-tool"
+    ],
+    "expected_tools": [
+      "vaultManager_openNote"
+    ],
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "expected_context": {
+      "session_id": "session_1732300800000_eval01234",
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
+      "agent_ids": []
+    }
   }
 ]
