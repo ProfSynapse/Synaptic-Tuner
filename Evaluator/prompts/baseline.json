@@ -11,9 +11,7 @@
       "vaultLibrarian_batch"
     ],
     "behavior_expectations": {
-      "should_use_batch_for_multiple_queries": true,
-      "sessionMemory_min_chars": 80,
-      "toolContext_explains_search_strategy": true
+      "sessionMemory_min_chars": 80
     },
     "notes": "New troubleshooting prompt, not in training set. Tests batch search efficiency.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
@@ -37,11 +35,6 @@
     "expected_tools": [
       "vaultLibrarian_searchDirectory"
     ],
-    "behavior_expectations": {
-      "should_verify_destination_before_overwrite": true,
-      "toolContext_acknowledges_overwrite_risk": true,
-      "sessionMemory_notes_verification": true
-    },
     "notes": "Tests verification before destructive overwrite.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
@@ -65,9 +58,7 @@
       "contentManager_createContent"
     ],
     "behavior_expectations": {
-      "sessionMemory_references_session_details": true,
-      "sessionMemory_min_chars": 80,
-      "toolContext_explains_content_source": true
+      "sessionMemory_min_chars": 80
     },
     "notes": "Tests if model references session context when creating content from 'current session details'.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
@@ -92,8 +83,7 @@
       "contentManager_appendContent"
     ],
     "behavior_expectations": {
-      "sessionMemory_min_chars": 60,
-      "toolContext_explains_append_purpose": true
+      "sessionMemory_min_chars": 60
     },
     "notes": "Tests basic append operation with context quality.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
@@ -117,11 +107,6 @@
     "expected_tools": [
       "memoryManager_getSessionMemory"
     ],
-    "behavior_expectations": {
-      "demonstrates_verification_before_action": true,
-      "toolContext_explains_duplicate_prevention": true,
-      "sessionMemory_acknowledges_check_purpose": true
-    },
     "notes": "Tests explicit intellectual humility pattern: verify before proceeding.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
@@ -144,11 +129,6 @@
     "expected_tools": [
       "vaultLibrarian_searchContent"
     ],
-    "behavior_expectations": {
-      "should_search_when_uncertain": true,
-      "should_acknowledge_ambiguity": true,
-      "sessionMemory_notes_search_strategy": true
-    },
     "notes": "Tests handling of explicit uncertainty - should search rather than assume.",
     "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
