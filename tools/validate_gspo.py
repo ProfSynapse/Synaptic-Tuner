@@ -2,7 +2,9 @@
 """
 Validate GSPO (Group Sequence Policy Optimization) dataset format.
 
-GSPO Format Requirements:
+GSPO Format Requirements - Two types supported:
+
+1. Tool-call examples:
 {
   "prompt": [
     {"role": "system", "content": "..."},  # Optional
@@ -12,9 +14,19 @@ GSPO Format Requirements:
   "ground_truth_args": {...}                # Required, dict with context object
 }
 
+2. Text-only examples:
+{
+  "prompt": [
+    {"role": "system", "content": "..."},  # Optional
+    {"role": "user", "content": "..."}     # Required
+  ],
+  "ground_truth_response": "..."           # Required, non-empty string
+}
+
 Key validations:
 - prompt must be a list of messages with at least one user role
 - prompt must NOT contain assistant role (GSPO generates completions)
+- Must have EITHER (ground_truth_tool + ground_truth_args) OR ground_truth_response
 - ground_truth_tool must be a valid tool name
 - ground_truth_args.context must have all 7 required fields
 """
@@ -130,27 +142,60 @@ def validate_tool_args(args: Any, line_num: int) -> Tuple[List[str], List[str]]:
     return errors, warnings
 
 
-def validate_example(example: Dict[str, Any], line_num: int) -> Tuple[List[str], List[str]]:
-    """Validate a single GSPO example. Returns (errors, warnings)."""
+def validate_text_response(response: Any, line_num: int) -> List[str]:
+    """Validate the ground_truth_response field for text-only examples."""
+    errors = []
+
+    if not isinstance(response, str):
+        errors.append(f"Line {line_num}: 'ground_truth_response' must be string, got {type(response).__name__}")
+        return errors
+
+    if not response.strip():
+        errors.append(f"Line {line_num}: 'ground_truth_response' is empty")
+
+    return errors
+
+
+def validate_example(example: Dict[str, Any], line_num: int) -> Tuple[List[str], List[str], str]:
+    """Validate a single GSPO example. Returns (errors, warnings, example_type)."""
     errors = []
     warnings = []
+    example_type = "unknown"
 
-    required_fields = ["prompt", "ground_truth_tool", "ground_truth_args"]
-    missing = [f for f in required_fields if f not in example]
+    # Must have prompt
+    if "prompt" not in example:
+        errors.append(f"Line {line_num}: Missing required field 'prompt'")
+        return errors, warnings, example_type
 
-    if missing:
-        errors.append(f"Line {line_num}: Missing required fields: {missing}")
-        return errors, warnings
-
-    # Validate each field
+    # Validate prompt first
     errors.extend(validate_prompt(example["prompt"], line_num))
-    errors.extend(validate_tool_name(example["ground_truth_tool"], line_num))
 
-    arg_errors, arg_warnings = validate_tool_args(example["ground_truth_args"], line_num)
-    errors.extend(arg_errors)
-    warnings.extend(arg_warnings)
+    # Determine example type - must have EITHER tool-call fields OR text response
+    has_tool = "ground_truth_tool" in example
+    has_args = "ground_truth_args" in example
+    has_response = "ground_truth_response" in example
 
-    return errors, warnings
+    if has_response:
+        # Text-only example
+        example_type = "text"
+        errors.extend(validate_text_response(example["ground_truth_response"], line_num))
+    elif has_tool and has_args:
+        # Tool-call example
+        example_type = "tool"
+        errors.extend(validate_tool_name(example["ground_truth_tool"], line_num))
+        arg_errors, arg_warnings = validate_tool_args(example["ground_truth_args"], line_num)
+        errors.extend(arg_errors)
+        warnings.extend(arg_warnings)
+    elif has_tool or has_args:
+        # Partial tool-call fields
+        if not has_tool:
+            errors.append(f"Line {line_num}: Has 'ground_truth_args' but missing 'ground_truth_tool'")
+        if not has_args:
+            errors.append(f"Line {line_num}: Has 'ground_truth_tool' but missing 'ground_truth_args'")
+    else:
+        errors.append(f"Line {line_num}: Must have either (ground_truth_tool + ground_truth_args) or ground_truth_response")
+
+    return errors, warnings, example_type
 
 
 def validate_dataset(input_path: str, verbose: bool = False) -> Dict[str, Any]:
@@ -166,6 +211,8 @@ def validate_dataset(input_path: str, verbose: bool = False) -> Dict[str, Any]:
     all_errors = []
     all_warnings = []
     tool_counts = defaultdict(int)
+    tool_examples = 0
+    text_examples = 0
 
     with open(input_file, 'r', encoding='utf-8') as f:
         for line_num, line in enumerate(f, 1):
@@ -177,15 +224,18 @@ def validate_dataset(input_path: str, verbose: bool = False) -> Dict[str, Any]:
 
             try:
                 example = json.loads(line)
-                errors, warnings = validate_example(example, line_num)
+                errors, warnings, example_type = validate_example(example, line_num)
 
                 if errors:
                     all_errors.extend(errors)
                 else:
                     valid += 1
-                    # Count tools only for valid examples
-                    if "ground_truth_tool" in example:
+                    # Count by type
+                    if example_type == "tool":
+                        tool_examples += 1
                         tool_counts[example["ground_truth_tool"]] += 1
+                    elif example_type == "text":
+                        text_examples += 1
 
                 all_warnings.extend(warnings)
 
@@ -196,6 +246,8 @@ def validate_dataset(input_path: str, verbose: bool = False) -> Dict[str, Any]:
         "total": total,
         "valid": valid,
         "invalid": total - valid,
+        "tool_examples": tool_examples,
+        "text_examples": text_examples,
         "errors": all_errors,
         "warnings": all_warnings,
         "tool_counts": dict(sorted(tool_counts.items(), key=lambda x: -x[1])),
@@ -239,6 +291,8 @@ def main():
     valid_pct = (result["valid"] / result["total"] * 100) if result["total"] > 0 else 0
     print(f"Total examples:   {result['total']}")
     print(f"Valid examples:   {result['valid']} ({valid_pct:.1f}%)")
+    print(f"  - Tool-call:    {result['tool_examples']}")
+    print(f"  - Text-only:    {result['text_examples']}")
     print(f"Invalid examples: {result['invalid']}")
     print(f"Unique tools:     {result['unique_tools']}")
     print()
