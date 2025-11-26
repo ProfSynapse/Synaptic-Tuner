@@ -1,5 +1,5 @@
 model:
-  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\sft_output_rtx3090\20251125_123254\nexus-tools-sft15\merged-16bit
+  model_name: F:\Code\Toolset-Training\Trainers\rtx3090_sft\sft_output_rtx3090\20251126_094722\nexus-tools_sft16\merged-16bit
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -52,8 +52,8 @@ training:
   eval_steps: 100
 dataset:
   dataset_name: professorsynapse/claudesidian-synthetic-dataset
-  dataset_file: syngen_behavior_kto_11.25.25.jsonl  # Behavioral + response patterns with system prompts (2,288 examples)
-  local_file: ../../Datasets/syngen_behavior_kto_11.25.25.jsonl
+  dataset_file: behavior_merged_kto_v1.3.jsonl  # Behavioral + response patterns with system prompts (2,288 examples)
+  local_file: ../../Datasets/behavior_merged_kto_v1.3.jsonl
   num_proc: 1
   test_size: 0.1
   chat_template: chatml

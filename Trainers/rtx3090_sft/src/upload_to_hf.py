@@ -45,6 +45,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 from unsloth import FastLanguageModel
 from huggingface_hub import HfApi
+import gc
+import time
 
 # Load .env file if it exists
 try:
@@ -52,6 +54,39 @@ try:
     load_dotenv()  # Loads HF_TOKEN from .env file
 except ImportError:
     pass  # dotenv not required, can use environment variables directly
+
+
+def cleanup_temp_directory(temp_dir: Path, max_retries: int = 3, delay: float = 2.0):
+    """
+    Clean up temporary directory with retries for Windows file locks.
+
+    Args:
+        temp_dir: Path to temporary directory to remove
+        max_retries: Maximum number of retry attempts
+        delay: Seconds to wait between retries
+    """
+    for attempt in range(max_retries):
+        try:
+            # Force garbage collection to release file handles
+            gc.collect()
+
+            if attempt > 0:
+                print(f"  Retry {attempt}/{max_retries - 1}...")
+                time.sleep(delay)
+
+            shutil.rmtree(temp_dir)
+            print("✓ Temporary files removed")
+            return
+        except PermissionError:
+            if attempt < max_retries - 1:
+                continue
+            # Final attempt failed
+            print(f"⚠ Could not remove temporary files (Windows file lock): {temp_dir}")
+            print(f"  You can manually delete this directory later")
+            print(f"  Tip: Run from WSL bash instead of PowerShell to avoid this issue")
+        except Exception as e:
+            print(f"⚠ Error cleaning up: {e}")
+            break
 
 
 def save_local_copy(
@@ -223,7 +258,7 @@ def upload_standard_model(
         # Clean up temp directory (always created to prevent stray local copies)
         if Path(temp_dir).exists():
             print(f"\nCleaning up temporary directory...")
-            shutil.rmtree(temp_dir)
+            cleanup_temp_directory(Path(temp_dir))
 
 
 def create_gguf_versions(
@@ -377,13 +412,7 @@ def create_gguf_versions(
         # Cleanup temporary work directory
         if cleanup and temp_work_dir.exists():
             print(f"\nCleaning up temporary files...")
-            try:
-                shutil.rmtree(temp_work_dir)
-                print("✓ Temporary files removed")
-            except PermissionError as e:
-                print(f"⚠ Could not remove some temporary files (Windows file lock): {temp_work_dir}")
-                print(f"  You can manually delete this directory later if needed")
-                # Continue anyway - GGUF files are already saved
+            cleanup_temp_directory(temp_work_dir)
 
 
 def upload_gguf_files(

@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "syngen_tools_sft_11.25.25.jsonl"  # Tool calling examples only (5,286 examples)
+  dataset_file: "syngen_tools_sft_11.26.25.jsonl"  # Tool calling examples only (5,286 examples)
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/syngen_tools_sft_11.25.25.jsonl"
+  local_file: "../../Datasets/syngen_tools_sft_11.26.25.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
