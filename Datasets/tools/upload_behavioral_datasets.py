@@ -549,8 +549,8 @@ def upload_individual_behavior(api, behavior_name, repo_name, token):
 
 def upload_merged_dataset(api, repo_name, token):
     """Upload the merged behavioral dataset."""
-    merged_file = Path(__file__).parent / "behavior_merged_kto_v1.1.jsonl"
-    metadata_file = Path(__file__).parent / "behavior_merged_kto_v1.1.metadata.json"
+    merged_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.jsonl"
+    metadata_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.metadata.json"
 
     if not merged_file.exists():
         print(f"  ⚠️  {merged_file} not found")
