@@ -68,77 +68,118 @@ def create_interleaved_dataset(examples: List[Dict]) -> List[Dict]:
 def main():
     # Configuration
     behavior_datasets_dir = Path(__file__).parent.parent / "behavior_datasets"
-    output_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.2.jsonl"
+    output_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.jsonl"
 
-    # Behavior categories
-    behaviors = [
+    # Behavior categories - use v1.2 for datasets with system context added
+    behaviors_v1_2 = [
+        "execute_prompt_usage",
+        "intellectual_humility",
+        "verification_before_action",
+    ]
+
+    # These still use v1.1 (already had system context or don't need it)
+    behaviors_v1_1 = [
         "context_continuity",
         "context_efficiency",
         "error_recovery",
-        "execute_prompt_usage",
-        "intellectual_humility",
         "strategic_tool_selection",
-        "verification_before_action",
         "workspace_awareness"
     ]
 
-    # Response pattern datasets (new - teaches when to respond with text vs continue with tools)
+    # Response pattern datasets
     response_patterns = [
-        "response_patterns/text_only",
-        "response_patterns/tool_only",
-        "response_patterns/tool_text"
+        ("response_patterns/text_only", "v1.2"),  # Fixed ID mismatches
+        ("response_patterns/tool_only", "v1.1"),
+        ("response_patterns/tool_text", "v1.1")
+    ]
+
+    # New ask_first dataset
+    ask_first = [
+        ("ask_first", "v1.0")
     ]
 
     # Load all datasets
-    print("Loading behavior datasets...")
+    print("Loading behavior datasets (v1.2 with system context)...")
     all_examples = []
     behavior_stats = {}
 
-    for behavior in behaviors:
+    # Load v1.2 datasets (with system context added)
+    for behavior in behaviors_v1_2:
+        file_path = behavior_datasets_dir / behavior / "pairs_v1.2.jsonl"
+        if file_path.exists():
+            examples = load_dataset(file_path)
+            all_examples.extend(examples)
+
+            positive = sum(1 for ex in examples if ex.get('label') is True)
+            negative = sum(1 for ex in examples if ex.get('label') is False)
+            behavior_stats[behavior] = {
+                "total": len(examples),
+                "positive": positive,
+                "negative": negative,
+                "version": "v1.2"
+            }
+            print(f"  {behavior} (v1.2): {len(examples)} examples ({positive} positive, {negative} negative)")
+        else:
+            print(f"  WARNING: {file_path} not found")
+
+    # Load v1.1 datasets
+    print("\nLoading behavior datasets (v1.1)...")
+    for behavior in behaviors_v1_1:
         file_path = behavior_datasets_dir / behavior / "pairs_v1.1.jsonl"
         if file_path.exists():
             examples = load_dataset(file_path)
             all_examples.extend(examples)
 
-            # Track stats
-            try:
-                positive = sum(1 for ex in examples if ex.get('label') is True)
-                negative = sum(1 for ex in examples if ex.get('label') is False)
-                behavior_stats[behavior] = {
-                    "total": len(examples),
-                    "positive": positive,
-                    "negative": negative
-                }
-                print(f"  {behavior}: {len(examples)} examples ({positive} positive, {negative} negative)")
-            except Exception as e:
-                print(f"  ERROR processing {behavior}: {e}")
-                raise
+            positive = sum(1 for ex in examples if ex.get('label') is True)
+            negative = sum(1 for ex in examples if ex.get('label') is False)
+            behavior_stats[behavior] = {
+                "total": len(examples),
+                "positive": positive,
+                "negative": negative,
+                "version": "v1.1"
+            }
+            print(f"  {behavior} (v1.1): {len(examples)} examples ({positive} positive, {negative} negative)")
         else:
             print(f"  WARNING: {file_path} not found")
 
     # Load response pattern datasets
     print("\nLoading response pattern datasets...")
-    for pattern in response_patterns:
-        # Pattern format: "response_patterns/text_only" -> "text_only_pairs_v1.0.jsonl"
+    for pattern, version in response_patterns:
         pattern_name = pattern.split('/')[-1]
-        file_path = behavior_datasets_dir / "response_patterns" / f"{pattern_name}_pairs_v1.0.jsonl"
+        file_path = behavior_datasets_dir / "response_patterns" / f"{pattern_name}_pairs_{version}.jsonl"
         if file_path.exists():
             examples = load_dataset(file_path)
             all_examples.extend(examples)
 
-            # Track stats
-            try:
-                positive = sum(1 for ex in examples if ex.get('label') is True)
-                negative = sum(1 for ex in examples if ex.get('label') is False)
-                behavior_stats[pattern] = {
-                    "total": len(examples),
-                    "positive": positive,
-                    "negative": negative
-                }
-                print(f"  {pattern_name}: {len(examples)} examples ({positive} positive, {negative} negative)")
-            except Exception as e:
-                print(f"  ERROR processing {pattern}: {e}")
-                raise
+            positive = sum(1 for ex in examples if ex.get('label') is True)
+            negative = sum(1 for ex in examples if ex.get('label') is False)
+            behavior_stats[pattern] = {
+                "total": len(examples),
+                "positive": positive,
+                "negative": negative,
+                "version": version
+            }
+            print(f"  {pattern_name} ({version}): {len(examples)} examples ({positive} positive, {negative} negative)")
+        else:
+            print(f"  WARNING: {file_path} not found")
+
+    # Load ask_first dataset (NEW)
+    print("\nLoading ask_first dataset...")
+    for dataset, version in ask_first:
+        file_path = behavior_datasets_dir / dataset / f"pairs_{version}.jsonl"
+        if file_path.exists():
+            examples = load_dataset(file_path)
+            all_examples.extend(examples)
+
+            positive = sum(1 for ex in examples if ex.get('label') is True)
+            negative = sum(1 for ex in examples if ex.get('label') is False)
+            behavior_stats[dataset] = {
+                "total": len(examples),
+                "positive": positive,
+                "negative": negative,
+                "version": version
+            }
+            print(f"  {dataset} ({version}): {len(examples)} examples ({positive} positive, {negative} negative)")
         else:
             print(f"  WARNING: {file_path} not found")
 
@@ -172,20 +213,25 @@ def main():
             f.write(json.dumps(example, ensure_ascii=False) + '\n')
 
     # Write metadata file
-    all_datasets = behaviors + response_patterns
+    all_behaviors = behaviors_v1_2 + behaviors_v1_1
+    all_patterns = [p[0] for p in response_patterns]
+    all_ask_first = [a[0] for a in ask_first]
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "behavior_datasets merge (includes response_patterns)",
-        "behaviors": behaviors,
-        "response_patterns": response_patterns,
-        "all_datasets": all_datasets,
+        "source": "behavior_datasets merge v1.3 (with system context and ask_first)",
+        "behaviors_v1_2": behaviors_v1_2,
+        "behaviors_v1_1": behaviors_v1_1,
+        "response_patterns": all_patterns,
+        "ask_first": all_ask_first,
+        "all_datasets": all_behaviors + all_patterns + all_ask_first,
         "behavior_stats": behavior_stats,
         "total_examples": len(interleaved),
         "positive_examples": total_positive,
         "negative_examples": total_negative,
         "interleaved": True,
         "consecutive_same_labels": consecutive_same,
-        "format": "KTO-compatible ChatML with interleaved labels"
+        "format": "KTO-compatible ChatML with interleaved labels",
+        "notes": "v1.3 includes system context for ID validation and ask_first behavior examples"
     }
 
     metadata_file = output_file.with_suffix('.metadata.json')

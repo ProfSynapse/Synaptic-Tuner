@@ -1,0 +1,119 @@
+{
+  "created": "2025-11-26T12:11:02.816003",
+  "source": "behavior_datasets merge v1.3 (with system context and ask_first)",
+  "behaviors_v1_2": [
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "verification_before_action"
+  ],
+  "behaviors_v1_1": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "strategic_tool_selection",
+    "workspace_awareness"
+  ],
+  "response_patterns": [
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text"
+  ],
+  "ask_first": [
+    "ask_first"
+  ],
+  "all_datasets": [
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "verification_before_action",
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "strategic_tool_selection",
+    "workspace_awareness",
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text",
+    "ask_first"
+  ],
+  "behavior_stats": {
+    "execute_prompt_usage": {
+      "total": 140,
+      "positive": 90,
+      "negative": 50,
+      "version": "v1.2"
+    },
+    "intellectual_humility": {
+      "total": 258,
+      "positive": 150,
+      "negative": 108,
+      "version": "v1.2"
+    },
+    "verification_before_action": {
+      "total": 254,
+      "positive": 145,
+      "negative": 109,
+      "version": "v1.2"
+    },
+    "context_continuity": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133,
+      "version": "v1.1"
+    },
+    "context_efficiency": {
+      "total": 140,
+      "positive": 70,
+      "negative": 70,
+      "version": "v1.1"
+    },
+    "error_recovery": {
+      "total": 261,
+      "positive": 178,
+      "negative": 83,
+      "version": "v1.1"
+    },
+    "strategic_tool_selection": {
+      "total": 259,
+      "positive": 150,
+      "negative": 109,
+      "version": "v1.1"
+    },
+    "workspace_awareness": {
+      "total": 260,
+      "positive": 155,
+      "negative": 105,
+      "version": "v1.1"
+    },
+    "response_patterns/text_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.2"
+    },
+    "response_patterns/tool_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "response_patterns/tool_text": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "ask_first": {
+      "total": 100,
+      "positive": 50,
+      "negative": 50,
+      "version": "v1.0"
+    }
+  },
+  "total_examples": 2388,
+  "positive_examples": 1346,
+  "negative_examples": 1042,
+  "interleaved": true,
+  "consecutive_same_labels": 303,
+  "format": "KTO-compatible ChatML with interleaved labels",
+  "notes": "v1.3 includes system context for ID validation and ask_first behavior examples"
+}
