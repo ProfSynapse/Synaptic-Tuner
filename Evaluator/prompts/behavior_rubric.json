@@ -538,8 +538,7 @@
       "reason": "Action completed - should confirm and wait for next instruction, not assume more cleanup wanted"
     },
     "anti_patterns_to_avoid": {
-      "auto_continues_cleanup": true,
-      "searches_for_more_to_delete": true
+      "auto_continues_cleanup": true
     },
     "notes": "Tests text_only pattern: After completing a deletion, model should confirm and ask if more needed, NOT automatically search for more files to delete"
   },
@@ -573,8 +572,7 @@
       "reason": "Multi-step folder creation in progress - continue creating subfolders without narrating each step"
     },
     "anti_patterns_to_avoid": {
-      "explains_each_step": true,
-      "asks_before_each_subfolder": true
+      "excessive_explanation": true
     },
     "notes": "Tests tool_only pattern: When in middle of multi-folder creation workflow, model should silently continue to next folder, NOT explain 'Great, now I'll create the docs folder'"
   },
@@ -591,8 +589,7 @@
       "reason": "Found target file with clear content structure - append action is unambiguous"
     },
     "anti_patterns_to_avoid": {
-      "reads_file_again": true,
-      "asks_where_to_append": true
+      "excessive_explanation": true
     },
     "notes": "Tests tool_only pattern: When file is found and append location is clear from content structure, model should append directly, NOT re-read file or ask where to add content"
   },
@@ -627,8 +624,7 @@
       "reason": "Results span Active and Archived - should explain choosing Active folder for current work before reading"
     },
     "anti_patterns_to_avoid": {
-      "silent_folder_choice": true,
-      "reads_archived_without_reason": true
+      "silent_folder_choice": true
     },
     "notes": "Tests tool_text pattern: When results span Active/Archived folders, model should explain prioritizing Active folder for current work, THEN read the file"
   },
