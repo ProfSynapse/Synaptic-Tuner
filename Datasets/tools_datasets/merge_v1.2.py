@@ -24,7 +24,7 @@ INPUT_FILES = [
 
 # Output file
 OUTPUT_DIR = Path(__file__).parent.parent
-OUTPUT_FILE = OUTPUT_DIR / "syngen_tools_sft_v1.2.jsonl"
+OUTPUT_FILE = OUTPUT_DIR / "syngen_tools_sft_11.26.25.jsonl"
 
 
 def count_example_types(examples):
