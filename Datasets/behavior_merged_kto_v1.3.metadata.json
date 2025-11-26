@@ -1,15 +1,15 @@
 {
-  "created": "2025-11-26T12:11:02.816003",
+  "created": "2025-11-26T12:13:37.895062",
   "source": "behavior_datasets merge v1.3 (with system context and ask_first)",
   "behaviors_v1_2": [
     "execute_prompt_usage",
     "intellectual_humility",
-    "verification_before_action"
+    "verification_before_action",
+    "error_recovery"
   ],
   "behaviors_v1_1": [
     "context_continuity",
     "context_efficiency",
-    "error_recovery",
     "strategic_tool_selection",
     "workspace_awareness"
   ],
@@ -25,9 +25,9 @@
     "execute_prompt_usage",
     "intellectual_humility",
     "verification_before_action",
+    "error_recovery",
     "context_continuity",
     "context_efficiency",
-    "error_recovery",
     "strategic_tool_selection",
     "workspace_awareness",
     "response_patterns/text_only",
@@ -54,6 +54,12 @@
       "negative": 109,
       "version": "v1.2"
     },
+    "error_recovery": {
+      "total": 261,
+      "positive": 178,
+      "negative": 83,
+      "version": "v1.2"
+    },
     "context_continuity": {
       "total": 266,
       "positive": 133,
@@ -64,12 +70,6 @@
       "total": 140,
       "positive": 70,
       "negative": 70,
-      "version": "v1.1"
-    },
-    "error_recovery": {
-      "total": 261,
-      "positive": 178,
-      "negative": 83,
       "version": "v1.1"
     },
     "strategic_tool_selection": {
