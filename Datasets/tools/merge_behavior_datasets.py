@@ -81,10 +81,12 @@ def main():
     behaviors_v1_1 = [
         "context_continuity",
         "context_efficiency",
-        "error_recovery",
         "strategic_tool_selection",
         "workspace_awareness"
     ]
+
+    # error_recovery uses v1.2 (fixed 10-char IDs to 9-char)
+    behaviors_v1_2.append("error_recovery")
 
     # Response pattern datasets
     response_patterns = [
