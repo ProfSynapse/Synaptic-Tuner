@@ -60,21 +60,23 @@ Write-Host ""
 # ============================================================================
 # Main Menu
 # ============================================================================
-Write-Host "Select Training Mode:" -ForegroundColor Yellow
+Write-Host "Select Mode:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  1) SFT Only           - Supervised Fine-Tuning (teaches tool-calling)"
-Write-Host "  2) KTO Only           - Preference Learning (refines existing model)"
+Write-Host "  1) SFT Only            - Supervised Fine-Tuning (teaches tool-calling)"
+Write-Host "  2) KTO Only            - Preference Learning (refines existing model)"
 Write-Host "  3) SFT -> KTO Pipeline - Full training pipeline (recommended)"
-Write-Host "  4) Exit"
+Write-Host "  4) Evaluate Model      - Run evaluation on a trained model"
+Write-Host "  5) Exit"
 Write-Host ""
 
-$Choice = Read-Host "Enter choice [1-4]"
+$Choice = Read-Host "Enter choice [1-5]"
 
 switch ($Choice) {
     "1" { $Mode = "sft" }
     "2" { $Mode = "kto" }
     "3" { $Mode = "pipeline" }
-    "4" {
+    "4" { $Mode = "evaluate" }
+    "5" {
         Write-Host "Exiting..." -ForegroundColor Yellow
         exit 0
     }
@@ -82,6 +84,172 @@ switch ($Choice) {
         Write-Host "Invalid choice. Exiting." -ForegroundColor Red
         exit 1
     }
+}
+
+# ============================================================================
+# Standalone Evaluation Mode
+# ============================================================================
+if ($Mode -eq "evaluate") {
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Cyan
+    Write-Host "Model Evaluation" -ForegroundColor Cyan
+    Write-Host "============================================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "This will run the evaluation CLI against a model running in LM Studio or Ollama." -ForegroundColor White
+    Write-Host ""
+
+    # Backend selection
+    Write-Host "Select Backend:" -ForegroundColor Yellow
+    Write-Host "  1) LM Studio (recommended)"
+    Write-Host "  2) Ollama"
+    Write-Host ""
+    $BackendChoice = Read-Host "Enter choice [1]"
+    if ([string]::IsNullOrEmpty($BackendChoice)) { $BackendChoice = "1" }
+
+    $Backend = switch ($BackendChoice) {
+        "1" { "lmstudio" }
+        "2" { "ollama" }
+        default { "lmstudio" }
+    }
+
+    # Set API endpoint based on backend
+    $ApiBaseUrl = if ($Backend -eq "lmstudio") { "http://localhost:1234" } else { "http://localhost:11434" }
+
+    Write-Host ""
+    Write-Host "Prerequisites:" -ForegroundColor Yellow
+    if ($Backend -eq "lmstudio") {
+        Write-Host "  1. Open LM Studio" -ForegroundColor White
+        Write-Host "  2. Load your model (GGUF format)" -ForegroundColor White
+        Write-Host "  3. Start the local server (Developer tab -> Start Server)" -ForegroundColor White
+    } else {
+        Write-Host "  1. Ensure Ollama is running" -ForegroundColor White
+        Write-Host "  2. Pull/create your model: ollama pull <model-name>" -ForegroundColor White
+    }
+    Write-Host ""
+
+    $Ready = Read-Host "Is your model loaded and server running? (y/n)"
+    if ($Ready -ne "y" -and $Ready -ne "Y") {
+        Write-Host "Please set up your model first, then run this script again." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 0
+    }
+
+    # Fetch available models from API
+    Write-Host ""
+    Write-Host "Fetching available models..." -ForegroundColor Yellow
+
+    $ModelName = $null
+    try {
+        $ModelsResponse = Invoke-RestMethod -Uri "$ApiBaseUrl/v1/models" -Method Get -TimeoutSec 5
+        $Models = $ModelsResponse.data | ForEach-Object { $_.id }
+
+        if ($Models.Count -eq 0) {
+            Write-Host "[WARN] No models found. Please load a model first." -ForegroundColor Yellow
+            Read-Host "Press Enter to exit"
+            exit 0
+        } elseif ($Models.Count -eq 1) {
+            $ModelName = $Models[0]
+            Write-Host "  Using only available model: $ModelName" -ForegroundColor Green
+        } else {
+            Write-Host ""
+            Write-Host "Available Models:" -ForegroundColor Yellow
+            for ($i = 0; $i -lt $Models.Count; $i++) {
+                Write-Host "  $($i + 1)) $($Models[$i])"
+            }
+            Write-Host ""
+            $ModelChoice = Read-Host "Select model [1]"
+            if ([string]::IsNullOrEmpty($ModelChoice)) { $ModelChoice = "1" }
+
+            $ModelIndex = [int]$ModelChoice - 1
+            if ($ModelIndex -ge 0 -and $ModelIndex -lt $Models.Count) {
+                $ModelName = $Models[$ModelIndex]
+            } else {
+                $ModelName = $Models[0]
+            }
+        }
+        Write-Host "  Selected: $ModelName" -ForegroundColor Green
+    } catch {
+        Write-Host "[ERROR] Could not connect to $Backend API at $ApiBaseUrl" -ForegroundColor Red
+        Write-Host "  Error: $_" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Make sure the server is running and try again." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    Write-Host ""
+    Write-Host "Evaluation Type:" -ForegroundColor Yellow
+    Write-Host "  1) Tool Evaluation      - Tests tool-calling accuracy (47 prompts)"
+    Write-Host "  2) Behavior Evaluation  - Tests behavioral patterns"
+    Write-Host "  3) Full Evaluation      - Both tool and behavior tests"
+    Write-Host ""
+    $EvalTypeChoice = Read-Host "Select evaluation type [3]"
+    if ([string]::IsNullOrEmpty($EvalTypeChoice)) { $EvalTypeChoice = "3" }
+
+    Write-Host ""
+    Write-Host "Starting evaluation..." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Run evaluator based on choice
+    Set-Location (Join-Path $ScriptDir "../Evaluator")
+
+    switch ($EvalTypeChoice) {
+        "1" {
+            # Tool evaluation only
+            Write-Host "Running Tool Evaluation..." -ForegroundColor Cyan
+            $EvalArgs = @(
+                "cli.py",
+                "--backend", $Backend,
+                "--model", $ModelName,
+                "--prompt-set", "prompts/full_coverage.json"
+            )
+            & $PythonExe @EvalArgs
+        }
+        "2" {
+            # Behavior evaluation only
+            Write-Host "Running Behavior Evaluation..." -ForegroundColor Cyan
+            $EvalArgs = @(
+                "cli.py",
+                "--backend", $Backend,
+                "--model", $ModelName,
+                "--prompt-set", "prompts/behavioral_patterns.json"
+            )
+            & $PythonExe @EvalArgs
+        }
+        default {
+            # Full evaluation (both)
+            Write-Host "Running Full Evaluation (Tools + Behavior)..." -ForegroundColor Cyan
+            Write-Host ""
+
+            Write-Host "--- Tool Evaluation ---" -ForegroundColor Yellow
+            $EvalArgs = @(
+                "cli.py",
+                "--backend", $Backend,
+                "--model", $ModelName,
+                "--prompt-set", "prompts/full_coverage.json"
+            )
+            & $PythonExe @EvalArgs
+
+            Write-Host ""
+            Write-Host "--- Behavior Evaluation ---" -ForegroundColor Yellow
+            $EvalArgs = @(
+                "cli.py",
+                "--backend", $Backend,
+                "--model", $ModelName,
+                "--prompt-set", "prompts/behavioral_patterns.json"
+            )
+            & $PythonExe @EvalArgs
+
+            Write-Host ""
+            Write-Host "============================================================================" -ForegroundColor Green
+            Write-Host "  Full Evaluation Complete!" -ForegroundColor Green
+            Write-Host "============================================================================" -ForegroundColor Green
+        }
+    }
+
+    Set-Location $ScriptDir
+    Read-Host "Press Enter to exit"
+    exit 0
 }
 
 Write-Host ""
@@ -125,8 +293,9 @@ $SaveMethod = $null
 $GgufFlag = ""
 
 if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
-    # Get HF token from .env file
+    # Get HF token and username from .env file
     $EnvFile = Join-Path $ScriptDir "../.env"
+    $HfUsernameFromEnv = $null
     if (Test-Path $EnvFile) {
         $EnvContent = Get-Content $EnvFile
         foreach ($line in $EnvContent) {
@@ -134,6 +303,8 @@ if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
                 $HfToken = $Matches[1].Trim('"').Trim("'")
             } elseif ($line -match "^HF_API_KEY=(.+)$" -and -not $HfToken) {
                 $HfToken = $Matches[1].Trim('"').Trim("'")
+            } elseif ($line -match "^HF_USERNAME=(.+)$") {
+                $HfUsernameFromEnv = $Matches[1].Trim('"').Trim("'")
             }
         }
     }
@@ -148,13 +319,22 @@ if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
     } else {
         Write-Host "  [OK] HF_TOKEN loaded from .env" -ForegroundColor Green
     }
+
+    if ($HfUsernameFromEnv) {
+        Write-Host "  [OK] HF_USERNAME loaded from .env: $HfUsernameFromEnv" -ForegroundColor Green
+    }
 }
 
 if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
     Write-Host ""
 
-    # Get HuggingFace username for default repo name
-    $HfUsername = Read-Host "HuggingFace username"
+    # Get HuggingFace username (use from .env if available)
+    if ($HfUsernameFromEnv) {
+        $HfUsername = Read-Host "HuggingFace username [$HfUsernameFromEnv]"
+        if ([string]::IsNullOrEmpty($HfUsername)) { $HfUsername = $HfUsernameFromEnv }
+    } else {
+        $HfUsername = Read-Host "HuggingFace username"
+    }
 
     # Generate default repo name based on mode
     $DefaultModelName = switch ($Mode) {
@@ -567,6 +747,134 @@ if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
 }
 
 # ============================================================================
+# Optional: Run Evaluation
+# ============================================================================
+Write-Host ""
+Write-Host "============================================================================" -ForegroundColor Cyan
+Write-Host "Model Evaluation (Optional)" -ForegroundColor Cyan
+Write-Host "============================================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Would you like to run evaluation on the trained model?" -ForegroundColor White
+Write-Host ""
+Write-Host "To evaluate, you'll need to:" -ForegroundColor Yellow
+Write-Host "  1. Download the model to LM Studio (from HuggingFace or local GGUF)" -ForegroundColor White
+Write-Host "  2. Load the model in LM Studio" -ForegroundColor White
+Write-Host "  3. Start the local server (Developer tab -> Start Server)" -ForegroundColor White
+Write-Host ""
+
+$RunEvalNow = Read-Host "Run evaluation now? (y/n) [n]"
+if ([string]::IsNullOrEmpty($RunEvalNow)) { $RunEvalNow = "n" }
+
+if ($RunEvalNow -eq "y" -or $RunEvalNow -eq "Y") {
+    Write-Host ""
+    Write-Host "Please set up your model in LM Studio now..." -ForegroundColor Yellow
+    Write-Host ""
+    if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+        Write-Host "Your model is available at: https://huggingface.co/$RepoName" -ForegroundColor White
+        if ($GgufFlag) {
+            Write-Host "GGUF files are in the 'gguf' folder on HuggingFace" -ForegroundColor White
+        }
+    } else {
+        Write-Host "Your model is at: $FinalModelPath" -ForegroundColor White
+    }
+    Write-Host ""
+
+    $ModelReady = Read-Host "Is your model loaded and LM Studio server running? (y/n)"
+
+    if ($ModelReady -eq "y" -or $ModelReady -eq "Y") {
+        # Fetch available models from LM Studio API
+        Write-Host ""
+        Write-Host "Fetching available models from LM Studio..." -ForegroundColor Yellow
+
+        $EvalModelName = $null
+        try {
+            $ModelsResponse = Invoke-RestMethod -Uri "http://localhost:1234/v1/models" -Method Get -TimeoutSec 5
+            $Models = $ModelsResponse.data | ForEach-Object { $_.id }
+
+            if ($Models.Count -eq 0) {
+                Write-Host "[WARN] No models found. Please load a model first." -ForegroundColor Yellow
+            } elseif ($Models.Count -eq 1) {
+                $EvalModelName = $Models[0]
+                Write-Host "  Using only available model: $EvalModelName" -ForegroundColor Green
+            } else {
+                Write-Host ""
+                Write-Host "Available Models:" -ForegroundColor Yellow
+                for ($i = 0; $i -lt $Models.Count; $i++) {
+                    Write-Host "  $($i + 1)) $($Models[$i])"
+                }
+                Write-Host ""
+                $ModelChoice = Read-Host "Select model [1]"
+                if ([string]::IsNullOrEmpty($ModelChoice)) { $ModelChoice = "1" }
+
+                $ModelIndex = [int]$ModelChoice - 1
+                if ($ModelIndex -ge 0 -and $ModelIndex -lt $Models.Count) {
+                    $EvalModelName = $Models[$ModelIndex]
+                } else {
+                    $EvalModelName = $Models[0]
+                }
+            }
+        } catch {
+            Write-Host "[ERROR] Could not connect to LM Studio API" -ForegroundColor Red
+            Write-Host "Make sure LM Studio server is running and try again." -ForegroundColor Yellow
+            $EvalModelName = $null
+        }
+
+        if ($EvalModelName) {
+            Write-Host "  Selected: $EvalModelName" -ForegroundColor Green
+
+            Write-Host ""
+            Write-Host "Evaluation Type:" -ForegroundColor Yellow
+            Write-Host "  1) Tool Evaluation      - Tests tool-calling accuracy (47 prompts)"
+            Write-Host "  2) Behavior Evaluation  - Tests behavioral patterns"
+            Write-Host "  3) Full Evaluation      - Both tool and behavior tests"
+            Write-Host ""
+            $EvalTypeChoice = Read-Host "Select evaluation type [3]"
+            if ([string]::IsNullOrEmpty($EvalTypeChoice)) { $EvalTypeChoice = "3" }
+
+            Write-Host ""
+            Write-Host "Starting evaluation..." -ForegroundColor Yellow
+            Write-Host ""
+
+            # Run evaluator based on choice
+            Set-Location (Join-Path $ScriptDir "../Evaluator")
+
+            switch ($EvalTypeChoice) {
+                "1" {
+                    Write-Host "Running Tool Evaluation..." -ForegroundColor Cyan
+                    $EvalArgs = @("cli.py", "--backend", "lmstudio", "--model", $EvalModelName, "--prompt-set", "prompts/full_coverage.json")
+                    & $PythonExe @EvalArgs
+                }
+                "2" {
+                    Write-Host "Running Behavior Evaluation..." -ForegroundColor Cyan
+                    $EvalArgs = @("cli.py", "--backend", "lmstudio", "--model", $EvalModelName, "--prompt-set", "prompts/behavioral_patterns.json")
+                    & $PythonExe @EvalArgs
+                }
+                default {
+                    Write-Host "Running Full Evaluation (Tools + Behavior)..." -ForegroundColor Cyan
+                    Write-Host ""
+                    Write-Host "--- Tool Evaluation ---" -ForegroundColor Yellow
+                    $EvalArgs = @("cli.py", "--backend", "lmstudio", "--model", $EvalModelName, "--prompt-set", "prompts/full_coverage.json")
+                    & $PythonExe @EvalArgs
+                    Write-Host ""
+                    Write-Host "--- Behavior Evaluation ---" -ForegroundColor Yellow
+                    $EvalArgs = @("cli.py", "--backend", "lmstudio", "--model", $EvalModelName, "--prompt-set", "prompts/behavioral_patterns.json")
+                    & $PythonExe @EvalArgs
+                    Write-Host ""
+                    Write-Host "Full Evaluation Complete!" -ForegroundColor Green
+                }
+            }
+
+            Set-Location $ScriptDir
+        }
+    } else {
+        Write-Host ""
+        Write-Host "No problem! You can run evaluation later:" -ForegroundColor Yellow
+        Write-Host "  .\train_unified.ps1  (then select option 4)" -ForegroundColor Gray
+        Write-Host ""
+    }
+}
+
+# ============================================================================
 # Final Summary
 # ============================================================================
 Write-Host ""
@@ -574,6 +882,7 @@ Write-Host "====================================================================
 Write-Host "  Pipeline Complete!" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host ""
+Write-Host "Summary:" -ForegroundColor Cyan
 Write-Host "  Training Output: $FinalModelPath" -ForegroundColor White
 
 if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
@@ -581,26 +890,39 @@ if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
 }
 
 Write-Host ""
-Write-Host "Next Steps:" -ForegroundColor Cyan
 
+# Show what was accomplished
+Write-Host "Completed Steps:" -ForegroundColor Cyan
+Write-Host "  [OK] Training ($ModeText)" -ForegroundColor Green
+Write-Host "  [OK] Training lineage saved" -ForegroundColor Green
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host "  [OK] Uploaded to HuggingFace" -ForegroundColor Green
+    if ($GgufFlag) {
+        Write-Host "  [OK] GGUF quantizations created" -ForegroundColor Green
+    }
+    Write-Host "  [OK] Model card generated from lineage" -ForegroundColor Green
+}
+
+Write-Host ""
+
+# Show next steps if upload wasn't done
 if ($DoUpload -ne "y" -and $DoUpload -ne "Y") {
+    Write-Host "Next Steps:" -ForegroundColor Cyan
     Write-Host "  - Upload to HuggingFace:" -ForegroundColor White
     Write-Host "    cd Trainers\$TrainerDir" -ForegroundColor Gray
     Write-Host "    python src/upload_to_hf.py `"$FinalModelPath`" username/model-name" -ForegroundColor Gray
     Write-Host ""
 }
 
-Write-Host "  - Test the model locally:" -ForegroundColor White
-Write-Host "    cd Evaluator" -ForegroundColor Gray
-Write-Host "    python cli.py --model `"$FinalModelPath`" --prompt-set prompts/baseline.json" -ForegroundColor Gray
+Write-Host "To run evaluation later:" -ForegroundColor Cyan
+Write-Host "  .\train_unified.ps1  (select option 4: Evaluate Model)" -ForegroundColor Gray
 Write-Host ""
 
-Write-Host "  - Run evaluation and update model card:" -ForegroundColor White
-Write-Host "    python cli.py --model `"$FinalModelPath`" --prompt-set prompts/full_coverage.json --lineage eval_results.json" -ForegroundColor Gray
 if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
-    Write-Host "    python cli.py --upload-to-hf $RepoName --update-model-card" -ForegroundColor Gray
+    Write-Host "Quick Links:" -ForegroundColor Cyan
+    Write-Host "  Model:  https://huggingface.co/$RepoName" -ForegroundColor White
+    Write-Host ""
 }
-Write-Host ""
 
 Set-Location $ScriptDir
 Read-Host "Press Enter to exit"
