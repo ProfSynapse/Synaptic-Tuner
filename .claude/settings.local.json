@@ -93,7 +93,8 @@
       "Bash(timeout 5 python:*)",
       "Bash(/mnt/f/Code/Toolset-Training/venv/bin/python:*)",
       "Bash(pip show:*)",
-      "Bash(ollama list:*)"
+      "Bash(ollama list:*)",
+      "WebFetch(domain:docs.nebius.com)"
     ],
     "deny": [],
     "ask": []
