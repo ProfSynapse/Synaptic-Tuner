@@ -6,6 +6,8 @@ against Ollama or LM Studio backends.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from typing import List
 
@@ -23,7 +25,14 @@ from .config import (
     parse_tags,
 )
 from .prompt_sets import filter_prompts, load_prompt_cases
-from .reporting import build_run_payload, console_summary, render_markdown, write_json
+from .reporting import (
+    build_run_payload,
+    console_summary,
+    render_markdown,
+    write_json,
+    build_evaluation_lineage,
+    generate_evaluation_model_card_section,
+)
 from .runner import evaluate_cases
 
 
@@ -62,6 +71,26 @@ Backend Configuration:
         "--validate-context",
         action="store_true",
         help="Validate that model uses IDs from system prompt (requires prompts with expected_context)",
+    )
+
+    # Lineage and HuggingFace options
+    parser.add_argument(
+        "--lineage",
+        help="Path to save evaluation lineage JSON (enables lineage generation)",
+    )
+    parser.add_argument(
+        "--upload-to-hf",
+        metavar="REPO_ID",
+        help="Upload evaluation results to HuggingFace repo (e.g., username/model-name)",
+    )
+    parser.add_argument(
+        "--hf-token",
+        help="HuggingFace write token (or set HF_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--update-model-card",
+        action="store_true",
+        help="Update the model's README.md with evaluation results (requires --upload-to-hf)",
     )
     return parser.parse_args(argv)
 
@@ -133,7 +162,105 @@ def main(argv: List[str] | None = None) -> int:
     print(console_summary(records))
 
     if markdown_path:
-        markdown_path.write_text(render_markdown(records), encoding="utf-8")
+        markdown_path.write_text(render_markdown(records, args.model, str(prompt_path.name)), encoding="utf-8")
+
+    # Generate evaluation lineage if requested
+    lineage = None
+    model_card_section = None
+    if args.lineage or args.upload_to_hf:
+        eval_config = {
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "max_tokens": args.max_tokens,
+            "seed": args.seed,
+            "backend": args.backend,
+        }
+
+        lineage = build_evaluation_lineage(
+            records=records,
+            model_name=args.model,
+            test_suites=[str(prompt_path)],
+            eval_config=eval_config,
+            hardware_info={"platform": sys.platform},
+        )
+        model_card_section = generate_evaluation_model_card_section(lineage)
+
+        # Save lineage to file if path provided
+        if args.lineage:
+            lineage_path = expand_path(args.lineage)
+            lineage_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(lineage_path, 'w', encoding='utf-8') as f:
+                json.dump(lineage, f, indent=2)
+            print(f"\n✓ Evaluation lineage saved to: {lineage_path}")
+
+    # Upload to HuggingFace if requested
+    if args.upload_to_hf:
+        hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+        if not hf_token:
+            print("\n❌ HuggingFace token required. Provide via --hf-token or HF_TOKEN env var")
+            return 1
+
+        try:
+            from huggingface_hub import HfApi, hf_hub_download
+            import tempfile
+            import re
+
+            api = HfApi()
+            repo_id = args.upload_to_hf
+
+            print(f"\n📤 Uploading evaluation results to: {repo_id}")
+
+            # Upload evaluation lineage JSON
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(lineage, f, indent=2)
+                temp_lineage_path = f.name
+
+            api.upload_file(
+                path_or_fileobj=temp_lineage_path,
+                path_in_repo="evaluation_lineage.json",
+                repo_id=repo_id,
+                token=hf_token,
+            )
+            print(f"  ✓ evaluation_lineage.json uploaded")
+
+            # Update model card if requested
+            if args.update_model_card:
+                try:
+                    readme_path = hf_hub_download(repo_id=repo_id, filename="README.md", token=hf_token)
+                    with open(readme_path, 'r', encoding='utf-8') as f:
+                        existing_readme = f.read()
+
+                    if "## Evaluation Results" in existing_readme:
+                        pattern = r'## Evaluation Results.*?(?=\n## |\Z)'
+                        updated_readme = re.sub(pattern, model_card_section, existing_readme, flags=re.DOTALL)
+                        print("  Replacing existing evaluation section...")
+                    else:
+                        updated_readme = existing_readme.rstrip() + "\n\n" + model_card_section
+                        print("  Adding new evaluation section...")
+
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+                        f.write(updated_readme)
+                        temp_readme_path = f.name
+
+                    api.upload_file(
+                        path_or_fileobj=temp_readme_path,
+                        path_in_repo="README.md",
+                        repo_id=repo_id,
+                        token=hf_token,
+                    )
+                    print(f"  ✓ README.md updated with evaluation results")
+
+                except Exception as e:
+                    print(f"  ⚠️  Could not update README: {e}")
+
+            print(f"\n✓ Evaluation results uploaded to: https://huggingface.co/{repo_id}")
+
+        except ImportError:
+            print("\n❌ huggingface_hub not installed. Run: pip install huggingface_hub")
+            return 1
+        except Exception as e:
+            print(f"\n❌ Upload failed: {e}")
+            return 1
 
     return determine_exit_code(records)
 

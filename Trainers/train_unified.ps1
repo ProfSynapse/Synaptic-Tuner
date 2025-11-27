@@ -109,6 +109,93 @@ if ($WandbEnable -eq "y" -or $WandbEnable -eq "Y") {
 Write-Host ""
 
 # ============================================================================
+# HuggingFace Upload Configuration (Collect Upfront)
+# ============================================================================
+Write-Host "============================================================================" -ForegroundColor Cyan
+Write-Host "HuggingFace Upload Configuration" -ForegroundColor Cyan
+Write-Host "============================================================================" -ForegroundColor Cyan
+Write-Host ""
+
+$DoUpload = Read-Host "Upload to HuggingFace when training completes? (y/n) [n]"
+if ([string]::IsNullOrEmpty($DoUpload)) { $DoUpload = "n" }
+
+$HfToken = $null
+$RepoName = $null
+$SaveMethod = $null
+$GgufFlag = ""
+
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    # Get HF token from .env file
+    $EnvFile = Join-Path $ScriptDir "../.env"
+    if (Test-Path $EnvFile) {
+        $EnvContent = Get-Content $EnvFile
+        foreach ($line in $EnvContent) {
+            if ($line -match "^HF_TOKEN=(.+)$") {
+                $HfToken = $Matches[1].Trim('"').Trim("'")
+            } elseif ($line -match "^HF_API_KEY=(.+)$" -and -not $HfToken) {
+                $HfToken = $Matches[1].Trim('"').Trim("'")
+            }
+        }
+    }
+
+    if (-not $HfToken) {
+        Write-Host "[WARN] HF_TOKEN not found in .env file" -ForegroundColor Yellow
+        $HfToken = Read-Host "Enter HuggingFace Token (with write access)"
+        if ([string]::IsNullOrEmpty($HfToken)) {
+            Write-Host "No token provided - upload will be skipped" -ForegroundColor Yellow
+            $DoUpload = "n"
+        }
+    } else {
+        Write-Host "  [OK] HF_TOKEN loaded from .env" -ForegroundColor Green
+    }
+}
+
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host ""
+
+    # Get HuggingFace username for default repo name
+    $HfUsername = Read-Host "HuggingFace username"
+
+    # Generate default repo name based on mode
+    $DefaultModelName = switch ($Mode) {
+        "sft" { "toolset-sft-" + (Get-Date -Format "yyyyMMdd") }
+        "kto" { "toolset-kto-" + (Get-Date -Format "yyyyMMdd") }
+        "pipeline" { "toolset-sft-kto-" + (Get-Date -Format "yyyyMMdd") }
+    }
+
+    $ModelName = Read-Host "Model name [$DefaultModelName]"
+    if ([string]::IsNullOrEmpty($ModelName)) { $ModelName = $DefaultModelName }
+
+    $RepoName = "$HfUsername/$ModelName"
+
+    Write-Host ""
+    Write-Host "Save Method Options:" -ForegroundColor Yellow
+    Write-Host "  1) merged_16bit - Full quality (~14GB) [Recommended]"
+    Write-Host "  2) merged_4bit  - Smaller size (~3.5GB)"
+    Write-Host "  3) lora         - LoRA adapters only (~320MB)"
+    Write-Host ""
+    $SaveMethodChoice = Read-Host "Select save method [1]"
+    if ([string]::IsNullOrEmpty($SaveMethodChoice)) { $SaveMethodChoice = "1" }
+
+    $SaveMethod = switch ($SaveMethodChoice) {
+        "1" { "merged_16bit" }
+        "2" { "merged_4bit" }
+        "3" { "lora" }
+        default { "merged_16bit" }
+    }
+
+    Write-Host ""
+    $CreateGguf = Read-Host "Create GGUF quantizations (Q4_K_M, Q5_K_M, Q8_0)? (y/n) [n]"
+    if ([string]::IsNullOrEmpty($CreateGguf)) { $CreateGguf = "n" }
+
+    if ($CreateGguf -eq "y" -or $CreateGguf -eq "Y") {
+        $GgufFlag = "--create-gguf"
+    }
+}
+
+Write-Host ""
+
+# ============================================================================
 # Configuration Summary
 # ============================================================================
 Write-Host "============================================================================" -ForegroundColor Cyan
@@ -129,6 +216,18 @@ if ($WandbFlag) {
     Write-Host "  W&B Logging:      Disabled"
 }
 Write-Host ""
+
+# Upload settings
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host "  HuggingFace Upload:" -ForegroundColor Green
+    Write-Host "    Repository:     $RepoName" -ForegroundColor White
+    Write-Host "    Save Method:    $SaveMethod" -ForegroundColor White
+    Write-Host "    Create GGUF:    $(if ($GgufFlag) { 'Yes (Q4_K_M, Q5_K_M, Q8_0)' } else { 'No' })" -ForegroundColor White
+    Write-Host ""
+} else {
+    Write-Host "  HuggingFace Upload: Disabled" -ForegroundColor Gray
+    Write-Host ""
+}
 
 if ($Mode -eq "sft" -or $Mode -eq "pipeline") {
     Write-Host "  SFT Configuration:" -ForegroundColor White
@@ -387,35 +486,120 @@ print('[OK] Updated KTO config')
 }
 
 # ============================================================================
-# Next Steps
+# Determine Final Model Path
 # ============================================================================
-Write-Host ""
-Write-Host "============================================================================" -ForegroundColor Cyan
-Write-Host "Next Steps" -ForegroundColor Cyan
-Write-Host "============================================================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "1. Test the model:" -ForegroundColor White
-Write-Host "   cd Evaluator" -ForegroundColor Gray
+$FinalModelPath = $null
+$TrainerDir = $null
+
 if ($Mode -eq "kto" -or $Mode -eq "pipeline") {
     if ($KtoOutputDir) {
-        Write-Host "   python cli.py --model `"$KtoOutputDir\final_model`" --prompt-set prompts/baseline.json" -ForegroundColor Gray
+        $FinalModelPath = "$KtoOutputDir\final_model"
+        $TrainerDir = "rtx3090_kto"
     }
 } else {
     if ($SftOutputDir) {
-        Write-Host "   python cli.py --model `"$SftOutputDir\final_model`" --prompt-set prompts/baseline.json" -ForegroundColor Gray
+        $FinalModelPath = "$SftOutputDir\final_model"
+        $TrainerDir = "rtx3090_sft"
     }
 }
-Write-Host ""
-Write-Host "2. Upload to HuggingFace:" -ForegroundColor White
-if ($Mode -eq "kto" -or $Mode -eq "pipeline") {
-    Write-Host "   cd Trainers\rtx3090_kto" -ForegroundColor Gray
-} else {
-    Write-Host "   cd Trainers\rtx3090_sft" -ForegroundColor Gray
+
+# ============================================================================
+# Automatic Upload to HuggingFace (uses settings collected upfront)
+# ============================================================================
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Cyan
+    Write-Host "Uploading to HuggingFace (Automatic)" -ForegroundColor Cyan
+    Write-Host "============================================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Model Path:    $FinalModelPath" -ForegroundColor White
+    Write-Host "  Repository:    $RepoName" -ForegroundColor White
+    Write-Host "  Save Method:   $SaveMethod" -ForegroundColor White
+    Write-Host "  Create GGUF:   $(if ($GgufFlag) { 'Yes' } else { 'No' })" -ForegroundColor White
+    Write-Host ""
+
+    # Check for training lineage
+    $LineagePath = Join-Path (Split-Path $FinalModelPath -Parent) "training_lineage.json"
+    if (Test-Path $LineagePath) {
+        Write-Host "  [OK] Training lineage found - generating comprehensive model card" -ForegroundColor Green
+    } else {
+        Write-Host "  [INFO] No training lineage found - generating basic model card" -ForegroundColor Yellow
+    }
+    Write-Host ""
+
+    Write-Host "Starting upload..." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Run the upload script
+    Set-Location (Join-Path $ScriptDir $TrainerDir)
+
+    $UploadArgs = @(
+        "src/upload_to_hf.py",
+        $FinalModelPath,
+        $RepoName,
+        "--save-method", $SaveMethod
+    )
+
+    if ($GgufFlag) {
+        $UploadArgs += $GgufFlag
+    }
+
+    # Set HF_TOKEN environment variable for the upload
+    $env:HF_TOKEN = $HfToken
+
+    & $PythonExe @UploadArgs
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "============================================================================" -ForegroundColor Green
+        Write-Host "  [SUCCESS] Upload Complete!" -ForegroundColor Green
+        Write-Host "============================================================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  View your model at: https://huggingface.co/$RepoName" -ForegroundColor White
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "[ERROR] Upload failed (Exit code: $LASTEXITCODE)" -ForegroundColor Red
+        Write-Host ""
+    }
+
+    Set-Location $ScriptDir
 }
-Write-Host "   .\upload_model.ps1" -ForegroundColor Gray
+
+# ============================================================================
+# Final Summary
+# ============================================================================
 Write-Host ""
-Write-Host "3. Create GGUF quantizations:" -ForegroundColor White
-Write-Host "   Select 'Create GGUF' option during upload" -ForegroundColor Gray
+Write-Host "============================================================================" -ForegroundColor Green
+Write-Host "  Pipeline Complete!" -ForegroundColor Green
+Write-Host "============================================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Training Output: $FinalModelPath" -ForegroundColor White
+
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host "  HuggingFace:     https://huggingface.co/$RepoName" -ForegroundColor White
+}
+
+Write-Host ""
+Write-Host "Next Steps:" -ForegroundColor Cyan
+
+if ($DoUpload -ne "y" -and $DoUpload -ne "Y") {
+    Write-Host "  - Upload to HuggingFace:" -ForegroundColor White
+    Write-Host "    cd Trainers\$TrainerDir" -ForegroundColor Gray
+    Write-Host "    python src/upload_to_hf.py `"$FinalModelPath`" username/model-name" -ForegroundColor Gray
+    Write-Host ""
+}
+
+Write-Host "  - Test the model locally:" -ForegroundColor White
+Write-Host "    cd Evaluator" -ForegroundColor Gray
+Write-Host "    python cli.py --model `"$FinalModelPath`" --prompt-set prompts/baseline.json" -ForegroundColor Gray
+Write-Host ""
+
+Write-Host "  - Run evaluation and update model card:" -ForegroundColor White
+Write-Host "    python cli.py --model `"$FinalModelPath`" --prompt-set prompts/full_coverage.json --lineage eval_results.json" -ForegroundColor Gray
+if ($DoUpload -eq "y" -or $DoUpload -eq "Y") {
+    Write-Host "    python cli.py --upload-to-hf $RepoName --update-model-card" -ForegroundColor Gray
+}
 Write-Host ""
 
 Set-Location $ScriptDir

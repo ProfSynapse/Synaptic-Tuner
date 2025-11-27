@@ -10,10 +10,13 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
+import time
 import torch
 from pathlib import Path
+from typing import Dict, Any, Optional
 
 # Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
 try:
@@ -208,6 +211,162 @@ def extract_previous_log_entries(checkpoint_path: str) -> list:
     except Exception as e:
         print(f"⚠ Warning: Failed to read log file: {e}")
         return []
+
+
+def build_training_lineage(
+    config,
+    train_dataset,
+    eval_dataset,
+    trainer,
+    run_dir: Path,
+    args: argparse.Namespace,
+    training_time_seconds: Optional[float] = None,
+    final_loss: Optional[float] = None
+) -> Dict[str, Any]:
+    """Build comprehensive training lineage for model cards and traceability.
+
+    Args:
+        config: Training configuration object
+        train_dataset: Training dataset
+        eval_dataset: Evaluation dataset (may be None)
+        trainer: KTO trainer after training
+        run_dir: Path to training run directory
+        args: Command-line arguments
+        training_time_seconds: Total training time in seconds
+        final_loss: Final training loss from trainer output
+
+    Returns:
+        Dictionary containing complete training lineage
+    """
+    import platform
+    from datetime import datetime
+
+    # Get hardware info
+    hardware_info = {
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+        "pytorch_version": torch.__version__,
+        "cuda_available": torch.cuda.is_available(),
+    }
+
+    if torch.cuda.is_available():
+        hardware_info.update({
+            "cuda_version": torch.version.cuda,
+            "gpu_name": torch.cuda.get_device_name(0),
+            "gpu_memory_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1),
+        })
+
+    # Get dataset source info
+    dataset_source = args.local_file or config.dataset.local_file
+    if not dataset_source:
+        dataset_source = f"{config.dataset.dataset_name}/{config.dataset.dataset_file}"
+
+    # Build lineage dictionary
+    lineage = {
+        "training_type": "KTO",
+        "timestamp": datetime.now().isoformat(),
+        "run_directory": str(run_dir),
+
+        "model": {
+            "base_model": config.model.model_name,
+            "max_seq_length": config.model.max_seq_length,
+            "load_in_4bit": config.model.load_in_4bit,
+            "dtype": str(config.model.dtype),
+        },
+
+        "lora": {
+            "rank": config.lora.r,
+            "alpha": config.lora.lora_alpha,
+            "dropout": config.lora.lora_dropout,
+            "target_modules": config.lora.target_modules,
+            "bias": config.lora.bias,
+        },
+
+        "training": {
+            "batch_size": config.training.per_device_train_batch_size,
+            "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
+            "effective_batch_size": config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps,
+            "learning_rate": config.training.learning_rate,
+            "num_epochs": config.training.num_train_epochs,
+            "max_steps": args.max_steps if args.max_steps else -1,
+            "warmup_ratio": config.training.warmup_ratio,
+            "lr_scheduler": config.training.lr_scheduler_type,
+            "optimizer": config.training.optim,
+            "max_grad_norm": config.training.max_grad_norm,
+            "max_length": config.training.max_length,
+            "max_prompt_length": config.training.max_prompt_length,
+            "gradient_checkpointing": config.training.gradient_checkpointing,
+            "fp16": not torch.cuda.is_bf16_supported() if config.training.fp16 is False else config.training.fp16,
+            "bf16": torch.cuda.is_bf16_supported() if config.training.bf16 is True else config.training.bf16,
+            "seed": config.seed,
+            # KTO-specific parameters
+            "beta": config.training.beta,
+            "desirable_weight": config.training.desirable_weight,
+            "undesirable_weight": config.training.undesirable_weight,
+            "use_kto_s": config.training.use_kto_s,
+        },
+
+        "dataset": {
+            "source": dataset_source,
+            "train_examples": len(train_dataset),
+            "eval_examples": len(eval_dataset) if eval_dataset else 0,
+        },
+
+        "hardware": hardware_info,
+
+        "results": {},
+    }
+
+    # Add two-stage LR info if enabled
+    if config.training.use_two_stage_lr:
+        lineage["training"]["two_stage_lr"] = {
+            "enabled": True,
+            "initial_lr": config.training.learning_rate,
+            "reduced_lr": config.training.learning_rate * config.training.lr_reduction_factor,
+            "reduction_step": config.training.lr_reduction_step,
+            "reduction_factor": config.training.lr_reduction_factor,
+        }
+
+    # Add training results if available
+    if hasattr(trainer, 'state') and trainer.state is not None:
+        lineage["results"]["final_step"] = trainer.state.global_step
+        lineage["results"]["total_epochs"] = trainer.state.epoch
+
+        if hasattr(trainer.state, 'log_history') and trainer.state.log_history:
+            # Get the last logged loss
+            for entry in reversed(trainer.state.log_history):
+                if 'loss' in entry:
+                    lineage["results"]["final_loss"] = entry['loss']
+                    break
+
+    # Use provided final_loss if available
+    if final_loss is not None:
+        lineage["results"]["final_loss"] = final_loss
+
+    if training_time_seconds:
+        lineage["results"]["training_time_seconds"] = round(training_time_seconds, 1)
+        lineage["results"]["training_time_formatted"] = f"{training_time_seconds // 3600:.0f}h {(training_time_seconds % 3600) // 60:.0f}m {training_time_seconds % 60:.0f}s"
+
+    return lineage
+
+
+def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:
+    """Save training lineage to JSON file.
+
+    Args:
+        lineage: Training lineage dictionary
+        run_dir: Path to training run directory
+
+    Returns:
+        Path to saved lineage file
+    """
+    lineage_path = run_dir / "training_lineage.json"
+
+    with open(lineage_path, 'w', encoding='utf-8') as f:
+        json.dump(lineage, f, indent=2, default=str)
+
+    print(f"✓ Training lineage saved to: {lineage_path}")
+    return lineage_path
 
 
 def main():
@@ -742,6 +901,10 @@ def main():
         print("STARTING TRAINING")
     print("=" * 60 + "\n")
 
+    training_start_time = time.time()
+    trainer_output = None
+    final_loss = None
+
     try:
         if debugger:
             debugger.log_step_start(0)
@@ -752,10 +915,11 @@ def main():
         if debugger:
             debugger.log_step_end(trainer.state.global_step)
 
+        final_loss = trainer_output.training_loss
         print("\n" + "=" * 60)
         print("✓ TRAINING COMPLETED SUCCESSFULLY!")
         print("=" * 60)
-        print(f"Final loss: {trainer_output.training_loss:.4f}")
+        print(f"Final loss: {final_loss:.4f}")
 
         # Check final GPU memory
         print()
@@ -804,8 +968,28 @@ def main():
     tokenizer.save_pretrained(str(output_path))
 
     print(f"✓ Model saved to: {output_path}")
+
+    # Calculate training time
+    training_end_time = time.time()
+    training_time_seconds = training_end_time - training_start_time
+
+    # Build and save training lineage
+    print("\nBuilding training lineage...")
+    lineage = build_training_lineage(
+        config=config,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        trainer=trainer,
+        run_dir=run_dir,
+        args=args,
+        training_time_seconds=training_time_seconds,
+        final_loss=final_loss
+    )
+    save_training_lineage(lineage, run_dir)
+
     print("\nTo upload to HuggingFace:")
     print(f"  model.push_to_hub_merged('username/model-name', tokenizer, save_method='merged_16bit')")
+    print(f"  # Or use: python src/upload_to_hf.py {output_path} username/model-name")
     if debugger:
         debugger.close()
         print(f"\nDebug log saved to: {logs_dir}/training_debug.log")

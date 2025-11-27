@@ -500,15 +500,212 @@ def create_upload_manifest(
     return manifest_path
 
 
+def generate_model_card_from_lineage(lineage: Dict[str, Any], hf_username: str) -> str:
+    """
+    Generate a comprehensive HuggingFace model card from training lineage.
+
+    Args:
+        lineage: Training lineage dictionary
+        hf_username: HuggingFace username for the model
+
+    Returns:
+        Markdown string for model card
+    """
+    base_model = lineage.get("base_model", {})
+    dataset = lineage.get("dataset", {})
+    lora = lineage.get("lora_config", {})
+    training = lineage.get("training_config", {})
+    results = lineage.get("training_results", {})
+    hardware = lineage.get("hardware", {})
+    frameworks = lineage.get("framework_versions", {})
+
+    # Determine training method
+    training_method = lineage.get("training_method", "SFT")
+    is_kto = training_method == "KTO"
+
+    # Build model card
+    model_card = f'''---
+language:
+- en
+license: apache-2.0
+library_name: transformers
+tags:
+- tool-calling
+- {training_method.lower()}
+- {"preference-learning" if is_kto else "supervised-fine-tuning"}
+- claudesidian
+- obsidian
+- fine-tuned
+- unsloth
+base_model: {base_model.get("name", "unknown")}
+datasets:
+- {dataset.get("name", "unknown")}
+pipeline_tag: text-generation
+model-index:
+- name: {lineage.get("model_name", "model")}
+  results:
+  - task:
+      type: text-generation
+    metrics:
+    - name: Final Loss
+      type: loss
+      value: {results.get("final_loss", "N/A")}
+---
+
+# {lineage.get("model_name", "Model")}
+
+This model was fine-tuned using **{training_method}** to {"improve tool-calling behavior" if is_kto else "learn tool-calling behavior"} for the Claudesidian vault application.
+
+## Model Description
+
+- **Base Model:** [{base_model.get("name", "unknown")}](https://huggingface.co/{base_model.get("name", "unknown")})
+- **Training Method:** {training_method}
+- **Task:** Tool-calling for Obsidian vault operations
+- **Training Date:** {lineage.get("training_date", "N/A")}
+
+## Training Details
+
+### Dataset
+
+| Property | Value |
+|----------|-------|
+| Dataset | [{dataset.get("name", "unknown")}]({dataset.get("huggingface_url", "#")}) |
+'''
+
+    if dataset.get("file"):
+        model_card += f'| File | {dataset.get("file")} |\n'
+
+    model_card += f'| Total Examples | {dataset.get("total_examples", "N/A"):,} |\n'
+
+    if is_kto:
+        model_card += f'| Desirable | {dataset.get("desirable_examples", "N/A"):,} |\n'
+        model_card += f'| Undesirable | {dataset.get("undesirable_examples", "N/A"):,} |\n'
+
+    if dataset.get("chat_template"):
+        model_card += f'| Chat Template | {dataset.get("chat_template")} |\n'
+
+    # KTO-specific section
+    if is_kto and lineage.get("kto_config"):
+        kto = lineage["kto_config"]
+        model_card += f'''
+### KTO Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Beta (β) | {kto.get("beta", "N/A")} |
+| Desirable Weight | {kto.get("desirable_weight", "N/A")} |
+| Undesirable Weight | {kto.get("undesirable_weight", "N/A")} |
+'''
+
+    model_card += f'''
+### LoRA Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Rank (r) | {lora.get("r", "N/A")} |
+| Alpha (α) | {lora.get("alpha", "N/A")} |
+| Dropout | {lora.get("dropout", "N/A")} |
+| Target Modules | {", ".join(lora.get("target_modules", []))} |
+| Trainable Parameters | {lora.get("trainable_parameters", "N/A"):,} ({lora.get("trainable_percentage", "N/A")}%) |
+
+### Training Hyperparameters
+
+| Parameter | Value |
+|-----------|-------|
+| Batch Size | {training.get("batch_size", "N/A")} |
+| Gradient Accumulation | {training.get("gradient_accumulation_steps", "N/A")} |
+| Effective Batch Size | {training.get("effective_batch_size", "N/A")} |
+| Learning Rate | {training.get("learning_rate", "N/A")} |
+| LR Scheduler | {training.get("learning_rate_scheduler", "N/A")} |
+| Warmup Ratio | {training.get("warmup_ratio", "N/A")} |
+| Max Grad Norm | {training.get("max_grad_norm", "N/A")} |
+| Epochs | {training.get("num_epochs", "N/A")} |
+| Optimizer | {training.get("optimizer", "N/A")} |
+| Precision | {training.get("precision", "N/A")} |
+| Random Seed | {training.get("random_seed", "N/A")} |
+
+### Training Results
+
+| Metric | Value |
+|--------|-------|
+| Final Loss | {results.get("final_loss", "N/A")} |
+| Total Steps | {results.get("total_steps", "N/A"):,} |
+| Training Duration | {results.get("training_duration_minutes", "N/A")} minutes |
+
+### Hardware
+
+| Component | Value |
+|-----------|-------|
+| GPU | {hardware.get("gpu", "N/A")} |
+| GPU Memory | {hardware.get("gpu_memory_gb", "N/A")} GB |
+| CUDA Version | {hardware.get("cuda_version", "N/A")} |
+| Platform | {hardware.get("platform", "N/A")} |
+
+### Framework Versions
+
+| Library | Version |
+|---------|--------|
+| PyTorch | {frameworks.get("torch", "N/A")} |
+| Transformers | {frameworks.get("transformers", "N/A")} |
+| TRL | {frameworks.get("trl", "N/A")} |
+| PEFT | {frameworks.get("peft", "N/A")} |
+| Unsloth | {frameworks.get("unsloth", "N/A")} |
+
+## Usage
+
+### With Transformers
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained("{hf_username}/{lineage.get("model_name", "model")}")
+tokenizer = AutoTokenizer.from_pretrained("{hf_username}/{lineage.get("model_name", "model")}")
+
+messages = [{{"role": "user", "content": "Show me the contents of my project roadmap file."}}]
+inputs = tokenizer.apply_chat_template(messages, return_tensors="pt")
+outputs = model.generate(inputs, max_new_tokens=512)
+print(tokenizer.decode(outputs[0]))
+```
+
+### With Ollama (GGUF)
+
+```bash
+ollama pull {hf_username}/{lineage.get("model_name", "model")}
+ollama run {hf_username}/{lineage.get("model_name", "model")}
+```
+
+## Intended Use
+
+This model is designed for tool-calling in Obsidian vault management applications.
+
+## Training Lineage
+
+<details>
+<summary>Click to expand full training configuration (JSON)</summary>
+
+```json
+{json.dumps(lineage, indent=2)}
+```
+
+</details>
+'''
+
+    return model_card
+
+
 def create_readme(
     output_dir: Path,
     repo_id: str,
     training_run: str,
     formats_created: List[str],
-    model_name: str
+    model_name: str,
+    training_lineage: Dict[str, Any] = None
 ) -> Path:
     """
-    Create a simple README.md file in the output directory.
+    Create a README.md file in the output directory.
+
+    If training_lineage is provided, generates a comprehensive model card.
+    Otherwise, creates a simple README.
 
     Args:
         output_dir: Directory to save README
@@ -516,11 +713,18 @@ def create_readme(
         training_run: Training run timestamp
         formats_created: List of formats created
         model_name: Name of the model for GGUF file references
+        training_lineage: Optional training lineage for comprehensive model card
 
     Returns:
         Path to README file
     """
-    readme_content = f"""# {model_name}
+    # If lineage provided, generate comprehensive model card
+    if training_lineage:
+        hf_username = repo_id.split('/')[0]
+        readme_content = generate_model_card_from_lineage(training_lineage, hf_username)
+    else:
+        # Simple README without lineage
+        readme_content = f"""# {model_name}
 
 **Training Run:** `{training_run}`
 **HuggingFace:** [https://huggingface.co/{repo_id}](https://huggingface.co/{repo_id})
@@ -529,36 +733,36 @@ def create_readme(
 
 """
 
-    for fmt in formats_created:
-        if fmt == "lora":
-            readme_content += "- **LoRA Adapters** (`lora/`) - Use with base model\n"
-        elif fmt == "merged_16bit":
-            readme_content += "- **Merged 16-bit** (`merged-16bit/`) - Full quality merged model (~14GB)\n"
-        elif fmt == "merged_4bit":
-            readme_content += "- **Merged 4-bit** (`merged-4bit/`) - Quantized merged model (~3.5GB)\n"
-        elif fmt == "gguf":
-            readme_content += "- **GGUF Quantizations** (`gguf/`) - For llama.cpp/Ollama\n"
+        for fmt in formats_created:
+            if fmt == "lora":
+                readme_content += "- **LoRA Adapters** (`lora/`) - Use with base model\n"
+            elif fmt == "merged_16bit":
+                readme_content += "- **Merged 16-bit** (`merged-16bit/`) - Full quality merged model (~14GB)\n"
+            elif fmt == "merged_4bit":
+                readme_content += "- **Merged 4-bit** (`merged-4bit/`) - Quantized merged model (~3.5GB)\n"
+            elif fmt == "gguf":
+                readme_content += "- **GGUF Quantizations** (`gguf/`) - For llama.cpp/Ollama\n"
 
-    readme_content += f"""
+        readme_content += f"""
 ## Directory Structure
 
 ```
 {model_name}/
 """
 
-    for fmt in formats_created:
-        subdir = fmt.replace("_", "-") if fmt != "lora" else "lora"
-        if fmt == "gguf":
-            readme_content += f"""├── {subdir}/
+        for fmt in formats_created:
+            subdir = fmt.replace("_", "-") if fmt != "lora" else "lora"
+            if fmt == "gguf":
+                readme_content += f"""├── {subdir}/
 │   ├── {model_name}.gguf (f16)
 │   ├── {model_name}-Q4_K_M.gguf
 │   ├── {model_name}-Q5_K_M.gguf
 │   └── {model_name}-Q8_0.gguf
 """
-        else:
-            readme_content += f"├── {subdir}/\n"
+            else:
+                readme_content += f"├── {subdir}/\n"
 
-    readme_content += """├── upload_manifest.json
+        readme_content += """├── upload_manifest.json
 └── README.md
 ```
 
@@ -568,7 +772,7 @@ See the HuggingFace model card for detailed usage instructions.
 """
 
     readme_path = output_dir / "README.md"
-    with open(readme_path, 'w') as f:
+    with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme_content)
 
     print(f"✓ README created: {readme_path}")
@@ -627,6 +831,11 @@ def main():
         action="store_true",
         help="Skip uploading standard model (only GGUF)"
     )
+    parser.add_argument(
+        "--training-lineage",
+        type=str,
+        help="Path to training_lineage.json for comprehensive model card generation"
+    )
 
     args = parser.parse_args()
 
@@ -662,6 +871,26 @@ def main():
     print(f"\nOrganized output directory: {output_dir}")
     print(f"Model name: {model_name}")
     print(f"Training run: {training_run}\n")
+
+    # Load training lineage if provided
+    training_lineage = None
+    lineage_source_path = None
+    if args.training_lineage:
+        lineage_source_path = Path(args.training_lineage)
+        if lineage_source_path.exists():
+            with open(lineage_source_path, 'r', encoding='utf-8') as f:
+                training_lineage = json.load(f)
+            print(f"✓ Training lineage loaded from: {lineage_source_path}")
+        else:
+            print(f"⚠ Training lineage not found: {lineage_source_path}")
+    else:
+        # Try to auto-detect lineage file in training run directory
+        auto_lineage_path = model_path.parent / "training_lineage.json"
+        if auto_lineage_path.exists():
+            with open(auto_lineage_path, 'r', encoding='utf-8') as f:
+                training_lineage = json.load(f)
+            lineage_source_path = auto_lineage_path
+            print(f"✓ Training lineage auto-detected: {auto_lineage_path}")
 
     formats_created = []
     gguf_files = None
@@ -709,13 +938,48 @@ def main():
         gguf_files=gguf_files
     )
 
-    create_readme(
+    readme_path = create_readme(
         output_dir=output_dir,
         repo_id=args.repo_id,
         training_run=training_run,
         formats_created=formats_created,
-        model_name=model_name
+        model_name=model_name,
+        training_lineage=training_lineage
     )
+
+    # Upload lineage and README to HuggingFace
+    if training_lineage or readme_path.exists():
+        print("\n" + "=" * 60)
+        print("UPLOADING DOCUMENTATION TO HUGGINGFACE")
+        print("=" * 60)
+
+        api = HfApi()
+
+        # Upload training lineage JSON
+        if training_lineage and lineage_source_path:
+            try:
+                api.upload_file(
+                    path_or_fileobj=str(lineage_source_path),
+                    path_in_repo="training_lineage.json",
+                    repo_id=args.repo_id,
+                    token=hf_token,
+                )
+                print(f"✓ training_lineage.json uploaded to HuggingFace")
+            except Exception as e:
+                print(f"⚠ Could not upload training_lineage.json: {e}")
+
+        # Upload README (model card)
+        if readme_path.exists():
+            try:
+                api.upload_file(
+                    path_or_fileobj=str(readme_path),
+                    path_in_repo="README.md",
+                    repo_id=args.repo_id,
+                    token=hf_token,
+                )
+                print(f"✓ README.md (model card) uploaded to HuggingFace")
+            except Exception as e:
+                print(f"⚠ Could not upload README.md: {e}")
 
     # Final summary
     print("\n" + "=" * 60)
