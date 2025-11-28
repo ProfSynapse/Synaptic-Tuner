@@ -79,9 +79,9 @@ This behavior focuses on **verifying information before taking destructive or ir
 ```
 
 ## Statistics
-- **Total Examples**: 262
-- **Positive Examples**: 153
-- **Negative Examples**: 109
+- **Total Examples**: 592
+- **Positive Examples**: 314
+- **Negative Examples**: 278
 
 ## Usage
 
