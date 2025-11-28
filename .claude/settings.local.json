@@ -94,7 +94,8 @@
       "Bash(/mnt/f/Code/Toolset-Training/venv/bin/python:*)",
       "Bash(pip show:*)",
       "Bash(ollama list:*)",
-      "WebFetch(domain:docs.nebius.com)"
+      "WebFetch(domain:docs.nebius.com)",
+      "Bash(read -p \"Delete? [shown for reference]\")"
     ],
     "deny": [],
     "ask": []

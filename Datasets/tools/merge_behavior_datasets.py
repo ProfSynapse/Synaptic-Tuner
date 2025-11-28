@@ -68,25 +68,23 @@ def create_interleaved_dataset(examples: List[Dict]) -> List[Dict]:
 def main():
     # Configuration
     behavior_datasets_dir = Path(__file__).parent.parent / "behavior_datasets"
-    output_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.jsonl"
+    output_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.jsonl"
 
-    # Behavior categories - use v1.2 for datasets with system context added
-    behaviors_v1_2 = [
-        "execute_prompt_usage",
-        "intellectual_humility",
-        "verification_before_action",
-    ]
-
-    # These still use v1.1 (already had system context or don't need it)
-    behaviors_v1_1 = [
+    # All behavior categories now use v1.3 (with text-only response examples added)
+    behaviors_v1_3 = [
         "context_continuity",
         "context_efficiency",
+        "error_recovery",
+        "execute_prompt_usage",
+        "intellectual_humility",
         "strategic_tool_selection",
-        "workspace_awareness"
+        "verification_before_action",
+        "workspace_awareness",
     ]
 
-    # error_recovery uses v1.2 (fixed 10-char IDs to 9-char)
-    behaviors_v1_2.append("error_recovery")
+    # Legacy lists kept empty for backwards compatibility
+    behaviors_v1_2 = []
+    behaviors_v1_1 = []
 
     # Response pattern datasets
     response_patterns = [
@@ -101,13 +99,13 @@ def main():
     ]
 
     # Load all datasets
-    print("Loading behavior datasets (v1.2 with system context)...")
+    print("Loading behavior datasets (v1.3 with text-only examples)...")
     all_examples = []
     behavior_stats = {}
 
-    # Load v1.2 datasets (with system context added)
-    for behavior in behaviors_v1_2:
-        file_path = behavior_datasets_dir / behavior / "pairs_v1.2.jsonl"
+    # Load v1.3 datasets (with text-only response examples added)
+    for behavior in behaviors_v1_3:
+        file_path = behavior_datasets_dir / behavior / "pairs_v1.3.jsonl"
         if file_path.exists():
             examples = load_dataset(file_path)
             all_examples.extend(examples)
@@ -118,29 +116,9 @@ def main():
                 "total": len(examples),
                 "positive": positive,
                 "negative": negative,
-                "version": "v1.2"
+                "version": "v1.3"
             }
-            print(f"  {behavior} (v1.2): {len(examples)} examples ({positive} positive, {negative} negative)")
-        else:
-            print(f"  WARNING: {file_path} not found")
-
-    # Load v1.1 datasets
-    print("\nLoading behavior datasets (v1.1)...")
-    for behavior in behaviors_v1_1:
-        file_path = behavior_datasets_dir / behavior / "pairs_v1.1.jsonl"
-        if file_path.exists():
-            examples = load_dataset(file_path)
-            all_examples.extend(examples)
-
-            positive = sum(1 for ex in examples if ex.get('label') is True)
-            negative = sum(1 for ex in examples if ex.get('label') is False)
-            behavior_stats[behavior] = {
-                "total": len(examples),
-                "positive": positive,
-                "negative": negative,
-                "version": "v1.1"
-            }
-            print(f"  {behavior} (v1.1): {len(examples)} examples ({positive} positive, {negative} negative)")
+            print(f"  {behavior} (v1.3): {len(examples)} examples ({positive} positive, {negative} negative)")
         else:
             print(f"  WARNING: {file_path} not found")
 
@@ -215,17 +193,15 @@ def main():
             f.write(json.dumps(example, ensure_ascii=False) + '\n')
 
     # Write metadata file
-    all_behaviors = behaviors_v1_2 + behaviors_v1_1
     all_patterns = [p[0] for p in response_patterns]
     all_ask_first = [a[0] for a in ask_first]
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "behavior_datasets merge v1.3 (with system context and ask_first)",
-        "behaviors_v1_2": behaviors_v1_2,
-        "behaviors_v1_1": behaviors_v1_1,
+        "source": "behavior_datasets merge 11.28.25 (v1.3 with text-only response examples)",
+        "behaviors_v1_3": behaviors_v1_3,
         "response_patterns": all_patterns,
         "ask_first": all_ask_first,
-        "all_datasets": all_behaviors + all_patterns + all_ask_first,
+        "all_datasets": behaviors_v1_3 + all_patterns + all_ask_first,
         "behavior_stats": behavior_stats,
         "total_examples": len(interleaved),
         "positive_examples": total_positive,
@@ -233,7 +209,7 @@ def main():
         "interleaved": True,
         "consecutive_same_labels": consecutive_same,
         "format": "KTO-compatible ChatML with interleaved labels",
-        "notes": "v1.3 includes system context for ID validation and ask_first behavior examples"
+        "notes": "v1.3 includes ~30% text-only response examples teaching when NOT to use tools"
     }
 
     metadata_file = output_file.with_suffix('.metadata.json')
