@@ -80,9 +80,9 @@ This behavior demonstrates **proper use of workspace context, preferences, and w
 ```
 
 ## Statistics
-- **Total Examples**: 260
-- **Positive Examples**: 155
-- **Negative Examples**: 105
+- **Total Examples**: 494
+- **Positive Examples**: 272
+- **Negative Examples**: 222
 
 ## Usage
 

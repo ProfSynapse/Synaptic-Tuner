@@ -17,12 +17,19 @@ from datetime import datetime
 
 def load_env_token():
     """Load HuggingFace token from .env file."""
-    env_file = Path(__file__).parent.parent / ".env"
-    if env_file.exists():
-        with open(env_file, 'r') as f:
-            for line in f:
-                if line.startswith('HF_TOKEN=') or line.startswith('HF_API_KEY='):
-                    return line.split('=', 1)[1].strip()
+    # Check multiple locations for .env file
+    possible_paths = [
+        Path(__file__).parent.parent / ".env",  # Datasets/.env
+        Path(__file__).parent.parent.parent / ".env",  # Project root/.env
+    ]
+
+    for env_file in possible_paths:
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('HF_TOKEN=') or line.startswith('HF_API_KEY='):
+                        return line.split('=', 1)[1].strip().strip('"').strip("'")
     return os.environ.get('HF_TOKEN') or os.environ.get('HF_API_KEY')
 
 
@@ -484,8 +491,8 @@ This behavior demonstrates **asking clarifying questions and acknowledging uncer
 
 def upload_individual_behavior(api, behavior_name, repo_name, token):
     """Upload a single behavior dataset."""
-    behavior_dir = Path(__file__).parent / "behavior_datasets" / behavior_name
-    dataset_file = behavior_dir / "pairs_v1.1.jsonl"
+    behavior_dir = Path(__file__).parent.parent / "behavior_datasets" / behavior_name
+    dataset_file = behavior_dir / "pairs_v1.3.jsonl"
 
     if not dataset_file.exists():
         print(f"  ⚠️  {dataset_file} not found, skipping")
@@ -549,8 +556,8 @@ def upload_individual_behavior(api, behavior_name, repo_name, token):
 
 def upload_merged_dataset(api, repo_name, token):
     """Upload the merged behavioral dataset."""
-    merged_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.jsonl"
-    metadata_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.3.metadata.json"
+    merged_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.jsonl"
+    metadata_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.metadata.json"
 
     if not merged_file.exists():
         print(f"  ⚠️  {merged_file} not found")
@@ -562,7 +569,7 @@ def upload_merged_dataset(api, repo_name, token):
 
     print(f"\n📦 Uploading merged dataset...")
     print(f"   Total examples: {metadata['total_examples']}")
-    print(f"   Behaviors: {len(metadata['behaviors'])}")
+    print(f"   Behaviors: {len(metadata.get('behaviors_v1_3', metadata.get('all_datasets', [])))}")
 
     try:
         # Create repo

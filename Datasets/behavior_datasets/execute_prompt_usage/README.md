@@ -79,9 +79,9 @@ This behavior focuses on **appropriate delegation to AI agents for complex tasks
 ```
 
 ## Statistics
-- **Total Examples**: 140
-- **Positive Examples**: 90
-- **Negative Examples**: 50
+- **Total Examples**: 266
+- **Positive Examples**: 153
+- **Negative Examples**: 113
 
 ## Usage
 
