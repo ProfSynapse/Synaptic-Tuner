@@ -45,14 +45,24 @@ class Merged4BitStrategy(BaseSaveStrategy):
             Path to the saved model
         """
         model_size = kwargs.get("model_size", "7b")
+        skip_gpu_check = kwargs.get("skip_gpu_check", False)
 
-        # Check GPU memory
-        required_gb = get_required_memory(model_size, "merge_4bit")
-        if not ensure_gpu_memory(required_gb, "4-bit model merge"):
-            raise SaveError(
-                f"Insufficient GPU memory for 4-bit merge. "
-                f"Try --save-method lora or free up GPU memory."
-            )
+        # Check GPU memory (can be skipped if user knows they have enough)
+        if not skip_gpu_check:
+            required_gb = get_required_memory(model_size, "merge_4bit")
+            if not ensure_gpu_memory(required_gb, "4-bit model merge"):
+                try:
+                    import torch
+                    if not torch.cuda.is_available():
+                        print("\n⚠ CUDA not detected, but proceeding anyway...")
+                        print("  (GPU may work once model loading begins)")
+                    else:
+                        raise SaveError(
+                            f"Insufficient GPU memory for 4-bit merge. "
+                            f"Try --save-method lora or free up GPU memory."
+                        )
+                except ImportError:
+                    raise SaveError("PyTorch not installed")
 
         if self.model_loader is None:
             raise SaveError("Model loader required for merged save strategies")

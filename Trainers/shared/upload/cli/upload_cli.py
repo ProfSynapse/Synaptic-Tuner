@@ -9,21 +9,21 @@ import os
 import sys
 from pathlib import Path
 
-# Add shared module to path if running directly
-if __name__ == "__main__":
-    shared_path = Path(__file__).parent.parent.parent.parent
-    if str(shared_path) not in sys.path:
-        sys.path.insert(0, str(shared_path))
+# Add shared module to path BEFORE any relative imports
+_shared_path = Path(__file__).parent.parent.parent
+if str(_shared_path) not in sys.path:
+    sys.path.insert(0, str(_shared_path))
 
-from ..platform.windows_patches import ensure_windows_compatibility
-from ..core.config import (
+# Now use absolute imports (relative to shared/)
+from upload.platform.windows_patches import ensure_windows_compatibility
+from upload.core.config import (
     UploadConfig,
     SaveConfig,
     ConversionConfig,
     DocumentationConfig,
 )
-from ..core.types import ModelPath, to_repository_id, to_credential
-from ..orchestrator import UploadOrchestrator
+from upload.core.types import ModelPath, to_repository_id, to_credential
+from upload.orchestrator import UploadOrchestrator
 
 
 def load_env_file():

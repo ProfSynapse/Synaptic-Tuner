@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from .base import BaseModelLoader
-from ..upload.core.types import ModelPath
-from ..upload.core.exceptions import DependencyError
+from upload.core.types import ModelPath
+from upload.core.exceptions import DependencyError
 
 
 class UnslothModelLoader(BaseModelLoader):

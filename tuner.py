@@ -164,8 +164,12 @@ def list_training_runs(trainer_type: str) -> list:
 
     runs = []
     for d in sorted(output_dir.iterdir(), reverse=True):
-        if d.is_dir() and (d / "final_model").exists():
-            runs.append(d)
+        if d.is_dir():
+            # Include runs with final_model OR checkpoints
+            has_final = (d / "final_model").exists()
+            has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
+            if has_final or has_checkpoints:
+                runs.append(d)
     return runs[:10]
 
 
@@ -313,9 +317,45 @@ def _train_mac():
 # UPLOAD MENU
 # =============================================================================
 
+def _load_checkpoint_metrics(run_dir: Path) -> dict:
+    """Load training metrics from logs for checkpoint analysis."""
+    metrics = {}
+    logs_dir = run_dir / "logs"
+
+    if not logs_dir.exists():
+        return metrics
+
+    # Find the training log file
+    log_files = list(logs_dir.glob("training_*.jsonl"))
+    if not log_files:
+        return metrics
+
+    try:
+        import json
+        with open(log_files[0]) as f:
+            for line in f:
+                entry = json.loads(line)
+                step = entry.get("step", 0)
+                metrics[step] = entry
+    except Exception:
+        pass
+
+    return metrics
+
+
+def _detect_training_type(run_dir: Path) -> str:
+    """Detect if this is SFT or KTO based on path."""
+    path_str = str(run_dir).lower()
+    if "kto" in path_str:
+        return "kto"
+    elif "sft" in path_str:
+        return "sft"
+    return "unknown"
+
+
 def _select_model_checkpoint(run_dir: Path) -> Path:
     """
-    Select between final_model and specific checkpoints.
+    Select between final_model and specific checkpoints with metrics display.
 
     Args:
         run_dir: Path to training run directory
@@ -323,13 +363,19 @@ def _select_model_checkpoint(run_dir: Path) -> Path:
     Returns:
         Path to selected model/checkpoint, or None if cancelled
     """
+    # Load metrics from training logs
+    metrics = _load_checkpoint_metrics(run_dir)
+    training_type = _detect_training_type(run_dir)
+
     # Build list of available models
     options = []
+    checkpoint_info = []
 
     # Final model (if exists)
     final_model = run_dir / "final_model"
     if final_model.exists():
         options.append(("final", f"{BOX['star']} final_model (recommended)"))
+        checkpoint_info.append(None)
 
     # Checkpoints
     checkpoints_dir = run_dir / "checkpoints"
@@ -337,26 +383,127 @@ def _select_model_checkpoint(run_dir: Path) -> Path:
         checkpoints = sorted(
             [d for d in checkpoints_dir.iterdir() if d.is_dir() and d.name.startswith("checkpoint-")],
             key=lambda x: int(x.name.split("-")[1]),
-            reverse=True  # Most recent first
+            reverse=False  # Ascending order for table display
         )
         for cp in checkpoints:
-            step = cp.name.split("-")[1]
-            options.append((cp.name, f"{BOX['bullet']} {cp.name} (step {step})"))
+            step = int(cp.name.split("-")[1])
+            step_metrics = metrics.get(step, {})
+            checkpoint_info.append((cp.name, step, step_metrics))
 
-    if not options:
+    if not options and not checkpoint_info:
         print_error("No models found in training run")
         return None
 
     # If only final_model exists, use it directly
-    if len(options) == 1 and options[0][0] == "final":
+    if len(options) == 1 and not checkpoint_info:
         print_info("Using final_model")
         return final_model
 
-    # Let user choose
-    choice = print_menu(options, "Select model to upload:")
+    # Display checkpoint metrics table
+    if checkpoint_info and any(c for c in checkpoint_info if c):
+        print()
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
 
-    if not choice:
-        return None
+            table = Table(
+                title="Available Checkpoints",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+                show_header=True,
+                header_style=f"bold {COLORS['aqua']}"
+            )
+
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Checkpoint", style="white")
+            table.add_column("Step", style=COLORS["sky"], justify="right")
+            table.add_column("Loss", justify="right")
+
+            if training_type == "kto":
+                table.add_column("KL", justify="right")
+                table.add_column("Margin", justify="right")
+                table.add_column("Score", justify="right", style=COLORS["aqua"])
+            else:
+                table.add_column("LR", justify="right")
+
+            idx = 1
+            if final_model.exists():
+                table.add_row(str(idx), f"{BOX['star']} final_model", "-", "-", "-" if training_type != "kto" else "-", "-" if training_type == "kto" else None, "-" if training_type == "kto" else None)
+                idx += 1
+
+            for info in checkpoint_info:
+                if info:
+                    cp_name, step, m = info
+                    loss = f"{m.get('loss', 0):.4f}" if m else "-"
+
+                    if training_type == "kto":
+                        kl = m.get('kl', 0) if m else 0
+                        margin = m.get('rewards/margins', 0) if m else 0
+                        score = margin / kl if kl > 0 else 0
+
+                        kl_str = f"{kl:.2f}" if m else "-"
+                        margin_str = f"{margin:.2f}" if m else "-"
+                        score_str = f"{score:.2f}" if m else "-"
+
+                        table.add_row(str(idx), cp_name, str(step), loss, kl_str, margin_str, score_str)
+                    else:
+                        lr = m.get('learning_rate', 0) if m else 0
+                        lr_str = f"{lr:.2e}" if m else "-"
+                        table.add_row(str(idx), cp_name, str(step), loss, lr_str)
+
+                    options.append((cp_name, f"{BOX['bullet']} {cp_name}"))
+                    idx += 1
+
+            console.print()
+            console.print(table)
+
+            if training_type == "kto":
+                console.print(f"\n  [dim]Score = Margin/KL (higher is better: high margin, low KL)[/dim]")
+            console.print()
+        else:
+            # Fallback text display
+            print("\nAvailable Checkpoints:")
+            print("-" * 60)
+            if training_type == "kto":
+                print(f"{'#':<4} {'Checkpoint':<20} {'Step':<8} {'Loss':<10} {'KL':<8} {'Margin':<8} {'Score':<8}")
+            else:
+                print(f"{'#':<4} {'Checkpoint':<20} {'Step':<8} {'Loss':<10} {'LR':<12}")
+            print("-" * 60)
+
+            idx = 1
+            if final_model.exists():
+                print(f"{idx:<4} {'final_model':<20} {'-':<8} {'-':<10} {'-':<8}")
+                idx += 1
+
+            for info in checkpoint_info:
+                if info:
+                    cp_name, step, m = info
+                    loss = f"{m.get('loss', 0):.4f}" if m else "-"
+
+                    if training_type == "kto":
+                        kl = m.get('kl', 0) if m else 0
+                        margin = m.get('rewards/margins', 0) if m else 0
+                        score = margin / kl if kl > 0 else 0
+                        print(f"{idx:<4} {cp_name:<20} {step:<8} {loss:<10} {kl:<8.2f} {margin:<8.2f} {score:<8.2f}")
+                    else:
+                        lr = m.get('learning_rate', 0) if m else 0
+                        print(f"{idx:<4} {cp_name:<20} {step:<8} {loss:<10} {lr:<12.2e}")
+
+                    options.append((cp_name, f"{BOX['bullet']} {cp_name}"))
+                    idx += 1
+            print()
+
+    # Let user choose by number
+    while True:
+        try:
+            sel = prompt(f"Select checkpoint (1-{len(options)})", "1")
+            idx = int(sel) - 1
+            if 0 <= idx < len(options):
+                choice = options[idx][0]
+                break
+        except ValueError:
+            pass
+        print_error("Invalid selection.")
 
     if choice == "final":
         return final_model
@@ -430,11 +577,20 @@ def upload_menu():
     if not model_path:
         return
 
-    # Get repo ID
-    repo_id = prompt("HuggingFace repo ID (username/model-name)")
-    if not repo_id or "/" not in repo_id:
-        print_error("Invalid repo ID format")
-        return
+    # Get repo ID (use HF_USERNAME from .env if available)
+    hf_username = os.environ.get("HF_USERNAME", "")
+    if hf_username:
+        print_info(f"HuggingFace username: {hf_username}")
+        model_name = prompt("Model name", "")
+        if not model_name:
+            print_error("Model name required")
+            return
+        repo_id = f"{hf_username}/{model_name}"
+    else:
+        repo_id = prompt("HuggingFace repo ID (username/model-name)")
+        if not repo_id or "/" not in repo_id:
+            print_error("Invalid repo ID format. Add HF_USERNAME to .env for easier input.")
+            return
 
     # Save method
     save_method = print_menu([
@@ -461,17 +617,106 @@ def upload_menu():
         print_info("Upload cancelled.")
         return
 
-    # Execute upload
-    from upload.cli.upload_cli import main as upload_main
-    args = [str(model_path), repo_id, "--save-method", save_method]
+    # Execute upload using conda Python (needs GPU/unsloth)
+    python = get_conda_python()
+    upload_script = REPO_ROOT / "Trainers" / "shared" / "upload" / "cli" / "upload_cli.py"
+
+    cmd = [
+        python,
+        str(upload_script),
+        str(model_path),
+        repo_id,
+        "--save-method", save_method,
+    ]
     if create_gguf:
-        args.append("--create-gguf")
-    upload_main(args)
+        cmd.append("--create-gguf")
+
+    print_info(f"Running: {' '.join(cmd)}")
+    print()
+    subprocess.run(cmd, cwd=str(REPO_ROOT))
 
 
 # =============================================================================
 # EVALUATION MENU
 # =============================================================================
+
+def _list_ollama_models() -> list:
+    """List available Ollama models."""
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            return []
+
+        models = []
+        lines = result.stdout.strip().split("\n")
+        for line in lines[1:]:  # Skip header
+            if line.strip():
+                # Format: NAME ID SIZE MODIFIED
+                parts = line.split()
+                if parts:
+                    models.append(parts[0])  # Model name
+        return models
+    except Exception:
+        return []
+
+
+def _list_lmstudio_models() -> list:
+    """List available LM Studio models via API."""
+    try:
+        import urllib.request
+        import json
+
+        # LM Studio API endpoint
+        req = urllib.request.Request(
+            "http://localhost:1234/v1/models",
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            models = [m.get("id", "") for m in data.get("data", [])]
+            return [m for m in models if m]
+    except Exception:
+        return []
+
+
+def _list_prompt_sets() -> list:
+    """List available prompt sets with their prompt counts."""
+    import json
+    prompts_dir = REPO_ROOT / "Evaluator" / "prompts"
+    prompt_sets = []
+
+    # Define prompt sets with descriptions (order = display order)
+    sets_info = [
+        ("full_coverage", "Tool Coverage - Comprehensive tool testing"),
+        ("behavior_rubric", "Behavior Rubric - Behavioral pattern evaluation"),
+        ("behavioral_patterns", "Behavioral Patterns - Additional behaviors"),
+        ("baseline", "Baseline - Quick smoke test"),
+    ]
+
+    for name, description in sets_info:
+        filepath = prompts_dir / f"{name}.json"
+        if filepath.exists():
+            try:
+                with open(filepath) as f:
+                    data = json.load(f)
+                # Handle both list format and dict with "prompts" key
+                if isinstance(data, list):
+                    count = len(data)
+                elif isinstance(data, dict):
+                    count = len(data.get("prompts", data.get("cases", [])))
+                else:
+                    count = 0
+                prompt_sets.append((name, description, count))
+            except Exception:
+                pass
+
+    return prompt_sets
+
 
 def eval_menu():
     """Evaluation submenu - test model performance."""
@@ -485,20 +730,103 @@ def eval_menu():
     if not backend:
         return
 
-    # Model name
-    model = prompt("Model name (as shown in Ollama/LM Studio)")
-    if not model:
-        print_error("Model name required")
+    # List available models from selected backend
+    print_info(f"Fetching models from {backend}...")
+
+    if backend == "ollama":
+        models = _list_ollama_models()
+    else:
+        models = _list_lmstudio_models()
+
+    if not models:
+        print_error(f"No models found. Is {backend} running?")
+        if backend == "lmstudio":
+            print_info("Make sure LM Studio server is running on http://localhost:1234")
         return
 
-    # Prompt set
-    prompt_set = print_menu([
-        ("baseline", f"{BOX['bullet']} Baseline - General scenarios"),
-        ("behavior_rubric", f"{BOX['bullet']} Behavior rubric - Behavior evaluation"),
-    ], "Select prompt set:")
+    # Display model selection
+    if RICH_AVAILABLE:
+        from rich.table import Table
+        from rich import box as rich_box
 
-    if not prompt_set:
+        table = Table(
+            title=f"Available {backend.title()} Models",
+            box=rich_box.ROUNDED,
+            border_style=COLORS["cello"],
+        )
+        table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+        table.add_column("Model", style="white")
+
+        for i, m in enumerate(models, 1):
+            table.add_row(str(i), m)
+
+        console.print()
+        console.print(table)
+        console.print()
+    else:
+        print(f"\nAvailable {backend} models:")
+        for i, m in enumerate(models, 1):
+            print(f"  [{i}] {m}")
+        print()
+
+    # Select model
+    while True:
+        try:
+            sel = prompt(f"Select model (1-{len(models)})", "1")
+            idx = int(sel) - 1
+            if 0 <= idx < len(models):
+                model = models[idx]
+                break
+        except ValueError:
+            pass
+        print_error("Invalid selection.")
+
+    # Prompt set - show all available with counts
+    prompt_sets = _list_prompt_sets()
+
+    if not prompt_sets:
+        print_error("No prompt sets found in Evaluator/prompts/")
         return
+
+    # Display prompt sets with counts
+    if RICH_AVAILABLE:
+        from rich.table import Table
+        from rich import box as rich_box
+
+        table = Table(
+            title="Available Prompt Sets",
+            box=rich_box.ROUNDED,
+            border_style=COLORS["cello"],
+        )
+        table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+        table.add_column("Name", style="white")
+        table.add_column("Description", style="dim")
+        table.add_column("Tests", style=COLORS["aqua"], justify="right")
+
+        for i, (name, desc, count) in enumerate(prompt_sets, 1):
+            table.add_row(str(i), name, desc, str(count))
+
+        console.print()
+        console.print(table)
+        console.print()
+    else:
+        print("\nAvailable prompt sets:")
+        for i, (name, desc, count) in enumerate(prompt_sets, 1):
+            print(f"  [{i}] {name} ({count} tests) - {desc}")
+        print()
+
+    # Select prompt set
+    while True:
+        try:
+            sel = prompt(f"Select prompt set (1-{len(prompt_sets)})", "1")
+            idx = int(sel) - 1
+            if 0 <= idx < len(prompt_sets):
+                prompt_set = prompt_sets[idx][0]
+                prompt_count = prompt_sets[idx][2]
+                break
+        except ValueError:
+            pass
+        print_error("Invalid selection.")
 
     prompt_file = REPO_ROOT / "Evaluator" / "prompts" / f"{prompt_set}.json"
 
@@ -506,7 +834,7 @@ def eval_menu():
     print_config({
         "Backend": backend,
         "Model": model,
-        "Prompts": prompt_file.name,
+        "Prompts": f"{prompt_file.name} ({prompt_count} tests)",
     }, "Evaluation Configuration")
 
     if not confirm("Start evaluation?"):

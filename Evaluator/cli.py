@@ -11,6 +11,16 @@ import os
 import sys
 from typing import List
 
+# Rich console for colored output (optional)
+try:
+    from rich.console import Console
+    from rich.text import Text
+    _console = Console()
+    _RICH_AVAILABLE = True
+except ImportError:
+    _console = None
+    _RICH_AVAILABLE = False
+
 from .cli_utils import (
     build_metadata,
     build_settings_kwargs,
@@ -147,13 +157,50 @@ def main(argv: List[str] | None = None) -> int:
         retries=config.retries,
     )
 
-    # Run evaluation
+    # Live output callback with colored output
+    def on_record(record):
+        name = record.case.case_id or "unnamed"
+        latency = f"{record.latency_s:.2f}s" if record.latency_s else "-"
+
+        if _RICH_AVAILABLE:
+            line = Text()
+            line.append("  ")
+            if record.passed:
+                line.append("✓ PASS", style="bold green")
+            else:
+                line.append("✗ FAIL", style="bold red")
+            line.append(f"  {name} ", style="white")
+            line.append(f"({latency})", style="dim")
+            _console.print(line)
+
+            if not record.passed:
+                if record.error:
+                    _console.print(f"         [yellow]Error:[/yellow] {record.error}")
+                elif record.validator and not record.validator.passed:
+                    for issue in record.validator.issues[:2]:
+                        _console.print(f"         [dim]-[/dim] [yellow]{issue.message}[/yellow]")
+        else:
+            status = "✓ PASS" if record.passed else "✗ FAIL"
+            print(f"  {status}  {name} ({latency})")
+            if not record.passed:
+                if record.error:
+                    print(f"         Error: {record.error}")
+                elif record.validator and not record.validator.passed:
+                    for issue in record.validator.issues[:2]:
+                        print(f"         - {issue.message}")
+
+    print(f"\nRunning {len(selected_cases)} evaluations...\n")
+
+    # Run evaluation with live output
     records = evaluate_cases(
         selected_cases,
         client=client,
         dry_run=config.dry_run,
         validate_context=args.validate_context,
+        on_record=on_record,
     )
+
+    print()  # Blank line before summary
 
     # Build and save results
     metadata = build_metadata(config, settings, len(cases), len(selected_cases), args.backend)

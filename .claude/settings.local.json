@@ -112,7 +112,12 @@
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/train_fixed.ps1 )",
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/train_unified.ps1 )",
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/upload.ps1 )",
-      "Bash(/mnt/f/Code/Toolset-Training/Trainers/scripts/upload_model.sh:*)"
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/scripts/upload_model.sh:*)",
+      "Bash(for f in Evaluator/prompts/*.json)",
+      "Bash(do echo \"$f:\")",
+      "Bash(done)",
+      "Bash(do)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

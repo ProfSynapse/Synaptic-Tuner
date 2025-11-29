@@ -6,8 +6,8 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from ..upload.core.interfaces import IModelLoader
-from ..upload.core.types import ModelPath
+from upload.core.interfaces import IModelLoader
+from upload.core.types import ModelPath
 
 
 class BaseModelLoader(IModelLoader):
