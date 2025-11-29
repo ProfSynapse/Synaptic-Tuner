@@ -1,6 +1,7 @@
 #!/bin/bash
 # Toolset-Training Unified CLI - Bash wrapper
 # Usage: ./run.sh [train|upload|eval|pipeline]
+# Or: python tuner.py
 
 set -e
 
@@ -17,4 +18,4 @@ elif [ -f /opt/conda/etc/profile.d/conda.sh ]; then
 fi
 
 # Run CLI
-python cli.py "$@"
+python tuner.py "$@"

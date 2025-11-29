@@ -10,9 +10,16 @@ This is a synthetic dataset generation and LLM fine-tuning system designed to tr
 
 ```
 Toolset-Training/
+├── tuner.py               # Unified CLI entry point
+├── run.sh                 # Bash wrapper (auto-activates conda)
+├── run.ps1                # PowerShell wrapper
 ├── Datasets/              # Synthetic training data in ChatML format (JSONL)
 ├── Tools/                 # Dataset validation and analysis utilities
 ├── Trainers/
+│   ├── shared/            # Shared modules across trainers
+│   │   ├── upload/        # Upload framework (SOLID architecture)
+│   │   ├── model_loading/ # Model loader abstractions
+│   │   └── utilities/     # Path, env utilities
 │   ├── mistral_lora_mac/  # Apple Silicon (MLX) LoRA fine-tuning
 │   ├── rtx3090_kto/       # NVIDIA GPU (Unsloth) KTO fine-tuning
 │   └── rtx3090_sft/       # NVIDIA GPU (Unsloth) SFT fine-tuning
@@ -53,43 +60,63 @@ bash setup.sh --with-flash-attn
 
 **Not recommended** - Use WSL2 for best compatibility. Windows has known issues with multiprocessing and some dependencies.
 
+### Unified CLI (Recommended)
+
+The project now has a unified CLI that handles all operations from the repo root:
+
+```bash
+# Interactive mode (recommended)
+python tuner.py
+
+# Direct commands
+python tuner.py train     # Training submenu
+python tuner.py upload    # Upload submenu
+python tuner.py eval      # Evaluation submenu
+python tuner.py pipeline  # Full pipeline (train -> upload -> eval)
+
+# Platform wrappers (auto-detect conda)
+./run.sh          # Bash/WSL
+.\run.ps1         # PowerShell
+```
+
+**Features:**
+- Cross-platform (WSL, Linux, Windows, Mac)
+- Auto-detects conda environment
+- Interactive menus with configuration preview
+- Supports all platforms: NVIDIA RTX (SFT/KTO) and Apple Silicon (MLX)
+- Full pipeline automation
+
 ### Training
+
+> **Recommended:** Use `python tuner.py train` from repo root for interactive training setup.
 
 #### SFT (Supervised Fine-Tuning) - RECOMMENDED FOR INITIAL TRAINING
 
 Use SFT to teach the model tool-calling behavior from scratch. SFT uses direct supervision with only positive examples.
 
-**WSL2 / Linux:**
+**Via Unified CLI (Recommended):**
+
+```bash
+# From repo root - interactive selection of platform, method, model size, dataset
+python tuner.py train
+```
+
+**Direct Python (Advanced):**
 
 ```bash
 cd Trainers/rtx3090_sft
 
 # Recommended: 7B model training (uses default SFT dataset)
-./train.sh --model-size 7b
+python train_sft.py --model-size 7b
 
 # With custom dataset
-./train.sh --model-size 7b --local-file ../../Datasets/my_data.jsonl
+python train_sft.py --model-size 7b --local-file ../../Datasets/my_data.jsonl
 
 # With W&B logging
-./train.sh --model-size 7b --wandb --wandb-project my-project
-
-# Direct Python invocation
-python train_sft.py --model-size 7b --batch-size 6 --gradient-accumulation 4
+python train_sft.py --model-size 7b --wandb --wandb-project my-project
 
 # Dry run (setup without training)
 python train_sft.py --model-size 7b --dry-run
-```
-
-**Windows PowerShell:**
-
-```powershell
-cd Trainers\rtx3090_sft
-
-# Interactive training script (checks everything, prompts for confirmation)
-.\train.ps1
-
-# Direct Python (manual)
-python train_sft.py --model-size 7b --local-file "..\..\Datasets\syngen_tools_sft_11.18.25.jsonl"
 ```
 
 **SFT Configuration:**
@@ -104,37 +131,30 @@ python train_sft.py --model-size 7b --local-file "..\..\Datasets\syngen_tools_sf
 
 Use KTO to refine an already-trained model by teaching it to prefer better tool calls over worse ones.
 
-**WSL2 / Linux:**
+**Via Unified CLI (Recommended):**
+
+```bash
+# From repo root - interactive selection
+python tuner.py train
+# Then select: NVIDIA GPU -> KTO
+```
+
+**Direct Python (Advanced):**
 
 ```bash
 cd Trainers/rtx3090_kto
 
 # Recommended: 7B model training (uses default KTO dataset)
-./train.sh --model-size 7b
+python train_kto.py --model-size 7b
 
 # With custom dataset
-./train.sh --model-size 7b --local-file ../../Datasets/my_data.jsonl
+python train_kto.py --model-size 7b --local-file ../../Datasets/my_data.jsonl
 
 # With W&B logging
-./train.sh --model-size 7b --wandb --wandb-project my-project
-
-# Direct Python invocation
-python train_kto.py --model-size 7b --batch-size 4 --gradient-accumulation 6
+python train_kto.py --model-size 7b --wandb --wandb-project my-project
 
 # Dry run (setup without training)
 python train_kto.py --model-size 7b --dry-run
-```
-
-**Windows PowerShell:**
-
-```powershell
-cd Trainers\rtx3090_kto
-
-# Interactive training script (checks everything, prompts for confirmation)
-.\train.ps1
-
-# Direct Python (manual)
-python train_kto.py --local-file "..\..\Datasets\syngen_tools_11.18.25.jsonl"
 ```
 
 **KTO Configuration:**
@@ -147,13 +167,17 @@ python train_kto.py --local-file "..\..\Datasets\syngen_tools_11.18.25.jsonl"
 
 **Model size options:** `3b` (fast), `7b` (recommended), `13b` (quality), `20b` (specialized)
 
-**Note:** Both PowerShell scripts automatically:
-- Find Python from `unsloth_env` conda environment
-- Check disk space and CUDA availability
-- Use the appropriate default dataset
-- Show configuration summary before training
-
 ### Training (Mac / Apple Silicon)
+
+**Via Unified CLI (Recommended):**
+
+```bash
+# From repo root - interactive selection
+python tuner.py train
+# Then select: Apple Silicon (M1/M2/M3)
+```
+
+**Direct Python (Advanced):**
 
 ```bash
 cd Trainers/mistral_lora_mac
@@ -170,7 +194,9 @@ python main.py --config config/config.yaml --resume checkpoints/best_checkpoint.
 
 ### Model Upload to HuggingFace
 
-**NEW:** Upload scripts now organize all artifacts within your training run directory:
+> **Recommended:** Use `python tuner.py upload` from repo root for interactive upload setup.
+
+Upload organizes all artifacts within your training run directory:
 
 ```
 sft_output_rtx3090/YYYYMMDD_HHMMSS/
@@ -196,15 +222,13 @@ sft_output_rtx3090/YYYYMMDD_HHMMSS/
 - Automatic cleanup of temporary files (~14GB saved per upload)
 - Complete traceability via manifest
 
-#### WSL2 / Linux (Interactive)
+#### Via Unified CLI (Recommended)
 
 ```bash
-cd Trainers/rtx3090_sft  # or rtx3090_kto
+# From repo root - interactive selection
+python tuner.py upload
 
-# Interactive script - select training run, configure options
-./upload_model.sh
-
-# The script will:
+# The CLI will:
 # 1. List available training runs
 # 2. Prompt for model name
 # 3. Select save method (16bit/4bit/lora)
@@ -213,8 +237,11 @@ cd Trainers/rtx3090_sft  # or rtx3090_kto
 # 6. Upload and create manifest/README
 ```
 
-**Direct Python invocation:**
+#### Direct Python (Advanced)
+
 ```bash
+cd Trainers/rtx3090_sft  # or rtx3090_kto
+
 python src/upload_to_hf.py \
   ./sft_output_rtx3090/20251122_143000/final_model \
   username/model-name \
@@ -229,27 +256,6 @@ python src/upload_to_hf.py \
 - `merged_16bit` - Full quality, ~14GB (recommended)
 - `merged_4bit` - Smaller size, ~3.5GB
 - `lora` - LoRA adapters only, ~320MB
-
-#### Windows PowerShell (Interactive)
-
-```powershell
-cd Trainers\rtx3090_sft  # or rtx3090_kto
-
-# Interactive upload script (enhanced)
-# - Lists available training runs
-# - Prompts for model name
-# - Select format (16bit/4bit/lora)
-# - Option to create GGUF versions
-# - Shows organized directory structure
-.\upload_model.ps1
-```
-
-**Features:**
-- Automatically finds Python from conda environment
-- Loads HF_TOKEN from root `.env` file
-- Shows complete upload summary with directory structure
-- Creates organized artifacts in training run directory
-- Auto-cleanup of temporary files after upload
 
 ### GGUF Creation (Integrated)
 
@@ -806,38 +812,17 @@ HF_HOME=/path/to/cache
 
 ## Script Reference
 
-### WSL2 / Linux Scripts
+### Unified CLI (Recommended)
 
-**Setup:**
-- `Trainers/rtx3090_kto/setup.sh` - Full environment setup with verification
+**Main entry point:**
+- `tuner.py` - Unified CLI for all operations (train, upload, eval, pipeline)
+- `run.sh` - Bash wrapper (auto-activates conda)
+- `run.ps1` - PowerShell wrapper (auto-finds conda python)
 
-**Training:**
-- `Trainers/rtx3090_kto/train.sh` - Training wrapper (uses conda, passes args to train_kto.py)
-- `Trainers/rtx3090_kto/train_kto.py` - Main training script (Python)
+### Setup Scripts
 
-**Upload:**
-- `Trainers/rtx3090_kto/upload_model.sh` - Upload to HuggingFace
-- `Trainers/rtx3090_kto/src/upload_to_hf.py` - Upload script (Python)
-
-**Other:**
-- `Trainers/rtx3090_kto/run_dry_run.sh` - Dry run wrapper
-- `Trainers/rtx3090_kto/train_run8.sh` - Legacy training script
-
-### Windows PowerShell Scripts
-
-**Training:**
-- `Trainers/rtx3090_sft/train.ps1` - Interactive SFT training (checks prereqs, prompts confirmation)
-- `Trainers/rtx3090_kto/train.ps1` - Interactive KTO training (checks prereqs, prompts confirmation)
-
-**Upload:**
-- `Trainers/rtx3090_kto/upload_model.ps1` - Interactive upload (select model, format, GGUF options)
-
-**GGUF:**
-- `Trainers/rtx3090_kto/create_gguf.ps1` - Create GGUF quantizations (Q4_K_M, Q5_K_M, Q8_0)
-- `Trainers/rtx3090_kto/check_gguf_requirements.ps1` - Verify GGUF dependencies
-
-**Setup:**
-- `setup_unsloth_windows.ps1` (root) - Windows setup script
+- `Trainers/rtx3090_kto/setup.sh` - Full NVIDIA environment setup with verification
+- `Trainers/rtx3090_sft/setup.sh` - Full NVIDIA environment setup with verification
 
 ### Python Scripts (Cross-platform)
 
@@ -852,11 +837,25 @@ HF_HOME=/path/to/cache
 - `Trainers/rtx3090_kto/src/model_loader.py` - Model loading with Unsloth (shared)
 - `Trainers/rtx3090_kto/src/kto_s_trainer.py` - Custom KTO trainer with SIGN correction
 
-**Utilities:**
-- `Trainers/rtx3090_kto/src/upload_to_hf.py` - HuggingFace upload
+**Shared Upload Framework:**
+- `Trainers/shared/upload/` - Shared upload module (SOLID architecture)
+  - `core/` - Interfaces, types, config, exceptions
+  - `strategies/` - Save strategies (LoRA, 16-bit, 4-bit)
+  - `converters/` - GGUF converter
+  - `uploaders/` - HuggingFace uploader
+  - `documentation/` - Manifest, model card, README generators
+  - `platform/` - GPU memory, Windows patches, filesystem utilities
+  - `orchestrator.py` - Upload workflow orchestration
+  - `cli/upload_cli.py` - CLI interface
+
+**Upload Thin Wrappers:**
+- `Trainers/rtx3090_sft/src/upload_to_hf.py` - SFT upload (delegates to shared)
+- `Trainers/rtx3090_kto/src/upload_to_hf.py` - KTO upload (delegates to shared)
+
+**Other Utilities:**
 - `Trainers/rtx3090_kto/src/inference.py` - Inference utilities
-- `Trainers/rtx3090_sft/src/training_callbacks.py` - Training callbacks (shared)
-- `Trainers/rtx3090_kto/src/training_callbacks.py` - Training callbacks (shared)
+- `Trainers/rtx3090_sft/src/training_callbacks.py` - Training callbacks
+- `Trainers/rtx3090_kto/src/training_callbacks.py` - Training callbacks
 - `Trainers/rtx3090_kto/src/adaptive_memory.py` - Adaptive memory management
 - `Trainers/rtx3090_kto/check_config.py` - Config verification
 - `Trainers/rtx3090_kto/check_gpu_setup.py` - GPU verification

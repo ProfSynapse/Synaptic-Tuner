@@ -97,7 +97,22 @@
       "WebFetch(domain:docs.nebius.com)",
       "Bash(read -p \"Delete? [shown for reference]\")",
       "WebFetch(domain:qwen.readthedocs.io)",
-      "WebFetch(domain:lawwu.github.io)"
+      "WebFetch(domain:lawwu.github.io)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_kto/train.sh:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_kto/upload_model.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_kto/upload_model.sh:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/train.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/train.sh:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/upload_model.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/upload_model.sh )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/train.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/train.sh:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/train_fixed.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/train_unified.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/upload.ps1 )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/scripts/upload_model.sh:*)"
     ],
     "deny": [],
     "ask": []

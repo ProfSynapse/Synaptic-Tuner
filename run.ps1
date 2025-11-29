@@ -1,5 +1,6 @@
 # Toolset-Training Unified CLI - PowerShell wrapper
 # Usage: .\run.ps1 [train|upload|eval|pipeline]
+# Or: python tuner.py
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -27,4 +28,4 @@ if (-not $Python) {
 }
 
 # Run CLI
-& $Python cli.py @args
+& $Python tuner.py @args
