@@ -95,7 +95,9 @@
       "Bash(pip show:*)",
       "Bash(ollama list:*)",
       "WebFetch(domain:docs.nebius.com)",
-      "Bash(read -p \"Delete? [shown for reference]\")"
+      "Bash(read -p \"Delete? [shown for reference]\")",
+      "WebFetch(domain:qwen.readthedocs.io)",
+      "WebFetch(domain:lawwu.github.io)"
     ],
     "deny": [],
     "ask": []
