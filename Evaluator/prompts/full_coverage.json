@@ -426,7 +426,7 @@
   },
   {
     "id": "contentManager_replaceContent",
-    "question": "Overwrite the body of Projects/Briefings/Weekly-Exec.md with a fresh outline: Objectives, Progress, Risks, and Next Steps.",
+    "question": "In Projects/Briefings/Weekly-Exec.md, replace the introduction paragraph that starts with \"Welcome to this week's executive briefing\" with the following new text:\n\n\"This executive summary covers Q4 progress on the Atlas rollout. Key metrics show 85% completion with all critical milestones on track.\"",
     "tags": [
       "contentManager",
       "single-tool"
@@ -434,7 +434,7 @@
     "expected_tools": [
       "contentManager_replaceContent"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<file_content path=\"Projects/Briefings/Weekly-Exec.md\">\n# Weekly Executive Briefing\n\nWelcome to this week's executive briefing. This document provides an overview of ongoing initiatives and their current status across all departments.\n\n## Current Initiatives\n\n### Atlas Customer Rollout\n- Phase 1: Complete\n- Phase 2: In Progress (75%)\n- Phase 3: Scheduled for Q1\n\n### Infrastructure Updates\n- Server migration: On track\n- Security patches: Applied\n\n## Action Items\n1. Review Q4 budget allocations\n2. Finalize vendor contracts\n3. Schedule stakeholder meetings\n\n## Next Steps\nThe team will reconvene Friday to assess progress and adjust timelines as needed.\n</file_content>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
