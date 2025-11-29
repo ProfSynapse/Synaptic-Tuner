@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "tools_sft_v1.3_11.27.25.jsonl"  # Tool calling examples only (5,286 examples)
+  dataset_file: "tools-sft_v1.4_11.28.25.jsonl"  # 8,036 examples (66% tool calls, 34% text-only)
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/tools_sft_v1.3_11.27.25.jsonl"
+  local_file: "../../Datasets/tools-sft_v1.4_11.28.25.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
@@ -107,6 +107,6 @@ seed: 42
 # Notes:
 # - This is optimized for RTX 3090 24GB VRAM
 # - Expected VRAM usage: ~7-9GB for 7B model
-# - Training time: ~45 minutes for 3 epochs with 5,841 examples
+# - Training time: ~60 minutes for 3 epochs with 8,036 examples
 # - For 3B models: increase batch_size to 12, reduce to ~12GB VRAM
 # - For 13B models: reduce batch_size to 4, expect ~14GB VRAM

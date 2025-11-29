@@ -42,11 +42,143 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from unsloth import FastLanguageModel
 from huggingface_hub import HfApi
 import gc
 import time
+import torch
+
+
+def get_gpu_memory_info() -> Tuple[float, float, float]:
+    """
+    Get GPU memory information in GB.
+
+    Returns:
+        Tuple of (used_gb, total_gb, free_gb)
+    """
+    if not torch.cuda.is_available():
+        return (0.0, 0.0, 0.0)
+
+    try:
+        # Get memory info in bytes
+        total = torch.cuda.get_device_properties(0).total_memory
+        reserved = torch.cuda.memory_reserved(0)
+        allocated = torch.cuda.memory_allocated(0)
+
+        # Free memory is total minus reserved (reserved includes allocated + cached)
+        free = total - reserved
+        used = reserved
+
+        # Convert to GB
+        return (used / 1024**3, total / 1024**3, free / 1024**3)
+    except Exception:
+        return (0.0, 0.0, 0.0)
+
+
+def clear_gpu_cache() -> float:
+    """
+    Clear GPU cache and return freed memory in GB.
+
+    Returns:
+        Amount of memory freed in GB
+    """
+    if not torch.cuda.is_available():
+        return 0.0
+
+    before_used, _, _ = get_gpu_memory_info()
+
+    # Force garbage collection
+    gc.collect()
+
+    # Clear CUDA cache
+    torch.cuda.empty_cache()
+
+    # Synchronize to ensure cache is cleared
+    torch.cuda.synchronize()
+
+    after_used, _, _ = get_gpu_memory_info()
+    freed = before_used - after_used
+
+    return max(0.0, freed)
+
+
+def ensure_gpu_memory(
+    required_gb: float,
+    operation_name: str = "operation",
+    auto_clear: bool = True
+) -> bool:
+    """
+    Ensure sufficient GPU memory is available for an operation.
+
+    Args:
+        required_gb: Required GPU memory in GB
+        operation_name: Name of the operation (for logging)
+        auto_clear: Whether to automatically clear cache if needed
+
+    Returns:
+        True if sufficient memory is available, False otherwise
+    """
+    if not torch.cuda.is_available():
+        print(f"⚠ No CUDA GPU available")
+        return False
+
+    used_gb, total_gb, free_gb = get_gpu_memory_info()
+
+    print(f"\n{'='*60}")
+    print(f"GPU MEMORY CHECK")
+    print(f"{'='*60}")
+    print(f"Operation: {operation_name}")
+    print(f"Required: ~{required_gb:.1f} GB")
+    print(f"Available: {free_gb:.1f} GB / {total_gb:.1f} GB total")
+    print(f"Currently used: {used_gb:.1f} GB")
+
+    if free_gb >= required_gb:
+        print(f"✓ Sufficient GPU memory available")
+        return True
+
+    if auto_clear:
+        print(f"\n⚠ Insufficient memory ({free_gb:.1f} GB < {required_gb:.1f} GB required)")
+        print(f"Attempting to clear GPU cache...")
+
+        freed_gb = clear_gpu_cache()
+
+        # Recheck after clearing
+        used_gb, total_gb, free_gb = get_gpu_memory_info()
+        print(f"Freed: {freed_gb:.1f} GB")
+        print(f"Available after clearing: {free_gb:.1f} GB")
+
+        if free_gb >= required_gb:
+            print(f"✓ Sufficient GPU memory now available")
+            return True
+
+    # Still not enough
+    shortfall = required_gb - free_gb
+    print(f"\n✗ Still insufficient GPU memory")
+    print(f"  Need {shortfall:.1f} GB more")
+    print(f"\nSuggestions:")
+    print(f"  1. Close other applications using GPU (check: nvidia-smi)")
+    print(f"  2. Restart your terminal/Python session")
+    print(f"  3. Use --save-method lora (no GPU needed for upload)")
+    print(f"  4. Run from a fresh terminal session")
+
+    return False
+
+
+# Estimated GPU memory requirements (in GB) for different operations
+GPU_MEMORY_REQUIREMENTS = {
+    "7b_merge_16bit": 14.0,
+    "7b_merge_4bit": 8.0,
+    "7b_gguf": 14.0,
+    "3b_merge_16bit": 7.0,
+    "3b_merge_4bit": 4.0,
+    "3b_gguf": 7.0,
+    "13b_merge_16bit": 26.0,
+    "13b_merge_4bit": 14.0,
+    "13b_gguf": 26.0,
+    "default_merge": 14.0,  # Assume 7B
+    "default_gguf": 14.0,
+}
 
 # Load .env file if it exists
 try:
@@ -141,6 +273,17 @@ def save_local_copy(
         if temp_dir:
             os.chdir(temp_dir)
 
+        # Check GPU memory before loading model
+        required_key = f"7b_merge_{'16bit' if '16bit' in save_method else '4bit'}"
+        required_gb = GPU_MEMORY_REQUIREMENTS.get(required_key, GPU_MEMORY_REQUIREMENTS["default_merge"])
+
+        if not ensure_gpu_memory(required_gb, f"Local save ({save_method})"):
+            raise RuntimeError(
+                f"Insufficient GPU memory for local save. "
+                f"Try --save-method lora or free up GPU memory."
+            )
+        print()  # Add spacing after memory check
+
         # Load and save merged model
         print("Loading model for local save...")
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -229,6 +372,18 @@ def upload_standard_model(
         os.chdir(temp_dir)
         print(f"Working directory: {os.getcwd()}\n")
 
+        # Check GPU memory before loading model (not needed for LoRA-only)
+        if save_method != "lora":
+            required_key = f"7b_merge_{'16bit' if '16bit' in save_method else '4bit'}"
+            required_gb = GPU_MEMORY_REQUIREMENTS.get(required_key, GPU_MEMORY_REQUIREMENTS["default_merge"])
+
+            if not ensure_gpu_memory(required_gb, f"Model merge ({save_method})"):
+                raise RuntimeError(
+                    f"Insufficient GPU memory for {save_method}. "
+                    f"Try --save-method lora or free up GPU memory."
+                )
+            print()  # Add spacing after memory check
+
         # Load model and tokenizer
         print("Loading model and tokenizer...")
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -304,6 +459,15 @@ def create_gguf_versions(
     temp_work_dir = Path(tempfile.mkdtemp(prefix='gguf_work_', dir=str(tmp_base)))
 
     try:
+        # Check GPU memory before loading model for GGUF creation
+        required_gb = GPU_MEMORY_REQUIREMENTS.get("default_gguf", 14.0)
+        if not ensure_gpu_memory(required_gb, "GGUF creation (16-bit merge)"):
+            raise RuntimeError(
+                f"Insufficient GPU memory for GGUF creation. "
+                f"Need ~{required_gb:.0f} GB to merge model to 16-bit."
+            )
+        print()  # Add spacing after memory check
+
         # First, save merged model to temp location
         merged_dir = temp_work_dir / "merged_model"
         print("[1/4] Saving merged model locally...")
