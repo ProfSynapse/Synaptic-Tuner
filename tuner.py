@@ -313,6 +313,57 @@ def _train_mac():
 # UPLOAD MENU
 # =============================================================================
 
+def _select_model_checkpoint(run_dir: Path) -> Path:
+    """
+    Select between final_model and specific checkpoints.
+
+    Args:
+        run_dir: Path to training run directory
+
+    Returns:
+        Path to selected model/checkpoint, or None if cancelled
+    """
+    # Build list of available models
+    options = []
+
+    # Final model (if exists)
+    final_model = run_dir / "final_model"
+    if final_model.exists():
+        options.append(("final", f"{BOX['star']} final_model (recommended)"))
+
+    # Checkpoints
+    checkpoints_dir = run_dir / "checkpoints"
+    if checkpoints_dir.exists():
+        checkpoints = sorted(
+            [d for d in checkpoints_dir.iterdir() if d.is_dir() and d.name.startswith("checkpoint-")],
+            key=lambda x: int(x.name.split("-")[1]),
+            reverse=True  # Most recent first
+        )
+        for cp in checkpoints:
+            step = cp.name.split("-")[1]
+            options.append((cp.name, f"{BOX['bullet']} {cp.name} (step {step})"))
+
+    if not options:
+        print_error("No models found in training run")
+        return None
+
+    # If only final_model exists, use it directly
+    if len(options) == 1 and options[0][0] == "final":
+        print_info("Using final_model")
+        return final_model
+
+    # Let user choose
+    choice = print_menu(options, "Select model to upload:")
+
+    if not choice:
+        return None
+
+    if choice == "final":
+        return final_model
+    else:
+        return checkpoints_dir / choice
+
+
 def upload_menu():
     """Upload submenu - push model to HuggingFace."""
     print_header("UPLOAD", "Push your model to HuggingFace")
@@ -374,7 +425,10 @@ def upload_menu():
             pass
         print_error("Invalid selection.")
 
-    model_path = selected_run / "final_model"
+    # Select checkpoint or final model
+    model_path = _select_model_checkpoint(selected_run)
+    if not model_path:
+        return
 
     # Get repo ID
     repo_id = prompt("HuggingFace repo ID (username/model-name)")
