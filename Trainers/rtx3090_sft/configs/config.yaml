@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
-  dataset_file: "tools-sft_v1.4_11.28.25.jsonl"  # 8,036 examples (66% tool calls, 34% text-only)
+  dataset_file: "tools_sft_v1.5_11.29.25.jsonl"  # 6,794 examples (removed 10 corrupted)
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/tools-sft_v1.4_11.28.25.jsonl"
+  local_file: "../../Datasets/tools_sft_v1.5_11.29.25.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

@@ -68,17 +68,21 @@ def create_interleaved_dataset(examples: List[Dict]) -> List[Dict]:
 def main():
     # Configuration
     behavior_datasets_dir = Path(__file__).parent.parent / "behavior_datasets"
-    output_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.jsonl"
+    output_file = Path(__file__).parent.parent / "behavior_merged_kto_v1.5_11.29.25.jsonl"
 
-    # All behavior categories now use v1.3 (with text-only response examples added)
-    behaviors_v1_3 = [
-        "context_continuity",
-        "context_efficiency",
+    # Datasets updated to v1.4 (fixed destructive+ambiguous → TEXT clarification)
+    behaviors_v1_4 = [
         "error_recovery",
-        "execute_prompt_usage",
         "intellectual_humility",
         "strategic_tool_selection",
         "verification_before_action",
+    ]
+
+    # Datasets remaining at v1.3 (no issues found)
+    behaviors_v1_3 = [
+        "context_continuity",
+        "context_efficiency",
+        "execute_prompt_usage",
         "workspace_awareness",
     ]
 
@@ -99,11 +103,30 @@ def main():
     ]
 
     # Load all datasets
-    print("Loading behavior datasets (v1.3 with text-only examples)...")
+    print("Loading behavior datasets (v1.4 with clarification fixes)...")
     all_examples = []
     behavior_stats = {}
 
-    # Load v1.3 datasets (with text-only response examples added)
+    # Load v1.4 datasets (fixed destructive+ambiguous → TEXT clarification)
+    for behavior in behaviors_v1_4:
+        file_path = behavior_datasets_dir / behavior / "pairs_v1.4.jsonl"
+        if file_path.exists():
+            examples = load_dataset(file_path)
+            all_examples.extend(examples)
+
+            positive = sum(1 for ex in examples if ex.get('label') is True)
+            negative = sum(1 for ex in examples if ex.get('label') is False)
+            behavior_stats[behavior] = {
+                "total": len(examples),
+                "positive": positive,
+                "negative": negative,
+                "version": "v1.4"
+            }
+            print(f"  {behavior} (v1.4): {len(examples)} examples ({positive} positive, {negative} negative)")
+        else:
+            print(f"  WARNING: {file_path} not found")
+
+    # Load v1.3 datasets (no issues found, staying at v1.3)
     for behavior in behaviors_v1_3:
         file_path = behavior_datasets_dir / behavior / "pairs_v1.3.jsonl"
         if file_path.exists():
@@ -197,11 +220,12 @@ def main():
     all_ask_first = [a[0] for a in ask_first]
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "behavior_datasets merge 11.28.25 (v1.3 with text-only response examples)",
+        "source": "behavior_datasets merge v1.5 11.29.25",
+        "behaviors_v1_4": behaviors_v1_4,
         "behaviors_v1_3": behaviors_v1_3,
         "response_patterns": all_patterns,
         "ask_first": all_ask_first,
-        "all_datasets": behaviors_v1_3 + all_patterns + all_ask_first,
+        "all_datasets": behaviors_v1_4 + behaviors_v1_3 + all_patterns + all_ask_first,
         "behavior_stats": behavior_stats,
         "total_examples": len(interleaved),
         "positive_examples": total_positive,
@@ -209,7 +233,7 @@ def main():
         "interleaved": True,
         "consecutive_same_labels": consecutive_same,
         "format": "KTO-compatible ChatML with interleaved labels",
-        "notes": "v1.3 includes ~30% text-only response examples teaching when NOT to use tools"
+        "notes": "v1.4 fixes: destructive+ambiguous requests now use TEXT clarification instead of TOOL"
     }
 
     metadata_file = output_file.with_suffix('.metadata.json')

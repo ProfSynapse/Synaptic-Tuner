@@ -47,16 +47,25 @@ def main():
     # Configuration
     tools_datasets_dir = Path(__file__).parent.parent / "tools_datasets"
     output_dir = Path(__file__).parent.parent
-    version = "1.0"
-    output_file = output_dir / f"syngen_tools_sft_merged_v{version}.jsonl"
+    output_file = output_dir / "tools_sft_v1.5_11.29.25.jsonl"
+
+    # Agent versions - use v1.4 where available (corrupted data removed)
+    agent_versions = {
+        "agentManager": "v1.3",
+        "contentManager": "v1.4",   # 4 corrupted examples removed
+        "memoryManager": "v1.4",    # 6 corrupted examples removed
+        "vaultLibrarian": "v1.3",
+        "vaultManager": "v1.3"
+    }
 
     # Load all datasets
-    print("Loading tools datasets...")
+    print("Loading tools datasets (v1.4 with corrupted data removed)...")
     all_examples = []
     agent_stats = {}
 
     for agent in AGENTS:
-        file_path = tools_datasets_dir / agent / "tools_v1.0.jsonl"
+        version = agent_versions[agent]
+        file_path = tools_datasets_dir / agent / f"tools_{version}.jsonl"
         if file_path.exists():
             examples = load_dataset(file_path)
             all_examples.extend(examples)
@@ -70,9 +79,10 @@ def main():
                 "total": len(examples),
                 "positive": positive,
                 "negative": negative,
-                "no_label": no_label
+                "no_label": no_label,
+                "version": version
             }
-            print(f"  {agent}: {len(examples)} examples")
+            print(f"  {agent} ({version}): {len(examples)} examples")
         else:
             print(f"  WARNING: {file_path} not found")
 
@@ -99,16 +109,18 @@ def main():
     # Write metadata file
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "tools_datasets merge",
-        "version": version,
+        "source": "tools_datasets merge v1.5 11.29.25",
+        "version": "1.5",
         "agents": AGENTS,
+        "agent_versions": agent_versions,
         "agent_stats": agent_stats,
         "total_examples": len(all_examples),
         "positive_examples": total_positive,
         "negative_examples": total_negative,
         "no_label_examples": total_no_label,
         "shuffled": True,
-        "format": "SFT-compatible ChatML"
+        "format": "SFT-compatible ChatML",
+        "notes": "v1.5 fixes: removed 10 corrupted examples (malformed responses) from contentManager and memoryManager"
     }
 
     metadata_file = output_file.with_suffix('.metadata.json')

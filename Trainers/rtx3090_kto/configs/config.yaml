@@ -25,7 +25,7 @@ training:
   per_device_train_batch_size: 4
   gradient_accumulation_steps: 4
   beta: 0.3
-  desirable_weight: 0.7
+  desirable_weight: 1.0
   undesirable_weight: 1.0
   learning_rate: 3e-7
   max_grad_norm: 0.5
@@ -52,8 +52,8 @@ training:
   eval_steps: 100
 dataset:
   dataset_name: professorsynapse/claudesidian-synthetic-dataset
-  dataset_file: behavior_merged_kto_11.28.25.jsonl  # Behavioral + response patterns with system prompts (2,288 examples)
-  local_file: ../../Datasets/behavior_merged_kto_11.28.25.jsonl
+  dataset_file: behavior_merged_kto_v1.5_11.29.25.jsonl  # 4,268 examples (198 clarification fixes)
+  local_file: ../../Datasets/behavior_merged_kto_v1.5_11.29.25.jsonl
   num_proc: 1
   test_size: 0.1
   chat_template: chatml
