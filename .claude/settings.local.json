@@ -117,7 +117,9 @@
       "Bash(do echo \"$f:\")",
       "Bash(done)",
       "Bash(do)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(conda info:*)",
+      "Bash(./run.sh:*)"
     ],
     "deny": [],
     "ask": []

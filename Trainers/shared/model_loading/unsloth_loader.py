@@ -2,8 +2,9 @@
 Unsloth model loader implementation.
 """
 
+import json
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from .base import BaseModelLoader
 from upload.core.types import ModelPath
@@ -15,7 +16,20 @@ class UnslothModelLoader(BaseModelLoader):
     Model loader using Unsloth optimizations.
 
     Unsloth provides 2x faster loading and training with optimized kernels.
+    Supports both language models (FastLanguageModel) and vision-language
+    models (FastVisionModel).
     """
+
+    # Model classes that require FastVisionModel
+    VL_MODEL_CLASSES = [
+        "Qwen2VLForConditionalGeneration",
+        "Qwen3VLForConditionalGeneration",
+        "LlavaForConditionalGeneration",
+        "LlavaNextForConditionalGeneration",
+        "Idefics2ForConditionalGeneration",
+        "PaliGemmaForConditionalGeneration",
+        "Pixtral",
+    ]
 
     @property
     def name(self) -> str:
@@ -30,6 +44,7 @@ class UnslothModelLoader(BaseModelLoader):
         """
         super().__init__(max_seq_length)
         self._FastLanguageModel = None
+        self._FastVisionModel = None
 
     def _get_fast_language_model(self):
         """
@@ -46,6 +61,69 @@ class UnslothModelLoader(BaseModelLoader):
                 ) from e
         return self._FastLanguageModel
 
+    def _get_fast_vision_model(self):
+        """
+        Lazily import FastVisionModel for vision-language models.
+        """
+        if self._FastVisionModel is None:
+            try:
+                from unsloth import FastVisionModel
+                self._FastVisionModel = FastVisionModel
+            except ImportError as e:
+                raise DependencyError(
+                    "unsloth",
+                    "FastVisionModel requires unsloth with VL support. "
+                    "Install with: pip install unsloth"
+                ) from e
+        return self._FastVisionModel
+
+    def _is_vision_model(self, model_path: str) -> bool:
+        """
+        Detect if model is a vision-language model by checking adapter_config.json.
+
+        Args:
+            model_path: Path to the model directory
+
+        Returns:
+            True if this is a VL model, False otherwise
+        """
+        path = Path(model_path)
+
+        # Check adapter_config.json for base_model_class
+        adapter_config = path / "adapter_config.json"
+        if adapter_config.exists():
+            try:
+                with open(adapter_config, 'r') as f:
+                    config = json.load(f)
+
+                # Check auto_mapping for base_model_class
+                auto_mapping = config.get("auto_mapping", {})
+                base_model_class = auto_mapping.get("base_model_class", "")
+
+                if any(vl_class in base_model_class for vl_class in self.VL_MODEL_CLASSES):
+                    return True
+
+                # Also check base_model_name_or_path for common VL model names
+                base_name = config.get("base_model_name_or_path", "").lower()
+                if any(vl_name in base_name for vl_name in ["qwen2-vl", "qwen3-vl", "llava", "pixtral", "paligemma"]):
+                    return True
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        # Check config.json for model_type
+        config_json = path / "config.json"
+        if config_json.exists():
+            try:
+                with open(config_json, 'r') as f:
+                    config = json.load(f)
+                model_type = config.get("model_type", "").lower()
+                if any(vl_type in model_type for vl_type in ["qwen2_vl", "qwen3_vl", "llava", "pixtral"]):
+                    return True
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        return False
+
     def load_model(
         self,
         model_path: ModelPath,
@@ -55,6 +133,8 @@ class UnslothModelLoader(BaseModelLoader):
         """
         Load model and tokenizer using Unsloth.
 
+        Automatically detects vision-language models and uses FastVisionModel.
+
         Args:
             model_path: Path to the model or HuggingFace model ID
             load_in_4bit: Whether to load in 4-bit quantization
@@ -63,10 +143,19 @@ class UnslothModelLoader(BaseModelLoader):
         Returns:
             Tuple of (model, tokenizer)
         """
-        FastLanguageModel = self._get_fast_language_model()
+        model_path_str = str(model_path)
 
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=str(model_path),
+        # Detect if this is a vision-language model
+        is_vl = self._is_vision_model(model_path_str)
+
+        if is_vl:
+            print("Detected Vision-Language model, using FastVisionModel...")
+            FastModel = self._get_fast_vision_model()
+        else:
+            FastModel = self._get_fast_language_model()
+
+        model, tokenizer = FastModel.from_pretrained(
+            model_name=model_path_str,
             max_seq_length=config.get("max_seq_length", self.max_seq_length),
             dtype=config.get("dtype", None),
             load_in_4bit=load_in_4bit,
