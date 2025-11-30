@@ -88,7 +88,16 @@ def load_model_and_tokenizer(
 
     # Verify model loaded correctly
     print(f"\n✓ Model loaded: {model.config._name_or_path}")
-    print(f"✓ Tokenizer vocab size: {len(tokenizer)}")
+    # Handle both tokenizers and processors (VL models)
+    try:
+        vocab_size = len(tokenizer)
+        print(f"✓ Tokenizer vocab size: {vocab_size}")
+    except TypeError:
+        # Vision-Language models use Processors instead of Tokenizers
+        if hasattr(tokenizer, 'tokenizer'):
+            print(f"✓ Processor tokenizer vocab size: {len(tokenizer.tokenizer)}")
+        else:
+            print(f"✓ Processor loaded (VL model)")
 
     # Check CUDA availability
     if torch.cuda.is_available():

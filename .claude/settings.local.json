@@ -120,7 +120,8 @@
       "Bash(echo:*)",
       "Bash(conda info:*)",
       "Bash(./run.sh:*)",
-      "Bash(/usr/bin/python3:*)"
+      "Bash(/usr/bin/python3:*)",
+      "Bash(wsl:*)"
     ],
     "deny": [],
     "ask": []
