@@ -117,28 +117,37 @@ def detect_environment() -> str:
         return "linux"
 
 
+# Standard Unsloth environment - always use unsloth_latest
+UNSLOTH_ENV = "unsloth_latest"
+UNSLOTH_VERSION = "2025.11.4"
+
+
 def get_conda_python() -> str:
-    """Find Python from conda environment."""
+    """Find Python from unsloth_latest conda environment."""
     env = detect_environment()
 
     if env == "windows":
         paths = [
-            Path(os.environ.get("USERPROFILE", "")) / "miniconda3" / "envs" / "unsloth_env" / "python.exe",
-            Path(os.environ.get("USERPROFILE", "")) / "anaconda3" / "envs" / "unsloth_env" / "python.exe",
-            Path("C:/ProgramData/miniconda3/envs/unsloth_env/python.exe"),
-            Path("C:/ProgramData/anaconda3/envs/unsloth_env/python.exe"),
+            Path(os.environ.get("USERPROFILE", "")) / "miniconda3" / "envs" / UNSLOTH_ENV / "python.exe",
+            Path(os.environ.get("USERPROFILE", "")) / "anaconda3" / "envs" / UNSLOTH_ENV / "python.exe",
+            Path("C:/ProgramData/miniconda3/envs") / UNSLOTH_ENV / "python.exe",
+            Path("C:/ProgramData/anaconda3/envs") / UNSLOTH_ENV / "python.exe",
         ]
     else:
         paths = [
-            Path.home() / "miniconda3" / "envs" / "unsloth_env" / "bin" / "python",
-            Path.home() / "anaconda3" / "envs" / "unsloth_env" / "bin" / "python",
-            Path("/opt/conda/envs/unsloth_env/bin/python"),
+            Path.home() / ".conda" / "envs" / UNSLOTH_ENV / "bin" / "python",
+            Path.home() / "miniconda3" / "envs" / UNSLOTH_ENV / "bin" / "python",
+            Path.home() / "anaconda3" / "envs" / UNSLOTH_ENV / "bin" / "python",
+            Path("/opt/conda/envs") / UNSLOTH_ENV / "bin" / "python",
         ]
 
     for p in paths:
         if p.exists():
             return str(p)
 
+    # Environment not found - show helpful error
+    print_error(f"Unsloth environment '{UNSLOTH_ENV}' not found!")
+    print_info("Please run the setup first or use ./run.sh")
     return sys.executable
 
 
@@ -230,6 +239,7 @@ def _train_rtx():
         model_display = model_name.split('/')[-1] if '/' in model_name else model_name
 
         print_config({
+            "Environment": f"{UNSLOTH_ENV} (Unsloth {UNSLOTH_VERSION})",
             "Method": method.upper(),
             "Model": model_display,
             "Dataset": Path(dataset_file).name if dataset_file else "Unknown",
@@ -237,7 +247,7 @@ def _train_rtx():
             "Batch Size": str(batch_size),
             "Learning Rate": str(lr),
             "Config": str(config_path.relative_to(REPO_ROOT)),
-        }, "Training Configuration (from config.yaml)")
+        }, "Training Configuration")
 
     except Exception as e:
         print_error(f"Failed to parse config: {e}")
