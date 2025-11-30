@@ -13,8 +13,60 @@ Run from repo root:
 import os
 import sys
 import subprocess
-import argparse
 from pathlib import Path
+
+# =============================================================================
+# AUTO-RELAUNCH: Ensure we're running in the correct conda environment
+# =============================================================================
+
+UNSLOTH_ENV_NAME = "unsloth_latest"
+
+def _find_conda_python() -> str:
+    """Find Python from unsloth_latest conda environment."""
+    paths = [
+        Path.home() / ".conda" / "envs" / UNSLOTH_ENV_NAME / "bin" / "python",
+        Path.home() / "miniconda3" / "envs" / UNSLOTH_ENV_NAME / "bin" / "python",
+        Path.home() / "anaconda3" / "envs" / UNSLOTH_ENV_NAME / "bin" / "python",
+        Path("/opt/conda/envs") / UNSLOTH_ENV_NAME / "bin" / "python",
+        # Windows paths
+        Path(os.environ.get("USERPROFILE", "")) / "miniconda3" / "envs" / UNSLOTH_ENV_NAME / "python.exe",
+        Path(os.environ.get("USERPROFILE", "")) / "anaconda3" / "envs" / UNSLOTH_ENV_NAME / "python.exe",
+    ]
+    for p in paths:
+        if p.exists():
+            return str(p)
+    return None
+
+def _is_correct_environment() -> bool:
+    """Check if we're running in the correct conda environment."""
+    # Check if CONDA_DEFAULT_ENV is set to our environment
+    if os.environ.get("CONDA_DEFAULT_ENV") == UNSLOTH_ENV_NAME:
+        return True
+    # Check if current Python is from our environment
+    current_python = Path(sys.executable).resolve()
+    if UNSLOTH_ENV_NAME in str(current_python):
+        return True
+    return False
+
+# Auto-relaunch if not in correct environment
+if not _is_correct_environment():
+    conda_python = _find_conda_python()
+    if conda_python and Path(conda_python).exists():
+        # Re-execute with correct Python
+        print(f"🔄 Relaunching with {UNSLOTH_ENV_NAME} environment...", flush=True)
+        os.execv(conda_python, [conda_python] + sys.argv)  # Replace current process
+    else:
+        print(f"⚠️  Warning: {UNSLOTH_ENV_NAME} environment not found.")
+        print(f"   Current Python: {sys.executable}")
+        print(f"   GPU operations may not work. Run setup first:")
+        print(f"   cd Trainers && source activate_unsloth_latest.sh")
+        print()
+
+# =============================================================================
+# MAIN IMPORTS (after environment check)
+# =============================================================================
+
+import argparse
 
 # Ensure we're in the repo root
 REPO_ROOT = Path(__file__).parent.resolve()
