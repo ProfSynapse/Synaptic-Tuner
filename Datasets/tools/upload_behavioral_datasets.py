@@ -55,7 +55,7 @@ size_categories:
 - n<1K
 ---
 
-# Claudesidian Behavioral Dataset - {behavior_name.replace('_', ' ').title()}
+# Nexus Synthetic Data - Behavior: {behavior_name.replace('_', ' ').title()}
 
 ## Dataset Description
 
@@ -115,7 +115,7 @@ This dataset contains synthetic training examples demonstrating **{behavior_name
 ```python
 from datasets import load_dataset
 
-dataset = load_dataset("ProfSynapse/claudesidian-behavior-{behavior_name}")
+dataset = load_dataset("professorsynapse/nexus-synthetic-data", data_files="behaviors/{behavior_name}.jsonl")
 ```
 
 ### Training with TRL
@@ -153,19 +153,18 @@ MIT License - Free to use for research and commercial applications.
 ## Citation
 
 ```bibtex
-@dataset{{claudesidian_behavior_{behavior_name},
-  title={{Claudesidian Behavioral Dataset - {behavior_name.replace('_', ' ').title()}}},
+@dataset{{nexus_synthetic_behavior_{behavior_name},
+  title={{Nexus Synthetic Data - {behavior_name.replace('_', ' ').title()}}},
   author={{ProfSynapse}},
   year={{2025}},
   publisher={{Hugging Face}},
-  howpublished={{\\url{{https://huggingface.co/datasets/ProfSynapse/claudesidian-behavior-{behavior_name}}}}}
+  howpublished={{\\url{{https://huggingface.co/datasets/professorsynapse/nexus-synthetic-data}}}}
 }}
 ```
 
 ## Related Datasets
 
-- [Claudesidian Merged Behaviors](https://huggingface.co/datasets/ProfSynapse/claudesidian-behaviors-merged) - All behaviors combined
-- [Claudesidian Base Dataset](https://huggingface.co/datasets/ProfSynapse/claudesidian-toolset) - Main tool-calling dataset
+- [Nexus Synthetic Data](https://huggingface.co/datasets/professorsynapse/nexus-synthetic-data) - All datasets combined
 
 ## Contact
 
@@ -191,7 +190,7 @@ size_categories:
 - 1K<n<10K
 ---
 
-# Claudesidian Merged Behavioral Dataset
+# Nexus Synthetic Data - Merged Behaviors
 
 ## Dataset Description
 
@@ -266,7 +265,7 @@ This dataset includes examples from 8 distinct behavioral patterns:
 ```python
 from datasets import load_dataset
 
-dataset = load_dataset("ProfSynapse/claudesidian-behaviors-merged")
+dataset = load_dataset("professorsynapse/nexus-synthetic-data", data_files="behaviors/merged.jsonl")
 ```
 
 ### KTO Training with TRL
@@ -335,19 +334,18 @@ MIT License - Free to use for research and commercial applications.
 ## Citation
 
 ```bibtex
-@dataset{claudesidian_behaviors_merged,
-  title={Claudesidian Merged Behavioral Dataset},
+@dataset{nexus_synthetic_behaviors_merged,
+  title={Nexus Synthetic Data - Merged Behaviors},
   author={ProfSynapse},
   year={2025},
   publisher={Hugging Face},
-  howpublished={\\url{https://huggingface.co/datasets/ProfSynapse/claudesidian-behaviors-merged}}
+  howpublished={\\url{https://huggingface.co/datasets/professorsynapse/nexus-synthetic-data}}
 }
 ```
 
 ## Related Datasets
 
-- [Individual Behavior Datasets](https://huggingface.co/ProfSynapse) - Each behavior available separately
-- [Claudesidian Base Dataset](https://huggingface.co/datasets/ProfSynapse/claudesidian-toolset) - Main tool-calling dataset
+- [Nexus Synthetic Data](https://huggingface.co/datasets/professorsynapse/nexus-synthetic-data) - All datasets combined
 
 ## Contact
 
@@ -490,7 +488,7 @@ This behavior demonstrates **asking clarifying questions and acknowledging uncer
 
 
 def upload_individual_behavior(api, behavior_name, repo_name, token):
-    """Upload a single behavior dataset."""
+    """Upload a single behavior dataset to the unified repo."""
     behavior_dir = Path(__file__).parent.parent / "behavior_datasets" / behavior_name
     dataset_file = behavior_dir / "pairs_v1.3.jsonl"
 
@@ -510,11 +508,12 @@ def upload_individual_behavior(api, behavior_name, repo_name, token):
                 elif data.get("label") is False:
                     stats["negative"] += 1
 
-    print(f"\n📦 Uploading {behavior_name}...")
+    upload_time = datetime.now().strftime('%H:%M:%S')
+    print(f"\n📦 [{upload_time}] Uploading {behavior_name}...")
     print(f"   Examples: {stats['total']} ({stats['positive']} positive, {stats['negative']} negative)")
 
     try:
-        # Create repo
+        # Create repo (if not exists)
         create_repo(
             repo_id=repo_name,
             repo_type="dataset",
@@ -523,30 +522,16 @@ def upload_individual_behavior(api, behavior_name, repo_name, token):
             private=False
         )
 
-        # Create and upload README
-        readme_content = create_dataset_card(behavior_name, stats)
-        readme_path = behavior_dir / "README.md"
-        with open(readme_path, 'w') as f:
-            f.write(readme_content)
-
-        api.upload_file(
-            path_or_fileobj=str(readme_path),
-            path_in_repo="README.md",
-            repo_id=repo_name,
-            repo_type="dataset",
-            token=token
-        )
-
-        # Upload dataset file
+        # Upload dataset file to behaviors/ folder
         api.upload_file(
             path_or_fileobj=str(dataset_file),
-            path_in_repo="train.jsonl",
+            path_in_repo=f"behaviors/{behavior_name}.jsonl",
             repo_id=repo_name,
             repo_type="dataset",
             token=token
         )
 
-        print(f"   ✅ Uploaded to https://huggingface.co/datasets/{repo_name}")
+        print(f"   ✅ Uploaded to https://huggingface.co/datasets/{repo_name}/blob/main/behaviors/{behavior_name}.jsonl")
         return True
 
     except Exception as e:
@@ -555,7 +540,7 @@ def upload_individual_behavior(api, behavior_name, repo_name, token):
 
 
 def upload_merged_dataset(api, repo_name, token):
-    """Upload the merged behavioral dataset."""
+    """Upload the merged behavioral dataset to the unified repo."""
     merged_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.jsonl"
     metadata_file = Path(__file__).parent.parent / "behavior_merged_kto_11.28.25.metadata.json"
 
@@ -567,12 +552,13 @@ def upload_merged_dataset(api, repo_name, token):
     with open(metadata_file, 'r') as f:
         metadata = json.load(f)
 
-    print(f"\n📦 Uploading merged dataset...")
+    upload_time = datetime.now().strftime('%H:%M:%S')
+    print(f"\n📦 [{upload_time}] Uploading merged dataset...")
     print(f"   Total examples: {metadata['total_examples']}")
     print(f"   Behaviors: {len(metadata.get('behaviors_v1_3', metadata.get('all_datasets', [])))}")
 
     try:
-        # Create repo
+        # Create repo (if not exists)
         create_repo(
             repo_id=repo_name,
             repo_type="dataset",
@@ -581,24 +567,10 @@ def upload_merged_dataset(api, repo_name, token):
             private=False
         )
 
-        # Create and upload README
-        readme_content = create_dataset_card(None, None)
-        readme_path = Path(__file__).parent / "README_merged.md"
-        with open(readme_path, 'w') as f:
-            f.write(readme_content)
-
-        api.upload_file(
-            path_or_fileobj=str(readme_path),
-            path_in_repo="README.md",
-            repo_id=repo_name,
-            repo_type="dataset",
-            token=token
-        )
-
-        # Upload dataset file
+        # Upload dataset file to behaviors/ folder
         api.upload_file(
             path_or_fileobj=str(merged_file),
-            path_in_repo="train.jsonl",
+            path_in_repo="behaviors/merged.jsonl",
             repo_id=repo_name,
             repo_type="dataset",
             token=token
@@ -607,13 +579,13 @@ def upload_merged_dataset(api, repo_name, token):
         # Upload metadata
         api.upload_file(
             path_or_fileobj=str(metadata_file),
-            path_in_repo="metadata.json",
+            path_in_repo="behaviors/merged_metadata.json",
             repo_id=repo_name,
             repo_type="dataset",
             token=token
         )
 
-        print(f"   ✅ Uploaded to https://huggingface.co/datasets/{repo_name}")
+        print(f"   ✅ Uploaded to https://huggingface.co/datasets/{repo_name}/blob/main/behaviors/merged.jsonl")
         return True
 
     except Exception as e:
@@ -622,10 +594,17 @@ def upload_merged_dataset(api, repo_name, token):
 
 
 def main():
+    # Record start time
+    start_time = datetime.now()
+
     print("=" * 80)
-    print("Uploading Claudesidian Behavioral Datasets to Hugging Face")
+    print("Uploading Behavioral Datasets to Nexus Synthetic Data")
     print("=" * 80)
+    print(f"📅 Upload started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print()
+
+    # Unified repo for all datasets
+    REPO_NAME = "professorsynapse/nexus-synthetic-data"
 
     # Get token
     token = load_env_token()
@@ -643,6 +622,7 @@ def main():
     user_info = api.whoami(token=token)
     username = user_info['name']
     print(f"✅ Authenticated as: {username}")
+    print(f"📁 Target repo: {REPO_NAME}")
     print()
 
     # Individual behaviors
@@ -657,25 +637,29 @@ def main():
         "workspace_awareness"
     ]
 
-    print("Uploading individual behavior datasets...")
+    print("Uploading individual behavior datasets to behaviors/ folder...")
     success_count = 0
     for behavior in behaviors:
-        repo_name = f"{username}/claudesidian-behavior-{behavior}"
-        if upload_individual_behavior(api, behavior, repo_name, token):
+        if upload_individual_behavior(api, behavior, REPO_NAME, token):
             success_count += 1
 
     print(f"\n✅ Successfully uploaded {success_count}/{len(behaviors)} individual datasets")
 
     # Merged dataset
     print("\n" + "=" * 80)
-    merged_repo = f"{username}/claudesidian-behaviors-merged"
-    if upload_merged_dataset(api, merged_repo, token):
+    if upload_merged_dataset(api, REPO_NAME, token):
         print("\n✅ Merged dataset uploaded successfully")
+
+    # Record completion time
+    end_time = datetime.now()
+    duration = end_time - start_time
 
     print("\n" + "=" * 80)
     print("Upload complete! 🎉")
     print("=" * 80)
-    print(f"\nView your datasets at: https://huggingface.co/{username}")
+    print(f"📅 Completed: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"⏱️  Duration: {duration.total_seconds():.1f} seconds")
+    print(f"\nView your datasets at: https://huggingface.co/datasets/{REPO_NAME}")
 
 
 if __name__ == "__main__":
