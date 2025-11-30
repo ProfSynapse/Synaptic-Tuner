@@ -29,7 +29,7 @@ This guide explains how to use the behavior-focused evaluation prompts to test w
 
 ## Evaluation Prompt Sets
 
-### 1. `behavior_rubric.json` - Primary Behavior Testing
+### 1. `behavior_prompts.json` - Primary Behavior Testing
 
 **Purpose:** Comprehensive behavior testing across all rubric categories
 
@@ -49,7 +49,7 @@ This guide explains how to use the behavior-focused evaluation prompts to test w
 ```bash
 python -m Evaluator.cli \
   --model your-trained-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output Evaluator/results/behavior_test_$(date +%s).json \
   --markdown Evaluator/results/behavior_report.md
 ```
@@ -68,7 +68,7 @@ python -m Evaluator.cli \
   --output Evaluator/results/baseline_$(date +%s).json
 ```
 
-### 3. `full_coverage.json` - Tool Coverage (No commandManager/get_tools)
+### 3. `tool_prompts.json` - Tool Coverage (No commandManager/get_tools)
 
 **Purpose:** Ensure every tool can be invoked correctly
 
@@ -78,7 +78,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model your-trained-model \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --output Evaluator/results/coverage_$(date +%s).json
 ```
 
@@ -490,14 +490,14 @@ direct_delete_rate = count(delete_without_search) / delete_ops
 # 1. Behavior-focused evaluation
 python -m Evaluator.cli \
   --model your-trained-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/behavior_$(date +%s).json \
   --markdown results/behavior_report.md
 
 # 2. Tool coverage check
 python -m Evaluator.cli \
   --model your-trained-model \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --output results/coverage_$(date +%s).json
 
 # 3. Multi-step workflows
@@ -519,19 +519,19 @@ python -m Evaluator.cli \
 # Test base model
 python -m Evaluator.cli \
   --model unsloth/mistral-7b-v0.3-bnb-4bit \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/base_model_behavior.json
 
 # Test SFT-trained model
 python -m Evaluator.cli \
   --model your-sft-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/sft_model_behavior.json
 
 # Test KTO-refined model
 python -m Evaluator.cli \
   --model your-kto-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/kto_model_behavior.json
 
 # Compare results

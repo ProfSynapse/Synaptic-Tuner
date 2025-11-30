@@ -77,7 +77,7 @@ How many runs? (default 1): 1
 
 Running evaluation for: nexus-toolbox_v0.1.6
 Test suite: Behavior Rubric (43 prompts)
-Prompt file: F:\Code\Toolset-Training\Evaluator\prompts\behavior_rubric.json
+Prompt file: F:\Code\Toolset-Training\Evaluator\prompts\behavior_prompts.json
 Runs: 1
 
 --- Run 1/1 ---
@@ -99,7 +99,7 @@ python -m Evaluator --model your-model-name
 
 ### Skip Test Suite Selection
 ```bash
-python -m Evaluator --prompt-set Evaluator/prompts/behavior_rubric.json
+python -m Evaluator --prompt-set Evaluator/prompts/behavior_prompts.json
 ```
 
 ### Skip Run Count Selection
@@ -111,7 +111,7 @@ python -m Evaluator --runs 3
 ```bash
 python -m Evaluator \
   --model nexus-toolbox_v0.1.6 \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --runs 1
 ```
 
@@ -159,10 +159,10 @@ python -m Evaluator --runs 5
 ### 3. **Compare Before/After Training**
 ```bash
 # Before training
-python -m Evaluator --model base-model --prompt-set Evaluator/prompts/behavior_rubric.json --runs 3
+python -m Evaluator --model base-model --prompt-set Evaluator/prompts/behavior_prompts.json --runs 3
 
 # After training
-python -m Evaluator --model trained-model --prompt-set Evaluator/prompts/behavior_rubric.json --runs 3
+python -m Evaluator --model trained-model --prompt-set Evaluator/prompts/behavior_prompts.json --runs 3
 ```
 
 ### 4. **Use Dry Run to Test Setup**
@@ -237,7 +237,7 @@ Use the full CLI:
 python -m Evaluator.cli \
   --backend ollama \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json
+  --prompt-set Evaluator/prompts/behavior_prompts.json
 ```
 
 ---
@@ -268,12 +268,12 @@ python -m Evaluator
 python -m Evaluator --model your-model
 
 # Interactive with test suite pre-selected
-python -m Evaluator --prompt-set Evaluator/prompts/behavior_rubric.json
+python -m Evaluator --prompt-set Evaluator/prompts/behavior_prompts.json
 
 # Fully automated (no prompts)
 python -m Evaluator \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --runs 3
 
 # Dry run (test setup without API calls)
@@ -283,7 +283,7 @@ python -m Evaluator --dry-run
 python -m Evaluator.cli \
   --backend lmstudio \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags intellectual_humility \
   --limit 10 \
   --output results/test.json \
