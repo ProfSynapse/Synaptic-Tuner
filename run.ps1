@@ -40,21 +40,34 @@ if ($NeedsGpu) {
 # For non-GPU operations (eval), try to find local Python
 $CondaPaths = @(
     "$env:USERPROFILE\miniconda3\envs\$UnslothEnv\python.exe",
-    "$env:USERPROFILE\anaconda3\envs\$UnslothEnv\python.exe"
+    "$env:USERPROFILE\anaconda3\envs\$UnslothEnv\python.exe",
+    "$env:USERPROFILE\miniconda3\python.exe",
+    "$env:USERPROFILE\anaconda3\python.exe"
 )
 
 $Python = $null
 foreach ($path in $CondaPaths) {
     if (Test-Path $path) {
         $Python = $path
-        Write-Host "Using $UnslothEnv environment" -ForegroundColor Green
+        Write-Host "Using Python: $path" -ForegroundColor Green
         break
     }
 }
 
+# Try system Python if no conda
 if (-not $Python) {
-    # Fallback to WSL for everything
-    Write-Host "Local environment not found, using WSL..." -ForegroundColor Yellow
+    try {
+        $SysPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+        if ($SysPython) {
+            $Python = $SysPython
+            Write-Host "Using system Python: $Python" -ForegroundColor Green
+        }
+    } catch { }
+}
+
+if (-not $Python) {
+    # Fallback to WSL only if no local Python at all
+    Write-Host "No local Python found, using WSL..." -ForegroundColor Yellow
     $WslCmd = "cd /mnt/f/Code/Toolset-Training && ./run.sh $($Arguments -join ' ')"
     wsl -d $WslDistro bash -c $WslCmd
     exit $LASTEXITCODE
