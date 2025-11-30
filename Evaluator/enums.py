@@ -91,6 +91,9 @@ class ToolCallFormat(str, Enum):
     MISTRAL = "mistral"
     """Mistral format: '[TOOL_CALLS] [{\"name\": \"...\", \"arguments\": {...}}]'"""
 
+    QWEN = "qwen"
+    """Qwen format: '<tool_call>\\n{\"name\": \"...\", \"arguments\": {...}}\\n</tool_call>'"""
+
     NONE = "none"
     """No tool call detected in response."""
 
