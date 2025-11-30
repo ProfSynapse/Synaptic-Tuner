@@ -9,7 +9,7 @@ model:
   # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
   # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
   # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+  model_name: "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit"
 
   # Model parameters
   max_seq_length: 2048 

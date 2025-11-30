@@ -70,21 +70,12 @@ def load_model_and_tokenizer(
         token=hf_token,
     )
 
-    # Add chat template if missing
-    if tokenizer.chat_template is None:
-        # Detect model type and use appropriate template
-        if _is_mistral_model(model_name):
-            print("\n⚠ No chat template found, adding Mistral [INST] template")
-            tokenizer.chat_template = MISTRAL_CHAT_TEMPLATE
-            print("   Format: <s>[INST] user [/INST] assistant</s>")
-        else:
-            print("\n⚠ No chat template found, adding default template")
-            tokenizer.chat_template = DEFAULT_CHAT_TEMPLATE
-    else:
+    # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
+    # This ensures proper handling for all model types including VL models
+    if tokenizer.chat_template is not None:
         print("✓ Chat template already configured")
-        # Optionally display what format is being used
-        if _is_mistral_model(model_name):
-            print("   Detected Mistral model - ensure template uses [INST] format")
+    else:
+        print("ℹ Chat template will be applied via get_chat_template()")
 
     # Verify model loaded correctly
     print(f"\n✓ Model loaded: {model.config._name_or_path}")

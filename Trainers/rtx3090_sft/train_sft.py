@@ -26,6 +26,13 @@ except ImportError:
     pass  # dotenv not required
 
 # ============================================================================
+# DISABLE TORCH.COMPILE - Required for VL models and WSL compatibility
+# Must be set BEFORE importing unsloth
+# ============================================================================
+os.environ['TORCH_COMPILE_DISABLE'] = '1'
+os.environ['PYTORCH_JIT'] = '0'
+
+# ============================================================================
 # WINDOWS COMPATIBILITY PATCHES - Apply BEFORE importing unsloth
 # ============================================================================
 if sys.platform == 'win32':
@@ -434,6 +441,29 @@ def run(args: argparse.Namespace):
         hf_token=args.hf_token
     )
 
+    # Apply proper chat template using Unsloth's get_chat_template
+    # This is CRITICAL for VL models and ensures special tokens are handled correctly
+    from unsloth.chat_templates import get_chat_template
+
+    model_name_lower = config.model.model_name.lower()
+    if "qwen" in model_name_lower:
+        chat_template_name = "chatml"
+    elif "llama" in model_name_lower:
+        chat_template_name = "llama-3"
+    elif "mistral" in model_name_lower:
+        chat_template_name = "mistral"
+    elif "gemma" in model_name_lower:
+        chat_template_name = "gemma"
+    elif "phi" in model_name_lower:
+        chat_template_name = "phi-3"
+    elif "deepseek" in model_name_lower:
+        chat_template_name = "chatml"
+    else:
+        chat_template_name = "chatml"  # Default fallback
+
+    tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
+    print(f"✓ Applied {chat_template_name} chat template via Unsloth")
+
     # Apply LoRA adapters
     model = apply_lora_adapters(
         model,
@@ -448,6 +478,65 @@ def run(args: argparse.Namespace):
 
     # Check initial GPU memory
     check_gpu_memory()
+
+    import json
+
+    def render_tool_calls_to_content(tool_calls):
+        """Convert tool_calls array to text content for chat template."""
+        if not tool_calls:
+            return ""
+
+        rendered_parts = []
+        for tc in tool_calls:
+            # Handle OpenAI nested format: {"function": {"name": ..., "arguments": ...}}
+            if "function" in tc and tc["function"]:
+                func = tc["function"]
+                name = func.get("name", "")
+                args = func.get("arguments", "{}")
+            else:
+                # Handle flat format: {"name": ..., "arguments": ...}
+                name = tc.get("name", "")
+                args = tc.get("arguments", "{}")
+
+            # Parse arguments if it's a string
+            if isinstance(args, str):
+                try:
+                    args_obj = json.loads(args)
+                except:
+                    args_obj = args
+            else:
+                args_obj = args
+
+            tool_call_obj = {"name": name, "arguments": args_obj}
+            rendered_parts.append(
+                f"<tool_call>\n{json.dumps(tool_call_obj, indent=2)}\n</tool_call>"
+            )
+
+        return "\n".join(rendered_parts)
+
+    def sanitize_conversations(conversations):
+        """Ensure all message fields are properly set and tool_calls are rendered to content."""
+        sanitized = []
+        for msg in conversations:
+            new_msg = dict(msg)
+
+            # Get existing content (or empty string if None)
+            content = new_msg.get("content") or ""
+
+            # If there are tool_calls, render them to content
+            if "tool_calls" in new_msg and new_msg["tool_calls"]:
+                tool_content = render_tool_calls_to_content(new_msg["tool_calls"])
+                if tool_content:
+                    content = f"{content}\n\n{tool_content}" if content else tool_content
+
+            new_msg["content"] = content
+
+            # Remove tool_calls since we've rendered them to content
+            if "tool_calls" in new_msg:
+                del new_msg["tool_calls"]
+
+            sanitized.append(new_msg)
+        return sanitized
 
     def format_chat_template(batch):
         """Apply the model chat template to each example for TRL's SFTTrainer."""
@@ -466,9 +555,11 @@ def run(args: argparse.Namespace):
         for msgs in conversations:
             if not isinstance(msgs, list):
                 raise ValueError(f"Expected list of messages, got {type(msgs)}")
+            # Sanitize conversations to handle None content and tool_calls
+            sanitized_msgs = sanitize_conversations(msgs)
             formatted.append(
                 tokenizer.apply_chat_template(
-                    msgs,
+                    sanitized_msgs,
                     tokenize=False,
                     add_generation_prompt=False,
                 )
