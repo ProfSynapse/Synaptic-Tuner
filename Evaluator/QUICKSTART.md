@@ -20,7 +20,7 @@ Tests all 6 behavior patterns from the training rubric.
 ```bash
 python -m Evaluator.cli \
   --model your-model-name \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output Evaluator/results/behavior_test.json \
   --markdown Evaluator/results/behavior_report.md
 ```
@@ -50,7 +50,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model your-model-name \
-  --prompt-set Evaluator/prompts/full_coverage.json
+  --prompt-set Evaluator/prompts/tool_prompts.json
 ```
 
 ### 4. **Multi-Step Workflows** (Complex sequences)
@@ -70,7 +70,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags intellectual_humility,verification
 ```
 
@@ -78,7 +78,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --limit 10
 ```
 
@@ -87,14 +87,14 @@ python -m Evaluator.cli \
 python -m Evaluator.cli \
   --backend lmstudio \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json
+  --prompt-set Evaluator/prompts/behavior_prompts.json
 ```
 
 ### Save Results with Markdown Report
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/test.json \
   --markdown results/report.md
 ```
@@ -103,7 +103,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --dry-run
 ```
 
@@ -116,13 +116,13 @@ python -m Evaluator.cli \
 # Only test intellectual humility prompts
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags intellectual_humility
 
 # Only test verification patterns
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags verification_before_action
 ```
 
@@ -131,19 +131,19 @@ python -m Evaluator.cli \
 # Base model
 python -m Evaluator.cli \
   --model mistral-7b-base \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/base_model.json
 
 # Your SFT model
 python -m Evaluator.cli \
   --model your-sft-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/sft_model.json
 
 # Your KTO model
 python -m Evaluator.cli \
   --model your-kto-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/kto_model.json
 ```
 
@@ -225,7 +225,7 @@ python -m Evaluator.cli \
   --port 8080 \
   --temperature 0.1 \
   --max-tokens 2048 \
-  --prompt-set Evaluator/prompts/behavior_rubric.json
+  --prompt-set Evaluator/prompts/behavior_prompts.json
 ```
 
 ---
@@ -238,14 +238,14 @@ Run all prompt sets for comprehensive testing:
 # 1. Behavior patterns (43 prompts)
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --output results/behavior.json \
   --markdown results/behavior.md
 
 # 2. Tool coverage (45 prompts)
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --output results/coverage.json
 
 # 3. Multi-step workflows (7 prompts)
@@ -304,7 +304,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model my-new-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --markdown results/my_test.md
 ```
 
@@ -312,7 +312,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model my-model \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --limit 20
 ```
 
@@ -320,15 +320,15 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --model my-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags intellectual_humility \
   --markdown results/humility_test.md
 ```
 
 ### "I want to compare two models"
 ```bash
-python -m Evaluator.cli --model model-a --prompt-set Evaluator/prompts/behavior_rubric.json --output results/model_a.json
-python -m Evaluator.cli --model model-b --prompt-set Evaluator/prompts/behavior_rubric.json --output results/model_b.json
+python -m Evaluator.cli --model model-a --prompt-set Evaluator/prompts/behavior_prompts.json --output results/model_a.json
+python -m Evaluator.cli --model model-b --prompt-set Evaluator/prompts/behavior_prompts.json --output results/model_b.json
 # Then manually compare the JSON files
 ```
 

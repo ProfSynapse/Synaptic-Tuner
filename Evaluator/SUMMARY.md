@@ -26,7 +26,7 @@ python -m Evaluator
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json
+  --prompt-set Evaluator/prompts/behavior_prompts.json
 ```
 
 **Features:**
@@ -83,18 +83,18 @@ python -m Evaluator
 # CLI with behavior tests
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --markdown results/report.md
 
 # Test specific behavior only
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --tags intellectual_humility
 
 # Compare models
-python -m Evaluator.cli --model base-model --prompt-set Evaluator/prompts/behavior_rubric.json --output results/base.json
-python -m Evaluator.cli --model trained-model --prompt-set Evaluator/prompts/behavior_rubric.json --output results/trained.json
+python -m Evaluator.cli --model base-model --prompt-set Evaluator/prompts/behavior_prompts.json --output results/base.json
+python -m Evaluator.cli --model trained-model --prompt-set Evaluator/prompts/behavior_prompts.json --output results/trained.json
 ```
 
 ---

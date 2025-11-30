@@ -1,7 +1,7 @@
 [
   {
     "id": "agentManager_batchExecutePrompt",
-    "question": "Send a single \"housekeeping reminder\" prompt to every active capture agent so they log blockers for the Phoenix migration, and include in the report whether any agent failed to respond.",
+    "question": "Send the prompt \"List any blockers for the Phoenix migration and log them to your workspace\" to all five agents: Workspace Auditor, Release Briefing, Incident Scribe, Legacy Intake, and QA Prototype. Include whether any agent failed to respond in your report.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -29,7 +29,7 @@
   },
   {
     "id": "agentManager_createAgent",
-    "question": "Create a lightweight agent called \"Vault Curator\" that specializes in culling outdated workspace docs for the Atlas program. Give it the same default model as our other curation helpers.",
+    "question": "Create a new agent called \"Vault Curator\" with the description \"Culls outdated workspace docs for the Atlas program\". Use the model \"gpt-4o-mini\" and set the temperature to 0.3.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -55,7 +55,7 @@
   },
   {
     "id": "agentManager_deleteAgent",
-    "question": "Retire the sandbox agent named \"QA Prototype\" so it stops cluttering the agent list.",
+    "question": "Delete the agent \"QA Prototype\" (id: agent_1732300800004_qa_prototype) since we no longer need it.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -81,7 +81,7 @@
   },
   {
     "id": "agentManager_executePrompt",
-    "question": "Have the \"Workspace Auditor\" agent summarize this week's incidents related to sync failures and return the raw response.",
+    "question": "Send the prompt \"Summarize all sync failure incidents from the past week and list their root causes\" to the Workspace Auditor agent (id: agent_1732300800000_workspace_auditor) and return the raw response.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -107,7 +107,7 @@
   },
   {
     "id": "agentManager_generateImage",
-    "question": "Create an image of a dog playing fetch with a frisbee.",
+    "question": "Generate an image with the prompt \"A golden retriever playing fetch with a red frisbee in a sunny park\" and save it to Projects/Images/dog-frisbee.png.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -133,7 +133,7 @@
   },
   {
     "id": "agentManager_getAgent",
-    "question": "Pull the latest configuration for the \"Release Briefing\" agent so I can see its temperature and tool permissions.",
+    "question": "Get the full configuration for the Release Briefing agent (id: agent_1732300800001_release_briefing) so I can see its temperature and tool permissions.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -159,7 +159,7 @@
   },
   {
     "id": "agentManager_listAgents",
-    "question": "List every registered agent so I can confirm who is enabled for the Odyssey workspace.",
+    "question": "List all registered agents in the system so I can see which ones are available.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -186,7 +186,7 @@
   },
   {
     "id": "agentManager_listModels",
-    "question": "Show me the foundation models available to our agents along with their parameter sizes. I need to pick one for quick drafting.",
+    "question": "List all available foundation models along with their parameter sizes so I can choose one for drafting.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -213,7 +213,7 @@
   },
   {
     "id": "agentManager_toggleAgent",
-    "question": "Disable the \"Legacy Intake\" agent for now because we paused that workflow.",
+    "question": "Disable the Legacy Intake agent (id: agent_1732300800003_legacy_intake) because we paused that workflow.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -239,7 +239,7 @@
   },
   {
     "id": "agentManager_updateAgent",
-    "question": "Update the \"Incident Scribe\" agent so it defaults to the claudesidian coder model and bump its temperature down to 0.2.",
+    "question": "Update the Incident Scribe agent (id: agent_1732300800002_incident_scribe) to use the model \"gpt-4o\" and set its temperature to 0.2.",
     "tags": [
       "agentManager",
       "single-tool"
@@ -265,7 +265,7 @@
   },
   {
     "id": "contentManager_appendContent",
-    "question": "Append a short note to Projects/Rollouts/Atlas.md letting everyone know the monitoring probes just turned green again.",
+    "question": "Append the text \"\\n\\n## Status Update\\nMonitoring probes are now green. All systems operational.\" to the file Projects/Rollouts/Atlas.md.",
     "tags": [
       "contentManager",
       "single-tool"
@@ -285,7 +285,7 @@
   },
   {
     "id": "contentManager_batchContent",
-    "question": "Apply the \"trim whitespace\" batch operation to both Projects/Rollouts/Atlas.md and Projects/Rollouts/Phoenix.md so the formatting is clean before publishing.",
+    "question": "Run the \"trim\" batch operation on both Projects/Rollouts/Atlas.md and Projects/Rollouts/Phoenix.md to remove trailing whitespace.",
     "tags": [
       "contentManager",
       "single-tool"
@@ -306,7 +306,7 @@
   },
   {
     "id": "contentManager_createContent",
-    "question": "Create Projects/Decisions/2025-Strategy-Retrospective.md with headings for Highlights, Risks, and Action Items.",
+    "question": "Create a new file at Projects/Decisions/2025-Strategy-Retrospective.md with the content:\n\n# 2025 Strategy Retrospective\n\n## Highlights\n- TBD\n\n## Risks\n- TBD\n\n## Action Items\n- TBD",
     "tags": [
       "contentManager",
       "single-tool"
@@ -326,7 +326,7 @@
   },
   {
     "id": "contentManager_deleteContent",
-    "question": "Delete the draft note under Scratch/Temp-Migration-Checklist.md because we're redoing it from scratch.",
+    "question": "Delete the file Scratch/Temp-Migration-Checklist.md because we're redoing it from scratch.",
     "tags": [
       "contentManager",
       "single-tool"
@@ -346,7 +346,7 @@
   },
   {
     "id": "contentManager_findReplaceContent",
-    "question": "Run a find-and-replace in Projects/Rollouts/Phoenix.md to rename every instance of \"Phase 2\" to \"Stabilization Sprint\".",
+    "question": "In the file Projects/Rollouts/Phoenix.md, find all instances of \"Phase 2\" and replace them with \"Stabilization Sprint\".",
     "tags": [
       "contentManager",
       "single-tool"
@@ -366,7 +366,7 @@
   },
   {
     "id": "contentManager_prependContent",
-    "question": "Add a \"Last updated today\" banner to the top of Projects/Decisions/Data-Lake-Postmortem.md.",
+    "question": "Prepend the text \"> **Last updated: 2025-01-15**\\n\\n\" to the beginning of Projects/Decisions/Data-Lake-Postmortem.md.",
     "tags": [
       "contentManager",
       "single-tool"
@@ -386,7 +386,7 @@
   },
   {
     "id": "contentManager_readContent",
-    "question": "Read Projects/Incidents/Sync-Loop.md and summarize the root cause paragraph for me.",
+    "question": "Read the contents of Projects/Incidents/Sync-Loop.md so I can review the root cause analysis.",
     "tags": [
       "contentManager",
       "single-tool"
@@ -406,7 +406,7 @@
   },
   {
     "id": "contentManager_replaceByLine",
-    "question": "In Projects/Runbooks/Backup.md replace line 12 with \"5. Validate restores weekly on staging.\" and leave the other lines untouched.",
+    "question": "In Projects/Runbooks/Backup.md, replace line 12 with the text \"5. Validate restores weekly on staging environment.\".",
     "tags": [
       "contentManager",
       "single-tool"
@@ -426,7 +426,7 @@
   },
   {
     "id": "contentManager_replaceContent",
-    "question": "In Projects/Briefings/Weekly-Exec.md, replace the introduction paragraph that starts with \"Welcome to this week's executive briefing\" with the following new text:\n\n\"This executive summary covers Q4 progress on the Atlas rollout. Key metrics show 85% completion with all critical milestones on track.\"",
+    "question": "In Projects/Briefings/Weekly-Exec.md, find the text \"Welcome to this week's executive briefing. This document provides an overview of ongoing initiatives and their current status across all departments.\" and replace it with \"This executive summary covers Q4 progress on the Atlas rollout. Key metrics show 85% completion with all critical milestones on track.\".",
     "tags": [
       "contentManager",
       "single-tool"
@@ -446,7 +446,7 @@
   },
   {
     "id": "memoryManager_createSession",
-    "question": "Start a brand new session focused on \"Workspace hardening initiatives\" so we can track these discussions separately.",
+    "question": "Create a new session with the description \"Workspace hardening initiatives\" to track security-related discussions.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -466,7 +466,7 @@
   },
   {
     "id": "memoryManager_createState",
-    "question": "Create a saved state called \"atlas_context_snapshot\" that captures the current session notes before we pivot.",
+    "question": "Create a saved state called \"atlas_context_snapshot\" with the description \"Session state before pivoting to Phoenix work\".",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -486,7 +486,7 @@
   },
   {
     "id": "memoryManager_createWorkspace",
-    "question": "Spin up a new workspace entry for the \"Helios\" customer rollout so we can start populating notes.",
+    "question": "Create a new workspace called \"Helios Rollout\" with the description \"Project tracking for Helios customer rollout\" and root folder \"Projects/Helios/\".",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -506,7 +506,7 @@
   },
   {
     "id": "memoryManager_listSessions",
-    "question": "List every open session along with their descriptions so I can choose which one to resume.",
+    "question": "List all available sessions so I can see which one to resume.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -514,7 +514,7 @@
     "expected_tools": [
       "memoryManager_listSessions"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_sessions>\nThe following sessions exist in this vault:\n\n- Atlas Planning (id: \"session_1732300800000_eval01234\")\n  Description: Current planning session for Atlas rollout\n\n- Phoenix Review (id: \"session_1732300800001_phoenixrev\")\n  Description: Code review session for Phoenix migration\n\n- Northwind Cleanup (id: \"session_1732300800002_northwind\")\n  Description: Legacy cleanup tasks for Northwind integration\n\n</available_sessions>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -527,7 +527,7 @@
   },
   {
     "id": "memoryManager_listStates",
-    "question": "Show me all saved states for this session so I can restore the right checkpoint.",
+    "question": "List all saved states for the current session so I can choose one to restore.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -535,7 +535,7 @@
     "expected_tools": [
       "memoryManager_listStates"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_states>\nThe following saved states exist for this session:\n\n- checkpoint_A (id: \"state_1732300800000_checkpoint_a\")\n  Description: Checkpoint before dependency updates\n\n- phoenix_pre_mortem (id: \"state_1732300800001_pre_mortem\")\n  Description: State captured before Phoenix post-mortem analysis\n\n- atlas_milestone_1 (id: \"state_1732300800002_milestone1\")\n  Description: Checkpoint at Atlas milestone 1 completion\n\n</available_states>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -548,7 +548,7 @@
   },
   {
     "id": "memoryManager_listWorkspaces",
-    "question": "List the workspaces we have on record, especially anything related to customer onboarding.",
+    "question": "List all available workspaces in the vault.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -569,7 +569,7 @@
   },
   {
     "id": "memoryManager_loadSession",
-    "question": "Load the session titled \"Northwind cleanup\" before we do anything else so context is fresh.",
+    "question": "Load the session \"Northwind Cleanup\" (id: session_1732300800002_northwind) so I can continue that work.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -577,7 +577,7 @@
     "expected_tools": [
       "memoryManager_loadSession"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_sessions>\nThe following sessions exist in this vault:\n\n- Atlas Planning (id: \"session_1732300800000_eval01234\")\n  Description: Current planning session for Atlas rollout\n\n- Phoenix Review (id: \"session_1732300800001_phoenixrev\")\n  Description: Code review session for Phoenix migration\n\n- Northwind Cleanup (id: \"session_1732300800002_northwind\")\n  Description: Legacy cleanup tasks for Northwind integration\n\n</available_sessions>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -590,7 +590,7 @@
   },
   {
     "id": "memoryManager_loadState",
-    "question": "Restore the saved state called \"phoenix_pre_mortem\" to bring back that conversation snapshot.",
+    "question": "Load the saved state \"phoenix_pre_mortem\" (id: state_1732300800001_pre_mortem) to restore that conversation snapshot.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -598,7 +598,7 @@
     "expected_tools": [
       "memoryManager_loadState"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_states>\nThe following saved states exist for this session:\n\n- checkpoint_A (id: \"state_1732300800000_checkpoint_a\")\n  Description: Checkpoint before dependency updates\n\n- phoenix_pre_mortem (id: \"state_1732300800001_pre_mortem\")\n  Description: State captured before Phoenix post-mortem analysis\n\n- atlas_milestone_1 (id: \"state_1732300800002_milestone1\")\n  Description: Checkpoint at Atlas milestone 1 completion\n\n</available_states>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -611,7 +611,7 @@
   },
   {
     "id": "memoryManager_loadWorkspace",
-    "question": "Load the workspace labeled \"Atlas rollout\" so the rest of this session stays scoped correctly.",
+    "question": "Load the Atlas Rollout workspace (id: ws_1732300800000_atlasroll) to scope the session to that project.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -632,7 +632,7 @@
   },
   {
     "id": "memoryManager_updateSession",
-    "question": "Update the description of this session to mention that we're now focusing on \"Atlas resiliency\".",
+    "question": "Update the current session (id: session_1732300800000_eval01234) to change its description to \"Atlas resiliency planning and implementation\".",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -652,7 +652,7 @@
   },
   {
     "id": "memoryManager_updateState",
-    "question": "Rename the saved state \"checkpoint_A\" to \"checkpoint_archived_dependencies\" and include a note that it predates the security review.",
+    "question": "Update the saved state \"checkpoint_A\" (id: state_1732300800000_checkpoint_a) to rename it to \"checkpoint_archived_dependencies\" and add a note that it predates the security review.",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -660,7 +660,7 @@
     "expected_tools": [
       "memoryManager_updateState"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_states>\nThe following saved states exist for this session:\n\n- checkpoint_A (id: \"state_1732300800000_checkpoint_a\")\n  Description: Checkpoint before dependency updates\n\n- phoenix_pre_mortem (id: \"state_1732300800001_pre_mortem\")\n  Description: State captured before Phoenix post-mortem analysis\n\n- atlas_milestone_1 (id: \"state_1732300800002_milestone1\")\n  Description: Checkpoint at Atlas milestone 1 completion\n\n</available_states>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -672,7 +672,7 @@
   },
   {
     "id": "memoryManager_updateWorkspace",
-    "question": "Update the workspace entry for \"Northwind\" so its description highlights the upcoming compliance audit.",
+    "question": "Update the Phoenix Migration workspace (id: ws_1732300800001_phoenixmg) to change its description to \"Phoenix system migration - compliance audit pending\".",
     "tags": [
       "memoryManager",
       "single-tool"
@@ -680,19 +680,20 @@
     "expected_tools": [
       "memoryManager_updateWorkspace"
     ],
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
       "workspace_ids": [
-        "ws_1732300800000_atlasroll"
+        "ws_1732300800000_atlasroll",
+        "ws_1732300800001_phoenixmg"
       ],
       "agent_ids": []
     }
   },
   {
     "id": "vaultLibrarian_batch",
-    "question": "Run a batch librarian query that finds all notes mentioning \"Atlas\" and \"rollout risks\" within the Projects directory, then summarize how many hits came back per folder.",
+    "question": "Run a batch librarian search with two queries: first search for \"Atlas\" in the Projects/ directory, then search for \"rollout risks\" in the same directory. Return hit counts per folder.",
     "tags": [
       "vaultLibrarian",
       "single-tool"
@@ -713,7 +714,7 @@
   },
   {
     "id": "vaultLibrarian_searchContent",
-    "question": "Search for every note referencing \"workspace crash\" so we can review the remediation steps.",
+    "question": "Search all notes in the vault for the phrase \"workspace crash\" to find remediation steps.",
     "tags": [
       "vaultLibrarian",
       "single-tool"
@@ -733,7 +734,7 @@
   },
   {
     "id": "vaultLibrarian_searchDirectory",
-    "question": "List everything currently stored under Projects/Rollouts/ so I can decide what to archive.",
+    "question": "Search and list all files and folders in the Projects/Rollouts/ directory.",
     "tags": [
       "vaultLibrarian",
       "single-tool"
@@ -753,7 +754,7 @@
   },
   {
     "id": "vaultLibrarian_searchMemory",
-    "question": "Search our conversation memory for earlier mentions of \"Atlas workspace\" and summarize what we promised the customer.",
+    "question": "Search the conversation memory for mentions of \"customer promise\" or \"SLA\" to recall what we agreed to.",
     "tags": [
       "vaultLibrarian",
       "single-tool"
@@ -773,7 +774,7 @@
   },
   {
     "id": "vaultManager_createFolder",
-    "question": "Create a folder at Projects/Retrospectives/2025/Q1 so we have a place for the new notes.",
+    "question": "Create a new folder at Projects/Retrospectives/2025/Q1 for quarterly retrospective notes.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -793,7 +794,7 @@
   },
   {
     "id": "vaultManager_deleteFolder",
-    "question": "Delete the empty folder Scratch/Old-Prototypes because it's no longer used.",
+    "question": "Delete the folder Scratch/Old-Prototypes since it's empty and no longer needed.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -813,7 +814,7 @@
   },
   {
     "id": "vaultManager_deleteNote",
-    "question": "Remove Projects/Ideas/Outdated-Risks.md entirely; we consolidated it elsewhere.",
+    "question": "Delete the file Projects/Ideas/Outdated-Risks.md since we consolidated it elsewhere.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -833,7 +834,7 @@
   },
   {
     "id": "vaultManager_duplicateNote",
-    "question": "Duplicate Projects/Runbooks/Incident-Response.md into Projects/Runbooks/Incident-Response-Template.md so we can customize it for a customer.",
+    "question": "Duplicate the file Projects/Runbooks/Incident-Response.md to Projects/Runbooks/Incident-Response-Template.md so we can customize it.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -853,7 +854,7 @@
   },
   {
     "id": "vaultManager_editFolder",
-    "question": "Rename Projects/Initiatives/LegacyCleanup to Projects/Initiatives/Legacy-Modernization to match the new naming scheme.",
+    "question": "Rename the folder Projects/Initiatives/LegacyCleanup to Projects/Initiatives/Legacy-Modernization.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -873,7 +874,7 @@
   },
   {
     "id": "vaultManager_listDirectory",
-    "question": "List the contents of Projects/Decisions/ so I know which RFCs are already filed.",
+    "question": "List the contents of the Projects/Decisions/ directory to see which RFCs are filed.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -894,7 +895,7 @@
   },
   {
     "id": "vaultManager_moveFolder",
-    "question": "Move Projects/Initiatives/Atlas to Archives/2025/Initiatives/Atlas without losing any children.",
+    "question": "Move the folder Projects/Initiatives/Atlas to Archives/2025/Initiatives/Atlas while preserving all contents.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -914,7 +915,7 @@
   },
   {
     "id": "vaultManager_moveNote",
-    "question": "Move Projects/Rollouts/Odyssey.md into Projects/Clients/Odyssey.md and overwrite any existing draft there.",
+    "question": "Move the file Projects/Rollouts/Odyssey.md to Projects/Clients/Odyssey.md, overwriting if a file exists there.",
     "tags": [
       "vaultManager",
       "single-tool"
@@ -934,7 +935,7 @@
   },
   {
     "id": "vaultManager_openNote",
-    "question": "Open Projects/Runbooks/Backup.md because I want to read it inside Obsidian.",
+    "question": "Open the file Projects/Runbooks/Backup.md in Obsidian so I can view it.",
     "tags": [
       "vaultManager",
       "single-tool"

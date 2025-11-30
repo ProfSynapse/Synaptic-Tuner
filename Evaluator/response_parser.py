@@ -149,8 +149,10 @@ def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> No
 
 
 def _parse_string_format(response: str, result: ParsedResponse) -> None:
-    """Parse string format response (ChatML or Mistral)."""
-    if "[TOOL_CALLS]" in response:
+    """Parse string format response (Qwen, ChatML, or Mistral)."""
+    if "<tool_call>" in response:
+        _parse_qwen_format(response, result)
+    elif "[TOOL_CALLS]" in response:
         _parse_mistral_format(response, result)
     elif "tool_call:" in response:
         _parse_chatml_format(response, result)
@@ -158,6 +160,87 @@ def _parse_string_format(response: str, result: ParsedResponse) -> None:
         # No tool calls, just text
         result.text_content = response.strip()
         result.format_detected = ToolCallFormat.NONE
+
+
+def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
+    """Parse Qwen format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+
+    This format is used by Qwen models trained with ChatML templates.
+    The tool call is wrapped in <tool_call>...</tool_call> tags and contains
+    a JSON object with "name" and "arguments" fields.
+    """
+    result.format_detected = ToolCallFormat.QWEN
+
+    # Extract text before first <tool_call>
+    parts = response.split("<tool_call>", 1)
+    result.text_content = parts[0].strip()
+
+    # Find all <tool_call>...</tool_call> blocks
+    tool_call_pattern = re.compile(
+        r'<tool_call>\s*([\s\S]*?)\s*</tool_call>',
+        re.IGNORECASE
+    )
+
+    for match in tool_call_pattern.finditer(response):
+        json_content = match.group(1).strip()
+        tool_obj = None
+
+        # Try to parse JSON, with fallback for malformed output
+        try:
+            tool_obj = json.loads(json_content)
+        except json.JSONDecodeError as e:
+            # If it's a control character error, try fixing newlines
+            if "control character" in str(e).lower():
+                try:
+                    fixed_json = _fix_json_newlines(json_content)
+                    tool_obj = json.loads(fixed_json)
+                except json.JSONDecodeError:
+                    pass
+
+        if tool_obj and isinstance(tool_obj, dict):
+            name = tool_obj.get("name", "")
+            args = tool_obj.get("arguments", {})
+
+            # Arguments might be a string that needs parsing
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+
+            result.tool_calls.append(ParsedToolCall(
+                name=name,
+                arguments=args if isinstance(args, dict) else {},
+                raw=json_content,
+            ))
+        else:
+            # Fallback: Try to extract name and arguments separately
+            name_match = re.search(r'"name"\s*:\s*"([^"]+)"', json_content)
+            if name_match:
+                name = name_match.group(1)
+
+                # Try to find arguments block and fix it
+                args_match = re.search(r'"arguments"\s*:\s*(\{[\s\S]*\})', json_content)
+                args = {}
+                raw = json_content
+
+                if args_match:
+                    args_str = args_match.group(1)
+                    try:
+                        args = json.loads(args_str)
+                    except json.JSONDecodeError:
+                        # Try fixing newlines in arguments
+                        try:
+                            fixed_args = _fix_json_newlines(args_str)
+                            args = json.loads(fixed_args)
+                        except json.JSONDecodeError:
+                            pass
+
+                result.tool_calls.append(ParsedToolCall(
+                    name=name,
+                    arguments=args if isinstance(args, dict) else {},
+                    raw=raw,
+                ))
 
 
 def _parse_mistral_format(response: str, result: ParsedResponse) -> None:
@@ -253,6 +336,65 @@ def _parse_chatml_format(response: str, result: ParsedResponse) -> None:
                 arguments=args if isinstance(args, dict) else {},
                 raw=args_raw,
             ))
+
+
+def _fix_json_newlines(json_str: str) -> str:
+    """Fix literal newlines inside JSON string values.
+
+    Models sometimes output literal newlines inside JSON strings instead of
+    escaped \\n sequences. This makes the JSON invalid.
+
+    This function attempts to fix this by escaping newlines that appear
+    inside string values (between quotes).
+
+    Args:
+        json_str: Potentially malformed JSON string
+
+    Returns:
+        Fixed JSON string with escaped newlines
+    """
+    # Strategy: find all string values and escape newlines within them
+    result = []
+    in_string = False
+    escape_next = False
+    i = 0
+
+    while i < len(json_str):
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == '\\':
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        if in_string:
+            if char == '\n':
+                result.append('\\n')
+            elif char == '\r':
+                result.append('\\r')
+            elif char == '\t':
+                result.append('\\t')
+            else:
+                result.append(char)
+        else:
+            result.append(char)
+
+        i += 1
+
+    return ''.join(result)
 
 
 def _extract_json_array(json_str: str) -> List[Any]:

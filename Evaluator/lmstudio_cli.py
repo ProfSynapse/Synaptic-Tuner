@@ -19,7 +19,7 @@ from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
 
-DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "full_coverage.json"
+DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "tool_prompts.json"
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
@@ -46,7 +46,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     run_parser.add_argument(
         "--prompt-set",
         default=str(DEFAULT_PROMPT_SET),
-        help="Path to a prompt set file (default: full_coverage.json).",
+        help="Path to a prompt set file (default: tool_prompts.json).",
     )
     run_parser.add_argument(
         "--output-dir",

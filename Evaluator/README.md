@@ -110,7 +110,7 @@ Both backends support environment variables and CLI overrides:
 
 Four evaluation prompt sets are available:
 
-### 1. **behavior_rubric.json** (43 prompts) - **Recommended for trained models**
+### 1. **behavior_prompts.json** (43 prompts) - **Recommended for trained models**
 Tests behavior patterns from the training rubric:
 - Intellectual Humility (8 prompts)
 - Verification Before Action (6 prompts)
@@ -124,14 +124,14 @@ Tests behavior patterns from the training rubric:
 ```bash
 python -m Evaluator.cli \
   --model your-model \
-  --prompt-set Evaluator/prompts/behavior_rubric.json \
+  --prompt-set Evaluator/prompts/behavior_prompts.json \
   --markdown results/behavior_report.md
 ```
 
 ### 2. **baseline.json** (6 prompts) - Quick functionality check
 General-purpose prompts with behavior expectations.
 
-### 3. **full_coverage.json** (45 prompts) - Every tool tested once
+### 3. **tool_prompts.json** (45 prompts) - Every tool tested once
 One scenario per tool (no commandManager or get_tools).
 
 ### 4. **tool_combos.json** (7 prompts) - Multi-step workflows
@@ -178,7 +178,7 @@ Prefer a purpose-built helper for LM Studio runs:
 # List hosted models
 python3 -m Evaluator.lmstudio_cli list-models
 
-# Run the full coverage suite (defaults to prompts/full_coverage.json)
+# Run the full coverage suite (defaults to prompts/tool_prompts.json)
 python3 -m Evaluator.lmstudio_cli run --model <model-id>
 ```
 

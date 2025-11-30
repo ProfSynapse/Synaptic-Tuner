@@ -35,7 +35,7 @@ from .reporting import build_run_payload, console_summary, render_markdown, writ
 from .runner import evaluate_cases
 
 # Default paths
-DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "full_coverage.json"
+DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "tool_prompts.json"
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
@@ -53,7 +53,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--model-path", help="Path to local model (vLLM only)")
     parser.add_argument("--runs", type=int, help="How many times to run the suite (default: ask).")
     parser.add_argument("--prompt-set", default=str(DEFAULT_PROMPT_SET),
-                        help="Prompt set to use (default: full_coverage.json).")
+                        help="Prompt set to use (default: tool_prompts.json).")
     parser.add_argument("--output-dir", default=str(DEFAULT_RESULTS_DIR),
                         help="Directory for JSON/MD artifacts.")
     parser.add_argument("--timeout", type=float, default=120.0,
@@ -618,8 +618,8 @@ def _select_prompt_set() -> Union[str, List[str]]:
         Path string or list of paths for 'all'.
     """
     paths = {
-        "1": "Evaluator/prompts/behavior_rubric.json",
-        "2": "Evaluator/prompts/full_coverage.json",
+        "1": "Evaluator/prompts/behavior_prompts.json",
+        "2": "Evaluator/prompts/tool_prompts.json",
         "3": "Evaluator/prompts/baseline.json",
         "4": "Evaluator/prompts/tool_combos.json",
     }

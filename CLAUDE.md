@@ -314,14 +314,14 @@ python -m Evaluator.cli \
 python -m Evaluator.cli \
   --backend lmstudio \
   --model your-model-name \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --output Evaluator/results/run_lmstudio.json \
   --markdown Evaluator/results/report.md
 ```
 
 **Prompt sets:**
 - `baseline.json` - General scenarios
-- `full_coverage.json` - One prompt per tool (47 prompts)
+- `tool_prompts.json` - One prompt per tool (47 prompts)
 - `tool_combos.json` - Multi-step workflows
 
 ## Architecture Overview
@@ -681,7 +681,7 @@ python train_kto.py --model-size 7b --dry-run
 ### Model Evaluation
 ```bash
 # Serve model and run evaluation suite
-python -m Evaluator.cli --model <name> --prompt-set Evaluator/prompts/full_coverage.json
+python -m Evaluator.cli --model <name> --prompt-set Evaluator/prompts/tool_prompts.json
 ```
 
 ## Troubleshooting

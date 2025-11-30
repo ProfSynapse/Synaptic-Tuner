@@ -204,7 +204,7 @@ def main():
     prompts_dir = Path(__file__).parent / "prompts"
 
     files_to_process = [
-        "full_coverage.json",
+        "tool_prompts.json",
         "baseline.json",
         "tool_combos.json",
     ]

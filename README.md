@@ -119,7 +119,7 @@ ollama run your-model-name
 # 2. Run evaluation
 python -m Evaluator.cli \
   --model your-model-name \
-  --prompt-set Evaluator/prompts/full_coverage.json \
+  --prompt-set Evaluator/prompts/tool_prompts.json \
   --output Evaluator/results/run_$(date +%s).json \
   --markdown Evaluator/results/report.md
 ```
@@ -164,7 +164,7 @@ Toolset-Training/
 │   ├── lmstudio_cli.py         # LM Studio-specific CLI
 │   ├── interactive_cli.py      # Interactive evaluation
 │   ├── prompts/                # Test prompt sets
-│   │   ├── full_coverage.json  # One prompt per tool (47 prompts)
+│   │   ├── tool_prompts.json  # One prompt per tool (47 prompts)
 │   │   ├── baseline.json       # General scenarios
 │   │   └── tool_combos.json    # Multi-step workflows
 │   └── results/                # Evaluation outputs (JSON + Markdown)
@@ -341,7 +341,7 @@ python -m Evaluator.cli \
 
 ### Prompt Sets
 
-- **`full_coverage.json`** - One prompt per tool (47 prompts)
+- **`tool_prompts.json`** - One prompt per tool (47 prompts)
 - **`baseline.json`** - General scenarios
 - **`tool_combos.json`** - Multi-step workflows
 
