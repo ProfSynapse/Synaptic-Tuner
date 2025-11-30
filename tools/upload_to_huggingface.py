@@ -6,6 +6,7 @@ Upload syngen_toolset_v1.0.0_claude.jsonl to Hugging Face Hub
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 from huggingface_hub import HfApi, create_repo
 
@@ -19,12 +20,18 @@ if not HF_TOKEN:
     sys.exit(1)
 
 # Configuration
-REPO_ID = "professorsynapse/claudesidian-synthetic-dataset"
+REPO_ID = "professorsynapse/nexus-synthetic-data"
 DATASET_FILE = "Datasets/tools-sft_v1.3_11.27.25.jsonl"
 REPO_TYPE = "dataset"  # This is a dataset, not a model
 
 def upload_dataset():
     """Upload the JSONL dataset to Hugging Face Hub"""
+
+    # Record start time
+    start_time = datetime.now()
+    print("=" * 60)
+    print(f"📅 Upload started: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
 
     # Verify file exists
     if not Path(DATASET_FILE).exists():
@@ -69,7 +76,7 @@ def upload_dataset():
 
         # Create README.md if it doesn't exist
         print("\nCreating/updating README.md...")
-        readme_content = """# Claudesidian Synthetic Training Dataset
+        readme_content = """# Nexus Synthetic Training Data
 
 High-quality synthetic training dataset for fine-tuning local LLMs to reliably use the Claudesidian-MCP tool suite for Obsidian vault operations.
 
@@ -140,7 +147,7 @@ The dataset is formatted as JSONL with OpenAI-compatible structure:
 from datasets import load_dataset
 
 # Load the dataset
-dataset = load_dataset("professorsynapse/claudesidian-synthetic-dataset",
+dataset = load_dataset("professorsynapse/nexus-synthetic-data",
                        data_files="syngen_tools_sft_11.24.25_with_tools.jsonl")
 
 # The dataset includes both messages and tools for proper training
@@ -154,7 +161,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Load and prepare
-dataset = load_dataset("jrosenbaum/claudesidian-synthetic-dataset",
+dataset = load_dataset("professorsynapse/nexus-synthetic-data",
                        data_files="syngen_toolset_v1.0.0_claude.jsonl")
 
 # Format for instruction tuning
@@ -241,9 +248,15 @@ These synthetic examples are provided for research and training purposes.
         except Exception as e:
             print(f"Note: Could not upload README: {e}")
 
+        # Record completion time
+        end_time = datetime.now()
+        duration = end_time - start_time
+
         print("\n" + "="*60)
         print("✅ Dataset upload complete!")
         print("="*60)
+        print(f"📅 Completed: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏱️  Duration: {duration.total_seconds():.1f} seconds")
         print(f"\nYour dataset is now available at:")
         print(f"  https://huggingface.co/datasets/{REPO_ID}")
         print(f"\nYou can load it with:")
@@ -251,7 +264,9 @@ These synthetic examples are provided for research and training purposes.
         print(f"  ds = load_dataset('{REPO_ID}', data_files='{filename}')")
 
     except Exception as e:
-        print(f"Error during upload: {e}")
+        end_time = datetime.now()
+        print(f"\n❌ Error during upload: {e}")
+        print(f"📅 Failed at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         sys.exit(1)
 
 if __name__ == "__main__":
