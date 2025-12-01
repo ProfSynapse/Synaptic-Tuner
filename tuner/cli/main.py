@@ -7,6 +7,8 @@ Used by: tuner.py wrapper, python -m tuner
 """
 
 import sys
+from pathlib import Path
+from tuner.utils import load_env_file
 from .parser import create_parser
 from .router import route_command
 
@@ -27,6 +29,10 @@ def main():
         >>> if __name__ == "__main__":
         ...     main()
     """
+    # Load environment from repo root (.env) so CLI commands have HF_TOKEN, etc.
+    repo_root = Path(__file__).parent.parent.parent.resolve()
+    load_env_file(repo_root / ".env")
+
     # Create and parse arguments
     parser = create_parser()
     args = parser.parse_args()

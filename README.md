@@ -13,11 +13,25 @@ Synthetic data and training stack for teaching local LLMs to run the Obsidian Ne
 
 </div>
 
+<div align="center">
+  <a href="https://github.com/unslothai/unsloth">
+    <img src="https://raw.githubusercontent.com/unslothai/unsloth/main/images/unsloth%20logo%20white%20text.png" alt="Unsloth logo" width="360">
+  </a>
+  <br/>
+  <sub><i>Training is powered by <a href="https://github.com/unslothai/unsloth">Unsloth</a> — huge thanks to their team.</i></sub>
+</div>
+
 ## Choose a path
 - **Beginner (no setup):** Run the Colab notebook `Trainers/notebooks/sft_colab_beginner.ipynb`. It walks through SFT, exports checkpoints, and keeps you on a free GPU (unless you want to pay for it).
 - **Local/production:** Use the unified CLI (`./run.sh` on Linux/WSL, `.\run.ps1` on PowerShell, or `python tuner.py` if your env is already active). It covers training, uploads, evaluation, and the full pipeline.
 
 ## Quick start
+
+### Configure credentials
+- Copy `.env.example` to `.env` in the repo root, then add your Hugging Face write token (`HF_TOKEN=hf_...`). A write-scoped token is needed for downloading private models and uploading checkpoints; `HF_API_KEY` works as an alias if you prefer.
+- (Optional) Set `HF_USERNAME` to prefill upload prompts, and `WANDB_API_KEY` if you want Weights & Biases logging during training.
+- The CLI now auto-loads the root `.env` when you run `./run.sh`, `.\run.ps1`, or `python tuner.py`—no manual `export` needed.
+- In Google Colab (beginner notebook), click the 🔑 **Secrets** icon, add a secret named `HF_TOKEN`, and paste the same write token there; the notebook reads it securely at runtime.
 
 ### Beginner notebook
 1. Open `Trainers/notebooks/sft_colab_beginner.ipynb` in Google Colab.

@@ -807,7 +807,7 @@ HF_HOME=/path/to/cache
 
 **Note:**
 - `.env` file is gitignored
-- See `.env.example` in `Trainers/rtx3090_kto/` for template
+- See the root `.env.example` for template values
 - PowerShell scripts auto-load from root `.env` file
 
 ## Script Reference
