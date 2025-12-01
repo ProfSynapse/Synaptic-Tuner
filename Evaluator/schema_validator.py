@@ -12,6 +12,7 @@ if str(tools_dir) not in sys.path:
     sys.path.insert(0, str(tools_dir))
 
 import validate_syngen as dataset_validator
+from .tool_call_parser import parse_qwen_tool_calls
 
 
 @dataclass
@@ -63,14 +64,28 @@ def validate_assistant_response(
     report = dataset_validator.ExampleReport(index=0, label=True)
     tool_calls: List[ToolCall] = []
 
+    def _convert_qwen_to_openai(msg: str) -> Optional[Dict[str, Any]]:
+        """Convert Qwen <tool_call> content into OpenAI-style tool_calls."""
+        calls = parse_qwen_tool_calls(msg)
+        if not calls:
+            return None
+        return {"role": "assistant", "content": msg, "tool_calls": calls}
+
     # Detect format and validate accordingly
     if isinstance(content, dict):
+        message = dict(content)
+        # Qwen sometimes embeds tool calls in content without tool_calls array
+        if (not message.get("tool_calls")) and isinstance(message.get("content"), str):
+            converted = _convert_qwen_to_openai(message["content"])
+            if converted:
+                message = converted
+
         # OpenAI format with structured tool_calls
-        if "tool_calls" in content:
-            dataset_validator.validate_assistant_message_openai(content, report)
+        if "tool_calls" in message:
+            dataset_validator.validate_assistant_message_openai(message, report)
             # Extract tool calls
             try:
-                tool_calls_array = content.get("tool_calls", [])
+                tool_calls_array = message.get("tool_calls", [])
                 for name, args in dataset_validator.extract_tool_calls_openai(tool_calls_array):
                     tool_calls.append(ToolCall(name=name, arguments=args))
             except Exception:
@@ -80,24 +95,36 @@ def validate_assistant_response(
             # Dict without tool_calls - invalid
             report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
     elif isinstance(content, str):
-        # ChatML or Mistral format with content string
-        dataset_validator.validate_assistant_content(content, report)
-        # Extract tool calls even if validation failed to help debugging.
-        # Check for Mistral format first (more specific marker)
-        if "[TOOL_CALLS]" in content:
-            try:
-                for name, args in dataset_validator.extract_tool_calls_mistral(content):
-                    tool_calls.append(ToolCall(name=name, arguments=args))
-            except Exception:
-                # extractor raises ValueError for broken JSON; already surfaced as issue
-                pass
-        elif "tool_call:" in content:
-            try:
-                for name, args in dataset_validator.extract_tool_calls(content):
-                    tool_calls.append(ToolCall(name=name, arguments=args))
-            except Exception:
-                # extractor raises ValueError for broken JSON; already surfaced as issue
-                pass
+        if "<tool_call>" in content:
+            converted = _convert_qwen_to_openai(content)
+            if converted:
+                dataset_validator.validate_assistant_message_openai(converted, report)
+                try:
+                    for name, args in dataset_validator.extract_tool_calls_openai(converted["tool_calls"]):
+                        tool_calls.append(ToolCall(name=name, arguments=args))
+                except Exception:
+                    pass
+            else:
+                report.add("ERROR", "Assistant response contains <tool_call> markers but could not be parsed")
+        else:
+            # ChatML or Mistral format with content string
+            dataset_validator.validate_assistant_content(content, report)
+            # Extract tool calls even if validation failed to help debugging.
+            # Check for Mistral format first (more specific marker)
+            if "[TOOL_CALLS]" in content:
+                try:
+                    for name, args in dataset_validator.extract_tool_calls_mistral(content):
+                        tool_calls.append(ToolCall(name=name, arguments=args))
+                except Exception:
+                    # extractor raises ValueError for broken JSON; already surfaced as issue
+                    pass
+            elif "tool_call:" in content:
+                try:
+                    for name, args in dataset_validator.extract_tool_calls(content):
+                        tool_calls.append(ToolCall(name=name, arguments=args))
+                except Exception:
+                    # extractor raises ValueError for broken JSON; already surfaced as issue
+                    pass
     else:
         report.add("ERROR", f"Assistant response must be string or dict, got {type(content).__name__}")
 

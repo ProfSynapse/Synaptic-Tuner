@@ -39,7 +39,7 @@ training:
   output_dir: "./sft_output_rtx3090"
 
   # Batch configuration
-  per_device_train_batch_size: 6  
+  per_device_train_batch_size: 2  
   gradient_accumulation_steps: 4  
 
   # Learning rate
