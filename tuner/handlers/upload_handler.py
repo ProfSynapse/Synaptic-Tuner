@@ -88,8 +88,8 @@ class UploadHandler(BaseHandler):
             return 0
 
         # Step 3: List training runs
-        discovery = TrainingRunDiscovery()
-        runs = discovery.discover(trainer_type=model_type, repo_root=self.repo_root, limit=10)
+        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        runs = discovery.discover(trainer_type=model_type, limit=10)
 
         if not runs:
             print_error(f"No training runs found for {model_type.upper()}")

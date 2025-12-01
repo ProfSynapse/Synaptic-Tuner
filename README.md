@@ -1,5 +1,20 @@
 # Toolset-Training
 
+<div align="center">
+  <img src="https://picoshare-production-7223.up.railway.app/-JRwnJvYt5S" alt="Toolset-Training Banner" width="800"/>
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+  [![GitHub Stars](https://img.shields.io/github/stars/ProfSynapse/Synaptic-Tuner?style=social)](https://github.com/ProfSynapse/Synaptic-Tuner)
+  [![GitHub Issues](https://img.shields.io/github/issues/ProfSynapse/Synaptic-Tuner)](https://github.com/ProfSynapse/Synaptic-Tuner/issues)
+  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ProfSynapse/Synaptic-Tuner/pulls)
+  [![CUDA 12.1+](https://img.shields.io/badge/CUDA-12.1+-76B900.svg?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
+  [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C.svg?logo=pytorch&logoColor=white)](https://pytorch.org/)
+  [![Weights & Biases](https://img.shields.io/badge/Weights%20&%20Biases-Integrated-FFBE00.svg?logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
+</div>
+
+---
+
 **Synthetic dataset generation and LLM fine-tuning system** for training local language models to reliably use the **Claudesidian-MCP toolset** for Obsidian vault operations.
 
 > Train small, local models (3B-20B parameters) to call tools as reliably as Claude, ChatGPT, or Copilot using supervised fine-tuning (SFT) and preference learning (KTO).
@@ -47,8 +62,8 @@
 **Linux/WSL2:**
 ```bash
 # 1. Clone repository
-git clone https://github.com/ProfSynapse/Toolset-Training.git
-cd Toolset-Training
+git clone https://github.com/ProfSynapse/Synaptic-Tuner.git
+cd Synaptic-Tuner
 
 # 2. Setup environment (one-time)
 cd Trainers/rtx3090_sft
@@ -67,8 +82,8 @@ cd ../
 **Windows PowerShell:**
 ```powershell
 # 1. Clone repository
-git clone https://github.com/ProfSynapse/Toolset-Training.git
-cd Toolset-Training
+git clone https://github.com/ProfSynapse/Synaptic-Tuner.git
+cd Synaptic-Tuner
 
 # 2. Setup environment (one-time)
 cd Trainers\rtx3090_sft
@@ -136,7 +151,7 @@ python -m Evaluator.cli \
 ## 📁 Repository Structure
 
 ```
-Toolset-Training/
+Synaptic-Tuner/
 ├── Trainers/
 │   ├── notebooks/              # 🎯 START HERE - Colab notebooks
 │   │   ├── sft_colab_beginner.ipynb           # ⭐ Best for first-time users
@@ -476,7 +491,7 @@ WANDB_API_KEY=your_wandb_key
 
 ### Reporting Issues
 
-- GitHub Issues: https://github.com/ProfSynapse/Toolset-Training/issues
+- GitHub Issues: https://github.com/ProfSynapse/Synaptic-Tuner/issues
 - Include: dataset version, training logs, error messages
 
 ---

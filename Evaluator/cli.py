@@ -206,6 +206,9 @@ def main(argv: List[str] | None = None) -> int:
     metadata = build_metadata(config, settings, len(cases), len(selected_cases), args.backend)
     payload = build_run_payload(records, metadata=metadata)
     write_json(config.output_path, payload)
+    print(f"Results saved to {config.output_path}")
+    if markdown_path:
+        print(f"Markdown summary saved to {markdown_path}")
     print(console_summary(records))
 
     if markdown_path:

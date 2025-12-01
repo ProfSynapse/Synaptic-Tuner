@@ -226,39 +226,34 @@ class GGUFConverter(BaseConverter):
         return llamacpp_dir
 
     def _build_llamacpp(self, llamacpp_dir: Path):
-        """Build llama.cpp for the current platform."""
-        if sys.platform == 'win32':
-            print("  Using CMake for Windows build...")
-            build_dir = llamacpp_dir / "build"
-            build_dir.mkdir(exist_ok=True)
+        """Build llama.cpp for the current platform using cmake."""
+        print("  Using CMake build...")
+        build_dir = llamacpp_dir / "build"
+        build_dir.mkdir(exist_ok=True)
 
-            # Configure with CMake
-            subprocess.run(
-                ["cmake", "..",
-                 "-DCMAKE_BUILD_TYPE=Release",
-                 "-DLLAMA_CURL=OFF",
-                 "-DGGML_CUDA=OFF",
-                 "-DGGML_METAL=OFF"],
-                cwd=str(build_dir),
-                check=True,
-                capture_output=True
-            )
+        # Configure with CMake
+        cmake_args = [
+            "cmake", "..",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DLLAMA_CURL=OFF",
+            "-DGGML_CUDA=OFF",
+            "-DGGML_METAL=OFF"
+        ]
 
-            # Build
-            subprocess.run(
-                ["cmake", "--build", ".", "--config", "Release"],
-                cwd=str(build_dir),
-                check=True,
-                capture_output=True
-            )
-        else:
-            # Use make on Linux/macOS
-            subprocess.run(
-                ["make", "-j"],
-                cwd=str(llamacpp_dir),
-                check=True,
-                capture_output=True
-            )
+        subprocess.run(
+            cmake_args,
+            cwd=str(build_dir),
+            check=True,
+            capture_output=True
+        )
+
+        # Build
+        subprocess.run(
+            ["cmake", "--build", ".", "--config", "Release", "-j"],
+            cwd=str(build_dir),
+            check=True,
+            capture_output=True
+        )
 
     def _convert_to_gguf(
         self,
@@ -296,11 +291,14 @@ class GGUFConverter(BaseConverter):
 
         gguf_files = [base_gguf]
 
-        # Find llama-quantize executable
+        # Find llama-quantize executable (cmake build puts it in build/bin/)
         if sys.platform == 'win32':
             quantize_exe = llamacpp_dir / "build" / "bin" / "Release" / "llama-quantize.exe"
         else:
-            quantize_exe = llamacpp_dir / "llama-quantize"
+            quantize_exe = llamacpp_dir / "build" / "bin" / "llama-quantize"
+            # Fallback to old location if cmake build dir doesn't exist
+            if not quantize_exe.exists():
+                quantize_exe = llamacpp_dir / "llama-quantize"
 
         for quant in quantizations:
             output_file = output_dir / f"{model_name}-{quant}.gguf"
