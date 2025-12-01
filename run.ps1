@@ -41,8 +41,8 @@ if ($NeedsGpu) {
 $CondaPaths = @(
     "$env:USERPROFILE\miniconda3\envs\$UnslothEnv\python.exe",
     "$env:USERPROFILE\anaconda3\envs\$UnslothEnv\python.exe",
-    "$env:USERPROFILE\miniconda3\python.exe",
-    "$env:USERPROFILE\anaconda3\python.exe"
+    "C:\ProgramData\miniconda3\envs\$UnslothEnv\python.exe",
+    "C:\ProgramData\anaconda3\envs\$UnslothEnv\python.exe"
 )
 
 $Python = $null
@@ -51,6 +51,36 @@ foreach ($path in $CondaPaths) {
         $Python = $path
         Write-Host "Using Python: $path" -ForegroundColor Green
         break
+    }
+}
+
+if (-not $Python) {
+    Write-Host "Environment '$UnslothEnv' not found." -ForegroundColor Yellow
+    $RunSetup = Read-Host "Would you like to run setup now? (Y/n)"
+    if ($RunSetup -match "^[Yy]$" -or $RunSetup -eq "") {
+        .\setup_env.ps1
+        # Try finding python again
+        foreach ($path in $CondaPaths) {
+            if (Test-Path $path) {
+                $Python = $path
+                break
+            }
+        }
+    }
+}
+
+# Fallback to other python paths if setup failed or was skipped (legacy behavior)
+if (-not $Python) {
+    $FallbackPaths = @(
+        "$env:USERPROFILE\miniconda3\python.exe",
+        "$env:USERPROFILE\anaconda3\python.exe"
+    )
+    foreach ($path in $FallbackPaths) {
+        if (Test-Path $path) {
+            $Python = $path
+            Write-Host "Using fallback Python: $path" -ForegroundColor Yellow
+            break
+        }
     }
 }
 

@@ -22,12 +22,21 @@ fi
 
 if [ -n "$CONDA_SH" ]; then
     source "$CONDA_SH"
-    if conda activate "$UNSLOTH_ENV" 2>/dev/null; then
+    if conda env list | grep -q "$UNSLOTH_ENV"; then
+        conda activate "$UNSLOTH_ENV"
         echo "✓ Using $UNSLOTH_ENV environment"
     else
-        echo "✗ Could not activate $UNSLOTH_ENV environment"
-        echo "  Please run setup first: cd Trainers && source activate_unsloth_latest.sh"
-        exit 1
+        echo "⚠ Environment $UNSLOTH_ENV not found."
+        read -p "Would you like to run setup now? (Y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+            bash setup_env.sh
+            source "$CONDA_SH"
+            conda activate "$UNSLOTH_ENV"
+        else
+            echo "✗ Setup cancelled. Cannot continue."
+            exit 1
+        fi
     fi
 else
     echo "✗ Conda not found"
