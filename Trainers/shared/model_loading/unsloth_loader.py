@@ -72,8 +72,13 @@ class UnslothModelLoader(BaseModelLoader):
             except ImportError as e:
                 raise DependencyError(
                     "unsloth",
-                    "FastVisionModel requires unsloth with VL support. "
-                    "Install with: pip install unsloth"
+                    "FastVisionModel requires unsloth with VL support.\n"
+                    "  Your unsloth installation does not include vision model support.\n\n"
+                    "  To fix, run ONE of the following:\n"
+                    "    pip install --upgrade unsloth unsloth_zoo\n"
+                    "  OR re-run setup with --with-vision:\n"
+                    "    bash setup.sh --with-vision\n\n"
+                    "  Supported VL models: Qwen2-VL, Qwen3-VL, LLaVA, Pixtral, PaliGemma"
                 ) from e
         return self._FastVisionModel
 

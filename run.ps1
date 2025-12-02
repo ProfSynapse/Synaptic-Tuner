@@ -1,30 +1,43 @@
 # Toolset-Training Unified CLI - PowerShell wrapper
 # Usage: .\run.ps1 [train|upload|eval|pipeline]
 #
-# NOTE: For GPU operations (training, upload), use WSL instead:
-#       wsl -d Ubuntu-22.04 bash -c 'cd /mnt/f/Code/Toolset-Training && ./run.sh'
+# NOTE: For best results, run directly in WSL:
+#   ./run.sh [train|upload|eval|pipeline]
 
 param(
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$Arguments
 )
 
-$ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 # Standard environment
 $UnslothEnv = "unsloth_latest"
 
-# For GPU operations, recommend WSL
-Write-Host ""
-Write-Host "NOTE: For GPU training/upload, use WSL:" -ForegroundColor Yellow
-Write-Host "  wsl -d Ubuntu-22.04 bash -c 'cd /mnt/f/Code/Toolset-Training && ./run.sh $($Arguments -join ' ')'" -ForegroundColor Cyan
-Write-Host ""
+# Auto-detect WSL distro
+Write-Host "Detecting WSL distribution..." -ForegroundColor Gray
+$WslDistros = (wsl -l -q 2>$null) -replace "`0", "" | Where-Object { $_ -ne "" }
+if ($WslDistros) {
+    # Find Ubuntu distro (prefer Ubuntu-22.04, then any Ubuntu, then first available)
+    $WslDistro = $WslDistros | Where-Object { $_ -eq "Ubuntu-22.04" } | Select-Object -First 1
+    if (-not $WslDistro) {
+        $WslDistro = $WslDistros | Where-Object { $_ -like "Ubuntu*" } | Select-Object -First 1
+    }
+    if (-not $WslDistro) {
+        $WslDistro = $WslDistros | Select-Object -First 1
+    }
+    Write-Host "  Using WSL distro: $WslDistro" -ForegroundColor Green
+} else {
+    Write-Host "  ERROR: No WSL distributions found!" -ForegroundColor Red
+    Write-Host "  Install WSL with: wsl --install" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Yellow
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit 1
+}
 
-# Find Python - check WSL first for GPU support
 $UseWsl = $false
-$WslDistro = "Ubuntu-22.04"
 
 # Check if this is a GPU operation
 $GpuOps = @("train", "upload", "pipeline")
@@ -32,6 +45,59 @@ $NeedsGpu = $Arguments | Where-Object { $GpuOps -contains $_ }
 
 if ($NeedsGpu) {
     Write-Host "This operation requires GPU. Running via WSL..." -ForegroundColor Cyan
+    Write-Host ""
+
+    # Check dependencies in WSL before running
+    Write-Host "Checking dependencies..." -ForegroundColor Cyan
+
+    # Check unsloth
+    $unslothCheck = wsl -d $WslDistro bash -c "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unsloth_latest && python -c 'import unsloth' 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  [OK] unsloth" -ForegroundColor Green
+    } else {
+        Write-Host "  [MISSING] unsloth" -ForegroundColor Red
+    }
+
+    # Check FastVisionModel
+    $visionCheck = wsl -d $WslDistro bash -c "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unsloth_latest && python -c 'from unsloth import FastVisionModel' 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  [OK] FastVisionModel (Vision Language support)" -ForegroundColor Green
+    } else {
+        Write-Host "  [MISSING] FastVisionModel (Vision Language support)" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Vision Model support is required for Qwen-VL, LLaVA, Pixtral models." -ForegroundColor Yellow
+        $install = Read-Host "Install missing dependencies? (Y/n)"
+        if ($install -match "^[Yy]$" -or $install -eq "") {
+            Write-Host ""
+            Write-Host "Installing unsloth + unsloth_zoo (this may take 1-2 minutes)..." -ForegroundColor Cyan
+            wsl -d $WslDistro bash -c "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unsloth_latest && pip install --upgrade unsloth unsloth_zoo xformers"
+            Write-Host ""
+
+            # Verify
+            $verifyCheck = wsl -d $WslDistro bash -c "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unsloth_latest && python -c 'from unsloth import FastVisionModel' 2>&1"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "FastVisionModel installed successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "FastVisionModel still not available. Check errors above." -ForegroundColor Red
+                exit 1
+            }
+        } else {
+            Write-Host "Skipping installation. VL model uploads will fail." -ForegroundColor Yellow
+        }
+    }
+
+    # Check xformers
+    $xformersCheck = wsl -d $WslDistro bash -c "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unsloth_latest && python -c 'import xformers' 2>&1"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  [OK] xformers" -ForegroundColor Green
+    } else {
+        Write-Host "  [MISSING] xformers" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "Running operation..." -ForegroundColor Cyan
+    Write-Host ""
+
     $WslCmd = "cd /mnt/f/Code/Toolset-Training && ./run.sh $($Arguments -join ' ')"
     wsl -d $WslDistro bash -c $WslCmd
     exit $LASTEXITCODE

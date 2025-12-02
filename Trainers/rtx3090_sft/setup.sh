@@ -1,14 +1,16 @@
 #!/bin/bash
-# Setup script for RTX 3090 KTO Training - IMPROVED
+# Setup script for RTX 3090 SFT/KTO Training - IMPROVED
 # Run with: bash setup.sh
 # For quick setup: bash setup.sh --quick
 # For flash-attn: bash setup.sh --with-flash-attn
+# For vision models: bash setup.sh --with-vision
 
 set -e  # Exit on error
 
 # Parse arguments
 QUICK_MODE=false
 INSTALL_FLASH_ATTN=false
+INSTALL_VISION=false
 for arg in "$@"; do
     case $arg in
         --quick)
@@ -19,14 +21,19 @@ for arg in "$@"; do
             INSTALL_FLASH_ATTN=true
             shift
             ;;
+        --with-vision)
+            INSTALL_VISION=true
+            shift
+            ;;
     esac
 done
 
 echo "=========================================="
-echo "RTX 3090 KTO Training - Setup"
+echo "RTX 3090 SFT/KTO Training - Setup"
 echo "=========================================="
 echo "Mode: $([ "$QUICK_MODE" = true ] && echo "Quick (no verification)" || echo "Full")"
 echo "Flash Attention: $([ "$INSTALL_FLASH_ATTN" = true ] && echo "Yes" || echo "No")"
+echo "Vision Models: $([ "$INSTALL_VISION" = true ] && echo "Yes (Qwen-VL, LLaVA, Pixtral)" || echo "No")"
 echo "=========================================="
 
 # Check Python version
@@ -124,17 +131,30 @@ fi
 
 # Install Unsloth and Xformers (special installation)
 echo -e "\n[8/8] Installing Unsloth and Xformers..."
-echo "Installing Unsloth 2024.9 (stable version)..."
-pip install --no-deps unsloth==2024.9
-echo "✓ Unsloth installed"
 
-echo "Installing Xformers 0.0.27.post2 (attention backend)..."
-pip install --no-deps xformers==0.0.27.post2
+if [ "$INSTALL_VISION" = true ]; then
+    echo "Installing Unsloth (latest) with Vision Model support..."
+    echo "This includes FastVisionModel for Qwen-VL, LLaVA, Pixtral, etc."
+    pip install --upgrade unsloth unsloth_zoo
+    echo "✓ Unsloth with Vision support installed"
+else
+    echo "Installing Unsloth (latest)..."
+    pip install --upgrade unsloth
+    echo "✓ Unsloth installed"
+fi
+
+echo "Installing Xformers (attention backend)..."
+pip install --upgrade xformers
 echo "✓ Xformers installed"
 
 echo ""
 echo "NOTE: Unsloth will use Xformers for efficient attention."
 echo "Flash Attention 2 can be installed separately if needed (see below)."
+if [ "$INSTALL_VISION" = false ]; then
+    echo ""
+    echo "To add Vision Model support later, run:"
+    echo "  pip install --upgrade unsloth unsloth_zoo"
+fi
 
 # Optional: Install Flash Attention
 if [ "$INSTALL_FLASH_ATTN" = true ]; then
@@ -172,18 +192,28 @@ python -c "import transformers; print(f'  Transformers: {transformers.__version_
 python -c "import datasets; print(f'  Datasets: {datasets.__version__}')"
 python -c "import peft; print(f'  PEFT: {peft.__version__}')"
 python -c "import trl; print(f'  TRL: {trl.__version__}')"
-python -c "import huggingface_hub; print(f'  HuggingFace Hub: {huggingface_hub.__version__} (CRITICAL: must be 0.25.0)')"
-python -c "from unsloth import FastLanguageModel; print('  Unsloth: 2024.9 ✓')"
+python -c "import huggingface_hub; print(f'  HuggingFace Hub: {huggingface_hub.__version__}')"
+python -c "import unsloth; print(f'  Unsloth: {getattr(unsloth, \"__version__\", \"latest\")} ✓')"
 python -c "import xformers; print(f'  Xformers: {xformers.__version__}')"
 if [ "$INSTALL_FLASH_ATTN" = true ]; then
     python -c "import flash_attn; print(f'  Flash Attention: {flash_attn.__version__}')" 2>/dev/null || echo "  Flash Attention: ✗ Not installed"
 fi
 
+# Check vision model support
+echo ""
+echo "Vision Model Support:"
+if python -c "from unsloth import FastVisionModel" 2>/dev/null; then
+    echo "  FastVisionModel: ✓ Available (Qwen-VL, LLaVA, Pixtral supported)"
+else
+    echo "  FastVisionModel: ✗ Not available"
+    echo "  To enable: pip install --upgrade unsloth unsloth_zoo"
+fi
+
 echo ""
 echo "Next steps:"
-echo "  1. Activate environment: source venv/bin/activate"
-echo "  2. Test with dry run: python train_kto.py --model-size 7b --dry-run"
-echo "  3. Start training: python train_kto.py --model-size 7b"
+echo "  1. Activate environment: conda activate ./venv"
+echo "  2. Test with dry run: python train_sft.py --model-size 7b --dry-run"
+echo "  3. Start training: python train_sft.py --model-size 7b"
 echo ""
-echo "For help: python train_kto.py --help"
+echo "For help: python train_sft.py --help"
 echo ""
