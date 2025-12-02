@@ -7,6 +7,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load environment variables from .env if it exists
+if [ -f ".env" ]; then
+    # Export all variables, ignoring comments and empty lines
+    set -a
+    source .env
+    set +a
+fi
+
 # Standard environment
 UNSLOTH_ENV="unsloth_latest"
 

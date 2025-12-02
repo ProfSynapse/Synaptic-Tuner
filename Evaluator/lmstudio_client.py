@@ -20,6 +20,26 @@ class LMStudioError(OpenAICompatError):
 LMStudioResponse = BackendResponse
 
 
+# WSL connection troubleshooting instructions
+WSL_TROUBLESHOOTING = """
+WSL Users: If connecting to LM Studio on Windows fails, try:
+
+1. In LM Studio (Windows):
+   - Click "Developer" in the left sidebar
+   - Go to "Server" settings
+   - Toggle ON "Serve on Local Network"
+   - Note the IP address shown (e.g., 192.168.1.104)
+
+2. Set the environment variable:
+   export LMSTUDIO_HOST=<your-ip-address>
+
+3. Re-run the evaluation:
+   ./run.sh eval
+
+Note: The IP may change when your network changes.
+"""
+
+
 class LMStudioClient(OpenAICompatClient):
     """Chat client for LM Studio's OpenAI-compatible /v1/chat/completions endpoint.
 
@@ -42,5 +62,20 @@ class LMStudioClient(OpenAICompatClient):
         return "LM Studio"
 
     def _create_error(self, message: str) -> BackendError:
-        """Create an LMStudioError."""
+        """Create an LMStudioError with helpful troubleshooting info."""
+        # Check if this is a connection error
+        if "connect" in message.lower() or "connection" in message.lower():
+            message = f"{message}\n{WSL_TROUBLESHOOTING}"
         return LMStudioError(message)
+
+    def is_server_running(self) -> bool:
+        """Check if the server is running and accessible.
+
+        Returns:
+            True if server responds to health check, False otherwise
+        """
+        is_running = super().is_server_running()
+        if not is_running:
+            print(f"\n⚠ Cannot connect to LM Studio at {self.settings.base_url()}")
+            print(WSL_TROUBLESHOOTING)
+        return is_running

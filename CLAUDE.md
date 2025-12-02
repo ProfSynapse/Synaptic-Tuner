@@ -319,6 +319,17 @@ python -m Evaluator.cli \
   --markdown Evaluator/results/report.md
 ```
 
+**LM Studio + WSL Setup:**
+
+If running from WSL and LM Studio is on Windows:
+
+1. In LM Studio: **Developer** → **Server** → Enable **Serve on Local Network**
+2. Note the IP shown (e.g., `192.168.1.104`)
+3. Add to `.env`: `LMSTUDIO_HOST=192.168.1.104`
+4. Run: `./run.sh eval`
+
+The `.env` file is auto-loaded by `run.sh` and `run.ps1`.
+
 **Prompt sets:**
 - `baseline.json` - General scenarios
 - `tool_prompts.json` - One prompt per tool (47 prompts)

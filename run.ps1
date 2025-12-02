@@ -12,6 +12,25 @@ param(
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
+# Load environment variables from .env if it exists
+$EnvFile = Join-Path $ScriptDir ".env"
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+        $line = $_.Trim()
+        # Skip comments and empty lines
+        if ($line -and -not $line.StartsWith("#")) {
+            $parts = $line -split "=", 2
+            if ($parts.Length -eq 2) {
+                $name = $parts[0].Trim()
+                $value = $parts[1].Trim()
+                # Remove quotes if present
+                $value = $value -replace '^["'']|["'']$', ''
+                [Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
+    }
+}
+
 # Standard environment
 $UnslothEnv = "unsloth_latest"
 

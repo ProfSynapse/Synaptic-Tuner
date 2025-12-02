@@ -221,6 +221,117 @@ class UnslothModelLoader(BaseModelLoader):
             private=private
         )
 
+    def save_gguf(
+        self,
+        model: Any,
+        tokenizer: Any,
+        output_dir: Path,
+        model_name: str,
+        quantizations: list[str] = None
+    ) -> list[Path]:
+        """
+        Save model directly to GGUF format using Unsloth's save_pretrained_gguf.
+
+        This method handles all model types including VL models properly.
+
+        Args:
+            model: The model to convert
+            tokenizer: The tokenizer
+            output_dir: Directory to save GGUF files
+            model_name: Base name for output files
+            quantizations: List of quantization methods (e.g., ["q4_k_m", "q8_0"])
+
+        Returns:
+            List of paths to created GGUF files
+        """
+        if quantizations is None:
+            quantizations = ["q4_k_m", "q5_k_m", "q8_0"]
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        gguf_files = []
+
+        # Always create f16 base first
+        print(f"  Creating f16 (full precision) GGUF...")
+        f16_path = output_dir / f"{model_name}.gguf"
+        model.save_pretrained_gguf(
+            str(output_dir),
+            tokenizer,
+            quantization_method="f16"
+        )
+        # Unsloth saves as "unsloth.F16.gguf", rename to our naming convention
+        unsloth_f16 = output_dir / "unsloth.F16.gguf"
+        if unsloth_f16.exists():
+            unsloth_f16.rename(f16_path)
+        elif (output_dir / f"{model_name}-unsloth.F16.gguf").exists():
+            (output_dir / f"{model_name}-unsloth.F16.gguf").rename(f16_path)
+        gguf_files.append(f16_path)
+        print(f"  ✓ {f16_path.name}")
+
+        # Create quantized versions
+        for quant in quantizations:
+            print(f"  Creating {quant.upper()} quantization...")
+            quant_path = output_dir / f"{model_name}-{quant.upper()}.gguf"
+            model.save_pretrained_gguf(
+                str(output_dir),
+                tokenizer,
+                quantization_method=quant
+            )
+            # Find and rename the output file
+            quant_upper = quant.upper().replace("_", "-")
+            possible_names = [
+                f"unsloth.{quant_upper}.gguf",
+                f"unsloth.{quant.upper()}.gguf",
+                f"{model_name}-unsloth.{quant_upper}.gguf",
+            ]
+            for possible in possible_names:
+                possible_path = output_dir / possible
+                if possible_path.exists():
+                    possible_path.rename(quant_path)
+                    break
+
+            if quant_path.exists():
+                gguf_files.append(quant_path)
+                print(f"  ✓ {quant_path.name}")
+            else:
+                print(f"  ⚠ {quant.upper()} file not found after conversion")
+
+        return gguf_files
+
+    def push_to_hub_gguf(
+        self,
+        model: Any,
+        tokenizer: Any,
+        repo_id: str,
+        token: str,
+        quantizations: list[str] = None,
+        private: bool = False
+    ) -> None:
+        """
+        Push GGUF files directly to HuggingFace Hub.
+
+        Args:
+            model: The model to convert and push
+            tokenizer: The tokenizer
+            repo_id: HuggingFace repository ID
+            token: HuggingFace token
+            quantizations: List of quantization methods
+            private: Whether to make repository private
+        """
+        if quantizations is None:
+            quantizations = ["q4_k_m", "q8_0"]
+
+        for quant in quantizations:
+            print(f"  Pushing {quant.upper()} to {repo_id}...")
+            model.push_to_hub_gguf(
+                repo_id,
+                tokenizer,
+                quantization_method=quant,
+                token=token,
+                private=private
+            )
+
     def get_model_info(self, model: Any) -> Dict[str, Any]:
         """
         Get information about the loaded model.

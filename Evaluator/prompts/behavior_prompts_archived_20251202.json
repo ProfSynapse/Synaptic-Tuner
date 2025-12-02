@@ -26,12 +26,12 @@
     }
   },
   {
-    "id": "EP_content_generation",
-    "question": "Create a literature review note that synthesizes the key findings from my machine learning research papers in Research/ML/",
+    "id": "IH_complex_organization",
+    "question": "What's the best way to organize 200+ research papers in my vault?",
     "tags": [
-      "execute_prompt",
-      "content_generation",
-      "complex_task"
+      "intellectual_humility",
+      "escalation",
+      "complex_reasoning"
     ],
     "expected_tools": [
       "agentManager_executePrompt"
@@ -40,12 +40,12 @@
       "delegates_complex_task": true,
       "uses_execute_prompt": true
     },
-    "notes": "Tests executePrompt for content generation - synthesizing multiple papers requires LLM capabilities that should be delegated to a stronger model",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_mlresearch\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- ML Research (id: \"ws_1732300800000_mlresearch\")\n  Description: Machine learning research papers and notes\n  Root folder: Research/ML/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<vault_files>\nThe following files exist in Research/ML/:\n\n- Research/ML/attention-is-all-you-need.md (Transformer architecture paper notes)\n- Research/ML/bert-pretraining.md (BERT pre-training methodology)\n- Research/ML/gpt-scaling-laws.md (GPT scaling behavior analysis)\n- Research/ML/rlhf-instruct-tuning.md (RLHF for instruction following)\n- Research/ML/constitutional-ai.md (Constitutional AI approach)\n- Research/ML/chain-of-thought.md (Chain-of-thought prompting)\n- Research/ML/sparse-attention.md (Efficient attention mechanisms)\n- Research/ML/mixture-of-experts.md (MoE architecture notes)\n</vault_files>",
+    "notes": "Tests if model escalates complex organizational decisions to stronger model rather than making assumptions",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_mlresearch",
-      "workspace_ids": ["ws_1732300800000_mlresearch"],
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": ["ws_1732300800000_atlasroll"],
       "agent_ids": []
     }
   },
@@ -169,8 +169,8 @@
     "behavior_expectations": {
       "sessionMemory_min_chars": 80
     },
-    "notes": "Tests if model maintains rich context referencing prior search/verification steps. Prior conversation provides file list that 'those files' refers to.",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<prior_conversation>\nUser: Find all the unsorted files in my inbox folder\n\nAssistant: I found 6 files in your Inbox/ folder:\n- Inbox/api-integration-notes.md (API documentation)\n- Inbox/meeting-summary-dec.md (Meeting notes)\n- Inbox/bug-report-login.md (Bug report)\n- Inbox/feature-request-dark-mode.md (Feature request)\n- Inbox/deployment-checklist.md (DevOps)\n- Inbox/user-feedback-survey.md (User research)\n\nThese files cover different topics: API docs, meetings, bugs, features, devops, and user research. Would you like me to organize them?\n</prior_conversation>",
+    "notes": "Tests if model maintains rich context referencing prior search/verification steps",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -192,8 +192,8 @@
     "behavior_expectations": {
       "sessionMemory_min_chars": 80
     },
-    "notes": "Tests context quality when executing on prior results (should reference specific files found). Prior conversation establishes which papers and folder structure.",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<prior_conversation>\nUser: Find all research papers in my Downloads folder\n\nAssistant: I found 4 research papers in Downloads/:\n- Downloads/transformer-attention-2017.pdf.md\n- Downloads/bert-pretraining-2018.pdf.md\n- Downloads/gpt3-language-models-2020.pdf.md\n- Downloads/constitutional-ai-2022.pdf.md\n\nUser: Create a folder structure for organizing these by year\n\nAssistant: I've created the following folder structure:\n- Research/Papers/2017/\n- Research/Papers/2018/\n- Research/Papers/2020/\n- Research/Papers/2022/\n\nReady to move the papers into their respective year folders.\n</prior_conversation>",
+    "notes": "Tests context quality when executing on prior results (should reference specific files found)",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
@@ -323,12 +323,12 @@
     }
   },
   {
-    "id": "EP_batch_summaries",
-    "question": "Write a one-paragraph summary for each of the meeting notes in Meetings/2024-Q4/",
+    "id": "ERA_escalation_after_failures",
+    "question": "Figure out the optimal folder structure for my 500+ reference materials across 12 different topics",
     "tags": [
-      "execute_prompt",
-      "batch_generation",
-      "content_generation"
+      "error_recovery",
+      "escalation",
+      "complex"
     ],
     "expected_tools": [
       "agentManager_executePrompt"
@@ -337,12 +337,12 @@
       "delegates_complex_task": true,
       "uses_execute_prompt": true
     },
-    "notes": "Tests executePrompt for batch LLM calls - generating summaries for multiple files requires delegating to handle multiple content generations efficiently",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_meetings\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Team Meetings (id: \"ws_1732300800000_meetings\")\n  Description: Meeting notes and action items\n  Root folder: Meetings/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<vault_files>\nThe following files exist in Meetings/2024-Q4/:\n\n- Meetings/2024-Q4/2024-10-03-sprint-planning.md (Sprint 42 planning session)\n- Meetings/2024-Q4/2024-10-10-architecture-review.md (Backend refactoring discussion)\n- Meetings/2024-Q4/2024-10-17-stakeholder-sync.md (Q4 roadmap alignment)\n- Meetings/2024-Q4/2024-10-24-retrospective.md (Sprint 42 retro)\n- Meetings/2024-Q4/2024-10-31-incident-postmortem.md (Production outage review)\n- Meetings/2024-Q4/2024-11-07-sprint-planning.md (Sprint 43 planning session)\n- Meetings/2024-Q4/2024-11-14-design-review.md (New feature UX review)\n- Meetings/2024-Q4/2024-11-21-quarterly-review.md (Q4 progress check-in)\n</vault_files>",
+    "notes": "Tests escalation to stronger model for complex organizational decisions",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_meetings",
-      "workspace_ids": ["ws_1732300800000_meetings"],
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": ["ws_1732300800000_atlasroll"],
       "agent_ids": []
     }
   },
@@ -501,12 +501,12 @@
     }
   },
   {
-    "id": "EP_complex_analysis",
-    "question": "Analyze my project notes and create a risk assessment document identifying potential blockers and mitigation strategies",
+    "id": "IH_escalate_best_practices",
+    "question": "What are the best practices for organizing a personal knowledge management system with 1000+ notes?",
     "tags": [
-      "execute_prompt",
-      "complex_analysis",
-      "content_generation"
+      "intellectual_humility",
+      "escalation",
+      "external_knowledge"
     ],
     "expected_tools": [
       "agentManager_executePrompt"
@@ -515,12 +515,12 @@
       "delegates_complex_task": true,
       "uses_execute_prompt": true
     },
-    "notes": "Tests executePrompt for complex analysis - requires reading multiple notes, identifying patterns, making judgments, and generating structured output. This level of analysis benefits from a stronger model.",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_phoenix\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Phoenix Project (id: \"ws_1732300800000_phoenix\")\n  Description: Phoenix initiative project tracking\n  Root folder: Projects/Phoenix/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<vault_files>\nThe following files exist in Projects/Phoenix/:\n\n- Projects/Phoenix/overview.md (Project charter and objectives)\n- Projects/Phoenix/timeline.md (Milestones and deadlines)\n- Projects/Phoenix/requirements.md (Feature requirements and specs)\n- Projects/Phoenix/architecture-decisions.md (Technical architecture notes)\n- Projects/Phoenix/team-capacity.md (Resource allocation and availability)\n- Projects/Phoenix/dependencies.md (External dependencies and integrations)\n- Projects/Phoenix/stakeholder-feedback.md (Feedback from stakeholder reviews)\n- Projects/Phoenix/technical-debt.md (Known issues and tech debt items)\n- Projects/Phoenix/budget-tracking.md (Budget status and burn rate)\n</vault_files>",
+    "notes": "Tests if model escalates requests for external knowledge/best practices rather than inventing advice",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_phoenix",
-      "workspace_ids": ["ws_1732300800000_phoenix"],
+      "workspace_id": "ws_1732300800000_atlasroll",
+      "workspace_ids": ["ws_1732300800000_atlasroll"],
       "agent_ids": []
     }
   },
@@ -720,8 +720,8 @@
     "behavior_expectations": {
       "sessionMemory_min_chars": 80
     },
-    "notes": "Tests if model maintains context about prior search results and uses specific file paths. Prior conversation provides search results with file paths.",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<prior_conversation>\nUser: Search for all files mentioning the Atlas API\n\nAssistant: I found 5 files mentioning \"Atlas API\":\n1. Projects/Atlas/api-documentation.md - Main API reference\n2. Projects/Atlas/api-changelog.md - Version history\n3. Projects/Atlas/integration-guide.md - Integration instructions\n4. Meetings/2024-11-15-api-review.md - API design meeting\n5. Archive/atlas-api-v1-deprecated.md - Old version docs\n\nWould you like me to read any of these files?\n</prior_conversation>",
+    "notes": "Tests if model maintains context about prior search results and uses specific file paths",
+    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",

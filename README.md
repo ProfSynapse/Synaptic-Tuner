@@ -52,6 +52,28 @@ python tuner.py     # If your Python env is already active
 
 Pick a subcommand when prompted: `train`, `upload`, `eval`, or `pipeline` (train -> upload -> eval).
 
+### Evaluation with LM Studio (WSL users)
+
+If running evaluations from WSL against LM Studio on Windows, you need to configure network access:
+
+1. **In LM Studio (Windows):**
+   - Click **Developer** in the left sidebar
+   - Go to **Server** settings
+   - Toggle ON **Serve on Local Network**
+   - Note the IP address shown (e.g., `192.168.1.104`)
+
+2. **Add to your `.env` file:**
+   ```bash
+   LMSTUDIO_HOST=192.168.1.104
+   ```
+
+3. **Run evaluation:**
+   ```bash
+   ./run.sh eval
+   ```
+
+The IP address may change when your network changes—check LM Studio's server panel for the current address.
+
 ### Evaluate an existing model (Beginner Colab Notebook)
 Use the beginner Colab notebook to run evaluations (training optional). Direct link:
 **Colab Notebook:** [`sft_colab_beginner.ipynb`](https://github.com/ProfSynapse/Toolset-Training/blob/cli-refactor/Trainers/notebooks/sft_colab_beginner.ipynb)
