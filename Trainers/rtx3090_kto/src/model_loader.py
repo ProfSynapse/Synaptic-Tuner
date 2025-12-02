@@ -70,8 +70,20 @@ def load_model_and_tokenizer(
         token=hf_token,
     )
 
+    # Verify model loaded correctly
+    print(f"\n✓ Model loaded: {model.config._name_or_path}")
+
+    # Handle VL models where tokenizer is actually a processor
+    # For KTO training with text-only data, we need the actual tokenizer, not the VL processor
+    if hasattr(tokenizer, 'tokenizer'):
+        print(f"✓ Detected VL processor ({type(tokenizer).__name__})")
+        print("  Extracting text tokenizer for text-only KTO training...")
+        vl_processor = tokenizer
+        tokenizer = vl_processor.tokenizer
+        print(f"✓ Using text tokenizer: {type(tokenizer).__name__}")
+
     # Add chat template if missing
-    if tokenizer.chat_template is None:
+    if getattr(tokenizer, 'chat_template', None) is None:
         # Detect model type and use appropriate template
         if _is_mistral_model(model_name):
             print("\n⚠ No chat template found, adding Mistral [INST] template")
@@ -86,9 +98,12 @@ def load_model_and_tokenizer(
         if _is_mistral_model(model_name):
             print("   Detected Mistral model - ensure template uses [INST] format")
 
-    # Verify model loaded correctly
-    print(f"\n✓ Model loaded: {model.config._name_or_path}")
-    print(f"✓ Tokenizer vocab size: {len(tokenizer)}")
+    # Get vocab size
+    try:
+        vocab_size = len(tokenizer)
+    except TypeError:
+        vocab_size = "N/A"
+    print(f"✓ Tokenizer vocab size: {vocab_size}")
 
     # Check CUDA availability
     if torch.cuda.is_available():

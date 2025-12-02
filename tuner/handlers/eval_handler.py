@@ -231,15 +231,33 @@ class EvalHandler(BaseHandler):
 
         # Step 7: Execute evaluation
         python = self.get_conda_python()
+
+        # Generate timestamped output paths
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = self.repo_root / "Evaluator" / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        output_json = results_dir / f"run_{timestamp}.json"
+        output_md = results_dir / f"run_{timestamp}.md"
+
         cmd = [
             python, "-m", "Evaluator.cli",
             "--backend", backend_choice,
             "--model", model,
-            "--prompt-set", str(prompt_file)
+            "--prompt-set", str(prompt_file),
+            "--output", str(output_json),
+            "--markdown", str(output_md)
         ]
 
         print_info(f"Running: {' '.join(cmd)}")
         print()
 
         result = subprocess.run(cmd, cwd=str(self.repo_root))
+
+        if result.returncode == 0:
+            print()
+            print_info(f"Results saved to: {output_json.relative_to(self.repo_root)}")
+            print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
+
         return result.returncode

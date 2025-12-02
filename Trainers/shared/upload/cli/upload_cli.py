@@ -4,8 +4,15 @@ Universal upload CLI.
 Provides a command-line interface for uploading models to HuggingFace Hub.
 """
 
-import argparse
+# ============================================================================
+# DISABLE TORCH.COMPILE - Required for VL models (Qwen3-VL, LLaVA, etc.)
+# Must be set BEFORE importing unsloth or any torch-dependent modules
+# ============================================================================
 import os
+os.environ['TORCH_COMPILE_DISABLE'] = '1'
+os.environ['PYTORCH_JIT'] = '0'
+
+import argparse
 import sys
 from pathlib import Path
 
@@ -15,7 +22,7 @@ if str(_shared_path) not in sys.path:
     sys.path.insert(0, str(_shared_path))
 
 # Now use absolute imports (relative to shared/)
-from upload.platform.windows_patches import ensure_windows_compatibility
+from upload.platform.windows_patches import ensure_windows_compatibility, ensure_vl_compatibility
 from upload.core.config import (
     UploadConfig,
     SaveConfig,

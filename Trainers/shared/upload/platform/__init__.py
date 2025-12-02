@@ -8,7 +8,13 @@ from .gpu_memory import (
     ensure_gpu_memory,
     GPU_MEMORY_REQUIREMENTS,
 )
-from .windows_patches import apply_windows_patches, is_windows
+from .windows_patches import (
+    apply_windows_patches,
+    apply_vl_model_patches,
+    ensure_windows_compatibility,
+    ensure_vl_compatibility,
+    is_windows,
+)
 from .filesystem import (
     cleanup_temp_directory,
     is_windows_filesystem,
@@ -22,8 +28,11 @@ __all__ = [
     "clear_gpu_cache",
     "ensure_gpu_memory",
     "GPU_MEMORY_REQUIREMENTS",
-    # Windows
+    # Platform patches
     "apply_windows_patches",
+    "apply_vl_model_patches",
+    "ensure_windows_compatibility",
+    "ensure_vl_compatibility",
     "is_windows",
     # Filesystem
     "cleanup_temp_directory",

@@ -43,13 +43,13 @@ if ($Test) {
 
 } else {
     Write-Host ""
-    Write-Host "Unsloth Latest Environment (2025.11.4)" -ForegroundColor Cyan
-    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host "Unsloth Latest Environment" -ForegroundColor Cyan
+    Write-Host "==========================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "This environment is installed in WSL and should be used via WSL."
     Write-Host ""
     Write-Host "Usage from PowerShell:" -ForegroundColor Yellow
-    Write-Host "  # Test the environment"
+    Write-Host "  # Test the environment (checks Vision Model support)"
     Write-Host "  .\activate_unsloth_latest.ps1 -Test" -ForegroundColor White
     Write-Host ""
     Write-Host "  # Enter interactive shell"
@@ -61,11 +61,11 @@ if ($Test) {
     Write-Host "Usage from WSL/Bash:" -ForegroundColor Yellow
     Write-Host "  source Trainers/activate_unsloth_latest.sh" -ForegroundColor White
     Write-Host ""
-    Write-Host "Environment Details:" -ForegroundColor Yellow
-    Write-Host "  - Location: /home/profsynapse/.conda/envs/unsloth_latest"
-    Write-Host "  - Python: 3.11"
-    Write-Host "  - PyTorch: 2.9.0"
-    Write-Host "  - CUDA: 12.8"
-    Write-Host "  - Unsloth: 2025.11.4"
+    Write-Host "Vision Model Support:" -ForegroundColor Yellow
+    Write-Host "  Qwen-VL, LLaVA, Pixtral, PaliGemma" -ForegroundColor White
+    Write-Host "  Run -Test to verify FastVisionModel is available" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "To enable vision support:" -ForegroundColor Yellow
+    Write-Host "  pip install --upgrade unsloth unsloth_zoo" -ForegroundColor White
     Write-Host ""
 }
