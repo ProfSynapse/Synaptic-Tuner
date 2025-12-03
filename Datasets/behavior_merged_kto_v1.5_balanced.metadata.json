@@ -1,0 +1,98 @@
+{
+  "created": "2025-12-02T18:19:13.524922",
+  "source": "Balanced behavior datasets v1.5",
+  "description": "All behavior categories balanced to 1:1 positive:negative ratio",
+  "datasets": {
+    "error_recovery": {
+      "total": 592,
+      "positive": 296,
+      "negative": 296,
+      "balanced": true,
+      "file": "pairs_v1.5.jsonl"
+    },
+    "workspace_awareness": {
+      "total": 544,
+      "positive": 272,
+      "negative": 272,
+      "balanced": true,
+      "file": "pairs_v1.4.jsonl"
+    },
+    "intellectual_humility": {
+      "total": 650,
+      "positive": 325,
+      "negative": 325,
+      "balanced": true,
+      "file": "pairs_v1.5.jsonl"
+    },
+    "strategic_tool_selection": {
+      "total": 534,
+      "positive": 267,
+      "negative": 267,
+      "balanced": true,
+      "file": "pairs_v1.5.jsonl"
+    },
+    "execute_prompt_usage": {
+      "total": 306,
+      "positive": 153,
+      "negative": 153,
+      "balanced": true,
+      "file": "pairs_v1.4.jsonl"
+    },
+    "verification_before_action": {
+      "total": 628,
+      "positive": 314,
+      "negative": 314,
+      "balanced": true,
+      "file": "pairs_v1.5.jsonl"
+    },
+    "context_continuity": {
+      "total": 502,
+      "positive": 251,
+      "negative": 251,
+      "balanced": true,
+      "file": "pairs_v1.3.jsonl"
+    },
+    "context_efficiency": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133,
+      "balanced": true,
+      "file": "pairs_v1.3.jsonl"
+    },
+    "ask_first": {
+      "total": 100,
+      "positive": 50,
+      "negative": 50,
+      "balanced": true,
+      "file": "pairs_v1.0.jsonl"
+    },
+    "response_patterns/text_only_pairs_v1.2.jsonl": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "balanced": true,
+      "file": "text_only_pairs_v1.2.jsonl"
+    },
+    "response_patterns/tool_only_pairs_v1.1.jsonl": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "balanced": true,
+      "file": "tool_only_pairs_v1.1.jsonl"
+    },
+    "response_patterns/tool_text_pairs_v1.1.jsonl": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "balanced": true,
+      "file": "tool_text_pairs_v1.1.jsonl"
+    }
+  },
+  "total_examples": 4572,
+  "positive_examples": 2286,
+  "negative_examples": 2286,
+  "perfectly_balanced": true,
+  "interleaved": true,
+  "consecutive_same_labels": 0,
+  "format": "KTO-compatible ChatML with interleaved labels"
+}
