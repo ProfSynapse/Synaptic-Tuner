@@ -4,11 +4,14 @@ GGUF format converter.
 Converts models to GGUF format for use with llama.cpp and Ollama.
 
 Uses Unsloth's save_pretrained_gguf for optimal compatibility with all model types
-including Vision-Language models (Qwen-VL, LLaVA, etc.).
+including Vision-Language models (Qwen-VL, LLaVA, Ministral, etc.).
 """
 
+import json
+import os
+import subprocess
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from .base import BaseConverter
 from ..core.types import ModelPath, QuantizationMethod
@@ -44,15 +47,241 @@ class GGUFConverter(BaseConverter):
         """Get list of supported quantization methods."""
         return self.SUPPORTED_QUANTIZATIONS.copy()
 
-    # VL model indicators
+    def validate_environment(self) -> Tuple[bool, str]:
+        """
+        Validate that required tools are available for GGUF conversion.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Check if Unsloth is available (required for save_pretrained_gguf)
+        try:
+            import unsloth
+            return (True, "")
+        except ImportError:
+            return (False, "Unsloth is required for GGUF conversion. Install with: pip install unsloth")
+
+    # VL model indicators - models that use vision components
     VL_MODEL_INDICATORS = [
         "qwen2-vl", "qwen3-vl", "qwen2_vl", "qwen3_vl",
         "llava", "pixtral", "paligemma", "idefics",
+        "ministral3", "ministral-3", "ministral_3", "mistral3",
     ]
+
+    def _ensure_llama_cpp(self, working_dir: Path) -> bool:
+        """
+        Ensure llama.cpp is available and built for GGUF conversion.
+
+        Unsloth's save_pretrained_gguf internally uses llama.cpp.
+        This method ensures:
+        1. llama.cpp is cloned if not present (to WSL native filesystem for reliability)
+        2. llama-quantize is built
+        3. Symlinks are created where Unsloth expects them
+
+        Args:
+            working_dir: Directory to set up llama.cpp in (used for symlink)
+
+        Returns:
+            True if setup successful, False otherwise
+        """
+        import shutil
+
+        # Use WSL native filesystem for llama.cpp (NTFS has issues with git clone)
+        # This is a shared location so we only build once
+        home_dir = Path.home()
+        llama_cpp_dir = home_dir / "llama.cpp"
+        quantize_bin = llama_cpp_dir / "build" / "bin" / "llama-quantize"
+
+        # Also check working_dir for backwards compatibility
+        local_llama_cpp = working_dir / "llama.cpp"
+        local_quantize = local_llama_cpp / "llama-quantize"
+
+        # Check if already set up in home directory
+        if quantize_bin.exists():
+            print(f"  ✓ llama.cpp already built at {llama_cpp_dir}")
+            return True
+
+        # Check if local symlink already works
+        if local_quantize.exists():
+            print(f"  ✓ llama-quantize found at {local_llama_cpp}")
+            return True
+
+        # Verify clone is complete (has CMakeLists.txt)
+        cmake_file = llama_cpp_dir / "CMakeLists.txt"
+
+        # If directory exists but is incomplete, remove it
+        if llama_cpp_dir.exists() and not cmake_file.exists():
+            print("  Removing incomplete llama.cpp clone...")
+            shutil.rmtree(str(llama_cpp_dir), ignore_errors=True)
+
+        # Clone llama.cpp to home directory (WSL native filesystem)
+        if not llama_cpp_dir.exists():
+            print(f"  Cloning llama.cpp to {llama_cpp_dir}...")
+            try:
+                result = subprocess.run(
+                    ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git"],
+                    cwd=str(home_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode != 0:
+                    print(f"  ⚠ Clone failed: {result.stderr}")
+                    return False
+            except subprocess.TimeoutExpired:
+                print("  ⚠ Timeout cloning llama.cpp")
+                return False
+            except Exception as e:
+                print(f"  ⚠ Failed to clone llama.cpp: {e}")
+                return False
+
+            # Verify clone succeeded
+            if not cmake_file.exists():
+                print("  ⚠ Clone incomplete - CMakeLists.txt not found")
+                return False
+
+        # Build llama-quantize (CPU-only is fine for quantization)
+        build_dir = llama_cpp_dir / "build"
+        build_dir.mkdir(exist_ok=True)
+
+        print("  Building llama.cpp (CPU-only for quantization)...")
+        try:
+            # Configure
+            result = subprocess.run(
+                ["cmake", "..", "-DGGML_CUDA=OFF"],
+                cwd=str(build_dir),
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode != 0:
+                print(f"  ⚠ cmake failed: {result.stderr}")
+                return False
+
+            # Build just llama-quantize
+            result = subprocess.run(
+                ["make", "-j4", "llama-quantize"],
+                cwd=str(build_dir),
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+            if result.returncode != 0:
+                print(f"  ⚠ make failed: {result.stderr}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("  ⚠ Timeout building llama.cpp")
+            return False
+        except Exception as e:
+            print(f"  ⚠ Build error: {e}")
+            return False
+
+        # Create symlink in llama.cpp root where Unsloth expects it
+        quantize_symlink = llama_cpp_dir / "llama-quantize"
+        if quantize_bin.exists() and not quantize_symlink.exists():
+            try:
+                os.symlink(str(quantize_bin), str(quantize_symlink))
+            except OSError:
+                pass  # Not critical, Unsloth can find build/bin/llama-quantize
+
+        if quantize_bin.exists():
+            print(f"  ✓ llama.cpp built at {llama_cpp_dir}")
+            return True
+        else:
+            print("  ⚠ llama-quantize binary not found after build")
+            return False
+
+    def _fix_vlm_tokenizer(self, model_path: Path) -> bool:
+        """
+        Fix VLM tokenizer by adding added_tokens_decoder to tokenizer_config.json.
+
+        Some VLMs (like Ministral 3) have tokenizer info in tokenizer.json but
+        the GGUF converter expects added_tokens_decoder in tokenizer_config.json.
+
+        Args:
+            model_path: Path to the model directory
+
+        Returns:
+            True if fix applied or not needed, False on error
+        """
+        tokenizer_json = model_path / "tokenizer.json"
+        tokenizer_config = model_path / "tokenizer_config.json"
+
+        if not tokenizer_json.exists() or not tokenizer_config.exists():
+            return True  # Not needed
+
+        # Check if already has added_tokens_decoder
+        try:
+            with open(tokenizer_config, 'r') as f:
+                config = json.load(f)
+            if 'added_tokens_decoder' in config:
+                return True  # Already present
+        except (json.JSONDecodeError, IOError):
+            return False
+
+        # Read added_tokens from tokenizer.json
+        try:
+            with open(tokenizer_json, 'r') as f:
+                tokenizer_data = json.load(f)
+
+            added_tokens = tokenizer_data.get('added_tokens', [])
+            if not added_tokens:
+                return True  # No tokens to add
+
+            # Build added_tokens_decoder
+            added_tokens_decoder = {}
+            for token in added_tokens:
+                token_id = str(token['id'])
+                added_tokens_decoder[token_id] = {
+                    'content': token['content'],
+                    'lstrip': token.get('lstrip', False),
+                    'normalized': token.get('normalized', False),
+                    'rstrip': token.get('rstrip', False),
+                    'single_word': token.get('single_word', False),
+                    'special': token.get('special', True)
+                }
+
+            # Update tokenizer_config.json
+            config['added_tokens_decoder'] = added_tokens_decoder
+
+            with open(tokenizer_config, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            print(f"  ✓ Added {len(added_tokens_decoder)} tokens to tokenizer_config.json")
+            return True
+
+        except (json.JSONDecodeError, IOError, KeyError) as e:
+            print(f"  ⚠ Failed to fix VLM tokenizer: {e}")
+            return False
+
+    def _install_gguf_dependencies(self) -> bool:
+        """
+        Install Python dependencies needed for GGUF conversion.
+
+        Returns:
+            True if successful
+        """
+        try:
+            import gguf
+            return True
+        except ImportError:
+            pass
+
+        print("  Installing GGUF dependencies...")
+        try:
+            subprocess.run(
+                ["pip", "install", "gguf", "protobuf", "sentencepiece", "-q"],
+                capture_output=True,
+                check=True,
+                timeout=120
+            )
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            print("  ⚠ Failed to install GGUF dependencies")
+            return False
 
     def _is_vision_model(self, model_path: ModelPath) -> bool:
         """Check if this is a Vision-Language model based on config."""
-        import json
         path = Path(model_path)
 
         # Check adapter_config.json
@@ -147,6 +376,29 @@ class GGUFConverter(BaseConverter):
         print(f"Method: Unsloth save_pretrained_gguf")
         print()
 
+        # Setup steps - ensure all dependencies and tools are available
+        print("[0/3] Setting up GGUF conversion environment...")
+
+        # Install Python dependencies
+        if not self._install_gguf_dependencies():
+            raise ConversionError("Failed to install GGUF Python dependencies")
+        print("  ✓ Python dependencies ready")
+
+        # Setup llama.cpp (Unsloth uses this internally)
+        if not self._ensure_llama_cpp(output_dir.parent):
+            raise ConversionError(
+                "Failed to setup llama.cpp. Unsloth's GGUF conversion requires llama.cpp.\n"
+                "Try manually: cd output_dir && git clone https://github.com/ggerganov/llama.cpp.git"
+            )
+        print("  ✓ llama.cpp ready")
+
+        # Fix VLM tokenizer if needed
+        if is_vl_model:
+            if not self._fix_vlm_tokenizer(Path(model_path)):
+                print("  ⚠ Warning: Could not fix VLM tokenizer, conversion may fail")
+            else:
+                print("  ✓ VLM tokenizer configuration ready")
+
         # Create gguf subdirectory
         gguf_dir = output_dir / "gguf"
         gguf_dir.mkdir(parents=True, exist_ok=True)
@@ -156,17 +408,17 @@ class GGUFConverter(BaseConverter):
             if self.model_loader is None:
                 raise ConversionError("Model loader required for GGUF conversion")
 
-            print("[1/2] Loading model for GGUF conversion...")
+            print("[1/3] Loading model for GGUF conversion...")
             model, tokenizer = self.model_loader.load_model(
                 str(model_path),
                 load_in_4bit=False,  # Need full precision for GGUF
             )
             print("✓ Model loaded")
         else:
-            print("[1/2] Using pre-loaded model")
+            print("[1/3] Using pre-loaded model")
 
         # Use Unsloth's save_pretrained_gguf
-        print(f"\n[2/2] Creating GGUF files...")
+        print(f"\n[2/3] Creating GGUF files...")
         gguf_files = []
 
         # Create f16 base first
@@ -201,7 +453,8 @@ class GGUFConverter(BaseConverter):
             except Exception as e:
                 print(f"  ⚠ {quant.upper()} creation failed: {e}")
 
-        print(f"\n✓ GGUF files created: {len(gguf_files)} total")
+        print(f"\n[3/3] Summary")
+        print(f"✓ GGUF files created: {len(gguf_files)} total")
         print(f"Saved to: {gguf_dir}")
 
         return gguf_files

@@ -123,7 +123,22 @@
       "Bash(/usr/bin/python3:*)",
       "Bash(wsl:*)",
       "Bash(curl:*)",
-      "Bash(ip route:*)"
+      "Bash(ip route:*)",
+      "Bash(__NEW_LINE__ echo -e \"\\n=== train_kto.py - balance import ===\")",
+      "Bash(__NEW_LINE__ echo -e \"\\n=== train_kto.py - monkey patch ===\")",
+      "Bash(__NEW_LINE__ echo -e \"\\n=== train_handler.py - auto detect ===\")",
+      "Bash(__NEW_LINE__ echo -e \"\\n=== run.sh - startup ===\")",
+      "Bash(__NEW_LINE__ echo -e \"\\n=== UnslothKTOTrainer.py - patch ===\")",
+      "Bash(timeout 120 python:*)",
+      "Bash(export:*)",
+      "Bash(timeout 2 strace:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(dpkg:*)",
+      "Bash(apt list:*)",
+      "Bash(ln:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

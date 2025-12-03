@@ -14,21 +14,9 @@ import json
 import os
 import sys
 import time
+import torch
 from pathlib import Path
 from typing import Dict, Any, Optional
-
-# ============================================================================
-# DISABLE TORCH.COMPILE - Must be set BEFORE importing torch
-# Fixes nvcc permission errors in WSL and compilation issues
-# ============================================================================
-os.environ['TORCH_COMPILE_DISABLE'] = '1'
-os.environ['TORCHDYNAMO_DISABLE'] = '1'
-os.environ['PYTORCH_JIT'] = '0'
-
-import torch
-# Also disable via torch API after import
-torch._dynamo.config.suppress_errors = True
-torch._dynamo.config.disable = True
 
 # Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
 try:
@@ -899,6 +887,7 @@ def main():
         )
 
     print("✓ KTO trainer initialized with metrics tracking")
+
     if ref_model is not None:
         print("✓ Explicit reference model provided for stable KL computation")
     else:

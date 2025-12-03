@@ -78,7 +78,20 @@ class UploadHandler(BaseHandler):
 
         print_success("HuggingFace token found")
 
-        # Step 2: Select model type
+        # Step 2: Select upload mode
+        upload_mode = print_menu([
+            ("local", f"{BOX['bullet']} Upload local training run"),
+            ("gguf_only", f"{BOX['bullet']} Create GGUF from existing HuggingFace repo"),
+        ], "Select upload mode:")
+
+        if not upload_mode:
+            return 0
+
+        # Handle GGUF-only mode
+        if upload_mode == "gguf_only":
+            return self._handle_gguf_only(hf_token)
+
+        # Step 3: Select model type (for local upload)
         model_type = print_menu([
             ("sft", f"{BOX['bullet']} SFT model"),
             ("kto", f"{BOX['bullet']} KTO model"),
@@ -159,12 +172,13 @@ class UploadHandler(BaseHandler):
             return 0
 
         # Step 10: Execute upload
+        # Run as module from Trainers directory to handle relative imports properly
         python = self.get_conda_python()
-        upload_script = self.repo_root / "Trainers" / "shared" / "upload" / "cli" / "upload_cli.py"
+        trainers_dir = self.repo_root / "Trainers"
 
         cmd = [
             python,
-            str(upload_script),
+            "-m", "shared.upload.cli.upload_cli",
             str(checkpoint_path),
             repo_id,
             "--save-method", save_method,
@@ -175,7 +189,8 @@ class UploadHandler(BaseHandler):
         print_info(f"Running: {' '.join(cmd)}")
         print()
 
-        exit_code = subprocess.run(cmd, cwd=str(self.repo_root)).returncode
+        # Run from Trainers directory so 'shared' package is found
+        exit_code = subprocess.run(cmd, cwd=str(trainers_dir)).returncode
 
         if exit_code == 0:
             print_success("Upload completed successfully.")
@@ -228,3 +243,85 @@ class UploadHandler(BaseHandler):
             except ValueError:
                 pass
             print_error("Invalid selection.")
+
+    def _handle_gguf_only(self, hf_token: str) -> int:
+        """
+        Handle GGUF-only mode: create GGUF from existing HuggingFace repo.
+
+        Args:
+            hf_token: HuggingFace token
+
+        Returns:
+            int: Exit code
+        """
+        print_header("GGUF FROM HUGGINGFACE", "Create GGUF from existing repo")
+
+        # Get source repo
+        hf_username = os.environ.get("HF_USERNAME", "")
+        if hf_username:
+            print_info(f"HuggingFace username: {hf_username}")
+            model_name = prompt("Model name (existing repo)")
+            if not model_name:
+                print_error("Model name required")
+                return 1
+            source_repo = f"{hf_username}/{model_name}"
+        else:
+            source_repo = prompt("HuggingFace repo ID (username/model-name)")
+            if not validate_repo_id(source_repo):
+                print_error("Invalid repo ID format")
+                return 1
+
+        target_repo = f"{source_repo}-GGUF"
+
+        # Select quantizations
+        quant_choice = print_menu([
+            ("default", f"{BOX['star']} Default (Q4_K_M, Q5_K_M, Q8_0)"),
+            ("q4_only", f"{BOX['bullet']} Q4_K_M only (smallest)"),
+            ("q8_only", f"{BOX['bullet']} Q8_0 only (best quality)"),
+            ("all", f"{BOX['bullet']} All (Q4_K_M, Q5_K_M, Q6_K, Q8_0)"),
+        ], "Select quantizations:")
+
+        if not quant_choice:
+            return 0
+
+        quant_map = {
+            "default": ["Q4_K_M", "Q5_K_M", "Q8_0"],
+            "q4_only": ["Q4_K_M"],
+            "q8_only": ["Q8_0"],
+            "all": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"],
+        }
+        quantizations = quant_map[quant_choice]
+
+        # Confirmation
+        print_config({
+            "Source": source_repo,
+            "Target": target_repo,
+            "Quantizations": ", ".join(quantizations),
+        }, "GGUF Configuration")
+
+        if not confirm("Create GGUF files?"):
+            print_info("Cancelled.")
+            return 0
+
+        # Execute via subprocess to shared upload CLI
+        python = self.get_conda_python()
+        trainers_dir = self.repo_root / "Trainers"
+
+        cmd = [
+            python,
+            "-m", "shared.upload.cli.upload_cli",
+            "--gguf-only", source_repo,
+            "--gguf-quantizations", *quantizations,
+        ]
+
+        print_info(f"Running GGUF conversion...")
+        print()
+
+        exit_code = subprocess.run(cmd, cwd=str(trainers_dir)).returncode
+
+        if exit_code == 0:
+            print_success(f"GGUF files uploaded to: https://huggingface.co/{target_repo}")
+        else:
+            print_error(f"GGUF conversion failed with exit code: {exit_code}")
+
+        return exit_code

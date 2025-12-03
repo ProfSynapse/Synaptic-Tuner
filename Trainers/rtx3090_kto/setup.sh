@@ -104,10 +104,11 @@ echo -e "\n[4/8] Activating conda environment..."
 conda activate ./venv
 echo "✓ Conda environment activated (Python $(python --version 2>&1 | awk '{print $2}'))"
 
-# Upgrade pip
-echo -e "\n[5/8] Upgrading pip, setuptools, wheel..."
-pip install --upgrade pip setuptools wheel -q
+# Upgrade pip and install uv (required by Unsloth for GGUF conversion)
+echo -e "\n[5/8] Upgrading pip, setuptools, wheel, uv..."
+pip install --upgrade pip setuptools wheel uv -q
 echo "✓ pip upgraded to $(pip --version | awk '{print $2}')"
+echo "✓ uv installed (required for GGUF conversion)"
 
 # Install PyTorch and core dependencies
 echo -e "\n[6/8] Installing PyTorch and core dependencies..."

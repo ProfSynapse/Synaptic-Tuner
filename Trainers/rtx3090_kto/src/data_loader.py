@@ -5,7 +5,109 @@ Handles ChatML to KTO format conversion.
 
 from typing import Dict, List, Optional, Tuple
 from datasets import load_dataset, Dataset
+import random
 import os
+
+
+def interleave_dataset(dataset: Dataset, seed: int = 42) -> Dataset:
+    """
+    Interleave dataset to alternate True/False labels (T,F,T,F,...).
+
+    This GUARANTEES every batch of size 2+ has mixed labels, completely
+    preventing homogeneous batch crashes in KTO training.
+
+    Also balances the dataset if needed (drops excess from majority class).
+
+    Args:
+        dataset: HuggingFace Dataset with 'label' column
+        seed: Random seed for reproducible sampling
+
+    Returns:
+        Interleaved dataset with strict T/F/T/F pattern
+    """
+    labels = list(dataset["label"])
+    true_indices = [i for i, l in enumerate(labels) if l is True]
+    false_indices = [i for i, l in enumerate(labels) if l is False]
+
+    true_count = len(true_indices)
+    false_count = len(false_indices)
+
+    print(f"  Original: {true_count} True, {false_count} False")
+
+    # Shuffle each group independently
+    rng = random.Random(seed)
+    rng.shuffle(true_indices)
+    rng.shuffle(false_indices)
+
+    # Balance if needed (truncate majority to match minority)
+    min_count = min(true_count, false_count)
+    if true_count != false_count:
+        dropped = abs(true_count - false_count)
+        majority = "True" if true_count > false_count else "False"
+        print(f"  Dropped {dropped} excess {majority} examples for balance")
+
+    true_indices = true_indices[:min_count]
+    false_indices = false_indices[:min_count]
+
+    # Interleave: T, F, T, F, T, F, ...
+    interleaved_indices = []
+    for t, f in zip(true_indices, false_indices):
+        interleaved_indices.append(t)
+        interleaved_indices.append(f)
+
+    print(f"  Interleaved: {min_count} True, {min_count} False ({len(interleaved_indices)} total)")
+    print(f"  Pattern: T,F,T,F,... (guarantees mixed batches)")
+
+    return dataset.select(interleaved_indices)
+
+
+def balance_dataset(dataset: Dataset, seed: int = 42) -> Dataset:
+    """
+    Balance dataset to have equal True and False labels.
+
+    NOTE: Use interleave_dataset() instead for KTO training - it both
+    balances AND interleaves to guarantee mixed batches.
+
+    Args:
+        dataset: HuggingFace Dataset with 'label' column
+        seed: Random seed for reproducible sampling
+
+    Returns:
+        Balanced dataset with 1:1 True/False ratio (but NOT interleaved)
+    """
+    labels = list(dataset["label"])
+    true_indices = [i for i, l in enumerate(labels) if l is True]
+    false_indices = [i for i, l in enumerate(labels) if l is False]
+
+    true_count = len(true_indices)
+    false_count = len(false_indices)
+
+    if true_count == false_count:
+        print(f"  Dataset already balanced: {true_count} True, {false_count} False")
+        return dataset
+
+    # Determine minority and majority
+    if true_count > false_count:
+        majority, minority = "True", "False"
+        majority_indices, minority_indices = true_indices, false_indices
+    else:
+        majority, minority = "False", "True"
+        majority_indices, minority_indices = false_indices, true_indices
+
+    # Sample from majority to match minority count
+    rng = random.Random(seed)
+    sampled_majority = rng.sample(majority_indices, len(minority_indices))
+
+    # Combine and shuffle
+    balanced_indices = sampled_majority + minority_indices
+    rng.shuffle(balanced_indices)
+
+    dropped = len(majority_indices) - len(minority_indices)
+    print(f"  Balancing dataset: {true_count} True, {false_count} False")
+    print(f"  Dropped {dropped} excess {majority} examples")
+    print(f"  Balanced: {len(minority_indices)} True, {len(minority_indices)} False ({len(balanced_indices)} total)")
+
+    return dataset.select(balanced_indices)
 
 
 def format_tool_calls(tool_calls: List[Dict]) -> str:

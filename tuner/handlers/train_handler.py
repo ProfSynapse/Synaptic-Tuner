@@ -21,6 +21,41 @@ from tuner.ui import (
 )
 
 
+def detect_platform() -> str | None:
+    """
+    Auto-detect the available training platform.
+
+    Returns:
+        'rtx' if CUDA is available
+        'mac' if MLX is available (Apple Silicon)
+        None if neither or both are available (user must choose)
+    """
+    has_cuda = False
+    has_mlx = False
+
+    # Check for CUDA
+    try:
+        import torch
+        has_cuda = torch.cuda.is_available()
+    except ImportError:
+        pass
+
+    # Check for MLX (Apple Silicon)
+    try:
+        import mlx.core as mx
+        has_mlx = mx.metal.is_available()
+    except ImportError:
+        pass
+
+    # Auto-select if only one is available
+    if has_cuda and not has_mlx:
+        return "rtx"
+    elif has_mlx and not has_cuda:
+        return "mac"
+    else:
+        return None
+
+
 class TrainHandler(BaseHandler):
     """
     Handler for training workflow.
@@ -55,11 +90,17 @@ class TrainHandler(BaseHandler):
         """
         print_header("TRAINING", "Select your platform and training method")
 
-        # Step 1: Select platform
-        platform_choice = print_menu([
-            ("rtx", f"{BOX['bullet']} NVIDIA GPU (RTX 3090 / CUDA) - SFT or KTO"),
-            ("mac", f"{BOX['bullet']} Apple Silicon (M1/M2/M3) - MLX LoRA"),
-        ], "Select platform:")
+        # Step 1: Auto-detect or select platform
+        platform_choice = detect_platform()
+
+        if platform_choice:
+            platform_name = "NVIDIA GPU (CUDA)" if platform_choice == "rtx" else "Apple Silicon (MLX)"
+            print_info(f"Auto-detected platform: {platform_name}")
+        else:
+            platform_choice = print_menu([
+                ("rtx", f"{BOX['bullet']} NVIDIA GPU (RTX 3090 / CUDA) - SFT or KTO"),
+                ("mac", f"{BOX['bullet']} Apple Silicon (M1/M2/M3) - MLX LoRA"),
+            ], "Select platform:")
 
         if not platform_choice:
             return 0

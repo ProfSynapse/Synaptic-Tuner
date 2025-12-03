@@ -16,21 +16,16 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add shared module to path BEFORE any relative imports
-_shared_path = Path(__file__).parent.parent.parent
-if str(_shared_path) not in sys.path:
-    sys.path.insert(0, str(_shared_path))
-
-# Now use absolute imports (relative to shared/)
-from upload.platform.windows_patches import ensure_windows_compatibility, ensure_vl_compatibility
-from upload.core.config import (
+# Use relative imports (this module is part of shared.upload.cli)
+from ..platform.windows_patches import ensure_windows_compatibility, ensure_vl_compatibility
+from ..core.config import (
     UploadConfig,
     SaveConfig,
     ConversionConfig,
     DocumentationConfig,
 )
-from upload.core.types import ModelPath, to_repository_id, to_credential
-from upload.orchestrator import UploadOrchestrator
+from ..core.types import ModelPath, to_repository_id, to_credential
+from ..orchestrator import UploadOrchestrator
 
 
 def load_env_file():
@@ -72,15 +67,19 @@ Examples:
 """
     )
 
-    # Required arguments
+    # Positional arguments (optional when using --gguf-only)
     parser.add_argument(
         "model_path",
         type=str,
+        nargs="?",
+        default=None,
         help="Path to saved model directory (e.g., sft_output_rtx3090/20251122/final_model)"
     )
     parser.add_argument(
         "repo_id",
         type=str,
+        nargs="?",
+        default=None,
         help="HuggingFace repo ID (username/model-name)"
     )
 
@@ -140,6 +139,12 @@ Examples:
         action="store_true",
         help="Skip uploading standard model (only GGUF)"
     )
+    parser.add_argument(
+        "--gguf-only",
+        type=str,
+        metavar="HF_REPO",
+        help="Create GGUF from existing HuggingFace repo and push to {repo}-GGUF"
+    )
 
     # Documentation configuration
     parser.add_argument(
@@ -149,6 +154,163 @@ Examples:
     )
 
     return parser
+
+
+def gguf_only_mode(hf_repo: str, quantizations: list, token: str):
+    """
+    Create GGUF from existing HuggingFace repo and push to {repo}-GGUF.
+
+    Args:
+        hf_repo: HuggingFace repo ID (e.g., professorsynapse/nexus-tools_sft23)
+        quantizations: List of quantization methods
+        token: HuggingFace token
+    """
+    import subprocess
+    import tempfile
+    import shutil
+    from pathlib import Path
+
+    gguf_repo = f"{hf_repo}-GGUF"
+
+    print("\n" + "=" * 60)
+    print("GGUF-ONLY MODE")
+    print("=" * 60)
+    print(f"Source: {hf_repo}")
+    print(f"Target: {gguf_repo}")
+    print(f"Quantizations: {', '.join(quantizations)}")
+    print()
+
+    # Check GGUF dependencies (run.sh should have installed them)
+    print("[0/5] Checking GGUF dependencies...")
+    try:
+        from gguf.vocab import MistralTokenizerType
+        print("  ✓ Dependencies ready")
+    except ImportError:
+        print("  ⚠ Warning: MistralTokenizerType not found")
+        print("  Please restart with ./run.sh to install correct gguf version")
+
+    from unsloth import FastLanguageModel
+
+    print("[1/5] Loading model from HuggingFace...")
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=hf_repo,
+        max_seq_length=2048,
+        load_in_4bit=False,
+        token=token,
+    )
+    print("  ✓ Model loaded")
+
+    # Create temp directory in WSL native filesystem (better performance)
+    temp_base = Path.home() / "tmp_gguf_conversion"
+    temp_base.mkdir(exist_ok=True)
+    temp_dir = tempfile.mkdtemp(dir=str(temp_base))
+
+    try:
+        print(f"[2/5] Saving model to temp directory...")
+        print(f"  Location: {temp_dir}")
+        model.save_pretrained(temp_dir)
+        tokenizer.save_pretrained(temp_dir)
+        print("  ✓ Model saved")
+
+        print(f"\n[3/5] Converting to GGUF format...")
+        print("  This may take 10-15 minutes depending on quantizations...")
+        print("  Note: Skipping vision components (text-only training)")
+
+        # Use llama.cpp directly to convert (skip vision projector for VLMs)
+        # llama.cpp is in Trainers/llama.cpp/
+        # This file is in Trainers/shared/upload/cli/, so need 4 parents to get to Trainers/
+        llama_cpp_dir = Path(__file__).parent.parent.parent.parent / "llama.cpp"
+
+        if not llama_cpp_dir.exists():
+            raise RuntimeError(f"llama.cpp not found at {llama_cpp_dir}")
+
+        import sys
+        sys.path.insert(0, str(llama_cpp_dir))
+
+        try:
+            # Import llama.cpp converter
+            from convert_hf_to_gguf import main as convert_main
+
+            model_name = hf_repo.split("/")[-1]
+            base_gguf = Path(temp_dir) / f"{model_name}.gguf"
+
+            # Convert to f16 GGUF (base conversion, no vision)
+            print(f"  Converting to f16 GGUF...")
+            convert_args = [
+                str(temp_dir),
+                "--outfile", str(base_gguf),
+                "--outtype", "f16",
+            ]
+
+            # Monkey-patch sys.argv for the converter
+            old_argv = sys.argv
+            sys.argv = ["convert_hf_to_gguf.py"] + convert_args
+
+            try:
+                convert_main()
+            finally:
+                sys.argv = old_argv
+
+            print(f"  ✓ Base GGUF created: {base_gguf.name}")
+
+            # Quantize to requested formats
+            quantize_bin = llama_cpp_dir / "llama-quantize"
+
+            if not quantize_bin.exists():
+                raise RuntimeError(f"llama-quantize not found at {quantize_bin}")
+
+            for quant in quantizations:
+                quant_upper = quant.upper()
+                output_gguf = Path(temp_dir) / f"{model_name}-{quant_upper}.gguf"
+
+                print(f"  Quantizing to {quant_upper}...")
+                result = subprocess.run(
+                    [str(quantize_bin), str(base_gguf), str(output_gguf), quant_upper],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',  # Replace invalid UTF-8 with � instead of crashing
+                    timeout=600
+                )
+
+                if result.returncode == 0:
+                    print(f"  ✓ Created: {output_gguf.name}")
+                else:
+                    # Decode stderr safely in case of encoding issues
+                    stderr_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    print(f"  ⚠ Failed to create {quant_upper}: {stderr_msg}")
+
+            print("  ✓ GGUF files created")
+
+        except Exception as e:
+            raise RuntimeError(f"GGUF conversion failed: {e}")
+
+        print(f"\n[4/5] Uploading GGUF files to {gguf_repo}...")
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=token)
+        api.create_repo(repo_id=gguf_repo, exist_ok=True, private=False)
+
+        # Upload all files (GGUF + config)
+        api.upload_folder(
+            folder_path=temp_dir,
+            repo_id=gguf_repo,
+            repo_type="model",
+        )
+        print("  ✓ Upload complete")
+
+        print("\n" + "=" * 60)
+        print("[5/5] GGUF UPLOAD COMPLETE")
+        print("=" * 60)
+        print(f"✓ GGUF files uploaded to: https://huggingface.co/{gguf_repo}")
+        print()
+
+    finally:
+        # Cleanup temp directory
+        if Path(temp_dir).exists():
+            print("  Cleaning up temp files...")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print("  ✓ Cleanup complete")
 
 
 def main(args=None):
@@ -168,6 +330,23 @@ def main(args=None):
     if not hf_token:
         print("Error: HuggingFace token required. Provide via --token or HF_TOKEN env var")
         print("Get token from: https://huggingface.co/settings/tokens")
+        sys.exit(1)
+
+    # Handle --gguf-only mode
+    if args.gguf_only:
+        try:
+            gguf_only_mode(args.gguf_only, args.gguf_quantizations, hf_token)
+            return 0
+        except Exception as e:
+            print(f"\n✗ GGUF-only failed: {e}")
+            return 1
+
+    # Validate required args for normal mode
+    if not args.model_path or not args.repo_id:
+        print("Error: model_path and repo_id are required (unless using --gguf-only)")
+        print("\nUsage:")
+        print("  python -m shared.upload.cli.upload_cli ./model username/repo [options]")
+        print("  python -m shared.upload.cli.upload_cli --gguf-only username/existing-repo")
         sys.exit(1)
 
     # Create configurations

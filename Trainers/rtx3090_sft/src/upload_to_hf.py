@@ -16,14 +16,14 @@ import os
 import sys
 from pathlib import Path
 
-# Add shared module to path
-SHARED_PATH = Path(__file__).parent.parent.parent / "shared"
-sys.path.insert(0, str(SHARED_PATH))
+# Add Trainers directory to path so 'shared' package is accessible
+TRAINERS_PATH = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(TRAINERS_PATH))
 
 # Set default output directory for SFT trainer
 os.environ.setdefault("TRAINER_TYPE", "sft")
 
-from upload.cli.upload_cli import main
+from shared.upload.cli.upload_cli import main
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -125,9 +125,80 @@ class RTXBackend(ITrainingBackend):
         Returns:
             Exit code (0 = success, non-zero = failure)
         """
+        import sys
+        import shutil
+        import threading
+        import time
+        from tuner.ui import console, RICH_AVAILABLE
+
         cmd = [python_path, f"train_{config.method}.py"]
-        result = subprocess.run(cmd, cwd=str(config.trainer_dir))
-        return result.returncode
+        
+        if not RICH_AVAILABLE:
+            result = subprocess.run(cmd, cwd=str(config.trainer_dir))
+            return result.returncode
+
+        # Interactive execution with loader
+        try:
+            # Start the process with pipes
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(config.trainer_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line buffered
+                encoding='utf-8',
+                errors='replace'
+            )
+
+            # Use a thread to peek at the output so we don't block the spinner
+            output_started = threading.Event()
+            first_char = []
+
+            def wait_for_output():
+                try:
+                    char = process.stdout.read(1)
+                    if char:
+                        first_char.append(char)
+                except Exception:
+                    pass
+                finally:
+                    output_started.set()
+
+            reader_thread = threading.Thread(target=wait_for_output, daemon=True)
+            reader_thread.start()
+
+            # Show loader until first output appears
+            with console.status("[bold aqua]Initializing Unsloth & CUDA Kernels...[/bold aqua]", spinner="dots12"):
+                while not output_started.is_set():
+                    if process.poll() is not None:
+                        break
+                    time.sleep(0.1)
+
+            # If process finished immediately (error case), return code
+            if not first_char and process.poll() is not None:
+                return process.returncode
+
+            # Print the character we swallowed
+            if first_char:
+                sys.stdout.write(first_char[0])
+                sys.stdout.flush()
+
+            # Stream the rest of the output directly to stdout
+            # This preserves TQDM progress bars and other animations
+            shutil.copyfileobj(process.stdout, sys.stdout)
+            
+            # Wait for completion
+            return process.wait()
+
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user.")
+            if 'process' in locals():
+                process.terminate()
+            return 130
+        except Exception as e:
+            print(f"Execution error: {e}")
+            return 1
 
     def validate_environment(self) -> tuple[bool, str]:
         """

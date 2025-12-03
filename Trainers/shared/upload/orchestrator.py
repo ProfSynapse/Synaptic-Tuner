@@ -27,7 +27,7 @@ from .uploaders.registry import UploaderRegistry
 from .documentation.manifest import ManifestGenerator
 from .documentation.model_card import ModelCardGenerator
 from .documentation.readme import ReadmeGenerator
-from model_loading.registry import ModelLoaderRegistry
+from ..model_loading.registry import ModelLoaderRegistry
 
 
 class UploadOrchestrator:

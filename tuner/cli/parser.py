@@ -30,7 +30,7 @@ def create_parser() -> argparse.ArgumentParser:
         'train'
     """
     parser = argparse.ArgumentParser(
-        description="Synaptic Tuner - Fine-tuning CLI for the Claudesidian MCP",
+        description="Synaptic Tuner - Fine-tuning CLI for Nexus MCP",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
