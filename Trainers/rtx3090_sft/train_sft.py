@@ -18,6 +18,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+# Force UTF-8 output for Windows to handle unicode characters like ✓
+if sys.platform == "win32":
+    import io
+    # Check if stdout/stderr are attached to a terminal or file (have buffer)
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
 try:
     from dotenv import load_dotenv

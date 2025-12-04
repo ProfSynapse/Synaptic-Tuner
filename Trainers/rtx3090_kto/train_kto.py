@@ -9,14 +9,31 @@ Usage:
     python train_kto.py --config custom_config.py
 """
 
+# ============================================================================
+# DISABLE TORCH COMPILE - Must be set BEFORE importing torch
+# Prevents nvcc permission errors and dynamo compilation issues
+# ============================================================================
+import os
+os.environ["TORCH_COMPILE_DISABLE"] = "1"
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Get accurate CUDA error location
+
 import argparse
 import json
-import os
 import sys
 import time
 import torch
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+# Force UTF-8 output for Windows to handle unicode characters like ✓
+if sys.platform == "win32":
+    import io
+    # Check if stdout/stderr are attached to a terminal or file (have buffer)
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
 try:
@@ -693,6 +710,12 @@ def main():
         split_dataset=args.split_dataset
     )
 
+    # Interleave dataset to guarantee mixed True/False batches
+    # This prevents CUDA errors from homogeneous batches (all True or all False)
+    from src.data_loader import interleave_dataset
+    print("\nInterleaving dataset for mixed batches...")
+    train_dataset = interleave_dataset(train_dataset, seed=config.seed)
+
     # Validate dataset
     if not validate_kto_dataset(train_dataset):
         print("✗ Dataset validation failed. Exiting.")
@@ -887,6 +910,64 @@ def main():
         )
 
     print("✓ KTO trainer initialized with metrics tracking")
+
+    # Override sampler to use SequentialSampler - preserves interleaved T,F,T,F order
+    from torch.utils.data import SequentialSampler
+    trainer._get_train_sampler = lambda dataset: SequentialSampler(dataset)
+    print("✓ Using SequentialSampler to preserve interleaved batch order")
+
+    # Monkey-patch the forward method to use index_select instead of list indexing
+    # This fixes CUDA errors with large vocab models like Qwen3-VL (151K vocab)
+    original_forward = trainer.forward
+
+    def patched_forward(model, batch):
+        """Patched forward that uses index_select for large vocab compatibility."""
+        # Run the KL computation first
+        KL_logps = trainer._compute_kl_logps(model, batch)
+
+        # Run model forward
+        model_kwargs = {}
+        if trainer.aux_loss_enabled:
+            model_kwargs["output_router_logits"] = True
+
+        outputs = model(
+            batch["completion_input_ids"],
+            attention_mask=batch["completion_attention_mask"],
+            **model_kwargs,
+        )
+        completion_logits = outputs.logits
+
+        # Compute log probs
+        completion_logps = trainer.get_batch_logps(
+            completion_logits,
+            batch["completion_labels"],
+            average_log_prob=False,
+            is_encoder_decoder=trainer.is_encoder_decoder,
+            label_pad_token_id=trainer.label_pad_token_id,
+        )
+
+        # Use tensor indices with index_select (fixes large vocab CUDA errors)
+        device = completion_logits.device
+        chosen_idx = torch.tensor(
+            [i for i in range(completion_logps.shape[0]) if batch["label"][i] is True],
+            dtype=torch.long, device=device
+        )
+        rejected_idx = torch.tensor(
+            [i for i in range(completion_logps.shape[0]) if batch["label"][i] is False],
+            dtype=torch.long, device=device
+        )
+
+        chosen_logps = completion_logps.index_select(0, chosen_idx)
+        rejected_logps = completion_logps.index_select(0, rejected_idx)
+        chosen_logits = completion_logits.index_select(0, chosen_idx)
+        rejected_logits = completion_logits.index_select(0, rejected_idx)
+
+        if trainer.aux_loss_enabled:
+            return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, KL_logps, outputs.aux_loss)
+        return (chosen_logps, rejected_logps, chosen_logits, rejected_logits, KL_logps)
+
+    trainer.forward = patched_forward
+    print("✓ Applied index_select patch for large vocab compatibility")
 
     if ref_model is not None:
         print("✓ Explicit reference model provided for stable KL computation")

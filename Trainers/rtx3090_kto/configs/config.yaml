@@ -22,7 +22,7 @@ lora:
   use_dora: false
 training:
   output_dir: ./kto_output_rtx3090
-  per_device_train_batch_size: 4
+  per_device_train_batch_size: 2
   gradient_accumulation_steps: 4
   beta: 0.1
   desirable_weight: 1.0
@@ -53,7 +53,7 @@ training:
 dataset:
   dataset_name: professorsynapse/nexus-synthetic-dataset
   dataset_file: behavior_merged_kto_v1.5_11.29.25.jsonl
-  local_file: ../../Datasets/behavior_merged_kto_v1.5_11.29.25.jsonl
+  local_file: ../../Datasets/behavior_merged_kto_v1.5_balanced.jsonl
   num_proc: 1
   test_size: 0.1
   chat_template: chatml
