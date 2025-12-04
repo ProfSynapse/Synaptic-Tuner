@@ -11,6 +11,15 @@ import os
 import sys
 from typing import List
 
+# Force UTF-8 output for Windows to handle unicode characters like ✓
+if sys.platform == "win32":
+    import io
+    # Check if stdout/stderr are attached to a terminal or file (have buffer)
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # Rich console for colored output (optional)
 try:
     from rich.console import Console

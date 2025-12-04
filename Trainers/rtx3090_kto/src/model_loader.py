@@ -6,6 +6,13 @@ from unsloth import FastLanguageModel, is_bfloat16_supported
 from typing import Tuple, Optional
 import torch
 
+# Try to import FastVisionModel for VL models
+try:
+    from unsloth import FastVisionModel
+    VISION_MODEL_AVAILABLE = True
+except ImportError:
+    VISION_MODEL_AVAILABLE = False
+
 
 # Mistral-specific chat template (for models using [INST] format)
 # Official Mistral format: <s>[INST] user [/INST] assistant</s>
@@ -31,6 +38,14 @@ def _is_mistral_model(model_name: str) -> bool:
     """Detect if a model is a Mistral model based on name."""
     model_name_lower = model_name.lower()
     return 'mistral' in model_name_lower
+
+
+def _is_vision_model(model_name: str) -> bool:
+    """Detect if a model is a Vision-Language (VL) model based on name."""
+    model_name_lower = model_name.lower()
+    # Common VL model indicators
+    vl_indicators = ['vl', 'vision', 'qwen2-vl', 'qwen3-vl', 'llava', 'pixtral']
+    return any(indicator in model_name_lower for indicator in vl_indicators)
 
 
 def load_model_and_tokenizer(
@@ -61,14 +76,32 @@ def load_model_and_tokenizer(
     print(f"4-bit quantization: {load_in_4bit}")
     print(f"dtype: {dtype if dtype else 'auto-detect'}")
 
-    # Load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_name,
-        max_seq_length=max_seq_length,
-        dtype=dtype,
-        load_in_4bit=load_in_4bit,
-        token=hf_token,
-    )
+    # Detect if this is a VL model and use appropriate loader
+    is_vl = _is_vision_model(model_name)
+
+    if is_vl and VISION_MODEL_AVAILABLE:
+        print(f"✓ Detected Vision-Language model, using FastVisionModel")
+        model, tokenizer = FastVisionModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
+    elif is_vl and not VISION_MODEL_AVAILABLE:
+        raise ImportError(
+            f"Model {model_name} appears to be a VL model but FastVisionModel is not available. "
+            "Install unsloth_zoo: pip install unsloth_zoo"
+        )
+    else:
+        # Standard language model
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
 
     # Verify model loaded correctly
     print(f"\n✓ Model loaded: {model.config._name_or_path}")

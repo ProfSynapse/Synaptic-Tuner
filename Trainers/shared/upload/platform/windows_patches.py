@@ -93,7 +93,10 @@ def apply_windows_patches() -> bool:
         pass
 
     _windows_patches_applied = True
-    print("✓ Windows patches applied")
+    try:
+        print("✓ Windows patches applied")
+    except UnicodeEncodeError:
+        print("[OK] Windows patches applied")
 
     return True
 

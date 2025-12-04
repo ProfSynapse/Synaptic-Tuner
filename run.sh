@@ -59,17 +59,18 @@ check_and_install_deps() {
         NEED_INSTALL=true
     fi
 
-    # Check for correct Transformers version (5.0.0.dev0 for Ministral 3)
+    # Check for Transformers version (4.51.0+ required for Qwen3-VL, 5.x for Ministral 3)
+    # Accept either 4.5x+ or 5.x - both work for most models
     TRANSFORMERS_VERSION=$(python -c "import transformers; print(transformers.__version__)" 2>/dev/null || echo "0")
-    if [[ ! "$TRANSFORMERS_VERSION" == 5.0.0* ]]; then
-        MISSING_DEPS+=("transformers 5.0.0.dev0 (current: $TRANSFORMERS_VERSION)")
+    if [[ ! "$TRANSFORMERS_VERSION" =~ ^(4\.(5[1-9]|[6-9][0-9])|5\.) ]]; then
+        MISSING_DEPS+=("transformers >=4.51.0 (current: $TRANSFORMERS_VERSION)")
         NEED_INSTALL=true
     fi
 
-    # Check for TRL 0.22.2
+    # Check for TRL (accept 0.15.x or 0.22.x)
     TRL_VERSION=$(python -c "import trl; print(trl.__version__)" 2>/dev/null || echo "0")
-    if [[ "$TRL_VERSION" != "0.22.2" ]]; then
-        MISSING_DEPS+=("trl 0.22.2 (current: $TRL_VERSION)")
+    if [[ ! "$TRL_VERSION" =~ ^0\.(15|22)\. ]]; then
+        MISSING_DEPS+=("trl 0.15.x or 0.22.x (current: $TRL_VERSION)")
         NEED_INSTALL=true
     fi
 
@@ -226,9 +227,9 @@ try:
     checks = [
         ('Initializing neural pathways (Unsloth)...', 'import unsloth'),
         ('Loading model architectures (Vision)...', 'from unsloth import FastVisionModel'),
-        ('Calibrating training loops (TRL)...', 'import trl; assert trl.__version__ == \"0.22.2\"'),
+        ('Calibrating training loops (TRL)...', 'import trl'),
         ('Establishing GPU connection (xformers)...', 'import xformers'),
-        ('Preparing interface (Transformers)...', 'import transformers; assert transformers.__version__.startswith(\"5.0.0\")'),
+        ('Preparing interface (Transformers)...', 'import transformers'),
         ('Configuring GGUF converter (llama.cpp)...', 'from gguf.vocab import MistralTokenizerType'),
     ]
 

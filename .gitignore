@@ -98,3 +98,5 @@ archive/
 
 nexus-tools-sft14-kto3
 nexus-tools_v0.1.10
+llama.cpp/
+**/llama.cpp/
