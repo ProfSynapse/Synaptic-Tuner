@@ -26,7 +26,9 @@ def route_command(args: Namespace) -> int:
         train    -> TrainHandler
         upload   -> UploadHandler
         eval     -> EvalHandler
+        generate -> GenerateHandler
         pipeline -> PipelineHandler
+        gguf     -> GGUFHandler
         (none)   -> MainMenuHandler
 
     Example:
@@ -39,8 +41,10 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.upload_handler import UploadHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
+        from tuner.handlers.gguf_handler import GGUFHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         print(f"Error: Handlers not yet implemented: {e}")
@@ -55,7 +59,9 @@ def route_command(args: Namespace) -> int:
         'train': TrainHandler,
         'upload': UploadHandler,
         'eval': EvalHandler,
+        'generate': GenerateHandler,
         'pipeline': PipelineHandler,
+        'gguf': GGUFHandler,
     }
 
     # Execute handler

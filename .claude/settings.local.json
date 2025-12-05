@@ -145,7 +145,12 @@
       "Bash(wc:*)",
       "Bash(git check-ignore:*)",
       "Bash(git reset:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:llm.mlc.ai)",
+      "WebFetch(domain:webllm.mlc.ai)",
+      "Bash(timeout 3 python tuner.py:*)"
     ],
     "deny": [],
     "ask": []

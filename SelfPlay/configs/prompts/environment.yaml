@@ -1,0 +1,154 @@
+# Environment Generation Prompts (Prompt 1)
+# These prompts tell the LLM how to generate realistic Obsidian workspace environments
+
+variations:
+  simple:
+    description: "Basic workspace with minimal structure (3-5 files)"
+    weight: 0.2
+    prompt: |
+      Generate a realistic Obsidian vault workspace environment for a user.
+
+      Create a simple, focused workspace with:
+      - A clear purpose (e.g., "Daily Notes", "Quick Capture", "Reading List")
+      - A root folder (e.g., "Journal/", "Inbox/", "Books/")
+      - 3-5 files in a simple structure (1-2 subfolders max)
+      - Realistic but simple file names
+
+      Output format:
+      Workspace Name: {name}
+      Description: {what the user uses this workspace for}
+      Root Folder: {root path}
+
+      Folder Structure:
+      {root}/
+      ├── {file1.md}
+      ├── {file2.md}
+      └── {subfolder}/
+          ├── {file3.md}
+          └── {file4.md}
+
+      Make it feel real but keep it simple - this is a focused workspace.
+
+  complex:
+    description: "Realistic messy workspace (10-15 files, inconsistent naming)"
+    weight: 0.5
+    prompt: |
+      Generate a realistic Obsidian vault workspace environment for a user.
+
+      Create a complex, realistic workspace that feels LIVED-IN:
+      - A clear purpose (e.g., "Project Management", "Research Notes", "Work Vault")
+      - A root folder (e.g., "Projects/", "Research/", "Work/")
+      - 10-15 files across 3-5 nested subfolders
+      - REALISTIC imperfections:
+        * Some files have dates, some don't
+        * Inconsistent naming (some camelCase, some kebab-case, some spaces)
+        * Mix of organization levels (some well-organized, some messy)
+        * A few generic names like "notes.md", "draft.md", "temp.md"
+        * Some folders might be empty or have just 1 file
+
+      Output format:
+      Workspace Name: {name}
+      Description: {detailed description of what this workspace is for}
+      Root Folder: {root path}
+
+      Folder Structure:
+      {root}/
+      ├── {subfolder1}/
+      │   ├── {file1.md}
+      │   ├── {file2.md}
+      │   └── {nested-subfolder}/
+      │       └── {file3.md}
+      ├── {subfolder2}/
+      │   ├── {file4.md}
+      │   └── {file5.md}
+      ├── {file6.md}
+      └── {file7.md}
+
+      Make it feel like a REAL person's workspace - not perfectly organized, but functional.
+      Include specific domain content (e.g., if it's a "Research" workspace, use academic-sounding file names).
+
+  project_focused:
+    description: "Project management workspace (structured but realistic)"
+    weight: 0.2
+    prompt: |
+      Generate a realistic Obsidian vault workspace for PROJECT MANAGEMENT.
+
+      Create a project-oriented workspace with:
+      - A specific project name (e.g., "Atlas Rollout", "Phoenix Migration", "Q4 Planning")
+      - Root folder: Projects/{project-name}/
+      - Standard project structure:
+        * Planning/ (roadmaps, specs, goals)
+        * Active/ (current work, sprints, tasks)
+        * Archive/ (completed work)
+        * Meetings/ (meeting notes, standups)
+        * Resources/ (reference docs, templates)
+      - 8-12 files across these folders
+      - Realistic project file names (with dates, versions, or status indicators)
+
+      Output format:
+      Workspace Name: {project name}
+      Description: {what this project is about and current status}
+      Root Folder: Projects/{project-name}/
+
+      Folder Structure:
+      Projects/{project-name}/
+      ├── Planning/
+      │   ├── {roadmap or spec file}
+      │   └── {goals file}
+      ├── Active/
+      │   ├── {sprint or current work}
+      │   └── {tasks or todos}
+      ├── Meetings/
+      │   ├── {meeting note 1}
+      │   └── {meeting note 2}
+      ├── Archive/
+      │   └── {old file}
+      └── README.md
+
+      Make it feel like an active, ongoing project.
+
+  knowledge_base:
+    description: "Knowledge base / research workspace (topic-organized)"
+    weight: 0.1
+    prompt: |
+      Generate a realistic Obsidian vault workspace for KNOWLEDGE MANAGEMENT or RESEARCH.
+
+      Create a knowledge-oriented workspace with:
+      - A topic or domain (e.g., "Machine Learning Notes", "Philosophy Reading", "Programming Reference")
+      - Root folder: {topic-name}/
+      - Topic-based organization (folders by subtopic, concept, or category)
+      - 10-15 notes with descriptive names
+      - Some notes might reference each other (like "linked concepts")
+      - Include some meta-files (index.md, MOC.md, tags.md, etc.)
+
+      Output format:
+      Workspace Name: {topic or domain}
+      Description: {what knowledge this workspace contains}
+      Root Folder: {topic-root}/
+
+      Folder Structure:
+      {topic-root}/
+      ├── {subtopic1}/
+      │   ├── {concept1.md}
+      │   ├── {concept2.md}
+      │   └── {examples.md}
+      ├── {subtopic2}/
+      │   ├── {concept3.md}
+      │   └── {notes.md}
+      ├── Index.md
+      ├── MOC.md
+      └── Reading-List.md
+
+      Make it feel like someone building a second brain or personal wiki.
+
+# Metadata
+selection_strategy: "weighted"  # Use weights above to randomly select variation
+default_variation: "complex"     # Use this if no variation specified
+
+# Post-processing instructions
+post_processing:
+  - "Ensure all file names end with .md"
+  - "Ensure folder paths end with /"
+  - "Ensure realistic names (no placeholders like 'file1', 'folder2')"
+  - "Vary the depth (some workspaces flat, some nested)"
+  - "Include at least one folder and at least 3 files"

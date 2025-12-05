@@ -1,0 +1,692 @@
+# Tool-Specific Prompt Generation Configuration
+# Simplified approach - system prompts tell the user agent what tools to use
+
+# ============================================================================
+# VAULT MANAGER TOOLS
+# ============================================================================
+
+vaultManager_createFolder:
+  description: "Create a new folder in the vault"
+  tools: ["vaultManager_createFolder"]
+  user_instruction: |
+    You are a user with an Obsidian vault who needs to organize your notes.
+    Generate a realistic request to create a folder. Include:
+    - What the folder is for (e.g., project, topic, archive)
+    - Where it should go (specific path or general location)
+    - Any context about why you need it
+
+  example_prompts:
+    - "Create a folder called 'Q4 Planning' in my Projects directory"
+    - "I need a new folder for my machine learning notes"
+    - "Can you make a folder called 'Archive/2024' to organize old files?"
+
+vaultManager_deleteFolder:
+  description: "Delete a folder from the vault"
+  tools: ["vaultManager_deleteFolder"]
+  user_instruction: |
+    You are a user who wants to delete a folder from your vault.
+    Generate a realistic deletion request. Include:
+    - Which folder to delete (name or path)
+    - Optional: Why you're deleting it
+    - Optional: Whether to delete recursively
+
+  example_prompts:
+    - "Delete the 'Temp' folder - I don't need it anymore"
+    - "Remove the 'Old Projects' directory and everything in it"
+    - "Can you delete the empty 'Archive' folder?"
+
+vaultManager_editFolder:
+  description: "Rename or move a folder"
+  tools: ["vaultManager_editFolder"]
+  user_instruction: |
+    You are a user who needs to rename or reorganize folders.
+    Generate a realistic request. Include:
+    - Current folder name/path
+    - New name or location
+    - Reason for the change (optional)
+
+  example_prompts:
+    - "Rename 'Old Notes' to 'Legacy Notes'"
+    - "Move the 'Projects' folder to 'Work/Projects'"
+    - "Can you rename 'misc' to 'Miscellaneous'?"
+
+vaultManager_moveFolder:
+  description: "Move a folder to a new location"
+  tools: ["vaultManager_moveFolder"]
+  user_instruction: |
+    You are a user reorganizing your vault structure.
+    Generate a request to move a folder. Include:
+    - Source folder path
+    - Destination path
+    - Optional: What to do if destination exists
+
+  example_prompts:
+    - "Move all files from 'Temp' to 'Archive'"
+    - "Relocate my 'Research' folder into 'Work/Research'"
+    - "Transfer the 'Meeting Notes' folder to the 'Archive' directory"
+
+vaultManager_deleteNote:
+  description: "Delete a specific note"
+  tools: ["vaultManager_deleteNote"]
+  user_instruction: |
+    You are a user who wants to delete a note.
+    Generate a realistic deletion request. Include:
+    - Note name or path
+    - Optional: Reason for deletion
+
+  example_prompts:
+    - "Delete the 'Draft Ideas.md' note"
+    - "Remove that old TODO list I created yesterday"
+    - "Can you delete 'Meeting Notes 2023-01-15.md'?"
+
+vaultManager_moveNote:
+  description: "Move a note to a different folder"
+  tools: ["vaultManager_moveNote"]
+  user_instruction: |
+    You are a user organizing your notes.
+    Generate a request to move a note. Include:
+    - Note to move
+    - Destination folder
+    - Optional: What to do if file exists
+
+  example_prompts:
+    - "Move 'Project Ideas.md' to the 'Active Projects' folder"
+    - "Relocate my meeting notes to the Archive"
+    - "Transfer 'TODO.md' to 'Work/Current Tasks'"
+
+vaultManager_duplicateNote:
+  description: "Create a copy of a note"
+  tools: ["vaultManager_duplicateNote"]
+  user_instruction: |
+    You are a user who needs to duplicate a note.
+    Generate a request. Include:
+    - Source note
+    - Target location/name
+    - Optional: Purpose of the duplicate
+
+  example_prompts:
+    - "Make a copy of my 'Weekly Template.md' for this week"
+    - "Duplicate 'Project Plan.md' as 'Project Plan Backup.md'"
+    - "Copy the meeting template to 'Meeting Notes 2024-01-20.md'"
+
+vaultManager_listDirectory:
+  description: "List contents of a folder"
+  tools: ["vaultManager_listDirectory"]
+  user_instruction: |
+    You are a user exploring your vault structure.
+    Generate a request to list directory contents. Include:
+    - Which directory to list
+    - Optional: Filters (files only, folders only, depth)
+
+  example_prompts:
+    - "Show me what's in my Projects folder"
+    - "List all the markdown files in 'Archive'"
+    - "What folders are in the root directory?"
+
+vaultManager_openNote:
+  description: "Open a note in the editor"
+  tools: ["vaultManager_openNote"]
+  user_instruction: |
+    You are a user who wants to open a note.
+    Generate a request. Include:
+    - Which note to open
+    - Optional: How to open it (tab, split, window)
+
+  example_prompts:
+    - "Open my 'TODO.md' file"
+    - "Can you open 'Meeting Notes.md' in a new tab?"
+    - "Show me the contents of 'Project Plan.md'"
+
+# ============================================================================
+# CONTENT MANAGER TOOLS
+# ============================================================================
+
+contentManager_createContent:
+  description: "Create a new note with content"
+  tools: ["contentManager_createContent"]
+  user_instruction: |
+    You are a user who wants to create a new note.
+    Generate a request. Include:
+    - Note name/path
+    - What content should be in it
+    - Optional: Purpose of the note
+
+  example_prompts:
+    - "Create a note called 'Daily Standup.md' with today's date as the header"
+    - "Make a new file 'Ideas.md' with a bulleted list template"
+    - "Can you create 'Meeting Notes.md' with sections for Agenda, Discussion, and Action Items?"
+
+contentManager_readContent:
+  description: "Read the contents of a note"
+  tools: ["contentManager_readContent"]
+  user_instruction: |
+    You are a user who wants to read a note.
+    Generate a request. Include:
+    - Which note to read
+    - Optional: Specific sections or line ranges
+
+  example_prompts:
+    - "Show me what's in 'TODO.md'"
+    - "Read the contents of my 'Project Plan.md' file"
+    - "What does my 'Meeting Notes.md' say?"
+
+contentManager_appendContent:
+  description: "Add content to the end of a note"
+  tools: ["contentManager_appendContent"]
+  user_instruction: |
+    You are a user adding to an existing note.
+    Generate a request. Include:
+    - Which note to append to
+    - What content to add
+
+  example_prompts:
+    - "Add 'Review PR #42' to my TODO list"
+    - "Append today's meeting notes to 'Weekly Updates.md'"
+    - "Add a new bullet point to 'Ideas.md' about the new feature"
+
+contentManager_prependContent:
+  description: "Add content to the beginning of a note"
+  tools: ["contentManager_prependContent"]
+  user_instruction: |
+    You are a user adding content to the start of a note.
+    Generate a request. Include:
+    - Which note to prepend to
+    - What content to add at the top
+
+  example_prompts:
+    - "Add an urgent task at the top of my TODO list"
+    - "Put today's date at the beginning of 'Daily Log.md'"
+    - "Add a warning notice to the top of 'Archive Notes.md'"
+
+contentManager_replaceContent:
+  description: "Replace specific content in a note"
+  tools: ["contentManager_replaceContent"]
+  user_instruction: |
+    You are a user updating content in a note.
+    Generate a request. Include:
+    - Which note to modify
+    - Old content to find
+    - New content to replace it with
+
+  example_prompts:
+    - "Replace 'TODO' with 'DONE' in my task list"
+    - "Update the project deadline from March to April in 'Plan.md'"
+    - "Change the meeting time from 2pm to 3pm in today's notes"
+
+contentManager_deleteContent:
+  description: "Remove specific content from a note"
+  tools: ["contentManager_deleteContent"]
+  user_instruction: |
+    You are a user removing content from a note.
+    Generate a request. Include:
+    - Which note to modify
+    - What content to remove
+
+  example_prompts:
+    - "Delete the completed tasks from my TODO list"
+    - "Remove the old section about 'Legacy System' from the docs"
+    - "Take out the placeholder text from 'Draft.md'"
+
+contentManager_replaceByLine:
+  description: "Replace content by line numbers"
+  tools: ["contentManager_replaceByLine"]
+  user_instruction: |
+    You are a user editing specific lines in a note.
+    Generate a request. Include:
+    - Which note to modify
+    - Line range to replace
+    - New content
+
+  example_prompts:
+    - "Replace lines 5-10 in 'Notes.md' with the updated text"
+    - "Update line 3 of my TODO list with the new task"
+    - "Change lines 1-2 of 'Header.md' to the new title"
+
+contentManager_findReplaceContent:
+  description: "Find and replace text in a note"
+  tools: ["contentManager_findReplaceContent"]
+  user_instruction: |
+    You are a user doing find-and-replace operations.
+    Generate a request. Include:
+    - Which note to modify
+    - Text to find
+    - Replacement text
+    - Optional: Replace all or just first occurrence
+
+  example_prompts:
+    - "Find all instances of 'TODO' and replace with 'DONE' in my notes"
+    - "Replace every mention of 'old-name' with 'new-name' in the document"
+    - "Change the first occurrence of 'draft' to 'final' in 'Report.md'"
+
+contentManager_batchContent:
+  description: "Perform multiple content operations at once"
+  tools: ["contentManager_batchContent"]
+  user_instruction: |
+    You are a user who needs to perform multiple content operations.
+    Generate a request for batch operations. Include:
+    - Multiple operations to perform
+    - Which notes they apply to
+
+  example_prompts:
+    - "Create three new daily log files for this week"
+    - "Update all meeting notes to include the new template header"
+    - "Append the summary to all project files in the 'Active' folder"
+
+# ============================================================================
+# MEMORY MANAGER TOOLS
+# ============================================================================
+
+memoryManager_createSession:
+  description: "Create a new session for tracking work"
+  tools: ["memoryManager_createSession"]
+  user_instruction: |
+    You are a user starting a new work session.
+    Generate a request. Include:
+    - What you're working on
+    - Optional: Session name, goal, or description
+
+  example_prompts:
+    - "Start a new session for working on the Atlas project"
+    - "Create a session called 'Bug Fixes' for today's work"
+    - "Begin a new session to review the quarterly reports"
+
+memoryManager_loadSession:
+  description: "Load a previous session"
+  tools: ["memoryManager_loadSession"]
+  user_instruction: |
+    You are a user resuming previous work.
+    Generate a request. Include:
+    - Which session to load (by ID or name)
+    - Optional: What you want to continue working on
+
+  example_prompts:
+    - "Load my 'Atlas Rollout' session from yesterday"
+    - "Resume the session where I was reviewing the migration docs"
+    - "Switch back to my Q4 planning session"
+
+memoryManager_updateSession:
+  description: "Update session metadata"
+  tools: ["memoryManager_updateSession"]
+  user_instruction: |
+    You are a user updating session information.
+    Generate a request. Include:
+    - Which session to update
+    - What to change (name, description, goal)
+
+  example_prompts:
+    - "Rename this session to 'Phoenix Migration - Phase 2'"
+    - "Update the session goal to include the new requirements"
+    - "Change the session description to reflect what we accomplished"
+
+memoryManager_listSessions:
+  description: "List all sessions"
+  tools: ["memoryManager_listSessions"]
+  user_instruction: |
+    You are a user reviewing your work history.
+    Generate a request. Include:
+    - Optional: Filters or sorting preferences
+
+  example_prompts:
+    - "Show me all my recent sessions"
+    - "List the sessions from this week"
+    - "What sessions have I created for the Atlas project?"
+
+memoryManager_createState:
+  description: "Save current state for later restoration"
+  tools: ["memoryManager_createState"]
+  user_instruction: |
+    You are a user creating a checkpoint of your work.
+    Generate a request. Include:
+    - What to name the state
+    - Optional: What to include (files, summary, traces)
+
+  example_prompts:
+    - "Save my current state as 'Before Refactor'"
+    - "Create a checkpoint called 'Milestone 1 Complete'"
+    - "Save the current session state for the weekly review"
+
+memoryManager_loadState:
+  description: "Restore a previously saved state"
+  tools: ["memoryManager_loadState"]
+  user_instruction: |
+    You are a user restoring a previous checkpoint.
+    Generate a request. Include:
+    - Which state to restore
+    - Optional: What you're trying to recover
+
+  example_prompts:
+    - "Load the 'Before Refactor' state"
+    - "Restore the checkpoint from this morning"
+    - "Go back to the 'Milestone 1 Complete' state"
+
+memoryManager_updateState:
+  description: "Update state metadata"
+  tools: ["memoryManager_updateState"]
+  user_instruction: |
+    You are a user modifying state information.
+    Generate a request. Include:
+    - Which state to update
+    - What to change (name, description, tags)
+
+  example_prompts:
+    - "Add tags 'important' and 'backup' to yesterday's state"
+    - "Rename the state to better reflect what it contains"
+    - "Update the description of the 'Milestone 2' state"
+
+memoryManager_listStates:
+  description: "List all saved states"
+  tools: ["memoryManager_listStates"]
+  user_instruction: |
+    You are a user reviewing available checkpoints.
+    Generate a request. Include:
+    - Optional: Filters or sorting
+
+  example_prompts:
+    - "Show me all saved states"
+    - "List the states I created this week"
+    - "What checkpoints do I have for the Phoenix project?"
+
+memoryManager_createWorkspace:
+  description: "Create a new workspace for organizing work"
+  tools: ["memoryManager_createWorkspace"]
+  user_instruction: |
+    You are a user setting up a new workspace.
+    Generate a request. Include:
+    - Workspace name and purpose
+    - Root folder
+    - Optional: Workflows, key files, preferences
+
+  example_prompts:
+    - "Create a workspace for the 'Product Launch' project in Projects/Launch/"
+    - "Set up a new workspace for my daily journaling in Notes/Journal/"
+    - "Make a workspace called 'Research Papers' in the Research directory"
+
+memoryManager_loadWorkspace:
+  description: "Load and switch to a workspace"
+  tools: ["memoryManager_loadWorkspace"]
+  user_instruction: |
+    You are a user switching contexts.
+    Generate a request. Include:
+    - Which workspace to load
+    - Optional: What you want to work on
+
+  example_prompts:
+    - "Switch to my 'Atlas Rollout' workspace"
+    - "Load the Phoenix Migration workspace"
+    - "Go to my Daily Notes workspace"
+
+memoryManager_updateWorkspace:
+  description: "Update workspace configuration"
+  tools: ["memoryManager_updateWorkspace"]
+  user_instruction: |
+    You are a user modifying workspace settings.
+    Generate a request. Include:
+    - Which workspace to update
+    - What field to change
+    - New value
+
+  example_prompts:
+    - "Update the current goal for my Atlas workspace"
+    - "Add a new workflow to the Product Launch workspace"
+    - "Change the workspace preferences to focus on daily tasks"
+
+memoryManager_listWorkspaces:
+  description: "List all available workspaces"
+  tools: ["memoryManager_listWorkspaces"]
+  user_instruction: |
+    You are a user exploring available workspaces.
+    Generate a request. Include:
+    - Optional: Sorting or filtering preferences
+
+  example_prompts:
+    - "Show me all my workspaces"
+    - "List workspaces sorted by most recently used"
+    - "What workspaces do I have set up?"
+
+# ============================================================================
+# VAULT LIBRARIAN TOOLS
+# ============================================================================
+
+vaultLibrarian_searchContent:
+  description: "Search for content across notes"
+  tools: ["vaultLibrarian_searchContent"]
+  user_instruction: |
+    You are a user searching for information in your vault.
+    Generate a search request. Include:
+    - What to search for
+    - Optional: Where to search, filters
+
+  example_prompts:
+    - "Search for all notes mentioning 'deployment' from last week"
+    - "Find references to 'Project Atlas' in my work notes"
+    - "Look for any notes about 'machine learning algorithms'"
+
+vaultLibrarian_searchDirectory:
+  description: "Search within specific directories"
+  tools: ["vaultLibrarian_searchDirectory"]
+  user_instruction: |
+    You are a user searching in specific folders.
+    Generate a request. Include:
+    - Search query
+    - Which directories to search
+    - Optional: File type filters, depth
+
+  example_prompts:
+    - "Search for 'TODO' in all my project folders"
+    - "Find files containing 'meeting' in the Archive directory"
+    - "Look for markdown files with 'urgent' in the Work folder"
+
+vaultLibrarian_searchMemory:
+  description: "Search across session memory and history"
+  tools: ["vaultLibrarian_searchMemory"]
+  user_instruction: |
+    You are a user searching through conversation history.
+    Generate a request. Include:
+    - What to search for
+    - Optional: Which workspace, time range, session filters
+
+  example_prompts:
+    - "Search my session history for discussions about the API design"
+    - "Find when we talked about the database migration"
+    - "Look for any mentions of 'Phoenix project' in my workspace memory"
+
+vaultLibrarian_batch:
+  description: "Perform multiple search operations"
+  tools: ["vaultLibrarian_batch"]
+  user_instruction: |
+    You are a user performing complex multi-search operations.
+    Generate a request. Include:
+    - Multiple searches to perform
+    - Optional: Whether to merge results
+
+  example_prompts:
+    - "Search for 'deployment', 'release', and 'production' across all notes"
+    - "Find all references to the project in multiple directories"
+    - "Run searches for different keywords and combine the results"
+
+# ============================================================================
+# AGENT MANAGER TOOLS
+# ============================================================================
+
+agentManager_createAgent:
+  description: "Create a custom agent"
+  tools: ["agentManager_createAgent"]
+  user_instruction: |
+    You are a user creating a specialized agent.
+    Generate a request. Include:
+    - Agent name and purpose
+    - What the agent should do (prompt/instructions)
+
+  example_prompts:
+    - "Create an agent called 'Standup Summarizer' that generates daily summaries"
+    - "Make a new agent to monitor my TODO notes and remind me of overdue items"
+    - "Set up an agent for generating weekly reports from my work notes"
+
+agentManager_deleteAgent:
+  description: "Delete an agent"
+  tools: ["agentManager_deleteAgent"]
+  user_instruction: |
+    You are a user removing an agent.
+    Generate a request. Include:
+    - Which agent to delete
+    - Optional: Reason for deletion
+
+  example_prompts:
+    - "Delete the 'Test Agent' - we don't need it anymore"
+    - "Remove the old reporting agent"
+    - "Can you delete the agent I created for the Phoenix project?"
+
+agentManager_updateAgent:
+  description: "Update agent configuration"
+  tools: ["agentManager_updateAgent"]
+  user_instruction: |
+    You are a user modifying an agent.
+    Generate a request. Include:
+    - Which agent to update
+    - What to change (name, description, prompt, enabled status)
+
+  example_prompts:
+    - "Update the Standup Summarizer to include more detail"
+    - "Change the reporting agent's schedule to weekly instead of daily"
+    - "Disable the old migration agent"
+
+agentManager_toggleAgent:
+  description: "Enable or disable an agent"
+  tools: ["agentManager_toggleAgent"]
+  user_instruction: |
+    You are a user enabling/disabling agents.
+    Generate a request. Include:
+    - Which agent to toggle
+
+  example_prompts:
+    - "Turn off the daily reminder agent"
+    - "Enable the project tracking agent"
+    - "Disable the report generator temporarily"
+
+agentManager_getAgent:
+  description: "Get details about a specific agent"
+  tools: ["agentManager_getAgent"]
+  user_instruction: |
+    You are a user checking agent information.
+    Generate a request. Include:
+    - Which agent to retrieve (by ID or name)
+
+  example_prompts:
+    - "Show me the details of the 'Report Generator' agent"
+    - "What's configured for my Standup Summarizer?"
+    - "Get the info for the project tracking agent"
+
+agentManager_listAgents:
+  description: "List all agents"
+  tools: ["agentManager_listAgents"]
+  user_instruction: |
+    You are a user reviewing available agents.
+    Generate a request. Include:
+    - Optional: Filter for enabled agents only
+
+  example_prompts:
+    - "Show me all my agents"
+    - "List only the enabled agents"
+    - "What custom agents do I have set up?"
+
+agentManager_executePrompt:
+  description: "Execute a prompt with a specific agent or model"
+  tools: ["agentManager_executePrompt"]
+  user_instruction: |
+    You are a user running a prompt through an agent.
+    Generate a request. Include:
+    - The prompt to execute
+    - Optional: Which agent/model, files to include, parameters
+
+  example_prompts:
+    - "Run 'Summarize my week' using the Report Generator agent"
+    - "Execute 'List all blockers' with the Project Manager agent"
+    - "Generate a summary of my TODO.md file"
+
+agentManager_batchExecutePrompt:
+  description: "Execute multiple prompts in batch"
+  tools: ["agentManager_batchExecutePrompt"]
+  user_instruction: |
+    You are a user running multiple prompts.
+    Generate a request. Include:
+    - Multiple prompts to execute
+    - Optional: Whether to merge responses
+
+  example_prompts:
+    - "Send 'Generate weekly report' to all my reporting agents"
+    - "Run these three prompts and combine the results"
+    - "Execute batch analysis on all my project files"
+
+agentManager_listModels:
+  description: "List available AI models"
+  tools: ["agentManager_listModels"]
+  user_instruction: |
+    You are a user checking available models.
+    Generate a simple request.
+
+  example_prompts:
+    - "What models are available?"
+    - "Show me the list of AI models I can use"
+    - "Which models can I choose from?"
+
+agentManager_generateImage:
+  description: "Generate an image using AI"
+  tools: ["agentManager_generateImage"]
+  user_instruction: |
+    You are a user creating an image.
+    Generate a request. Include:
+    - Image description/prompt
+    - Where to save it
+    - Optional: Provider, model, aspect ratio, number of images
+
+  example_prompts:
+    - "Generate an image of 'sunset over mountains' and save it in Images/"
+    - "Create a diagram showing the system architecture"
+    - "Make an illustration for my blog post about productivity"
+
+# ============================================================================
+# COMMAND MANAGER TOOLS
+# ============================================================================
+
+commandManager_executeCommand:
+  description: "Execute an Obsidian command"
+  tools: ["commandManager_executeCommand"]
+  user_instruction: |
+    You are a user running an Obsidian command.
+    Generate a request. Include:
+    - Which command to run (by ID)
+
+  example_prompts:
+    - "Run the 'Toggle Reading Mode' command"
+    - "Execute the daily note command"
+    - "Open the command palette"
+
+commandManager_listCommands:
+  description: "List available Obsidian commands"
+  tools: ["commandManager_listCommands"]
+  user_instruction: |
+    You are a user exploring available commands.
+    Generate a request. Include:
+    - Optional: Filter for specific commands
+
+  example_prompts:
+    - "Show me all available commands"
+    - "List commands related to 'note'"
+    - "What commands can I run?"
+
+# ============================================================================
+# META TOOLS
+# ============================================================================
+
+get_tools:
+  description: "Get tool schemas for specific managers"
+  tools: ["get_tools"]
+  user_instruction: |
+    You are a developer who needs tool information.
+    Generate a request. Include:
+    - Which managers/agents you want tool info for
+
+  example_prompts:
+    - "Get the tool schemas for vaultManager and contentManager"
+    - "Show me what tools are available in memoryManager"
+    - "I need the API reference for agentManager tools"

@@ -39,6 +39,36 @@ python tools/validate_syngen.py Datasets/syngen_toolset_v1.0.0_claude.jsonl
 python tools/analyze_tool_coverage.py Datasets/syngen_toolset_v1.0.0_claude.jsonl
 ```
 
+### Self-Play Data Generation
+
+**NEW!** Generate synthetic training data using your fine-tuned model:
+
+```bash
+# Interactive mode (recommended)
+./Tools/run_selfplay.sh
+
+# Quick test (100 examples)
+./Tools/run_selfplay.sh --quick
+
+# Standard generation (1000 examples)
+./Tools/run_selfplay.sh --standard
+
+# Large generation (5000 examples)
+./Tools/run_selfplay.sh --large
+
+# PowerShell (Windows)
+.\Tools\run_selfplay.ps1
+```
+
+**What it does:**
+1. Sends prompts to your fine-tuned model via LM Studio
+2. Validates responses automatically
+3. Collects both correct and incorrect examples
+4. Creates interleaved KTO datasets (True/False pattern)
+5. Ready for immediate KTO training
+
+**See:** [docs/SELF_PLAY_GENERATION.md](docs/SELF_PLAY_GENERATION.md) for complete guide.
+
 ### Setup & Installation
 
 #### WSL2 / Linux (Recommended)

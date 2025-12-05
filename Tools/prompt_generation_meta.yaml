@@ -1,0 +1,411 @@
+# Meta-Level Prompt Generation Configuration
+# This controls how we generate system prompts that then generate user prompts
+
+# ============================================================================
+# META PROMPT TEMPLATES
+# ============================================================================
+# These prompts tell the model how to generate system prompts for different scenarios
+
+meta_tool_based:
+  description: "Generate system prompts for tool-based scenarios"
+  meta_instruction: |
+    You are generating a system prompt that will be used to create realistic user requests
+    for an Obsidian vault assistant.
+
+    Generate a system prompt that instructs a user to create a request using this tool:
+    {tool_name}
+
+    The system prompt should:
+    - Tell the user they have an Obsidian vault and need to complete a task
+    - Specify which tool is relevant for this scenario
+    - Encourage realistic, natural language requests
+    - NOT include session context formatting (that's for behavioral scenarios)
+    - Vary the level of specificity (sometimes vague, sometimes very specific)
+
+    Keep the system prompt concise (2-4 sentences).
+
+  variations:
+    single_tool:
+      template: |
+        You are a user with an Obsidian vault who needs to complete a task using the
+        {tool_name} tool. Generate a realistic request that includes what you want to do,
+        any specific files or folders mentioned, and context about why you need it.
+
+meta_behavioral:
+  description: "Generate system prompts for behavioral scenarios"
+  meta_instruction: |
+    You are generating a system prompt for eliciting specific behaviors from an AI assistant.
+
+    The behavior to elicit: {behavior_name}
+    Description: {behavior_description}
+
+    Generate a system prompt that includes:
+    - <session_context> block with sessionId and workspaceId placeholders
+    - <available_workspaces> block describing the vault context
+    - Enough ambiguity or challenge to elicit the target behavior
+
+    The system prompt should create a scenario where the assistant MUST demonstrate
+    {behavior_name} to respond properly.
+
+  behaviors:
+    intellectual_humility:
+      context_type: "ambiguous_request"
+      workspace_complexity: "multiple_workspaces"
+      template: |
+        <session_context>
+        IMPORTANT: When using tools, include these values in your tool call parameters:
+        - sessionId: "session_{timestamp}_selfplay"
+        - workspaceId: "{workspace_id}" (current workspace)
+        Include these in the "context" parameter of your tool calls.
+        </session_context>
+        <available_workspaces>
+        The following workspaces are available in this vault:
+        - {workspace_name} (id: "{workspace_id}")
+          Description: {workspace_description}
+          Root folder: {workspace_root}
+        Use memoryManager with loadWorkspace mode to get full workspace context.
+        </available_workspaces>
+
+    error_recovery:
+      context_type: "conflicting_requirements"
+      workspace_complexity: "single_workspace"
+      template: |
+        <session_context>
+        IMPORTANT: When using tools, include these values in your tool call parameters:
+        - sessionId: "session_{timestamp}_selfplay"
+        - workspaceId: "{workspace_id}" (current workspace)
+        </session_context>
+        <available_workspaces>
+        The following workspaces are available in this vault:
+        - {workspace_name} (id: "{workspace_id}")
+          Description: {workspace_description}
+          Root folder: {workspace_root}
+        </available_workspaces>
+
+    verification_before_action:
+      context_type: "destructive_operation"
+      workspace_complexity: "complex_structure"
+      template: |
+        <session_context>
+        IMPORTANT: When using tools, include these values in your tool call parameters:
+        - sessionId: "session_{timestamp}_selfplay"
+        - workspaceId: "{workspace_id}" (current workspace)
+        </session_context>
+        <available_workspaces>
+        The following workspaces are available in this vault:
+        - {workspace_name} (id: "{workspace_id}")
+          Description: {workspace_description}
+          Root folder: {workspace_root}
+        - {workspace_name_2} (id: "{workspace_id_2}")
+          Description: {workspace_description_2}
+          Root folder: {workspace_root_2}
+        </available_workspaces>
+
+    workspace_awareness:
+      context_type: "context_switching"
+      workspace_complexity: "multiple_workspaces"
+      template: |
+        <session_context>
+        IMPORTANT: When using tools, include these values in your tool call parameters:
+        - sessionId: "session_{timestamp}_selfplay"
+        - workspaceId: "{workspace_id}" (current workspace)
+        </session_context>
+        <available_workspaces>
+        The following workspaces are available in this vault:
+        - Atlas Rollout (id: "ws_{timestamp}_atlasroll")
+          Description: Project tracking for Atlas customer rollout
+          Root folder: Projects/Atlas/
+        - Phoenix Migration (id: "ws_{timestamp}_phoenixmig")
+          Description: Phoenix system migration tracking
+          Root folder: Projects/Phoenix/
+        Use memoryManager with loadWorkspace mode to get full workspace context.
+        </available_workspaces>
+
+# ============================================================================
+# GENERATION STRATEGY
+# ============================================================================
+
+generation_strategy:
+  # How to distribute generation across types
+  distribution:
+    tool_based: 0.70      # 70% tool-focused generation
+    behavioral: 0.30      # 30% behavior-focused generation
+
+  # Within tool-based generation, how to vary
+  tool_variations:
+    single_tool: 1.00     # 100% single tool requests
+
+  # Within behavioral generation, distribution
+  behavior_distribution:
+    intellectual_humility: 0.30
+    error_recovery: 0.25
+    verification_before_action: 0.25
+    workspace_awareness: 0.20
+
+# ============================================================================
+# SAMPLING PARAMETERS
+# ============================================================================
+
+sampling:
+  # For generating system prompts (meta level)
+  meta_generation:
+    temperature_range: [0.8, 1.2]     # Higher for creative variations
+    top_p_range: [0.85, 0.95]
+    max_tokens_range: [100, 250]
+
+  # For generating user prompts (using generated system prompt)
+  user_generation:
+    temperature_range: [0.6, 1.0]     # Moderate creativity
+    top_p_range: [0.85, 0.98]
+    max_tokens_range: [50, 150]
+
+  # For generating assistant responses (no system prompt - fine-tuned model)
+  response_generation:
+    temperature_range: [0.3, 0.9]     # Conservative to creative
+    top_p_range: [0.90, 0.98]
+    max_tokens_range: [150, 500]
+
+# ============================================================================
+# RANDOMIZATION POOLS
+# ============================================================================
+
+randomization:
+  task_types:
+    - "project organization"
+    - "daily note-taking"
+    - "research documentation"
+    - "meeting notes"
+    - "task management"
+    - "archive cleanup"
+    - "knowledge base building"
+    - "sprint planning"
+    - "retrospective analysis"
+
+  workflow_types:
+    - "daily standup tracking"
+    - "weekly review"
+    - "project planning"
+    - "content publishing"
+    - "research organization"
+    - "meeting preparation"
+    - "task prioritization"
+
+  manager_groups:
+    organization:
+      - "vaultManager_createFolder"
+      - "vaultManager_moveFolder"
+      - "vaultManager_deleteFolder"
+      - "vaultManager_editFolder"
+
+    content_creation:
+      - "contentManager_createContent"
+      - "contentManager_appendContent"
+      - "contentManager_prependContent"
+
+    content_modification:
+      - "contentManager_replaceContent"
+      - "contentManager_deleteContent"
+      - "contentManager_findReplaceContent"
+      - "contentManager_replaceByLine"
+
+    file_management:
+      - "vaultManager_moveNote"
+      - "vaultManager_deleteNote"
+      - "vaultManager_duplicateNote"
+      - "vaultManager_openNote"
+
+    search_discovery:
+      - "vaultLibrarian_searchContent"
+      - "vaultLibrarian_searchDirectory"
+      - "vaultLibrarian_searchMemory"
+      - "vaultManager_listDirectory"
+
+    session_management:
+      - "memoryManager_createSession"
+      - "memoryManager_loadSession"
+      - "memoryManager_updateSession"
+      - "memoryManager_listSessions"
+
+    state_management:
+      - "memoryManager_createState"
+      - "memoryManager_loadState"
+      - "memoryManager_updateState"
+      - "memoryManager_listStates"
+
+    workspace_management:
+      - "memoryManager_createWorkspace"
+      - "memoryManager_loadWorkspace"
+      - "memoryManager_updateWorkspace"
+      - "memoryManager_listWorkspaces"
+
+    agent_operations:
+      - "agentManager_createAgent"
+      - "agentManager_executePrompt"
+      - "agentManager_updateAgent"
+      - "agentManager_listAgents"
+
+    batch_operations:
+      - "contentManager_batchContent"
+      - "agentManager_batchExecutePrompt"
+      - "vaultLibrarian_batch"
+
+# ============================================================================
+# TEMPLATE VARIABLES (from behavioral_prompts.yaml)
+# ============================================================================
+
+template_variables:
+  timestamp:
+    - "1732300800000"
+    - "1732301200000"
+    - "1732302400000"
+
+  workspace_id:
+    - "ws_1732300800000_main"
+    - "ws_1732300800001_proj"
+    - "ws_1732300800002_docs"
+
+  workspace_name:
+    - "Main Workspace"
+    - "Project Management"
+    - "Daily Notes"
+    - "Research & Papers"
+    - "Configuration"
+
+  workspace_description:
+    - "General workspace for all vault operations"
+    - "Project files, development notes, and planning documents"
+    - "Personal notes, journal entries, and daily reflections"
+    - "Research notes, academic papers, and study materials"
+    - "Configuration files, settings, and system parameters"
+
+  workspace_root:
+    - "/"
+    - "Projects/"
+    - "Notes/"
+    - "Research/"
+    - "Config/"
+
+  agent_id:
+    - "agent_1732300800000_workspace_auditor"
+    - "agent_1732300800001_release_briefing"
+    - "agent_1732300800002_incident_scribe"
+
+  agent_name:
+    - "Workspace Auditor"
+    - "Release Briefing"
+    - "Incident Scribe"
+
+  agent_description:
+    - "Audits workspace contents and reports issues"
+    - "Generates release briefing summaries"
+    - "Documents incidents and post-mortems"
+
+# ============================================================================
+# PIPELINE CONFIGURATION
+# ============================================================================
+
+pipeline:
+  description: |
+    Full self-play generation pipeline:
+
+    1. META GENERATION (Optional - can also use pre-defined templates)
+       Input: Meta instruction + tool/behavior selection
+       Output: System prompt for user agent
+       Sampling: meta_generation parameters
+
+    2. USER PROMPT GENERATION
+       Input: Generated system prompt + user instruction
+       Output: User request
+       Sampling: user_generation parameters
+
+    3. RESPONSE GENERATION
+       Input: User request (NO system prompt - model is fine-tuned)
+       Output: Assistant response with tool calls
+       Sampling: response_generation parameters
+
+    4. VALIDATION
+       Input: Full conversation (system + user + assistant)
+       Output: Label (true/false)
+       Method: validate_syngen.py
+
+    5. FORMATTING
+       Input: Validated conversation + label
+       Output: JSONL entry
+       Format: ChatML with conversations array
+
+  steps:
+    - name: "select_generation_type"
+      description: "Choose tool-based vs behavioral (70/30 split)"
+
+    - name: "generate_system_prompt"
+      description: "Either use template or generate with meta prompt"
+      options:
+        - "use_template"      # Faster, consistent
+        - "generate_dynamic"  # More diverse, creative
+
+    - name: "generate_user_prompt"
+      description: "Create realistic user request"
+      input: "system_prompt"
+      output: "user_request"
+
+    - name: "generate_response"
+      description: "Generate assistant response (no system prompt!)"
+      input: "user_request"
+      output: "assistant_response"
+
+    - name: "validate"
+      description: "Check context object, tool syntax, parameters"
+      input: "full_conversation"
+      output: "label (true/false)"
+
+    - name: "format_jsonl"
+      description: "Create final dataset entry"
+      format: |
+        {
+          "conversations": [
+            {"role": "user", "content": "..."},
+            {"role": "assistant", "content": "tool_call: ...\narguments: {...}\n\nResult: {...}\n\nResponse"}
+          ],
+          "label": true/false
+        }
+
+    - name: "interleave"
+      description: "Ensure True/False/True/False pattern for KTO"
+      input: "validated_examples"
+      output: "interleaved_dataset"
+
+# ============================================================================
+# USAGE MODES
+# ============================================================================
+
+usage_modes:
+  fast_template:
+    description: "Use pre-defined templates, no meta generation"
+    steps:
+      - "Select random tool/behavior"
+      - "Use template from tool_prompts.yaml or behavioral_prompts.yaml"
+      - "Generate user prompt"
+      - "Generate response"
+      - "Validate and save"
+    speed: "Fast"
+    diversity: "Medium"
+
+  dynamic_generation:
+    description: "Generate system prompts dynamically"
+    steps:
+      - "Select random tool/behavior"
+      - "Use meta prompt to generate system prompt"
+      - "Use generated system prompt to generate user prompt"
+      - "Generate response"
+      - "Validate and save"
+    speed: "Slower"
+    diversity: "High"
+
+  hybrid:
+    description: "Mix templates and dynamic generation"
+    steps:
+      - "70% use templates (fast)"
+      - "30% generate dynamically (diverse)"
+    speed: "Medium"
+    diversity: "High"
+    recommended: true

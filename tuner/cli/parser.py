@@ -38,21 +38,25 @@ Commands:
   train     Training submenu
   upload    Upload submenu
   eval      Evaluation submenu
+  generate  Generate synthetic data (SelfPlay)
   pipeline  Full pipeline (train -> upload -> eval)
+  gguf      Convert model to GGUF format
 
 Examples:
   python tuner.py           # Interactive mode
   python tuner.py train     # Go directly to training
   python tuner.py upload    # Go directly to upload
   python tuner.py eval      # Go directly to evaluation
+  python tuner.py generate  # Generate synthetic data
   python tuner.py pipeline  # Run full pipeline
+  python tuner.py gguf      # Convert to GGUF format
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "upload", "eval", "pipeline"],
+        choices=["train", "upload", "eval", "generate", "pipeline", "gguf"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 

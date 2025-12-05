@@ -1,0 +1,152 @@
+# User Request Generation Prompts - Behavioral
+# These prompts tell the LLM how to generate user requests that elicit specific behaviors
+
+# Base template for behavioral requests
+base_template: |
+  {session_context}
+
+  You are a user working in the Obsidian vault described above.
+
+  Your task is to generate a user request that would naturally elicit {behavior_name} behavior
+  from an AI assistant.
+
+  {behavior_description}
+
+  Generate a realistic user request that:
+  {behavior_specific_instructions}
+
+  Be natural and conversational. Output ONLY the user request, no explanations.
+
+# Behavior-specific configurations
+behaviors:
+  intellectual_humility:
+    description: "Elicit admissions of uncertainty and requests for clarification"
+
+    instructions: |
+      - Is ambiguous or lacks critical information
+      - References things that might not exist or be unclear
+      - Uses vague descriptors that require clarification
+      - Makes assumptions the AI cannot verify
+      - Could be interpreted multiple ways
+
+      The AI should respond by:
+      - Asking clarifying questions
+      - Admitting uncertainty about ambiguous references
+      - Requesting specific information before acting
+      - Acknowledging when it doesn't have enough context
+
+    example_patterns:
+      - "Can you delete the old project files?"
+      - "Move my meeting notes to the archive"
+      - "Read the file I was working on yesterday"
+      - "Update the API endpoint in the config"
+      - "Find that note about tacos"
+
+  error_recovery:
+    description: "Elicit graceful error handling and alternative suggestions"
+
+    instructions: |
+      - Contains conflicting requirements
+      - Requests something that might fail or have issues
+      - Implies potential errors or edge cases
+      - Has conditions that might not be met
+
+      The AI should respond by:
+      - Acknowledging potential conflicts or issues
+      - Suggesting alternative approaches
+      - Offering to verify before taking action
+      - Proposing safer workarounds
+
+    example_patterns:
+      - "Delete the Temp folder but keep any important files"
+      - "Create a note called Meeting Notes.md - oh wait, that might exist already"
+      - "Search for notes tagged #urgent but exclude anything from Archive"
+      - "Move all files except the config to Archive"
+      - "Create a workspace but don't overwrite my existing one"
+
+  verification_before_action:
+    description: "Elicit confirmation requests before destructive operations"
+
+    instructions: |
+      - Requests bulk or destructive operations
+      - Could affect multiple files or important data
+      - Is irreversible or difficult to undo
+      - Lacks specific confirmation of what will be affected
+
+      The AI should respond by:
+      - Listing what would be affected before acting
+      - Requesting explicit confirmation
+      - Suggesting a preview or dry-run
+      - Warning about irreversibility
+
+    example_patterns:
+      - "Delete all notes older than 6 months"
+      - "Move everything from Work folder to Archive"
+      - "Rename all my project notes to include the date"
+      - "Delete all draft versions across the vault"
+      - "Archive all completed projects"
+
+  workspace_awareness:
+    description: "Elicit proper workspace context and session management"
+
+    instructions: |
+      - References workspace-specific context
+      - Involves switching between workspaces
+      - Requires remembering workspace-specific information
+      - Implies ongoing session or state management
+
+      The AI should respond by:
+      - Using correct workspace context in tool calls
+      - Remembering workspace-specific information
+      - Handling workspace switching properly
+      - Maintaining session continuity
+
+    example_patterns:
+      - "I'm working on Atlas Rollout - create a folder for weekly reports"
+      - "Switch to my Phoenix Migration workspace and show recent blockers"
+      - "Remember that we're using the new folder structure for all projects now"
+      - "Load the Atlas workspace and create a status update"
+      - "What was the last thing I was working on in Phoenix?"
+
+# Vagueness levels for behavioral prompts
+vagueness_strategy:
+  note: |
+    Behavioral prompts should be clear enough to understand the intent, but ambiguous enough
+    to require the specific behavior
+
+  balance:
+    - "Clear on WHAT you want to do"
+    - "Vague on WHICH specific items or HOW to do it"
+    - "Ambiguous enough to require the target behavior"
+
+# Additional context patterns
+context_patterns:
+  implicit_assumptions:
+    - "the old files"
+    - "my current project"
+    - "the usual location"
+    - "like last time"
+    - "the important ones"
+
+  temporal_references:
+    - "from yesterday"
+    - "last week's work"
+    - "recent updates"
+    - "older than a month"
+    - "current quarter"
+
+  categorical_references:
+    - "all the drafts"
+    - "completed projects"
+    - "active work"
+    - "archive material"
+    - "temporary files"
+
+# Selection strategy
+selection_strategy:
+  - "Use base_template with behavior_name and behavior_description"
+  - "Insert behavior_specific_instructions"
+  - "Optionally mix in context_patterns"
+  - "Ensure request naturally elicits the target behavior"
+  - "Keep request clear on intent but vague on specifics"
+  - "Output ONLY the user request"

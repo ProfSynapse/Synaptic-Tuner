@@ -4,6 +4,7 @@
 # For quick setup: bash setup.sh --quick
 # For flash-attn: bash setup.sh --with-flash-attn
 # For vision models: bash setup.sh --with-vision
+# For WebGPU/browser deployment: bash setup.sh --with-webgpu
 
 set -e  # Exit on error
 
@@ -11,6 +12,7 @@ set -e  # Exit on error
 QUICK_MODE=false
 INSTALL_FLASH_ATTN=false
 INSTALL_VISION=false
+INSTALL_WEBGPU=false
 for arg in "$@"; do
     case $arg in
         --quick)
@@ -25,6 +27,10 @@ for arg in "$@"; do
             INSTALL_VISION=true
             shift
             ;;
+        --with-webgpu)
+            INSTALL_WEBGPU=true
+            shift
+            ;;
     esac
 done
 
@@ -34,6 +40,7 @@ echo "=========================================="
 echo "Mode: $([ "$QUICK_MODE" = true ] && echo "Quick (no verification)" || echo "Full")"
 echo "Flash Attention: $([ "$INSTALL_FLASH_ATTN" = true ] && echo "Yes" || echo "No")"
 echo "Vision Models: $([ "$INSTALL_VISION" = true ] && echo "Yes (Qwen-VL, LLaVA, Pixtral)" || echo "No")"
+echo "WebGPU/MLC-LLM: $([ "$INSTALL_WEBGPU" = true ] && echo "Yes (browser deployment)" || echo "No")"
 echo "=========================================="
 
 # Check Python version
@@ -172,6 +179,23 @@ if [ "$INSTALL_FLASH_ATTN" = true ]; then
     fi
 
     echo "✓ Flash Attention installed"
+fi
+
+# Optional: Install MLC-LLM for WebGPU conversion
+if [ "$INSTALL_WEBGPU" = true ]; then
+    echo -e "\n[OPTIONAL] Installing MLC-LLM for WebGPU..."
+    echo "This enables converting models for browser deployment via WebLLM"
+
+    # Install MLC-LLM nightly (includes pre-built binaries)
+    pip install --pre mlc-llm-nightly mlc-ai-nightly -f https://mlc.ai/wheels
+
+    # Verify installation
+    if mlc_llm --help &>/dev/null; then
+        echo "✓ MLC-LLM installed"
+    else
+        echo "⚠ MLC-LLM installation may need additional setup"
+        echo "  See: https://llm.mlc.ai/docs/install/mlc_llm.html"
+    fi
 fi
 
 # Final verification (unless quick mode)

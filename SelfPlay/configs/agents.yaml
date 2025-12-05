@@ -1,0 +1,76 @@
+# All agents and their tools (46 total)
+# Organized by agent category for tool-based generation
+# commandManager and meta (get_tools) are deprecated
+
+agents:
+  vaultManager:
+    description: "Manages vault structure - creates/deletes folders, organizes files"
+    tools:
+      - vaultManager_createFolder
+      - vaultManager_deleteFolder
+      - vaultManager_editFolder
+      - vaultManager_moveFolder
+      - vaultManager_deleteNote
+      - vaultManager_moveNote
+      - vaultManager_duplicateNote
+      - vaultManager_openNote
+      - vaultManager_listDirectory
+
+  contentManager:
+    description: "Manages note content - creates/reads/updates/deletes notes"
+    tools:
+      - contentManager_createContent
+      - contentManager_readContent
+      - contentManager_appendContent
+      - contentManager_prependContent
+      - contentManager_replaceContent
+      - contentManager_deleteContent
+      - contentManager_replaceByLine
+      - contentManager_findReplaceContent
+      - contentManager_batchContent
+
+  memoryManager:
+    description: "Manages sessions, workspaces, and context memory"
+    tools:
+      # Session management
+      - memoryManager_createSession
+      - memoryManager_loadSession
+      - memoryManager_updateSession
+      - memoryManager_listSessions
+      # State management
+      - memoryManager_createState
+      - memoryManager_loadState
+      - memoryManager_updateState
+      - memoryManager_listStates
+      # Workspace management
+      - memoryManager_createWorkspace
+      - memoryManager_loadWorkspace
+      - memoryManager_updateWorkspace
+      - memoryManager_listWorkspaces
+
+  vaultLibrarian:
+    description: "Advanced search, batch operations, and analysis"
+    tools:
+      - vaultLibrarian_searchContent
+      - vaultLibrarian_searchDirectory
+      - vaultLibrarian_searchMemory
+      - vaultLibrarian_batch
+
+  agentManager:
+    description: "Manages custom agents - creates, executes, and organizes agents"
+    tools:
+      - agentManager_createAgent
+      - agentManager_deleteAgent
+      - agentManager_updateAgent
+      - agentManager_toggleAgent
+      - agentManager_getAgent
+      - agentManager_listAgents
+      - agentManager_listModels
+      - agentManager_executePrompt
+      - agentManager_batchExecutePrompt
+      - agentManager_generateImage
+
+# Distribution strategy for generation
+# SINGLE TOOL ONLY - tool chaining not supported
+distribution:
+  single_tool: 1.0      # 100% of generations use a single tool

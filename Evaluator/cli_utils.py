@@ -437,7 +437,7 @@ def count_behavior_patterns(path_str: str) -> int:
             behavior_tags = set()
             behavior_prefixes = {
                 "intellectual_humility", "verification_before_action", "context_continuity",
-                "strategic_tool_selection", "error_recovery", "workspace_awareness",
+                "error_recovery", "workspace_awareness",
                 "response_patterns", "context_efficiency", "execute_prompt_usage"
             }
             for case in cases:
