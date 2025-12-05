@@ -100,7 +100,9 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.upload_handler import UploadHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
+        from tuner.handlers.gguf_handler import GGUFHandler
 
         # Step 1: Detect environment and load .env
         env = detect_environment()
@@ -113,7 +115,9 @@ class MainMenuHandler(BaseHandler):
         menu_options = [
             ("train", f"{BOX['star']} Train a model (SFT, KTO, or MLX)"),
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
+            ("gguf", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
+            ("generate", f"{BOX['bullet']} Generate synthetic data (SelfPlay)"),
             ("pipeline", f"{BOX['bullet']} Full pipeline (Train -> Upload -> Eval)"),
         ]
 
@@ -121,7 +125,9 @@ class MainMenuHandler(BaseHandler):
         handlers = {
             "train": TrainHandler(),
             "upload": UploadHandler(),
+            "gguf": GGUFHandler(),
             "eval": EvalHandler(),
+            "generate": GenerateHandler(),
             "pipeline": PipelineHandler(),
         }
 

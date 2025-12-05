@@ -21,7 +21,6 @@ This guide explains how to use the behavior-focused evaluation prompts to test w
 - ✅ **Intellectual Humility** - Verifies assumptions, acknowledges uncertainty, escalates complexity
 - ✅ **Context Continuity** - Maintains rich context, references prior actions, tracks workflow
 - ✅ **Verification Before Action** - Searches/reads before destructive operations
-- ✅ **Strategic Tool Selection** - Uses batch operations, chooses efficient sequences
 - ✅ **Error Recovery** - Adapts when operations fail, tries alternatives
 - ✅ **Workspace Awareness** - Loads workspace context, follows workflows
 
@@ -37,7 +36,6 @@ This guide explains how to use the behavior-focused evaluation prompts to test w
 - **Intellectual Humility** - 8 prompts testing ambiguity recognition, escalation, verification
 - **Verification Before Action** - 6 prompts testing search-before-delete, read-before-replace patterns
 - **Context Continuity** - 7 prompts testing sessionMemory quality, workflow tracking
-- **Strategic Tool Selection** - 6 prompts testing batch operations, efficient sequences
 - **Error Recovery** - 4 prompts testing failure handling, adaptation, escalation
 - **Workspace Awareness** - 3 prompts testing workspace loading, workflow adherence
 - **Multi-Behavior** - 4 prompts testing multiple behaviors simultaneously
@@ -84,7 +82,7 @@ python -m Evaluator.cli \
 
 ### 4. `tool_combos.json` - Multi-Step Workflows
 
-**Purpose:** Test complex multi-tool sequences
+**Purpose:** Test behavior compliance in single-tool flows
 
 **Coverage:** 7 multi-step scenarios requiring tool sequencing
 
@@ -150,7 +148,6 @@ Each prompt can include a `behavior_expectations` object defining what the model
 - `should_check_folder_empty` - Verifies folder state before delete
 - `tool_sequence` - Expected sequence (e.g., ["search", "delete"])
 
-**Strategic Tool Selection:**
 - `should_use_batch_operation` - Uses batch vs multiple individual calls
 - `should_use_batch_search` - Uses vaultLibrarian_batch for multiple queries
 - `should_use_includeContent_false` - Efficient parameter when not reading
@@ -221,7 +218,6 @@ For each response, check:
 - [ ] Uses concrete numbers ("found 47 files, filtered to 23")
 - [ ] toolContext shows step position ("After search, now organizing...")
 
-**Strategic Tool Selection:**
 - [ ] Uses batch operations for multiple related tasks
 - [ ] Uses vaultLibrarian_batch for multi-query searches
 - [ ] Uses contentManager_batchContent for multiple file ops
@@ -326,7 +322,6 @@ Calculate per-behavior averages:
 Intellectual Humility:     avg(IH_prompt_scores)
 Context Continuity:        avg(CC_prompt_scores)
 Verification Before Action: avg(VBA_prompt_scores)
-Strategic Tool Selection:  avg(STS_prompt_scores)
 Error Recovery:            avg(ERA_prompt_scores)
 Workspace Awareness:       avg(WA_prompt_scores)
 ```

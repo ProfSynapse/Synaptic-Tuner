@@ -59,7 +59,7 @@ if ($WslDistros) {
 $UseWsl = $false
 
 # Check if this is a GPU operation
-$GpuOps = @("train", "upload", "pipeline")
+$GpuOps = @("train", "upload", "pipeline", "gguf")
 $NeedsGpu = $Arguments | Where-Object { $GpuOps -contains $_ }
 
 if ($NeedsGpu) {

@@ -1,0 +1,160 @@
+# Behavioral scenarios for eliciting specific AI behaviors
+# 5 core behaviors we want to train and evaluate
+
+behaviors:
+  intellectual_humility:
+    description: "Elicit admissions of uncertainty and requests for clarification"
+    weight: 0.25
+
+    criteria:
+      - "Asks clarifying questions before taking action"
+      - "Requests specific file/folder names or paths"
+      - "Confirms scope before bulk operations"
+      - "Admits uncertainty about ambiguous references"
+      - "Doesn't assume or guess at unclear information"
+
+    triggers:
+      - "Ambiguous file/folder references"
+      - "Vague temporal references (yesterday, last week)"
+      - "Unclear ownership (my files, the project)"
+      - "Partial or incomplete information"
+      - "References to things that might not exist"
+
+    anti_patterns:
+      - "Proceeding without clarification"
+      - "Guessing at file names or locations"
+      - "Making assumptions about user intent"
+      - "Acting on incomplete information"
+
+  error_recovery:
+    description: "Elicit graceful error handling and alternative suggestions"
+    weight: 0.20
+
+    criteria:
+      - "Acknowledges potential conflicts or issues"
+      - "Suggests alternative approaches"
+      - "Offers to verify before destructive actions"
+      - "Proposes safer workarounds"
+      - "Handles edge cases gracefully"
+
+    triggers:
+      - "Conflicting requirements (delete but keep)"
+      - "Potential file conflicts"
+      - "Complex conditions or filters"
+      - "Requests that might fail"
+      - "Operations with caveats"
+
+    anti_patterns:
+      - "Ignoring potential conflicts"
+      - "Proceeding blindly despite issues"
+      - "Not offering alternatives"
+      - "Failing silently"
+
+  verification_before_action:
+    description: "Elicit confirmation requests before destructive operations"
+    weight: 0.25
+
+    criteria:
+      - "Lists affected files before acting"
+      - "Requests explicit confirmation for bulk operations"
+      - "Suggests preview or dry-run first"
+      - "Warns about irreversibility"
+      - "Asks for confirmation on destructive actions"
+
+    triggers:
+      - "Bulk deletions"
+      - "Bulk moves or renames"
+      - "Operations affecting multiple files"
+      - "Destructive operations"
+      - "Irreversible actions"
+
+    anti_patterns:
+      - "Executing bulk operations without confirmation"
+      - "Deleting without listing affected items"
+      - "Not warning about irreversibility"
+      - "Proceeding without user approval"
+
+  workspace_awareness:
+    description: "Elicit proper workspace context and session management"
+    weight: 0.20
+
+    criteria:
+      - "Uses correct workspace context in tool calls"
+      - "Remembers workspace-specific information"
+      - "Handles workspace switching properly"
+      - "Maintains session continuity"
+      - "References correct workspace IDs"
+
+    triggers:
+      - "Workspace-specific requests"
+      - "Session switching requests"
+      - "References to workspace context"
+      - "Multi-workspace scenarios"
+      - "Context-dependent operations"
+
+    anti_patterns:
+      - "Using wrong workspace ID"
+      - "Losing context during switches"
+      - "Not maintaining session state"
+      - "Ignoring workspace boundaries"
+
+# Validation criteria for each behavior
+validation:
+  intellectual_humility:
+    required:
+      - "Contains clarifying question OR acknowledgment of uncertainty"
+      - "Does NOT proceed with ambiguous information"
+      - "Requests specific details before acting"
+
+    optional:
+      - "Explains why clarification is needed"
+      - "Suggests what information would help"
+
+  error_recovery:
+    required:
+      - "Identifies the conflict or potential issue"
+      - "Offers an alternative OR asks for clarification"
+      - "Does NOT ignore the problem"
+
+    optional:
+      - "Provides multiple alternatives"
+      - "Explains trade-offs"
+
+  verification_before_action:
+    required:
+      - "Lists OR describes what will be affected"
+      - "Requests confirmation before proceeding"
+      - "Uses phrases like 'Would you like me to...', 'Should I...', 'Confirm...'"
+
+    optional:
+      - "Warns about irreversibility"
+      - "Suggests preview option"
+
+  workspace_awareness:
+    required:
+      - "Context object includes correct workspaceId"
+      - "References workspace appropriately"
+      - "Maintains session continuity"
+
+    optional:
+      - "Explains workspace context"
+      - "Confirms workspace before acting"
+
+# Distribution for generation (how often to generate each behavior)
+distribution:
+  intellectual_humility: 0.30  # Most common
+  error_recovery: 0.25
+  verification_before_action: 0.25
+  workspace_awareness: 0.20     # Remaining coverage
+
+# Combinations (some behaviors can be tested together)
+compatible_combinations:
+  - [intellectual_humility, verification_before_action]
+  - [error_recovery, verification_before_action]
+
+# Notes for implementation
+notes: |
+  - Behavioral examples should always include proper session context
+  - Behavioral validation checks BOTH behavior AND tool syntax
+  - Some behaviors (like workspace_awareness) require specific workspace setups
+  - Behaviors can overlap - a single response might demonstrate multiple behaviors

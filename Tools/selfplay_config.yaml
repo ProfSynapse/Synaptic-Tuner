@@ -1,0 +1,195 @@
+# Self-Play Generation Configuration
+# Edit this file to customize prompt generation behavior
+
+# Manager-specific configurations
+managers:
+  vaultManager:
+    description: "Manages vault structure - creates/deletes folders, organizes files"
+    modes:
+      - createFolder
+      - deleteFolder
+      - renameFolder
+      - moveFolder
+    examples:
+      - "Create a new folder called 'Project Ideas' in the root directory"
+      - "Delete the 'Archive' folder and all its contents"
+      - "Rename the folder 'Old Notes' to 'Legacy Notes'"
+      - "Move all files from 'Temp' to 'Archive'"
+
+  contentManager:
+    description: "Manages note content - creates/reads/updates/deletes notes"
+    modes:
+      - createNote
+      - readNote
+      - updateNote
+      - deleteNote
+      - appendToNote
+    examples:
+      - "Create a new note called 'Meeting Notes.md' with today's date as the header"
+      - "Read the contents of 'TODO.md'"
+      - "Update 'Project Plan.md' to include the new timeline"
+      - "Delete the note 'Draft.md'"
+      - "Append 'Review PR #42' to my TODO list"
+
+  memoryManager:
+    description: "Manages sessions, workspaces, and context memory"
+    modes:
+      - createWorkspace
+      - loadWorkspace
+      - saveSession
+      - rememberContext
+    examples:
+      - "Create a new workspace for the Phoenix Migration project"
+      - "Load my 'Q4 Planning' workspace"
+      - "Save my current session so I can resume later"
+      - "Remember that we decided to use PostgreSQL for the database"
+
+  vaultLibrarian:
+    description: "Advanced search, batch operations, and analysis"
+    modes:
+      - searchNotes
+      - batchUpdate
+      - findByTag
+      - listByDate
+      - analyze
+    examples:
+      - "Search for all notes mentioning 'deployment' from the past week"
+      - "Find all notes tagged with #urgent that haven't been updated in 30 days"
+      - "List all notes in the 'Projects' folder sorted by last modified"
+      - "Analyze my vault and show me which topics I've written most about"
+
+  agentManager:
+    description: "Manages custom agents - creates, executes, and organizes agents"
+    modes:
+      - createAgent
+      - executePrompt
+      - batchExecute
+      - deleteAgent
+      - listAgents
+    examples:
+      - "Create a new agent called 'Standup Summarizer' that generates daily summaries"
+      - "Execute the prompt 'List all blockers' using the Project Manager agent"
+      - "Send 'Generate weekly report' to all my reporting agents"
+      - "Delete the 'Test Agent' since we don't need it anymore"
+
+# Behavioral agents - Elicit specific behaviors without teaching to the test
+behaviors:
+  intellectual_humility:
+    description: "Elicit admissions of uncertainty and appropriate caution"
+    scenarios:
+      - "Ask me to {action} for something that might not exist"
+      - "Request {action} with ambiguous parameters"
+      - "Ask about {topic} I might not have information about"
+    examples:
+      - "Search for notes about 'quantum entanglement research' - I might not have any"
+      - "Create a folder for my 'blockchain startup' - but I'm not sure where to put it"
+      - "Find all notes mentioning 'Project Nebula' - I think that was the codename but not certain"
+
+  error_recovery:
+    description: "Elicit graceful error handling and recovery suggestions"
+    scenarios:
+      - "Ask to {action} something in a way that might fail"
+      - "Request {action} that could have multiple interpretations"
+      - "Ask to {action} with potentially conflicting requirements"
+    examples:
+      - "Delete the folder 'Temp' but keep any important files"
+      - "Create a note called 'Meeting Notes.md' - oh wait, that already exists"
+      - "Search for notes tagged #urgent but exclude anything from 'Archive' folder"
+
+  verification_before_action:
+    description: "Elicit confirmation requests before destructive actions"
+    scenarios:
+      - "Request {action} that would delete or modify important data"
+      - "Ask to {action} in bulk or across multiple items"
+      - "Request {action} that can't be easily undone"
+    examples:
+      - "Delete all notes older than 6 months from my vault"
+      - "Move everything from 'Work' folder to 'Archive'"
+      - "Rename all my project notes to include the current date"
+
+  workspace_awareness:
+    description: "Elicit proper workspace and context management"
+    scenarios:
+      - "Request {action} across different workspaces"
+      - "Ask to {action} while remembering previous context"
+      - "Request {action} that requires workspace switching"
+    examples:
+      - "I'm working on Atlas Rollout - create a folder for weekly reports"
+      - "Switch to my Phoenix Migration workspace and show me recent blockers"
+      - "Remember that we're using the new folder structure for all projects now"
+
+# Generation parameters
+generation:
+  # Probability of generating behavioral vs tool-based prompts
+  behavioral_probability: 0.3  # 30% behavioral, 70% tool-based
+
+  # Sampling parameters for prompt generation
+  prompt_sampling:
+    temperature_min: 0.6
+    temperature_max: 1.2
+    top_p_min: 0.85
+    top_p_max: 0.98
+    max_tokens_min: 50
+    max_tokens_max: 150
+
+  # Sampling parameters for response generation
+  response_sampling:
+    temperature_min: 0.3
+    temperature_max: 0.9
+    top_p_min: 0.90
+    top_p_max: 0.98
+
+# Template placeholders for randomization
+placeholders:
+  name:
+    - 'Project Ideas'
+    - 'Meeting Notes'
+    - 'Research'
+    - 'Archive'
+    - 'Daily Logs'
+    - 'Q4 Planning'
+
+  location:
+    - 'the root directory'
+    - 'Projects/'
+    - 'Notes/'
+    - 'Work/'
+    - 'Personal/'
+
+  topic:
+    - 'project planning'
+    - 'machine learning'
+    - 'quarterly review'
+    - 'brainstorming'
+    - 'sprint retrospective'
+    - 'deployment strategy'
+
+  title:
+    - 'TODO.md'
+    - 'Ideas.md'
+    - 'Notes.md'
+    - 'Summary.md'
+    - 'Plan.md'
+    - 'Standup.md'
+
+  project:
+    - 'Atlas Rollout'
+    - 'Phoenix Migration'
+    - 'Q4 Planning'
+    - 'Product Launch'
+    - 'System Upgrade'
+
+  keyword:
+    - 'deployment'
+    - 'bug'
+    - 'feature'
+    - 'meeting'
+    - 'decision'
+    - 'blocker'
+    - 'urgent'
+
+  agent_name:
+    - 'Standup Summarizer'
+    - 'Report Generator'
+    - 'Task Tracker'
+    - 'Vault Auditor'

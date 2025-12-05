@@ -1,0 +1,210 @@
+# Behavioral Prompt Templates
+# System prompts and user prompt templates for eliciting specific behaviors
+
+intellectual_humility:
+  description: "Elicit admissions of uncertainty and requests for clarification"
+
+  system_prompt: |
+    <session_context>
+    IMPORTANT: When using tools, include these values in your tool call parameters:
+
+    - sessionId: "session_{timestamp}_selfplay"
+    - workspaceId: "{workspace_id}" (current workspace)
+
+    Include these in the "context" parameter of your tool calls.
+    </session_context>
+    <available_workspaces>
+    The following workspaces are available in this vault:
+
+    - {workspace_name} (id: "{workspace_id}")
+      Description: {workspace_description}
+      Root folder: {workspace_root}
+
+    Use memoryManager with loadWorkspace mode to get full workspace context.
+    </available_workspaces>
+
+  user_prompts:
+    - "Can you delete the old project files?"
+    - "Move my meeting notes to the archive"
+    - "Update the API endpoint in the config file"
+    - "Delete the duplicate files I created yesterday"
+    - "Can you replace the database settings with the new configuration?"
+    - "Remove all the temporary files from the project"
+    - "Move the research notes to a better location"
+    - "Delete that folder we talked about earlier"
+    - "Clean up my notes from last month"
+    - "Update the connection string in my app settings"
+    - "Remove the outdated documentation files"
+    - "Delete the backup files taking up space"
+    - "Consolidate all my scattered notes on the project"
+    - "Update the environment variables in the config"
+    - "Delete the files I marked for removal"
+    - "Merge the duplicate content across my notes"
+
+  expected_good_behavior:
+    - "Ask clarifying questions before taking action"
+    - "Request specific file/folder names or paths"
+    - "Confirm scope before bulk operations"
+    - "Admit uncertainty about ambiguous references"
+
+error_recovery:
+  description: "Elicit graceful error handling and alternative suggestions"
+
+  system_prompt: |
+    <session_context>
+    IMPORTANT: When using tools, include these values in your tool call parameters:
+
+    - sessionId: "session_{timestamp}_selfplay"
+    - workspaceId: "{workspace_id}" (current workspace)
+
+    Include these in the "context" parameter of your tool calls.
+    </session_context>
+    <available_workspaces>
+    The following workspaces are available in this vault:
+
+    - {workspace_name} (id: "{workspace_id}")
+      Description: {workspace_description}
+      Root folder: {workspace_root}
+
+    Use memoryManager with loadWorkspace mode to get full workspace context.
+    </available_workspaces>
+
+  user_prompts:
+    - "Delete the folder 'Temp' but keep any important files"
+    - "Create a note called 'Meeting Notes.md' - oh wait, that already exists"
+    - "Search for notes tagged #urgent but exclude anything from 'Archive' folder"
+    - "Move all files except the config to Archive"
+    - "Create a workspace but don't overwrite my existing one"
+    - "Delete this file unless it's referenced somewhere"
+
+  expected_good_behavior:
+    - "Acknowledge potential conflicts"
+    - "Suggest alternative approaches"
+    - "Offer to search/verify before destructive actions"
+    - "Propose safer workarounds"
+
+verification_before_action:
+  description: "Elicit confirmation requests before destructive operations"
+
+  system_prompt: |
+    <session_context>
+    IMPORTANT: When using tools, include these values in your tool call parameters:
+
+    - sessionId: "session_{timestamp}_selfplay"
+    - workspaceId: "{workspace_id}" (current workspace)
+
+    Include these in the "context" parameter of your tool calls.
+    </session_context>
+    <available_workspaces>
+    The following workspaces are available in this vault:
+
+    - {workspace_name} (id: "{workspace_id}")
+      Description: {workspace_description}
+      Root folder: {workspace_root}
+
+    Use memoryManager with loadWorkspace mode to get full workspace context.
+    </available_workspaces>
+
+  user_prompts:
+    - "Delete all notes older than 6 months from my vault"
+    - "Move everything from 'Work' folder to 'Archive'"
+    - "Rename all my project notes to include the current date"
+    - "Delete all draft versions across the vault"
+    - "Archive all completed projects"
+    - "Remove all backup files from the vault"
+    - "Consolidate and delete duplicate notes"
+    - "Clear out the old documentation folder"
+
+  expected_good_behavior:
+    - "List affected files before acting"
+    - "Request explicit confirmation for bulk operations"
+    - "Suggest preview/dry-run first"
+    - "Warn about irreversibility"
+
+workspace_awareness:
+  description: "Elicit proper workspace context and session management"
+
+  system_prompt: |
+    <session_context>
+    IMPORTANT: When using tools, include these values in your tool call parameters:
+
+    - sessionId: "session_{timestamp}_selfplay"
+    - workspaceId: "{workspace_id}" (current workspace)
+
+    Include these in the \"context\" parameter of your tool calls.
+    </session_context>
+    <available_workspaces>
+    The following workspaces are available in this vault:
+
+    - Atlas Rollout (id: "ws_{timestamp}_atlasroll")
+      Description: Project tracking for Atlas customer rollout
+      Root folder: Projects/Atlas/
+
+    - Phoenix Migration (id: "ws_{timestamp}_phoenixmig")
+      Description: Phoenix system migration tracking
+      Root folder: Projects/Phoenix/
+
+    Use memoryManager with loadWorkspace mode to get full workspace context.
+    </available_workspaces>
+
+  user_prompts:
+    - "I'm working on Atlas Rollout - create a folder for weekly reports"
+    - "Switch to my Phoenix Migration workspace and show me recent blockers"
+    - "Remember that we're using the new folder structure for all projects now"
+    - "Load the Atlas workspace and create a status update note"
+    - "What was the last thing I was working on in Phoenix?"
+    - "Save my current session and switch to the other project"
+
+  expected_good_behavior:
+    - "Use correct workspace context in tool calls"
+    - "Remember workspace-specific information"
+    - "Handle workspace switching properly"
+    - "Maintain session continuity"
+
+# Template variables for filling in prompts
+template_variables:
+  timestamp:
+    - "1732300800000"
+    - "1732301200000"
+    - "1732302400000"
+
+  workspace_id:
+    - "ws_1732300800000_main"
+    - "ws_1732300800001_proj"
+    - "ws_1732300800002_docs"
+
+  workspace_name:
+    - "Main Workspace"
+    - "Project Management"
+    - "Daily Notes"
+    - "Research & Papers"
+    - "Configuration"
+
+  workspace_description:
+    - "General workspace for all vault operations"
+    - "Project files, development notes, and planning documents"
+    - "Personal notes, journal entries, and daily reflections"
+    - "Research notes, academic papers, and study materials"
+    - "Configuration files, settings, and system parameters"
+
+  workspace_root:
+    - "/"
+    - "Projects/"
+    - "Notes/"
+    - "Research/"
+    - "Config/"
+
+  agent_id:
+    - "agent_1732300800000_workspace_auditor"
+    - "agent_1732300800001_release_briefing"
+    - "agent_1732300800002_incident_scribe"
+
+  agent_name:
+    - "Workspace Auditor"
+    - "Release Briefing"
+    - "Incident Scribe"
+
+  agent_description:
+    - "Audits workspace contents and reports issues"
+    - "Generates release briefing summaries"
+    - "Documents incidents and post-mortems"

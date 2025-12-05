@@ -26,6 +26,16 @@ class ModelCardGenerator(IDocumentationGenerator):
     def name(self) -> str:
         return "model_card"
 
+    @staticmethod
+    def _format_number(value: Any) -> str:
+        """
+        Safely format a value as a number with thousands separator.
+        If value is not numeric, returns it as-is.
+        """
+        if isinstance(value, (int, float)):
+            return f"{value:,}"
+        return str(value)
+
     def generate(
         self,
         lineage: Dict[str, Any] = None,
@@ -152,11 +162,11 @@ This model was fine-tuned using **{training_method}** to {"improve tool-calling 
         if dataset.get("file"):
             content += f'| File | {dataset.get("file")} |\n'
 
-        content += f'| Total Examples | {dataset.get("total_examples", "N/A"):,} |\n'
+        content += f'| Total Examples | {self._format_number(dataset.get("total_examples", "N/A"))} |\n'
 
         if is_kto:
-            content += f'| Desirable | {dataset.get("desirable_examples", "N/A"):,} |\n'
-            content += f'| Undesirable | {dataset.get("undesirable_examples", "N/A"):,} |\n'
+            content += f'| Desirable | {self._format_number(dataset.get("desirable_examples", "N/A"))} |\n'
+            content += f'| Undesirable | {self._format_number(dataset.get("undesirable_examples", "N/A"))} |\n'
 
         if dataset.get("chat_template"):
             content += f'| Chat Template | {dataset.get("chat_template")} |\n'
@@ -211,7 +221,7 @@ This model was fine-tuned using **{training_method}** to {"improve tool-calling 
 | Metric | Value |
 |--------|-------|
 | Final Loss | {results.get("final_loss", "N/A")} |
-| Total Steps | {results.get("total_steps", "N/A"):,} |
+| Total Steps | {self._format_number(results.get("total_steps", "N/A"))} |
 | Training Duration | {results.get("training_duration_minutes", "N/A")} minutes |
 
 ### Hardware

@@ -1,5 +1,5 @@
 model:
-  model_name: professorsynapse/nexus-tools_sft22
+  model_name: professorsynapse/nexus-tools_sft24
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -27,7 +27,7 @@ training:
   beta: 0.1
   desirable_weight: 1.0
   undesirable_weight: 1.0
-  learning_rate: 5e-7
+  learning_rate: 1e-6
   max_grad_norm: 0.5
   lr_scheduler_type: cosine
   use_kto_s: false
@@ -40,7 +40,7 @@ training:
   optim: adamw_8bit
   fp16: false
   bf16: true
-  num_train_epochs: 2
+  num_train_epochs: 1
   warmup_ratio: 0.15
   logging_steps: 5
   save_steps: 25

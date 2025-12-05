@@ -1,0 +1,167 @@
+# User Request Generation Prompts - Tool-Based (Prompt 2)
+# These prompts tell the LLM how to generate realistic, VAGUE user requests for tool-based scenarios
+
+# Base template used for all tool-based requests
+base_template: |
+  {session_context}
+
+  You are a user working in the Obsidian vault described above. You need to perform a task
+  that would use one of these {agent_name} tools: {tool_list}
+
+  Generate a realistic, natural user request. IMPORTANT - be VAGUE like a real user:
+
+  ❌ DON'T be overly specific:
+  - "Read the file at Projects/Active/Q4-Goals.md"
+  - "Create a folder called 'Meeting Notes' in Projects/2024/"
+  - "Search for the exact phrase 'deployment strategy' in Archive/"
+
+  ✅ DO be natural and vague:
+  - Misspell file names: "Can you read my Q4 gols file?"
+  - Forget exact locations: "I think I have a goals file somewhere in projects?"
+  - Describe conceptually: "Read my notes about quarterly planning"
+  - Be casual: "Find that deployment thing I wrote last week"
+  - Be ambiguous: "Delete the old project files" (which files? which project?)
+  - Mix precision and vagueness: "Create a folder for meeting notes" (where? what structure?)
+
+  Real users:
+  - Don't remember exact file paths
+  - Describe things from memory
+  - Use casual, conversational language
+  - Might refer to content, not file names
+  - Are often ambiguous or incomplete
+
+  Generate ONE realistic, vague user request that would require using {agent_name} tools.
+  Don't explain or add commentary - just output the user request.
+
+# Agent-specific variations (optional - adds context for certain agents)
+agent_variations:
+  vaultManager:
+    additional_context: |
+      You're organizing your vault, moving files around, or managing folder structure.
+      You might not know exact paths, or be unsure where things should go.
+
+  contentManager:
+    additional_context: |
+      You're working with note content - creating, editing, or reading notes.
+      You might describe what you want to write about, or reference notes by topic not filename.
+
+  memoryManager:
+    additional_context: |
+      You're managing your workspace sessions or states.
+      You might not remember exact session names, or describe when you worked on something.
+
+  vaultLibrarian:
+    additional_context: |
+      You're searching for something in your vault.
+      You might remember partial content, wrong file names, or vague topics.
+
+  agentManager:
+    additional_context: |
+      You're working with custom agents or AI features.
+      You might not remember exact agent names, or describe what you want the agent to do.
+
+  commandManager:
+    additional_context: |
+      You're trying to execute Obsidian commands.
+      You might not know the exact command name, or describe what you want to do.
+
+# Vagueness level variations (randomly select how vague the request should be)
+vagueness_levels:
+  minimal:
+    description: "Slightly vague - user knows most details but not all"
+    weight: 0.3
+    examples:
+      - "Can you read my quarterly goals file? I think it's in Projects"
+      - "Create a folder for Q4 planning somewhere in my work area"
+      - "Search for notes about the database migration"
+
+  moderate:
+    description: "Moderately vague - user knows general area but fuzzy on specifics"
+    weight: 0.5
+    examples:
+      - "Read that file about our goals... quarterly something?"
+      - "I need a new folder for planning stuff"
+      - "Find anything I wrote about databases last month"
+
+  high:
+    description: "Very vague - user barely remembers or is very casual"
+    weight: 0.2
+    examples:
+      - "Can you read my goals file or whatever it's called"
+      - "Make a folder for my planning things"
+      - "Did I write something about migrations?"
+
+# Common vagueness patterns to mix in
+vagueness_patterns:
+  misspellings:
+    goals: "gols"
+    planning: "planing"
+    meeting: "meating"
+    summary: "sumary"
+    architecture: "architechture"
+    deployment: "deployement"
+    configuration: "configration"
+
+  partial_recall:
+    - "I think it's called..."
+    - "Something like..."
+    - "I remember writing about..."
+    - "It might be in..."
+    - "Probably in the..."
+
+  time_vagueness:
+    - "from last week"
+    - "the other day"
+    - "a while ago"
+    - "recently"
+    - "yesterday or the day before"
+
+  location_vagueness:
+    - "somewhere in..."
+    - "I think in the..."
+    - "maybe under..."
+    - "in one of the folders"
+    - "in my work area"
+
+  content_description:
+    - "my notes about {topic}"
+    - "that file with {vague description}"
+    - "the thing I wrote about {concept}"
+    - "anything related to {topic}"
+    - "my {type of content}"
+
+# Tool-specific example prompts
+tool_examples:
+  vaultManager_createFolder:
+    - "Can you make a folder for my Q4 stuff?"
+    - "I need a place to put meeting notes"
+    - "Create a folder for the new project... Phoenix or something"
+
+  contentManager_createContent:
+    - "Make a note called daily log with today's date"
+    - "Create a file for my meeting notes"
+    - "Start a new note about the architecture discussion"
+
+  memoryManager_createSession:
+    - "Start a session for working on the Atlas thing"
+    - "I'm beginning work on the migration, can you track that?"
+    - "Create a new session for today's planning"
+
+  vaultLibrarian_searchContent:
+    - "Find anything about deployment in my notes"
+    - "Search for that thing about APIs I wrote"
+    - "Look for notes mentioning the Phoenix project"
+
+  agentManager_createAgent:
+    - "Make an agent that summarizes my daily notes"
+    - "Can you create something that tracks my TODOs?"
+    - "Set up an agent for weekly reports"
+
+# Selection strategy
+selection_strategy:
+  - "Use base_template with appropriate agent_name and tool_list"
+  - "Randomly select vagueness_level (weighted)"
+  - "Mix in 1-3 vagueness_patterns"
+  - "Optionally add agent-specific context (30% chance)"
+  - "Ensure request is natural and conversational"
+  - "Output ONLY the user request, no explanations"

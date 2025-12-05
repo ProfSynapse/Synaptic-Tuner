@@ -29,9 +29,20 @@ def _get_lmstudio_host() -> str:
     """
     Get the appropriate host for LM Studio based on environment.
 
+    Priority order:
+    1. LMSTUDIO_HOST environment variable (user override)
+    2. WSL: Windows host IP from /etc/resolv.conf
+    3. Fallback to localhost
+
     In WSL2, localhost points to the Linux VM, not Windows where LM Studio runs.
-    We need to use the Windows host IP from /etc/resolv.conf.
     """
+    import os
+
+    # Check for explicit environment variable override
+    env_host = os.getenv("LMSTUDIO_HOST")
+    if env_host:
+        return env_host
+
     # Check if running in WSL
     if sys.platform != "win32" and Path("/mnt/c").exists():
         # WSL detected - try to get Windows host IP

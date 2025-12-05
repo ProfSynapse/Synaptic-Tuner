@@ -21,7 +21,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -45,7 +47,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -71,7 +75,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -91,7 +97,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -111,7 +119,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -131,7 +141,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -151,7 +163,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -174,7 +188,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -197,7 +213,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -220,66 +238,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_batch_over_iteration",
-    "question": "Search for mentions of 'workspace crash', 'vault failure', and 'sync error' across all incident reports",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency",
-      "batch"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_batch"
-    ],
-    "notes": "Tests if model chooses batch operation over multiple individual searches",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_appropriate_search_scope",
-    "question": "Find all markdown files in the Projects folder",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_searchDirectory"
-    ],
-    "notes": "Tests if model uses searchDirectory for structure queries (not searchContent)",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_memory_over_research",
-    "question": "What did we decide about the Atlas workspace folder structure last week?",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency",
-      "memory"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_searchMemory"
-    ],
-    "notes": "Tests if model searches session memory for prior discussions rather than re-searching files",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -299,7 +260,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -318,7 +281,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -342,7 +307,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -362,7 +329,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -381,7 +350,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -407,7 +378,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -429,7 +402,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -455,7 +430,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -474,7 +451,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -496,7 +475,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -520,27 +501,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_efficient_multi_file_operations",
-    "question": "Update the copyright year from 2024 to 2025 in all documentation files under Docs/",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency",
-      "batch"
-    ],
-    "expected_tools": [
-      "contentManager_batchContent"
-    ],
-    "notes": "Tests if model uses batchContent for multiple file operations rather than individual calls",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -562,7 +525,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -581,7 +546,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -600,7 +567,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -620,45 +589,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "multi_behavior_research_workflow",
-    "question": "Find all papers about transformer architectures in my vault",
-    "tags": [
-      "strategic_tool_selection",
-      "search"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_searchContent"
-    ],
-    "notes": "Tests search-first behavior for research tasks",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_include_content_efficiency",
-    "question": "How many notes do I have in the Projects folder?",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_searchDirectory"
-    ],
-    "notes": "Tests if model uses includeContent: false when only counting/listing (not reading content)",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -677,7 +610,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -703,7 +638,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -725,7 +662,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -744,7 +683,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -764,28 +705,10 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
-    }
-  },
-  {
-    "id": "STS_agent_selection",
-    "question": "Have all my research agents analyze the latest findings and provide summaries",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency",
-      "batch"
-    ],
-    "expected_tools": [
-      "agentManager_batchExecutePrompt"
-    ],
-    "notes": "Tests if model uses batchExecutePrompt for multiple agent prompts",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n<available_agents>\nThe following agents are available:\n\n- Research Agent Alpha (id: \"agent_1732300800000_alpha\")\n- Research Agent Beta (id: \"agent_1732300800000_beta\")\n</available_agents>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": ["agent_1732300800000_alpha", "agent_1732300800000_beta"]
     }
   },
   {
@@ -806,26 +729,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
-      "agent_ids": []
-    }
-  },
-  {
-    "id": "negative_pattern_inefficient_sequence",
-    "question": "Search for 'meeting notes', 'standup', 'retrospective', 'planning', and 'review' across all my documents",
-    "tags": [
-      "strategic_tool_selection",
-      "efficiency"
-    ],
-    "expected_tools": [
-      "vaultLibrarian_batch"
-    ],
-    "notes": "Tests if model uses batch operation for multiple search terms",
-    "system": "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>",
-    "expected_context": {
-      "session_id": "session_1732300800000_eval01234",
-      "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -852,7 +758,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -880,7 +788,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -908,7 +818,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -934,7 +846,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -963,7 +877,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -992,7 +908,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1021,7 +939,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1051,7 +971,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1080,7 +1002,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1110,7 +1034,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1133,7 +1059,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1156,7 +1084,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1180,7 +1110,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1203,7 +1135,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1227,7 +1161,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1255,7 +1191,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1283,7 +1221,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1311,7 +1251,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1339,7 +1281,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   },
@@ -1367,7 +1311,9 @@
     "expected_context": {
       "session_id": "session_1732300800000_eval01234",
       "workspace_id": "ws_1732300800000_atlasroll",
-      "workspace_ids": ["ws_1732300800000_atlasroll"],
+      "workspace_ids": [
+        "ws_1732300800000_atlasroll"
+      ],
       "agent_ids": []
     }
   }
