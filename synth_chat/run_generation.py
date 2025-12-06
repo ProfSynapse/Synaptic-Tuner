@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run SelfPlay generation to create synthetic training data.
+Run Synthetic Chat generation to create synthetic training data.
 
 This script connects to LM Studio and generates a batch of training examples
 using the 3-prompt pipeline. Valid and invalid examples are collected separately
@@ -14,14 +14,14 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from SelfPlay.generator import SelfPlayGenerator
-from Evaluator.lmstudio_client import LMStudioClient
+from synth_chat.generator import SynthChatGenerator
+from Evaluator.shared_llm_adapters import SharedLMStudioAdapter
 from Evaluator.config import LMStudioSettings
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate synthetic training data using SelfPlay pipeline"
+        description="Generate synthetic training data using Synthetic Chat pipeline"
     )
     parser.add_argument(
         "--num-examples",
@@ -32,8 +32,8 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="SelfPlay/selfplay_output.jsonl",
-        help="Output file path (default: SelfPlay/selfplay_output.jsonl)"
+        default="synth_chat/synth_chat_output.jsonl",
+        help="Output file path (default: synth_chat/synth_chat_output.jsonl)"
     )
     parser.add_argument(
         "--host",
@@ -67,7 +67,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("SELFPLAY GENERATION")
+    print("SYNTHETIC CHAT GENERATION")
     print("=" * 70)
     print(f"\nConfiguration:")
     print(f"  LM Studio: {args.host}:{args.port}")
@@ -87,7 +87,8 @@ def main():
         port=args.port,
         model=args.model
     )
-    client = LMStudioClient(settings=settings)
+    # Use shared LLM adapter for LM Studio
+    client = SharedLMStudioAdapter(settings=settings)
 
     # Check connection
     if not client.is_server_running():
@@ -114,7 +115,7 @@ def main():
     print("INITIALIZING GENERATOR")
     print("=" * 70)
 
-    generator = SelfPlayGenerator(model_client=client)
+    generator = SynthChatGenerator(model_client=client)
     print("✅ Generator initialized!")
 
     # Create output directory

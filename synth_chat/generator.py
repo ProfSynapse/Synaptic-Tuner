@@ -1,5 +1,5 @@
 """
-SelfPlay Generator - 3-Prompt Pipeline
+Synthetic Chat Generator - 3-Prompt Pipeline
 
 Generates synthetic training data through a three-prompt pipeline:
 1. Generate workspace environment
@@ -30,9 +30,9 @@ except ImportError:
     print("Warning: validate_syngen not available, validation disabled")
 
 
-class SelfPlayGenerator:
+class SynthChatGenerator:
     """
-    Main generator class for the 3-prompt pipeline.
+    Main generator class for the 3-prompt synthetic chat pipeline.
     """
 
     def __init__(

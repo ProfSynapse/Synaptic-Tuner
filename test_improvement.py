@@ -38,15 +38,15 @@ config = ImprovementConfig(
 logger = get_logger()
 
 print("\n" + "="*60)
-print("Testing Improvement Engine - Line 7 of contentManager v1.4")
+print(f"Testing Improvement Engine - Line {args.line} of contentManager v1.4")
 print("="*60 + "\n")
 
 print("Configuration:")
 print(f"  Input:  {config.input_file}")
 print(f"  Line:   {config.start_line}")
 print(f"  Dry run: {config.dry_run}")
-print(f"  Backend: {os.getenv('IMPROVEMENT_BACKEND', 'default')}")
-print(f"  Model:   {os.getenv('IMPROVEMENT_MODEL', 'default')}\n")
+print(f"  Backend: {config.backend}")
+print(f"  Model:   {config.model or 'default'}\n")
 
 # Run improvement
 service = ImprovementService(config=config, logger=logger)

@@ -1,16 +1,31 @@
 """HTTP client for interacting with an Ollama server.
 
+**DEPRECATED**: This module is deprecated in favor of SharedOllamaAdapter
+which uses the shared LLM client system (shared/llm/). The legacy client
+is maintained for backward compatibility but will be removed in a future version.
+
+Use SharedOllamaAdapter from shared_llm_adapters.py instead.
+
 This module provides the OllamaClient for sending chat requests to Ollama's
 /api/chat endpoint. It inherits from BaseBackendClient for shared retry logic.
 """
 from __future__ import annotations
 
+import warnings
 import json
 from typing import Any, Dict, Mapping, Sequence
 
 from .base_client import BaseBackendClient, extract_message_content
 from .config import OllamaSettings
 from .protocols import BackendError, BackendResponse
+
+# Deprecation warning
+warnings.warn(
+    "OllamaClient is deprecated. Use SharedOllamaAdapter from "
+    "shared_llm_adapters.py instead, which uses the shared LLM client system.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 class OllamaError(BackendError):

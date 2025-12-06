@@ -13,20 +13,29 @@ from typing import Any, Dict, Optional, Type, Union
 
 from .config import LMStudioSettings, OllamaSettings, VLLMSettings
 from .enums import BackendType
-from .lmstudio_client import LMStudioClient
-from .ollama_client import OllamaClient
 from .vllm_client import VLLMClient
 from .protocols import BackendClient, BackendSettings
 
+# Import shared LLM adapters (preferred) with fallback to legacy clients
+try:
+    from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter
+    USE_SHARED_ADAPTERS = True
+except ImportError:
+    # Fallback to legacy clients if shared adapters not available
+    from .lmstudio_client import LMStudioClient as SharedLMStudioAdapter
+    from .ollama_client import OllamaClient as SharedOllamaAdapter
+    USE_SHARED_ADAPTERS = False
+
 # Type alias for settings types
 SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings]
-ClientType = Union[OllamaClient, LMStudioClient, VLLMClient]
+ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient]
 
 
 # Registry mapping backend types to their client and settings classes
+# Uses shared LLM adapters for LM Studio and Ollama (reduces code duplication)
 _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
-    BackendType.OLLAMA: OllamaClient,
-    BackendType.LMSTUDIO: LMStudioClient,
+    BackendType.OLLAMA: SharedOllamaAdapter,
+    BackendType.LMSTUDIO: SharedLMStudioAdapter,
     BackendType.VLLM: VLLMClient,
 }
 

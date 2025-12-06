@@ -1,14 +1,30 @@
 """HTTP client for interacting with LM Studio server.
 
+**DEPRECATED**: This module is deprecated in favor of SharedLMStudioAdapter
+which uses the shared LLM client system (shared/llm/). The legacy client
+is maintained for backward compatibility but will be removed in a future version.
+
+Use SharedLMStudioAdapter from shared_llm_adapters.py instead.
+
 This module provides the LMStudioClient for sending chat requests to
 LM Studio's OpenAI-compatible API. It inherits from OpenAICompatClient
 for shared OpenAI API handling.
 """
 from __future__ import annotations
 
+import warnings
+
 from .config import LMStudioSettings
 from .openai_compat_client import OpenAICompatClient, OpenAICompatError
 from .protocols import BackendError, BackendResponse
+
+# Deprecation warning
+warnings.warn(
+    "LMStudioClient is deprecated. Use SharedLMStudioAdapter from "
+    "shared_llm_adapters.py instead, which uses the shared LLM client system.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 class LMStudioError(OpenAICompatError):

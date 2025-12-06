@@ -4,9 +4,77 @@ import os
 import glob
 import re
 import pandas as pd
+import yaml
+from dotenv import load_dotenv
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+from improvement_engine.services.backends.openrouter_backend import OpenRouterBackend
+from improvement_engine.services.backends.openai_compatible_backend import OpenAICompatibleBackend
+
+load_dotenv()
 
 st.set_page_config(layout="wide", page_title="Dataset Editor")
+
+# --- Backend Setup ---
+def load_system_prompt():
+    try:
+        prompt_path = os.path.join("improvement_engine", "config", "system_prompts.yaml")
+        if os.path.exists(prompt_path):
+            with open(prompt_path, "r") as f:
+                config = yaml.safe_load(f)
+                return config.get("improvement_prompt", "")
+        return ""
+    except Exception as e:
+        st.error(f"Failed to load system prompt: {e}")
+        return ""
+
+# --- LLM Configuration ---
+st.sidebar.header("LLM Settings")
+provider = st.sidebar.selectbox("Provider", ["OpenRouter", "LM Studio", "Ollama", "Custom"], index=0)
+
+backend = None
+system_prompt = load_system_prompt()
+
+if provider == "OpenRouter":
+    api_key = st.sidebar.text_input("API Key", value=os.getenv("OPENROUTER_API_KEY", ""), type="password")
+    model = st.sidebar.text_input("Model", value=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"))
+    if api_key:
+        try:
+            backend = OpenRouterBackend(api_key=api_key, model=model)
+        except Exception as e:
+            st.sidebar.error(f"Init failed: {e}")
+
+elif provider == "LM Studio":
+    base_url = st.sidebar.text_input("Base URL", value=os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1"))
+    model = st.sidebar.text_input("Model", value=os.getenv("LM_STUDIO_MODEL", "local-model"))
+    if base_url:
+        try:
+            backend = OpenAICompatibleBackend(base_url=base_url, model=model)
+        except Exception as e:
+            st.sidebar.error(f"Init failed: {e}")
+
+elif provider == "Ollama":
+    base_url = st.sidebar.text_input("Base URL", value=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
+    model = st.sidebar.text_input("Model", value=os.getenv("OLLAMA_MODEL", "llama3"))
+    if base_url:
+        try:
+            backend = OpenAICompatibleBackend(base_url=base_url, model=model)
+        except Exception as e:
+            st.sidebar.error(f"Init failed: {e}")
+
+elif provider == "Custom":
+    base_url = st.sidebar.text_input("Base URL", value=os.getenv("CUSTOM_BASE_URL", "http://localhost:8000/v1"))
+    api_key = st.sidebar.text_input("API Key", value=os.getenv("CUSTOM_API_KEY", ""), type="password")
+    model = st.sidebar.text_input("Model", value=os.getenv("CUSTOM_MODEL", "model-name"))
+    if base_url:
+        try:
+            backend = OpenAICompatibleBackend(base_url=base_url, api_key=api_key, model=model)
+        except Exception as e:
+            st.sidebar.error(f"Init failed: {e}")
+
+if backend:
+    st.sidebar.success(f"Backend: {provider} Ready")
+else:
+    st.sidebar.warning("LLM Backend not configured")
 
 # --- Session State Management ---
 if 'view' not in st.session_state:
@@ -312,6 +380,23 @@ def view_editor():
             if role == "assistant" and thinking_data:
                 st.info("Detected Thinking Block - Editing Fields")
                 
+                # Regenerate Button (Using form_submit_button to avoid nesting error)
+                if backend and system_prompt:
+                    if st.form_submit_button("✨ Regenerate Thinking", type="secondary", help="Regenerate this thinking block using the configured LLM"):
+                        with st.spinner("Regenerating thinking block..."):
+                            try:
+                                new_thinking = backend.improve_thinking_block(thinking_data, system_prompt)
+                                # Merge new thinking data
+                                thinking_data.update(new_thinking)
+                                # Reconstruct content
+                                updated_content = construct_thinking(thinking_data)
+                                # Update session state directly
+                                st.session_state.data[idx]["conversations"][i]["content"] = updated_content
+                                st.success("Regenerated!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error regenerating: {e}")
+
                 # Goal
                 new_goal = st.text_input(f"Goal ({i})", value=thinking_data.get("goal", ""))
                 

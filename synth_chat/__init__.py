@@ -1,7 +1,7 @@
 """
-SelfPlay - Synthetic Dataset Generation via 3-Prompt Pipeline
+Synthetic Chat - Synthetic Dataset Generation via 3-Prompt Pipeline
 
-A sophisticated self-play system for generating training data where a fine-tuned model
+A sophisticated synthetic chat system for generating training data where a fine-tuned model
 generates both sides of the conversation through a three-prompt pipeline:
 
 1. Prompt 1: Generate realistic workspace environment
