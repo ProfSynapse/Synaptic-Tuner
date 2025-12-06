@@ -45,6 +45,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
         from tuner.handlers.gguf_handler import GGUFHandler
+        from tuner.handlers.improve_handler import handle_improve
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         print(f"Error: Handlers not yet implemented: {e}")
@@ -60,14 +61,23 @@ def route_command(args: Namespace) -> int:
         'upload': UploadHandler,
         'eval': EvalHandler,
         'generate': GenerateHandler,
+        'improve': handle_improve,  # Function-based handler
         'pipeline': PipelineHandler,
         'gguf': GGUFHandler,
     }
 
     # Execute handler
     if command and command in handlers:
-        handler = handlers[command]()
-        return handler.handle()
+        handler_or_func = handlers[command]
+        # Check if it's a function or a class
+        if callable(handler_or_func) and not hasattr(handler_or_func, 'handle'):
+            # It's a function, call it directly
+            handler_or_func()
+            return 0
+        else:
+            # It's a class, instantiate and call handle()
+            handler = handler_or_func()
+            return handler.handle()
     else:
         # No command = interactive menu
         handler = MainMenuHandler()

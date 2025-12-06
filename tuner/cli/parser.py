@@ -39,6 +39,7 @@ Commands:
   upload    Upload submenu
   eval      Evaluation submenu
   generate  Generate synthetic data (SelfPlay)
+  improve   Improve dataset quality (LLM-based)
   pipeline  Full pipeline (train -> upload -> eval)
   gguf      Convert model to GGUF format
 
@@ -48,6 +49,7 @@ Examples:
   python tuner.py upload    # Go directly to upload
   python tuner.py eval      # Go directly to evaluation
   python tuner.py generate  # Generate synthetic data
+  python tuner.py improve   # Improve dataset quality
   python tuner.py pipeline  # Run full pipeline
   python tuner.py gguf      # Convert to GGUF format
 """
@@ -56,7 +58,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "upload", "eval", "generate", "pipeline", "gguf"],
+        choices=["train", "upload", "eval", "generate", "improve", "pipeline", "gguf"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
