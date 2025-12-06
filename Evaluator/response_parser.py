@@ -50,6 +50,7 @@ class ParsedResponse:
     """
 
     text_content: str = ""
+    thinking: str = ""
     tool_calls: List[ParsedToolCall] = field(default_factory=list)
     format_detected: ToolCallFormat = ToolCallFormat.NONE
     response_type: ResponseType = ResponseType.EMPTY
@@ -72,10 +73,32 @@ class ParsedResponse:
 
     @property
     def context(self) -> Optional[Dict[str, Any]]:
-        """Extract context object from first tool call's arguments."""
+        """Extract context object from thinking block and tool arguments."""
+        context_data = {}
+        
+        # 1. Extract from thinking block if available
+        if self.thinking:
+            try:
+                thinking_json = json.loads(self.thinking)
+                if isinstance(thinking_json, dict):
+                    context_data.update(thinking_json)
+            except json.JSONDecodeError:
+                pass
+
+        # 2. Extract from first tool call's arguments (IDs)
         if self.first_tool_call:
-            return self.first_tool_call.arguments.get("context")
-        return None
+            # Check for nested context object (legacy)
+            legacy_context = self.first_tool_call.arguments.get("context")
+            if isinstance(legacy_context, dict):
+                context_data.update(legacy_context)
+            
+            # Check for top-level IDs (new format)
+            for key in ["sessionId", "workspaceId"]:
+                val = self.first_tool_call.arguments.get(key)
+                if val:
+                    context_data[key] = val
+                    
+        return context_data if context_data else None
 
     def get_argument(self, key: str) -> Optional[Any]:
         """Get an argument value from the first tool call."""
@@ -115,9 +138,29 @@ def parse_response(response: Union[str, Dict[str, Any]]) -> ParsedResponse:
     return result
 
 
+def _extract_thinking(content: str) -> tuple[str, str]:
+    """Extract thinking block from content.
+    
+    Returns:
+        Tuple of (thinking_content, remaining_content)
+    """
+    if not content:
+        return "", ""
+        
+    thinking_match = re.search(r'<thinking>\s*([\s\S]*?)\s*</thinking>', content)
+    if thinking_match:
+        thinking = thinking_match.group(1).strip()
+        # Remove the thinking block from content
+        remaining = content.replace(thinking_match.group(0), "").strip()
+        return thinking, remaining
+    
+    return "", content
+
+
 def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> None:
     """Parse OpenAI format response with tool_calls array."""
-    result.text_content = response.get("content") or ""
+    content = response.get("content") or ""
+    result.thinking, result.text_content = _extract_thinking(content)
 
     tool_calls_data = response.get("tool_calls") or []
     if tool_calls_data and isinstance(tool_calls_data, list):
@@ -150,15 +193,28 @@ def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> No
 
 def _parse_string_format(response: str, result: ParsedResponse) -> None:
     """Parse string format response (Qwen, ChatML, or Mistral)."""
-    if "<tool_call>" in response:
-        _parse_qwen_format(response, result)
-    elif "[TOOL_CALLS]" in response:
-        _parse_mistral_format(response, result)
-    elif "tool_call:" in response:
-        _parse_chatml_format(response, result)
+    # Extract thinking block first
+    result.thinking, clean_response = _extract_thinking(response)
+    
+    # Use clean response for tool call parsing
+    # If clean_response is empty but we had thinking, we might still want to check for tool calls 
+    # (though unlikely to be empty if tool calls exist)
+    target_response = clean_response if clean_response else response
+    
+    # If we extracted thinking, we should use the clean response for parsing tool calls
+    # to avoid confusion, but we need to be careful not to lose text content if no tool calls.
+    if result.thinking:
+        target_response = clean_response
+
+    if "<tool_call>" in target_response:
+        _parse_qwen_format(target_response, result)
+    elif "[TOOL_CALLS]" in target_response:
+        _parse_mistral_format(target_response, result)
+    elif "tool_call:" in target_response:
+        _parse_chatml_format(target_response, result)
     else:
         # No tool calls, just text
-        result.text_content = response.strip()
+        result.text_content = target_response.strip()
         result.format_detected = ToolCallFormat.NONE
 
 

@@ -208,14 +208,18 @@ def _check_expectation(
     if expectation in ("explains_choice", "reasons_about_selection", "then_calls_tool",
                        "explains_folder_priority", "reasons_about_active_vs_archived",
                        "explains_name_based_choice", "reasons_about_naming"):
-        has_text = text_len > 30
-        passed = has_text and has_tool if value else True
+        # For thinking models, reasoning is in parsed.thinking
+        # For standard models, reasoning is in parsed.text_content
+        thinking_len = len(parsed.thinking) if parsed.thinking else 0
+        has_reasoning = (text_len > 30) or (thinking_len > 30)
+        
+        passed = has_reasoning and has_tool if value else True
         return BehaviorIssue(
             check=expectation,
             expected=value,
-            actual=f"text={text_len}chars, tool={has_tool}",
+            actual=f"text={text_len}chars, thinking={thinking_len}chars, tool={has_tool}",
             passed=passed,
-            message=f"{expectation}: {'PASS' if passed else 'FAIL'} - has explanation: {has_text}, has tool: {has_tool}"
+            message=f"{expectation}: {'PASS' if passed else 'FAIL'} - has reasoning: {has_reasoning}, has tool: {has_tool}"
         )
 
     # Text content expectations

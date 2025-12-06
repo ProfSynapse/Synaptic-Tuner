@@ -150,7 +150,10 @@
       "WebFetch(domain:dev.to)",
       "WebFetch(domain:llm.mlc.ai)",
       "WebFetch(domain:webllm.mlc.ai)",
-      "Bash(timeout 3 python tuner.py:*)"
+      "Bash(timeout 3 python tuner.py:*)",
+      "WebFetch(domain:support.claude.com)",
+      "Bash(./scripts/improve_dataset.sh:*)",
+      "Bash(.claude/skills/synethetic-data-generation/scripts/improve_dataset.sh:*)"
     ],
     "deny": [],
     "ask": []
