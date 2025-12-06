@@ -32,7 +32,7 @@ class ImprovementService:
         """
         self.config = config
         self.logger = logger or ImproveLogger()
-        self.llm_service = LLMService()  # Auto-initializes from environment
+        self.llm_service = LLMService(backend=config.backend, model=config.model)
         self.validator = Validator()
         self.file_handler = FileHandler()
         self.backup_manager = BackupManager(enabled=True)

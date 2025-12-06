@@ -4,11 +4,12 @@ Automated quality improvement for synthetic training datasets using LLM-based en
 
 ## Overview
 
-The Dataset Improvement Engine uses OpenRouter API (with gpt-4o-mini) to automatically improve the quality of synthetic training data by enhancing thinking blocks in tool-calling examples.
+The Dataset Improvement Engine uses a shared LLM client system to automatically improve the quality of synthetic training data by enhancing thinking blocks in tool-calling examples. Supports multiple LLM providers: OpenRouter, LM Studio, and Ollama.
 
 ## Features
 
-- **LLM-Powered Improvements**: Uses gpt-4o-mini to enhance thinking blocks
+- **Multi-Provider LLM Support**: OpenRouter (cloud), LM Studio (local), Ollama (local)
+- **LLM-Powered Improvements**: Uses configured model to enhance thinking blocks
 - **Quality Validation**: Validates improvements against schema rules
 - **Batch Processing**: Processes examples in configurable batches
 - **Sequential Processing**: Waits for each batch before proceeding (no parallel requests)
@@ -24,17 +25,28 @@ The Dataset Improvement Engine uses OpenRouter API (with gpt-4o-mini) to automat
    pip install pyyaml requests python-dotenv
    ```
 
-2. **Create `.env` file**:
+2. **Create `.env` file in repo root** (if not already exists):
    ```bash
-   cd Datasets/improvement_engine
-   cp .env.example .env
+   cd /path/to/Toolset-Training
+   # Add improvement engine settings to root .env (see improvement_engine/.env.example)
    ```
 
-3. **Add your OpenRouter API key**:
+3. **Configure LLM backend in root `.env`**:
    ```bash
-   # Edit .env
+   # Edit root .env file
+   IMPROVEMENT_BACKEND=lmstudio  # or openrouter, ollama
+   IMPROVEMENT_MODEL=local-model
+
+   # If using OpenRouter:
    OPENROUTER_API_KEY=your_api_key_here
-   OPENROUTER_MODEL=openai/gpt-4o-mini
+
+   # If using LM Studio:
+   LMSTUDIO_HOST=192.168.1.104
+   LMSTUDIO_PORT=1234
+
+   # If using Ollama:
+   OLLAMA_HOST=localhost
+   OLLAMA_PORT=11434
    ```
 
 ## Usage
@@ -135,7 +147,7 @@ DRY RUN - No files modified
 ## Architecture
 
 ```
-Datasets/improvement_engine/
+improvement_engine/
 ├── config/                  # YAML configuration files
 │   ├── quality_guidelines.yaml
 │   ├── system_prompts.yaml
@@ -240,7 +252,7 @@ Approximate costs using gpt-4o-mini:
 ```
 Error: OPENROUTER_API_KEY not found in .env file
 ```
-**Solution**: Create `.env` file in `Datasets/improvement_engine/` with your API key.
+**Solution**: Add your API key to the root `.env` file in the repository root with the settings from `improvement_engine/.env.example`.
 
 ### Validation Failures
 ```

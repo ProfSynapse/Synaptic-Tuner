@@ -4,10 +4,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from Datasets.improvement_engine.core.models import ImprovementConfig
-from Datasets.improvement_engine.services.improvement_service import ImprovementService
-from Datasets.improvement_engine.utils.logger import get_logger
-from Datasets.improvement_engine.utils.dataset_scanner import DatasetScanner
+from improvement_engine.core.models import ImprovementConfig
+from improvement_engine.services.improvement_service import ImprovementService
+from improvement_engine.utils.logger import get_logger
+from improvement_engine.utils.dataset_scanner import DatasetScanner
 
 
 def handle_improve():
@@ -17,14 +17,17 @@ def handle_improve():
     print("   Dataset Improvement Engine")
     print("=" * 50 + "\n")
 
-    # Load environment variables from improvement_engine/.env
-    env_path = Path(__file__).parent.parent.parent / "Datasets" / "improvement_engine" / ".env"
+    # Load environment variables from root .env
+    env_path = Path(__file__).parent.parent.parent / ".env"
     load_dotenv(env_path)
-    api_key = os.getenv("OPENROUTER_API_KEY")
 
-    if not api_key:
+    # Check LLM backend configuration
+    backend = os.getenv("IMPROVEMENT_BACKEND", "openrouter")
+    model = os.getenv("IMPROVEMENT_MODEL", "openai/gpt-4o-mini")
+
+    if backend == "openrouter" and not os.getenv("OPENROUTER_API_KEY"):
         print("❌ Error: OPENROUTER_API_KEY not found in .env file")
-        print("Please create Datasets/improvement_engine/.env with your API key")
+        print("Please add your OpenRouter API key to the root .env file")
         return
 
     # Scan datasets
@@ -116,7 +119,8 @@ def handle_improve():
     print(f"Agent:      {agent}")
     print(f"Input:      v{version} ({scanner.count_examples(input_file)} examples)")
     print(f"Output:     v{next_version}")
-    print(f"Model:      {os.getenv('OPENROUTER_MODEL', 'openai/gpt-4o-mini')}")
+    print(f"Backend:    {backend}")
+    print(f"Model:      {model}")
     print(f"Batch size: {batch_size}")
     print(f"Range:      Lines {start_line}-{end_line}")
     print(f"Mode:       {'DRY RUN' if dry_run else 'LIVE'}")
@@ -127,16 +131,14 @@ def handle_improve():
         print("Cancelled")
         return
 
-    # Create configuration
+    # Create configuration (LLM backend configured via environment variables)
     config = ImprovementConfig(
         input_file=input_file,
         output_file=output_file,
         batch_size=batch_size,
         start_line=start_line,
         end_line=end_line,
-        dry_run=dry_run,
-        model=os.getenv('OPENROUTER_MODEL', 'openai/gpt-4o-mini'),
-        api_key=api_key
+        dry_run=dry_run
     )
 
     # Run improvement

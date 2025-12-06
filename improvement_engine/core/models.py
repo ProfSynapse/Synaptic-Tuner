@@ -116,15 +116,13 @@ class ImprovementConfig:
     """
     Configuration for improvement process.
 
-    Note: LLM backend (provider, model, API keys) is configured via environment variables:
-        IMPROVEMENT_BACKEND=lmstudio (or openrouter, ollama)
-        IMPROVEMENT_MODEL=local-model
-        OPENROUTER_API_KEY=...
-        LMSTUDIO_HOST=192.168.1.104
-        etc.
+    Note: API keys and host configurations are in .env file.
+    Backend and model are runtime choices (CLI flags or interactive).
     """
     input_file: str
     output_file: str
+    backend: str = "openrouter"  # openrouter, lmstudio, or ollama
+    model: Optional[str] = None  # Optional: defaults per backend
     batch_size: int = 10
     start_line: int = 1
     end_line: Optional[int] = None

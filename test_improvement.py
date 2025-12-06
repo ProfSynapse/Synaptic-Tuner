@@ -2,28 +2,37 @@
 """Quick test of improvement engine on a single line."""
 
 import os
+import sys
 import json
+import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 
-from Datasets.improvement_engine.core.models import ImprovementConfig
-from Datasets.improvement_engine.services.improvement_service import ImprovementService
-from Datasets.improvement_engine.utils.logger import get_logger
+from improvement_engine.core.models import ImprovementConfig
+from improvement_engine.services.improvement_service import ImprovementService
+from improvement_engine.utils.logger import get_logger
 
-# Load environment variables
-env_path = Path("Datasets/improvement_engine/.env")
+# Load environment variables from root .env (for API keys)
+env_path = Path(".env")
 load_dotenv(env_path)
 
-# Note: LLM backend configured via IMPROVEMENT_BACKEND and IMPROVEMENT_MODEL env vars
+# Parse CLI arguments
+parser = argparse.ArgumentParser(description="Test improvement engine on a single line")
+parser.add_argument("--backend", choices=["openrouter", "lmstudio", "ollama"],
+                    default="openrouter", help="LLM backend to use")
+parser.add_argument("--model", help="Model name (optional, uses backend defaults)")
+parser.add_argument("--line", type=int, default=7, help="Line number to test")
+args = parser.parse_args()
 
 config = ImprovementConfig(
     input_file=Path("Datasets/tools_datasets/thinking/contentManager/tools_v1.4.jsonl"),
     output_file=Path("Datasets/tools_datasets/thinking/contentManager/tools_v1.5.jsonl"),
+    backend=args.backend,
+    model=args.model,
     batch_size=1,
-    start_line=7,
-    end_line=7,
+    start_line=args.line,
+    end_line=args.line,
     dry_run=True
-    # Note: LLM backend is configured via environment variables (IMPROVEMENT_BACKEND, IMPROVEMENT_MODEL)
 )
 
 logger = get_logger()

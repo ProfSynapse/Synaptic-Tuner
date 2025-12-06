@@ -1,6 +1,6 @@
 """LLM service using shared LLM client system."""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from shared.llm import create_client, LLMError
 from ..core.exceptions import LLMServiceError
 from ..utils.yaml_loader import load_config
@@ -9,11 +9,18 @@ from ..utils.yaml_loader import load_config
 class LLMService:
     """Service for improving thinking blocks using shared LLM client."""
 
-    def __init__(self):
-        """Initialize LLM service with shared client."""
-        # Create client from environment variables (IMPROVEMENT_BACKEND, IMPROVEMENT_MODEL)
+    def __init__(self, backend: str = "openrouter", model: Optional[str] = None):
+        """
+        Initialize LLM service with shared client.
+
+        Args:
+            backend: LLM backend to use (openrouter, lmstudio, ollama)
+            model: Model name (optional, uses backend defaults if not specified)
+        """
+        # Create client with specified backend/model
+        # API keys/hosts still come from environment variables
         try:
-            self.client = create_client(env_prefix="IMPROVEMENT")
+            self.client = create_client(provider=backend, model=model)
         except LLMError as e:
             raise LLMServiceError(f"Failed to initialize LLM client: {e}")
 
