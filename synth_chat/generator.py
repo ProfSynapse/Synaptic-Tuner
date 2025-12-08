@@ -14,6 +14,7 @@ import sys
 import json
 import yaml
 import random
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -77,6 +78,17 @@ class SynthChatGenerator:
 
         # Frequency penalty: 0.0 to 0.3 (encourage diversity)
         self.model_client.settings.frequency_penalty = random.uniform(0.0, 0.3)
+
+    def _print_progress(self, current: int, total: int, prefix: str = "Generating") -> None:
+        """
+        Lightweight text progress bar (no extra dependencies).
+        """
+        percent = int((current / total) * 100) if total else 100
+        bar_len = 30
+        filled = int(bar_len * percent / 100)
+        bar = "#" * filled + "-" * (bar_len - filled)
+        sys.stdout.write(f"\r{prefix} [{bar}] {percent:3d}% ({current}/{total})")
+        sys.stdout.flush()
 
     def load_configs(self):
         """Load all YAML configuration files."""
@@ -525,7 +537,8 @@ Include these in the "context" parameter of your tool calls.
 
             for i in range(count):
                 current += 1
-                print(f"\nExample {current}/{total} ({category} {i+1}/{count})...")
+                # Progress bar across the full targeted run
+                self._print_progress(current, total, prefix="SynthChat")
 
                 # Generate with specific target
                 if is_tool:
@@ -567,6 +580,10 @@ Include these in the "context" parameter of your tool calls.
                     with open(output_file, 'a') as f:
                         f.write(json.dumps(example) + '\n')
 
+        # Finish progress line cleanly
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
         print(f"\n{'='*70}")
         print(f"📊 Summary: {len(valid_examples)} valid, {len(invalid_examples)} invalid")
         print(f"{'='*70}")
@@ -599,7 +616,8 @@ Include these in the "context" parameter of your tool calls.
         invalid_examples = []
 
         for i in range(num_examples):
-            print(f"\nGenerating example {i+1}/{num_examples}...")
+            # Progress bar (lightweight, no extra deps)
+            self._print_progress(i + 1, num_examples, prefix="SynthChat")
             example = self.generate_single_example()
 
             # Validate if requested
@@ -631,7 +649,11 @@ Include these in the "context" parameter of your tool calls.
                 with open(output_file, 'a') as f:
                     f.write(json.dumps(example) + '\n')
 
-        print(f"\n📊 Summary: {len(valid_examples)} valid, {len(invalid_examples)} invalid")
+        # Finish progress line cleanly
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+        print(f"📊 Summary: {len(valid_examples)} valid, {len(invalid_examples)} invalid")
 
         return {
             "valid": valid_examples,

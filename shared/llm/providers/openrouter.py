@@ -31,6 +31,26 @@ class OpenRouterClient(BaseLLMClient):
     def model_name(self) -> str:
         return self.model
 
+    def list_models(self) -> List[str]:
+        """List models available via OpenRouter."""
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            models = []
+            for item in data.get("data", []):
+                mid = item.get("id") or item.get("name")
+                if mid:
+                    models.append(str(mid))
+            return models
+        except Exception as e:
+            raise LLMResponseError(f"Failed to list OpenRouter models: {e}")
+
     def chat(
         self,
         messages: List[Dict[str, str]],

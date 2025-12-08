@@ -48,6 +48,13 @@ env/
 *.pth
 checkpoints/
 logs/
+
+# Web UI
+web-ui/node_modules/
+web-ui/.next/
+web-ui/.env*.local
+web-ui/out/
+web-ui/build/
 outputs/
 *.log
 

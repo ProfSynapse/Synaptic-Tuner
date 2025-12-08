@@ -1,0 +1,14 @@
+{
+  "conversations": [
+    {
+      "role": "user",
+      "content": "Update the config file with the new settings"
+    },
+    {
+      "role": "assistant",
+      "content": "<thinking>\n{\n  \"goal\": \"Update config\",\n  \"memory\": \"Working on files\",\n  \"requirements\": [\n    \"Edit the file\",\n    \"Make changes\"\n  ],\n  \"assessment\": {\n    \"complex\": false,\n    \"risky\": false\n  },\n  \"confidence\": 0.99,\n  \"plan\": [\n    \"Edit the file\",\n    \"Make changes\"\n  ]\n}\n</thinking>",
+      "tool_calls": []
+    }
+  ],
+  "label": true
+}

@@ -14,7 +14,9 @@ from .cli_utils import (
     select_model,
 )
 from .config import EvaluatorConfig, LMStudioSettings, PromptFilter, expand_path
-from .lmstudio_client import LMStudioClient, LMStudioError
+from .client_factory import create_client
+from .shared_llm_adapters import SharedLMStudioAdapter as LMStudioClient
+from .protocols import BackendError as LMStudioError
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
@@ -76,7 +78,8 @@ def main(argv: List[str] | None = None) -> int:
 def list_models_command(args: argparse.Namespace) -> int:
     """List models available in LM Studio."""
     settings_kwargs = build_settings_kwargs(args)
-    client = LMStudioClient(
+    client = create_client(
+        backend="lmstudio",
         settings=LMStudioSettings(model="__list__", **settings_kwargs),
         timeout=args.timeout,
         retries=args.retries,
@@ -102,7 +105,8 @@ def run_full_coverage_command(args: argparse.Namespace) -> int:
     settings_kwargs = build_settings_kwargs(args)
 
     # Create client for model selection
-    base_client = LMStudioClient(
+    base_client = create_client(
+        backend="lmstudio",
         settings=LMStudioSettings(model=args.model or "__list__", **settings_kwargs),
         timeout=args.timeout,
         retries=args.retries,
@@ -119,7 +123,12 @@ def run_full_coverage_command(args: argparse.Namespace) -> int:
         seed=args.seed,
         **settings_kwargs,
     )
-    client = LMStudioClient(settings=settings, timeout=args.timeout, retries=args.retries)
+    client = create_client(
+        backend="lmstudio",
+        settings=settings,
+        timeout=args.timeout,
+        retries=args.retries,
+    )
 
     json_path, md_path = model_output_paths(model_name, results_dir)
     config = EvaluatorConfig(

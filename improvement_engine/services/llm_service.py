@@ -9,7 +9,13 @@ from ..utils.yaml_loader import load_config
 class LLMService:
     """Service for improving thinking blocks using shared LLM client."""
 
-    def __init__(self, backend: str = "openrouter", model: Optional[str] = None):
+    def __init__(
+        self,
+        backend: str = "openrouter",
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ):
         """
         Initialize LLM service with shared client.
 
@@ -17,10 +23,20 @@ class LLMService:
             backend: LLM backend to use (openrouter, lmstudio, ollama)
             model: Model name (optional, uses backend defaults if not specified)
         """
+        # Load defaults from config.yaml (cloud-only defaults)
+        cfg = load_config("config")
+        defaults = cfg.get("llm", {}) if isinstance(cfg, dict) else {}
+        self.temperature = temperature if temperature is not None else float(defaults.get("temperature", 0.3))
+        self.max_tokens = max_tokens if max_tokens is not None else int(defaults.get("max_tokens", 2048))
+
         # Create client with specified backend/model
         # API keys/hosts still come from environment variables
         try:
-            self.client = create_client(provider=backend, model=model)
+            self.client = create_client(
+                provider=backend,
+                model=model,
+                config_defaults=defaults
+            )
         except LLMError as e:
             raise LLMServiceError(f"Failed to initialize LLM client: {e}")
 
@@ -105,8 +121,8 @@ class LLMService:
             response = self.client.structured_output(
                 messages=messages,
                 schema=self.thinking_block_schema,
-                temperature=0.3,
-                max_tokens=2048
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
 
             return response

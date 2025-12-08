@@ -17,7 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent.parent.resolve()
 sys.path.insert(0, str(REPO_ROOT))
 
-from Trainers.shared.ui import (
+from shared.ui import (
     console,
     RICH_AVAILABLE,
     COLORS,

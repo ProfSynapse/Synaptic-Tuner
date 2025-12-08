@@ -36,7 +36,7 @@ system_prompt = load_system_prompt()
 
 if provider == "OpenRouter":
     api_key = st.sidebar.text_input("API Key", value=os.getenv("OPENROUTER_API_KEY", ""), type="password")
-    model = st.sidebar.text_input("Model", value=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"))
+    model = st.sidebar.text_input("Model", value=os.getenv("OPENROUTER_MODEL", "openai/gpt-5-mini"))
     if api_key:
         try:
             backend = OpenRouterBackend(api_key=api_key, model=model)

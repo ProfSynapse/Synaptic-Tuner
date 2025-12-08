@@ -10,7 +10,7 @@ from typing import List
 from tuner.core.config import CheckpointInfo
 
 # Import from shared UI
-from Trainers.shared.ui import (
+from shared.ui import (
     RICH_AVAILABLE,
     console,
     COLORS,

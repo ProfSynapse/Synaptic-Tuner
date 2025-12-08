@@ -39,8 +39,7 @@ from .config import (
 )
 
 # Clients
-from .ollama_client import OllamaClient, OllamaError
-from .lmstudio_client import LMStudioClient, LMStudioError
+# from .ollama_client import OllamaClient, OllamaError
 
 # Prompt handling
 from .prompt_sets import PromptCase, filter_prompts, load_prompt_cases
@@ -98,10 +97,8 @@ __all__ = [
     "expand_path",
     "parse_tags",
     # Clients
-    "OllamaClient",
-    "OllamaError",
-    "LMStudioClient",
-    "LMStudioError",
+    # "OllamaClient",
+    # "OllamaError",
     # Prompts
     "PromptCase",
     "filter_prompts",

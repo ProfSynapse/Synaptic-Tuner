@@ -50,6 +50,23 @@ class LMStudioClient(BaseLLMClient):
     def model_name(self) -> str:
         return self.model
 
+    def list_models(self) -> List[str]:
+        """List models exposed by LM Studio via /v1/models."""
+        url = f"{self.base_url}/v1/models"
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            items = data.get("data") or []
+            models = []
+            for item in items:
+                mid = item.get("id") or item.get("model") or item.get("name")
+                if mid:
+                    models.append(str(mid))
+            return models
+        except Exception as e:
+            raise LLMResponseError(f"Failed to list LM Studio models: {e}")
+
     def chat(
         self,
         messages: List[Dict[str, str]],

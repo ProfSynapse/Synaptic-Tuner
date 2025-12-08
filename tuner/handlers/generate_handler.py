@@ -14,15 +14,17 @@ This handler implements the generation workflow:
 6. Optionally split into individual dataset files
 """
 
+import os
 import sys
 import json
+import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from tuner.handlers.base import BaseHandler
 
 # Import shared UI components
-from Trainers.shared.ui import (
+from shared.ui import (
     print_header,
     print_menu,
     print_config,
@@ -75,7 +77,12 @@ class GenerateHandler(BaseHandler):
 
             print_info("Checking LM Studio connection...")
 
-            settings = LMStudioSettings(model="local-model")
+            defaults = self._get_llm_defaults()
+            settings = LMStudioSettings(
+                host=os.getenv("LMSTUDIO_HOST", "localhost"),
+                port=int(os.getenv("LMSTUDIO_PORT", "1234")),
+                model=defaults.get("model", "local-model")
+            )
             client = LMStudioClient(settings=settings)
 
             if not client.is_server_running():
@@ -105,6 +112,19 @@ class GenerateHandler(BaseHandler):
         except Exception as e:
             print_error(f"Connection error: {e}")
             return None
+
+    def _get_llm_defaults(self) -> Dict[str, object]:
+        """Load Synth Chat LLM defaults from config (cloud defaults only)."""
+        cfg_path = Path(__file__).parent.parent.parent / "synth_chat" / "config" / "config.yaml"
+        if cfg_path.exists():
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                if isinstance(data, dict):
+                    return data.get("llm", {}) or {}
+            except Exception:
+                pass
+        return {}
 
     def _list_all_categories(self) -> Dict[str, List[str]]:
         """

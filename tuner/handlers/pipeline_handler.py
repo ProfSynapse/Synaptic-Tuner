@@ -19,7 +19,7 @@ This handler implements the full pipeline:
 from tuner.handlers.base import BaseHandler
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
-from Trainers.shared.ui import (
+from shared.ui import (
     print_header,
     confirm,
     console,

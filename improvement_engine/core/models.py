@@ -42,16 +42,17 @@ class ThinkingBlock:
 class Example:
     """Represents a complete training example."""
     conversations: List[Dict[str, str]]
-    label: bool
+    label: Optional[bool] = None  # Optional for thinking datasets
     behavior: Optional[str] = None
     pattern: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = {
-            "conversations": self.conversations,
-            "label": self.label
+            "conversations": self.conversations
         }
+        if self.label is not None:
+            result["label"] = self.label
         if self.behavior:
             result["behavior"] = self.behavior
         if self.pattern:
@@ -63,7 +64,7 @@ class Example:
         """Create from dictionary."""
         return cls(
             conversations=data["conversations"],
-            label=data["label"],
+            label=data.get("label"),  # Optional for thinking datasets
             behavior=data.get("behavior"),
             pattern=data.get("pattern")
         )
@@ -127,6 +128,8 @@ class ImprovementConfig:
     start_line: int = 1
     end_line: Optional[int] = None
     dry_run: bool = False
+    temperature: float = 0.3
+    max_tokens: int = 2048
 
     def validate(self) -> None:
         """Validate configuration."""

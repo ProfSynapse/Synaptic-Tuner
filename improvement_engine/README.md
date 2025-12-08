@@ -121,7 +121,7 @@ Dry run first? [y/n]: y
 Configuration Summary
 Input:  v1.5 (1491 examples)
 Output: v1.6
-Model:  openai/gpt-4o-mini
+Model:  openai/gpt-5-mini
 Batch:  20 examples (sequential)
 Range:  Lines 1-100 (5 batches)
 

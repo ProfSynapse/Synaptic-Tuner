@@ -23,7 +23,7 @@ from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import EvaluationBackendRegistry
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
-from Trainers.shared.ui import (
+from shared.ui import (
     print_header,
     print_menu,
     print_config,

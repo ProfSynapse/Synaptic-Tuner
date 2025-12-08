@@ -15,16 +15,7 @@ from .config import LMStudioSettings, OllamaSettings, VLLMSettings
 from .enums import BackendType
 from .vllm_client import VLLMClient
 from .protocols import BackendClient, BackendSettings
-
-# Import shared LLM adapters (preferred) with fallback to legacy clients
-try:
-    from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter
-    USE_SHARED_ADAPTERS = True
-except ImportError:
-    # Fallback to legacy clients if shared adapters not available
-    from .lmstudio_client import LMStudioClient as SharedLMStudioAdapter
-    from .ollama_client import OllamaClient as SharedOllamaAdapter
-    USE_SHARED_ADAPTERS = False
+from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter
 
 # Type alias for settings types
 SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings]

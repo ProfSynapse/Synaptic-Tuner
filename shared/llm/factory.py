@@ -14,7 +14,8 @@ def create_client(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     config: Optional[LLMConfig] = None,
-    env_prefix: str = "IMPROVEMENT"
+    env_prefix: str = "IMPROVEMENT",
+    config_defaults: Optional[dict] = None
 ) -> BaseLLMClient:
     """
     Create an LLM client based on configuration.
@@ -49,7 +50,7 @@ def create_client(
     """
     # Load config if not provided
     if config is None:
-        config = LLMConfig.from_env(env_prefix=env_prefix)
+        config = LLMConfig.from_env(env_prefix=env_prefix, config_defaults=config_defaults)
 
         # Override with explicit parameters if provided
         if provider:

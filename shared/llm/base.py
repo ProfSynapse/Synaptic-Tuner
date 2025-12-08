@@ -85,3 +85,8 @@ class BaseLLMClient(ABC):
     def model_name(self) -> str:
         """Return the model name being used."""
         pass
+
+    @abstractmethod
+    def list_models(self) -> list:
+        """Return a list of available model identifiers for this provider."""
+        pass

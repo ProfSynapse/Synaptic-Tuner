@@ -103,18 +103,30 @@ class DatasetScanner:
         """
         Get next version number.
 
+        For v1.4 or below: increment to v1.5 (standardizing to v1.5)
+        For v1.5+: add/increment patch version (v1.5 → v1.5.1 → v1.5.2)
+
         Args:
-            version: Current version (e.g., "1.5")
+            version: Current version (e.g., "1.4", "1.5", or "1.5.1")
 
         Returns:
-            Next version (e.g., "1.6")
+            Next version (e.g., "1.5", "1.5.1", or "1.5.2")
         """
         parts = version.split('.')
-        if len(parts) != 2:
+        if len(parts) == 2:
+            major, minor = int(parts[0]), int(parts[1])
+            # If below v1.5, jump to v1.5 for consistency
+            if major == 1 and minor < 5:
+                return "1.5"
+            # If at v1.5, add patch .1
+            else:
+                return f"{version}.1"
+        elif len(parts) == 3:
+            # Already has patch, increment it
+            major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"{major}.{minor}.{patch + 1}"
+        else:
             raise ValueError(f"Invalid version format: {version}")
-
-        major, minor = int(parts[0]), int(parts[1])
-        return f"{major}.{minor + 1}"
 
     def count_examples(self, file_path: str) -> int:
         """

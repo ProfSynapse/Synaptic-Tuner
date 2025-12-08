@@ -34,6 +34,22 @@ class OllamaClient(BaseLLMClient):
     def model_name(self) -> str:
         return self.model
 
+    def list_models(self) -> List[str]:
+        """List models available in Ollama."""
+        url = f"{self.base_url}/api/tags"
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            models = []
+            for item in data.get("models", []):
+                name = item.get("name")
+                if name:
+                    models.append(str(name))
+            return models
+        except Exception as e:
+            raise LLMResponseError(f"Failed to list Ollama models: {e}")
+
     def chat(
         self,
         messages: List[Dict[str, str]],

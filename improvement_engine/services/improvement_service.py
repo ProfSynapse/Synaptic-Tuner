@@ -1,6 +1,8 @@
 """Main improvement service orchestrating the improvement workflow."""
 
 import json
+import os
+import sys
 import time
 from typing import List, Optional
 from pathlib import Path
@@ -32,13 +34,21 @@ class ImprovementService:
         """
         self.config = config
         self.logger = logger or ImproveLogger()
-        self.llm_service = LLMService(backend=config.backend, model=config.model)
+        self.llm_service = LLMService(
+            backend=config.backend,
+            model=config.model,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
         self.validator = Validator()
         self.file_handler = FileHandler()
         self.backup_manager = BackupManager(enabled=True)
 
         # Log LLM provider info
-        self.logger.info(f"Using {self.llm_service.provider_name} with model {self.llm_service.model_name}")
+        if self.llm_service.provider_name == "lmstudio":
+            self.logger.info(f"Using {self.llm_service.provider_name} (using loaded model)")
+        else:
+            self.logger.info(f"Using {self.llm_service.provider_name} with model {self.llm_service.model_name}")
 
         # Validate configuration
         config.validate()
@@ -60,6 +70,19 @@ class ImprovementService:
             if backup_file:
                 self.logger.success(f"Created backup: {backup_file}")
 
+            # Version bump output file if it exists to prevent appending to old data
+            if os.path.exists(self.config.output_file):
+                # Find next available version (e.g., v1.5 → v1.5.1 → v1.5.2)
+                base_name = self.config.output_file
+                counter = 1
+                while os.path.exists(base_name):
+                    # Insert .X before .jsonl extension
+                    base_name = self.config.output_file.replace('.jsonl', f'.{counter}.jsonl')
+                    counter += 1
+
+                os.rename(self.config.output_file, base_name)
+                self.logger.info(f"Moved existing output to: {base_name}")
+
         # Determine line range
         total_lines = self.file_handler.count_lines(self.config.input_file)
         end_line = self.config.end_line or total_lines
@@ -74,6 +97,16 @@ class ImprovementService:
         # Process in batches
         batch_results = []
         current_line = self.config.start_line
+
+        total_examples = end_line - self.config.start_line + 1
+        progress_bar_width = 30
+
+        def _print_progress(done: int) -> None:
+            percent = int((done / total_examples) * 100) if total_examples else 100
+            filled = int(progress_bar_width * percent / 100)
+            bar = "#" * filled + "-" * (progress_bar_width - filled)
+            sys.stdout.write(f"\rImprovement [{bar}] {percent:3d}% ({done}/{total_examples})")
+            sys.stdout.flush()
 
         batch_num = 1
         while current_line <= end_line:
@@ -90,8 +123,15 @@ class ImprovementService:
             # Log batch result
             self.logger.info(str(batch_result))
 
+            # Progress update
+            _print_progress(min(batch_end, end_line) - self.config.start_line + 1)
+
             current_line = batch_end + 1
             batch_num += 1
+
+        # Finish progress line cleanly
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
         # Summary
         self._print_summary(batch_results)

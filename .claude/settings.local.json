@@ -153,7 +153,11 @@
       "Bash(timeout 3 python tuner.py:*)",
       "WebFetch(domain:support.claude.com)",
       "Bash(./scripts/improve_dataset.sh:*)",
-      "Bash(.claude/skills/synethetic-data-generation/scripts/improve_dataset.sh:*)"
+      "Bash(.claude/skills/synethetic-data-generation/scripts/improve_dataset.sh:*)",
+      "Bash(Datasets/tools_datasets/thinking/vaultManager/tools_v1.3.jsonl )",
+      "Bash(improvement_engine/test_batch_output.jsonl )",
+      "Bash(improvement_engine/test_batch_100.jsonl )",
+      "Bash(improvement_engine/test_batch_plain_language.jsonl )"
     ],
     "deny": [],
     "ask": []

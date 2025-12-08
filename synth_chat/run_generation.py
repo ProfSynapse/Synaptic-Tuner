@@ -7,9 +7,11 @@ using the 3-prompt pipeline. Valid and invalid examples are collected separately
 for KTO training.
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
+import yaml
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -38,20 +40,27 @@ def main():
     parser.add_argument(
         "--host",
         type=str,
-        default="localhost",
-        help="LM Studio host (default: localhost)"
+        default=os.getenv("LMSTUDIO_HOST", "localhost"),
+        help="LM Studio host (default: env LMSTUDIO_HOST or localhost)"
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=1234,
-        help="LM Studio port (default: 1234)"
+        default=int(os.getenv("LMSTUDIO_PORT", "1234")),
+        help="LM Studio port (default: env LMSTUDIO_PORT or 1234)"
     )
+    # Model default comes from synth_chat/config/config.yaml (cloud default) or env override
+    cfg = {}
+    cfg_path = Path(__file__).parent / "config" / "config.yaml"
+    if cfg_path.exists():
+        with open(cfg_path, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+    llm_defaults = cfg.get("llm", {}) if isinstance(cfg, dict) else {}
     parser.add_argument(
         "--model",
         type=str,
-        default="local-model",
-        help="Model name (default: local-model)"
+        default=os.getenv("SYNTHCHAT_MODEL", llm_defaults.get("model", "local-model")),
+        help="Model name (default: SYNTHCHAT_MODEL env or config.yaml llm.model or 'local-model')"
     )
     parser.add_argument(
         "--no-validate",

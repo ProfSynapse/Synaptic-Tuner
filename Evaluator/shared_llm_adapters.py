@@ -103,6 +103,13 @@ class SharedLLMAdapter:
         except Exception:
             return False
 
+    def list_models(self) -> list:
+        """Return available models if provider supports listing."""
+        try:
+            return self.client.list_models()
+        except Exception:
+            return []
+
     @property
     def _client_name(self) -> str:
         """Return client name for error messages."""
