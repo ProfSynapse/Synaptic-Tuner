@@ -1,0 +1,238 @@
+# Configuration for generating destructive action confirmation examples
+# These show the model learning to execute high-risk operations AFTER user confirmation
+
+destructive_tools:
+  vaultManager:
+    - tool: "vaultManager_deleteFolder"
+      description: "Delete a folder (potentially with contents)"
+      risk_level: "high"
+      scenarios:
+        - "Delete old project folders"
+        - "Remove archived material"
+        - "Clean up temporary workspace"
+        - "Delete draft folders"
+        - "Remove obsolete directories"
+
+    - tool: "vaultManager_deleteNote"
+      description: "Delete a specific note/file"
+      risk_level: "high"
+      scenarios:
+        - "Delete duplicate notes"
+        - "Remove old drafts"
+        - "Delete completed task lists"
+        - "Remove outdated documentation"
+        - "Delete test files"
+
+  contentManager:
+    - tool: "contentManager_deleteContent"
+      description: "Delete content from within a file"
+      risk_level: "medium"
+      scenarios:
+        - "Remove sections from a note"
+        - "Delete outdated information"
+        - "Clean up draft content"
+        - "Remove completed todos"
+        - "Delete placeholder text"
+
+  agentManager:
+    - tool: "agentManager_deleteAgent"
+      description: "Delete a custom agent"
+      risk_level: "medium"
+      scenarios:
+        - "Delete experimental agents"
+        - "Remove unused agents"
+        - "Delete duplicate agents"
+        - "Clean up old automation"
+        - "Remove failed agent configs"
+
+# Conversation flow pattern
+conversation_flow:
+  step_1_user_request:
+    description: "User makes a vague destructive request"
+    template: |
+      Generate a natural, vague user request for a destructive operation.
+
+      Destructive tool: {tool_name}
+      Scenario: {scenario}
+
+      User should be:
+      - Casual and vague (like real users)
+      - Not specify exact paths/names
+      - Possibly use plural ("files", "folders", "notes")
+      - Might misspell or misremember names
+
+      Examples of vague destructive requests:
+      - "Can you delete the old project stuff?"
+      - "Remove those draft notes I don't need anymore"
+      - "Clean up the archive folder"
+      - "Delete that test agent thing I made"
+
+      Generate ONE vague destructive request. Output ONLY the request.
+
+  step_2_assistant_asks:
+    description: "Assistant asks for confirmation, listing what will be deleted"
+    instructions: |
+      The assistant should:
+      1. NOT immediately execute the destructive action
+      2. List the specific items that would be affected
+      3. Request explicit confirmation
+      4. Warn about irreversibility
+
+      Pattern:
+      - "I found [X items] that match your request"
+      - "These will be permanently deleted: [list]"
+      - "This action cannot be undone."
+      - "Would you like me to proceed with the deletion?"
+
+  step_3_user_confirms:
+    description: "User explicitly confirms the action"
+    variations:
+      - "Yes, delete them"
+      - "Go ahead"
+      - "Yes, that's correct"
+      - "Yeah, remove those"
+      - "Confirmed, proceed"
+      - "Yes please"
+      - "That's fine, delete them"
+      - "Yep, go ahead"
+
+  step_4_assistant_executes:
+    description: "Assistant executes with HIGH RISK + HIGH CONFIDENCE"
+    thinking_requirements:
+      risk_assessment:
+        - Must acknowledge high risk (permanent deletion)
+        - Must note irreversibility
+        - Must reference user confirmation
+
+      confidence_level:
+        - HIGH confidence (8-10/10)
+        - Justified by explicit user confirmation
+        - Clear user intent
+
+      thinking_pattern: |
+        Risk Assessment:
+        - Operation: {operation_type}
+        - Risk Level: HIGH (permanent deletion, irreversible)
+        - Affected Items: {item_count} files/folders
+        - Scope: {specific_paths}
+
+        Confirmation Verification:
+        - User explicitly confirmed: "{confirmation_message}"
+        - User reviewed the list of items
+        - User understands irreversibility
+
+        Confidence: 9/10
+        - HIGH confidence to proceed
+        - User gave explicit permission
+        - Scope is clear and confirmed
+        - All items verified before deletion
+
+        Proceeding with deletion as confirmed by user.
+
+    tool_call_requirements:
+      - Must use correct tool schema
+      - Must include full context object
+      - Must target confirmed specific items
+      - Must show proper error handling
+
+# Generation weights
+generation_weights:
+  vaultManager_deleteFolder: 0.35    # Most common destructive operation
+  vaultManager_deleteNote: 0.30      # Second most common
+  contentManager_deleteContent: 0.20 # Less common but important
+  agentManager_deleteAgent: 0.15     # Least common
+
+# Validation criteria
+validation:
+  required_elements:
+    - "Multi-turn conversation (4 turns minimum)"
+    - "User makes vague destructive request"
+    - "Assistant asks for confirmation with specific list"
+    - "User explicitly confirms"
+    - "Assistant thinking shows HIGH RISK + HIGH CONFIDENCE"
+    - "Correct tool schema used"
+    - "Full context object present"
+
+  thinking_block_requirements:
+    - "Must contain 'Risk Level: HIGH' or similar"
+    - "Must contain 'Confidence: [8-10]/10' or 'HIGH confidence'"
+    - "Must reference user confirmation"
+    - "Must mention irreversibility"
+
+  anti_patterns:
+    - "Assistant executes without asking"
+    - "Assistant asks but doesn't wait for confirmation"
+    - "LOW confidence after confirmation"
+    - "Missing risk assessment"
+    - "Incorrect tool schema"
+
+# Example output structure
+example_structure:
+  conversations:
+    - role: "user"
+      content: "Can you delete those old project files?"
+
+    - role: "assistant"
+      content: |
+        I found 3 folders that appear to be old project files:
+        - Projects/Archive/Q1-2023/
+        - Projects/Archive/Q2-2023/
+        - Projects/Completed/Legacy-Project/
+
+        These folders contain a total of 47 files. This action will permanently
+        delete all of these files and cannot be undone.
+
+        Would you like me to proceed with deleting these folders?
+
+    - role: "user"
+      content: "Yes, delete them"
+
+    - role: "assistant"
+      content: |
+        <thinking>
+        Risk Assessment:
+        - Operation: Bulk folder deletion
+        - Risk Level: HIGH (permanent deletion of 47 files)
+        - Affected Items: 3 folders in Archive/
+        - Scope: Clear and specific
+
+        Confirmation Verification:
+        - User explicitly confirmed: "Yes, delete them"
+        - User reviewed the list (3 folders, 47 files)
+        - User understands this is permanent
+
+        Confidence: 9/10
+        - HIGH confidence to proceed
+        - User gave explicit, unambiguous permission
+        - Scope was presented and confirmed
+        - All paths verified
+
+        Proceeding with deletions as confirmed.
+        </thinking>
+
+        <tool_call>
+        {
+          "name": "vaultManager_deleteFolder",
+          "arguments": {
+            "context": {...},
+            "path": "Projects/Archive/Q1-2023",
+            "recursive": true
+          }
+        }
+        </tool_call>
+
+        [Additional tool calls for other folders...]
+
+        I've deleted all 3 folders as confirmed. The operation completed successfully.
+
+notes: |
+  This configuration generates training examples that teach the model:
+
+  1. NEVER execute destructive operations without confirmation
+  2. ALWAYS list what will be affected before asking
+  3. WAIT for explicit user confirmation
+  4. After confirmation: HIGH RISK + HIGH CONFIDENCE (not contradiction)
+  5. The pattern: Risk ↑ + Confirmation → Confidence ↑
+
+  Key insight: High risk + high confidence is CORRECT when user confirms.
+  The model learns that user confirmation resolves the uncertainty.

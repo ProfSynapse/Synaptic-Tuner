@@ -1,86 +1,127 @@
-# Labeling Categories Configuration
-# Configure how examples are displayed and what categories are available for labeling
+# LLM-Based Dataset Labeling Configuration
+# LLM judges examples against criteria and applies boolean labels
 
-# Display configuration - what to show during labeling
-display:
-  show_conversation: true        # Show full conversation history
-  show_response_text: true       # Show assistant response text
-  show_tool_calls: true          # Show tool calls and parameters
-  show_thinking_block: true      # Show thinking block if present
-  show_line_number: true         # Show line number for reference
-  show_existing_labels: true     # Show existing quality_labels if present
+# System prompt instructions for LLM judge
+system_prompt: |
+  You are an expert AI quality evaluator. Your task is to analyze training examples
+  and apply quality labels based on specific criteria.
 
-# Labeling configuration
-labeling:
-  allow_multiple: true           # Allow multiple tags per example
-  allow_skip: true               # Allow skipping examples (no label)
-  confirm_before_save: false     # Require confirmation before saving each label
-  allow_edit: true               # Allow editing existing labels
-  field_name: "quality_labels"   # Field name to store labels in JSONL
+  For each example, you will evaluate:
+  1. Overall quality (good vs bad)
+  2. Whether it's exemplary/reference quality
+  3. Whether it contains hallucinations
+  4. Whether the reasoning is poor
+  5. Whether there's a context mismatch
 
-# Available categories/tags
-# Users can customize this list with their own categories
-categories:
-  - tag: "hallucinated"
-    description: "Model makes claims not supported by context or makes up information"
-    color: "red"                 # For future CLI color coding
-    aliases: ["hallu", "h"]      # Short aliases for quick entry
+  Return your evaluation as JSON with boolean values and reasoning.
 
-  - tag: "good"
-    description: "High quality example - correct tool selection, accurate response, proper reasoning"
-    color: "green"
-    aliases: ["g"]
+# Label criteria - used to build detailed evaluation prompt
+criteria:
+  label:
+    # This field serves dual purpose: KTO training AND quality indicator
+    true_description: |
+      GOOD QUALITY - Apply label: true when:
+      - Tool selection is appropriate for the task
+      - Parameters are correct and complete
+      - Thinking block shows clear, logical reasoning
+      - Response addresses user request completely
+      - No factual errors or inconsistencies
+      - Context usage is proper and accurate
 
-  - tag: "bad"
-    description: "Poor quality example - wrong tool, incorrect reasoning, or inappropriate response"
-    color: "red"
-    aliases: ["b"]
+    false_description: |
+      BAD QUALITY - Apply label: false when:
+      - Wrong tool selected for the task
+      - Incorrect or invalid parameters
+      - Flawed or missing reasoning in thinking block
+      - Response doesn't address user request
+      - Contains clear errors or inconsistencies
+      - Misuses or ignores context
 
-  - tag: "incomplete"
-    description: "Response is partial or missing critical information"
-    color: "yellow"
-    aliases: ["inc", "i"]
+  excellent:
+    description: |
+      EXEMPLARY QUALITY - Apply excellent: true when:
+      - Perfect tool selection with optimal parameters
+      - Comprehensive, well-structured thinking block
+      - Accurate and complete response
+      - Excellent context awareness and usage
+      - Well-calibrated confidence score
+      - Clear, professional, and thorough
+      - Should be used as a reference example for training
 
-  - tag: "wrong_tool"
-    description: "Incorrect tool selection for the task"
-    color: "orange"
-    aliases: ["wt", "w"]
+      Use SPARINGLY - only for the very best examples (top 5-10%)
 
-  - tag: "poor_reasoning"
-    description: "Thinking block has weak or illogical reasoning"
-    color: "orange"
-    aliases: ["pr"]
+  hallucinated:
+    description: |
+      HALLUCINATION - Apply hallucinated: true when:
+      - Model makes claims not supported by the conversation context
+      - Invents file paths, functions, or details not mentioned
+      - States facts or information that weren't provided
+      - Makes assumptions presented as facts
+      - Creates non-existent context or history
+      - Fabricates tool capabilities or parameters
 
-  - tag: "context_mismatch"
-    description: "Response doesn't align with conversation context or user request"
-    color: "orange"
-    aliases: ["cm", "c"]
+      Note: This is DIFFERENT from being wrong - hallucination specifically means
+      making up information rather than acknowledging uncertainty.
 
-  - tag: "excellent"
-    description: "Exemplary quality - should be used as a reference example"
-    color: "blue"
-    aliases: ["ex", "e"]
+  poor_reasoning:
+    description: |
+      POOR REASONING - Apply poor_reasoning: true when:
+      - Goal is unclear, vague, or doesn't match the task
+      - Memory lacks relevant context or is too generic
+      - Requirements don't align with actual task needs
+      - Requirements and plan are duplicates (not distinct)
+      - Plan steps are illogical or out of order
+      - Confidence score doesn't match operation risk level
+      - Assessment flags (complex/risky) are incorrect
+      - Thinking block is incomplete or missing key elements
 
-  - tag: "needs_review"
-    description: "Unclear quality, needs manual review or expert opinion"
-    color: "yellow"
-    aliases: ["nr", "r"]
+  context_mismatch:
+    description: |
+      CONTEXT MISMATCH - Apply context_mismatch: true when:
+      - Model misunderstands user's actual intent
+      - Ignores previous conversation context
+      - Responds to a different request than what was asked
+      - Makes assumptions contradicting conversation history
+      - Fails to use available context appropriately
+      - Response would make sense in different context but not this one
 
-  - tag: "incorrect_parameters"
-    description: "Tool call has wrong or invalid parameters"
-    color: "orange"
-    aliases: ["ip"]
+# JSON schema for LLM response
+response_schema:
+  type: object
+  required:
+    - label
+    - excellent
+    - hallucinated
+    - poor_reasoning
+    - context_mismatch
+    - reasoning
+  properties:
+    label:
+      type: boolean
+      description: "True if good quality, false if bad quality"
+    excellent:
+      type: boolean
+      description: "True if exemplary/reference quality"
+    hallucinated:
+      type: boolean
+      description: "True if contains hallucinations"
+    poor_reasoning:
+      type: boolean
+      description: "True if reasoning is weak/illogical"
+    context_mismatch:
+      type: boolean
+      description: "True if doesn't align with context"
+    reasoning:
+      type: string
+      description: "Brief explanation of the evaluation (2-3 sentences)"
 
-# Progress tracking
-progress:
-  save_frequency: 10             # Save progress every N labels
-  progress_file: ".labeling_progress.json"  # Track labeled lines
-  backup_on_start: true          # Create backup of input file before labeling
+# Batch processing settings
+processing:
+  batch_size: 10              # Process N examples at a time
+  save_frequency: 10          # Save progress every N examples
+  create_backup: true         # Backup input file before labeling
 
-# UI/Display formatting
-ui:
-  max_line_length: 100           # Wrap long lines at this length
-  separator_char: "─"            # Character for visual separators
-  header_char: "═"               # Character for headers
-  indent_size: 2                 # Spaces for indentation
-  show_timestamps: false         # Show timestamps in progress updates
+# LLM settings (can be overridden via CLI)
+llm:
+  temperature: 0.3            # Low temperature for consistent judging
+  max_tokens: 500             # Enough for JSON response + reasoning

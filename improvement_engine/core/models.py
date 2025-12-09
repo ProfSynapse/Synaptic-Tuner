@@ -42,10 +42,14 @@ class ThinkingBlock:
 class Example:
     """Represents a complete training example."""
     conversations: List[Dict[str, str]]
-    label: Optional[bool] = None  # Optional for thinking datasets (KTO training)
+    label: Optional[bool] = None  # KTO training label: good (true) or bad (false)
     behavior: Optional[str] = None
     pattern: Optional[str] = None
-    quality_labels: Optional[List[str]] = None  # Manual quality labels from labeling mode
+    # LLM-judged quality labels (all optional booleans)
+    excellent: Optional[bool] = None  # Exemplary/reference quality
+    hallucinated: Optional[bool] = None  # Makes unsupported claims
+    poor_reasoning: Optional[bool] = None  # Weak/illogical reasoning
+    context_mismatch: Optional[bool] = None  # Doesn't align with context
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -58,8 +62,15 @@ class Example:
             result["behavior"] = self.behavior
         if self.pattern:
             result["pattern"] = self.pattern
-        if self.quality_labels:
-            result["quality_labels"] = self.quality_labels
+        # Add LLM-judged labels if present
+        if self.excellent is not None:
+            result["excellent"] = self.excellent
+        if self.hallucinated is not None:
+            result["hallucinated"] = self.hallucinated
+        if self.poor_reasoning is not None:
+            result["poor_reasoning"] = self.poor_reasoning
+        if self.context_mismatch is not None:
+            result["context_mismatch"] = self.context_mismatch
         return result
 
     @classmethod
@@ -67,10 +78,13 @@ class Example:
         """Create from dictionary."""
         return cls(
             conversations=data["conversations"],
-            label=data.get("label"),  # Optional for thinking datasets
+            label=data.get("label"),
             behavior=data.get("behavior"),
             pattern=data.get("pattern"),
-            quality_labels=data.get("quality_labels")  # Optional manual labels
+            excellent=data.get("excellent"),
+            hallucinated=data.get("hallucinated"),
+            poor_reasoning=data.get("poor_reasoning"),
+            context_mismatch=data.get("context_mismatch")
         )
 
 
@@ -153,19 +167,20 @@ class ImprovementConfig:
 @dataclass
 class LabelingConfig:
     """
-    Configuration for interactive labeling mode.
+    Configuration for LLM-based labeling mode.
 
-    Interactive labeling allows manual annotation of dataset examples with
-    configurable categories defined in labeling_categories.yaml.
+    LLM judges examples and applies boolean quality labels.
     """
     input_file: str
     output_file: str
+    backend: str = "lmstudio"  # lmstudio, openrouter, or ollama
+    model: Optional[str] = None  # Optional: defaults per backend
     categories_config: str = "improvement_engine/config/labeling_categories.yaml"
     start_line: int = 1
     end_line: Optional[int] = None
-    resume: bool = True  # Resume from last labeled line
-    field_name: str = "quality_labels"  # Field name for storing labels in JSONL
     dry_run: bool = False
+    temperature: float = 0.3
+    max_tokens: int = 500
 
     def validate(self) -> None:
         """Validate configuration."""

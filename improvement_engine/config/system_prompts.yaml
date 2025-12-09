@@ -108,3 +108,267 @@ improvement_prompt: |
   ```
 
   NOW IMPROVE THE PROVIDED THINKING BLOCK.
+
+# Hallucination Detection Prompt
+# Validates that thinking blocks only reference information from system/user prompts
+hallucination_detection_prompt: |
+  You are an expert at detecting hallucinations in AI reasoning.
+
+  **YOUR TASK:** Determine if the thinking block contains HALLUCINATED information (made-up details not present in the input).
+
+  ## What Counts as Hallucination?
+
+  ❌ **HALLUCINATION** - Information NOT in system prompt or user request:
+  - File paths, folder names, or file contents not mentioned
+  - Version numbers, dates, or metrics not provided
+  - User actions, motivations, or history not stated
+  - Tool results or operation outcomes not given
+  - Specific numbers (line counts, file sizes) not mentioned
+  - Details about "previous sessions" or "earlier work" not referenced
+  - Assumptions about workspace structure not shown
+
+  ✅ **ALLOWED** - Information directly from inputs or reasonable inferences:
+  - Exact text from system prompt or user request
+  - Tool names and parameters from the conversation
+  - Logical inferences (e.g., "delete is risky" - this is always true)
+  - General domain knowledge (e.g., "recursive delete removes contents")
+  - Direct quotes or paraphrases from the inputs
+
+  ## Examples
+
+  ### Example 1: HALLUCINATION
+
+  **System Prompt:**
+  ```
+  sessionId: "session_123"
+  workspaceId: "ws_456"
+  ```
+
+  **User Request:**
+  ```
+  Delete the old project files
+  ```
+
+  **Thinking Block:**
+  ```json
+  {
+    "goal": "Delete Projects/Archive/Q1-2023/ folder",
+    "memory": "User completed Q1 projects 3 months ago. Archive contains 47 files. Last accessed on Oct 15.",
+    "requirements": ["Projects/Archive/Q1-2023/ exists", "No active processes using these files"]
+  }
+  ```
+
+  **Verdict:** HALLUCINATED
+  - ❌ "Projects/Archive/Q1-2023/" - specific path not mentioned
+  - ❌ "completed Q1 projects 3 months ago" - timeline not provided
+  - ❌ "47 files" - count not given
+  - ❌ "Last accessed on Oct 15" - date not mentioned
+
+  ### Example 2: ALLOWED
+
+  **System Prompt:**
+  ```
+  sessionId: "session_123"
+  workspaceId: "ws_456"
+  ```
+
+  **User Request:**
+  ```
+  I give you permission to delete Projects/Archive/Q1-2023/
+  ```
+
+  **Thinking Block:**
+  ```json
+  {
+    "goal": "Delete the folder Projects/Archive/Q1-2023/ as authorized by user",
+    "memory": "User explicitly authorized deletion of Projects/Archive/Q1-2023/",
+    "requirements": ["Projects/Archive/Q1-2023/ exists", "User confirmed deletion"],
+    "assessment": {"risky": true, "complex": false},
+    "confidence": 0.9
+  }
+  ```
+
+  **Verdict:** ALLOWED
+  - ✅ "Projects/Archive/Q1-2023/" - directly from user request
+  - ✅ "authorized by user" - user said "I give you permission"
+  - ✅ "risky: true" - logical inference (delete is risky)
+  - ✅ "confidence: 0.9" - reasonable for authorized operation
+
+  ### Example 3: HALLUCINATION
+
+  **System Prompt:**
+  ```
+  sessionId: "session_789"
+  workspaceId: "ws_101"
+  ```
+
+  **User Request:**
+  ```
+  Create a new note for today's meeting
+  ```
+
+  **Thinking Block:**
+  ```json
+  {
+    "goal": "Create Meeting-2024-12-09.md in Notes/Daily/ with template",
+    "memory": "User has daily standup meetings at 10am. Last meeting note was created yesterday. Uses standard meeting template with attendees, agenda, and action items sections.",
+    "requirements": ["Notes/Daily/ folder exists", "Meeting template available"]
+  }
+  ```
+
+  **Verdict:** HALLUCINATED
+  - ❌ "Meeting-2024-12-09.md" - specific filename not requested
+  - ❌ "in Notes/Daily/" - location not specified
+  - ❌ "10am standups" - schedule not mentioned
+  - ❌ "Last meeting note was yesterday" - history not provided
+  - ❌ "standard meeting template" - template not mentioned
+
+  ## Your Task
+
+  Analyze the provided thinking block against the system prompt and user request.
+
+  Output JSON:
+  ```json
+  {
+    "has_hallucination": true/false,
+    "hallucinated_details": ["specific detail 1", "specific detail 2", ...],
+    "confidence": 0.0-1.0,
+    "explanation": "Brief explanation of verdict"
+  }
+  ```
+
+  **CRITICAL:**
+  - Be STRICT - any detail not in inputs = hallucination
+  - Check goal, memory, requirements, and plan fields
+  - Specific paths, numbers, dates MUST be in inputs
+  - "User did X in the past" without evidence = hallucination
+
+# Thinking Generation Prompt (No Hallucination)
+# For generating NEW thinking blocks that don't hallucinate
+thinking_generation_prompt: |
+  You are an expert at generating high-quality thinking blocks for AI training data.
+
+  **YOUR TASK:** Generate a thinking block based ONLY on the provided system prompt and user request.
+
+  ## CRITICAL RULES - NO HALLUCINATION
+
+  🚫 **NEVER MAKE UP:**
+  - File paths, folder names, or locations not mentioned
+  - Version numbers, dates, or metrics not provided
+  - User history, past actions, or motivations not stated
+  - Specific numbers (file counts, line numbers, sizes)
+  - Details about previous sessions or earlier work
+  - Assumptions about workspace structure not shown
+  - Tool results or outcomes not yet executed
+
+  ✅ **ONLY USE:**
+  - Exact information from system prompt
+  - Exact information from user request
+  - Tool names and schemas (you know these)
+  - Logical inferences about operations (e.g., "delete is risky")
+  - General domain knowledge (e.g., "recursive operations affect contents")
+
+  ## Thinking Block Structure
+
+  Generate a JSON thinking block with:
+
+  1. **goal** - What to accomplish (use ONLY paths/names from user request)
+  2. **memory** - Context from inputs (NO made-up history or details)
+  3. **requirements** - Prerequisites (use ONLY info from inputs)
+  4. **assessment** - Risk/complexity (logical inference allowed)
+  5. **confidence** - 0.0-1.0 (based on clarity and risk)
+  6. **plan** - Steps to execute (use tool names, not invented paths)
+
+  ## Examples
+
+  ### Example 1: Correct (No Hallucination)
+
+  **Inputs:**
+  - System: sessionId, workspaceId
+  - User: "Delete the archive folder"
+
+  **Generated Thinking:**
+  ```json
+  {
+    "goal": "Delete the archive folder as requested by user",
+    "memory": "User requested deletion of archive folder",
+    "requirements": [
+      "Archive folder exists in workspace",
+      "User confirmed deletion intent"
+    ],
+    "assessment": {"risky": true, "complex": false},
+    "confidence": 0.6,
+    "plan": [
+      "Identify archive folder location",
+      "Execute deleteFolder tool",
+      "Confirm deletion completed"
+    ]
+  }
+  ```
+
+  ✅ No hallucination - stays general, no invented paths
+
+  ### Example 2: Correct (Specific Path Given)
+
+  **Inputs:**
+  - System: sessionId, workspaceId
+  - User: "I authorize you to delete Projects/Archive/Old/"
+
+  **Generated Thinking:**
+  ```json
+  {
+    "goal": "Delete Projects/Archive/Old/ folder as authorized by user",
+    "memory": "User explicitly authorized deletion of Projects/Archive/Old/",
+    "requirements": [
+      "Projects/Archive/Old/ exists",
+      "User provided explicit authorization"
+    ],
+    "assessment": {"risky": true, "complex": false},
+    "confidence": 0.9,
+    "plan": [
+      "Execute vaultManager_deleteFolder on Projects/Archive/Old/",
+      "Confirm deletion successful"
+    ]
+  }
+  ```
+
+  ✅ Uses exact path from user request, no added details
+
+  ### Example 3: WRONG (Hallucination)
+
+  **Inputs:**
+  - System: sessionId, workspaceId
+  - User: "Create a meeting note"
+
+  **Generated Thinking (BAD):**
+  ```json
+  {
+    "goal": "Create Meeting-2024-12-09.md in Notes/Daily/",
+    "memory": "User has daily standup at 10am. Last note was yesterday.",
+    "requirements": ["Notes/Daily/ exists", "Template file available"]
+  }
+  ```
+
+  ❌ Hallucinated: specific filename, location, schedule, history
+
+  **Generated Thinking (GOOD):**
+  ```json
+  {
+    "goal": "Create a new note for meeting as requested",
+    "memory": "User requested creation of meeting note",
+    "requirements": ["User specifies note name/location", "Workspace is accessible"],
+    "confidence": 0.5
+  }
+  ```
+
+  ✅ Stays vague when details not provided
+
+  ## Your Task
+
+  Given system prompt and user request, generate a thinking block that:
+  - Uses ONLY information from inputs
+  - Stays general when specifics not provided
+  - Makes logical inferences about risk/operations
+  - Does NOT invent paths, numbers, dates, or history
+
+  Output the thinking block as valid JSON.

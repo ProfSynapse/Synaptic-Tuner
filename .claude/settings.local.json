@@ -159,7 +159,10 @@
       "Bash(improvement_engine/test_batch_100.jsonl )",
       "Bash(improvement_engine/test_batch_plain_language.jsonl )",
       "Bash(du:*)",
-      "Bash(sort:*)"
+      "Bash(sort:*)",
+      "Bash(for agent in agentManager contentManager memoryManager vaultLibrarian vaultManager)",
+      "Bash(do cp \"$agent/tools_v1.6.jsonl\" \"$agent/tools_v1.7.jsonl\")",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []
