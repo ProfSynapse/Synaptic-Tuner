@@ -1,0 +1,57 @@
+name: "Thinking Block Schema"
+description: "Required structure for thinking blocks in tool-using datasets"
+
+# Schema definition
+schema:
+  type: object
+  required:
+    - goal
+    - memory
+    - requirements
+    - assessment
+    - confidence
+    - plan
+  properties:
+    goal:
+      type: string
+      description: "Specific goal statement with concrete details"
+      minLength: 10
+    memory:
+      type: string
+      description: "Context about why/when, with metrics or dates if available"
+      minLength: 20
+    requirements:
+      type: array
+      description: "Prerequisites that must be true before proceeding"
+      minItems: 1
+      items:
+        type: string
+    assessment:
+      type: object
+      required:
+        - complex
+        - risky
+      properties:
+        complex:
+          type: boolean
+        risky:
+          type: boolean
+    confidence:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    plan:
+      type: array
+      description: "Step-by-step action items"
+      minItems: 1
+      items:
+        type: string
+
+# Field descriptions for validation
+field_descriptions:
+  goal: "Ultra-specific goal with paths/versions/names"
+  memory: "Why this is happening, when, with context (never empty, min 50 chars)"
+  requirements: "Prerequisites (what must be true) - NOT actions"
+  assessment: "Risk and complexity flags"
+  confidence: "Calibrated confidence score (0.0-1.0)"
+  plan: "Action steps (what will be done) - NOT prerequisites"

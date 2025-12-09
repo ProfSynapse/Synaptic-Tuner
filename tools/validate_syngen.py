@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple, Dict, Any, Optional
 
-SESSION_ID_RE = re.compile(r"^session_\d{13}_[a-z0-9]{9}$")
-WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]{9}$")
+SESSION_ID_RE = re.compile(r"^session_\d{13}_[a-z0-9]+$")
+WORKSPACE_ID_RE = re.compile(r"^ws_\d{13}_[a-z0-9]+$")
 # Labels are now boolean: true = desirable, false = undesirable
 ALLOWED_ROLES = {"system", "user", "assistant"}
 MIN_TOOL_CALLS = 2
@@ -486,23 +486,27 @@ def validate_tool_against_schema(tool_name: str, args: dict, report: ExampleRepo
             report.add("WARN", f"Tool call #{tool_call_num} (get_tools): Parameter 'managers' is an empty array")
 
         # Validate context is present (required for all tools)
-        if 'context' not in args:
-            report.add("ERROR", f"Tool call #{tool_call_num} (get_tools): Missing required parameter 'context'")
+        # if 'context' not in args:
+        #     report.add("ERROR", f"Tool call #{tool_call_num} (get_tools): Missing required parameter 'context'")
 
         # Skip further validation for get_tools (it's a meta-tool with special handling)
         return
 
     # Check required parameters are present
     for req_param in required_params:
+        # Skip 'context' check here - it is handled by validate_context() which supports both old (object) and new (flat) formats
+        if req_param == 'context':
+            continue
+
         if req_param not in args:
             report.add("ERROR", f"Tool call #{tool_call_num} ({tool_name}): Missing required parameter '{req_param}'")
 
-    # Check for unexpected parameters (skip 'context' as it's standard across all tools via CommonParams)
+    # Check for unexpected parameters (skip 'sessionId' and 'workspaceId' as they are standard across all tools via CommonParams)
     for arg_name in args.keys():
-        if arg_name not in all_params and arg_name not in ['context', 'workspaceContext']:
+        if arg_name not in all_params and arg_name not in ['sessionId', 'workspaceId', 'context', 'workspaceContext']:
             report.add("WARN", f"Tool call #{tool_call_num} ({tool_name}): Unexpected parameter '{arg_name}' not in schema")
 
-    # Validate context structure if present
+    # Validate context structure if present (deprecated check, but kept for backward compat if context exists)
     if 'context' in args and 'context_schema' in schema:
         context = args['context']
         if not isinstance(context, dict):
@@ -546,38 +550,58 @@ def validate_context(args: dict, report: ExampleReport) -> None:
         report.add("ERROR", "Arguments must be a JSON object")
         return
 
-    # ALL tools require context from CommonParams - it must be present and first
-    if "context" not in args:
-        report.add("ERROR", "Missing required 'context' field in arguments (all tools require context from CommonParams)")
-        return
+    # Support both formats:
+    # 1. Old Format: 'context' object containing IDs and metadata
+    # 2. New Format: Top-level 'sessionId' and 'workspaceId' (metadata in thinking block)
 
-    keys = list(args.keys())
-    if keys[0] != "context":
-        report.add("ERROR", "Context object must be the first field in arguments")
-        return
-    ctx = args.get("context")
-    required_fields = [
-        "sessionId",
-        "workspaceId",
-        "sessionDescription",
-        "sessionMemory",
-        "toolContext",
-        "primaryGoal",
-        "subgoal",
-    ]
-    if not isinstance(ctx, dict):
-        report.add("ERROR", "context must be an object")
-        return
-    for field in required_fields:
-        if field not in ctx:
-            report.add("ERROR", f"context missing field '{field}'")
-    sess_id = ctx.get("sessionId")
-    if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
-        report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
-    ws_id = ctx.get("workspaceId")
-    # Accept "default" as a valid workspaceId (used for default workspace)
-    if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
-        report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
+    if "context" in args:
+        # --- OLD FORMAT (Nested in 'context' object) ---
+        ctx = args.get("context")
+        if not isinstance(ctx, dict):
+            report.add("ERROR", "context must be an object")
+            return
+            
+        # Validate required fields in context object
+        required_fields = [
+            "sessionId",
+            "workspaceId",
+            "sessionDescription",
+            "sessionMemory",
+            "toolContext",
+            "primaryGoal",
+            "subgoal",
+        ]
+        for field in required_fields:
+            if field not in ctx:
+                report.add("ERROR", f"context missing field '{field}'")
+                
+        # Validate IDs
+        sess_id = ctx.get("sessionId")
+        if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
+            report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
+            
+        ws_id = ctx.get("workspaceId")
+        if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
+            report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
+            
+    else:
+        # --- NEW FORMAT (Top-level arguments) ---
+        # Check for sessionId
+        if "sessionId" not in args:
+            report.add("ERROR", "Missing required 'sessionId' field in arguments (or missing 'context' object)")
+        else:
+            sess_id = args.get("sessionId")
+            if isinstance(sess_id, str) and not SESSION_ID_RE.match(sess_id):
+                report.add("ERROR", f"sessionId '{sess_id}' does not match generator format")
+
+        # Check for workspaceId
+        if "workspaceId" not in args:
+            report.add("ERROR", "Missing required 'workspaceId' field in arguments (or missing 'context' object)")
+        else:
+            ws_id = args.get("workspaceId")
+            # Accept "default" as a valid workspaceId (used for default workspace)
+            if isinstance(ws_id, str) and ws_id != "default" and not WORKSPACE_ID_RE.match(ws_id):
+                report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
 
 
 def validate_assistant_content(content: str, report: ExampleReport, system_ctx: Optional[SystemPromptContext] = None) -> None:

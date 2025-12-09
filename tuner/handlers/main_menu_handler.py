@@ -20,7 +20,7 @@ from tuner.handlers.base import BaseHandler
 from tuner.utils import detect_environment, load_env_file
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
-from Trainers.shared.ui import (
+from shared.ui import (
     print_menu,
     animated_menu,
     console,
@@ -103,10 +103,11 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.gguf_handler import GGUFHandler
+        from tuner.handlers.improve_handler import handle_improve
 
         # Step 1: Detect environment and load .env
         env = detect_environment()
-        env_loaded = load_env_file(self.repo_root)
+        env_loaded = load_env_file(self.repo_root / ".env")
 
         # Step 2: Build status info
         status_info = self._build_status_info(env, env_loaded)
@@ -117,7 +118,8 @@ class MainMenuHandler(BaseHandler):
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
             ("gguf", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
-            ("generate", f"{BOX['bullet']} Generate synthetic data (SelfPlay)"),
+            ("generate", f"{BOX['bullet']} Synth Chat (SelfPlay data generation)"),
+            ("improve", f"{BOX['bullet']} Improvement Engine (clean datasets)"),
             ("pipeline", f"{BOX['bullet']} Full pipeline (Train -> Upload -> Eval)"),
         ]
 
@@ -128,6 +130,7 @@ class MainMenuHandler(BaseHandler):
             "gguf": GGUFHandler(),
             "eval": EvalHandler(),
             "generate": GenerateHandler(),
+            "improve": handle_improve,
             "pipeline": PipelineHandler(),
         }
 
@@ -157,7 +160,12 @@ class MainMenuHandler(BaseHandler):
             # Dispatch to appropriate handler
             handler = handlers.get(choice)
             if handler:
-                exit_code = handler.handle()
+                # Support both class-based handlers with handle() and function handlers
+                if callable(handler) and not hasattr(handler, "handle"):
+                    handler()
+                    exit_code = 0
+                else:
+                    exit_code = handler.handle()
                 # Continue to next iteration regardless of exit code
                 # This allows user to try again after errors
             else:

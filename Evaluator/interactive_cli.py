@@ -28,7 +28,7 @@ from .config import (
     expand_path,
 )
 from .enums import BackendType
-from .lmstudio_client import LMStudioClient
+from .client_factory import create_client
 from .vllm_client import VLLMClient
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
@@ -146,7 +146,8 @@ def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
     settings_kwargs = build_settings_kwargs(args)
 
     # Create client for model listing
-    list_client = LMStudioClient(
+    list_client = create_client(
+        backend="lmstudio",
         settings=LMStudioSettings(model="__list__", **settings_kwargs),
         timeout=args.timeout,
         retries=args.retries,
@@ -173,7 +174,12 @@ def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
         seed=None,
         **settings_kwargs,
     )
-    client = LMStudioClient(settings=settings, timeout=args.timeout, retries=args.retries)
+    client = create_client(
+        backend="lmstudio",
+        settings=settings,
+        timeout=args.timeout,
+        retries=args.retries,
+    )
 
     return _run_evaluation_loop(
         client=client,

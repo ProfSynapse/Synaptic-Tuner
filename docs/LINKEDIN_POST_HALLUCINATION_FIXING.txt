@@ -1,0 +1,108 @@
+Automatically Fixing Hallucinations in LLM Training Data - At Scale, Locally
+
+THE PROBLEM
+
+When fine-tuning LLMs for tool use, hallucinations in your training data become permanent fixtures in your model's behavior.
+
+We discovered this the hard way: our dataset of 1,131 tool-calling examples was riddled with:
+• Made-up file paths that didn't exist in user requests
+• Invented dates, counts, and details never mentioned
+• Tool calls with hallucinated parameters
+• Destructive operations (delete, move) without explicit user confirmation
+
+Manual review? Impractical. Each example needs careful comparison of user input vs model output, checking thinking blocks, tool calls, and text responses. At ~5 minutes per example, that's 94+ hours of tedious work.
+
+THE SOLUTION: LLM-as-Judge/Improver Loop
+
+We built an automated quality improvement system that runs entirely locally.
+
+How it works:
+1. JUDGE - LLM evaluates each example against a rubric (0.0-1.0 score)
+2. IMPROVER - If failing, LLM fixes issues based on judge's feedback
+3. LOOP - Repeat until example scores 1.0 (passes threshold)
+4. LOCAL - No API costs = unlimited improvement attempts
+
+Key features:
+• YAML-based rubrics for defining quality criteria
+• Scope-based evaluation (full response, thinking blocks, tool calls, or text)
+• Safety enforcement (destructive actions require explicit user approval)
+• Structured validation (JSON schema for thinking blocks)
+• Crash-safe with incremental saving
+• Full response reconstruction (content + tool_calls)
+
+RUNNING LOCALLY WITH LM STUDIO
+
+The game-changer: local LLMs via LM Studio
+
+Why this matters:
+• No API costs
+• Unlimited retries per example (average 2-3 attempts to pass)
+• 1,131 examples × 2 min/example = ~38 hours total
+• Privacy-first (sensitive training data never leaves your machine)
+
+Memory optimization:
+• Loads dataset once, processes one example at a time
+• Writes immediately after each fix (flush to disk)
+• Explicit cleanup after each write
+• ~20MB memory footprint for 1,131 examples
+
+REAL RESULTS
+
+From our test run (examples 3-8):
+• Example 3: Hallucinated path removed → asks for clarification (2 attempts)
+• Example 4: Valid tool call preserved (explicit paths in request)
+• Example 7: Completely hallucinated path → removed, asks user (1 attempt)
+
+All 6 test examples fixed automatically. 100% pass rate after improvements.
+
+TECHNICAL APPROACH
+
+Example rubric enforcement:
+
+Hallucination Detection Rubric
+• Scope: response (evaluate thinking + tool_calls + text)
+• Pass threshold: 1.0 (must be perfect)
+• Validates: No made-up file paths, no invented dates/counts, destructive ops require explicit approval, IDs match system prompt
+
+The core loop:
+• Judge evaluates example
+• If failing, improver fixes based on feedback
+• Write immediately (crash-safe)
+• Explicit memory cleanup
+• Repeat until passing
+
+WHY THIS MATTERS
+
+Fine-tuning LLMs is expensive:
+• Compute costs for training runs
+• Data collection/curation time
+• Model evaluation cycles
+
+Garbage in, garbage out.
+
+If your training data teaches the model to hallucinate file paths or ignore safety checks, you've just baked those behaviors into every inference.
+
+This system ensures your training data is CLEAN, SAFE, and ACCURATE before you spend GPU hours training on it.
+
+OPEN QUESTIONS
+
+1. Rubric design: What quality criteria matter most for your use case?
+2. Multi-model judging: Would consensus from multiple judge models improve accuracy?
+3. Automated rubric generation: Can we generate rubrics from few-shot examples?
+4. Transfer learning: Do rubrics trained on one domain transfer to others?
+
+TOOLS & STACK
+
+• LM Studio - Local LLM inference
+• Python - Core processing logic
+• Multi-provider LLM abstraction (OpenRouter, LM Studio, Ollama)
+• YAML - Rubric definitions
+• JSON schema - Structured output validation
+
+Currently processing our full dataset (1,131 examples). Will share final metrics when complete!
+
+Interested in the approach? I'm happy to discuss the technical details, share rubric templates, or brainstorm applications to other data quality problems.
+
+Link to repo in comments 👇
+
+#MachineLearning #LLM #DataQuality #LocalAI #FineTuning #SyntheticData #AIEngineering

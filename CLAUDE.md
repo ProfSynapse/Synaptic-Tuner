@@ -13,6 +13,17 @@ Toolset-Training/
 ├── tuner.py               # Unified CLI entry point
 ├── run.sh                 # Bash wrapper (auto-activates conda)
 ├── run.ps1                # PowerShell wrapper
+├── shared/                # Shared infrastructure across project
+│   └── llm/              # Unified LLM client (OpenRouter, LM Studio, Ollama)
+├── improvement_engine/    # Dataset quality improvement system
+│   ├── core/             # Models, exceptions, interfaces
+│   ├── services/         # LLM service, validators, file handlers
+│   ├── utils/            # Logging, backup, YAML loading
+│   └── config/           # Quality guidelines, prompts, rules
+├── synth_chat/            # Synthetic chat generation (3-prompt pipeline)
+│   ├── generator.py      # Main generator class
+│   ├── configs/          # Generation configs (agents, behaviors, prompts)
+│   └── run_generation.py # Generation runner
 ├── Datasets/              # Synthetic training data in ChatML format (JSONL)
 ├── Tools/                 # Dataset validation and analysis utilities
 ├── Trainers/
@@ -23,7 +34,7 @@ Toolset-Training/
 │   ├── mistral_lora_mac/  # Apple Silicon (MLX) LoRA fine-tuning
 │   ├── rtx3090_kto/       # NVIDIA GPU (Unsloth) KTO fine-tuning
 │   └── rtx3090_sft/       # NVIDIA GPU (Unsloth) SFT fine-tuning
-├── Evaluator/             # Model testing harness (Ollama/LM Studio)
+├── Evaluator/             # Model testing harness (uses shared LLM via adapters)
 └── docs/                  # Architecture specs and setup guides
 ```
 
@@ -39,25 +50,25 @@ python tools/validate_syngen.py Datasets/syngen_toolset_v1.0.0_claude.jsonl
 python tools/analyze_tool_coverage.py Datasets/syngen_toolset_v1.0.0_claude.jsonl
 ```
 
-### Self-Play Data Generation
+### Synthetic Chat Generation
 
 **NEW!** Generate synthetic training data using your fine-tuned model:
 
 ```bash
 # Interactive mode (recommended)
-./Tools/run_selfplay.sh
+./Tools/run_synth_chat.sh
 
 # Quick test (100 examples)
-./Tools/run_selfplay.sh --quick
+./Tools/run_synth_chat.sh --quick
 
 # Standard generation (1000 examples)
-./Tools/run_selfplay.sh --standard
+./Tools/run_synth_chat.sh --standard
 
 # Large generation (5000 examples)
-./Tools/run_selfplay.sh --large
+./Tools/run_synth_chat.sh --large
 
 # PowerShell (Windows)
-.\Tools\run_selfplay.ps1
+.\Tools\run_synth_chat.ps1
 ```
 
 **What it does:**
@@ -67,7 +78,41 @@ python tools/analyze_tool_coverage.py Datasets/syngen_toolset_v1.0.0_claude.json
 4. Creates interleaved KTO datasets (True/False pattern)
 5. Ready for immediate KTO training
 
-**See:** [docs/SELF_PLAY_GENERATION.md](docs/SELF_PLAY_GENERATION.md) for complete guide.
+**See:** [docs/SYNTH_CHAT_GENERATION.md](docs/SYNTH_CHAT_GENERATION.md) for complete guide.
+
+### Dataset Improvement Engine
+
+**NEW!** Automatically improve the quality of thinking blocks in training datasets using LLM-based enhancement:
+
+```bash
+# Test on a single example (default: line 7, OpenRouter)
+python test_improvement.py
+
+# Test with different backends
+python test_improvement.py --backend lmstudio
+python test_improvement.py --backend openrouter --model openai/gpt-4o-mini
+python test_improvement.py --backend ollama --model llama2
+
+# Test different line
+python test_improvement.py --backend lmstudio --line 42
+
+# Via tuner CLI (interactive)
+python tuner.py improve  # Coming soon
+```
+
+**Features:**
+- **Multi-Provider Support**: OpenRouter (cloud), LM Studio (local), Ollama (local)
+- **Quality Enhancement**: Improves goal clarity, memory context, requirements/plan distinction
+- **Confidence Calibration**: Adjusts confidence scores based on operation risk
+- **Validation**: Ensures improved thinking blocks meet schema requirements
+- **Batch Processing**: Processes datasets in configurable batches with progress tracking
+
+**Architecture:**
+- `shared/llm/` - Unified LLM client (factory pattern, multiple providers)
+- `improvement_engine/` - Core improvement system with validators and file handlers
+- Backend/model are **CLI flags** (not env vars), API keys in `.env`
+
+**See:** `improvement_engine/README.md` for complete documentation.
 
 ### Setup & Installation
 
@@ -401,6 +446,62 @@ The codebase maintains **three parallel implementations** for different hardware
 2. **Refine with KTO** (`rtx3090_kto`) - Teach the model WHICH tool calls are better
 
 All trainers consume datasets from `Datasets/` directory.
+
+### Shared LLM Client System
+
+**NEW!** Unified LLM client with multi-provider support for use across the codebase:
+
+**Architecture:**
+```
+shared/llm/
+├── __init__.py           # Public API exports
+├── base.py               # BaseLLMClient interface
+├── config.py             # LLMConfig (environment-based)
+├── factory.py            # create_client() factory
+├── exceptions.py         # LLMError and subclasses
+└── providers/
+    ├── openrouter.py     # OpenRouter (cloud)
+    ├── lmstudio.py       # LM Studio (local)
+    └── ollama.py         # Ollama (local)
+```
+
+**Key Features:**
+- **Abstract Base Class**: `BaseLLMClient` defines common interface
+- **Factory Pattern**: `create_client(provider, model)` for dynamic instantiation
+- **Environment Config**: API keys/hosts from .env, backend/model from runtime
+- **Consistent API**: `chat()`, `structured_output()`, `test_connection()`
+- **Provider-Specific Handling**:
+  - OpenRouter: Native json_schema support
+  - LM Studio: Prompt-based structured output (OpenAI-compatible API)
+  - Ollama: Native API with format="json"
+
+**Usage:**
+```python
+from shared.llm import create_client
+
+# Create client (API keys from .env)
+client = create_client(provider="lmstudio", model="local-model")
+
+# Simple chat
+response = client.chat(messages=[...], temperature=0.7)
+
+# Structured output with schema
+result = client.structured_output(messages=[...], schema={...})
+```
+
+**Used By:**
+- `improvement_engine/services/llm_service.py` - Dataset quality improvement
+- `Evaluator/shared_llm_adapters.py` - Evaluation harness (via adapters)
+- Future: `synth_chat/` - Synthetic chat generation (migration in progress)
+
+**Evaluator Integration:**
+The Evaluator uses **adapter classes** (`SharedLMStudioAdapter`, `SharedOllamaAdapter`) that wrap the shared LLM client to provide the Evaluator's specialized interface:
+- `BackendResponse` format with latency tracking
+- Settings-based configuration
+- Health checks and connection testing
+- Full backward compatibility with existing Evaluator code
+
+This eliminates duplicate HTTP/request logic while preserving the Evaluator's specialized features.
 
 ### Data Flow Pipeline
 

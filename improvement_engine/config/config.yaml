@@ -1,0 +1,6 @@
+llm:
+  # Cloud defaults (used as CLI defaults; API keys live in root .env)
+  provider: openrouter
+  model: openai/gpt-5-mini
+  temperature: 0.3
+  max_tokens: 2048

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Merge tools datasets from agent folders into a single SFT dataset.
+Merge *thinking* tools datasets from agent folders into a single SFT dataset.
 
-This script:
-1. Reads all individual agent dataset files (tools_v1.0.jsonl)
+This script now:
+1. Reads the latest thinking tool datasets for each agent (auto-picks newest version)
 2. Combines them with shuffling for training diversity
-3. Creates a merged dataset file with metadata
+3. Emits the reasoning-focused merged dataset + metadata
 """
 
 import json
@@ -15,14 +15,28 @@ from datetime import datetime
 from typing import List, Dict
 
 
-# Agent categories
-AGENTS = [
-    "vaultManager",
-    "contentManager",
-    "memoryManager",
-    "vaultLibrarian",
-    "agentManager"
-]
+def parse_version(version_str: str) -> tuple:
+    """Convert a version string like '1.5.1' into a comparable tuple."""
+    try:
+        return tuple(int(x) for x in version_str.split("."))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def find_latest_version(agent_dir: Path) -> str:
+    """Return the latest tools_v*.jsonl version for the given agent directory."""
+    if not agent_dir.exists():
+        return None
+    latest_version = None
+    for file in agent_dir.glob("tools_v*.jsonl"):
+        # Extract version between "tools_v" and ".jsonl"
+        name = file.name
+        if not name.startswith("tools_v") or not name.endswith(".jsonl"):
+            continue
+        version_str = name[len("tools_v") : -len(".jsonl")]
+        if latest_version is None or parse_version(version_str) > parse_version(latest_version):
+            latest_version = version_str
+    return latest_version
 
 
 def load_dataset(file_path: Path) -> List[Dict]:
@@ -44,47 +58,56 @@ def load_dataset(file_path: Path) -> List[Dict]:
 
 
 def main():
-    # Configuration
-    tools_datasets_dir = Path(__file__).parent.parent / "tools_datasets"
+    # Configuration (thinking datasets)
+    tools_datasets_dir = Path(__file__).parent.parent / "tools_datasets" / "thinking"
     output_dir = Path(__file__).parent.parent
-    output_file = output_dir / "tools_sft_v1.5_11.29.25.jsonl"
+    output_file = output_dir / "reasoning_tools_sft_12.7.25.jsonl"
 
-    # Agent versions - use v1.4 where available (corrupted data removed)
-    agent_versions = {
-        "agentManager": "v1.3",
-        "contentManager": "v1.4",   # 4 corrupted examples removed
-        "memoryManager": "v1.4",    # 6 corrupted examples removed
-        "vaultLibrarian": "v1.3",
-        "vaultManager": "v1.3"
-    }
+    # Agent categories
+    agents = [
+        "vaultManager",
+        "contentManager",
+        "memoryManager",
+        "vaultLibrarian",
+        "agentManager",
+    ]
 
     # Load all datasets
-    print("Loading tools datasets (v1.4 with corrupted data removed)...")
+    print("Loading latest thinking tools datasets...")
     all_examples = []
     agent_stats = {}
 
-    for agent in AGENTS:
-        version = agent_versions[agent]
-        file_path = tools_datasets_dir / agent / f"tools_{version}.jsonl"
-        if file_path.exists():
-            examples = load_dataset(file_path)
-            all_examples.extend(examples)
+    agent_versions = {}
+    for agent in agents:
+        agent_dir = tools_datasets_dir / agent
+        latest_version = find_latest_version(agent_dir)
+        if not latest_version:
+            print(f"  WARNING: No dataset found for {agent} in {agent_dir}")
+            continue
 
-            # Count labels for stats (some examples may have label field)
-            positive = sum(1 for ex in examples if ex.get('label') is True)
-            negative = sum(1 for ex in examples if ex.get('label') is False)
-            no_label = sum(1 for ex in examples if 'label' not in ex)
+        version_tag = f"v{latest_version}"
+        file_path = agent_dir / f"tools_{version_tag}.jsonl"
+        if not file_path.exists():
+            print(f"  WARNING: Expected file not found: {file_path}")
+            continue
 
-            agent_stats[agent] = {
-                "total": len(examples),
-                "positive": positive,
-                "negative": negative,
-                "no_label": no_label,
-                "version": version
-            }
-            print(f"  {agent} ({version}): {len(examples)} examples")
-        else:
-            print(f"  WARNING: {file_path} not found")
+        examples = load_dataset(file_path)
+        all_examples.extend(examples)
+
+        # Count labels for stats (some examples may have label field)
+        positive = sum(1 for ex in examples if ex.get('label') is True)
+        negative = sum(1 for ex in examples if ex.get('label') is False)
+        no_label = sum(1 for ex in examples if 'label' not in ex)
+
+        agent_versions[agent] = version_tag
+        agent_stats[agent] = {
+            "total": len(examples),
+            "positive": positive,
+            "negative": negative,
+            "no_label": no_label,
+            "version": version_tag
+        }
+        print(f"  {agent} ({version_tag}): {len(examples)} examples")
 
     # Overall stats
     total_positive = sum(1 for ex in all_examples if ex.get('label') is True)
@@ -109,9 +132,9 @@ def main():
     # Write metadata file
     metadata = {
         "created": datetime.now().isoformat(),
-        "source": "tools_datasets merge v1.5 11.29.25",
-        "version": "1.5",
-        "agents": AGENTS,
+        "source": "tools_datasets thinking merge 12.7.25",
+        "version": "thinking-latest",
+        "agents": agents,
         "agent_versions": agent_versions,
         "agent_stats": agent_stats,
         "total_examples": len(all_examples),
@@ -120,7 +143,7 @@ def main():
         "no_label_examples": total_no_label,
         "shuffled": True,
         "format": "SFT-compatible ChatML",
-        "notes": "v1.5 fixes: removed 10 corrupted examples (malformed responses) from contentManager and memoryManager"
+        "notes": "Merged latest thinking tool datasets; auto-selects newest version per agent"
     }
 
     metadata_file = output_file.with_suffix('.metadata.json')
