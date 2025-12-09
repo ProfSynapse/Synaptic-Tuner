@@ -647,14 +647,75 @@ class ReliableGGUFConverter:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 print(f"✓ Cleaned up {temp_dir}")
 
+                # If using WSL temp and parent directory is now empty, remove it too
+                if use_wsl_temp:
+                    temp_base = Path.home() / "tmp_gguf"
+                    try:
+                        # Check if directory is empty
+                        if temp_base.exists() and not any(temp_base.iterdir()):
+                            temp_base.rmdir()
+                            print(f"✓ Removed empty parent directory {temp_base}")
+                    except (OSError, PermissionError):
+                        # Directory not empty or permission issue, that's fine
+                        pass
+
+
+def cleanup_orphaned_temp_files(max_age_hours: int = 24) -> int:
+    """
+    Clean up orphaned temporary files in ~/tmp_gguf.
+
+    Removes temp directories older than max_age_hours that may have been
+    left behind due to interrupted conversions.
+
+    Args:
+        max_age_hours: Maximum age in hours before cleaning up
+
+    Returns:
+        Number of directories cleaned up
+    """
+    temp_base = Path.home() / "tmp_gguf"
+    if not temp_base.exists():
+        return 0
+
+    cleaned = 0
+    cutoff_time = time.time() - (max_age_hours * 3600)
+
+    print(f"Scanning {temp_base} for orphaned files older than {max_age_hours}h...")
+
+    for item in temp_base.iterdir():
+        if item.is_dir():
+            try:
+                # Check directory age
+                mtime = item.stat().st_mtime
+                if mtime < cutoff_time:
+                    size_mb = sum(f.stat().st_size for f in item.rglob('*') if f.is_file()) / (1024 * 1024)
+                    shutil.rmtree(item)
+                    cleaned += 1
+                    print(f"  ✓ Removed {item.name} ({size_mb:.1f} MB)")
+            except (OSError, PermissionError) as e:
+                print(f"  ✗ Failed to remove {item.name}: {e}")
+
+    # Try to remove parent if empty
+    try:
+        if not any(temp_base.iterdir()):
+            temp_base.rmdir()
+            print(f"  ✓ Removed empty parent directory {temp_base}")
+    except (OSError, PermissionError):
+        pass
+
+    if cleaned == 0:
+        print("  No orphaned files found")
+
+    return cleaned
+
 
 def main():
     """CLI entry point for testing."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Convert model to GGUF")
-    parser.add_argument("model_path", help="Path to model (LoRA or full)")
-    parser.add_argument("output_dir", help="Output directory")
+    parser.add_argument("model_path", nargs="?", help="Path to model (LoRA or full)")
+    parser.add_argument("output_dir", nargs="?", help="Output directory")
     parser.add_argument("--name", help="Model name for output files")
     parser.add_argument("--quants", nargs="+", default=DEFAULT_QUANTIZATIONS,
                         help="Quantization methods")
@@ -662,8 +723,22 @@ def main():
                         help="Base GGUF data type")
     parser.add_argument("--no-cleanup", action="store_true",
                         help="Keep temp files")
+    parser.add_argument("--cleanup-orphaned", action="store_true",
+                        help="Clean up orphaned temp files and exit")
+    parser.add_argument("--max-age-hours", type=int, default=24,
+                        help="Max age for orphaned files (default: 24h)")
 
     args = parser.parse_args()
+
+    # Handle cleanup mode
+    if args.cleanup_orphaned:
+        cleaned = cleanup_orphaned_temp_files(args.max_age_hours)
+        print(f"\nCleaned up {cleaned} orphaned directories")
+        return
+
+    # Normal conversion mode
+    if not args.model_path or not args.output_dir:
+        parser.error("model_path and output_dir are required for conversion")
 
     converter = ReliableGGUFConverter()
     converter.convert(

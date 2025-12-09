@@ -42,9 +42,10 @@ class ThinkingBlock:
 class Example:
     """Represents a complete training example."""
     conversations: List[Dict[str, str]]
-    label: Optional[bool] = None  # Optional for thinking datasets
+    label: Optional[bool] = None  # Optional for thinking datasets (KTO training)
     behavior: Optional[str] = None
     pattern: Optional[str] = None
+    quality_labels: Optional[List[str]] = None  # Manual quality labels from labeling mode
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -57,6 +58,8 @@ class Example:
             result["behavior"] = self.behavior
         if self.pattern:
             result["pattern"] = self.pattern
+        if self.quality_labels:
+            result["quality_labels"] = self.quality_labels
         return result
 
     @classmethod
@@ -66,7 +69,8 @@ class Example:
             conversations=data["conversations"],
             label=data.get("label"),  # Optional for thinking datasets
             behavior=data.get("behavior"),
-            pattern=data.get("pattern")
+            pattern=data.get("pattern"),
+            quality_labels=data.get("quality_labels")  # Optional manual labels
         )
 
 
@@ -139,3 +143,87 @@ class ImprovementConfig:
             raise ValueError("Start line must be at least 1")
         if self.end_line and self.end_line < self.start_line:
             raise ValueError("End line must be >= start line")
+
+
+# ============================================================================
+# Labeling Mode Models
+# ============================================================================
+
+
+@dataclass
+class LabelingConfig:
+    """
+    Configuration for interactive labeling mode.
+
+    Interactive labeling allows manual annotation of dataset examples with
+    configurable categories defined in labeling_categories.yaml.
+    """
+    input_file: str
+    output_file: str
+    categories_config: str = "improvement_engine/config/labeling_categories.yaml"
+    start_line: int = 1
+    end_line: Optional[int] = None
+    resume: bool = True  # Resume from last labeled line
+    field_name: str = "quality_labels"  # Field name for storing labels in JSONL
+    dry_run: bool = False
+
+    def validate(self) -> None:
+        """Validate configuration."""
+        if self.start_line < 1:
+            raise ValueError("Start line must be at least 1")
+        if self.end_line and self.end_line < self.start_line:
+            raise ValueError("End line must be >= start line")
+
+
+@dataclass
+class LabelingResult:
+    """Result of labeling a single example."""
+    line_number: int
+    original: Example
+    labeled: Example
+    tags: List[str]
+    skipped: bool
+    timestamp: str
+
+    def __str__(self) -> str:
+        if self.skipped:
+            return f"⊘ Line {self.line_number}: Skipped"
+        else:
+            tags_str = ", ".join(self.tags) if self.tags else "no labels"
+            return f"✓ Line {self.line_number}: Labeled [{tags_str}]"
+
+
+@dataclass
+class LabelingSession:
+    """Tracks labeling session progress and statistics."""
+    input_file: str
+    output_file: str
+    total_examples: int
+    labeled_count: int = 0
+    skipped_count: int = 0
+    last_line: int = 0
+    start_time: str = ""
+    categories_used: Dict[str, int] = field(default_factory=dict)  # Tag -> count
+
+    @property
+    def completion_rate(self) -> float:
+        """Calculate completion rate."""
+        total_processed = self.labeled_count + self.skipped_count
+        return (total_processed / self.total_examples * 100) if self.total_examples > 0 else 0.0
+
+    @property
+    def labeling_rate(self) -> float:
+        """Calculate labeling rate (non-skipped)."""
+        total_processed = self.labeled_count + self.skipped_count
+        return (self.labeled_count / total_processed * 100) if total_processed > 0 else 0.0
+
+    def __str__(self) -> str:
+        total_processed = self.labeled_count + self.skipped_count
+        return (
+            f"Labeling Session:\n"
+            f"  Processed: {total_processed}/{self.total_examples} "
+            f"({self.completion_rate:.1f}%)\n"
+            f"  Labeled: {self.labeled_count} ({self.labeling_rate:.1f}%)\n"
+            f"  Skipped: {self.skipped_count}\n"
+            f"  Last line: {self.last_line}"
+        )

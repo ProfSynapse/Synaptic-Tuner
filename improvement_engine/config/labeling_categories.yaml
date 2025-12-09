@@ -1,0 +1,86 @@
+# Labeling Categories Configuration
+# Configure how examples are displayed and what categories are available for labeling
+
+# Display configuration - what to show during labeling
+display:
+  show_conversation: true        # Show full conversation history
+  show_response_text: true       # Show assistant response text
+  show_tool_calls: true          # Show tool calls and parameters
+  show_thinking_block: true      # Show thinking block if present
+  show_line_number: true         # Show line number for reference
+  show_existing_labels: true     # Show existing quality_labels if present
+
+# Labeling configuration
+labeling:
+  allow_multiple: true           # Allow multiple tags per example
+  allow_skip: true               # Allow skipping examples (no label)
+  confirm_before_save: false     # Require confirmation before saving each label
+  allow_edit: true               # Allow editing existing labels
+  field_name: "quality_labels"   # Field name to store labels in JSONL
+
+# Available categories/tags
+# Users can customize this list with their own categories
+categories:
+  - tag: "hallucinated"
+    description: "Model makes claims not supported by context or makes up information"
+    color: "red"                 # For future CLI color coding
+    aliases: ["hallu", "h"]      # Short aliases for quick entry
+
+  - tag: "good"
+    description: "High quality example - correct tool selection, accurate response, proper reasoning"
+    color: "green"
+    aliases: ["g"]
+
+  - tag: "bad"
+    description: "Poor quality example - wrong tool, incorrect reasoning, or inappropriate response"
+    color: "red"
+    aliases: ["b"]
+
+  - tag: "incomplete"
+    description: "Response is partial or missing critical information"
+    color: "yellow"
+    aliases: ["inc", "i"]
+
+  - tag: "wrong_tool"
+    description: "Incorrect tool selection for the task"
+    color: "orange"
+    aliases: ["wt", "w"]
+
+  - tag: "poor_reasoning"
+    description: "Thinking block has weak or illogical reasoning"
+    color: "orange"
+    aliases: ["pr"]
+
+  - tag: "context_mismatch"
+    description: "Response doesn't align with conversation context or user request"
+    color: "orange"
+    aliases: ["cm", "c"]
+
+  - tag: "excellent"
+    description: "Exemplary quality - should be used as a reference example"
+    color: "blue"
+    aliases: ["ex", "e"]
+
+  - tag: "needs_review"
+    description: "Unclear quality, needs manual review or expert opinion"
+    color: "yellow"
+    aliases: ["nr", "r"]
+
+  - tag: "incorrect_parameters"
+    description: "Tool call has wrong or invalid parameters"
+    color: "orange"
+    aliases: ["ip"]
+
+# Progress tracking
+progress:
+  save_frequency: 10             # Save progress every N labels
+  progress_file: ".labeling_progress.json"  # Track labeled lines
+  backup_on_start: true          # Create backup of input file before labeling
+
+# UI/Display formatting
+ui:
+  max_line_length: 100           # Wrap long lines at this length
+  separator_char: "─"            # Character for visual separators
+  header_char: "═"               # Character for headers
+  indent_size: 2                 # Spaces for indentation
+  show_timestamps: false         # Show timestamps in progress updates

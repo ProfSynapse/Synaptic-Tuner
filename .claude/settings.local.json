@@ -157,7 +157,9 @@
       "Bash(Datasets/tools_datasets/thinking/vaultManager/tools_v1.3.jsonl )",
       "Bash(improvement_engine/test_batch_output.jsonl )",
       "Bash(improvement_engine/test_batch_100.jsonl )",
-      "Bash(improvement_engine/test_batch_plain_language.jsonl )"
+      "Bash(improvement_engine/test_batch_plain_language.jsonl )",
+      "Bash(du:*)",
+      "Bash(sort:*)"
     ],
     "deny": [],
     "ask": []
