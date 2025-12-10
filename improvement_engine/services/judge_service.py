@@ -67,11 +67,21 @@ class JudgeService:
             )
 
             # Determine pass/fail
-            score = judgment.get("score", 0.0)
+            # Find score field (could be "score", "factuality_score", "confidence_score", etc.)
+            score = 0.0
+            for key in judgment.keys():
+                if 'score' in key.lower() and isinstance(judgment[key], (int, float)):
+                    score = float(judgment[key])
+                    break
+
             passed = score >= self.rubric["pass_threshold"]
 
-            # Extract feedback
-            feedback = judgment.get("improvement_feedback", "")
+            # Extract feedback (try multiple field names)
+            feedback = (judgment.get("improvement_feedback") or
+                       judgment.get("factuality_feedback") or
+                       judgment.get("confidence_feedback") or
+                       judgment.get("feedback") or
+                       "")
 
             return JudgmentResult(
                 score=score,

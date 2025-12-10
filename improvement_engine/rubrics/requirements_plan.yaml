@@ -1,48 +1,33 @@
-name: "Requirements vs Plan"
-description: "Ensures requirements and plan are distinct (prerequisites vs execution steps)"
-scope: "thinking"
+name: Requirements vs Plan
+description: Ensures requirements and plan are distinct (prerequisites vs execution
+  steps)
+scope: thinking
 pass_threshold: 0.8
-
-judge_prompt: |
-  ## Requirements vs Plan Distinction Check
-
-  Verify requirements and plan are properly separated.
-
-  **REQUIREMENTS = Prerequisites (what must be TRUE):**
-  - Use CHECK, VERIFY, CONFIRM, EXISTS language
-  - Ask "What must be true before proceeding?"
-  - Check state BEFORE acting
-  - Focus on: file existence, current state, no conflicts
-  - NEVER mention permissions (always assumed available)
-  - Examples:
-    - "config.yaml exists"
-    - "no uncommitted changes"
-    - "target path doesn't already exist"
-
-  **PLAN = Execution steps (what to DO):**
-  - Use EXECUTE, READ, WRITE, UPDATE, CREATE language
-  - State "Here's what I'll do"
-  - Describe actions to take
-  - Examples:
-    - "Read current config"
-    - "Update version field"
-    - "Write changes to file"
-
-  **PROBLEMS:**
-  - Requirements that are actions: "Update the file" in requirements
-  - Plan items that are checks: "Verify file exists" in plan
-  - Duplicates between requirements and plan
-  - Requirements mentioning permissions: "have write access"
-
-  **Examples:**
-
-  BAD requirements: ["Batch content edits", "Modifying existing content"]
-  BAD plan: ["Batch content edits", "Modifying existing content"]
-  (These are identical and neither is properly categorized)
-
-  GOOD requirements: ["file.md exists", "no pending changes"]
-  GOOD plan: ["Read file.md", "Update content", "Write back"]
-
+judge_prompt: "## Requirements vs Plan Distinction Check\n\nVerify requirements and\
+  \ plan are properly separated.\n\n**REQUIREMENTS = Prerequisites (what must be TRUE):**\n\
+  - Use CHECK, VERIFY, CONFIRM, EXISTS language\n- Ask \"What must be true before\
+  \ proceeding?\"\n- Check state BEFORE acting\n- Focus on: file existence, current\
+  \ state, no conflicts\n- NEVER mention permissions (always assumed available)\n\
+  - Examples:\n  - \"config.yaml exists\"\n  - \"no uncommitted changes\"\n  - \"\
+  target path doesn't already exist\"\n\n**PLAN = Execution steps (what to DO):**\n\
+  - Use EXECUTE, READ, WRITE, UPDATE, CREATE language\n- State \"Here's what I'll\
+  \ do\"\n- Describe actions to take\n- Examples:\n  - \"Read current config\"\n \
+  \ - \"Update version field\"\n  - \"Write changes to file\"\n\n**PROBLEMS:**\n-\
+  \ Requirements that are actions: \"Update the file\" in requirements\n- Plan items\
+  \ that are checks: \"Verify file exists\" in plan\n- Duplicates between requirements\
+  \ and plan\n- Requirements mentioning permissions: \"have write access\"\n\n**Examples:**\n\
+  \nBAD requirements: [\"Batch content edits\", \"Modifying existing content\"]\n\
+  BAD plan: [\"Batch content edits\", \"Modifying existing content\"]\n(These are\
+  \ identical and neither is properly categorized)\n\nGOOD requirements: [\"file.md\
+  \ exists\", \"no pending changes\"]\nGOOD plan: [\"Read file.md\", \"Update content\"\
+  , \"Write back\"]\n\n\n**SCORING:**\n- **1.0** = Perfect distinction, requirements\
+  \ are prerequisites, plan is execution\n- **0.7-0.9** = Good distinction, minor\
+  \ overlap\n- **0.4-0.6** = Significant overlap or confusion\n- **0.0-0.3** = Requirements\
+  \ and plan are duplicates or completely swapped\n\n**OUTPUT:**\nReturn JSON with:\n\
+  - `distinction_score`: 0.0-1.0 distinction quality score\n- `requirements_are_prerequisites`:\
+  \ boolean\n- `plan_is_actionable`: boolean\n- `has_duplicates`: boolean\n- `mentions_permissions`:\
+  \ boolean (bad if true)\n- `problematic_items`: list of issues\n- `distinction_feedback`:\
+  \ brief explanation"
 output_schema:
   type: object
   properties:
@@ -65,7 +50,11 @@ output_schema:
     distinction_feedback:
       type: string
   required:
-    - distinction_score
-    - requirements_are_prerequisites
-    - plan_are_actions
-    - distinction_feedback
+  - distinction_score
+  - requirements_are_prerequisites
+  - plan_are_actions
+  - has_duplicates
+  - mentions_permissions
+  - problematic_items
+  - distinction_feedback
+  additionalProperties: false

@@ -201,7 +201,7 @@ The LLM applies **5 boolean labels** to each example:
 
 ### Configuration
 
-Evaluation criteria are defined in `improvement_engine/config/labeling_categories.yaml`:
+Evaluation criteria are defined in `improvement_engine/rubrics/quality_labels.yaml`:
 
 ```yaml
 # System prompt for LLM judge
