@@ -445,6 +445,13 @@ class RubricRunner:
 
         # Build improvement feedback from all failed rubrics
         feedback_parts = []
+
+        # First check programmatic thinking_schema (not in rubric_keys, added in judge())
+        schema_score = judgment.scores.get("thinking_schema", 1.0)
+        if schema_score < 1.0:
+            fb = judgment.feedback.get("thinking_schema", "Schema validation failed")
+            feedback_parts.append(f"**thinking_schema** (score: {schema_score:.2f}, needs: 1.0):\n{fb}")
+
         for key in rubric_keys:
             score = judgment.scores.get(key, 0)
             rubric = self._load_rubric(key)
@@ -860,8 +867,12 @@ Output ONLY the response, no explanations.
 
             # Log scores
             for key, score in judgment.scores.items():
-                rubric = self._load_rubric(key)
-                threshold = rubric.get("pass_threshold", 0.8)
+                # thinking_schema is programmatic, not a rubric file
+                if key == "thinking_schema":
+                    threshold = 1.0
+                else:
+                    rubric = self._load_rubric(key)
+                    threshold = rubric.get("pass_threshold", 0.8)
                 status = "✓" if score >= threshold else "✗"
                 self.logger.info(f"  {status} {key}: {score:.2f} (threshold: {threshold})")
 
