@@ -277,6 +277,38 @@ class RubricRunner:
 
         return system_prompt, user_request, assistant_response
 
+    def _validate_thinking_schema_programmatic(self, example: Dict) -> Tuple[bool, List[str]]:
+        """
+        Programmatically validate thinking block schema.
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+        """
+        import re
+
+        for conv in example.get("conversations", []):
+            if conv.get("role") == "assistant":
+                content = conv.get("content", "")
+
+                # Check for thinking block
+                match = re.search(r"<thinking>(.*?)</thinking>", content, re.DOTALL)
+                if not match:
+                    return False, ["No <thinking> block found"]
+
+                thinking_str = match.group(1).strip()
+
+                # Try to parse as JSON
+                try:
+                    thinking_block = json.loads(thinking_str)
+                except json.JSONDecodeError as e:
+                    return False, [f"Invalid JSON: {str(e)}"]
+
+                # Use the schema validator
+                is_valid, errors = self.schema_validator.validate(thinking_block)
+                return is_valid, errors
+
+        return False, ["No assistant message found"]
+
     def judge(
         self,
         example: Dict,
@@ -293,6 +325,9 @@ class RubricRunner:
             JudgmentResult with pass/fail, scores, and feedback
         """
         system_prompt, user_request, assistant_response = self._extract_conversations(example)
+
+        # FIRST: Run programmatic schema validation (fast, deterministic)
+        schema_valid, schema_errors = self._validate_thinking_schema_programmatic(example)
 
         # Build composed prompt and schema
         judge_prompt = self._compose_judge_prompt(
@@ -311,6 +346,12 @@ class RubricRunner:
             scores = {}
             feedback = {}
             all_passed = True
+
+            # Add schema validation result (programmatic, not from LLM)
+            scores["thinking_schema"] = 1.0 if schema_valid else 0.0
+            if not schema_valid:
+                all_passed = False
+                feedback["thinking_schema"] = f"Schema errors: {'; '.join(schema_errors)}"
 
             for key in rubric_keys:
                 rubric = self._load_rubric(key)
@@ -418,28 +459,44 @@ class RubricRunner:
         # Build tool call format instructions if original had tool calls
         tool_format_instructions = ""
         if original_tool_calls:
-            tool_format_instructions = """
+            # Extract tool name and schema from original
+            original_tool = original_tool_calls[0] if original_tool_calls else {}
+            original_func = original_tool.get("function", {})
+            original_tool_name = original_func.get("name", "unknown")
+            try:
+                original_args = json.loads(original_func.get("arguments", "{}"))
+            except:
+                original_args = {}
+
+            # Build example with actual tool schema
+            tool_format_instructions = f"""
 ## Tool Call Format
+
+The original response used tool: `{original_tool_name}`
+With these parameters: {json.dumps(list(original_args.keys()))}
 
 If making a tool call, use this EXACT format after the thinking block:
 
 ```
 [TOOL_CALL]
-tool_name: <tool_name>
+tool_name: {original_tool_name}
 arguments:
-{
-  "param1": "value1",
-  "param2": "value2",
-  "sessionId": "<from system prompt>",
-  "workspaceId": "<from system prompt>"
-}
+{{
+  {chr(10).join(f'  "{k}": "<value>",' for k in original_args.keys())}
+}}
+```
+
+**Original tool call for reference (DO NOT copy fabricated values like paths):**
+```json
+{json.dumps(original_args, indent=2)}
 ```
 
 IMPORTANT for tool calls:
+- Use the SAME tool name and parameter names as the original
 - sessionId and workspaceId MUST match the system prompt exactly
 - Only use file paths explicitly mentioned in the user request
 - If user request is vague (e.g., "my troubleshooting guide" without path), you MUST ask for clarification instead of guessing a path
-- Do NOT invent paths like "Support/troubleshooting.md" if user just said "troubleshooting guide"
+- Do NOT copy fabricated paths from the original - if the path wasn't in the user request, ASK for it
 """
 
         improve_prompt = f"""Completely regenerate the assistant response to fix all issues.
@@ -613,9 +670,10 @@ Output ONLY the response, no explanations.
 
     def _validate_and_fix_thinking_schema(self, improved: Dict, original: Dict) -> Dict:
         """
-        Validate thinking block schema and fix if needed.
+        Convert YAML-style thinking to JSON format.
 
-        Handles both JSON and YAML-style thinking blocks, converting YAML to JSON.
+        Does NOT patch missing fields - that's handled by the thinking_schema rubric
+        which will force regeneration if schema is invalid.
         """
         import re
 
@@ -633,29 +691,22 @@ Output ONLY the response, no explanations.
                 # Try to parse as JSON first
                 try:
                     thinking_block = json.loads(thinking_str)
+                    # Already valid JSON - just ensure it's clean
+                    new_thinking_str = json.dumps(thinking_block)
+                    new_content = content.replace(match.group(0), f"<thinking>\n{new_thinking_str}\n</thinking>")
+                    conv["content"] = new_content
                 except json.JSONDecodeError:
                     # Not valid JSON - try to convert YAML-style to JSON
                     thinking_block = self._parse_yaml_style_thinking(thinking_str)
-                    if thinking_block is None:
-                        self.logger.warning("Could not parse thinking block as JSON or YAML")
-                        continue
-
-                # Validate schema
-                is_valid, errors = self.schema_validator.validate(thinking_block)
-
-                if not is_valid:
-                    self.logger.warning(f"Schema errors: {errors}")
-                    # Try to fix using original
-                    original_thinking = self._extract_thinking_from_example(original)
-                    if original_thinking:
-                        thinking_block = self.schema_validator.enforce_schema_on_dict(
-                            thinking_block, original_thinking
-                        )
-
-                # Convert back to JSON string and update content
-                new_thinking_str = json.dumps(thinking_block)
-                new_content = content.replace(match.group(0), f"<thinking>\n{new_thinking_str}\n</thinking>")
-                conv["content"] = new_content
+                    if thinking_block is not None:
+                        # Successfully parsed YAML - convert to JSON
+                        new_thinking_str = json.dumps(thinking_block)
+                        new_content = content.replace(match.group(0), f"<thinking>\n{new_thinking_str}\n</thinking>")
+                        conv["content"] = new_content
+                        self.logger.info("Converted YAML-style thinking to JSON")
+                    else:
+                        # Could not parse - leave as-is, the thinking_schema rubric will fail it
+                        self.logger.warning("Could not parse thinking block - will be caught by schema rubric")
                 break
 
         return improved
