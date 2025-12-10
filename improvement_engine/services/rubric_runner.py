@@ -26,6 +26,7 @@ from shared.llm import create_client
 from shared.llm.config import LLMConfig
 from ..utils.yaml_loader import load_yaml
 from ..utils.logger import ImproveLogger
+from .schema_validator import ThinkingSchemaValidator
 
 
 @dataclass
@@ -94,6 +95,9 @@ class RubricRunner:
 
         self.llm_client = create_client(config=config)
         self.backend = backend
+
+        # Schema validator for thinking blocks
+        self.schema_validator = ThinkingSchemaValidator(logger=self.logger)
 
         # Discover available rubrics
         self.available_rubrics = self._discover_rubrics()
@@ -469,13 +473,21 @@ IMPORTANT for tool calls:
    - If user says "add intro" but doesn't specify content → ask what to add or use generic placeholder
    - NEVER invent: file paths, dates, edit history, file contents, user context
 
-2. **Thinking Block** must have:
-   - goal: What to do (use ONLY info from user request)
-   - memory: Just reference the user's request, no invented context
-   - requirements: Prerequisites (file exists, etc.) - no permissions
-   - assessment: {{complex: bool, risky: bool}}
-   - confidence: 0.3-0.5 risky, 0.6-0.8 medium, 0.85-0.95 safe
-   - plan: Steps to take
+2. **Thinking Block** must be VALID JSON inside `<thinking>` tags:
+   ```
+   <thinking>
+   {{"goal": "...", "memory": "...", "requirements": [...], "assessment": {{"complex": false, "risky": false}}, "confidence": 0.8, "plan": [...]}}
+   </thinking>
+   ```
+   Required fields:
+   - goal (string): What to do (use ONLY info from user request)
+   - memory (string): Just reference the user's request, no invented context (min 20 chars)
+   - requirements (array): Prerequisites (file exists, etc.) - NOT actions
+   - assessment (object): {{"complex": bool, "risky": bool}}
+   - confidence (number): 0.3-0.5 risky, 0.6-0.8 medium, 0.85-0.95 safe
+   - plan (array): Action steps to take - NOT prerequisites
+
+   **CRITICAL**: Use JSON format with double quotes, NOT YAML format. No `key: value` on separate lines.
 
 3. **If user request is vague** (no specific file path given):
    - Do NOT make a tool call with an invented path
@@ -519,6 +531,9 @@ Output ONLY the response, no explanations.
                         # No tool call in response, remove from conversation
                         conv.pop("tool_calls", None)
                     break
+
+            # Validate thinking block schema
+            improved = self._validate_and_fix_thinking_schema(improved, example)
 
             return improved
 
@@ -595,6 +610,159 @@ Output ONLY the response, no explanations.
             clean_lines.append(line)
 
         return "\n".join(clean_lines).strip()
+
+    def _validate_and_fix_thinking_schema(self, improved: Dict, original: Dict) -> Dict:
+        """
+        Validate thinking block schema and fix if needed.
+
+        Handles both JSON and YAML-style thinking blocks, converting YAML to JSON.
+        """
+        import re
+
+        for conv in improved.get("conversations", []):
+            if conv.get("role") == "assistant":
+                content = conv.get("content", "")
+
+                # Extract thinking block
+                match = re.search(r"<thinking>(.*?)</thinking>", content, re.DOTALL)
+                if not match:
+                    continue
+
+                thinking_str = match.group(1).strip()
+
+                # Try to parse as JSON first
+                try:
+                    thinking_block = json.loads(thinking_str)
+                except json.JSONDecodeError:
+                    # Not valid JSON - try to convert YAML-style to JSON
+                    thinking_block = self._parse_yaml_style_thinking(thinking_str)
+                    if thinking_block is None:
+                        self.logger.warning("Could not parse thinking block as JSON or YAML")
+                        continue
+
+                # Validate schema
+                is_valid, errors = self.schema_validator.validate(thinking_block)
+
+                if not is_valid:
+                    self.logger.warning(f"Schema errors: {errors}")
+                    # Try to fix using original
+                    original_thinking = self._extract_thinking_from_example(original)
+                    if original_thinking:
+                        thinking_block = self.schema_validator.enforce_schema_on_dict(
+                            thinking_block, original_thinking
+                        )
+
+                # Convert back to JSON string and update content
+                new_thinking_str = json.dumps(thinking_block)
+                new_content = content.replace(match.group(0), f"<thinking>\n{new_thinking_str}\n</thinking>")
+                conv["content"] = new_content
+                break
+
+        return improved
+
+    def _parse_yaml_style_thinking(self, thinking_str: str) -> Optional[Dict]:
+        """
+        Parse YAML-style thinking block into a dictionary.
+
+        Handles format like:
+            goal: Some goal text
+            memory: Some memory text
+            requirements: None
+            assessment:
+              complex: false
+              risky: true
+            confidence: 0.6
+            plan:
+            - Step 1
+            - Step 2
+        """
+        import re
+
+        result = {}
+        lines = thinking_str.split("\n")
+        current_key = None
+        current_value = []
+        in_array = False
+        in_nested = False
+        nested_key = None
+        nested_obj = {}
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Check for array item
+            if stripped.startswith("- "):
+                if current_key:
+                    if not isinstance(result.get(current_key), list):
+                        result[current_key] = []
+                    result[current_key].append(stripped[2:].strip())
+                continue
+
+            # Check for nested key (indented key: value)
+            if line.startswith("  ") and ":" in stripped and nested_key:
+                k, v = stripped.split(":", 1)
+                k = k.strip()
+                v = v.strip()
+                if v.lower() == "true":
+                    nested_obj[k] = True
+                elif v.lower() == "false":
+                    nested_obj[k] = False
+                else:
+                    nested_obj[k] = v
+                continue
+
+            # Check for top-level key
+            if ":" in stripped:
+                # Save any nested object
+                if nested_key and nested_obj:
+                    result[nested_key] = nested_obj
+                    nested_obj = {}
+                    nested_key = None
+
+                k, v = stripped.split(":", 1)
+                k = k.strip()
+                v = v.strip()
+                current_key = k
+
+                if v == "" or v.lower() == "none":
+                    # Could be start of nested object or array
+                    nested_key = k
+                    result[k] = [] if k in ["requirements", "plan"] else {}
+                elif v.lower() in ["true", "false"]:
+                    result[k] = v.lower() == "true"
+                else:
+                    try:
+                        result[k] = float(v) if "." in v else int(v)
+                    except ValueError:
+                        result[k] = v
+
+        # Handle final nested object
+        if nested_key and nested_obj:
+            result[nested_key] = nested_obj
+
+        # Validate we got the required fields
+        required = ["goal", "memory", "requirements", "assessment", "confidence", "plan"]
+        if not all(k in result for k in required):
+            return None
+
+        return result
+
+    def _extract_thinking_from_example(self, example: Dict) -> Optional[Dict]:
+        """Extract and parse thinking block from an example."""
+        import re
+
+        for conv in example.get("conversations", []):
+            if conv.get("role") == "assistant":
+                content = conv.get("content", "")
+                match = re.search(r"<thinking>(.*?)</thinking>", content, re.DOTALL)
+                if match:
+                    try:
+                        return json.loads(match.group(1).strip())
+                    except json.JSONDecodeError:
+                        return self._parse_yaml_style_thinking(match.group(1).strip())
+        return None
 
     def run(
         self,
@@ -815,11 +983,12 @@ def main():
 
             # Progress stats every 10 lines
             if processed % 10 == 0:
-                elapsed = time.time() - start_time
-                rate = processed / elapsed if elapsed > 0 else 0
-                eta = (total_lines - line_num) / rate if rate > 0 else 0
+                elapsed_min = (time.time() - start_time) / 60
+                rate_per_min = processed / elapsed_min if elapsed_min > 0 else 0
+                remaining = total_lines - line_num
+                eta_min = remaining / rate_per_min if rate_per_min > 0 else 0
                 print(f"\n--- Progress: {processed} done, {passed_count} passed, {failed_count} failed ---")
-                print(f"--- Rate: {rate:.1f} lines/min, ETA: {eta/60:.1f} hours ---")
+                print(f"--- Rate: {rate_per_min:.2f} lines/min, ETA: {eta_min/60:.1f} hours ({eta_min:.0f} min) ---")
 
         # Final summary
         elapsed = time.time() - start_time
