@@ -108,8 +108,6 @@ python tools/analyze_tool_coverage.py Datasets/syngen_toolset_v1.0.0_claude.json
 4. Creates interleaved KTO datasets (True/False pattern)
 5. Ready for immediate KTO training
 
-**See:** [docs/SYNTH_CHAT_GENERATION.md](docs/SYNTH_CHAT_GENERATION.md) for complete guide.
-
 ### Dataset Improvement Engine
 
 **NEW!** Automatically improve the quality of thinking blocks in training datasets using LLM-based enhancement:

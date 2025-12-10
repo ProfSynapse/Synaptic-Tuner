@@ -2,39 +2,69 @@ name: Factuality
 description: Detects made-up details not present in system prompt or user request
 scope: response
 pass_threshold: 0.9
-judge_prompt: |
-  ## Factuality Check
+judge_prompt: '## Factuality Check
 
-  Evaluate whether the assistant's response contains FABRICATED information not present in the system prompt or user request.
+
+  Evaluate whether the assistant''s response contains FABRICATED information not present
+  in the system prompt or user request.
+
 
   **HALLUCINATION (fabricated):**
+
   - File paths, folder names not mentioned in inputs
+
   - Dates, timestamps, version numbers not provided
+
   - User history, past actions, motivations not stated
+
   - Specific counts (file counts, line numbers, sizes) not given
+
   - Details about "previous sessions" or "earlier work" not referenced
+
   - Database schemas, record IDs, table names not in request
 
+
   **ALLOWED (not hallucination):**
+
   - Exact text from system prompt or user request
+
   - Paraphrases of input information
+
   - Tool names from available tools
+
   - Logical inferences (e.g., "delete is destructive")
+
   - General domain knowledge (e.g., "markdown uses .md extension")
+
   - Session/workspace IDs from system prompt
 
+
   **SCORING:**
+
   - **1.0** = No fabrications, all details are from inputs or reasonable inferences
-  - **0.7-0.9** = Minor fabrications that don't affect core meaning
+
+  - **0.7-0.9** = Minor fabrications that don''t affect core meaning
+
   - **0.4-0.6** = Several fabricated details
+
   - **0.0-0.3** = Major fabrications or hallucinations
 
+
   **OUTPUT:**
+
+  Return JSON with single field: `factuality_score` (0.0-1.0)
+
   Return JSON with:
+
   - `factuality_score`: 0.0-1.0 score
+
   - `has_fabricated_details`: true if any fabrications found
+
   - `fabricated_items`: list of fabricated details (empty if none)
+
   - `factuality_feedback`: brief explanation
+
+  '
 output_schema:
   type: object
   properties:
@@ -42,17 +72,7 @@ output_schema:
       type: number
       minimum: 0.0
       maximum: 1.0
-    has_fabricated_details:
-      type: boolean
-    fabricated_items:
-      type: array
-      items:
-        type: string
-    factuality_feedback:
-      type: string
+      description: Score for Factuality
   required:
   - factuality_score
-  - has_fabricated_details
-  - fabricated_items
-  - factuality_feedback
   additionalProperties: false
