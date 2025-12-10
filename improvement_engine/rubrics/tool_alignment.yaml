@@ -67,6 +67,8 @@ judge_prompt: '## Tool Alignment Check
 
   **OUTPUT:**
 
+  Return JSON with single field: `toolalignment_score` (0.0-1.0)
+
   Return JSON with:
 
   - `alignment_score`: 0.0-1.0 tool alignment score
@@ -83,27 +85,11 @@ judge_prompt: '## Tool Alignment Check
 output_schema:
   type: object
   properties:
-    tool_alignment_score:
+    toolalignment_score:
       type: number
       minimum: 0.0
       maximum: 1.0
-    tool_matches_goal:
-      type: boolean
-    params_match_thinking:
-      type: boolean
-    ids_match_system_prompt:
-      type: boolean
-    tool_mismatches:
-      type: array
-      items:
-        type: string
-    tool_alignment_feedback:
-      type: string
+      description: Score for Tool Alignment
   required:
-  - tool_alignment_score
-  - tool_matches_goal
-  - params_match_thinking
-  - ids_match_system_prompt
-  - tool_mismatches
-  - tool_alignment_feedback
+  - toolalignment_score
   additionalProperties: false

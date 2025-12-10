@@ -220,7 +220,13 @@ class RubricRunner:
             "=" * 60,
             "",
             "Evaluate the response against ALL criteria above.",
-            "Output a single JSON object combining all evaluations.",
+            "Output a single JSON object with:",
+            "- One score field per rubric (0.0-1.0)",
+            "- One `overall_feedback` field explaining all evaluations",
+            "Evaluate the response against ALL criteria above.",
+            "Output a single JSON object with:",
+            "- One score field per rubric (0.0-1.0)",
+            "- One `overall_feedback` field explaining all evaluations",
             "",
             "IMPORTANT: Respond with ONLY valid JSON. No markdown, no explanations.",
             "Start with { and end with }",
@@ -244,10 +250,18 @@ class RubricRunner:
             # Add required fields
             required.extend(schema.get("required", []))
 
+        # Add combined feedback field
+        properties["overall_feedback"] = {
+            "type": "string",
+            "description": "Combined explanation covering all rubric evaluations"
+        }
+        required.append("overall_feedback")
+
         return {
             "type": "object",
             "properties": properties,
-            "required": list(set(required))  # dedupe
+            "required": list(set(required)),  # dedupe
+            "additionalProperties": False
         }
 
     def _extract_conversations(self, example: Dict) -> Tuple[str, str, str]:
@@ -900,6 +914,7 @@ def main():
     parser.add_argument("--line", type=int, help="Line number to process (1-indexed, for single line mode)")
     parser.add_argument("--output", type=str, help="Output file (required for full dataset processing)")
     parser.add_argument("--start-line", type=int, default=1, help="Starting line (for resuming)")
+    parser.add_argument("--end-line", type=int, help="Ending line (for processing subset)")
     parser.add_argument("--rubrics", type=str, help="Comma-separated rubric names (or 'all')")
     parser.add_argument("--list", action="store_true", help="List available rubrics")
     parser.add_argument("--backend", default="lmstudio", help="LLM backend")
@@ -1026,6 +1041,8 @@ def main():
         for line_num, example in file_handler.iterate_jsonl(args.file):
             if line_num < args.start_line:
                 continue
+            if args.end_line and line_num > args.end_line:
+                break
             examples_to_process.append((line_num, example))
 
         # Process examples
