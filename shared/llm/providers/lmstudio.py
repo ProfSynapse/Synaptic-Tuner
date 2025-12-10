@@ -143,6 +143,20 @@ class LMStudioClient(BaseLLMClient):
 
             # Try to extract JSON if wrapped in markdown or other text
             content = content.strip()
+
+            # Strip LM Studio channel tags if present
+            # Example: <|start|>assistant<|channel|>commentary to=functions.send_message <|constrain|>json<|message|>{...}
+            if "<|message|>" in content:
+                # Extract JSON from between <|message|> tags
+                start_idx = content.find("<|message|>")
+                if start_idx != -1:
+                    content = content[start_idx + 11:]  # Skip <|message|>
+                    # Find end tag if present
+                    end_idx = content.find("<|")
+                    if end_idx != -1:
+                        content = content[:end_idx]
+
+            # Strip markdown code blocks
             if content.startswith("```json"):
                 content = content[7:]  # Remove ```json
             if content.startswith("```"):

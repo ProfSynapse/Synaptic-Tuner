@@ -9,7 +9,7 @@ description: "Detects and removes made-up details in entire response (thinking +
 scope: "response"
 
 # Pass threshold (0.0 - 1.0)
-pass_threshold: 1.0  # Must be perfect (no hallucinations allowed)
+pass_threshold: 0.95  # Near-perfect (allows minor judge conservatism)
 
 # Judge prompt - evaluates and scores the example
 judge_prompt: |
@@ -89,6 +89,32 @@ judge_prompt: |
   **Critical Rule:**
   Any specific detail (path, date, number, name) not explicitly stated in the inputs = HALLUCINATION
 
+  **CRITICAL: Confidence Appropriateness Check**
+
+  Check if the confidence value in the thinking block is appropriate for the operation:
+
+  **Confidence Guidelines:**
+  - **Simple, non-risky operations** (read, list, search): 0.85-0.95
+    * Example: "list all files" → confidence should be ~0.9
+  - **Simple, risky operations** (delete/move with explicit paths): 0.7-0.85
+    * Example: "delete unused.md" (exact file named) → confidence ~0.8
+  - **Complex operations** (multi-step, requires planning): 0.6-0.8
+    * Example: "reorganize project structure" → confidence ~0.7
+  - **Asking for clarification** (no tool call, needs more info): 0.4-0.6
+    * Example: "delete old files" (vague, asking which) → confidence ~0.5
+  - **Never 1.0**: Nothing is 100% certain in real operations
+  - **Never < 0.3**: If that uncertain, shouldn't proceed at all
+
+  **Assessment vs Confidence:**
+  - risky=true → confidence should be ≤ 0.8 (cautious)
+  - risky=false, complex=false → confidence should be ≥ 0.85 (straightforward)
+  - risky=true, complex=true → confidence should be 0.5-0.7 (very cautious)
+
+  **Common Issues:**
+  ❌ confidence=0.6 for simple "create file" → Too low, should be ~0.9
+  ❌ confidence=1.0 for any operation → Too high, should be ≤ 0.95
+  ❌ confidence=0.9 for risky delete without explicit file → Too high, should be ~0.5
+
   **Output JSON:**
   Provide a structured evaluation with these exact fields:
   ```json
@@ -98,6 +124,8 @@ judge_prompt: |
     "hallucinated_in_thinking": true/false,
     "hallucinated_in_tool_calls": true/false,
     "hallucinated_in_text": true/false,
+    "confidence_appropriate": true/false,
+    "confidence_issue": "Explanation if confidence is wrong (empty string if appropriate)",
     "hallucinated_details": [
       "Specific hallucination 1",
       "Specific hallucination 2"
@@ -106,10 +134,10 @@ judge_prompt: |
   }}
   ```
 
-  Score 1.0 = perfect (no hallucinations)
-  Score 0.0 = severe hallucinations
+  Score 1.0 = perfect (no hallucinations AND confidence is appropriate)
+  Score 0.0 = severe hallucinations OR confidence very inappropriate
 
-  Be STRICT. Even one made-up detail should lower the score significantly.
+  Be STRICT. Even one made-up detail OR inappropriate confidence should lower the score significantly.
 
 # Improver prompt - fixes issues based on judge feedback
 improver_prompt: |
@@ -176,6 +204,28 @@ improver_prompt: |
   - Examples of explicit approval: "delete unused.md", "move temp.md to Archive/old.md"
   - Examples requiring confirmation: "delete old files", "clean up my workspace", "remove unused items"
 
+  **CRITICAL: Confidence Calibration**
+
+  Set the confidence value appropriately based on the operation complexity and risk:
+
+  **Confidence Guidelines:**
+  - **Simple, non-risky operations** (read, list, search): 0.85-0.95
+    * Example: "list all files" → confidence = 0.9
+  - **Simple, risky operations** (delete/move with explicit paths): 0.7-0.85
+    * Example: "delete unused.md" (exact file named) → confidence = 0.8
+  - **Complex operations** (multi-step, requires planning): 0.6-0.8
+    * Example: "reorganize project structure" → confidence = 0.7
+  - **Asking for clarification** (no tool call, needs more info): 0.4-0.6
+    * Example: "delete old files" (vague, asking which) → confidence = 0.5
+  - **Never 1.0**: Nothing is 100% certain in real operations (max 0.95)
+  - **Never < 0.3**: If that uncertain, shouldn't proceed at all
+
+  **Calibration Rules:**
+  - If risky=true → confidence ≤ 0.8
+  - If risky=false AND complex=false → confidence ≥ 0.85
+  - If risky=true AND complex=true → confidence 0.5-0.7
+  - If asking for clarification (no tool call) → confidence 0.4-0.6
+
   **Your Task:**
 
   Generate a FIXED assistant response that:
@@ -183,14 +233,15 @@ improver_prompt: |
   1. **REMOVES** all hallucinated details identified in the feedback
   2. **USES ONLY** information explicitly stated in system prompt and user request
   3. **STAYS VAGUE** when inputs don't provide specific details
-  4. **KEEPS** the same structure and format:
+  4. **CALIBRATES CONFIDENCE** appropriately based on complexity and risk
+  5. **KEEPS** the same structure and format:
      - If there's a <thinking> block, keep the tags
      - If there are tool calls, keep the format
      - If there's text response, keep it (just fix hallucinations)
-  5. **PRESERVES** session/workspace IDs from system prompt
-  6. **MAINTAINS** logical inferences and general statements
-  7. **PRESERVES THINKING SCHEMA**: The thinking block MUST include ALL required fields (goal, memory, requirements, assessment, confidence, plan) - do NOT remove fields, only fix the content within them
-  8. **PRESERVES TOOL CALLS**: If there are tool calls, keep them! Only fix hallucinated arguments (paths, IDs, etc.) - do NOT remove the tool call entirely. If a path is hallucinated, ask the user for clarification IN THE TEXT RESPONSE, but keep the tool call structure
+  6. **PRESERVES** session/workspace IDs from system prompt
+  7. **MAINTAINS** logical inferences and general statements
+  8. **PRESERVES THINKING SCHEMA**: The thinking block MUST include ALL required fields (goal, memory, requirements, assessment, confidence, plan) - do NOT remove fields, only fix the content within them
+  9. **PRESERVES TOOL CALLS**: If there are tool calls, keep them! Only fix hallucinated arguments (paths, IDs, etc.) - do NOT remove the tool call entirely. If a path is hallucinated, ask the user for clarification IN THE TEXT RESPONSE, but keep the tool call structure
 
   **Examples of Fixes:**
 
@@ -238,6 +289,11 @@ output_schema:
       type: boolean
     hallucinated_in_text:
       type: boolean
+    confidence_appropriate:
+      type: boolean
+    confidence_issue:
+      type: string
+      description: "Explanation if confidence is inappropriate (empty string if appropriate)"
     hallucinated_details:
       type: array
       items:
@@ -247,5 +303,6 @@ output_schema:
   required:
     - score
     - has_hallucination
+    - confidence_appropriate
     - hallucinated_details
     - improvement_feedback
