@@ -661,10 +661,14 @@ Output ONLY the response, no explanations.
 def main():
     """CLI entry point."""
     import argparse
+    import time
+    from .file_handler import FileHandler
 
     parser = argparse.ArgumentParser(description="Run modular validation rubrics")
     parser.add_argument("--file", type=str, help="JSONL dataset file")
-    parser.add_argument("--line", type=int, default=1, help="Line number to process (1-indexed)")
+    parser.add_argument("--line", type=int, help="Line number to process (1-indexed, for single line mode)")
+    parser.add_argument("--output", type=str, help="Output file (required for full dataset processing)")
+    parser.add_argument("--start-line", type=int, default=1, help="Starting line (for resuming)")
     parser.add_argument("--rubrics", type=str, help="Comma-separated rubric names (or 'all')")
     parser.add_argument("--list", action="store_true", help="List available rubrics")
     parser.add_argument("--backend", default="lmstudio", help="LLM backend")
@@ -696,19 +700,14 @@ def main():
 
     # Validate args
     if not args.file:
-        print("Usage: python -m improvement_engine.services.rubric_runner --file <dataset.jsonl> --line <N>")
-        print("       python -m improvement_engine.services.rubric_runner --list")
+        print("Usage:")
+        print("  Single line:  python -m improvement_engine.services.rubric_runner --file <dataset.jsonl> --line <N>")
+        print("  Full dataset: python -m improvement_engine.services.rubric_runner --file <dataset.jsonl> --output <output.jsonl>")
+        print("  List rubrics: python -m improvement_engine.services.rubric_runner --list")
         return
 
-    # Load example
-    with open(args.file, 'r', encoding='utf-8') as f:
-        lines = [json.loads(line) for line in f if line.strip()]
-
-    if args.line < 1 or args.line > len(lines):
-        print(f"Line {args.line} out of range (1-{len(lines)})")
-        return
-
-    example = lines[args.line - 1]
+    file_handler = FileHandler()
+    total_lines = file_handler.count_lines(args.file)
 
     # Select rubrics
     if args.rubrics:
@@ -724,32 +723,114 @@ def main():
         return
 
     print(f"\nRunning rubrics: {', '.join(rubric_keys)}")
-    print(f"File: {args.file}, Line: {args.line}")
-    print("=" * 60)
 
-    # Extract and show context
-    for conv in example.get("conversations", []):
-        if conv.get("role") == "user":
-            print(f"User request: {conv.get('content', '')[:100]}...")
-            break
+    # Determine mode: single line or full dataset
+    if args.line:
+        # SINGLE LINE MODE
+        if args.line < 1 or args.line > total_lines:
+            print(f"Line {args.line} out of range (1-{total_lines})")
+            return
 
-    # Run
-    passed, final_example, history = runner.run(
-        example,
-        rubric_keys,
-        max_iterations=args.max_iterations,
-    )
+        examples = file_handler.read_jsonl(args.file, start_line=args.line, end_line=args.line)
+        example = examples[0]
 
-    print("\n" + "=" * 60)
-    print("RESULT")
-    print("=" * 60)
-    print(f"Passed: {passed}")
-    print(f"Iterations: {len(history)}")
+        print(f"File: {args.file}, Line: {args.line}")
+        print("=" * 60)
 
-    if history:
-        print("\nFinal scores:")
-        for key, score in history[-1].scores.items():
-            print(f"  {key}: {score:.2f}")
+        # Extract and show context
+        for conv in example.get("conversations", []):
+            if conv.get("role") == "user":
+                print(f"User request: {conv.get('content', '')[:100]}...")
+                break
+
+        # Run
+        passed, final_example, history = runner.run(
+            example,
+            rubric_keys,
+            max_iterations=args.max_iterations,
+        )
+
+        print("\n" + "=" * 60)
+        print("RESULT")
+        print("=" * 60)
+        print(f"Passed: {passed}")
+        print(f"Iterations: {len(history)}")
+
+        if history:
+            print("\nFinal scores:")
+            for key, score in history[-1].scores.items():
+                print(f"  {key}: {score:.2f}")
+
+    else:
+        # FULL DATASET MODE
+        if not args.output:
+            print("Error: --output required for full dataset processing")
+            print("  Example: --output Datasets/.../tools_v1.8.jsonl")
+            return
+
+        print(f"Input: {args.file} ({total_lines} lines)")
+        print(f"Output: {args.output}")
+        print(f"Starting from line: {args.start_line}")
+        print("=" * 60)
+
+        # Stats
+        processed = 0
+        passed_count = 0
+        failed_count = 0
+        start_time = time.time()
+
+        # Process each line
+        for line_num, example in file_handler.iterate_jsonl(args.file):
+            # Skip lines before start_line
+            if line_num < args.start_line:
+                continue
+
+            processed += 1
+
+            # Show progress
+            user_req = ""
+            for conv in example.get("conversations", []):
+                if conv.get("role") == "user":
+                    user_req = conv.get("content", "")[:50]
+                    break
+
+            print(f"\n[{line_num}/{total_lines}] {user_req}...")
+
+            # Run improvement
+            passed, final_example, history = runner.run(
+                example,
+                rubric_keys,
+                max_iterations=args.max_iterations,
+            )
+
+            if passed:
+                passed_count += 1
+                # Write improved example to output (append mode)
+                file_handler.write_jsonl(args.output, [final_example], mode='a')
+            else:
+                failed_count += 1
+                # Still write (best effort), but mark it
+                runner.logger.warning(f"  Line {line_num} did not fully pass, writing best effort")
+                file_handler.write_jsonl(args.output, [final_example], mode='a')
+
+            # Progress stats every 10 lines
+            if processed % 10 == 0:
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                eta = (total_lines - line_num) / rate if rate > 0 else 0
+                print(f"\n--- Progress: {processed} done, {passed_count} passed, {failed_count} failed ---")
+                print(f"--- Rate: {rate:.1f} lines/min, ETA: {eta/60:.1f} hours ---")
+
+        # Final summary
+        elapsed = time.time() - start_time
+        print("\n" + "=" * 60)
+        print("COMPLETE")
+        print("=" * 60)
+        print(f"Total processed: {processed}")
+        print(f"Passed: {passed_count} ({passed_count/processed*100:.1f}%)")
+        print(f"Failed: {failed_count} ({failed_count/processed*100:.1f}%)")
+        print(f"Time: {elapsed/60:.1f} minutes")
+        print(f"Output: {args.output}")
 
 
 if __name__ == "__main__":
