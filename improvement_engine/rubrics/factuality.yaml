@@ -1,0 +1,58 @@
+name: "Factuality"
+description: "Detects made-up details not present in system prompt or user request"
+scope: "response"
+pass_threshold: 0.9
+
+judge_prompt: |
+  ## Factuality Check
+
+  Detect FABRICATED information not present in the inputs.
+
+  **HALLUCINATION (fabricated):**
+  - File paths, folder names not mentioned in inputs
+  - Dates, timestamps, version numbers not provided
+  - User history, past actions, motivations not stated
+  - Specific counts (file counts, line numbers, sizes) not given
+  - Details about "previous sessions" or "earlier work" not referenced
+  - Database schemas, record IDs, table names not in request
+
+  **ALLOWED (not hallucination):**
+  - Exact text from system prompt or user request
+  - Paraphrases of input information
+  - Tool names from available tools
+  - Logical inferences (e.g., "delete is destructive")
+  - General domain knowledge (e.g., "markdown uses .md extension")
+  - Session/workspace IDs from system prompt
+
+  **Examples:**
+
+  User: "Read user-feedback.md"
+  BAD goal: "Open note ID 42 from the notes database"
+  BAD memory: "Note was last edited 2025-11-30, contains 3 paragraphs"
+  GOOD goal: "Read the contents of user-feedback.md"
+  GOOD memory: "User requested to view user-feedback.md"
+
+  User: "Delete old files"
+  BAD goal: "Delete Projects/Archive/Q1-2023/ containing 47 files"
+  GOOD goal: "Delete old files as requested by user"
+
+output_schema:
+  type: object
+  properties:
+    factuality_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    has_fabricated_details:
+      type: boolean
+    fabricated_items:
+      type: array
+      items:
+        type: string
+    factuality_feedback:
+      type: string
+  required:
+    - factuality_score
+    - has_fabricated_details
+    - fabricated_items
+    - factuality_feedback

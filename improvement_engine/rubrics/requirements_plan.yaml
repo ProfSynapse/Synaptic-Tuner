@@ -1,0 +1,71 @@
+name: "Requirements vs Plan"
+description: "Ensures requirements and plan are distinct (prerequisites vs execution steps)"
+scope: "thinking"
+pass_threshold: 0.8
+
+judge_prompt: |
+  ## Requirements vs Plan Distinction Check
+
+  Verify requirements and plan are properly separated.
+
+  **REQUIREMENTS = Prerequisites (what must be TRUE):**
+  - Use CHECK, VERIFY, CONFIRM, EXISTS language
+  - Ask "What must be true before proceeding?"
+  - Check state BEFORE acting
+  - Focus on: file existence, current state, no conflicts
+  - NEVER mention permissions (always assumed available)
+  - Examples:
+    - "config.yaml exists"
+    - "no uncommitted changes"
+    - "target path doesn't already exist"
+
+  **PLAN = Execution steps (what to DO):**
+  - Use EXECUTE, READ, WRITE, UPDATE, CREATE language
+  - State "Here's what I'll do"
+  - Describe actions to take
+  - Examples:
+    - "Read current config"
+    - "Update version field"
+    - "Write changes to file"
+
+  **PROBLEMS:**
+  - Requirements that are actions: "Update the file" in requirements
+  - Plan items that are checks: "Verify file exists" in plan
+  - Duplicates between requirements and plan
+  - Requirements mentioning permissions: "have write access"
+
+  **Examples:**
+
+  BAD requirements: ["Batch content edits", "Modifying existing content"]
+  BAD plan: ["Batch content edits", "Modifying existing content"]
+  (These are identical and neither is properly categorized)
+
+  GOOD requirements: ["file.md exists", "no pending changes"]
+  GOOD plan: ["Read file.md", "Update content", "Write back"]
+
+output_schema:
+  type: object
+  properties:
+    distinction_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    requirements_are_prerequisites:
+      type: boolean
+    plan_are_actions:
+      type: boolean
+    has_duplicates:
+      type: boolean
+    mentions_permissions:
+      type: boolean
+    problematic_items:
+      type: array
+      items:
+        type: string
+    distinction_feedback:
+      type: string
+  required:
+    - distinction_score
+    - requirements_are_prerequisites
+    - plan_are_actions
+    - distinction_feedback

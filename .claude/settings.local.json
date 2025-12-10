@@ -162,7 +162,8 @@
       "Bash(sort:*)",
       "Bash(for agent in agentManager contentManager memoryManager vaultLibrarian vaultManager)",
       "Bash(do cp \"$agent/tools_v1.6.jsonl\" \"$agent/tools_v1.7.jsonl\")",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(timeout 120 python3:*)"
     ],
     "deny": [],
     "ask": []

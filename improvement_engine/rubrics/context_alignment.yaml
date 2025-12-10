@@ -1,0 +1,59 @@
+name: "Context Alignment"
+description: "Ensures goal and memory align with what the user actually requested"
+scope: "response"
+pass_threshold: 0.9
+
+judge_prompt: |
+  ## Context Alignment Check
+
+  Verify the thinking block addresses the user's ACTUAL request.
+
+  **MISALIGNMENT (problem):**
+  - Goal describes a different task than user requested
+  - Memory references unrelated files, operations, or context
+  - Requirements checking for wrong file types or locations
+  - Plan steps that don't achieve user's stated goal
+  - Thinking about file X when user asked about file Y
+
+  **ALIGNED (correct):**
+  - Goal directly addresses what user asked for
+  - Memory provides relevant context for THIS request
+  - Requirements verify prerequisites for the actual operation
+  - Plan steps would accomplish the user's stated goal
+
+  **Examples:**
+
+  User: "Add 'New entry' to log.md"
+  BAD goal: "Append 'Reviewed on 2025-12-07' to notes/meeting_notes.txt"
+  BAD memory: "User wants to add timestamped review to meeting notes"
+  GOOD goal: "Append 'New entry' to log.md"
+  GOOD memory: "User requested adding new entry to log file"
+
+  User: "Read config.yaml"
+  BAD: Thinking discusses database queries or different files
+  GOOD: Thinking focuses on reading config.yaml
+
+output_schema:
+  type: object
+  properties:
+    alignment_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    goal_matches_request:
+      type: boolean
+    memory_is_relevant:
+      type: boolean
+    plan_achieves_goal:
+      type: boolean
+    misaligned_elements:
+      type: array
+      items:
+        type: string
+    alignment_feedback:
+      type: string
+  required:
+    - alignment_score
+    - goal_matches_request
+    - memory_is_relevant
+    - alignment_feedback

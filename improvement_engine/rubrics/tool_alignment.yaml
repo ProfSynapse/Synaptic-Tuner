@@ -1,0 +1,58 @@
+name: "Tool Alignment"
+description: "Ensures tool calls match what the thinking block describes"
+scope: "response"
+pass_threshold: 0.85
+
+judge_prompt: |
+  ## Tool Alignment Check
+
+  Verify tool calls match the thinking block's stated goal and plan.
+
+  **MISALIGNMENT (problem):**
+  - Tool name doesn't match operation in goal
+  - Tool parameters use different paths than thinking mentions
+  - Operation type differs (thinking says read, tool does delete)
+  - Tool affects different files than thinking discusses
+  - Session/workspace IDs don't match system prompt
+
+  **ALIGNED (correct):**
+  - Tool operation matches goal (read tool for read goal)
+  - Tool parameters use same paths mentioned in thinking
+  - Tool would achieve what the plan describes
+  - IDs from system prompt used correctly
+
+  **Examples:**
+
+  Thinking goal: "Read config.yaml"
+  BAD tool: contentManager_deleteContent with filePath: "config.yaml"
+  GOOD tool: contentManager_readContent with filePath: "config.yaml"
+
+  Thinking goal: "Append to log.md"
+  BAD tool: contentManager_replaceContent
+  GOOD tool: contentManager_appendContent
+
+  **Note:** If thinking is about file X but tool uses file Y, that's misalignment even if tool works.
+
+output_schema:
+  type: object
+  properties:
+    tool_alignment_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+    tool_matches_goal:
+      type: boolean
+    params_match_thinking:
+      type: boolean
+    ids_match_system_prompt:
+      type: boolean
+    tool_mismatches:
+      type: array
+      items:
+        type: string
+    tool_alignment_feedback:
+      type: string
+  required:
+    - tool_alignment_score
+    - tool_matches_goal
+    - tool_alignment_feedback
