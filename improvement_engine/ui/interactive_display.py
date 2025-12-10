@@ -24,7 +24,7 @@ class InteractiveDisplay:
         Initialize interactive display.
 
         Args:
-            display_config: Display configuration from labeling_categories.yaml
+            display_config: Display configuration from quality_labels.yaml
             ui_config: UI formatting configuration
         """
         self.display_config = display_config

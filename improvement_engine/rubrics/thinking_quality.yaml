@@ -1,129 +1,59 @@
-name: "Thinking Quality"
-description: "Improves goal clarity, memory context, requirements/plan distinction, confidence calibration"
-
-# Scope: Only evaluates thinking block
-scope: "thinking"
-
-# Pass threshold (0.0 - 1.0)
-pass_threshold: 0.8  # 80% or higher is acceptable
-
-# Judge prompt - evaluates thinking block quality
-judge_prompt: |
-  You are evaluating the quality of this thinking block for AI training data.
-
-  **Thinking Block to Evaluate:**
-  ```json
-  {thinking_block}
-  ```
-
-  **Evaluation Criteria:**
-
-  1. **Goal Clarity** (0.0-1.0)
-     - Is goal ultra-specific with file paths, versions, exact actions?
-     - Does it clearly state what will be done?
-     - Score 1.0: Highly specific ("Update package.json version from 2.0.0 to 2.1.0")
-     - Score 0.0: Vague ("Update files")
-
-  2. **Memory Context** (0.0-1.0)
-     - Does memory explain WHY (motivation/rationale)?
-     - Does it include WHEN (timeline/sequence)?
-     - Does it have numbers/metrics/dates?
-     - Minimum 50 characters for good context
-     - Score 1.0: Rich context with WHY/WHEN/numbers
-     - Score 0.0: Generic or empty ("User requested this")
-
-  3. **Requirements/Plan Distinction** (0.0-1.0)
-     - Are requirements truly prerequisites (what must be true)?
-     - Is plan truly actions (what will be done)?
-     - Are they distinct and not duplicates?
-     - Do requirements avoid mentioning permissions? (always assumed available)
-     - Score 1.0: Clear distinction, proper categorization
-     - Score 0.0: Confused, duplicated, or swapped
-
-  4. **Confidence Calibration** (0.0-1.0)
-     - Does confidence match operation risk level?
-     - Is risk assessment accurate (risky operations like delete should be marked risky)?
-     - Is complexity assessment accurate?
-     - Score 1.0: Well-calibrated (low confidence for risky ops, high for simple ones)
-     - Score 0.0: Miscalibrated (high confidence for destructive operations)
-
-  **Common Issues to Flag:**
-  - ❌ Vague goal without specifics
-  - ❌ Generic memory without WHY/WHEN/numbers
-  - ❌ Requirements that are actions instead of prerequisites
-  - ❌ Requirements mentioning permissions (write/read/access)
-  - ❌ Requirements and Plan are duplicates
-  - ❌ Wrong risk/complexity assessment
-  - ❌ Confidence not calibrated to risk
-
-  **Output JSON:**
-  ```json
-  {{
-    "score": 0.0-1.0,
-    "goal_clarity": 0.0-1.0,
-    "memory_context": 0.0-1.0,
-    "requirements_plan_distinction": 0.0-1.0,
-    "confidence_calibration": 0.0-1.0,
-    "improvement_feedback": "Specific suggestions on what to fix..."
-  }}
-  ```
-
-  Overall score is the average of the 4 criteria scores.
-  Provide specific, actionable feedback on what needs improvement.
-
-# Improver prompt - applies improvements to thinking block
-improver_prompt: |
-  Improve this thinking block based on feedback.
-
-  **Current Thinking Block:**
-  ```json
-  {thinking_block}
-  ```
-
-  **Improvement Feedback:**
-  ```
-  {feedback}
-  ```
-
-  **YOUR TASK:** Generate an IMPROVED thinking block by applying these fixes:
-
-  1. **GOAL** - Make ultra-specific:
-     - Include file paths, version numbers, or entity names
-     - State exact action with details
-     - Example: "Update package.json version from 2.0.0 to 2.1.0"
-
-  2. **MEMORY** - Add rich context (min 50 chars):
-     - Include WHY (motivation/rationale)
-     - Include WHEN (timeline/sequence)
-     - Include numbers/metrics/dates
-     - Example: "User completed v2.1.0 development on Nov 18. Last release v2.0.0 was Nov 10."
-
-  3. **REQUIREMENTS** - Prerequisites only (distinct from plan):
-     - What needs to be true before proceeding
-     - Focus on: file existence, current state, no conflicts, having needed info
-     - NEVER mention permissions (always assumed available)
-     - Example: ["package.json exists", "current version is 2.0.0", "no uncommitted changes"]
-
-  4. **PLAN** - Action steps only (distinct from requirements):
-     - Step-by-step what will happen
-     - Can include tool calls and verification
-     - Example: ["Read package.json", "Update version field", "Write back to file"]
-
-  5. **ASSESSMENT** - Risk and complexity:
-     - Mark destructive operations (delete, move, overwrite) as risky
-     - Mark simple operations (read, list) as not risky
-     - Assess complexity accurately
-
-  6. **CONFIDENCE** - Calibrate to risk:
-     - Low (0.3-0.5) for risky/destructive operations
-     - Medium (0.6-0.8) for moderate operations
-     - High (0.85-1.0) for safe/simple operations
-
-  **Output:**
-  Provide ONLY the improved thinking block as valid JSON.
-  Do not include explanations, just the JSON.
-
-# Output schema for structured validation
+name: Thinking Quality
+description: Improves goal clarity, memory context, requirements/plan distinction,
+  confidence calibration
+scope: thinking
+pass_threshold: 0.8
+judge_prompt: "You are evaluating the quality of this thinking block for AI training\
+  \ data.\n\n**Thinking Block to Evaluate:**\n```json\n{thinking_block}\n```\n\n**Evaluation\
+  \ Criteria:**\n\n1. **Goal Clarity** (0.0-1.0)\n   - Is goal ultra-specific with\
+  \ file paths, versions, exact actions?\n   - Does it clearly state what will be\
+  \ done?\n   - Score 1.0: Highly specific (\"Update package.json version from 2.0.0\
+  \ to 2.1.0\")\n   - Score 0.0: Vague (\"Update files\")\n\n2. **Memory Context**\
+  \ (0.0-1.0)\n   - Does memory explain WHY (motivation/rationale)?\n   - Does it\
+  \ include WHEN (timeline/sequence)?\n   - Does it have numbers/metrics/dates?\n\
+  \   - Minimum 50 characters for good context\n   - Score 1.0: Rich context with\
+  \ WHY/WHEN/numbers\n   - Score 0.0: Generic or empty (\"User requested this\")\n\
+  \n3. **Requirements/Plan Distinction** (0.0-1.0)\n   - Are requirements truly prerequisites\
+  \ (what must be true)?\n   - Is plan truly actions (what will be done)?\n   - Are\
+  \ they distinct and not duplicates?\n   - Do requirements avoid mentioning permissions?\
+  \ (always assumed available)\n   - Score 1.0: Clear distinction, proper categorization\n\
+  \   - Score 0.0: Confused, duplicated, or swapped\n\n4. **Confidence Calibration**\
+  \ (0.0-1.0)\n   - Does confidence match operation risk level?\n   - Is risk assessment\
+  \ accurate (risky operations like delete should be marked risky)?\n   - Is complexity\
+  \ assessment accurate?\n   - Score 1.0: Well-calibrated (low confidence for risky\
+  \ ops, high for simple ones)\n   - Score 0.0: Miscalibrated (high confidence for\
+  \ destructive operations)\n\n**Common Issues to Flag:**\n- \u274C Vague goal without\
+  \ specifics\n- \u274C Generic memory without WHY/WHEN/numbers\n- \u274C Requirements\
+  \ that are actions instead of prerequisites\n- \u274C Requirements mentioning permissions\
+  \ (write/read/access)\n- \u274C Requirements and Plan are duplicates\n- \u274C Wrong\
+  \ risk/complexity assessment\n- \u274C Confidence not calibrated to risk\n\n**Output\
+  \ JSON:**\n```json\n{{\n  \"score\": 0.0-1.0,\n  \"goal_clarity\": 0.0-1.0,\n  \"\
+  memory_context\": 0.0-1.0,\n  \"requirements_plan_distinction\": 0.0-1.0,\n  \"\
+  confidence_calibration\": 0.0-1.0,\n  \"improvement_feedback\": \"Specific suggestions\
+  \ on what to fix...\"\n}}\n```\n\nOverall score is the average of the 4 criteria\
+  \ scores.\nProvide specific, actionable feedback on what needs improvement.\n"
+improver_prompt: "Improve this thinking block based on feedback.\n\n**Current Thinking\
+  \ Block:**\n```json\n{thinking_block}\n```\n\n**Improvement Feedback:**\n```\n{feedback}\n\
+  ```\n\n**YOUR TASK:** Generate an IMPROVED thinking block by applying these fixes:\n\
+  \n1. **GOAL** - Make ultra-specific:\n   - Include file paths, version numbers,\
+  \ or entity names\n   - State exact action with details\n   - Example: \"Update\
+  \ package.json version from 2.0.0 to 2.1.0\"\n\n2. **MEMORY** - Add rich context\
+  \ (min 50 chars):\n   - Include WHY (motivation/rationale)\n   - Include WHEN (timeline/sequence)\n\
+  \   - Include numbers/metrics/dates\n   - Example: \"User completed v2.1.0 development\
+  \ on Nov 18. Last release v2.0.0 was Nov 10.\"\n\n3. **REQUIREMENTS** - Prerequisites\
+  \ only (distinct from plan):\n   - What needs to be true before proceeding\n   -\
+  \ Focus on: file existence, current state, no conflicts, having needed info\n  \
+  \ - NEVER mention permissions (always assumed available)\n   - Example: [\"package.json\
+  \ exists\", \"current version is 2.0.0\", \"no uncommitted changes\"]\n\n4. **PLAN**\
+  \ - Action steps only (distinct from requirements):\n   - Step-by-step what will\
+  \ happen\n   - Can include tool calls and verification\n   - Example: [\"Read package.json\"\
+  , \"Update version field\", \"Write back to file\"]\n\n5. **ASSESSMENT** - Risk\
+  \ and complexity:\n   - Mark destructive operations (delete, move, overwrite) as\
+  \ risky\n   - Mark simple operations (read, list) as not risky\n   - Assess complexity\
+  \ accurately\n\n6. **CONFIDENCE** - Calibrate to risk:\n   - Low (0.3-0.5) for risky/destructive\
+  \ operations\n   - Medium (0.6-0.8) for moderate operations\n   - High (0.85-1.0)\
+  \ for safe/simple operations\n\n**Output:**\nProvide ONLY the improved thinking\
+  \ block as valid JSON.\nDo not include explanations, just the JSON.\n"
 output_schema:
   type: object
   properties:
@@ -150,9 +80,10 @@ output_schema:
     improvement_feedback:
       type: string
   required:
-    - score
-    - goal_clarity
-    - memory_context
-    - requirements_plan_distinction
-    - confidence_calibration
-    - improvement_feedback
+  - score
+  - goal_clarity
+  - memory_context
+  - requirements_plan_distinction
+  - confidence_calibration
+  - improvement_feedback
+  additionalProperties: false

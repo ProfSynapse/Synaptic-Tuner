@@ -881,6 +881,7 @@ def main():
     """CLI entry point."""
     import argparse
     import time
+    from concurrent.futures import ThreadPoolExecutor
     from .file_handler import FileHandler
 
     parser = argparse.ArgumentParser(description="Run modular validation rubrics")
@@ -894,6 +895,8 @@ def main():
     parser.add_argument("--host", type=str, help="LLM host (e.g., 192.168.1.236)")
     parser.add_argument("--port", type=int, default=1234, help="LLM port")
     parser.add_argument("--max-iterations", type=int, default=10, help="Max improvement iterations")
+    parser.add_argument("--parallel", action="store_true", help="Process batch in parallel (cloud only)")
+    parser.add_argument("--workers", type=int, default=10, help="Max concurrent workers for parallel mode")
 
     args = parser.parse_args()
 
@@ -987,9 +990,18 @@ def main():
             print("  Example: --output Datasets/.../tools_v1.8.jsonl")
             return
 
+        # Validate parallel mode
+        if args.parallel and args.backend not in ["openrouter"]:
+            print("ERROR: Parallel mode only supports cloud providers (openrouter)")
+            return
+
         print(f"Input: {args.file} ({total_lines} lines)")
         print(f"Output: {args.output}")
         print(f"Starting from line: {args.start_line}")
+        if args.parallel:
+            print(f"Mode: PARALLEL ({args.workers} workers)")
+        else:
+            print(f"Mode: SEQUENTIAL")
         print("=" * 60)
 
         # Stats
@@ -998,38 +1010,65 @@ def main():
         failed_count = 0
         start_time = time.time()
 
-        # Process each line
+        # Collect examples to process
+        examples_to_process = []
         for line_num, example in file_handler.iterate_jsonl(args.file):
-            # Skip lines before start_line
             if line_num < args.start_line:
                 continue
+            examples_to_process.append((line_num, example))
 
-            processed += 1
+        # Process examples
+        if args.parallel:
+            # PARALLEL MODE
+            def process_one(item):
+                line_num, example = item
+                # Create runner per thread (thread-safe)
+                thread_runner = RubricRunner(
+                    backend=args.backend,
+                    host=args.host,
+                    port=args.port,
+                )
+                passed, final_example, history = thread_runner.run(
+                    example,
+                    rubric_keys,
+                    max_iterations=args.max_iterations,
+                )
+                return (line_num, passed, final_example, history)
 
-            # Show progress
-            user_req = ""
-            for conv in example.get("conversations", []):
-                if conv.get("role") == "user":
-                    user_req = conv.get("content", "")[:50]
-                    break
+            print(f"\nProcessing {len(examples_to_process)} examples in parallel...")
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                results = list(executor.map(process_one, examples_to_process))
 
-            print(f"\n[{line_num}/{total_lines}] {user_req}...")
-
-            # Run improvement
-            passed, final_example, history = runner.run(
-                example,
-                rubric_keys,
-                max_iterations=args.max_iterations,
-            )
-
-            if passed:
-                passed_count += 1
+            # Process results
+            for line_num, passed, final_example, history in results:
+                processed += 1
+                if passed:
+                    passed_count += 1
+                else:
+                    failed_count += 1
                 # Write improved example to output (append mode)
                 file_handler.write_jsonl(args.output, [final_example], mode='a')
-            else:
-                failed_count += 1
-                # Still write (best effort), but mark it
-                runner.logger.warning(f"  Line {line_num} did not fully pass, writing best effort")
+
+        else:
+            # SEQUENTIAL MODE
+            for line_num, example in file_handler.iterate_jsonl(args.file):
+                if line_num < args.start_line:
+                    continue
+
+                processed += 1
+
+                # Run improvement
+                passed, final_example, history = runner.run(
+                    example,
+                    rubric_keys,
+                    max_iterations=args.max_iterations,
+                )
+
+                if passed:
+                    passed_count += 1
+                else:
+                    failed_count += 1
+                # Write improved example to output
                 file_handler.write_jsonl(args.output, [final_example], mode='a')
 
             # Progress stats every 10 lines

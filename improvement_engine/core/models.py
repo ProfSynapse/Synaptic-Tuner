@@ -175,7 +175,7 @@ class LabelingConfig:
     output_file: str
     backend: str = "lmstudio"  # lmstudio, openrouter, or ollama
     model: Optional[str] = None  # Optional: defaults per backend
-    categories_config: str = "improvement_engine/config/labeling_categories.yaml"
+    categories_config: str = "improvement_engine/rubrics/quality_labels.yaml"
     start_line: int = 1
     end_line: Optional[int] = None
     dry_run: bool = False

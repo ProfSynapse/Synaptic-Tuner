@@ -45,13 +45,15 @@ def load_rubric(rubric_name: str) -> Dict:
 
     # Validate required fields
     required_fields = ["name", "description", "scope", "pass_threshold",
-                       "judge_prompt", "improver_prompt", "output_schema"]
+                       "judge_prompt", "output_schema"]
 
     for field in required_fields:
         if field not in rubric:
             raise ValueError(
                 f"Rubric '{rubric_name}' missing required field: {field}"
             )
+
+    # improver_prompt is optional (some rubrics are judge-only)
 
     # Validate scope
     valid_scopes = ["response", "thinking", "tool_calls", "text"]

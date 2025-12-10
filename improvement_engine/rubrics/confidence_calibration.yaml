@@ -1,12 +1,11 @@
-name: "Confidence Calibration"
-description: "Ensures confidence scores are appropriate for operation risk level"
-scope: "thinking"
+name: Confidence Calibration
+description: Ensures confidence scores are appropriate for operation risk level
+scope: thinking
 pass_threshold: 0.8
-
 judge_prompt: |
   ## Confidence Calibration Check
 
-  Verify confidence is calibrated to operation risk.
+  Evaluate whether confidence scores are appropriate for operation risk level.
 
   **Confidence Guidelines:**
   - **Low risk (0.85-0.95):** read, list, search, get, view, find, query
@@ -21,12 +20,21 @@ judge_prompt: |
   - If risky=false AND complex=false → confidence should be ≥ 0.85
   - If risky=true AND complex=true → confidence should be 0.5-0.7
 
-  **Common Issues:**
-  - confidence=0.96 for batch replace → TOO HIGH, should be ~0.5
-  - confidence=0.6 for simple read → TOO LOW, should be ~0.9
-  - confidence=0.9 with risky=true → INCONSISTENT
-  - risky=false for delete operation → WRONG assessment
+  **SCORING:**
+  - **1.0** = Perfect calibration, confidence matches risk level
+  - **0.7-0.9** = Good calibration, minor mismatches
+  - **0.4-0.6** = Poor calibration, confidence off by 0.2+
+  - **0.0-0.3** = Completely miscalibrated or inconsistent with assessment
 
+  **OUTPUT:**
+  Return JSON with:
+  - `confidence_score`: 0.0-1.0 overall calibration score
+  - `confidence_appropriate`: boolean
+  - `detected_risk_level`: "low", "medium", or "high"
+  - `expected_confidence_range`: e.g., "0.85-0.95"
+  - `actual_confidence`: the confidence value from thinking block
+  - `assessment_consistent`: boolean
+  - `confidence_feedback`: brief explanation
 output_schema:
   type: object
   properties:
@@ -47,6 +55,11 @@ output_schema:
     confidence_feedback:
       type: string
   required:
-    - confidence_score
-    - confidence_appropriate
-    - confidence_feedback
+  - confidence_score
+  - confidence_appropriate
+  - detected_risk_level
+  - expected_confidence_range
+  - actual_confidence
+  - assessment_consistent
+  - confidence_feedback
+  additionalProperties: false

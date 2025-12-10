@@ -163,7 +163,10 @@
       "Bash(for agent in agentManager contentManager memoryManager vaultLibrarian vaultManager)",
       "Bash(do cp \"$agent/tools_v1.6.jsonl\" \"$agent/tools_v1.7.jsonl\")",
       "Bash(tee:*)",
-      "Bash(timeout 120 python3:*)"
+      "Bash(timeout 120 python3:*)",
+      "Bash(timeout 30 python3:*)",
+      "Bash(for f in improvement_engine/rubrics/*.yaml)",
+      "Bash(do wc -w:*)"
     ],
     "deny": [],
     "ask": []
