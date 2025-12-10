@@ -48,8 +48,8 @@ training:
   lr_scheduler_type: "cosine"
 
   # SFT-specific parameters
-  max_seq_length: 2048 
-  packing: false  # Pack multiple examples per sequence
+  max_seq_length: 2048
+  packing: true  # Pack multiple examples per sequence (2.5-5x faster training!)
   completion_only_loss: true  # Train only on assistant completions
   assistant_only_loss: false  # For multi-turn (not needed here)
 

@@ -40,6 +40,36 @@ Toolset-Training/
 
 ## Common Development Commands
 
+### Unsloth Packing Optimization (3-5x Faster Training!)
+
+**NEW!** Unsloth now supports padding-free batching and sample packing for dramatically faster SFT training:
+
+**Benefits:**
+- **2.5-5x faster training** (sometimes more)
+- **30-90% less VRAM usage**
+- **Identical loss curves** (no accuracy penalty)
+- Works on all GPUs (Tesla T4, RTX 2080/3090, H100, etc.)
+
+**How to enable:**
+
+1. **Upgrade Unsloth** (padding-free batching enabled automatically):
+```bash
+cd Trainers/rtx3090_sft
+./upgrade_unsloth.sh
+```
+
+2. **Enable packing** (already set in `configs/config.yaml`):
+```yaml
+training:
+  packing: true  # Sample packing for up to 5x speedup
+```
+
+**That's it!** Your next training run will be significantly faster with lower memory usage.
+
+**Reference:** [Unsloth Packing Documentation](https://docs.unsloth.ai/new/3x-faster-training-packing)
+
+**Note:** Packing only works with SFT training, not KTO (TRL limitation).
+
 ### Dataset Validation
 
 ```bash
