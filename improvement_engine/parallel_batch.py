@@ -35,7 +35,12 @@ def process_single_example(args: Tuple) -> Tuple[int, dict, bool]:
     line_num, example, rubric_keys, backend, max_iterations, rubrics_dir = args
 
     # Create engine per thread (thread-safe)
-    config = LLMConfig(backend=backend)
+    default_model = {
+        "lmstudio": "local-model",
+        "ollama": "qwen2.5:latest",
+        "openrouter": "anthropic/claude-3.5-sonnet"
+    }.get(backend, "local-model")
+    config = LLMConfig(provider=backend, model=default_model)
     llm_client = create_client(config=config)
     logger = ImproveLogger()
 
@@ -91,6 +96,13 @@ def process_file_parallel(
         end_line: Ending line number (1-indexed, None = all)
     """
     logger = ImproveLogger()
+
+    # Validate: only cloud providers for parallel processing
+    if backend in ["lmstudio", "ollama"]:
+        logger.error(f"ERROR: Parallel processing does not support local providers ({backend})")
+        logger.error("       Local providers cannot handle concurrent requests.")
+        logger.error("       Use --backend openrouter instead.")
+        raise ValueError(f"Parallel processing does not support {backend}")
 
     # Read input
     with open(input_file, 'r', encoding='utf-8') as f:

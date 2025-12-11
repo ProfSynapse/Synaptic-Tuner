@@ -37,7 +37,7 @@ class RubricLoader:
             rubric_key: Rubric key (filename stem)
 
         Returns:
-            Rubric dict
+            Rubric dict with 'key' field injected
 
         Raises:
             FileNotFoundError: If rubric file doesn't exist
@@ -49,7 +49,10 @@ class RubricLoader:
             raise FileNotFoundError(f"Rubric file not found: {yaml_file}")
 
         try:
-            return load_yaml(yaml_file)
+            rubric = load_yaml(yaml_file)
+            # Inject the key into the rubric dict so downstream services can access it
+            rubric['key'] = rubric_key
+            return rubric
         except Exception as e:
             raise ValueError(f"Failed to load rubric {rubric_key}: {e}")
 

@@ -7,6 +7,7 @@ All actual work delegated to ImprovementEngine.
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -55,14 +56,39 @@ class RubricRunner:
         self.rubrics_dir = Path(rubrics_dir)
 
         # Initialize LLM client
-        config = LLMConfig(backend=backend)
-        if host:
-            if backend == "lmstudio":
-                config.lmstudio_host = host
-            elif backend == "ollama":
-                config.ollama_host = host
-        if port and backend == "ollama":
-            config.ollama_port = port
+        # Read model from config.yaml and environment variables
+        from improvement_engine.utils.yaml_loader import load_config
+        from shared.utilities.env import load_env_file
+        import os
+
+        # Load environment variables from .env
+        load_env_file()
+
+        config_data = load_config("config")
+        llm_config_data = config_data.get("llm", {})
+
+        # Get model based on backend
+        if backend == "lmstudio":
+            model = "local-model"  # LM Studio uses whatever model is loaded in UI
+        elif backend == "ollama":
+            model = llm_config_data.get("ollama_model", "qwen2.5:latest")
+        else:  # openrouter
+            model = llm_config_data.get("openrouter_model", "anthropic/claude-3.5-sonnet")
+
+        # Get host/port from CLI args or environment variables
+        lmstudio_host = host if host and backend == "lmstudio" else os.getenv("LMSTUDIO_HOST", "localhost")
+        lmstudio_port = port if port and backend == "lmstudio" else int(os.getenv("LMSTUDIO_PORT", "1234"))
+        ollama_host = host if host and backend == "ollama" else os.getenv("OLLAMA_HOST", "localhost")
+        ollama_port = port if port and backend == "ollama" else int(os.getenv("OLLAMA_PORT", "11434"))
+
+        config = LLMConfig(
+            provider=backend,
+            model=model,
+            lmstudio_host=lmstudio_host,
+            lmstudio_port=lmstudio_port,
+            ollama_host=ollama_host,
+            ollama_port=ollama_port
+        )
 
         llm_client = create_client(config=config)
 
@@ -143,6 +169,21 @@ class RubricRunner:
             end_line: Ending line number (1-indexed, None = all)
             max_iterations: Max improvement iterations per example
         """
+        # Extract dataset name from file path for interaction logging
+        # Format: parentFolder_filename (without .jsonl extension)
+        file_path = Path(file_path)
+        parent_folder = file_path.parent.name
+        filename_stem = file_path.stem
+        dataset_name = f"{parent_folder}_{filename_stem}"
+
+        # Reinitialize engine with dataset name
+        self.engine.interaction_logger.dataset_name = dataset_name
+        # Update log file with dataset name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        interactions_dir = Path(self.rubrics_dir).parent / "interactions"
+        self.engine.interaction_logger.log_file = interactions_dir / f"interactions_{dataset_name}_{timestamp}.jsonl"
+        self.logger.info(f"Updated interaction log: {self.engine.interaction_logger.log_file}")
+
         # Read input file
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()

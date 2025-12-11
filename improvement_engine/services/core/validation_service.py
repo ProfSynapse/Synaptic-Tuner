@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional
 
 from ..parsing import ScopeExtractor
 from ..schema_validator import SchemaValidator
+from ..validators.tool_call_validator import ToolCallValidator
 from ...config import ScopeConfig
 from ...utils.logger import ImproveLogger
 
@@ -37,6 +38,9 @@ class ValidationService:
         self.scope_config = scope_config
         self.logger = logger or ImproveLogger()
 
+        # Initialize tool call validator
+        self.tool_call_validator = ToolCallValidator(logger=self.logger)
+
     def validate_example(
         self,
         example: Dict,
@@ -55,14 +59,28 @@ class ValidationService:
         results = {}
 
         for rubric in rubrics:
-            rubric_key = rubric.get("name", "unknown")
+            rubric_key = rubric.get("key", rubric.get("name", "unknown"))
             scope = rubric.get("scope", "response")
 
-            # Only validate scopes with structured content
-            if scope not in ["thinking", "system_prompt"]:
+            # Check if this rubric has tool call validation
+            validation_config = rubric.get("validation", {})
+            has_tool_validation = "tool_calls" in validation_config and validation_config["tool_calls"].get("enabled", False)
+
+            # Skip validation if not applicable
+            if scope not in ["thinking", "system_prompt"] and not has_tool_validation:
                 continue
 
             try:
+                # Handle tool call validation (for response scope)
+                if has_tool_validation and scope == "response":
+                    is_valid, errors = self._validate_tool_calls(example)
+                    results[f"{rubric_key}_tool_calls"] = (is_valid, errors)
+                    if not is_valid:
+                        # Also store under main rubric key
+                        results[rubric_key] = (is_valid, errors)
+                    continue
+
+                # Handle schema validation for structured content
                 # Extract content for this scope
                 content = self.scope_extractor.extract(example, scope)
 
@@ -92,3 +110,40 @@ class ValidationService:
                 results[rubric_key] = (False, [f"Validation error: {str(e)}"])
 
         return results
+
+    def _validate_tool_calls(self, example: Dict) -> Tuple[bool, List[str]]:
+        """
+        Validate tool calls in assistant response.
+
+        Args:
+            example: Example dict with conversations
+
+        Returns:
+            Tuple of (is_valid, error_messages)
+        """
+        conversations = example.get("conversations", [])
+
+        # Extract system prompt, user request, and tool calls
+        system_prompt = ""
+        user_request = ""
+        tool_calls = []
+
+        for conv in conversations:
+            role = conv.get("role")
+            if role == "system":
+                system_prompt = conv.get("content", "")
+            elif role == "user":
+                user_request = conv.get("content", "")
+            elif role == "assistant":
+                tool_calls = conv.get("tool_calls", [])
+
+        # If no tool calls, validation passes
+        if not tool_calls:
+            return (True, [])
+
+        # Validate using tool call validator
+        return self.tool_call_validator.validate_tool_calls(
+            tool_calls,
+            system_prompt,
+            user_request
+        )

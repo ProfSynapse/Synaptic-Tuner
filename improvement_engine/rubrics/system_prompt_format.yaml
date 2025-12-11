@@ -40,6 +40,26 @@ judge_prompt: |
 
   Return JSON with single field: `systempromptformat_score` (0.0-1.0)
 
+improver_prompt: |
+  Improve the system prompt to fix the issues identified in the feedback.
+
+  **Current System Prompt:**
+  ```
+  {current_content}
+  ```
+
+  **Improvement Feedback:**
+  ```
+  {feedback}
+  ```
+
+  **YOUR TASK:** Generate an improved system prompt that addresses the feedback while following the format specification below.
+
+  {format_instructions}
+
+  **Output:**
+  Provide ONLY the improved system prompt text (no JSON, no markdown code blocks, just the raw system prompt).
+
 format_spec: |
   ## Required System Prompt Format
 

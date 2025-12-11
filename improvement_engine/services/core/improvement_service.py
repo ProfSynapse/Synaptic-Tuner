@@ -39,20 +39,27 @@ class ImprovementService:
         self.scope_config = scope_config
         self.logger = logger or ImproveLogger()
 
-    def improve(self, prompt: str) -> str:
+    def improve(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
         Execute improvement call to LLM.
 
         Args:
             prompt: Complete improvement prompt (already built)
+            system_prompt: Optional system prompt for the improver
 
         Returns:
             Improved content string from LLM
         """
         try:
+            # Build messages
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
             # Call LLM
             response = self.llm_client.chat(
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=self.scope_config.llm.improvement_temperature,
                 max_tokens=self.scope_config.llm.improvement_max_tokens
             )

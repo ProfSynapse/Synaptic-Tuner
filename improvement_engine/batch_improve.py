@@ -44,8 +44,21 @@ def process_file(
     """
     logger = ImproveLogger()
 
-    # Initialize LLM client
-    config = LLMConfig(backend=backend)
+    # Validate: only cloud providers for batch processing
+    if backend in ["lmstudio", "ollama"]:
+        logger.error(f"ERROR: Batch processing does not support local providers ({backend})")
+        logger.error("       Local providers are too slow for batch processing.")
+        logger.error("       Use --backend openrouter instead.")
+        raise ValueError(f"Batch processing does not support {backend}")
+
+    # Initialize LLM client - read model from config.yaml
+    from improvement_engine.utils.yaml_loader import load_config
+    config_data = load_config("config")
+    llm_config_data = config_data.get("llm", {})
+
+    model = llm_config_data.get(f"{backend}_model", "anthropic/claude-3.5-sonnet")
+
+    config = LLMConfig(provider=backend, model=model)
     llm_client = create_client(config=config)
 
     # Initialize engine

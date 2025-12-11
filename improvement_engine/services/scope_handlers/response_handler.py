@@ -45,11 +45,21 @@ class ResponseHandler(ScopeHandler):
 
                 conv["content"] = clean_content
 
-                # Update tool_calls field
+                # Update tool_calls field based on improved content
                 if new_tool_calls:
+                    # Found new tool calls → use them
                     conv["tool_calls"] = new_tool_calls
-                elif "tool_calls" in conv:
-                    del conv["tool_calls"]
+                else:
+                    # No tool calls in improved content
+                    # Check if improved content looks like intentional text-only response
+                    is_text_only = self._is_text_only_response(improved_content)
+
+                    if is_text_only:
+                        # Improver intentionally provided text-only (asking for clarification, etc.)
+                        # Remove tool_calls to prevent execution
+                        if "tool_calls" in conv:
+                            del conv["tool_calls"]
+                    # else: preserve existing tool_calls (improver might have just focused on text)
 
                 break
 
@@ -86,12 +96,52 @@ class ResponseHandler(ScopeHandler):
             elif role == "assistant" and "tool_calls" in conv:
                 original_tool_calls = conv["tool_calls"]
 
+        # Format tool calls as JSON string for template
+        tool_calls_json = json.dumps(original_tool_calls, indent=2) if original_tool_calls else "[]"
+
         return {
             "current_content": current_content or "",
             "system_prompt": system_prompt,
             "user_request": user_request,
-            "original_tool_calls": original_tool_calls,
+            "original_tool_calls": tool_calls_json,
         }
+
+    def _is_text_only_response(self, content: str) -> bool:
+        """
+        Detect if improved content is intentionally text-only (no tool execution intended).
+
+        Indicators of text-only response:
+        - Contains question marks (asking for clarification)
+        - Contains phrases like "could you", "please specify", "confirm", "I'm not confident"
+        - Does NOT contain tool block markers (```tool, etc.)
+
+        Returns:
+            True if this appears to be intentional text-only response
+        """
+        content_lower = content.lower()
+
+        # Check for clarification/question indicators
+        clarification_phrases = [
+            "could you",
+            "can you",
+            "please specify",
+            "please confirm",
+            "i'm not confident",
+            "i'm uncertain",
+            "not sure",
+            "need clarification",
+            "which file",
+            "are you sure",
+        ]
+
+        has_clarification = any(phrase in content_lower for phrase in clarification_phrases)
+        has_question = "?" in content
+
+        # Check for tool block markers (if present, not text-only)
+        has_tool_markers = "```tool" in content or '"name":' in content
+
+        # Text-only if asking questions/clarifying AND no tool markers
+        return (has_clarification or has_question) and not has_tool_markers
 
     def _remove_tool_call_text(self, content: str) -> str:
         """
