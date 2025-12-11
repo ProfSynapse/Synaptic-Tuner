@@ -137,130 +137,168 @@ class ImprovementEngine:
         max_iterations: int = 3
     ) -> ImprovementResult:
         """
-        Run improvement loop: judge → improve → repeat.
+        Run improvement loop: process scopes sequentially.
+
+        Pipeline: system_prompt → thinking → response
+        Each scope receives improvements from previous scopes.
 
         Args:
             example: Example to improve
             rubric_keys: List of rubric keys to evaluate against
-            max_iterations: Maximum improvement iterations
+            max_iterations: Maximum improvement iterations per scope
 
         Returns:
             ImprovementResult with final example and metrics
         """
+        # Load all rubrics and group by scope
+        all_rubrics = [self.rubric_repo.get_rubric(key) for key in rubric_keys]
+        by_scope = self._group_rubrics_by_scope(all_rubrics)
+
         improved = example
         all_scopes_improved = []
+        all_scores = {}
+        total_iterations = 0
 
-        for iteration in range(max_iterations):
-            self.logger.info(f"Iteration {iteration + 1}/{max_iterations}")
+        # Process scopes in order: system_prompt → thinking → response
+        for scope in self.scope_config.scope_processing_order:
+            scope_rubrics = by_scope.get(scope, [])
+            if not scope_rubrics:
+                continue
 
-            # Load rubrics
-            rubrics = [self.rubric_repo.get_rubric(key) for key in rubric_keys]
+            self.logger.info(f"Processing scope: {scope} ({len(scope_rubrics)} rubrics)")
 
-            # 1. Run validation
-            validation_results = self.validation_service.validate_example(improved, rubrics)
+            # Run improvement loop for this scope
+            scope_passed = False
+            for iteration in range(max_iterations):
+                total_iterations += 1
+                self.logger.info(f"  {scope} iteration {iteration + 1}/{max_iterations}")
 
-            # 2. Build judge prompt
-            judge_prompt = self._build_judge_prompt(improved, rubrics, validation_results)
+                # 1. Validate with this scope's rubrics only
+                validation_results = self.validation_service.validate_example(improved, scope_rubrics)
 
-            # 3. Execute judge
-            judgment = self.judge_service.judge(judge_prompt, rubrics)
+                # 2. Build judge prompt with this scope's rubrics only
+                judge_system, judge_user = self._build_judge_prompt(improved, scope_rubrics, validation_results)
 
-            # 4. Parse results
-            scores, passed = self._parse_judgment(judgment, rubrics, validation_results)
+                # 3. Execute judge (smaller schema = no 400 error!)
+                judgment = self.judge_service.judge(judge_user, scope_rubrics, system_prompt=judge_system)
 
-            # Log judge interaction for each rubric
-            for rubric in rubrics:
-                rubric_key = rubric.get("key", rubric.get("name"))
-                score = scores.get(rubric_key, 0.0)
-                threshold = rubric.get("pass_threshold", 0.8)
-                rubric_passed = score >= threshold
+                # 4. Parse results
+                scores, passed = self._parse_judgment(judgment, scope_rubrics, validation_results)
+                all_scores.update(scores)
 
-                self.interaction_logger.log_judge_interaction(
-                    judge_prompt=judge_prompt,
-                    judge_response=str(judgment),
-                    rubric_name=rubric.get("name", rubric_key),
-                    score=score,
-                    passed=rubric_passed,
-                    example_id=None  # Could add example ID if available
-                )
+                # Log judge interactions
+                for rubric in scope_rubrics:
+                    rubric_key = rubric.get("key", rubric.get("name"))
+                    score = scores.get(rubric.get("name", rubric_key), 0.0)
+                    threshold = rubric.get("pass_threshold", 0.8)
+                    rubric_passed = score >= threshold
 
-            if passed:
-                self.logger.info(f"Passed after {iteration + 1} iterations")
-                return ImprovementResult(
-                    improved_example=improved,
-                    iterations=iteration + 1,
-                    passed=True,
-                    final_scores=scores,
-                    scopes_improved=all_scopes_improved
-                )
-
-            # 5. Detect failed scopes
-            failed_scopes = self._detect_failed_scopes(scores, rubrics)
-            self.logger.info(f"Failed scopes: {failed_scopes}")
-
-            # 6. Improve each failed scope
-            before_scores = scores.copy()
-            for scope in failed_scopes:
-                # Find rubric for this scope
-                rubric = next((r for r in rubrics if r.get("scope") == scope), None)
-                if not rubric:
-                    continue
-
-                rubric_key = rubric.get("key", rubric.get("name"))
-                before_score = before_scores.get(rubric_key, 0.0)
-
-                # Improve the scope (stores improve prompt and response internally)
-                improved_example, improve_prompt, improved_content, system_prompt = self._improve_scope_with_logging(
-                    improved,
-                    scope,
-                    rubrics,
-                    judgment
-                )
-
-                if improved_example != improved:
-                    # Re-evaluate after improvement
-                    after_validation = self.validation_service.validate_example(improved_example, [rubric])
-                    after_judgment = self.judge_service.judge(
-                        self._build_judge_prompt(improved_example, [rubric], after_validation),
-                        [rubric]
-                    )
-                    after_scores, _ = self._parse_judgment(after_judgment, [rubric], after_validation)
-                    after_score = after_scores.get(rubric_key, 0.0)
-
-                    # Log improver interaction
-                    self.interaction_logger.log_improver_interaction(
-                        improver_prompt=improve_prompt,
-                        improver_response=improved_content or "",
+                    self.interaction_logger.log_judge_interaction(
+                        judge_prompt=judge_user,
+                        judge_response=str(judgment),
                         rubric_name=rubric.get("name", rubric_key),
-                        scope=scope,
-                        before_score=before_score,
-                        after_score=after_score,
-                        improved=(after_score > before_score),
+                        score=score,
+                        passed=rubric_passed,
                         example_id=None,
-                        system_prompt=system_prompt
+                        system_prompt=judge_system
                     )
 
-                    improved = improved_example
-                    all_scopes_improved.append(scope)
-                else:
-                    self.logger.warning(f"No improvement applied for {scope}")
+                if passed:
+                    self.logger.info(f"  {scope} passed after {iteration + 1} iterations")
+                    scope_passed = True
+                    break
 
-        # Max iterations reached
+                # 5. Improve this scope
+                for rubric in scope_rubrics:
+                    rubric_key = rubric.get("key", rubric.get("name"))
+                    rubric_name = rubric.get("name", rubric_key)
+                    before_score = scores.get(rubric_name, 0.0)
+                    threshold = rubric.get("pass_threshold", 0.8)
+
+                    if before_score >= threshold:
+                        continue  # This rubric passed
+
+                    # Improve the scope with THIS specific rubric
+                    improved_example, improve_prompt, improved_content, system_prompt = self._improve_scope_with_logging(
+                        improved,
+                        scope,
+                        [rubric],  # Pass only this rubric, not all scope_rubrics
+                        judgment
+                    )
+
+                    if improved_example != improved:
+                        # Re-evaluate after improvement
+                        after_validation = self.validation_service.validate_example(improved_example, [rubric])
+                        after_system, after_user = self._build_judge_prompt(improved_example, [rubric], after_validation)
+                        after_judgment = self.judge_service.judge(
+                            after_user,
+                            [rubric],
+                            system_prompt=after_system
+                        )
+                        after_scores, _ = self._parse_judgment(after_judgment, [rubric], after_validation)
+                        after_score = after_scores.get(rubric_name, 0.0)
+
+                        # Log improver interaction
+                        self.interaction_logger.log_improver_interaction(
+                            improver_prompt=improve_prompt,
+                            improver_response=improved_content or "",
+                            rubric_name=rubric_name,
+                            scope=scope,
+                            before_score=before_score,
+                            after_score=after_score,
+                            improved=(after_score > before_score),
+                            example_id=None,
+                            system_prompt=system_prompt
+                        )
+
+                        improved = improved_example
+                        all_scopes_improved.append(scope)
+                        all_scores.update(after_scores)
+                    else:
+                        self.logger.warning(f"  No improvement applied for {scope}")
+
+            if not scope_passed:
+                self.logger.warning(f"  {scope} did not pass after {max_iterations} iterations")
+
+        # Check if all scopes passed
+        all_passed = all(
+            all_scores.get(rubric.get("name", ""), 0) >= rubric.get("pass_threshold", 0.8)
+            for rubric in all_rubrics
+        )
+
         return ImprovementResult(
             improved_example=improved,
-            iterations=max_iterations,
-            passed=False,
-            final_scores=scores,
+            iterations=total_iterations,
+            passed=all_passed,
+            final_scores=all_scores,
             scopes_improved=all_scopes_improved
         )
+
+    def _group_rubrics_by_scope(self, rubrics: List[Dict]) -> Dict[str, List[Dict]]:
+        """Group rubrics by their scope. Supports single scope or list of scopes."""
+        by_scope = {}
+        for rubric in rubrics:
+            scope = rubric.get("scope", "response")
+            # Support both single scope string and list of scopes
+            scopes = scope if isinstance(scope, list) else [scope]
+            for s in scopes:
+                if s not in by_scope:
+                    by_scope[s] = []
+                by_scope[s].append(rubric)
+        return by_scope
 
     def _build_judge_prompt(
         self,
         example: Dict,
         rubrics: List[Dict],
         validation_results: Dict
-    ) -> str:
-        """Build judge prompt from rubrics and validation results."""
+    ) -> tuple[str, str]:
+        """
+        Build judge prompt split into system and user parts.
+
+        Returns:
+            (system_prompt, user_prompt) tuple
+        """
         # Extract conversations
         conversation = self.conversation_parser.parse(example)
         system_msg = conversation.get_system_message()
@@ -271,47 +309,37 @@ class ImprovementEngine:
         user_content = user_msg.content if user_msg else ""
         assistant_content = assistant_msg.content if assistant_msg else ""
 
-        # Build prompt sections
-        parts = [self.scope_config.judge.prompt_structure.get("header", "")]
-        parts.append("")
+        # Build SYSTEM prompt (guidance + rubrics + structure)
+        system_parts = ["You are a quality judge. Evaluate examples and provide scores with improvement recommendations."]
 
-        sep = self.scope_config.judge.prompt_structure.get("section_separator", "=") * self.scope_config.judge.prompt_structure.get("section_width", 60)
-
-        # Criteria section
-        parts.extend([sep, "EVALUATION CRITERIA", sep, ""])
+        # Add rubric criteria
+        system_parts.extend(["", "## RUBRICS"])
         for rubric in rubrics:
-            parts.append("")
-            parts.append(rubric.get("judge_prompt", f"# {rubric.get('name', 'Unknown')}"))
+            rubric_name = rubric.get("name", "Unknown")
+            system_parts.append(f"\n**{rubric_name}**")
+            system_parts.append(rubric.get("judge_prompt", ""))
 
-        # Validation results section
+        # Add structure requirements (schema validation results)
         if validation_results:
-            parts.extend(["", sep, "SCHEMA VALIDATION RESULTS", sep, ""])
+            system_parts.extend(["", "## STRUCTURE REQUIREMENTS"])
             for rubric_key, (is_valid, errors) in validation_results.items():
-                icon = self.scope_config.validation.icons["passed" if is_valid else "failed"]
-                parts.append(f"{icon} {rubric_key}: Schema validation {'PASSED' if is_valid else 'FAILED'}")
                 if not is_valid:
+                    system_parts.append(f"\n**{rubric_key}**")
                     for error in errors:
-                        parts.append(f"   - {error}")
+                        system_parts.append(f"  - {error}")
 
-        # Example section
-        parts.extend(["", sep, "EXAMPLE TO EVALUATE", sep, ""])
-        parts.extend(["**System Prompt:**", "```", system_content, "```", ""])
-        parts.extend(["**User Request:**", "```", user_content, "```", ""])
-        parts.extend(["**Assistant Response:**", "```", assistant_content, "```", ""])
+        # Output format
+        system_parts.extend(["", "## OUTPUT"])
+        score_fields = [f'"{r.get("key", r.get("name"))}_score": 0.0-1.0' for r in rubrics]
+        system_parts.append(f"Return JSON: {{{', '.join(score_fields)}, \"{self.scope_config.judge.feedback_field}\": \"recommendations\"}}")
 
-        # Evaluation instructions
-        parts.extend(["", sep, "YOUR EVALUATION", sep, ""])
-        parts.extend([
-            "Evaluate the response against ALL criteria above.",
-            "Output a single JSON object with:",
-            "- One score field per rubric (0.0-1.0)",
-            f"- One `{self.scope_config.judge.feedback_field}` field explaining all evaluations",
-            "",
-            "IMPORTANT: Respond with ONLY valid JSON. No markdown, no explanations.",
-            "Start with { and end with }"
-        ])
+        # Build USER prompt (just the example to evaluate)
+        user_parts = ["## EXAMPLE TO EVALUATE", ""]
+        user_parts.extend(["**System:**", "```", system_content, "```", ""])
+        user_parts.extend(["**User:**", "```", user_content, "```", ""])
+        user_parts.extend(["**Assistant:**", "```", assistant_content, "```"])
 
-        return "\n".join(parts)
+        return "\n".join(system_parts), "\n".join(user_parts)
 
     def _parse_judgment(
         self,
@@ -392,10 +420,16 @@ class ImprovementEngine:
         Returns:
             Tuple of (improved_example, improve_prompt, improved_content, system_prompt)
         """
-        # Find rubric for this scope
+        # Find rubric for this scope (handle both single scope and list scopes)
         rubric = None
         for r in rubrics:
-            if r.get("scope") == scope:
+            r_scope = r.get("scope", "response")
+            # Support both single scope string and list of scopes
+            if isinstance(r_scope, list):
+                if scope in r_scope:
+                    rubric = r
+                    break
+            elif r_scope == scope:
                 rubric = r
                 break
 
@@ -406,45 +440,50 @@ class ImprovementEngine:
         # Build improvement prompt from rubric template
         template = rubric.get("improver_prompt", "")
         if not template:
-            self.logger.warning(f"No improvement template for {rubric.get('name')}")
+            self.logger.warning(f"No improver_prompt template for {rubric.get('name')}")
             return example, "", "", ""
 
-        # Extract current content
-        current_content = self.scope_extractor.extract(example, scope)
+        self.logger.info(f"    Improving {scope} with rubric: {rubric.get('name')}")
+
+        # Get scope handler to build prompt variables
+        from .services.scope_handlers import get_handler
+        handler = get_handler(scope, self.scope_config, self.scope_extractor, self.logger)
+
+        # Build template variables using scope handler
+        template_vars = handler.build_prompt_variables(example, judgment)
+
+        # Add feedback to template vars
         feedback = judgment.get(self.scope_config.judge.feedback_field, "")
+        template_vars["feedback"] = feedback
 
-        # Build system prompt for improver
-        system_prompt = (
-            f"You are a quality improvement specialist. Your task is to improve {scope} content "
-            f"to meet the standards of the '{rubric.get('name')}' rubric. "
-            f"Follow the format specification exactly and address all feedback issues."
-        )
+        # Build SYSTEM prompt for improver (feedback + role)
+        system_parts = []
+        system_parts.append(f"You are improving {scope} content for the '{rubric.get('name')}' rubric.")
 
-        # Render prompt - provide both variable names for compatibility
-        template_vars = {
-            "current_content": current_content or "",
-            "feedback": feedback,
-            "format_instructions": rubric.get("format_spec", ""),
-        }
+        # Add feedback to system
+        if feedback:
+            system_parts.extend(["", "## JUDGE FEEDBACK", feedback])
 
-        # Add scope-specific aliases for backward compatibility
-        if scope == "thinking":
-            template_vars["thinking_block"] = current_content or ""
-        elif scope == "system_prompt":
-            template_vars["system_prompt"] = current_content or ""
-        elif scope == "response":
-            template_vars["response"] = current_content or ""
-            # For response scope, also provide thinking block for alignment checks
-            thinking_content = self.scope_extractor.extract(example, "thinking")
-            template_vars["thinking_block"] = thinking_content or ""
+        system_prompt = "\n".join(system_parts)
 
-        improve_prompt = self.prompt_renderer.render_safe(template, template_vars)
+        # Build USER prompt (rendered improver template with all variables)
+        user_prompt = self.prompt_renderer.render_safe(template, template_vars)
 
-        # Execute improvement with system prompt
-        improved_content = self.improvement_service.improve(improve_prompt, system_prompt)
+        # Execute improvement
+        improved_content = self.improvement_service.improve(user_prompt, system_prompt)
+
+        # Log what the improver returned
+        content_preview = improved_content[:200] if improved_content else "(empty)"
+        self.logger.info(f"    Improver returned ({len(improved_content)} chars): {content_preview}...")
 
         # Apply improvement
         improved_example = self.improvement_applicator.apply(example, scope, improved_content)
 
-        # Return example, prompt, content, and system prompt for logging
-        return improved_example, improve_prompt, improved_content, system_prompt
+        # Log whether the example changed
+        if improved_example == example:
+            self.logger.warning(f"    Improvement NOT applied - example unchanged")
+        else:
+            self.logger.info(f"    Improvement applied successfully")
+
+        # Return example, prompts, content for logging
+        return improved_example, user_prompt, improved_content, system_prompt

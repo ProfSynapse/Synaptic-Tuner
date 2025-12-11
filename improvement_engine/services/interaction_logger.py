@@ -67,27 +67,31 @@ class InteractionLogger:
         rubric_name: str,
         score: float,
         passed: bool,
-        example_id: Optional[str] = None
+        example_id: Optional[str] = None,
+        system_prompt: Optional[str] = None
     ) -> None:
         """
         Log a judge interaction.
 
         Args:
-            judge_prompt: The prompt sent to judge
+            judge_prompt: The USER prompt sent to judge (example to evaluate)
             judge_response: The judge's response
             rubric_name: Name of the rubric
             score: Score returned by judge
             passed: Whether the example passed
             example_id: Optional example identifier
+            system_prompt: Optional SYSTEM prompt with criteria (if not provided, creates generic)
         """
         if not self.enabled:
             return
 
-        system_prompt = (
-            f"You are a quality judge for the '{rubric_name}' rubric. "
-            f"Evaluate examples and provide scores from 0.0 (poor) to 1.0 (excellent). "
-            f"Return JSON with the score field."
-        )
+        # Use provided system prompt or create generic fallback
+        if not system_prompt:
+            system_prompt = (
+                f"You are a quality judge for the '{rubric_name}' rubric. "
+                f"Evaluate examples and provide scores from 0.0 (poor) to 1.0 (excellent). "
+                f"Return JSON with the score field."
+            )
 
         interaction = {
             "conversations": [

@@ -29,37 +29,74 @@ class SchemaValidator:
             raise FileNotFoundError(f"Rubric not found: {rubric_file}")
 
         rubric_data = load_yaml(rubric_file)
-        self.schema = rubric_data.get("output_schema", {})
         self.scope = rubric_data.get("scope", "response")
 
-        if not self.schema:
-            raise ValueError(f"Rubric {rubric_name} has no output_schema defined")
+        # output_schema: What the JUDGE should return (scores, feedback)
+        self.output_schema = rubric_data.get("output_schema", {})
 
-        # Load content validation rules (composable types)
+        # content_schema: What the IMPROVED CONTENT should look like
+        self.content_schema = rubric_data.get("content_schema", {})
+
+        # Load content validation rules (composable types for xml, json, yaml, etc.)
         self.content_validation = rubric_data.get("schema_validation", {})
         self.validation_types = self.content_validation.get("types", [])
 
-    def validate(self, data: Dict) -> Tuple[bool, List[str]]:
+        # Shared context for cross-reference validation (extract → reference)
+        self.extracted_values = {}
+
+    def validate_thinking_content(self, data: Dict) -> Tuple[bool, List[str]]:
         """
-        Validate data against loaded schema.
+        Validate thinking block content against content_schema.
 
         Args:
-            data: Data to validate (thinking block, system prompt, etc.)
+            data: Thinking block dict (goal, memory, requirements, plan, etc.)
+
+        Returns:
+            (is_valid, list_of_errors)
+        """
+        if not self.content_schema:
+            # No content_schema defined, skip validation
+            return (True, [])
+
+        return self._validate_against_schema(data, self.content_schema)
+
+    def validate(self, data: Dict) -> Tuple[bool, List[str]]:
+        """
+        Validate data against output_schema (for judge response validation).
+
+        Args:
+            data: Data to validate (judge response)
+
+        Returns:
+            (is_valid, list_of_errors)
+        """
+        return self._validate_against_schema(data, self.output_schema)
+
+    def _validate_against_schema(self, data: Dict, schema: Dict) -> Tuple[bool, List[str]]:
+        """
+        Validate data against a given schema.
+
+        Args:
+            data: Data to validate
+            schema: JSON schema to validate against
 
         Returns:
             (is_valid, list_of_errors)
         """
         errors = []
 
+        if not schema:
+            return (True, [])
+
         # Check required fields
-        required = self.schema.get("required", [])
+        required = schema.get("required", [])
         for field in required:
             if field not in data:
                 errors.append(f"Missing required field: {field}")
                 continue
 
             # Validate field type and constraints
-            field_schema = self.schema.get("properties", {}).get(field, {})
+            field_schema = schema.get("properties", {}).get(field, {})
             value = data[field]
 
             # Type validation
@@ -173,14 +210,18 @@ class SchemaValidator:
 
         return None
 
-    def get_schema_description(self) -> str:
+    def get_schema_description(self, schema_type: str = "content") -> str:
         """Get human-readable schema description."""
+        schema = self.content_schema if schema_type == "content" else self.output_schema
+        if not schema:
+            return f"No {schema_type} schema defined for {self.rubric_name}"
+
         lines = []
         lines.append(f"Schema for {self.rubric_name} (scope: {self.scope}):")
         lines.append("")
 
-        required = self.schema.get("required", [])
-        properties = self.schema.get("properties", {})
+        required = schema.get("required", [])
+        properties = schema.get("properties", {})
 
         for field in required:
             field_schema = properties.get(field, {})
@@ -193,7 +234,7 @@ class SchemaValidator:
 
     def enforce_schema_on_dict(self, data: Dict, original_data: Dict) -> Dict:
         """
-        Enforce schema by filling in missing fields from original.
+        Enforce content_schema by filling in missing fields from original.
 
         Args:
             data: Possibly incomplete data
@@ -202,11 +243,15 @@ class SchemaValidator:
         Returns:
             Complete data with all required fields
         """
+        schema = self.content_schema
+        if not schema:
+            return data
+
         enforced = data.copy()
-        properties = self.schema.get("properties", {})
+        properties = schema.get("properties", {})
 
         # Ensure all required fields exist
-        for field in self.schema.get("required", []):
+        for field in schema.get("required", []):
             if field not in enforced or not enforced[field]:
                 # Use original value if available, otherwise use default
                 if field in original_data:
@@ -234,11 +279,14 @@ class SchemaValidator:
         Supports composable validation types:
         - xml: Check for required XML tags
         - json: Validate JSON structure (standalone or in sections)
-        - regex: Pattern matching
+        - regex: Pattern matching with {var} interpolation
         - yaml: YAML structure validation
         - code: Code syntax validation (Python, JS, etc.)
 
-        YAML can specify multiple types: types: [xml, json]
+        Cross-reference validation:
+        - Any type can extract values using 'extract:' config
+        - Any type can reference extracted values using {var_name}
+        - Types run in order specified by 'types:' list
 
         Args:
             content: Content string to validate
@@ -247,6 +295,9 @@ class SchemaValidator:
             (is_valid, list_of_error_messages)
         """
         all_errors = []
+
+        # Reset extracted values for each validation run
+        self.extracted_values = {}
 
         # Run each validation type in sequence
         for validation_type in self.validation_types:
@@ -293,7 +344,7 @@ class SchemaValidator:
 
     def _validate_json(self, content: str) -> Tuple[bool, List[str]]:
         r"""
-        Validate JSON structure.
+        Validate JSON structure and optionally extract values for cross-reference.
 
         YAML config options:
 
@@ -307,6 +358,10 @@ class SchemaValidator:
                - tag: 'selected_workspace'
                  extract_pattern: '\{[\s\S]*\}'
                  required_fields: [context, workspaceStructure]
+                 extract:
+                   - path: 'context.rootFolder'
+                     as: 'workspace_root'
+                     skip_if: '/'
         """
         errors = []
         json_config = self.content_validation.get("json", {})
@@ -339,10 +394,57 @@ class SchemaValidator:
                     try:
                         json_data = json.loads(json_match.group(0))
 
+                        # Extract values for cross-reference if configured
+                        extract_config = section.get("extract", [])
+                        if extract_config:
+                            self._extract_and_store(json_data, extract_config)
+
                         # Check required fields
-                        for field in required_fields:
-                            if field not in json_data:
-                                errors.append(f"Missing field in <{tag}>: {field}")
+                        for field_spec in required_fields:
+                            # Support both simple string and dict format
+                            if isinstance(field_spec, str):
+                                field_name = field_spec
+                                field_constraints = {}
+                            else:
+                                field_name = field_spec.get("name", field_spec)
+                                field_constraints = field_spec
+
+                            # Check field exists
+                            if field_name not in json_data:
+                                errors.append(f"Missing field in <{tag}>: {field_name}")
+                                continue
+
+                            field_value = json_data[field_name]
+
+                            # Type and constraint validation
+                            field_type = field_constraints.get("type")
+
+                            # Array validation
+                            if field_type == "array":
+                                if not isinstance(field_value, list):
+                                    errors.append(f"Field <{tag}>.{field_name} must be array, got {type(field_value).__name__}")
+                                else:
+                                    min_items = field_constraints.get("min_items")
+                                    if min_items and len(field_value) < min_items:
+                                        errors.append(f"Field <{tag}>.{field_name} must have at least {min_items} items, has {len(field_value)}")
+
+                            # Object validation
+                            elif field_type == "object":
+                                if not isinstance(field_value, dict):
+                                    errors.append(f"Field <{tag}>.{field_name} must be object, got {type(field_value).__name__}")
+                                else:
+                                    min_properties = field_constraints.get("min_properties")
+                                    if min_properties and len(field_value) < min_properties:
+                                        errors.append(f"Field <{tag}>.{field_name} must have at least {min_properties} properties, has {len(field_value)}")
+
+                            # String validation
+                            elif field_type == "string":
+                                if not isinstance(field_value, str):
+                                    errors.append(f"Field <{tag}>.{field_name} must be string, got {type(field_value).__name__}")
+                                else:
+                                    min_length = field_constraints.get("min_length")
+                                    if min_length and len(field_value) < min_length:
+                                        errors.append(f"Field <{tag}>.{field_name} must have at least {min_length} characters, has {len(field_value)}")
                     except json.JSONDecodeError as e:
                         errors.append(f"Invalid JSON in <{tag}>: {str(e)}")
                 else:
@@ -352,15 +454,16 @@ class SchemaValidator:
 
     def _validate_regex(self, content: str) -> Tuple[bool, List[str]]:
         """
-        Validate content against regex patterns.
+        Validate content against regex patterns with {var} interpolation.
 
         YAML config:
           regex:
             patterns:
               - pattern: '\\btool_call:\\s*\\w+'
                 description: 'Must contain tool_call: format'
-              - pattern: 'arguments:\\s*\\{'
-                description: 'Must have arguments: JSON'
+              - pattern: '{workspace_root}'
+                in_tag: 'vault_structure'
+                description: 'Workspace rootFolder must exist in vault_structure'
         """
         errors = []
         regex_config = self.content_validation.get("regex", {})
@@ -369,9 +472,33 @@ class SchemaValidator:
         for pattern_spec in patterns:
             pattern = pattern_spec["pattern"]
             description = pattern_spec.get("description", pattern)
+            in_tag = pattern_spec.get("in_tag")
 
-            if not re.search(pattern, content, re.DOTALL):
-                errors.append(f"Pattern not found: {description}")
+            # Interpolate {var} with extracted values
+            interpolated_pattern = self._interpolate(pattern)
+
+            # Skip if pattern still has unresolved {var} (value was skipped or not found)
+            if '{' in interpolated_pattern and '}' in interpolated_pattern:
+                continue
+
+            # Determine search content (scoped to tag or full content)
+            if in_tag:
+                search_content = self._get_tag_content(content, in_tag)
+                if search_content is None:
+                    errors.append(f"Tag <{in_tag}> not found for pattern: {description}")
+                    continue
+            else:
+                search_content = content
+
+            # Use re.escape for literal string matching when pattern is a simple extracted value
+            if interpolated_pattern == pattern_spec["pattern"]:
+                # Original pattern (no interpolation) - use as regex
+                if not re.search(interpolated_pattern, search_content, re.DOTALL):
+                    errors.append(f"Pattern not found: {description}")
+            else:
+                # Interpolated value - do literal string search
+                if interpolated_pattern not in search_content:
+                    errors.append(f"{description}: '{interpolated_pattern}' not found in <{in_tag}>")
 
         return (len(errors) == 0, errors)
 
@@ -379,25 +506,71 @@ class SchemaValidator:
         """
         Validate YAML structure.
 
-        YAML config:
-          yaml:
-            required_keys: [name, version, dependencies]
+        YAML config options:
+
+        1. Standalone YAML:
+           yaml:
+             required_keys: [name, version, dependencies]
+
+        2. YAML in XML sections:
+           yaml:
+             sections:
+               - tag: 'available_agents'
+                 min_items: 2
+                 item_fields: [name, description]
         """
         errors = []
         yaml_config = self.content_validation.get("yaml", {})
 
-        try:
-            import yaml
-            data = yaml.safe_load(content)
+        # Standalone YAML validation
+        if "required_keys" in yaml_config:
+            try:
+                import yaml
+                data = yaml.safe_load(content)
 
-            # Check required keys
-            required_keys = yaml_config.get("required_keys", [])
-            for key in required_keys:
-                if key not in data:
-                    errors.append(f"Missing required YAML key: {key}")
+                # Check required keys
+                required_keys = yaml_config.get("required_keys", [])
+                for key in required_keys:
+                    if key not in data:
+                        errors.append(f"Missing required YAML key: {key}")
 
-        except yaml.YAMLError as e:
-            errors.append(f"Invalid YAML: {str(e)}")
+            except yaml.YAMLError as e:
+                errors.append(f"Invalid YAML: {str(e)}")
+
+        # YAML in XML sections
+        sections = yaml_config.get("sections", [])
+        for section in sections:
+            tag = section["tag"]
+
+            # Extract section content
+            match = re.search(f'<{tag}[^>]*>(.*?)</{tag}>', content, re.DOTALL)
+            if match:
+                section_content = match.group(1).strip()
+
+                try:
+                    import yaml
+                    data = yaml.safe_load(section_content)
+
+                    # Check if it's a list
+                    if isinstance(data, list):
+                        min_items = section.get("min_items")
+                        if min_items and len(data) < min_items:
+                            errors.append(f"<{tag}> must have at least {min_items} items, has {len(data)}")
+
+                        # Check each item has required fields
+                        item_fields = section.get("item_fields", [])
+                        for idx, item in enumerate(data):
+                            if isinstance(item, dict):
+                                for field in item_fields:
+                                    if field not in item:
+                                        errors.append(f"<{tag}> item {idx + 1} missing field: {field}")
+                            else:
+                                errors.append(f"<{tag}> item {idx + 1} must be an object")
+                    else:
+                        errors.append(f"<{tag}> content must be a YAML list")
+
+                except yaml.YAMLError as e:
+                    errors.append(f"Invalid YAML in <{tag}>: {str(e)}")
 
         return (len(errors) == 0, errors)
 
@@ -432,3 +605,61 @@ class SchemaValidator:
             # Add more languages as needed
 
         return (len(errors) == 0, errors)
+
+    # ==================== Cross-Reference Helpers ====================
+
+    def _interpolate(self, text: str) -> str:
+        """Replace {var_name} with extracted values."""
+        for key, val in self.extracted_values.items():
+            text = text.replace(f"{{{key}}}", str(val))
+        return text
+
+    def _get_value_at_path(self, data: Dict, path: str) -> Optional[str]:
+        """
+        Navigate to value using dot notation path.
+
+        Args:
+            data: Dict to navigate
+            path: Dot notation path (e.g., 'context.rootFolder')
+
+        Returns:
+            Value at path, or None if not found
+        """
+        value = data
+        for key in path.split('.'):
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value if isinstance(value, str) else str(value) if value is not None else None
+
+    def _extract_and_store(self, data: Dict, extract_config: List[Dict]) -> None:
+        """
+        Extract values from data and store in shared context.
+
+        Args:
+            data: Parsed data (JSON or YAML)
+            extract_config: List of extraction specs from YAML config
+        """
+        for item in extract_config:
+            path = item.get("path")
+            var_name = item.get("as")
+            skip_if = item.get("skip_if")
+
+            if not path or not var_name:
+                continue
+
+            value = self._get_value_at_path(data, path)
+
+            if value is None:
+                continue
+
+            if skip_if and value == skip_if:
+                continue
+
+            self.extracted_values[var_name] = value
+
+    def _get_tag_content(self, content: str, tag: str) -> Optional[str]:
+        """Extract content from an XML tag."""
+        match = re.search(f'<{tag}[^>]*>(.*?)</{tag}>', content, re.DOTALL)
+        return match.group(1) if match else None

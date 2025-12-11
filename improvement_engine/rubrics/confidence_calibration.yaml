@@ -59,6 +59,35 @@ judge_prompt: '## Confidence Calibration Check
   Return JSON with single field: `confidencecalibration_score` (0.0-1.0)
 
   '
+improver_prompt: |
+  Fix the confidence score to match the operation's risk level.
+
+  **Current Thinking Block:**
+  ```json
+  {current_content}
+  ```
+
+  **Improvement Feedback:**
+  ```
+  {feedback}
+  ```
+
+  **Confidence Guidelines by Assessment:**
+  - risky=false, complex=false: 0.85-0.95 (safe simple operations)
+  - risky=false, complex=true: 0.70-0.80 (safe but complex)
+  - risky=true, complex=false: 0.60-0.75 (risky but straightforward)
+  - risky=true, complex=true: 0.50-0.65 (risky and complex)
+  - Asking clarification (no tool call): 0.50-0.70
+
+  **YOUR TASK:**
+  1. Check assessment.risky and assessment.complex values
+  2. Determine the correct confidence range
+  3. Adjust confidence to be within that range
+  4. Return the complete improved thinking block as valid JSON
+
+  **Output:**
+  Provide ONLY the improved thinking block as valid JSON. No explanations.
+
 output_schema:
   type: object
   properties:

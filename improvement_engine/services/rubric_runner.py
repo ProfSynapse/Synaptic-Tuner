@@ -199,43 +199,53 @@ class RubricRunner:
         print(f"Rubrics: {', '.join(rubric_keys)}")
         print(f"Max iterations: {max_iterations}\n")
 
-        # Process each example
-        results = []
-        for i in range(start_idx, end_idx):
-            if i >= len(lines):
-                break
-
-            line_num = i + 1
-            print(f"--- Line {line_num} ---")
-
-            try:
-                example = json.loads(lines[i])
-
-                # Run improvement engine
-                result = self.engine.run(
-                    example=example,
-                    rubric_keys=rubric_keys,
-                    max_iterations=max_iterations
-                )
-
-                # Display result
-                self._display_result(result)
-
-                # Save improved example
-                results.append(json.dumps(result.improved_example))
-
-            except Exception as e:
-                self.logger.error(f"Error processing line {line_num}: {e}")
-                # Save original on error
-                results.append(lines[i].strip())
-
-        # Write output
+        # Open output file for incremental writing
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for result_line in results:
-                f.write(result_line + '\n')
+
+        # Collect for markdown review
+        original_examples = []
+        results = []
+
+        with open(output_path, 'w', encoding='utf-8') as f_out:
+            # Process each example
+            for i in range(start_idx, end_idx):
+                if i >= len(lines):
+                    break
+
+                line_num = i + 1
+                print(f"--- Line {line_num} ---")
+
+                try:
+                    example = json.loads(lines[i])
+                    original_examples.append(example)
+
+                    # Run improvement engine
+                    result = self.engine.run(
+                        example=example,
+                        rubric_keys=rubric_keys,
+                        max_iterations=max_iterations
+                    )
+                    results.append(result)
+
+                    # Display result
+                    self._display_result(result)
+
+                    # Write improved example immediately
+                    f_out.write(json.dumps(result.improved_example) + '\n')
+                    f_out.flush()  # Ensure it's written to disk
+
+                except Exception as e:
+                    self.logger.error(f"Error processing line {line_num}: {e}")
+                    # Write original on error
+                    f_out.write(lines[i].strip() + '\n')
+                    f_out.flush()
 
         print(f"\n✅ Output written to: {output_path}")
+
+        # Write markdown review
+        if original_examples and results:
+            md_path = self._write_markdown_review(output_path, original_examples, results)
+            print(f"📝 Markdown review: {md_path}")
 
     def run_on_example(
         self,
@@ -276,6 +286,93 @@ class RubricRunner:
         for key, score in result.final_scores.items():
             print(f"  {key}: {score:.2f}")
         print()
+
+    def _write_markdown_review(
+        self,
+        output_path: Path,
+        original_examples: List[dict],
+        results: List[ImprovementResult]
+    ) -> Path:
+        """
+        Write markdown review file for human inspection.
+
+        Args:
+            output_path: Path to JSONL output file
+            original_examples: List of original examples
+            results: List of ImprovementResult for each example
+
+        Returns:
+            Path to markdown review file
+        """
+        md_path = output_path.with_suffix('.review.md')
+
+        with open(md_path, 'w', encoding='utf-8') as f:
+            f.write("# Improvement Engine Review\n\n")
+            f.write(f"**Output file:** `{output_path.name}`\n")
+            f.write(f"**Generated:** {datetime.now().isoformat()}\n\n")
+
+            # Summary
+            passed = sum(1 for r in results if r.passed)
+            f.write("## Summary\n\n")
+            f.write(f"- Total examples: {len(results)}\n")
+            f.write(f"- Passed: {passed}\n")
+            f.write(f"- Failed: {len(results) - passed}\n\n")
+
+            # Each example
+            for idx, (orig, result) in enumerate(zip(original_examples, results), 1):
+                f.write(f"---\n\n## Example {idx}\n\n")
+
+                # Status
+                status = "✅ PASSED" if result.passed else "❌ FAILED"
+                f.write(f"**Status:** {status} (iterations: {result.iterations})\n\n")
+
+                # Scores
+                f.write("### Scores\n\n")
+                for key, score in result.final_scores.items():
+                    threshold_marker = "✓" if score >= 0.8 else "✗"
+                    f.write(f"- {key}: {score:.2f} {threshold_marker}\n")
+                f.write("\n")
+
+                # Original example
+                f.write("### Original Example\n\n")
+                convs = orig.get("conversations", [])
+
+                for conv in convs:
+                    role = conv.get("role", "unknown").upper()
+                    content = conv.get("content", "")
+
+                    f.write(f"**{role}:**\n\n")
+                    # Truncate very long content
+                    if len(content) > 3000:
+                        f.write(f"```\n{content[:3000]}...\n```\n\n")
+                    else:
+                        f.write(f"```\n{content}\n```\n\n")
+
+                # Improved example
+                f.write("### Improved Example\n\n")
+                improved_convs = result.improved_example.get("conversations", [])
+
+                for conv in improved_convs:
+                    role = conv.get("role", "unknown").upper()
+                    content = conv.get("content", "")
+
+                    f.write(f"**{role}:**\n\n")
+                    # Truncate very long content
+                    if len(content) > 3000:
+                        f.write(f"```\n{content[:3000]}...\n```\n\n")
+                    else:
+                        f.write(f"```\n{content}\n```\n\n")
+
+                # Tool calls if present
+                for conv in improved_convs:
+                    if "tool_calls" in conv:
+                        f.write("**Tool Calls:**\n\n")
+                        for tc in conv["tool_calls"]:
+                            func = tc.get("function", {})
+                            f.write(f"- `{func.get('name', 'unknown')}`\n")
+                            f.write(f"  ```json\n  {func.get('arguments', '{}')}\n  ```\n\n")
+
+        return md_path
 
 
 def main():

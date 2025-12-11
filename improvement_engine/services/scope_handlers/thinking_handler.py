@@ -20,7 +20,9 @@ class ThinkingHandler(ScopeHandler):
         """
         Apply improved thinking block.
 
-        Logic moved from ImprovementApplicator._apply_thinking()
+        Handles both:
+        - Content with <thinking> tags
+        - Raw JSON (possibly wrapped in markdown code blocks)
         """
         improved = json.loads(json.dumps(example))  # Deep copy
         conversations = improved.get("conversations", [])
@@ -32,24 +34,53 @@ class ThinkingHandler(ScopeHandler):
 
         markers = scope_def.markers
 
+        # First, try to extract thinking content
+        thinking_json = None
+
+        # Try 1: Look for <thinking> tags
+        pattern = f"{re.escape(markers.start)}(.*?){re.escape(markers.end)}"
+        match = re.search(pattern, improved_content, re.DOTALL)
+        if match:
+            thinking_json = match.group(1).strip()
+
+        # Try 2: Look for markdown code blocks (```json ... ``` or ``` ... ```)
+        if not thinking_json:
+            code_block_pattern = r'```(?:json)?\s*(\{[\s\S]*?\})\s*```'
+            match = re.search(code_block_pattern, improved_content)
+            if match:
+                thinking_json = match.group(1).strip()
+
+        # Try 3: Look for raw JSON object
+        if not thinking_json:
+            json_pattern = r'(\{[\s\S]*\})'
+            match = re.search(json_pattern, improved_content)
+            if match:
+                try:
+                    json.loads(match.group(1))  # Validate it's valid JSON
+                    thinking_json = match.group(1).strip()
+                except json.JSONDecodeError:
+                    pass
+
+        if not thinking_json:
+            # No valid thinking content found
+            return improved
+
+        # Apply the thinking content
         for conv in conversations:
             if conv.get("role") == "assistant":
                 content = conv.get("content", "")
 
-                # Extract thinking block from new content using markers
-                pattern = f"{re.escape(markers.start)}(.*?){re.escape(markers.end)}"
-                match = re.search(pattern, improved_content, re.DOTALL)
+                # Wrap in thinking tags
+                new_thinking = f"{markers.start}\n{thinking_json}\n{markers.end}"
 
-                if match:
-                    new_thinking = f"{markers.start}\n{match.group(1).strip()}\n{markers.end}"
+                # Replace existing thinking or prepend
+                existing_pattern = f"{re.escape(markers.start)}.*?{re.escape(markers.end)}"
+                if re.search(existing_pattern, content, re.DOTALL):
+                    content = re.sub(existing_pattern, new_thinking, content, flags=re.DOTALL)
+                else:
+                    content = new_thinking + "\n\n" + content
 
-                    # Replace existing thinking or prepend
-                    if markers.start in content:
-                        content = re.sub(pattern, new_thinking, content, flags=re.DOTALL)
-                    else:
-                        content = new_thinking + "\n\n" + content
-
-                    conv["content"] = content
+                conv["content"] = content
                 break
 
         return improved

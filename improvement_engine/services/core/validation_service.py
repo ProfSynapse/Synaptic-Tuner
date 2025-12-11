@@ -100,7 +100,8 @@ class ValidationService:
                 elif scope == "thinking":
                     # content should already be a dict from ScopeExtractor
                     if isinstance(content, dict):
-                        is_valid, errors = validator.validate(content)
+                        # Use validate_thinking_content() which checks against content_schema
+                        is_valid, errors = validator.validate_thinking_content(content)
                         results[rubric_key] = (is_valid, errors)
                     else:
                         results[rubric_key] = (False, ["Thinking content is not a dict"])

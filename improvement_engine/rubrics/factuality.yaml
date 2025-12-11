@@ -1,65 +1,104 @@
 name: Factuality
-description: Detects made-up details not present in system prompt or user request
-scope: response
+description: Ensures all details are grounded in system prompt or user request
+scope: [thinking, response]
 pass_threshold: 0.8
-judge_prompt: '## Factuality Check
 
+judge_prompt: |
+  # CONTEXT
+  You are evaluating whether content contains only factual information from the system prompt and user request. The thinking block's memory field is particularly prone to inventing dates, history, and motivations.
 
-  Evaluate whether the assistant''s response contains FABRICATED information not present
-  in the system prompt or user request.
+  **Content to Evaluate:**
+  ```
+  {current_content}
+  ```
 
+  **System Prompt (ground truth):**
+  ```
+  {system_prompt}
+  ```
 
-  **HALLUCINATION (fabricated):**
+  **User Request:**
+  ```
+  {user_request}
+  ```
 
-  - File paths, folder names not mentioned in inputs
+  # MISSION
+  Score based on whether all details can be traced to the inputs. High-quality training data contains only verifiable information.
 
-  - Dates, timestamps, version numbers not provided
+  # INSTRUCTIONS
+  1. Check the "memory" field carefully for invented details:
+     - Dates like "Oct 12", "2025-12-07" (only valid if in inputs)
+     - History like "user has been working on", "was requested on"
+     - Motivations like "after reviewing", "to restructure"
 
-  - User history, past actions, motivations not stated
+  2. Check for valid information sources:
+     - Exact text from system prompt or user request
+     - Paraphrases of input information
+     - Tool and agent names from system prompt
+     - Logical inferences (e.g., "delete is irreversible")
+     - General domain knowledge (e.g., "markdown files use .md")
 
-  - Specific counts (file counts, line numbers, sizes) not given
+  3. Score based on grounding:
+     - 1.0: All details traceable to inputs or reasonable inference
+     - 0.7-0.9: Minor details without source
+     - 0.4-0.6: Several invented details
+     - 0.0-0.3: Major fabrications
 
-  - Details about "previous sessions" or "earlier work" not referenced
+  # GUIDELINES
+  - Memory should describe user's intent from their request
+  - Dates are almost always fabricated unless explicitly stated
+  - "User wants to X" is valid; "User has been doing X since..." is fabrication
 
-  - Database schemas, record IDs, table names not in request
+  # FORMAT
+  Return JSON: `{"factuality_score": 0.0-1.0}`
 
+improver_prompt: |
+  # CONTEXT
+  You are improving content to ensure all details are grounded in the system prompt or user request.
 
-  **ALLOWED (not hallucination):**
+  **Current Content:**
+  ```
+  {current_content}
+  ```
 
-  - Exact text from system prompt or user request
+  **System Prompt (ground truth):**
+  ```
+  {system_prompt}
+  ```
 
-  - Paraphrases of input information
+  **User Request:**
+  ```
+  {user_request}
+  ```
 
-  - Tool names from available tools
+  # MISSION
+  Generate improved content where every detail can be traced to the inputs.
 
-  - Logical inferences (e.g., "delete is destructive")
+  # INSTRUCTIONS
+  1. **Fix the memory field**:
+     - Replace invented history with simple intent statement
+     - Remove dates unless they appear in inputs
+     - Example: "User wants to remove obsolete documentation"
 
-  - General domain knowledge (e.g., "markdown uses .md extension")
+  2. **Keep grounded information**:
+     - File paths from vault_structure or workspaceStructure
+     - IDs from session_context
+     - Agent names from available_agents
+     - Direct quotes or paraphrases from user request
 
-  - **sessionId/workspaceId from <session_context> in system prompt**
+  3. **Use reasonable inferences**:
+     - "This is a destructive operation" (logical)
+     - "File is in the workspace" (from system prompt)
+     - Keep domain knowledge that doesn't invent specifics
 
-  - **Agent names/IDs from <available_agents> in system prompt**
+  # GUIDELINES
+  - Simple statements are better than invented context
+  - "User wants X" is sufficient for memory
+  - Trust the system prompt for file locations
 
-  - **Reasonable path inferences** when user says "my X file" and context suggests location
+  # FORMAT
+  Output ONLY the improved content. No JSON wrapper, no explanations.
 
-  - **Generic placeholders** when exact values aren''t critical (e.g., your file vs specific path)
-
-
-  **SCORING:**
-
-  - **1.0** = No fabrications, all details are from inputs or reasonable inferences
-
-  - **0.7-0.9** = Minor fabrications that don''t affect core meaning
-
-  - **0.4-0.6** = Several fabricated details
-
-  - **0.0-0.3** = Major fabrications or hallucinations
-
-
-  **OUTPUT:**
-
-  Return JSON with single field: `factuality_score` (0.0-1.0)
-  '
 output_schema:
   type: object
   properties:
@@ -71,3 +110,6 @@ output_schema:
   required:
   - factuality_score
   additionalProperties: false
+
+# No content_schema - structure validation handled by thinking_quality rubric
+# This rubric only checks for hallucinated facts, not structure

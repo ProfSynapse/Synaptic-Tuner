@@ -49,14 +49,16 @@ class JudgeService:
     def judge(
         self,
         prompt: str,
-        rubrics: List[Dict]
+        rubrics: List[Dict],
+        system_prompt: str = None
     ) -> Dict:
         """
         Execute judge call to LLM.
 
         Args:
-            prompt: Complete judge prompt (already built)
+            prompt: User prompt with example to evaluate
             rubrics: List of rubric dicts
+            system_prompt: Optional system prompt with criteria
 
         Returns:
             Raw judgment dict from LLM
@@ -65,9 +67,15 @@ class JudgeService:
             # Build combined schema
             schema = self.schema_builder.build_combined_schema(rubrics)
 
+            # Build messages
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
             # Call LLM
             judgment = self.llm_client.structured_output(
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 schema=schema,
                 temperature=self.scope_config.llm.judge_temperature
             )

@@ -75,11 +75,15 @@ class ResponseHandler(ScopeHandler):
                 "feedback": <judge feedback>,
                 "system_prompt": <system prompt for context>,
                 "user_request": <user request>,
-                "original_tool_calls": <original tool calls for format reference>
+                "original_tool_calls": <original tool calls for format reference>,
+                "thinking_content": <thinking block for checking assessment>
             }
         """
         # Extract current response (text only, no thinking)
         current_content = self.scope_extractor.extract(example, "response")
+
+        # Extract thinking block (for checking assessment in response improvers)
+        thinking_content = self.scope_extractor.extract(example, "thinking")
 
         # Extract context messages
         conversations = example.get("conversations", [])
@@ -104,6 +108,7 @@ class ResponseHandler(ScopeHandler):
             "system_prompt": system_prompt,
             "user_request": user_request,
             "original_tool_calls": tool_calls_json,
+            "thinking_content": thinking_content or "",
         }
 
     def _is_text_only_response(self, content: str) -> bool:
