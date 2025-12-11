@@ -385,15 +385,9 @@ class RubricRunner:
                 if score_field and score_field in judgment:
                     score = judgment[score_field]
                 else:
-                    # Fallback: try to infer from boolean fields
-                    if "has_fabricated_details" in judgment:
-                        score = 0.0 if judgment["has_fabricated_details"] else 1.0
-                    elif "goal_matches_request" in judgment:
-                        score = 1.0 if judgment["goal_matches_request"] else 0.0
-                    elif "confidence_appropriate" in judgment:
-                        score = 1.0 if judgment["confidence_appropriate"] else 0.5
-                    else:
-                        score = 0.5  # Unknown
+                    # Fallback: If score field not found, default to 0.5
+                    self.logger.warning(f"Score field '{score_field}' not found in judgment for {key}")
+                    score = 0.5
 
                 scores[key] = score
 
