@@ -8,39 +8,50 @@ judge_prompt: '## Confidence Calibration Check
   Evaluate whether confidence scores are appropriate for operation risk level.
 
 
-  **Confidence Guidelines:**
+  **Confidence Guidelines by Assessment:**
 
-  - **Low risk (0.85-0.95):** read, list, search, get, view, find, query
+  - **risky=false, complex=false:** 0.85-0.95 (safe simple operations)
 
-  - **Medium risk (0.6-0.85):** create, append, add, update, modify, write
+  - **risky=false, complex=true:** 0.70-0.80 (safe but complex operations)
 
-  - **High risk (0.3-0.6):** delete, remove, replace, overwrite, batch ops
+  - **risky=true, complex=false:** 0.60-0.75 (risky but straightforward)
 
-  - **Asking clarification (0.4-0.6):** when no tool call, needs more info
+  - **risky=true, complex=true:** 0.50-0.65 (risky and complex)
 
-  - **Never 1.0:** nothing is 100% certain
-
-  - **Never < 0.3:** if that uncertain, shouldn''t proceed
+  - **Asking clarification (no tool call):** 0.50-0.70 (needs more info)
 
 
-  **Assessment Consistency:**
+  **Operation Risk Levels (for reference):**
 
-  - If risky=true → confidence should be ≤ 0.8
+  - Low risk: read, list, search, get, view, find, query
 
-  - If risky=false AND complex=false → confidence should be ≥ 0.85
+  - Medium risk: create, append, add, update, modify, write
 
-  - If risky=true AND complex=true → confidence should be 0.5-0.7
+  - High risk: delete, remove, replace, overwrite, batch operations
+
+
+  **Evaluation Steps:**
+
+  1. Check assessment.risky and assessment.complex values
+
+  2. Determine expected confidence range from guidelines above
+
+  3. Compare actual confidence to expected range
+
+  4. Score based on how well it matches
 
 
   **SCORING:**
 
-  - **1.0** = Perfect calibration, confidence matches risk level
+  - **1.0** = Confidence is within expected range for assessment
 
-  - **0.7-0.9** = Good calibration, minor mismatches
+  - **0.8** = Confidence slightly off (within 0.05 of range)
 
-  - **0.4-0.6** = Poor calibration, confidence off by 0.2+
+  - **0.6** = Confidence moderately off (0.05-0.15 outside range)
 
-  - **0.0-0.3** = Completely miscalibrated or inconsistent with assessment
+  - **0.3** = Confidence significantly off (0.15+ outside range)
+
+  - **0.0** = Completely wrong (e.g., 0.95 for risky operation)
 
 
   **OUTPUT:**
