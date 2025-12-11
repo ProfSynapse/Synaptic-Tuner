@@ -47,22 +47,6 @@ judge_prompt: '## Confidence Calibration Check
 
   Return JSON with single field: `confidencecalibration_score` (0.0-1.0)
 
-  Return JSON with:
-
-  - `confidence_score`: 0.0-1.0 overall calibration score
-
-  - `confidence_appropriate`: boolean
-
-  - `detected_risk_level`: "low", "medium", or "high"
-
-  - `expected_confidence_range`: e.g., "0.85-0.95"
-
-  - `actual_confidence`: the confidence value from thinking block
-
-  - `assessment_consistent`: boolean
-
-  - `confidence_feedback`: brief explanation
-
   '
 output_schema:
   type: object

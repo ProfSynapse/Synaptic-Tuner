@@ -19,10 +19,7 @@ judge_prompt: "## Context Alignment Check\n\nVerify the thinking block addresses
   \ = Perfect alignment, goal and memory match user request exactly\n- **0.7-0.9**\
   \ = Good alignment, minor interpretation differences\n- **0.4-0.6** = Partial misalignment,\
   \ some context mismatch\n- **0.0-0.3** = Major misalignment, addressing wrong request\n\
-  \n**OUTPUT:**\nReturn JSON with single field: `contextalignment_score` (0.0-1.0)\n\
-  Return JSON with:\n- `context_score`: 0.0-1.0 alignment score\n- `goal_matches_request`:\
-  \ boolean\n- `memory_matches_context`: boolean  \n- `plan_achieves_goal`: boolean\n\
-  - `misaligned_elements`: list of mismatched parts\n- `context_feedback`: brief explanation"
+  \n**OUTPUT:**\nReturn JSON with single field: `contextalignment_score` (0.0-1.0)"
 output_schema:
   type: object
   properties:

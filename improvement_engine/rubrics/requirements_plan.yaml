@@ -24,11 +24,7 @@ judge_prompt: "## Requirements vs Plan Distinction Check\n\nVerify requirements 
   \ are prerequisites, plan is execution\n- **0.7-0.9** = Good distinction, minor\
   \ overlap\n- **0.4-0.6** = Significant overlap or confusion\n- **0.0-0.3** = Requirements\
   \ and plan are duplicates or completely swapped\n\n**OUTPUT:**\nReturn JSON with\
-  \ single field: `requirementsplan_score` (0.0-1.0)\nReturn JSON with:\n- `distinction_score`:\
-  \ 0.0-1.0 distinction quality score\n- `requirements_are_prerequisites`: boolean\n\
-  - `plan_is_actionable`: boolean\n- `has_duplicates`: boolean\n- `mentions_permissions`:\
-  \ boolean (bad if true)\n- `problematic_items`: list of issues\n- `distinction_feedback`:\
-  \ brief explanation"
+  \ single field: `requirementsplan_score` (0.0-1.0)"
 output_schema:
   type: object
   properties:

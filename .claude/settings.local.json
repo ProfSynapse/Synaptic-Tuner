@@ -166,7 +166,8 @@
       "Bash(timeout 120 python3:*)",
       "Bash(timeout 30 python3:*)",
       "Bash(for f in improvement_engine/rubrics/*.yaml)",
-      "Bash(do wc -w:*)"
+      "Bash(do wc -w:*)",
+      "Bash(BashOutput e1454a)"
     ],
     "deny": [],
     "ask": []

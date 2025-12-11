@@ -53,17 +53,6 @@ judge_prompt: '## Factuality Check
   **OUTPUT:**
 
   Return JSON with single field: `factuality_score` (0.0-1.0)
-
-  Return JSON with:
-
-  - `factuality_score`: 0.0-1.0 score
-
-  - `has_fabricated_details`: true if any fabrications found
-
-  - `fabricated_items`: list of fabricated details (empty if none)
-
-  - `factuality_feedback`: brief explanation
-
   '
 output_schema:
   type: object
