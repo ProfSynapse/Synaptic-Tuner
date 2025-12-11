@@ -110,38 +110,18 @@ class ResponseHandler(ScopeHandler):
         """
         Detect if improved content is intentionally text-only (no tool execution intended).
 
-        Indicators of text-only response:
-        - Contains question marks (asking for clarification)
-        - Contains phrases like "could you", "please specify", "confirm", "I'm not confident"
-        - Does NOT contain tool block markers (```tool, etc.)
+        Simple logic: If the improved content doesn't contain tool call markers,
+        it's text-only. The decision to ask for clarification vs. execute tools
+        is made by the LLM in the prompt, not by keyword detection.
 
         Returns:
             True if this appears to be intentional text-only response
         """
-        content_lower = content.lower()
-
-        # Check for clarification/question indicators
-        clarification_phrases = [
-            "could you",
-            "can you",
-            "please specify",
-            "please confirm",
-            "i'm not confident",
-            "i'm uncertain",
-            "not sure",
-            "need clarification",
-            "which file",
-            "are you sure",
-        ]
-
-        has_clarification = any(phrase in content_lower for phrase in clarification_phrases)
-        has_question = "?" in content
-
-        # Check for tool block markers (if present, not text-only)
+        # Check for tool block markers
         has_tool_markers = "```tool" in content or '"name":' in content
 
-        # Text-only if asking questions/clarifying AND no tool markers
-        return (has_clarification or has_question) and not has_tool_markers
+        # Text-only if no tool markers present
+        return not has_tool_markers
 
     def _remove_tool_call_text(self, content: str) -> str:
         """
