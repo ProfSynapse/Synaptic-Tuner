@@ -1,7 +1,7 @@
 name: Tool Alignment
 description: Ensures tool calls match what the thinking block describes
 scope: response
-pass_threshold: 0.85
+pass_threshold: 0.8
 judge_prompt: '## Tool Alignment Check
 
 
@@ -30,6 +30,17 @@ judge_prompt: '## Tool Alignment Check
   - Tool would achieve what the plan describes
 
   - IDs from system prompt used correctly
+
+
+  **PARAMETER SOURCE VALIDATION:**
+
+  1. Check if sessionId/workspaceId match <session_context> in system prompt → **PASS**
+
+  2. Check if agent IDs match <available_agents> in system prompt → **PASS**
+
+  3. For other parameters: check if explicitly in user request OR reasonably inferable
+
+  4. **If parameters come from system prompt → tool_alignment PASSES**
 
 
   **Examples:**

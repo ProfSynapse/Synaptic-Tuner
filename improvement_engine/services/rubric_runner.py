@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -26,7 +27,7 @@ from shared.llm import create_client
 from shared.llm.config import LLMConfig
 from ..utils.yaml_loader import load_yaml
 from ..utils.logger import ImproveLogger
-from .schema_validator import ThinkingSchemaValidator
+from .schema_validator import SchemaValidator
 
 
 @dataclass
@@ -95,9 +96,6 @@ class RubricRunner:
 
         self.llm_client = create_client(config=config)
         self.backend = backend
-
-        # Schema validator for thinking blocks
-        self.schema_validator = ThinkingSchemaValidator(logger=self.logger)
 
         # Discover available rubrics
         self.available_rubrics = self._discover_rubrics()
@@ -291,37 +289,87 @@ class RubricRunner:
 
         return system_prompt, user_request, assistant_response
 
-    def _validate_thinking_schema_programmatic(self, example: Dict) -> Tuple[bool, List[str]]:
+    def _validate_schemas_programmatic(
+        self,
+        example: Dict,
+        rubric_keys: List[str]
+    ) -> Dict[str, Tuple[bool, List[str]]]:
         """
-        Programmatically validate thinking block schema.
+        Programmatically validate content against all rubric schemas (DRY approach).
+
+        For any rubric with a scope that requires validation (thinking, system_prompt, etc.),
+        extracts the content, validates against the rubric's output_schema, and returns errors.
+
+        Args:
+            example: Example to validate
+            rubric_keys: List of rubric keys to validate
 
         Returns:
-            Tuple of (is_valid, list_of_errors)
+            Dict mapping rubric_key to (is_valid, list_of_errors)
         """
-        import re
+        validation_results = {}
 
-        for conv in example.get("conversations", []):
-            if conv.get("role") == "assistant":
-                content = conv.get("content", "")
+        for key in rubric_keys:
+            try:
+                rubric = self._load_rubric(key)
+                scope = rubric.get("scope", "response")
 
-                # Check for thinking block
-                match = re.search(r"<thinking>(.*?)</thinking>", content, re.DOTALL)
-                if not match:
-                    return False, ["No <thinking> block found"]
+                # Only validate scopes that have structured content (not plain "response" text)
+                if scope in ["thinking", "system_prompt"]:
+                    validator = SchemaValidator(key, logger=self.logger)
 
-                thinking_str = match.group(1).strip()
+                    # Extract content based on scope
+                    content = validator.extract_content(example)
 
-                # Try to parse as JSON
-                try:
-                    thinking_block = json.loads(thinking_str)
-                except json.JSONDecodeError as e:
-                    return False, [f"Invalid JSON: {str(e)}"]
+                    if content is None:
+                        validation_results[key] = (False, [f"No {scope} content found"])
+                        continue
 
-                # Use the schema validator
-                is_valid, errors = self.schema_validator.validate(thinking_block)
-                return is_valid, errors
+                    # For system_prompt, validate the structure itself
+                    if scope == "system_prompt":
+                        # Validate XML structure programmatically
+                        system_prompt_text = content.get("system_prompt", "")
+                        errors = []
 
-        return False, ["No assistant message found"]
+                        required_sections = [
+                            '<session_context>',
+                            '<vault_structure>',
+                            '<available_workspaces>',
+                            '<available_agents>',
+                            '<selected_workspace'
+                        ]
+
+                        for section in required_sections:
+                            if section not in system_prompt_text:
+                                errors.append(f"Missing required section: {section}")
+
+                        # Validate JSON in <selected_workspace>
+                        if '<selected_workspace' in system_prompt_text:
+                            match = re.search(r'<selected_workspace[^>]*>(.*?)</selected_workspace>',
+                                            system_prompt_text, re.DOTALL)
+                            if match:
+                                try:
+                                    ws_json = json.loads(match.group(1).strip())
+                                    # Check for required fields in workspace JSON
+                                    required_ws_fields = ['context', 'workspaceStructure', 'workflows']
+                                    for field in required_ws_fields:
+                                        if field not in ws_json:
+                                            errors.append(f"Missing field in selected_workspace: {field}")
+                                except json.JSONDecodeError as e:
+                                    errors.append(f"Invalid JSON in selected_workspace: {str(e)}")
+
+                        validation_results[key] = (len(errors) == 0, errors)
+
+                    elif scope == "thinking":
+                        # Validate thinking block JSON schema
+                        is_valid, errors = validator.validate(content)
+                        validation_results[key] = (is_valid, errors)
+
+            except Exception as e:
+                self.logger.warning(f"Schema validation error for {key}: {e}")
+                validation_results[key] = (False, [f"Validation error: {str(e)}"])
+
+        return validation_results
 
     def judge(
         self,
@@ -340,8 +388,8 @@ class RubricRunner:
         """
         system_prompt, user_request, assistant_response = self._extract_conversations(example)
 
-        # FIRST: Run programmatic schema validation (fast, deterministic)
-        schema_valid, schema_errors = self._validate_thinking_schema_programmatic(example)
+        # FIRST: Run programmatic schema validation (fast, deterministic, DRY)
+        schema_validation_results = self._validate_schemas_programmatic(example, rubric_keys)
 
         # Build composed prompt and schema
         judge_prompt = self._compose_judge_prompt(
@@ -361,11 +409,13 @@ class RubricRunner:
             feedback = {}
             all_passed = True
 
-            # Add schema validation result (programmatic, not from LLM)
-            scores["thinking_schema"] = 1.0 if schema_valid else 0.0
-            if not schema_valid:
-                all_passed = False
-                feedback["thinking_schema"] = f"Schema errors: {'; '.join(schema_errors)}"
+            # Add programmatic schema validation results for each rubric
+            for rubric_key, (is_valid, errors) in schema_validation_results.items():
+                schema_key = f"{rubric_key}_schema"
+                scores[schema_key] = 1.0 if is_valid else 0.0
+                if not is_valid:
+                    all_passed = False
+                    feedback[schema_key] = f"Schema validation failed: {'; '.join(errors)}"
 
             for key in rubric_keys:
                 rubric = self._load_rubric(key)
@@ -420,77 +470,161 @@ class RubricRunner:
                 raw_judgment={"error": str(e)}
             )
 
-    def improve(
+    def _build_improve_prompt_by_scope(
         self,
+        scope: str,
         example: Dict,
-        judgment: JudgmentResult,
-        rubric_keys: List[str],
-    ) -> Dict:
+        feedback_text: str,
+        rubric_keys: List[str]
+    ) -> str:
         """
-        Improve an example based on judgment feedback.
-
-        Regenerates the FULL assistant response including:
-        - Thinking block (if present)
-        - Tool calls (if present)
-        - Text response (if present)
+        Build scope-specific improve prompt.
 
         Args:
-            example: Original example
-            judgment: Judgment result with feedback
-            rubric_keys: Rubrics that were evaluated
+            scope: What to regenerate (system_prompt, thinking, response, user)
+            example: Current example
+            feedback_text: Judge feedback to fix
+            rubric_keys: Rubrics being evaluated
 
         Returns:
-            Improved example dict
+            Improve prompt for that scope
         """
         system_prompt, user_request, assistant_response = self._extract_conversations(example)
 
-        # Get original tool calls structure for reference
-        original_tool_calls = None
-        for conv in example.get("conversations", []):
-            if conv.get("role") == "assistant" and "tool_calls" in conv:
-                original_tool_calls = conv["tool_calls"]
-                break
+        if scope == "system_prompt":
+            return f"""Rewrite the system prompt to fix all issues.
 
-        # Build improvement feedback from all failed rubrics
-        feedback_parts = []
+## Current System Prompt (has problems)
+```
+{system_prompt}
+```
 
-        # First check programmatic thinking_schema (not in rubric_keys, added in judge())
-        schema_score = judgment.scores.get("thinking_schema", 1.0)
-        if schema_score < 1.0:
-            fb = judgment.feedback.get("thinking_schema", "Schema validation failed")
-            feedback_parts.append(f"**thinking_schema** (score: {schema_score:.2f}, needs: 1.0):\n{fb}")
+## User Request (for context)
+```
+{user_request}
+```
 
-        for key in rubric_keys:
-            score = judgment.scores.get(key, 0)
-            rubric = self._load_rubric(key)
-            threshold = rubric.get("pass_threshold", 0.8)
+## Assistant Response (for extracting tool call paths)
+```
+{assistant_response}
+```
 
-            if score < threshold:
-                fb = judgment.feedback.get(key, "No specific feedback")
-                feedback_parts.append(f"**{key}** (score: {score:.2f}, needs: {threshold}):\n{fb}")
+## Problems to Fix
+{feedback_text}
 
-        feedback_text = "\n\n".join(feedback_parts)
+## Required Format
 
-        # Build tool call format instructions if original had tool calls
-        tool_format_instructions = ""
-        if original_tool_calls:
-            # Extract tool name and schema from original
-            original_tool = original_tool_calls[0] if original_tool_calls else {}
-            original_func = original_tool.get("function", {})
-            original_tool_name = original_func.get("name", "unknown")
-            try:
-                original_args = json.loads(original_func.get("arguments", "{}"))
-            except:
-                original_args = {}
+Generate a system prompt with ALL 5 required sections:
 
-            # Build example with actual tool schema
-            tool_format_instructions = f"""
+1. <session_context>
+   - Preserve existing sessionId and workspaceId from current system prompt
+   - Format: sessionId: "..." and workspaceId: "..."
+
+2. <vault_structure>
+   - List root-level folders based on domain (infer from user request and tool calls)
+   - For dev: Projects/, Docs/, Config/
+   - For notes: Notes/, Articles/, Resources/
+   - Include root files: README.md, todo.md
+
+3. <available_workspaces>
+   - Generate 1-2 realistic workspaces based on domain
+   - Each needs: name, id, description, root folder path
+
+4. <available_agents>
+   - Preserve any existing custom agents from current system prompt
+   - Add note: "Built-in agents (ContentManager, VaultLibrarian, etc.) are always available via MCP tools."
+
+5. <selected_workspace name="..." id="...">
+   - Generate JSON object with ALL fields:
+     * context: {{"id": "...", "name": "...", "description": "...", "rootFolder": "..."}}
+     * workflows: [{{"id": "...", "name": "...", "steps": [...]}}] (at least 1 workflow)
+     * workspaceStructure: [{{"path": "...", "type": "folder", "children": [...]}}] (at least 3 folders)
+     * recentFiles: [] (extract from tool calls if present)
+     * keyFiles: {{"readme": "README.md", ...}}
+     * preferences: "..." (domain-appropriate)
+     * sessions: [{{"id": "...", "summary": "..."}}]
+
+   **CRITICAL for workspaceStructure:**
+   - Extract file paths from tool calls in assistant response
+   - Add those paths to workspaceStructure
+   - Add 2-3 realistic neighbor files in same folders
+   - Use realistic file names for the domain
+
+## Output
+
+Generate the COMPLETE rewritten system prompt with all 5 sections.
+Output ONLY the XML/JSON system prompt, no explanations."""
+
+        elif scope == "thinking":
+            return f"""Regenerate ONLY the thinking block to fix schema issues.
+
+## Original Inputs (the ONLY source of truth)
+
+**System Prompt:**
+```
+{system_prompt}
+```
+
+**User Request:**
+```
+{user_request}
+```
+
+## Current Thinking Block (has problems)
+{self._extract_thinking_block_text(example)}
+
+## Problems to Fix
+{feedback_text}
+
+## Required Format
+
+The thinking block must be VALID JSON inside `<thinking>` tags:
+
+```
+<thinking>
+{{"goal": "...", "memory": "...", "requirements": [...], "assessment": {{"complex": false, "risky": false}}, "confidence": 0.8, "plan": [...]}}
+</thinking>
+```
+
+Required fields:
+- goal (string): What to do (use ONLY info from user request)
+- memory (string): Reference the user's request context (min 20 chars)
+- requirements (array): Prerequisites (file exists, etc.) - NOT actions
+- assessment (object): {{"complex": bool, "risky": bool}}
+- confidence (number): 0.3-0.5 risky, 0.6-0.8 medium, 0.85-0.95 safe
+- plan (array): Action steps to take - NOT prerequisites
+
+**CRITICAL**: Use JSON format with double quotes, NOT YAML format.
+
+## Output
+
+Generate ONLY the thinking block in <thinking> tags. No other text."""
+
+        elif scope == "response":
+            # Get original tool calls for format reference
+            original_tool_calls = None
+            for conv in example.get("conversations", []):
+                if conv.get("role") == "assistant" and "tool_calls" in conv:
+                    original_tool_calls = conv["tool_calls"]
+                    break
+
+            tool_format_instructions = ""
+            if original_tool_calls:
+                original_tool = original_tool_calls[0] if original_tool_calls else {}
+                original_func = original_tool.get("function", {})
+                original_tool_name = original_func.get("name", "unknown")
+                try:
+                    original_args = json.loads(original_func.get("arguments", "{}"))
+                except:
+                    original_args = {}
+
+                tool_format_instructions = f"""
 ## Tool Call Format
 
 The original response used tool: `{original_tool_name}`
 With these parameters: {json.dumps(list(original_args.keys()))}
 
-If making a tool call, use this EXACT format after the thinking block:
+If making a tool call, use this EXACT format:
 
 ```
 [TOOL_CALL]
@@ -501,20 +635,19 @@ arguments:
 }}
 ```
 
-**Original tool call for reference (DO NOT copy fabricated values like paths):**
+**Original tool call for reference:**
 ```json
 {json.dumps(original_args, indent=2)}
 ```
 
 IMPORTANT for tool calls:
-- Use the SAME tool name and parameter names as the original
-- sessionId and workspaceId MUST match the system prompt exactly
-- Only use file paths explicitly mentioned in the user request
-- If user request is vague (e.g., "my troubleshooting guide" without path), you MUST ask for clarification instead of guessing a path
-- Do NOT copy fabricated paths from the original - if the path wasn't in the user request, ASK for it
-"""
+- Use the SAME tool name and parameter names
+- sessionId and workspaceId MUST match system prompt exactly
+- Only use file paths explicitly mentioned in user request OR reasonably inferable from system prompt context
+- If user request is vague but system prompt provides context → tool call is valid
+- If both vague → ask for clarification instead"""
 
-        improve_prompt = f"""Completely regenerate the assistant response to fix all issues.
+            return f"""Regenerate the assistant response (text and/or tool calls) to fix issues.
 
 ## Original Inputs (the ONLY source of truth)
 
@@ -529,83 +662,214 @@ IMPORTANT for tool calls:
 ```
 
 ## Current Response (has problems)
-
 ```
 {assistant_response}
 ```
 
 ## Problems to Fix
-
 {feedback_text}
 
 ## CRITICAL Rules
 
-1. **NO FABRICATION**: Only use information EXPLICITLY stated in system prompt or user request
-   - If user says "my troubleshooting guide" but doesn't give a path → ask which file
-   - If user says "add intro" but doesn't specify content → ask what to add or use generic placeholder
-   - NEVER invent: file paths, dates, edit history, file contents, user context
+1. **NO FABRICATION**: Only use information from system prompt or user request
+   - sessionId, workspaceId: Use values from <session_context> in system prompt
+   - Available agents: Use agents listed in <available_agents> in system prompt
+   - File paths: Only if explicitly in user request OR reasonably inferable from context
+   - NEVER invent: dates, edit history, fabricated file contents
 
-2. **Thinking Block** must be VALID JSON inside `<thinking>` tags:
-   ```
-   <thinking>
-   {{"goal": "...", "memory": "...", "requirements": [...], "assessment": {{"complex": false, "risky": false}}, "confidence": 0.8, "plan": [...]}}
-   </thinking>
-   ```
-   Required fields:
-   - goal (string): What to do (use ONLY info from user request)
-   - memory (string): Just reference the user's request, no invented context (min 20 chars)
-   - requirements (array): Prerequisites (file exists, etc.) - NOT actions
-   - assessment (object): {{"complex": bool, "risky": bool}}
-   - confidence (number): 0.3-0.5 risky, 0.6-0.8 medium, 0.85-0.95 safe
-   - plan (array): Action steps to take - NOT prerequisites
+2. **If user request is vague**:
+   - Check system prompt for context (sessionId, workspaceId, workspace structure)
+   - If system prompt has context → tool call is VALID
+   - If no context → ask for clarification
 
-   **CRITICAL**: Use JSON format with double quotes, NOT YAML format. No `key: value` on separate lines.
-
-3. **If user request is vague** (no specific file path given):
-   - Do NOT make a tool call with an invented path
-   - Instead, ask user for clarification in a text response
-   - Example: "Which file would you like me to add the introduction to?"
 {tool_format_instructions}
 
 ## Output
 
-Generate the COMPLETE fixed assistant response.
-Start with <thinking> block, then tool call OR clarifying question.
-Output ONLY the response, no explanations.
-"""
+Generate the assistant response (text and/or tool calls).
+Do NOT include <thinking> tags (that's handled separately).
+Output ONLY the response content."""
 
-        try:
-            response = self.llm_client.chat(
-                messages=[{"role": "user", "content": improve_prompt}],
-                temperature=0.3,
-            )
+        else:
+            # Unknown scope, return generic prompt
+            return f"""Fix the following issues:
 
-            content = response if isinstance(response, str) else response.get("content", "")
-            content = content.strip()
+{feedback_text}
 
-            # Create improved example
-            improved = json.loads(json.dumps(example))  # Deep copy
+Generate improved content for scope: {scope}"""
 
-            # Parse tool calls from the response if present
-            new_tool_calls = self._parse_tool_calls_from_response(content)
+    def _extract_thinking_block_text(self, example: Dict) -> str:
+        """Extract thinking block text from assistant response."""
+        for conv in example.get("conversations", []):
+            if conv.get("role") == "assistant":
+                content = conv.get("content", "")
+                match = re.search(r"<thinking>(.*?)</thinking>", content, re.DOTALL)
+                if match:
+                    return f"<thinking>\n{match.group(1).strip()}\n</thinking>"
+        return "(No thinking block found)"
 
-            # Update the assistant conversation
+    def _apply_improvement_by_scope(
+        self,
+        scope: str,
+        new_content: str,
+        example: Dict
+    ) -> Dict:
+        """
+        Apply scope-specific improvement to example.
+
+        Args:
+            scope: What was regenerated
+            new_content: New content from LLM
+            example: Example to update
+
+        Returns:
+            Updated example
+        """
+        improved = json.loads(json.dumps(example))  # Deep copy
+
+        if scope == "system_prompt":
+            # Replace system message
+            for conv in improved.get("conversations", []):
+                if conv.get("role") == "system":
+                    conv["content"] = new_content.strip()
+                    return improved
+
+            # If no system message exists, add one at the beginning
+            improved.setdefault("conversations", []).insert(0, {
+                "role": "system",
+                "content": new_content.strip()
+            })
+
+        elif scope == "thinking":
+            # Replace thinking block in assistant message
             for conv in improved.get("conversations", []):
                 if conv.get("role") == "assistant":
-                    # Remove tool call block from content if we parsed it separately
-                    clean_content = self._remove_tool_call_block(content)
+                    content = conv.get("content", "")
+
+                    # Extract new thinking block
+                    match = re.search(r"<thinking>(.*?)</thinking>", new_content, re.DOTALL)
+                    if match:
+                        new_thinking = f"<thinking>\n{match.group(1).strip()}\n</thinking>"
+
+                        # Replace existing thinking block or prepend if none exists
+                        if "<thinking>" in content:
+                            content = re.sub(
+                                r"<thinking>.*?</thinking>",
+                                new_thinking,
+                                content,
+                                flags=re.DOTALL
+                            )
+                        else:
+                            content = new_thinking + "\n\n" + content
+
+                        conv["content"] = content
+
+        elif scope == "response":
+            # Replace assistant text and tool calls
+            for conv in improved.get("conversations", []):
+                if conv.get("role") == "assistant":
+                    # Parse tool calls from new content
+                    new_tool_calls = self._parse_tool_calls_from_response(new_content)
+
+                    # Remove tool call block from text content
+                    clean_content = self._remove_tool_call_block(new_content)
+
+                    # Keep existing thinking block if present
+                    old_thinking_match = re.search(r"<thinking>.*?</thinking>", conv.get("content", ""), re.DOTALL)
+                    if old_thinking_match:
+                        old_thinking = old_thinking_match.group(0)
+                        if "<thinking>" not in clean_content:
+                            clean_content = old_thinking + "\n\n" + clean_content
+
                     conv["content"] = clean_content
 
-                    # Update tool_calls if we found new ones
+                    # Update tool_calls
                     if new_tool_calls:
                         conv["tool_calls"] = new_tool_calls
-                    elif "[TOOL_CALL]" not in content and "tool_name:" not in content:
-                        # No tool call in response, remove from conversation
-                        conv.pop("tool_calls", None)
-                    break
+                    elif "tool_calls" in conv:
+                        del conv["tool_calls"]
 
-            # Validate thinking block schema
-            improved = self._validate_and_fix_thinking_schema(improved, example)
+        return improved
+
+    def improve(
+        self,
+        example: Dict,
+        judgment: JudgmentResult,
+        rubric_keys: List[str],
+    ) -> Dict:
+        """
+        Improve an example based on judgment feedback using scope-based regeneration.
+
+        Detects which scopes failed and regenerates them in order:
+        1. system_prompt - System message
+        2. thinking - Thinking block in assistant response
+        3. response - Assistant text and tool calls
+
+        Args:
+            example: Original example
+            judgment: Judgment result with feedback
+            rubric_keys: Rubrics that were evaluated
+
+        Returns:
+            Improved example dict
+        """
+        try:
+            # Detect which scopes need regeneration
+            scopes_to_regenerate = self._detect_failed_scopes(judgment, rubric_keys)
+
+            if not scopes_to_regenerate:
+                self.logger.info("No scopes need regeneration (all passed)")
+                return example
+
+            self.logger.info(f"Regenerating scopes in order: {scopes_to_regenerate}")
+
+            # Start with current example
+            improved = example
+
+            # Regenerate each scope in order: system_prompt → thinking → response
+            for scope in scopes_to_regenerate:
+                # Build feedback for this scope only
+                feedback_parts = []
+
+                # Include schema validation errors for this scope
+                schema_key = f"{scope}_schema"
+                for rubric_key in rubric_keys:
+                    rubric = self._load_rubric(rubric_key)
+                    if rubric.get("scope") == scope:
+                        # Add schema feedback
+                        if schema_key in judgment.scores and judgment.scores[schema_key] < 1.0:
+                            fb = judgment.feedback.get(schema_key, "Schema validation failed")
+                            feedback_parts.append(f"**{schema_key}** (score: {judgment.scores[schema_key]:.2f}, needs: 1.0):\n{fb}")
+
+                        # Add rubric feedback
+                        if rubric_key in judgment.scores:
+                            score = judgment.scores[rubric_key]
+                            threshold = rubric.get("pass_threshold", 0.8)
+                            if score < threshold:
+                                fb = judgment.feedback.get(rubric_key, "No specific feedback")
+                                feedback_parts.append(f"**{rubric_key}** (score: {score:.2f}, needs: {threshold}):\n{fb}")
+
+                feedback_text = "\n\n".join(feedback_parts) if feedback_parts else "Fix issues"
+
+                # Build scope-specific improve prompt
+                improve_prompt = self._build_improve_prompt_by_scope(
+                    scope, improved, feedback_text, rubric_keys
+                )
+
+                # Regenerate this scope
+                self.logger.info(f"Regenerating scope: {scope}")
+                response = self.llm_client.chat(
+                    messages=[{"role": "user", "content": improve_prompt}],
+                    temperature=0.3,
+                )
+
+                content = response if isinstance(response, str) else response.get("content", "")
+
+                # Apply improvement for this scope
+                improved = self._apply_improvement_by_scope(scope, content, improved)
+
+            # Validate schemas after all improvements
+            improved = self._validate_and_fix_schemas(improved, example, rubric_keys)
 
             return improved
 
@@ -614,6 +878,50 @@ Output ONLY the response, no explanations.
             import traceback
             self.logger.error(traceback.format_exc())
             return example
+
+    def _detect_failed_scopes(
+        self,
+        judgment: JudgmentResult,
+        rubric_keys: List[str]
+    ) -> List[str]:
+        """
+        Detect which scopes failed and need regeneration.
+
+        Returns scopes in order: system_prompt → thinking → response
+
+        Args:
+            judgment: Judgment result
+            rubric_keys: Rubrics evaluated
+
+        Returns:
+            List of scopes to regenerate (ordered)
+        """
+        failed_scopes = set()
+
+        # Check schema validation failures
+        for score_key, score_value in judgment.scores.items():
+            if score_key.endswith("_schema") and score_value < 1.0:
+                # Extract scope from schema key (e.g., "system_prompt_format_schema" → "system_prompt")
+                for rubric_key in rubric_keys:
+                    if score_key.startswith(rubric_key):
+                        rubric = self._load_rubric(rubric_key)
+                        scope = rubric.get("scope", "response")
+                        failed_scopes.add(scope)
+                        break
+
+        # Check rubric failures
+        for key in rubric_keys:
+            rubric = self._load_rubric(key)
+            threshold = rubric.get("pass_threshold", 0.8)
+            score = judgment.scores.get(key, 0)
+
+            if score < threshold:
+                scope = rubric.get("scope", "response")
+                failed_scopes.add(scope)
+
+        # Return in order: system_prompt → thinking → response
+        scope_order = ["system_prompt", "user", "thinking", "response"]
+        return [s for s in scope_order if s in failed_scopes]
 
     def _parse_tool_calls_from_response(self, content: str) -> Optional[List[Dict]]:
         """Parse tool calls from improved response text."""
@@ -682,6 +990,69 @@ Output ONLY the response, no explanations.
             clean_lines.append(line)
 
         return "\n".join(clean_lines).strip()
+
+    def _validate_and_fix_schemas(self, improved: Dict, original: Dict, rubric_keys: List[str]) -> Dict:
+        """
+        Validate content against all rubric schemas based on their scope.
+
+        Args:
+            improved: Improved example to validate
+            original: Original example (for fallback)
+            rubric_keys: List of rubric keys being evaluated
+
+        Returns:
+            Validated and potentially fixed example
+        """
+        for key in rubric_keys:
+            rubric = self._load_rubric(key)
+            scope = rubric.get("scope", "response")
+
+            if scope == "thinking":
+                # Use existing thinking schema validation logic
+                improved = self._validate_and_fix_thinking_schema(improved, original)
+            elif scope == "system_prompt":
+                # Validate system prompt structure
+                # For now, log validation but don't modify
+                # Judge will catch issues in next iteration
+                try:
+                    validator = SchemaValidator(key, logger=self.logger)
+                    system_prompt = self._extract_system_prompt_text(improved)
+
+                    # Check for required XML sections
+                    required_sections = [
+                        '<session_context>',
+                        '<vault_structure>',
+                        '<available_workspaces>',
+                        '<available_agents>',
+                        '<selected_workspace'
+                    ]
+
+                    missing_sections = [s for s in required_sections if s not in system_prompt]
+                    if missing_sections:
+                        self.logger.warning(f"System prompt missing sections: {missing_sections}")
+
+                    # Validate JSON in <selected_workspace> if present
+                    if '<selected_workspace' in system_prompt:
+                        match = re.search(r'<selected_workspace[^>]*>(.*?)</selected_workspace>',
+                                        system_prompt, re.DOTALL)
+                        if match:
+                            try:
+                                ws_json = json.loads(match.group(1).strip())
+                                # Could validate structure here, but judge handles it
+                            except json.JSONDecodeError as e:
+                                self.logger.warning(f"Invalid JSON in selected_workspace: {e}")
+                except Exception as e:
+                    self.logger.warning(f"System prompt validation error: {e}")
+            # Additional scopes can be added here (tool_calls, response, etc.)
+
+        return improved
+
+    def _extract_system_prompt_text(self, example: Dict) -> str:
+        """Extract system prompt text from example."""
+        for conv in example.get("conversations", []):
+            if conv.get("role") == "system":
+                return conv.get("content", "")
+        return ""
 
     def _validate_and_fix_thinking_schema(self, improved: Dict, original: Dict) -> Dict:
         """
@@ -875,8 +1246,8 @@ Output ONLY the response, no explanations.
 
             # Log scores
             for key, score in judgment.scores.items():
-                # thinking_schema is programmatic, not a rubric file
-                if key == "thinking_schema":
+                # Schema keys are programmatic, not rubric files
+                if key.endswith("_schema"):
                     threshold = 1.0
                 else:
                     rubric = self._load_rubric(key)

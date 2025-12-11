@@ -1,0 +1,54 @@
+name: System Prompt Format
+description: Validates system prompt has all required sections with realistic content
+scope: system_prompt
+pass_threshold: 0.9
+
+judge_prompt: |
+  ## System Prompt Format Check
+
+  Evaluate if the system prompt follows the required rich format.
+
+  **REQUIRED SECTIONS (all must be present):**
+
+  1. **<session_context>** - Must have sessionId and workspaceId
+  2. **<vault_structure>** - Must list root folders (Notes/, Projects/, Resources/, etc.)
+  3. **<available_workspaces>** - Must list 1-2 workspaces with descriptions
+  4. **<available_agents>** - Must preserve existing agents + note about built-ins
+  5. **<selected_workspace>** - Must have JSON with:
+     - context object (id, name, description, rootFolder)
+     - workspaceStructure array with folder objects (path, type, children)
+     - recentFiles array
+     - keyFiles object
+     - workflows array (at least 1)
+     - sessions array
+     - preferences string
+
+  **QUALITY CHECKS:**
+
+  - workspaceStructure must have 3+ folder entries with realistic file names
+  - Folder paths must match tool calls in the assistant response
+  - Files in children arrays must be realistic for the domain
+  - No fabricated dates or contexts (use timestamps like 1700000000000)
+
+  **SCORING:**
+
+  - **1.0** = All 5 sections present, workspaceStructure realistic, paths match tool calls
+  - **0.7-0.9** = All sections present but workspaceStructure sparse (< 3 folders)
+  - **0.4-0.6** = Missing 1-2 sections or workspaceStructure empty
+  - **0.0-0.3** = Missing 3+ sections or wrong format
+
+  **OUTPUT:**
+
+  Return JSON with single field: `systempromptformat_score` (0.0-1.0)
+
+output_schema:
+  type: object
+  properties:
+    systempromptformat_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: Score for System Prompt Format
+  required:
+    - systempromptformat_score
+  additionalProperties: false

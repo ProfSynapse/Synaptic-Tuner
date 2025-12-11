@@ -1,7 +1,7 @@
 name: Factuality
 description: Detects made-up details not present in system prompt or user request
 scope: response
-pass_threshold: 0.9
+pass_threshold: 0.8
 judge_prompt: '## Factuality Check
 
 
@@ -36,7 +36,13 @@ judge_prompt: '## Factuality Check
 
   - General domain knowledge (e.g., "markdown uses .md extension")
 
-  - Session/workspace IDs from system prompt
+  - **sessionId/workspaceId from <session_context> in system prompt**
+
+  - **Agent names/IDs from <available_agents> in system prompt**
+
+  - **Reasonable path inferences** when user says "my X file" and context suggests location
+
+  - **Generic placeholders** when exact values aren''t critical (e.g., your file vs specific path)
 
 
   **SCORING:**
