@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Batch improvement with judge+improve loop.
+Batch improvement with refactored architecture.
 
-CLOUD ONLY: OpenRouter
-NOT for local providers (lmstudio, ollama) - too slow for batch processing.
+Uses ImprovementEngine for clean, config-driven improvement.
+
+CLOUD ONLY: OpenRouter recommended
+Can also work with local providers but slower.
 """
 
 import sys
@@ -14,236 +16,169 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from shared.llm import create_client
-from improvement_engine.rubrics import load_rubric
-from improvement_engine.services.judge_service import JudgeService
+from shared.llm.config import LLMConfig
+from improvement_engine.engine import ImprovementEngine
 from improvement_engine.utils.logger import ImproveLogger
 
-# Rubrics to use
-JUDGE_RUBRICS = [
-    "confidence_calibration",
-    "context_alignment",
-    "destructive_safety",
-    "factuality",
-    "requirements_plan",
-    "tool_alignment"
-]
 
-IMPROVE_RUBRIC = "thinking_quality"  # Only rubric with improver
-
-
-def improve_example(example: dict, llm_client, logger, max_iterations: int = 3):
+def process_file(
+    input_file: Path,
+    output_file: Path,
+    rubric_keys: list[str],
+    backend: str = "openrouter",
+    max_iterations: int = 3,
+    start_line: int = 1,
+    end_line: int = None
+):
     """
-    Run full judge+improve loop on one example.
+    Process a JSONL file with batch improvement.
 
-    Returns:
-        Tuple of (improved_example, iteration_count, all_passed)
+    Args:
+        input_file: Input JSONL file
+        output_file: Output JSONL file
+        rubric_keys: List of rubric keys to use
+        backend: LLM backend (openrouter, lmstudio, ollama)
+        max_iterations: Max improvement iterations per example
+        start_line: Starting line number (1-indexed)
+        end_line: Ending line number (1-indexed, None = all)
     """
-    current = example
-
-    for iteration in range(1, max_iterations + 1):
-        logger.info(f"  Iteration {iteration}/{max_iterations}")
-
-        # Judge with all rubrics
-        all_scores = {}
-        all_passed = True
-
-        for rubric_name in JUDGE_RUBRICS:
-            rubric = load_rubric(rubric_name)
-            judge = JudgeService(rubric=rubric, llm_client=llm_client, logger=logger)
-            result = judge.evaluate(current)
-
-            all_scores[rubric_name] = result.score
-
-            # DEBUG: Log full result details
-            logger.debug(f"    {rubric['name']} details: {result.details}")
-
-            if not result.passed:
-                all_passed = False
-                logger.warning(f"    {rubric['name']}: {result.score:.2f} (threshold: {rubric['pass_threshold']})")
-                if result.feedback:
-                    logger.debug(f"      Feedback: {result.feedback[:200]}")
-            else:
-                logger.success(f"    {rubric['name']}: {result.score:.2f} ✓")
-
-        # If all passed, we're done
-        if all_passed:
-            logger.success(f"  All rubrics passed on iteration {iteration}!")
-            return current, iteration, True
-
-        # Otherwise, try to improve
-        if iteration < max_iterations:
-            logger.info(f"  Improving with {IMPROVE_RUBRIC}...")
-            improve_rubric = load_rubric(IMPROVE_RUBRIC)
-
-            # Judge with improve rubric to get feedback
-            judge = JudgeService(rubric=improve_rubric, llm_client=llm_client, logger=logger)
-            result = judge.evaluate(current)
-
-            if not result.passed and improve_rubric.get("improver_prompt"):
-                # Improve based on feedback
-                improver_prompt = improve_rubric["improver_prompt"].format(
-                    thinking_block=json.dumps(extract_thinking(current)),
-                    feedback=result.feedback
-                )
-
-                # Get improved thinking block
-                improved_thinking = llm_client.structured_output(
-                    messages=[{"role": "user", "content": improver_prompt}],
-                    schema=improve_rubric.get("output_schema", {})
-                )
-
-                # Replace thinking block in example
-                current = replace_thinking(current, improved_thinking)
-                logger.info(f"  Applied improvements")
-            else:
-                logger.warning(f"  No improvements available")
-
-    logger.warning(f"  Max iterations reached without full pass")
-    return current, max_iterations, False
-
-
-def extract_thinking(example: dict) -> dict:
-    """Extract thinking block from example."""
-    for conv in example.get("conversations", []):
-        if conv.get("role") == "assistant":
-            content = conv.get("content", "")
-            if "<thinking>" in content:
-                start = content.find("<thinking>") + 10
-                end = content.find("</thinking>")
-                thinking_json = content[start:end].strip()
-                return json.loads(thinking_json)
-    return {}
-
-
-def replace_thinking(example: dict, new_thinking: dict) -> dict:
-    """Replace thinking block in example."""
-    improved = json.loads(json.dumps(example))  # Deep copy
-
-    for conv in improved.get("conversations", []):
-        if conv.get("role") == "assistant":
-            content = conv.get("content", "")
-            if "<thinking>" in content:
-                start = content.find("<thinking>") + 10
-                end = content.find("</thinking>")
-                new_content = (
-                    content[:start] +
-                    "\n" + json.dumps(new_thinking, indent=2) + "\n" +
-                    content[end:]
-                )
-                conv["content"] = new_content
-                break
-
-    return improved
-
-
-def main():
-    # Load config for defaults
-    from improvement_engine.utils.yaml_loader import load_config
-    config = load_config("config")
-    batch_config = config.get("batch", {})
-    default_batch_size = batch_config.get("default_size", 10)
-    default_max_iterations = batch_config.get("max_iterations", 3)
-
-    parser = argparse.ArgumentParser(
-        description="Batch improvement with judge+improve loop (CLOUD ONLY)"
-    )
-    parser.add_argument("--file", required=True, help="Input JSONL file")
-    parser.add_argument("--output", required=True, help="Output JSONL file")
-    parser.add_argument("--start-line", type=int, default=1, help="Start line (1-indexed)")
-    parser.add_argument("--end-line", type=int, help="End line (1-indexed, defaults to start + batch size)")
-    parser.add_argument("--batch-size", type=int, default=default_batch_size,
-                        help=f"Number of lines to process (default: {default_batch_size} from config)")
-    parser.add_argument("--backend", default="openrouter", help="LLM backend (openrouter only)")
-    parser.add_argument("--model", help="Model name (default from config)")
-    parser.add_argument("--max-iterations", type=int, default=default_max_iterations,
-                        help=f"Max improve iterations per example (default: {default_max_iterations} from config)")
-
-    args = parser.parse_args()
-
-    # Calculate end_line from batch_size if not specified
-    if not args.end_line:
-        args.end_line = args.start_line + args.batch_size - 1
-
-    # Validate cloud-only
-    if args.backend not in ["openrouter"]:
-        print(f"ERROR: Batch processing only supports cloud providers (openrouter)")
-        print(f"       Local providers (lmstudio, ollama) are too slow for batching")
-        sys.exit(1)
-
     logger = ImproveLogger()
 
-    print("=" * 70)
-    print("Batch Improvement - Judge+Improve Loop (CLOUD ONLY)")
-    print("=" * 70)
-    print(f"\nConfiguration:")
-    print(f"  Input: {args.file}")
-    print(f"  Output: {args.output}")
-    print(f"  Lines: {args.start_line}-{args.end_line or 'end'}")
-    print(f"  Backend: {args.backend}")
-    print(f"  Model: {args.model or 'default from config'}")
-    print(f"  Max iterations: {args.max_iterations}")
-    print(f"  Judge rubrics: {', '.join(JUDGE_RUBRICS)}")
-    print(f"  Improve rubric: {IMPROVE_RUBRIC}")
-    print()
+    # Initialize LLM client
+    config = LLMConfig(backend=backend)
+    llm_client = create_client(config=config)
 
-    # Create LLM client
-    logger.info("Initializing LLM client...")
-    llm_client = create_client(provider=args.backend, model=args.model)
+    # Initialize engine
+    rubrics_dir = Path(__file__).parent / "rubrics"
+    engine = ImprovementEngine(
+        llm_client=llm_client,
+        rubrics_dir=rubrics_dir,
+        logger=logger
+    )
 
-    # Load examples
-    logger.info(f"Loading examples from {args.file}...")
-    examples = []
-    with open(args.file, 'r') as f:
-        for i, line in enumerate(f, start=1):
-            if i < args.start_line:
-                continue
-            if args.end_line and i > args.end_line:
-                break
-            examples.append((i, json.loads(line)))
+    # Read input
+    with open(input_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
 
-    logger.success(f"Loaded {len(examples)} examples")
-    print()
+    # Determine range
+    if end_line is None:
+        end_line = len(lines)
+
+    start_idx = start_line - 1
+    end_idx = end_line
+
+    logger.info(f"Processing lines {start_line} to {end_line}")
+    logger.info(f"Rubrics: {', '.join(rubric_keys)}")
+    logger.info(f"Max iterations: {max_iterations}\n")
 
     # Process each example
     results = []
-    stats = {"improved": 0, "passed_first": 0, "failed": 0}
+    stats = {"passed": 0, "failed": 0, "errors": 0}
 
-    for line_num, example in examples:
-        print("-" * 70)
-        print(f"Processing Line {line_num}")
-        print("-" * 70)
+    for i in range(start_idx, end_idx):
+        if i >= len(lines):
+            break
 
-        improved, iterations, passed = improve_example(
-            example, llm_client, logger, args.max_iterations
-        )
+        line_num = i + 1
+        logger.info(f"=== Line {line_num}/{end_idx} ===")
 
-        results.append(improved)
+        try:
+            example = json.loads(lines[i])
 
-        if iterations == 1 and passed:
-            stats["passed_first"] += 1
-        elif passed:
-            stats["improved"] += 1
-        else:
-            stats["failed"] += 1
+            # Run improvement
+            result = engine.run(
+                example=example,
+                rubric_keys=rubric_keys,
+                max_iterations=max_iterations
+            )
 
-        print()
+            # Log result
+            if result.passed:
+                logger.success(f"✅ PASSED after {result.iterations} iteration(s)")
+                stats["passed"] += 1
+            else:
+                logger.warning(f"❌ FAILED after {result.iterations} iteration(s)")
+                stats["failed"] += 1
 
-    # Write results
-    logger.info(f"Writing {len(results)} examples to {args.output}...")
-    with open(args.output, 'w') as f:
-        for result in results:
-            f.write(json.dumps(result, ensure_ascii=False) + '\n')
+            logger.info(f"Scopes improved: {', '.join(result.scopes_improved) if result.scopes_improved else 'none'}")
+
+            # Save improved example
+            results.append(json.dumps(result.improved_example))
+
+        except Exception as e:
+            logger.error(f"Error processing line {line_num}: {e}")
+            stats["errors"] += 1
+            # Save original on error
+            results.append(lines[i].strip())
+
+    # Write output
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, 'w', encoding='utf-8') as f:
+        for result_line in results:
+            f.write(result_line + '\n')
 
     # Summary
-    print("=" * 70)
-    print("Summary")
-    print("=" * 70)
-    print(f"Total processed: {len(examples)}")
-    print(f"  Passed first try: {stats['passed_first']}")
-    print(f"  Improved to pass: {stats['improved']}")
-    print(f"  Failed to pass: {stats['failed']}")
-    print()
-    logger.success("Batch improvement complete!")
+    logger.info("\n" + "=" * 60)
+    logger.info("BATCH IMPROVEMENT COMPLETE")
+    logger.info("=" * 60)
+    logger.info(f"Total processed: {len(results)}")
+    logger.info(f"Passed: {stats['passed']}")
+    logger.info(f"Failed: {stats['failed']}")
+    logger.info(f"Errors: {stats['errors']}")
+    logger.info(f"Output: {output_file}")
+    logger.info("=" * 60)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Batch improvement with refactored architecture",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Process entire file with default rubrics
+  python batch_improve.py --file dataset.jsonl --output improved.jsonl
+
+  # Process specific lines
+  python batch_improve.py --file dataset.jsonl --output improved.jsonl \\
+    --start-line 1 --end-line 100
+
+  # Use specific rubrics
+  python batch_improve.py --file dataset.jsonl --output improved.jsonl \\
+    --rubrics thinking_quality,context_alignment,factuality
+
+  # Use local LLM
+  python batch_improve.py --file dataset.jsonl --output improved.jsonl \\
+    --backend lmstudio
+        """
+    )
+
+    parser.add_argument("--file", type=Path, required=True, help="Input JSONL file")
+    parser.add_argument("--output", type=Path, required=True, help="Output JSONL file")
+    parser.add_argument(
+        "--rubrics",
+        default="confidence_calibration,context_alignment,destructive_safety,factuality,requirements_plan,tool_alignment",
+        help="Comma-separated rubric keys (default: all main rubrics)"
+    )
+    parser.add_argument("--backend", default="openrouter", choices=["openrouter", "lmstudio", "ollama"])
+    parser.add_argument("--max-iterations", type=int, default=3, help="Max iterations per example")
+    parser.add_argument("--start-line", type=int, default=1, help="Start line (1-indexed)")
+    parser.add_argument("--end-line", type=int, help="End line (1-indexed)")
+
+    args = parser.parse_args()
+
+    # Parse rubric keys
+    rubric_keys = [k.strip() for k in args.rubrics.split(",")]
+
+    # Run batch processing
+    process_file(
+        input_file=args.file,
+        output_file=args.output,
+        rubric_keys=rubric_keys,
+        backend=args.backend,
+        max_iterations=args.max_iterations,
+        start_line=args.start_line,
+        end_line=args.end_line
+    )
 
 
 if __name__ == "__main__":
