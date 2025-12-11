@@ -106,8 +106,8 @@ class RubricRunner:
         """Scan rubrics folder and extract metadata."""
         rubrics = {}
 
-        # Skip these files (legacy or non-rubric)
-        skip_files = {"hallucination.yaml", "thinking_quality.yaml"}
+        # Skip these files (legacy or non-rubric configs)
+        skip_files = {"hallucination.yaml", "thinking_quality.yaml", "quality_labels.yaml"}
 
         for yaml_file in self.rubrics_dir.glob("*.yaml"):
             if yaml_file.name in skip_files:
