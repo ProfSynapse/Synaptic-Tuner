@@ -35,6 +35,10 @@ class SchemaValidator:
         if not self.schema:
             raise ValueError(f"Rubric {rubric_name} has no output_schema defined")
 
+        # Load content validation rules (composable types)
+        self.content_validation = rubric_data.get("schema_validation", {})
+        self.validation_types = self.content_validation.get("types", [])
+
     def validate(self, data: Dict) -> Tuple[bool, List[str]]:
         """
         Validate data against loaded schema.
@@ -222,3 +226,209 @@ class SchemaValidator:
                     self.logger.warning(f"Schema enforcement: Added default for '{field}'")
 
         return enforced
+
+    def validate_content(self, content: str) -> Tuple[bool, List[str]]:
+        """
+        Validate content against schema_validation rules from YAML.
+
+        Supports composable validation types:
+        - xml: Check for required XML tags
+        - json: Validate JSON structure (standalone or in sections)
+        - regex: Pattern matching
+        - yaml: YAML structure validation
+        - code: Code syntax validation (Python, JS, etc.)
+
+        YAML can specify multiple types: types: [xml, json]
+
+        Args:
+            content: Content string to validate
+
+        Returns:
+            (is_valid, list_of_error_messages)
+        """
+        all_errors = []
+
+        # Run each validation type in sequence
+        for validation_type in self.validation_types:
+            if validation_type == "xml":
+                is_valid, errors = self._validate_xml(content)
+            elif validation_type == "json":
+                is_valid, errors = self._validate_json(content)
+            elif validation_type == "regex":
+                is_valid, errors = self._validate_regex(content)
+            elif validation_type == "yaml":
+                is_valid, errors = self._validate_yaml(content)
+            elif validation_type == "code":
+                is_valid, errors = self._validate_code(content)
+            else:
+                self.logger.warning(f"Unknown validation type: {validation_type}")
+                continue
+
+            # Collect errors from all validators
+            if not is_valid:
+                all_errors.extend(errors)
+
+        return (len(all_errors) == 0, all_errors)
+
+    def _validate_xml(self, content: str) -> Tuple[bool, List[str]]:
+        """
+        Validate XML structure.
+
+        YAML config:
+          xml:
+            required_tags:
+              - '<session_context>'
+              - '<vault_structure>'
+        """
+        errors = []
+        xml_config = self.content_validation.get("xml", {})
+
+        # Check required tags
+        required_tags = xml_config.get("required_tags", [])
+        for tag in required_tags:
+            if tag not in content:
+                errors.append(f"Missing required XML tag: {tag}")
+
+        return (len(errors) == 0, errors)
+
+    def _validate_json(self, content: str) -> Tuple[bool, List[str]]:
+        r"""
+        Validate JSON structure.
+
+        YAML config options:
+
+        1. Standalone JSON:
+           json:
+             required_fields: [field1, field2]
+
+        2. JSON in XML sections:
+           json:
+             sections:
+               - tag: 'selected_workspace'
+                 extract_pattern: '\{[\s\S]*\}'
+                 required_fields: [context, workspaceStructure]
+        """
+        errors = []
+        json_config = self.content_validation.get("json", {})
+
+        # Check if content is standalone JSON
+        if "required_fields" in json_config:
+            try:
+                data = json.loads(content)
+                for field in json_config.get("required_fields", []):
+                    if field not in data:
+                        errors.append(f"Missing required JSON field: {field}")
+            except json.JSONDecodeError as e:
+                errors.append(f"Invalid JSON: {str(e)}")
+
+        # Check JSON in XML sections
+        sections = json_config.get("sections", [])
+        for section in sections:
+            tag = section["tag"]
+            extract_pattern = section.get("extract_pattern", r'\{.*\}')
+            required_fields = section.get("required_fields", [])
+
+            # Extract section content
+            match = re.search(f'<{tag}[^>]*>(.*?)</{tag}>', content, re.DOTALL)
+            if match:
+                section_content = match.group(1).strip()
+
+                # Extract JSON using pattern
+                json_match = re.search(extract_pattern, section_content, re.DOTALL)
+                if json_match:
+                    try:
+                        json_data = json.loads(json_match.group(0))
+
+                        # Check required fields
+                        for field in required_fields:
+                            if field not in json_data:
+                                errors.append(f"Missing field in <{tag}>: {field}")
+                    except json.JSONDecodeError as e:
+                        errors.append(f"Invalid JSON in <{tag}>: {str(e)}")
+                else:
+                    errors.append(f"No JSON found in <{tag}>")
+
+        return (len(errors) == 0, errors)
+
+    def _validate_regex(self, content: str) -> Tuple[bool, List[str]]:
+        """
+        Validate content against regex patterns.
+
+        YAML config:
+          regex:
+            patterns:
+              - pattern: '\\btool_call:\\s*\\w+'
+                description: 'Must contain tool_call: format'
+              - pattern: 'arguments:\\s*\\{'
+                description: 'Must have arguments: JSON'
+        """
+        errors = []
+        regex_config = self.content_validation.get("regex", {})
+
+        patterns = regex_config.get("patterns", [])
+        for pattern_spec in patterns:
+            pattern = pattern_spec["pattern"]
+            description = pattern_spec.get("description", pattern)
+
+            if not re.search(pattern, content, re.DOTALL):
+                errors.append(f"Pattern not found: {description}")
+
+        return (len(errors) == 0, errors)
+
+    def _validate_yaml(self, content: str) -> Tuple[bool, List[str]]:
+        """
+        Validate YAML structure.
+
+        YAML config:
+          yaml:
+            required_keys: [name, version, dependencies]
+        """
+        errors = []
+        yaml_config = self.content_validation.get("yaml", {})
+
+        try:
+            import yaml
+            data = yaml.safe_load(content)
+
+            # Check required keys
+            required_keys = yaml_config.get("required_keys", [])
+            for key in required_keys:
+                if key not in data:
+                    errors.append(f"Missing required YAML key: {key}")
+
+        except yaml.YAMLError as e:
+            errors.append(f"Invalid YAML: {str(e)}")
+
+        return (len(errors) == 0, errors)
+
+    def _validate_code(self, content: str) -> Tuple[bool, List[str]]:
+        """
+        Validate code syntax.
+
+        YAML config:
+          code:
+            language: python  # or javascript, etc.
+            check_syntax: true
+        """
+        errors = []
+        code_config = self.content_validation.get("code", {})
+
+        language = code_config.get("language", "python")
+        check_syntax = code_config.get("check_syntax", True)
+
+        if check_syntax:
+            if language == "python":
+                try:
+                    compile(content, '<string>', 'exec')
+                except SyntaxError as e:
+                    errors.append(f"Python syntax error: {str(e)}")
+
+            elif language == "javascript":
+                # Could use a JS parser if needed
+                # For now, basic check
+                if "syntax error" in content.lower():
+                    errors.append("JavaScript may have syntax errors")
+
+            # Add more languages as needed
+
+        return (len(errors) == 0, errors)

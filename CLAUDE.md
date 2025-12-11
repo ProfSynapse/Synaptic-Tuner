@@ -121,15 +121,68 @@ python src/upload_to_hf.py \
 ./Tools/run_synth_chat.sh --quick
 ```
 
-### 4. Improving Dataset Quality
+### 4. Improving Dataset Quality (LM Studio)
 
+**Direct Command:**
 ```bash
-# Test on single example
-python test_improvement.py
+python -m improvement_engine.services.rubric_runner \
+  --file Datasets/tools_datasets/thinking/agentManager/tools_v1.7.jsonl \
+  --output Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl \
+  --rubrics system_prompt_format \
+  --backend lmstudio \
+  --start-line 1 \
+  --end-line 3 \
+  --max-iterations 3
+```
 
-# Batch improvement
-cd improvement_engine
-python batch_improve.py
+**Options:**
+- `--file` - Input JSONL file
+- `--output` - Output JSONL file
+- `--rubrics` - Comma-separated rubric names (e.g., `system_prompt_format,thinking_quality`)
+- `--backend` - `lmstudio`, `ollama`, or `openrouter`
+- `--host` - LM Studio host (default: localhost)
+- `--port` - LM Studio port (default: 1234)
+- `--start-line` / `--end-line` - Line range to process
+- `--max-iterations` - Max improvement loops per example
+- `--no-interactions` - Disable interaction logging (enabled by default)
+
+**List available rubrics:**
+```bash
+python -m improvement_engine.services.rubric_runner --list
+```
+
+**Interactive Menu (Alternative):**
+```bash
+./run.sh
+# Select: [6] Improvement Engine (clean datasets)
+```
+
+**How it works:**
+1. Loads example from dataset
+2. Runs **schema validation** (YAML-driven: xml, json, regex, yaml, code)
+3. Passes validation results TO judge prompt
+4. Judge sees errors and gives targeted feedback
+5. Improver fixes based on feedback
+6. Logs interaction to `improvement_engine/interactions/` for KTO training
+
+**Checking Interactions:**
+```bash
+# View latest interactions file
+ls -lt improvement_engine/interactions/ | head -5
+
+# Inspect judge prompt (shows schema validation results)
+cat improvement_engine/interactions/interactions_LATEST.jsonl | head -1 | jq '.conversations[1].content'
+```
+
+**What Judge Sees:**
+```
+============================================================
+SCHEMA VALIDATION RESULTS
+============================================================
+
+❌ system_prompt_format: Schema validation FAILED
+   - Missing required XML tag: <vault_structure>
+   - Missing field in <selected_workspace>: workflows
 ```
 
 ### 5. Validating Datasets

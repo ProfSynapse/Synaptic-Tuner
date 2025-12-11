@@ -28,6 +28,7 @@ from shared.llm.config import LLMConfig
 from ..utils.yaml_loader import load_yaml
 from ..utils.logger import ImproveLogger
 from .schema_validator import SchemaValidator
+from .interaction_logger import InteractionLogger
 
 
 @dataclass
@@ -174,6 +175,7 @@ class RubricRunner:
         system_prompt: str,
         user_request: str,
         assistant_response: str,
+        schema_validation_results: Dict[str, Tuple[bool, List[str]]] = None,
     ) -> str:
         """Compose a single judge prompt from multiple rubrics."""
 
@@ -190,6 +192,32 @@ class RubricRunner:
             rubric = self._load_rubric(key)
             parts.append("")
             parts.append(rubric.get("judge_prompt", f"# {key} check"))
+
+        # Add schema validation results if available
+        if schema_validation_results:
+            parts.extend([
+                "",
+                "=" * 60,
+                "SCHEMA VALIDATION RESULTS",
+                "=" * 60,
+                "",
+            ])
+
+            for rubric_key, (is_valid, errors) in schema_validation_results.items():
+                if is_valid:
+                    parts.append(f"✅ {rubric_key}: Schema validation PASSED")
+                else:
+                    parts.append(f"❌ {rubric_key}: Schema validation FAILED")
+                    for error in errors:
+                        parts.append(f"   - {error}")
+
+            parts.extend([
+                "",
+                "**Instructions**: Incorporate schema validation results into your feedback.",
+                "If schema validation failed, prioritize fixing those issues.",
+                "If schema validation passed, focus on quality evaluation.",
+                "",
+            ])
 
         # Add the example to evaluate
         parts.extend([
@@ -325,40 +353,11 @@ class RubricRunner:
                         validation_results[key] = (False, [f"No {scope} content found"])
                         continue
 
-                    # For system_prompt, validate the structure itself
+                    # Validate content using YAML-driven schema
                     if scope == "system_prompt":
-                        # Validate XML structure programmatically
                         system_prompt_text = content.get("system_prompt", "")
-                        errors = []
-
-                        required_sections = [
-                            '<session_context>',
-                            '<vault_structure>',
-                            '<available_workspaces>',
-                            '<available_agents>',
-                            '<selected_workspace'
-                        ]
-
-                        for section in required_sections:
-                            if section not in system_prompt_text:
-                                errors.append(f"Missing required section: {section}")
-
-                        # Validate JSON in <selected_workspace>
-                        if '<selected_workspace' in system_prompt_text:
-                            match = re.search(r'<selected_workspace[^>]*>(.*?)</selected_workspace>',
-                                            system_prompt_text, re.DOTALL)
-                            if match:
-                                try:
-                                    ws_json = json.loads(match.group(1).strip())
-                                    # Check for required fields in workspace JSON
-                                    required_ws_fields = ['context', 'workspaceStructure', 'workflows']
-                                    for field in required_ws_fields:
-                                        if field not in ws_json:
-                                            errors.append(f"Missing field in selected_workspace: {field}")
-                                except json.JSONDecodeError as e:
-                                    errors.append(f"Invalid JSON in selected_workspace: {str(e)}")
-
-                        validation_results[key] = (len(errors) == 0, errors)
+                        is_valid, errors = validator.validate_content(system_prompt_text)
+                        validation_results[key] = (is_valid, errors)
 
                     elif scope == "thinking":
                         # Validate thinking block JSON schema
@@ -393,7 +392,8 @@ class RubricRunner:
 
         # Build composed prompt and schema
         judge_prompt = self._compose_judge_prompt(
-            rubric_keys, system_prompt, user_request, assistant_response
+            rubric_keys, system_prompt, user_request, assistant_response,
+            schema_validation_results  # Pass validation results to judge
         )
         output_schema = self._build_combined_schema(rubric_keys)
 
@@ -492,6 +492,19 @@ class RubricRunner:
         system_prompt, user_request, assistant_response = self._extract_conversations(example)
 
         if scope == "system_prompt":
+            # Load format_spec from rubric
+            format_instructions = ""
+            for key in rubric_keys:
+                rubric = self._load_rubric(key)
+                if rubric.get("scope") == "system_prompt":
+                    format_spec = rubric.get("format_spec", "")
+                    if format_spec:
+                        format_instructions = format_spec
+                        break
+
+            if not format_instructions:
+                format_instructions = "Follow the required format from the rubric."
+
             return f"""Rewrite the system prompt to fix all issues.
 
 ## Current System Prompt (has problems)
@@ -512,48 +525,12 @@ class RubricRunner:
 ## Problems to Fix
 {feedback_text}
 
-## Required Format
-
-Generate a system prompt with ALL 5 required sections:
-
-1. <session_context>
-   - Preserve existing sessionId and workspaceId from current system prompt
-   - Format: sessionId: "..." and workspaceId: "..."
-
-2. <vault_structure>
-   - List root-level folders based on domain (infer from user request and tool calls)
-   - For dev: Projects/, Docs/, Config/
-   - For notes: Notes/, Articles/, Resources/
-   - Include root files: README.md, todo.md
-
-3. <available_workspaces>
-   - Generate 1-2 realistic workspaces based on domain
-   - Each needs: name, id, description, root folder path
-
-4. <available_agents>
-   - Preserve any existing custom agents from current system prompt
-   - Add note: "Built-in agents (ContentManager, VaultLibrarian, etc.) are always available via MCP tools."
-
-5. <selected_workspace name="..." id="...">
-   - Generate JSON object with ALL fields:
-     * context: {{"id": "...", "name": "...", "description": "...", "rootFolder": "..."}}
-     * workflows: [{{"id": "...", "name": "...", "steps": [...]}}] (at least 1 workflow)
-     * workspaceStructure: [{{"path": "...", "type": "folder", "children": [...]}}] (at least 3 folders)
-     * recentFiles: [] (extract from tool calls if present)
-     * keyFiles: {{"readme": "README.md", ...}}
-     * preferences: "..." (domain-appropriate)
-     * sessions: [{{"id": "...", "summary": "..."}}]
-
-   **CRITICAL for workspaceStructure:**
-   - Extract file paths from tool calls in assistant response
-   - Add those paths to workspaceStructure
-   - Add 2-3 realistic neighbor files in same folders
-   - Use realistic file names for the domain
+{format_instructions}
 
 ## Output
 
 Generate the COMPLETE rewritten system prompt with all 5 sections.
-Output ONLY the XML/JSON system prompt, no explanations."""
+Output ONLY the system prompt, no explanations or markdown fences."""
 
         elif scope == "thinking":
             return f"""Regenerate ONLY the thinking block to fix schema issues.
@@ -796,6 +773,9 @@ Generate improved content for scope: {scope}"""
         example: Dict,
         judgment: JudgmentResult,
         rubric_keys: List[str],
+        interaction_logger: Optional[InteractionLogger] = None,
+        example_id: str = "unknown",
+        iteration: int = 0,
     ) -> Dict:
         """
         Improve an example based on judgment feedback using scope-based regeneration.
@@ -809,6 +789,9 @@ Generate improved content for scope: {scope}"""
             example: Original example
             judgment: Judgment result with feedback
             rubric_keys: Rubrics that were evaluated
+            interaction_logger: Optional logger for improver interactions
+            example_id: Unique identifier for this example
+            iteration: Current iteration number
 
         Returns:
             Improved example dict
@@ -822,6 +805,12 @@ Generate improved content for scope: {scope}"""
                 return example
 
             self.logger.info(f"Regenerating scopes in order: {scopes_to_regenerate}")
+
+            # Load judge prompts for interaction logging
+            rubric_judge_prompts = {}
+            for key in rubric_keys:
+                rubric = self._load_rubric(key)
+                rubric_judge_prompts[key] = rubric.get("judge_prompt", "")
 
             # Start with current example
             improved = example
@@ -864,6 +853,19 @@ Generate improved content for scope: {scope}"""
                 )
 
                 content = response if isinstance(response, str) else response.get("content", "")
+
+                # Log improver interaction (label will be set retroactively)
+                if interaction_logger:
+                    interaction_logger.log_improver_interaction(
+                        example_id=example_id,
+                        iteration=iteration,
+                        scope=scope,
+                        improve_prompt=improve_prompt,
+                        regenerated_content=content,
+                        rubric_keys=rubric_keys,
+                        feedback=feedback_text,
+                        rubric_judge_prompts=rubric_judge_prompts,
+                    )
 
                 # Apply improvement for this scope
                 improved = self._apply_improvement_by_scope(scope, content, improved)
@@ -1206,6 +1208,8 @@ Generate improved content for scope: {scope}"""
         example: Dict,
         rubric_keys: List[str],
         max_iterations: int = 10,
+        interaction_logger: Optional[InteractionLogger] = None,
+        example_id: str = "unknown",
     ) -> Tuple[bool, Dict, List[JudgmentResult]]:
         """
         Run judge/improve loop until all rubrics pass.
@@ -1217,6 +1221,8 @@ Generate improved content for scope: {scope}"""
             example: Example to validate/improve
             rubric_keys: Rubrics to evaluate against
             max_iterations: Max improvement attempts (ignored for local providers)
+            interaction_logger: Optional logger for judge/improver interactions
+            example_id: Unique identifier for this example
 
         Returns:
             Tuple of (passed, final_example, judgment_history)
@@ -1244,6 +1250,16 @@ Generate improved content for scope: {scope}"""
             judgment = self.judge(current, rubric_keys)
             history.append(judgment)
 
+            # Log judge interaction
+            if interaction_logger:
+                interaction_logger.log_judge_interaction(
+                    example_id=example_id,
+                    iteration=iteration,
+                    rubric_keys=rubric_keys,
+                    example=current,
+                    judgment=judgment,
+                )
+
             # Log scores
             for key, score in judgment.scores.items():
                 # Schema keys are programmatic, not rubric files
@@ -1261,7 +1277,14 @@ Generate improved content for scope: {scope}"""
 
             # Improve
             self.logger.info("  Improving...")
-            current = self.improve(current, judgment, rubric_keys)
+            current = self.improve(
+                current,
+                judgment,
+                rubric_keys,
+                interaction_logger=interaction_logger,
+                example_id=example_id,
+                iteration=iteration,
+            )
 
         self.logger.warning(f"Could not pass all rubrics after {effective_max} iterations")
         return False, current, history
@@ -1288,6 +1311,7 @@ def main():
     parser.add_argument("--max-iterations", type=int, default=10, help="Max improvement iterations")
     parser.add_argument("--parallel", action="store_true", help="Process batch in parallel (cloud only)")
     parser.add_argument("--workers", type=int, default=10, help="Max concurrent workers for parallel mode")
+    parser.add_argument("--no-interactions", action="store_true", help="Disable judge/improver interaction logging (enabled by default)")
 
     args = parser.parse_args()
 
@@ -1337,6 +1361,22 @@ def main():
 
     print(f"\nRunning rubrics: {', '.join(rubric_keys)}")
 
+    # Setup interaction logger (enabled by default)
+    interaction_logger = None
+    if not args.no_interactions:
+        # Create interactions folder structure
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dataset_path = Path(args.file)
+        dataset_name = dataset_path.stem
+        parent_folder = dataset_path.parent.name  # e.g., "agentManager", "contentManager"
+        interactions_dir = Path(__file__).parent.parent.parent / "improvement_engine" / "interactions"
+        interactions_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename: interactions_YYYYMMDD_HHMMSS_parentfolder_datasetname.jsonl
+        interaction_file = interactions_dir / f"interactions_{timestamp}_{parent_folder}_{dataset_name}.jsonl"
+        interaction_logger = InteractionLogger(interaction_file)
+
     # Determine mode: single line or full dataset
     if args.line:
         # SINGLE LINE MODE
@@ -1357,10 +1397,13 @@ def main():
                 break
 
         # Run
+        example_id = f"line_{args.line}"
         passed, final_example, history = runner.run(
             example,
             rubric_keys,
             max_iterations=args.max_iterations,
+            interaction_logger=interaction_logger,
+            example_id=example_id,
         )
 
         print("\n" + "=" * 60)
@@ -1373,6 +1416,10 @@ def main():
             print("\nFinal scores:")
             for key, score in history[-1].scores.items():
                 print(f"  {key}: {score:.2f}")
+
+        # Close interaction logger
+        if interaction_logger:
+            interaction_logger.close()
 
     else:
         # FULL DATASET MODE
@@ -1421,10 +1468,13 @@ def main():
                     host=args.host,
                     port=args.port,
                 )
+                example_id = f"line_{line_num}"
                 passed, final_example, history = thread_runner.run(
                     example,
                     rubric_keys,
                     max_iterations=args.max_iterations,
+                    interaction_logger=None,  # Don't log in parallel mode (thread safety)
+                    example_id=example_id,
                 )
                 return (line_num, passed, final_example, history)
 
@@ -1451,10 +1501,13 @@ def main():
                 processed += 1
 
                 # Run improvement
+                example_id = f"line_{line_num}"
                 passed, final_example, history = runner.run(
                     example,
                     rubric_keys,
                     max_iterations=args.max_iterations,
+                    interaction_logger=interaction_logger,
+                    example_id=example_id,
                 )
 
                 if passed:
@@ -1464,14 +1517,18 @@ def main():
                 # Write improved example to output
                 file_handler.write_jsonl(args.output, [final_example], mode='a')
 
-            # Progress stats every 10 lines
-            if processed % 10 == 0:
-                elapsed_min = (time.time() - start_time) / 60
-                rate_per_min = processed / elapsed_min if elapsed_min > 0 else 0
-                remaining = total_lines - line_num
-                eta_min = remaining / rate_per_min if rate_per_min > 0 else 0
-                print(f"\n--- Progress: {processed} done, {passed_count} passed, {failed_count} failed ---")
-                print(f"--- Rate: {rate_per_min:.2f} lines/min, ETA: {eta_min/60:.1f} hours ({eta_min:.0f} min) ---")
+                # Progress stats every 10 lines
+                if processed % 10 == 0:
+                    elapsed_min = (time.time() - start_time) / 60
+                    rate_per_min = processed / elapsed_min if elapsed_min > 0 else 0
+                    remaining = total_lines - line_num
+                    eta_min = remaining / rate_per_min if rate_per_min > 0 else 0
+                    print(f"\n--- Progress: {processed} done, {passed_count} passed, {failed_count} failed ---")
+                    print(f"--- Rate: {rate_per_min:.2f} lines/min, ETA: {eta_min/60:.1f} hours ({eta_min:.0f} min) ---")
+
+        # Close interaction logger
+        if interaction_logger:
+            interaction_logger.close()
 
         # Final summary
         elapsed = time.time() - start_time

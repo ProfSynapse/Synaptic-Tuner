@@ -28,7 +28,6 @@ judge_prompt: |
   - workspaceStructure must have 3+ folder entries with realistic file names
   - Folder paths must match tool calls in the assistant response
   - Files in children arrays must be realistic for the domain
-  - No fabricated dates or contexts (use timestamps like 1700000000000)
 
   **SCORING:**
 
@@ -41,6 +40,104 @@ judge_prompt: |
 
   Return JSON with single field: `systempromptformat_score` (0.0-1.0)
 
+format_spec: |
+  ## Required System Prompt Format
+
+  Generate a system prompt with ALL 5 required sections using this EXACT format:
+
+  **1. <session_context>** - Natural text format:
+  ```
+  <session_context>
+  IMPORTANT: When using tools, include these values in your tool call parameters:
+
+  - sessionId: "session_xyz123"
+  - workspaceId: "workspace_abc456"
+
+  Include these in the "context" parameter of your tool calls.
+  </session_context>
+  ```
+
+  **2. <vault_structure>** - Natural text format (NOT XML tags):
+  ```
+  <vault_structure>
+   Folders:
+    - Notes/
+    - Projects/
+    - Resources/
+
+  Files:
+    - README.md
+    - todo.md
+  </vault_structure>
+  ```
+
+  **3. <available_workspaces>** - Natural text format:
+  ```
+  <available_workspaces>
+  - Project Alpha (id: "workspace_alpha_123")
+    Description: Main development project for the new app
+    Root folder: Projects/Alpha
+
+  - Personal Notes (id: "workspace_personal_456")
+    Description: Daily journaling and personal tracking
+    Root folder: Notes/Personal
+  </available_workspaces>
+  ```
+
+  **4. <available_agents>** - Natural text format:
+  ```
+  <available_agents>
+  - CodeReviewer (id: "agent_code_review")
+    Specialized in reviewing TypeScript code and suggesting improvements
+  </available_agents>
+  ```
+
+  **5. <selected_workspace name="..." id="...">** - JSON format inside tags:
+  ```
+  <selected_workspace name="Project Alpha" id="workspace_alpha_123">
+  This workspace is currently selected. Use its context for your responses:
+
+  {
+    "context": {
+      "id": "workspace_alpha_123",
+      "name": "Project Alpha",
+      "description": "Main development project",
+      "rootFolder": "Projects/Alpha"
+    },
+    "workflows": [
+      {
+        "id": "workflow_1",
+        "name": "Daily Standup",
+        "steps": ["Review tasks", "Update status"]
+      }
+    ],
+    "workspaceStructure": [
+      {
+        "path": "Projects/Alpha/src",
+        "type": "folder",
+        "children": ["main.ts", "utils.ts"]
+      }
+    ],
+    "recentFiles": ["Projects/Alpha/src/main.ts"],
+    "keyFiles": {"config": "Projects/Alpha/config.json"},
+    "preferences": "Prefer TypeScript for all code examples.",
+    "sessions": [
+      {
+        "id": "session_prev_1",
+        "summary": "Implemented the login feature"
+      }
+    ]
+  }
+  </selected_workspace>
+  ```
+
+  **CRITICAL RULES:**
+  - Use NATURAL TEXT format for sections 1-4 (NOT XML tags like <folder>)
+  - Use JSON format ONLY inside <selected_workspace>
+  - Extract file paths from tool calls in assistant response
+  - Add realistic neighbor files in workspaceStructure
+  - Preserve sessionId and workspaceId from current system prompt
+
 output_schema:
   type: object
   properties:
@@ -52,3 +149,21 @@ output_schema:
   required:
     - systempromptformat_score
   additionalProperties: false
+
+schema_validation:
+  types: [xml, json]  # Composable validation types
+  xml:
+    required_tags:
+      - '<session_context>'
+      - '<vault_structure>'
+      - '<available_workspaces>'
+      - '<available_agents>'
+      - '<selected_workspace'
+  json:
+    sections:
+      - tag: 'selected_workspace'
+        extract_pattern: '\{[\s\S]*\}'  # Extract JSON block (greedy, multiline)
+        required_fields:
+          - 'context'
+          - 'workspaceStructure'
+          - 'workflows'
