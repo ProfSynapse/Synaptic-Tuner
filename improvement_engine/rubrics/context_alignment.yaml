@@ -2,31 +2,117 @@ name: Context Alignment
 description: Ensures goal and memory align with what the user actually requested
 scope: response
 pass_threshold: 0.9
-judge_prompt: "## Context Alignment Check\n\nVerify the thinking block addresses the\
-  \ user's ACTUAL request.\n\n**MISALIGNMENT (problem):**\n- Goal describes a different\
-  \ task than user requested\n- Memory references unrelated files, operations, or\
-  \ context\n- Requirements checking for wrong file types or locations\n- Plan steps\
-  \ that don't achieve user's stated goal\n- Thinking about file X when user asked\
-  \ about file Y\n\n**ALIGNED (correct):**\n- Goal directly addresses what user asked\
-  \ for\n- Memory provides relevant context for THIS request\n- Requirements verify\
-  \ prerequisites for the actual operation\n- Plan steps would accomplish the user's\
-  \ stated goal\n\n**Examples:**\n\nUser: \"Add 'New entry' to log.md\"\nBAD goal:\
-  \ \"Append 'Reviewed on 2025-12-07' to notes/meeting_notes.txt\"\nBAD memory: \"\
-  User wants to add timestamped review to meeting notes\"\nGOOD goal: \"Append 'New\
-  \ entry' to log.md\"\nGOOD memory: \"User requested adding new entry to log file\"\
-  \n\nUser: \"Read config.yaml\"\nBAD: Thinking discusses database queries or different\
-  \ files\nGOOD: Thinking focuses on reading config.yaml\n\n\n**SCORING:**\n- **1.0**\
-  \ = Perfect alignment, goal and memory match user request exactly\n- **0.7-0.9**\
-  \ = Good alignment, minor interpretation differences\n- **0.4-0.6** = Partial misalignment,\
-  \ some context mismatch\n- **0.0-0.3** = Major misalignment, addressing wrong request\n\
-  \n**OUTPUT:**\nReturn JSON with single field: `contextalignment_score` (0.0-1.0)"
+
+judge_prompt: |
+  ## Context Alignment Check
+
+  Verify the thinking block addresses the user's ACTUAL request.
+
+  **Thinking Block:**
+  ```
+  {thinking_content}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **MISALIGNMENT (problem):**
+  - Goal describes a different task than user requested
+  - Memory references unrelated files, operations, or context
+  - Requirements checking for wrong file types or locations
+  - Plan steps that don't achieve user's stated goal
+  - Thinking about file X when user asked about file Y
+
+  **ALIGNED (correct):**
+  - Goal directly addresses what user asked for
+  - Memory provides relevant context for THIS request
+  - Requirements verify prerequisites for the actual operation
+  - Plan steps would accomplish the user's stated goal
+
+  **Examples:**
+
+  User: "Add 'New entry' to log.md"
+  BAD goal: "Append 'Reviewed on 2025-12-07' to notes/meeting_notes.txt"
+  BAD memory: "User wants to add timestamped review to meeting notes"
+  GOOD goal: "Append 'New entry' to log.md"
+  GOOD memory: "User requested adding new entry to log file"
+
+  User: "Read config.yaml"
+  BAD: Thinking discusses database queries or different files
+  GOOD: Thinking focuses on reading config.yaml
+
+  **SCORING:**
+  - **1.0** = Perfect alignment, goal and memory match user request exactly
+  - **0.7-0.9** = Good alignment, minor interpretation differences
+  - **0.4-0.6** = Partial misalignment, some context mismatch
+  - **0.0-0.3** = Major misalignment, addressing wrong request
+
+  **OUTPUT:**
+  Return JSON with single field: `contextalignment_score` (0.0-1.0)
+
+improver_prompt: |
+  # CONTEXT
+  You are improving a thinking block to better align with the user's actual request.
+
+  **Current Thinking Block:**
+  ```json
+  {current_content}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **Improvement Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # MISSION
+  Generate an improved thinking block where the goal, memory, requirements, and plan directly address what the user asked for.
+
+  # INSTRUCTIONS
+  1. **GOAL** - Rewrite to match user's exact request:
+     - Use the same file names the user mentioned
+     - Use the same operation type the user requested
+     - Be specific about what will be done
+
+  2. **MEMORY** - Describe the user's actual intent:
+     - What does the user want to accomplish?
+     - Keep it factual based on their request
+     - Don't invent context or history
+
+  3. **REQUIREMENTS** - Check prerequisites for THIS operation:
+     - Only requirements relevant to user's request
+     - Don't add unrelated checks
+
+  4. **PLAN** - Steps to accomplish user's goal:
+     - Each step should move toward what user asked for
+     - Don't include steps for different tasks
+
+  # GUIDELINES
+  - If user said "delete file.md", goal should be about deleting file.md
+  - If user said "read config.yaml", don't plan to write or modify
+  - Match the scope - if user asked about one file, don't expand to multiple
+
+  # FORMAT
+  Output ONLY the improved thinking block as valid JSON. No explanations.
+
 output_schema:
   type: object
   properties:
     contextalignment_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
+      min: 0.0
+      max: 1.0
       description: Score for Context Alignment
   required:
   - contextalignment_score

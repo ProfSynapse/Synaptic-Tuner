@@ -1,186 +1,284 @@
-"""Logger for judge/improver interactions to create fine-tuning dataset."""
+"""Interaction logger - captures judge/improver interactions for KTO training.
+
+Logs interactions in ChatML format suitable for fine-tuning.
+"""
 
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
-
+from datetime import datetime
+from typing import Dict, Optional
 from ..utils.logger import ImproveLogger
-
-if TYPE_CHECKING:
-    from .rubric_runner import JudgmentResult
 
 
 class InteractionLogger:
-    """Logs judge/improver interactions for creating fine-tuning datasets with KTO labels."""
+    """
+    Logs judge and improver interactions in ChatML format.
+
+    Purpose: Capture training data for KTO fine-tuning so we can train
+    a small local model to do improvement more effectively.
+
+    Format:
+    {
+        "conversations": [
+            {"role": "system", "content": "..."},
+            {"role": "user", "content": "judge prompt"},
+            {"role": "assistant", "content": "judge response"}
+        ],
+        "label": true  # true if improvement passed, false if failed
+    }
+    """
 
     def __init__(
         self,
-        output_path: Path,
-        logger: Optional[ImproveLogger] = None
+        output_dir: Path,
+        enabled: bool = True,
+        logger: Optional[ImproveLogger] = None,
+        dataset_name: Optional[str] = None
     ):
         """
         Initialize interaction logger.
 
         Args:
-            output_path: Path to write interaction JSONL
+            output_dir: Directory to write interaction logs
+            enabled: Whether logging is enabled
             logger: Logger instance
+            dataset_name: Optional dataset identifier (parent_folder/filename)
         """
-        self.output_path = output_path
+        self.output_dir = Path(output_dir)
+        self.enabled = enabled
         self.logger = logger or ImproveLogger()
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Open file in append mode
-        self.file_handle = open(self.output_path, "a", encoding="utf-8")
+        if self.enabled:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Track last improver interaction for retroactive labeling
-        self.last_improver_interaction = None
-
-        self.logger.info(f"Interaction logging enabled: {output_path}")
+            # Create timestamped log file with dataset name
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if dataset_name:
+                # Format: interactions_parentFolder_filename_timestamp.jsonl
+                self.log_file = self.output_dir / f"interactions_{dataset_name}_{timestamp}.jsonl"
+            else:
+                self.log_file = self.output_dir / f"interactions_{timestamp}.jsonl"
+            self.logger.info(f"Interaction logging enabled: {self.log_file}")
 
     def log_judge_interaction(
         self,
-        example_id: str,
-        iteration: int,
-        rubric_keys: List[str],
-        example: Dict,
-        judgment: "JudgmentResult",
-    ):
+        judge_prompt: str,
+        judge_response: str,
+        rubric_name: str,
+        score: float,
+        passed: bool,
+        example_id: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ) -> None:
         """
-        Label the previous improver interaction based on judge result.
-
-        If judgment passed, the previous improve gets labeled True.
-        If judgment failed, the previous improve gets labeled False.
+        Log a judge interaction.
 
         Args:
-            example_id: Unique example identifier
-            iteration: Current iteration number
-            rubric_keys: List of rubrics being evaluated
-            example: Full example being judged
-            judgment: Judge output
+            judge_prompt: The USER prompt sent to judge (example to evaluate)
+            judge_response: The judge's response
+            rubric_name: Name of the rubric
+            score: Score returned by judge
+            passed: Whether the example passed
+            example_id: Optional example identifier
+            system_prompt: Optional SYSTEM prompt with criteria (if not provided, creates generic)
         """
-        # Retroactively label the previous improver interaction
-        if self.last_improver_interaction is not None:
-            # Label based on whether this judge passed
-            self.last_improver_interaction["label"] = judgment.passed
-            self._write_interaction(self.last_improver_interaction)
-            self.last_improver_interaction = None
+        if not self.enabled:
+            return
 
-        # Note: We don't log judge interactions - only improver interactions are needed for training
+        # Use provided system prompt or create generic fallback
+        if not system_prompt:
+            system_prompt = (
+                f"You are a quality judge for the '{rubric_name}' rubric. "
+                f"Evaluate examples and provide scores from 0.0 (poor) to 1.0 (excellent). "
+                f"Return JSON with the score field."
+            )
+
+        interaction = {
+            "conversations": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": judge_prompt},
+                {"role": "assistant", "content": judge_response}
+            ],
+            "label": passed,  # KTO label: true if passed, false if failed
+            "metadata": {
+                "type": "judge",
+                "rubric": rubric_name,
+                "score": score,
+                "passed": passed,
+                "example_id": example_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+
+        self._write_interaction(interaction)
 
     def log_improver_interaction(
         self,
-        example_id: str,
-        iteration: int,
+        improver_prompt: str,
+        improver_response: str,
+        rubric_name: str,
         scope: str,
-        improve_prompt: str,
-        regenerated_content: str,
-        rubric_keys: List[str],
-        feedback: str,
-        rubric_judge_prompts: Dict[str, str],
-    ):
+        before_score: float,
+        after_score: float,
+        improved: bool,
+        example_id: Optional[str] = None,
+        system_prompt: Optional[str] = None
+    ) -> None:
         """
-        Log an improver interaction (label will be set retroactively).
-
-        The label is determined by the NEXT judge call:
-        - True if next judge passes
-        - False if next judge fails
+        Log an improver interaction.
 
         Args:
-            example_id: Unique example identifier
-            iteration: Current iteration number
-            scope: Scope being regenerated (system_prompt, thinking, response)
-            improve_prompt: Full improve prompt sent to LLM
-            regenerated_content: LLM's regenerated content
-            rubric_keys: List of rubrics being used
-            feedback: Feedback from judge that triggered improvement
-            rubric_judge_prompts: Dict of rubric configs/judge prompts
+            improver_prompt: The prompt sent to improver
+            improver_response: The improver's response
+            rubric_name: Name of the rubric
+            scope: Scope being improved (thinking, system_prompt, response)
+            before_score: Score before improvement
+            after_score: Score after improvement
+            improved: Whether score improved
+            example_id: Optional example identifier
+            system_prompt: Optional system prompt (will create default if not provided)
         """
-        # System: The rubric judge prompt (config)
-        # Use first rubric's judge prompt as system
-        system_content = ""
-        if rubric_judge_prompts:
-            first_rubric = list(rubric_judge_prompts.values())[0]
-            system_content = first_rubric
+        if not self.enabled:
+            return
 
-        # Strip code fences from regenerated content (```xml, ```json, etc.)
-        cleaned_content = self._strip_code_fences(regenerated_content)
+        # Use provided system prompt or create default
+        if not system_prompt:
+            system_prompt = (
+                f"You are a quality improver for the '{rubric_name}' rubric. "
+                f"Your task is to improve {scope} content based on feedback. "
+                f"Follow the format specification and address all issues."
+            )
 
-        # Store interaction for retroactive labeling (don't write yet)
-        # Format: system=rubric config, user=judge feedback, assistant=fix
-        self.last_improver_interaction = {
+        interaction = {
             "conversations": [
-                {
-                    "role": "system",
-                    "content": system_content,
-                },
-                {
-                    "role": "user",
-                    "content": feedback,  # Judge's feedback on what's wrong
-                },
-                {
-                    "role": "assistant",
-                    "content": cleaned_content,  # The fix (cleaned)
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": improver_prompt},
+                {"role": "assistant", "content": improver_response}
             ],
-            # Label will be set in next log_judge_interaction() call
+            "label": improved,  # KTO label: true if improved, false if not
+            "metadata": {
+                "type": "improver",
+                "rubric": rubric_name,
+                "scope": scope,
+                "before_score": before_score,
+                "after_score": after_score,
+                "delta": after_score - before_score,
+                "improved": improved,
+                "example_id": example_id,
+                "timestamp": datetime.now().isoformat()
+            }
         }
 
-    def _strip_code_fences(self, content: str) -> str:
-        """Strip code fences (```xml, ```json, etc.) from content."""
-        import re
-        # Remove opening fence (```xml, ```json, etc.)
-        content = re.sub(r'^```\w*\n?', '', content.strip(), flags=re.MULTILINE)
-        # Remove closing fence
-        content = re.sub(r'\n?```$', '', content.strip(), flags=re.MULTILINE)
-        return content.strip()
+        self._write_interaction(interaction)
 
-    def _write_interaction(self, interaction: Dict):
+    def log_full_iteration(
+        self,
+        example: Dict,
+        rubric_name: str,
+        scope: str,
+        judge_prompt: str,
+        judge_response: str,
+        before_score: float,
+        improver_prompt: str,
+        improver_response: str,
+        after_score: float,
+        passed: bool,
+        example_id: Optional[str] = None
+    ) -> None:
+        """
+        Log a complete judge + improve iteration.
+
+        This creates a multi-turn conversation showing the full improvement flow.
+
+        Args:
+            example: The example being improved
+            rubric_name: Name of the rubric
+            scope: Scope being improved
+            judge_prompt: Initial judge prompt
+            judge_response: Initial judge response
+            before_score: Score before improvement
+            improver_prompt: Improver prompt
+            improver_response: Improver response
+            after_score: Score after improvement
+            passed: Whether final score passed threshold
+            example_id: Optional example identifier
+        """
+        if not self.enabled:
+            return
+
+        system_prompt = (
+            f"You are working with the '{rubric_name}' rubric to improve training data. "
+            f"First judge the quality, then improve the {scope} content if needed."
+        )
+
+        interaction = {
+            "conversations": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"**JUDGE TASK:**\n\n{judge_prompt}"},
+                {"role": "assistant", "content": judge_response},
+                {"role": "user", "content": f"**IMPROVE TASK:**\n\n{improver_prompt}"},
+                {"role": "assistant", "content": improver_response}
+            ],
+            "label": passed and (after_score > before_score),  # True if improved AND passed
+            "metadata": {
+                "type": "full_iteration",
+                "rubric": rubric_name,
+                "scope": scope,
+                "before_score": before_score,
+                "after_score": after_score,
+                "delta": after_score - before_score,
+                "passed": passed,
+                "example_id": example_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+
+        self._write_interaction(interaction)
+
+    def _write_interaction(self, interaction: Dict) -> None:
         """Write interaction to JSONL file."""
-        json_line = json.dumps(interaction, ensure_ascii=False)
-        self.file_handle.write(json_line + "\n")
-        self.file_handle.flush()
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(interaction, ensure_ascii=False) + "\n")
+        except Exception as e:
+            self.logger.error(f"Failed to write interaction: {e}")
 
-    def _extract_system_prompt(self, example: Dict) -> Optional[str]:
-        """Extract system prompt from example."""
-        for conv in example.get("conversations", []):
-            if conv.get("role") == "system":
-                return conv.get("content", "")
-        return None
+    def get_stats(self) -> Dict:
+        """
+        Get statistics about logged interactions.
 
-    def _extract_user_request(self, example: Dict) -> Optional[str]:
-        """Extract user request from example."""
-        for conv in example.get("conversations", []):
-            if conv.get("role") == "user":
-                return conv.get("content", "")
-        return None
+        Returns:
+            Dict with counts by type, labels, etc.
+        """
+        if not self.enabled or not self.log_file.exists():
+            return {"total": 0}
 
-    def _extract_assistant_response(self, example: Dict) -> Dict:
-        """Extract assistant response (text + tool calls) from example."""
-        for conv in example.get("conversations", []):
-            if conv.get("role") == "assistant":
-                return {
-                    "content": conv.get("content", ""),
-                    "tool_calls": conv.get("tool_calls", []),
-                }
-        return {}
+        stats = {
+            "total": 0,
+            "by_type": {},
+            "by_label": {"true": 0, "false": 0},
+            "by_rubric": {}
+        }
 
-    def close(self):
-        """Close the file handle and write any pending interactions."""
-        # If there's a pending improver interaction, label it as False (didn't converge)
-        if self.last_improver_interaction is not None:
-            self.last_improver_interaction["label"] = False
-            self._write_interaction(self.last_improver_interaction)
-            self.last_improver_interaction = None
+        with open(self.log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    interaction = json.loads(line)
+                    stats["total"] += 1
 
-        if hasattr(self, "file_handle") and self.file_handle:
-            self.file_handle.close()
-            self.logger.info(f"Interaction log closed: {self.output_path}")
+                    # Count by type
+                    interaction_type = interaction.get("metadata", {}).get("type", "unknown")
+                    stats["by_type"][interaction_type] = stats["by_type"].get(interaction_type, 0) + 1
 
-    def __enter__(self):
-        """Context manager enter."""
-        return self
+                    # Count by label
+                    label = "true" if interaction.get("label") else "false"
+                    stats["by_label"][label] += 1
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
+                    # Count by rubric
+                    rubric = interaction.get("metadata", {}).get("rubric", "unknown")
+                    stats["by_rubric"][rubric] = stats["by_rubric"].get(rubric, 0) + 1
+
+                except Exception:
+                    continue
+
+        return stats

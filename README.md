@@ -135,12 +135,100 @@ Example record:
 }
 ```
 
+## Improvement Engine
+
+The improvement engine automatically improves dataset quality using LLM-based judging and iterative refinement. It validates and fixes common issues like hallucinated content, malformed thinking blocks, and inconsistent formatting.
+
+### Quick start
+
+```bash
+# Via CLI menu
+./run.sh
+# Select: [6] Improvement Engine
+
+# Direct command
+python -m improvement_engine.services.rubric_runner \
+  --file Datasets/tools_datasets/thinking/agentManager/tools_v1.7.jsonl \
+  --output Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl \
+  --rubrics factuality,thinking_quality \
+  --max-iterations 3
+
+# List available rubrics
+python -m improvement_engine.services.rubric_runner --list
+```
+
+### Available rubrics
+
+| Rubric | Scope | Description |
+|--------|-------|-------------|
+| `factuality` | thinking, response | Ensures all details are grounded in system prompt or user request |
+| `thinking_quality` | thinking | Validates thinking block structure and content quality |
+| `system_prompt_format` | system_prompt | Validates XML tag structure and required fields |
+| `response_quality` | response | Checks response formatting and appropriateness |
+| `tool_alignment` | response | Validates tool calls match user intent |
+| `destructive_safety` | thinking | Ensures destructive operations have proper safeguards |
+| `confidence_calibration` | thinking | Checks confidence scores are well-calibrated |
+| `context_alignment` | thinking | Validates thinking aligns with provided context |
+
+Run `--list` to see all available rubrics with descriptions.
+
+### Cross-scope validation
+
+Rubrics can validate content across different scopes. For example, the factuality rubric extracts dates and file paths from the thinking block and validates they exist in the system prompt or user request:
+
+```yaml
+# From improvement_engine/rubrics/factuality.yaml
+validations:
+  - cross_scope:
+      from: thinking
+      to: [system_prompt, user]
+      extract:
+        fields: [memory, goal, requirements]
+        pattern: '\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|...)\b'
+      validate_in_content: true
+    error: "HALLUCINATED DATE: '{value}' not found in inputs"
+```
+
+**Example transformation:**
+- **Before:** `"memory": "User has been working on this project since 2025-12-07"`
+- **After:** `"memory": "User wants to create a checkpoint for their current work"`
+
+Dates that exist in inputs are preserved; only hallucinated dates are removed.
+
+### Backend options
+
+The improvement engine supports multiple LLM backends:
+
+```bash
+# LM Studio (default)
+--backend lmstudio --host localhost --port 1234
+
+# Ollama
+--backend ollama
+
+# OpenRouter (requires OPENROUTER_API_KEY in .env)
+--backend openrouter
+```
+
+### Interaction logging
+
+All judge/improver interactions are logged for KTO training data generation:
+
+```bash
+# Logs are saved to:
+improvement_engine/interactions/interactions_<dataset>_<timestamp>.jsonl
+
+# View latest interactions
+ls -lt improvement_engine/interactions/ | head -5
+```
+
 ## Repository map
 - `Trainers/notebooks/` - notebooks (start with `sft_colab_beginner.ipynb`; others cover KTO, Nebius, evaluation).
 - `tuner/` - unified CLI used by `run.sh` and `run.ps1`.
 - `Trainers/rtx3090_sft` and `Trainers/rtx3090_kto` - local configs and scripts for SFT and KTO.
 - `Evaluator/` - evaluation CLIs, prompt sets, and result reports.
 - `Datasets/` - datasets and metadata; validation utilities in `tools/`.
+- `improvement_engine/` - dataset quality improvement with LLM-based judging and rubrics.
 - `docs/` and `finetuning-strategy.md` - architecture and deep-dive notes.
 - `CLAUDE.md` - project-wide development guide and FAQs.
 

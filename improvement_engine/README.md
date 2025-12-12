@@ -492,6 +492,274 @@ API request failed: 429 Too Many Requests
 ```
 **Solution**: Reduce batch size or add delay between batches.
 
+## Rubric YAML Configuration
+
+Rubrics define how to judge and improve specific scopes of training data. Each rubric is a YAML file in `improvement_engine/rubrics/`.
+
+### Rubric Structure
+
+```yaml
+name: My Rubric Name
+description: What this rubric evaluates
+scope: system_prompt | thinking | response  # Which part to evaluate
+pass_threshold: 0.8  # Minimum score to pass (0.0-1.0)
+
+judge_prompt: |
+  # Instructions for LLM judge to score the content
+  Return JSON: {"myrubric_score": 0.0-1.0}
+
+improver_prompt: |
+  # Instructions for LLM to improve the content
+  Output ONLY the improved content.
+
+output_schema:
+  # JSON schema for judge response validation
+  type: object
+  properties:
+    myrubric_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+  required: [myrubric_score]
+
+content_schema:
+  # JSON schema for improved content validation (thinking blocks)
+  type: object
+  properties:
+    goal:
+      type: string
+    # ... other fields
+  required: [goal]
+
+schema_validation:
+  # Composable validation rules (see below)
+```
+
+### Two Types of Content Validation
+
+The engine has two distinct validation mechanisms:
+
+1. **`content_schema`** - Validates the **structure** of improved content (thinking blocks)
+   - Checks required fields exist (goal, memory, requirements, plan, etc.)
+   - Validates field types (string, array, object, number)
+   - Enforces constraints (min/max values, required nested properties)
+   - Used for `thinking` scope validation
+
+2. **`schema_validation`** - Validates **string content** against composable rules
+   - XML tag presence
+   - JSON structure in sections
+   - YAML structure
+   - Regex patterns with cross-reference support
+   - Used for `system_prompt` scope validation
+
+#### content_schema Example (Thinking Blocks)
+
+```yaml
+content_schema:
+  type: object
+  properties:
+    goal:
+      type: string
+      description: Specific, actionable goal statement
+    memory:
+      type: string
+      description: User intent without fabricated dates/history
+    requirements:
+      type: array
+      description: Dynamic state checks
+    plan:
+      type: array
+      description: Direct action steps
+    assessment:
+      type: object
+      properties:
+        risky:
+          type: boolean
+        complex:
+          type: boolean
+      required: [risky, complex]
+    confidence:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+  required: [goal, memory, requirements, plan, assessment, confidence]
+```
+
+This ensures every improved thinking block has the correct structure.
+
+### Schema Validation Types
+
+The `schema_validation` section supports composable validation types that run in sequence:
+
+```yaml
+schema_validation:
+  types: [xml, json, yaml, regex]  # Order = execution order
+```
+
+#### XML Validation
+
+Check for required XML tags:
+
+```yaml
+xml:
+  required_tags:
+    - '<session_context>'
+    - '<vault_structure>'
+    - '<selected_workspace'
+```
+
+#### JSON Validation
+
+Validate JSON structure in XML sections:
+
+```yaml
+json:
+  sections:
+    - tag: 'selected_workspace'
+      extract_pattern: '\{[\s\S]*\}'
+      required_fields:
+        - 'context'
+        - 'workspaceStructure'
+        - name: 'workflows'
+          type: 'array'
+          min_items: 1
+        - name: 'preferences'
+          type: 'string'
+          min_length: 1
+```
+
+#### YAML Validation
+
+Validate YAML structure in XML sections:
+
+```yaml
+yaml:
+  sections:
+    - tag: 'available_agents'
+      min_items: 2
+      item_fields: ['name', 'description']
+```
+
+#### Regex Validation
+
+Pattern matching with optional tag scoping:
+
+```yaml
+regex:
+  patterns:
+    - pattern: '\btool_call:\s*\w+'
+      description: 'Must contain tool_call format'
+    - pattern: '{workspace_root}'  # Interpolated variable
+      in_tag: 'vault_structure'
+      description: 'Workspace rootFolder must exist in vault_structure'
+```
+
+### Cross-Reference Validation
+
+The engine supports extracting values from one section and checking they exist in another. This works by composing `json` extraction with `regex` validation.
+
+#### Step 1: Extract Values
+
+In the `json` section, use `extract` to store values:
+
+```yaml
+json:
+  sections:
+    - tag: 'selected_workspace'
+      extract_pattern: '\{[\s\S]*\}'
+      required_fields: [...]
+      extract:
+        - path: 'context.rootFolder'    # Dot notation path
+          as: 'workspace_root'          # Variable name
+          skip_if: '/'                  # Skip if value equals this
+```
+
+#### Step 2: Reference Values
+
+In the `regex` section, use `{var_name}` to reference extracted values:
+
+```yaml
+regex:
+  patterns:
+    - pattern: '{workspace_root}'       # Interpolated from extract
+      in_tag: 'vault_structure'         # Scope to this tag
+      description: 'Workspace rootFolder must exist in vault_structure'
+```
+
+#### How It Works
+
+1. **Types run in order**: `[xml, json, yaml, regex]`
+2. **json extracts**: `context.rootFolder = "Vehicles/"` → stored as `workspace_root`
+3. **skip_if applies**: If value is `"/"`, extraction is skipped
+4. **regex interpolates**: `{workspace_root}` → `"Vehicles/"`
+5. **in_tag scopes**: Search only within `<vault_structure>` content
+6. **Error if not found**: `"Vehicles/' not found in <vault_structure>"`
+
+#### Full Example
+
+```yaml
+schema_validation:
+  types: [xml, json, yaml, regex]
+
+  xml:
+    required_tags:
+      - '<vault_structure>'
+      - '<selected_workspace'
+
+  json:
+    sections:
+      - tag: 'selected_workspace'
+        extract_pattern: '\{[\s\S]*\}'
+        required_fields:
+          - 'context'
+          - name: 'workflows'
+            type: 'array'
+            min_items: 1
+        extract:
+          - path: 'context.rootFolder'
+            as: 'workspace_root'
+            skip_if: '/'
+
+  yaml:
+    sections:
+      - tag: 'available_agents'
+        min_items: 2
+        item_fields: ['name', 'description']
+
+  regex:
+    patterns:
+      - pattern: '{workspace_root}'
+        in_tag: 'vault_structure'
+        description: 'Workspace rootFolder must exist in vault_structure'
+```
+
+### Available Rubrics
+
+List available rubrics:
+
+```bash
+python -m improvement_engine.services.rubric_runner --list
+```
+
+Current rubrics:
+- `system_prompt_format` - Validates system prompt structure and hierarchy
+- `thinking_quality` - Evaluates goal, memory, requirements/plan, confidence
+- `requirements_plan` - Ensures requirements vs plan distinction
+- `factuality` - Checks for fabricated dates/history in memory field
+
+### Running Rubrics
+
+```bash
+python -m improvement_engine.services.rubric_runner \
+  --file path/to/dataset.jsonl \
+  --output path/to/output.jsonl \
+  --rubrics system_prompt_format,thinking_quality \
+  --backend lmstudio \
+  --start-line 1 \
+  --end-line 10 \
+  --max-iterations 3
+```
+
 ## Development
 
 ### Adding New Validation Rules
@@ -512,6 +780,15 @@ Edit `config/system_prompts.yaml`:
 improvement_prompt: |
   Your custom instructions here...
 ```
+
+### Creating a New Rubric
+
+1. Create `rubrics/my_rubric.yaml` with the structure above
+2. Define `judge_prompt` for scoring
+3. Define `improver_prompt` for improvements
+4. Add `output_schema` for judge response validation
+5. Optionally add `schema_validation` for structural checks
+6. Test with: `python -m improvement_engine.services.rubric_runner --rubrics my_rubric ...`
 
 ### Testing
 
