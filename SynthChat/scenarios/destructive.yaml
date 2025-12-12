@@ -1,0 +1,194 @@
+# Destructive action scenarios for SynthChat
+# Training proper handling of high-risk operations
+
+scenarios:
+  destructive_explicit_permission:
+    type: destructive
+    subtype: single_turn
+    description: "User explicitly grants permission - model executes"
+    system: true
+
+    tools:
+      vaultManager_deleteFolder: 0.5
+      vaultManager_deleteNote: 0.5
+
+    prompts:
+      system: |
+        Generate workspace with specific deletable target.
+        Include folders/files that are clearly marked for deletion:
+        - "OldStuff"
+        - "ToDelete"
+        - "Deprecated"
+        Make the target clear and unambiguous.
+
+      user: |
+        User gives explicit permission with specific target:
+        - "Delete Projects/OldStuff - I'm sure, go ahead"
+        - "Remove the ToDelete folder, I don't need it"
+        - "Delete draft.md - yes I'm certain"
+        Include explicit confirmation language: "I'm sure", "go ahead", "yes".
+
+      assistant: |
+        Execute deletion with high confidence.
+        Generate response with:
+        1. <thinking> showing: high risk + high confidence (permission given)
+        2. Tool call to deleteFolder or deleteNote
+        The thinking should note explicit permission was given.
+
+  destructive_ambiguous_target:
+    type: destructive
+    subtype: single_turn
+    description: "Vague destructive request - model seeks clarification"
+    system: true
+
+    tools:
+      vaultManager_deleteFolder: 0.6
+      vaultManager_deleteNote: 0.4
+
+    prompts:
+      system: |
+        Generate workspace with multiple possible deletion targets.
+        Include:
+        - "Archive" folder with subfolders
+        - Multiple "old" or "draft" files
+        - Ambiguous folder names
+
+      user: |
+        Generate vague destructive request:
+        - "Delete the old stuff"
+        - "Remove those draft files"
+        - "Clean up the archives"
+        DO NOT specify which specific item.
+
+      assistant: |
+        DO NOT execute - ask for clarification.
+        Generate text response (NO tool calls) that:
+        1. <thinking> notes: high risk + low confidence (ambiguous)
+        2. Lists possible targets
+        3. Asks which specific item to delete
+        4. Warns about irreversibility
+
+  destructive_bulk_operation:
+    type: destructive
+    subtype: single_turn
+    description: "Bulk deletion request - model requests confirmation"
+    system: true
+
+    tools:
+      vaultManager_deleteFolder: 0.7
+      vaultManager_deleteNote: 0.3
+
+    prompts:
+      system: |
+        Generate workspace with folder containing multiple items.
+        Example: "Archive" with 15+ files/subfolders.
+        List specific contents.
+
+      user: |
+        Generate bulk deletion request:
+        - "Delete everything in Archive"
+        - "Remove all files in OldProjects"
+        - "Clean out the entire ToDelete folder"
+        Request affects multiple items.
+
+      assistant: |
+        DO NOT execute - request confirmation first.
+        Generate text response (NO tool calls) that:
+        1. <thinking> notes: high risk + bulk operation
+        2. Lists specific items that would be deleted (count + names)
+        3. Warns: "This will delete X items and cannot be undone"
+        4. Asks: "Please confirm to proceed"
+
+  destructive_with_constraint:
+    type: destructive
+    subtype: single_turn
+    description: "Delete with condition - model verifies constraint first"
+    system: true
+
+    tools:
+      vaultManager_deleteNote: 0.6
+      vaultLibrarian_searchContent: 0.4
+
+    prompts:
+      system: |
+        Generate workspace with dated files or tagged files.
+        Include files from different dates/with different tags.
+
+      user: |
+        Generate conditional deletion request:
+        - "Delete all notes older than 6 months"
+        - "Remove files tagged #draft"
+        - "Delete empty notes"
+        - "Remove all files without recent edits"
+        Condition requires verification.
+
+      assistant: |
+        DO NOT execute - verify constraint first.
+        Generate response with:
+        1. <thinking> notes: need to verify which files match condition
+        2. Tool call to searchContent or listDirectory to CHECK first
+        OR text response explaining need to search first
+        DO NOT call deleteNote without verification.
+
+  destructive_irreversible_warning:
+    type: destructive
+    subtype: single_turn
+    description: "Model warns about irreversibility before proceeding"
+    system: true
+
+    tools:
+      vaultManager_deleteFolder: 0.5
+      vaultManager_deleteNote: 0.5
+
+    prompts:
+      system: |
+        Generate workspace with important-looking folders.
+        Include folders like:
+        - "Projects" (with active work)
+        - "Documents" (with content)
+        Make deletion seem risky.
+
+      user: |
+        Generate request that might be accidental:
+        - "Delete the Projects folder"
+        - "Remove all my documents"
+        Request seems drastic without clear justification.
+
+      assistant: |
+        DO NOT execute - warn and confirm.
+        Generate text response (NO tool calls) that:
+        1. <thinking> notes: very high risk, seems unusual
+        2. Warns: "This will permanently delete [important item]"
+        3. Asks: "Are you sure? This cannot be undone"
+        4. May suggest alternatives (archive instead)
+
+  destructive_multi_step_safe:
+    type: destructive
+    subtype: single_turn
+    description: "Model suggests safer alternative to destructive action"
+    system: true
+
+    tools:
+      vaultManager_moveFolder: 0.4
+      vaultManager_deleteFolder: 0.3
+      vaultManager_createFolder: 0.3
+
+    prompts:
+      system: |
+        Generate workspace with folders including "Archive" folder.
+        Show folder structure with deletable items.
+
+      user: |
+        Generate request to delete something that could be archived:
+        - "Get rid of the old project files"
+        - "Remove the completed stuff"
+        - "Delete last year's notes"
+        Could be moved to Archive instead.
+
+      assistant: |
+        Suggest safer alternative.
+        Generate text response (NO tool calls) that:
+        1. <thinking> notes: destructive request but could archive instead
+        2. Suggests: "Would you like me to move these to Archive instead?"
+        3. Explains: "That way you can recover them if needed"
+        Offer archival as alternative to deletion.

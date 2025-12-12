@@ -1,0 +1,263 @@
+# Tool-based scenarios for SynthChat
+# Each scenario is self-contained with embedded prompts
+
+scenarios:
+  # VaultManager tools
+  vaultManager_createFolder:
+    type: tool
+    agent: vaultManager
+    tool: vaultManager_createFolder
+    system: true
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt with:
+        - <session_context> with workspace_id and path
+        - <vault_structure> showing existing folders
+        - <available_workspaces> with at least 2-3 workspaces
+        - <available_agents> listing vaultManager and others
+        - <selected_workspace> with name, path, and workflows
+        Make the vault structure realistic with typical project folders.
+
+      user: |
+        Generate a natural user request that would require creating a folder.
+        Be vague about exact location - use phrases like:
+        - "that project"
+        - "my notes"
+        - "for the Q4 planning"
+        Don't specify exact paths - make the AI infer from context.
+
+      assistant: |
+        Generate assistant response with:
+        1. Optional <thinking> block showing reasoning about folder location
+        2. Tool call to vaultManager_createFolder with appropriate path
+        Use OpenAI-style tool_calls format. The thinking should consider:
+        - Where the folder should be created based on context
+        - What path makes sense given the user's vague request
+
+  vaultManager_deleteFolder:
+    type: tool
+    agent: vaultManager
+    tool: vaultManager_deleteFolder
+    system: true
+    flags:
+      destructive: true
+      risk_level: high
+
+    prompts:
+      system: |
+        Generate workspace with folders that could be deleted.
+        Include folders like "Old Projects", "Archive", "Deprecated".
+        Make some folder names ambiguous.
+
+      user: |
+        Generate vague delete request - model should clarify first.
+        Examples:
+        - "Delete the old stuff"
+        - "Remove those deprecated files"
+        - "Clean up the archive"
+        Don't be specific about which folder.
+
+      assistant: |
+        The assistant should ASK for clarification before deleting.
+        Generate a text response that:
+        - Lists potential folders that might match
+        - Asks which specific folder to delete
+        - Warns about irreversibility
+        DO NOT generate a tool call - this should be a clarification response.
+
+  vaultManager_moveNote:
+    type: tool
+    agent: vaultManager
+    tool: vaultManager_moveNote
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with notes scattered across folders.
+        Include folders like "Inbox", "Projects", "Archive".
+        Add some notes in Inbox that should be organized.
+
+      user: |
+        Generate request to move a note to better location.
+        Examples:
+        - "Move that meeting note to the project folder"
+        - "Organize the inbox note about Q4"
+        - "Put the brainstorm doc where it belongs"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about source and destination
+        2. Tool call to vaultManager_moveNote
+        Consider workspace context for paths.
+
+  vaultManager_listDirectory:
+    type: tool
+    agent: vaultManager
+    tool: vaultManager_listDirectory
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with nested folder structure.
+        Include various project folders and subfolders.
+
+      user: |
+        Generate request to see what's in a folder.
+        Examples:
+        - "What's in the Projects folder?"
+        - "Show me what files are in that directory"
+        - "List the contents of my workspace"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about which folder to list
+        2. Tool call to vaultManager_listDirectory with path
+
+  # ContentManager tools
+  contentManager_createContent:
+    type: tool
+    agent: contentManager
+    tool: contentManager_createContent
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace for note creation.
+        Include folders like "Daily Notes", "Projects", "Ideas".
+
+      user: |
+        Generate request to create new note content.
+        Examples:
+        - "Start a note about today's meeting"
+        - "Create a doc for the new project"
+        - "Make a quick note about that idea"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about note location and content
+        2. Tool call to contentManager_createContent
+        Include realistic markdown content in the tool call.
+
+  contentManager_updateContent:
+    type: tool
+    agent: contentManager
+    tool: contentManager_replaceContent
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with existing notes that need updating.
+        Include notes with placeholder content.
+
+      user: |
+        Generate request to update note content.
+        Examples:
+        - "Update that project doc with the new info"
+        - "Change the meeting notes to include what we discussed"
+        - "Add the details to that note"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about what to update
+        2. Tool call to contentManager_replaceContent or appendContent
+        Choose the appropriate method based on request.
+
+  # AgentManager tools
+  agentManager_createAgent:
+    type: tool
+    agent: agentManager
+    tool: agentManager_createAgent
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with existing agents.
+        Show available models in available_agents.
+
+      user: |
+        Generate request to create a custom agent.
+        Examples:
+        - "Make an agent for summarizing my daily notes"
+        - "Create a writer agent for blog posts"
+        - "Set up an agent to help with research"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about agent purpose and configuration
+        2. Tool call to agentManager_createAgent
+        Include name, description, model, and prompt.
+
+  agentManager_executePrompt:
+    type: tool
+    agent: agentManager
+    tool: agentManager_executePrompt
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with custom agents available.
+        Include agents like "Summarizer", "Writer", "Researcher".
+
+      user: |
+        Generate request to run an agent.
+        Examples:
+        - "Use the summarizer on my meeting notes"
+        - "Have the writer agent draft a blog post"
+        - "Run the research agent on this topic"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which agent and what prompt
+        2. Tool call to agentManager_executePrompt
+        Include agent name and prompt text.
+
+  # MemoryManager tools
+  memoryManager_createWorkspace:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_createWorkspace
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace listing with existing workspaces.
+        Show workspaces like "Personal", "Work", "Archive".
+
+      user: |
+        Generate request to create new workspace.
+        Examples:
+        - "Set up a workspace for the new client project"
+        - "Make a workspace for my side project"
+        - "Create a workspace for learning materials"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about workspace configuration
+        2. Tool call to memoryManager_createWorkspace
+        Include name, description, and workflows.
+
+  # VaultLibrarian tools
+  vaultLibrarian_searchContent:
+    type: tool
+    agent: vaultLibrarian
+    tool: vaultLibrarian_searchContent
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with searchable content.
+        Include notes with various topics and keywords.
+
+      user: |
+        Generate search request.
+        Examples:
+        - "Find all notes about the Q4 project"
+        - "Search for meeting notes from last month"
+        - "Look for anything related to that client"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about search terms and scope
+        2. Tool call to vaultLibrarian_searchContent
+        Include search query and optional filters.

@@ -3,11 +3,10 @@
 import os
 from pathlib import Path
 
-from improvement_engine.core.models import ImprovementConfig
-from improvement_engine.services import ImprovementService
-from improvement_engine.utils.logger import get_logger
-from improvement_engine.utils.dataset_scanner import DatasetScanner
-from improvement_engine.utils.yaml_loader import load_config
+from SynthChat.services.rubric_runner import RubricRunner
+from SynthChat.utils.dataset_scanner import DatasetScanner
+from SynthChat.utils.yaml_loader import load_config
+from SynthChat.utils.logger import ImproveLogger
 from shared.llm import create_client, LLMError
 from shared.ui import print_menu, print_header
 from tuner.utils import load_env_file
@@ -26,10 +25,10 @@ def handle_improve():
     if not env_loaded:
         print("WARN: .env file not found; improvement settings may be incomplete")
 
-    # LLM defaults from config.yaml (cloud-only defaults) with .env fallback
+    # LLM defaults from settings.yaml (cloud-only defaults) with .env fallback
     try:
-        cfg = load_config("config")
-        llm_defaults = cfg.get("llm", {}) if isinstance(cfg, dict) else {}
+        cfg = load_config("settings")
+        llm_defaults = cfg.get("llm", {}).get("improvement", {}) if isinstance(cfg, dict) else {}
     except Exception:
         llm_defaults = {}
 
@@ -166,26 +165,36 @@ def handle_improve():
         print("Cancelled")
         return
 
-    # Create configuration (LLM backend configured via environment variables)
-    config = ImprovementConfig(
-        input_file=input_file,
-        output_file=output_file,
+    # Get rubrics directory
+    rubrics_dir = Path(__file__).parent.parent.parent / "SynthChat" / "rubrics"
+
+    # Initialize RubricRunner
+    runner = RubricRunner(
+        rubrics_dir=rubrics_dir,
         backend=backend,
-        model=model,
-        batch_size=batch_size,
-        start_line=start_line,
-        end_line=end_line,
-        dry_run=dry_run,
-        temperature=temperature,
-        max_tokens=max_tokens
+        host=None,
+        port=None
     )
 
-    # Run improvement
-    logger = get_logger()
-    service = ImprovementService(config=config, logger=logger)
+    # Select rubrics (use default or interactive)
+    print_header("RUBRICS", "Select rubrics to apply")
+    rubric_keys = runner.select_rubrics_interactive()
+    if not rubric_keys:
+        print("No rubrics selected. Cancelled.")
+        return
+
+    # Set max iterations
+    max_iterations = cfg.get("improvement", {}).get("max_iterations", 3) if cfg else 3
 
     try:
-        service.run()
+        runner.run_on_file(
+            file_path=input_file,
+            output_path=output_file,
+            rubric_keys=rubric_keys,
+            start_line=start_line,
+            end_line=end_line,
+            max_iterations=max_iterations
+        )
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
     except Exception as e:

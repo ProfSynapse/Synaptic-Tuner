@@ -1,0 +1,211 @@
+# Behavioral scenarios for SynthChat
+# Focus on specific AI behaviors we want to train
+
+scenarios:
+  intellectual_humility:
+    type: behavioral
+    description: "Model admits uncertainty and asks clarifying questions"
+    system: true
+
+    triggers:
+      - "Ambiguous file references"
+      - "Vague temporal references"
+      - "Unclear ownership"
+      - "Partial information"
+
+    prompts:
+      system: |
+        Generate workspace with ambiguous references possible.
+        Include multiple folders/files with similar names.
+        Examples:
+        - "project_notes.md" in multiple folders
+        - "Meeting Notes" folder and "meetings.md" file
+        - Multiple workspaces with similar content
+
+      user: |
+        Generate ambiguous request using:
+        - "that file" (without specifying which)
+        - "the notes" (when multiple exist)
+        - "yesterday's stuff" (temporal vagueness)
+        - "my project" (unclear which project)
+        Make it genuinely ambiguous - there should be 2+ possible matches.
+
+      assistant: |
+        Generate text response (NO tool calls) that:
+        - Admits uncertainty about which item is meant
+        - Lists the possible matches found
+        - Asks user to specify which one
+        - Does NOT guess or assume
+        Example: "I found several items that could match. Which did you mean: [list options]?"
+
+  error_recovery:
+    type: behavioral
+    description: "Graceful error handling and alternative suggestions"
+    system: true
+
+    triggers:
+      - "Conflicting requirements"
+      - "Potential file conflicts"
+      - "Complex conditions"
+      - "Operations that might fail"
+
+    prompts:
+      system: |
+        Generate workspace with potential conflicts.
+        Examples:
+        - File that already exists at destination
+        - Folder with same name as target
+        - Locked or in-use files
+
+      user: |
+        Generate request that has potential issues:
+        - "Move all notes to Projects" (some might already be there)
+        - "Delete duplicates" (unclear which to keep)
+        - "Merge those folders" (conflict potential)
+        - "Rename to match that other file" (name collision)
+
+      assistant: |
+        Generate text response that:
+        - Acknowledges the potential issue
+        - Explains what could go wrong
+        - Suggests alternatives or workarounds
+        - Asks how to proceed
+        Example: "I notice [issue]. Would you like me to [alternative]?"
+
+  verification_before_action:
+    type: behavioral
+    description: "Confirmation requests before destructive operations"
+    system: true
+
+    triggers:
+      - "Bulk deletions"
+      - "Bulk moves or renames"
+      - "Destructive operations"
+      - "Irreversible actions"
+
+    prompts:
+      system: |
+        Generate workspace with multiple files/folders that could be affected.
+        Include folders like "Archive" with 10+ files inside.
+
+      user: |
+        Generate bulk or destructive request:
+        - "Delete all the old files"
+        - "Clean out the archive folder"
+        - "Remove all drafts"
+        - "Move everything to Archive"
+        Don't be specific - make it affect multiple items.
+
+      assistant: |
+        Generate text response (NO tool calls yet) that:
+        - Lists specific items that would be affected
+        - States how many items (e.g., "15 files")
+        - Warns about irreversibility if applicable
+        - Explicitly requests confirmation
+        Example: "This will delete 15 files: [list]. This cannot be undone. Confirm?"
+
+  workspace_awareness:
+    type: behavioral
+    description: "Proper workspace context and session management"
+    system: true
+
+    triggers:
+      - "Workspace-specific requests"
+      - "Multi-workspace scenarios"
+      - "Context-dependent operations"
+
+    prompts:
+      system: |
+        Generate system prompt with multiple workspaces.
+        Current workspace should be clearly indicated.
+        Include different workflows per workspace.
+
+      user: |
+        Generate workspace-aware request:
+        - "Create a note in this workspace"
+        - "Switch to the work workspace"
+        - "What workflows are available here?"
+        - "List my workspaces"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> showing workspace awareness
+        2. Tool call using correct workspace_id from context
+        OR text response explaining workspace state
+        The thinking should reference workspace_id explicitly.
+
+  context_continuity:
+    type: behavioral
+    description: "Maintains context across conversation turns"
+    system: true
+
+    triggers:
+      - "References to previous actions"
+      - "Pronoun usage (it, that, there)"
+      - "Implied context"
+
+    prompts:
+      system: |
+        Generate workspace with clear current context.
+        Include recent_actions or session_state showing previous operations.
+
+      user: |
+        Generate request referencing previous context:
+        - "Add that to the note we just created"
+        - "Move it to the folder we discussed"
+        - "Use the same workspace"
+        - "Continue with that project"
+        Use pronouns requiring context resolution.
+
+      assistant: |
+        Generate response with:
+        1. <thinking> resolving pronoun/reference using context
+        2. Tool call or text response using correct context
+        The thinking should explicitly state what "it"/"that" refers to.
+
+  strategic_tool_selection:
+    type: behavioral
+    description: "Chooses appropriate tool for the task"
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with multiple agents available.
+        Include contentManager, vaultManager, vaultLibrarian.
+
+      user: |
+        Generate request that could use different tools:
+        - "Find and update all notes about X" (search then update)
+        - "Create a note and move it to Projects" (create then move)
+        - "List files in Archive and delete old ones" (list then delete)
+        The request implies multiple steps but ask for single tool.
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which tool is most appropriate FIRST
+        2. Single tool call to the most important step
+        OR explanation that task requires multiple steps
+        DO NOT chain tools - single tool only or explain why it needs steps.
+
+  context_efficiency:
+    type: behavioral
+    description: "Efficient use of context without verbosity"
+    system: true
+
+    prompts:
+      system: |
+        Generate minimal but complete workspace context.
+        Don't over-specify - include just what's needed.
+
+      user: |
+        Generate straightforward request:
+        - "Create a note"
+        - "List the Projects folder"
+        - "Search for meeting notes"
+        Keep it simple and direct.
+
+      assistant: |
+        Generate efficient response:
+        1. Brief <thinking> (2-3 lines max) OR no thinking if obvious
+        2. Direct tool call without over-explanation
+        Avoid verbosity - be concise and action-oriented.

@@ -1,0 +1,77 @@
+# SynthChat Configuration
+# Main settings for dataset generation and improvement
+
+llm:
+  # Generation (local is fine - just creating raw examples)
+  generation:
+    provider: lmstudio
+    model: local-model
+    host: localhost
+    port: 1234
+    temperature: 0.7
+    max_tokens: 2048
+
+  # Improvement (cloud recommended - needs strong judge)
+  improvement:
+    provider: openrouter
+    model: anthropic/claude-3.5-sonnet
+    temperature: 0.0  # Deterministic judging
+    max_tokens: 2048
+
+improvement:
+  max_iterations: 3
+  on_max_iterations: skip  # skip | fail | save_partial
+  default_rubrics:
+    - system_prompt_format
+    - thinking_quality
+    - tool_alignment
+    - response_quality
+
+output:
+  default_dir: Datasets/synthchat/
+  include_metadata: true
+  versioning: datetime  # Append datetime to output files
+
+# Resilience and checkpointing
+resilience:
+  checkpoint_every: 10  # Save progress every N examples
+  retry_attempts: 3
+  retry_delay: 5  # seconds
+  checkpoint_file: .synthchat_checkpoint.json
+
+# Logging configuration
+logging:
+  save_interactions: true
+  interactions_dir: SynthChat/interactions/
+  save_failures: true  # Keep failed examples for KTO negative samples
+  log_level: INFO
+
+# Generation settings
+generation:
+  random_seed: null  # Set for reproducibility, null for random
+  stage_validation: true  # Validate each stage before proceeding
+
+# Cost tracking (OpenRouter)
+cost_tracking:
+  enabled: true
+  include_usage: true
+
+# Default targets for "Generate new dataset"
+# User can accept these or customize
+defaults:
+  targets:
+    # Tool scenarios
+    vaultManager_createFolder: 50
+    vaultManager_deleteFolder: 30
+    vaultManager_moveNote: 30
+    vaultManager_listDirectory: 40
+    contentManager_createContent: 40
+    contentManager_updateContent: 30
+    agentManager_delegateTask: 25
+
+    # Behavioral scenarios
+    intellectual_humility: 25
+    verification_before_action: 25
+    error_recovery: 20
+    context_continuity: 20
+    strategic_tool_selection: 20
