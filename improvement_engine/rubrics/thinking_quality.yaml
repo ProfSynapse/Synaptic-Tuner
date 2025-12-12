@@ -165,14 +165,24 @@ output_schema:
   properties:
     score:
       type: number
+      min: 0.0
+      max: 1.0
     goal_clarity:
       type: number
+      min: 0.0
+      max: 1.0
     memory_context:
       type: number
+      min: 0.0
+      max: 1.0
     requirements_plan_distinction:
       type: number
+      min: 0.0
+      max: 1.0
     confidence_calibration:
       type: number
+      min: 0.0
+      max: 1.0
     improvement_feedback:
       type: string
   required:

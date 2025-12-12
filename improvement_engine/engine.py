@@ -4,6 +4,7 @@ Single Responsibility: Orchestrate the improvement loop ONLY.
 Delegates all actual work to focused services.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -21,6 +22,11 @@ from .services.core import (
 )
 from .services.interaction_logger import InteractionLogger
 from .utils.logger import ImproveLogger
+
+# Retry configuration
+MAX_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 2.0
+BACKOFF_MULTIPLIER = 2.0
 
 
 @dataclass
@@ -179,8 +185,11 @@ class ImprovementEngine:
                 # 2. Build judge prompt with this scope's rubrics only
                 judge_system, judge_user = self._build_judge_prompt(improved, scope_rubrics, validation_results)
 
-                # 3. Execute judge (smaller schema = no 400 error!)
-                judgment = self.judge_service.judge(judge_user, scope_rubrics, system_prompt=judge_system)
+                # 3. Execute judge with retry
+                judgment = self._call_with_retry(
+                    lambda: self.judge_service.judge(judge_user, scope_rubrics, system_prompt=judge_system),
+                    f"{scope} judge"
+                )
 
                 # 4. Parse results
                 scores, passed = self._parse_judgment(judgment, scope_rubrics, validation_results)
@@ -239,10 +248,13 @@ class ImprovementEngine:
                         # Re-evaluate after improvement with ALL scope rubrics
                         after_validation = self.validation_service.validate_example(improved_example, scope_rubrics)
                         after_system, after_user = self._build_judge_prompt(improved_example, scope_rubrics, after_validation)
-                        after_judgment = self.judge_service.judge(
-                            after_user,
-                            scope_rubrics,
-                            system_prompt=after_system
+                        after_judgment = self._call_with_retry(
+                            lambda: self.judge_service.judge(
+                                after_user,
+                                scope_rubrics,
+                                system_prompt=after_system
+                            ),
+                            f"{scope} re-evaluate judge"
                         )
                         after_scores, _ = self._parse_judgment(after_judgment, scope_rubrics, after_validation)
 
@@ -295,6 +307,42 @@ class ImprovementEngine:
                     by_scope[s] = []
                 by_scope[s].append(rubric)
         return by_scope
+
+    def _call_with_retry(self, func, operation_name: str):
+        """
+        Call a function with exponential backoff retry.
+
+        Args:
+            func: Callable to execute
+            operation_name: Name for logging
+
+        Returns:
+            Result of the function call
+
+        Raises:
+            Last exception if all retries fail
+        """
+        last_exception = None
+        backoff = INITIAL_BACKOFF_SECONDS
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                return func()
+            except Exception as e:
+                last_exception = e
+                if attempt < MAX_RETRIES - 1:
+                    self.logger.warning(
+                        f"  {operation_name} failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}"
+                    )
+                    self.logger.info(f"  Retrying in {backoff:.1f}s...")
+                    time.sleep(backoff)
+                    backoff *= BACKOFF_MULTIPLIER
+                else:
+                    self.logger.error(
+                        f"  {operation_name} failed after {MAX_RETRIES} attempts: {e}"
+                    )
+
+        raise last_exception
 
     def _build_judge_prompt(
         self,
@@ -515,8 +563,11 @@ class ImprovementEngine:
         combined_template = "\n\n".join(combined_templates)
         user_prompt = self.prompt_renderer.render_safe(combined_template, template_vars)
 
-        # Execute improvement
-        improved_content = self.improvement_service.improve(user_prompt, system_prompt)
+        # Execute improvement with retry
+        improved_content = self._call_with_retry(
+            lambda: self.improvement_service.improve(user_prompt, system_prompt),
+            f"{scope} improver"
+        )
 
         # Log what the improver returned
         content_preview = improved_content[:200] if improved_content else "(empty)"

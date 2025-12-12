@@ -115,16 +115,25 @@ class ValidationService:
                         if validator.has_cross_scope_validation():
                             target_scope = validator.get_cross_scope_target()
                             if target_scope:
-                                # Extract target scope content from original example
-                                target_content = self.scope_extractor.extract(example, target_scope)
-                                if target_content:
-                                    # If target is system_prompt, it returns a dict with 'system_prompt' key
-                                    if isinstance(target_content, dict) and "system_prompt" in target_content:
-                                        target_str = target_content["system_prompt"]
-                                    elif isinstance(target_content, str):
-                                        target_str = target_content
-                                    else:
-                                        target_str = str(target_content)
+                                # Handle multiple target scopes (e.g., [system_prompt, user])
+                                target_scopes = target_scope if isinstance(target_scope, list) else [target_scope]
+                                combined_target = []
+
+                                for ts in target_scopes:
+                                    # Extract target scope content from original example
+                                    target_content = self.scope_extractor.extract(example, ts)
+                                    if target_content:
+                                        # If target is system_prompt, it returns a dict with 'system_prompt' key
+                                        if isinstance(target_content, dict) and "system_prompt" in target_content:
+                                            combined_target.append(target_content["system_prompt"])
+                                        elif isinstance(target_content, str):
+                                            combined_target.append(target_content)
+                                        else:
+                                            combined_target.append(str(target_content))
+
+                                if combined_target:
+                                    # Join all target content for validation
+                                    target_str = "\n\n".join(combined_target)
 
                                     # Run cross-scope validation
                                     cross_valid, cross_errors = validator.validate_cross_scope(
@@ -153,14 +162,23 @@ class ValidationService:
                     if validator.has_cross_scope_validation():
                         target_scope = validator.get_cross_scope_target()
                         if target_scope:
-                            target_content = self.scope_extractor.extract(example, target_scope)
-                            if target_content:
-                                if isinstance(target_content, dict) and "system_prompt" in target_content:
-                                    target_str = target_content["system_prompt"]
-                                elif isinstance(target_content, str):
-                                    target_str = target_content
-                                else:
-                                    target_str = str(target_content)
+                            # Handle multiple target scopes (e.g., [system_prompt, user])
+                            target_scopes = target_scope if isinstance(target_scope, list) else [target_scope]
+                            combined_target = []
+
+                            for ts in target_scopes:
+                                target_content = self.scope_extractor.extract(example, ts)
+                                if target_content:
+                                    if isinstance(target_content, dict) and "system_prompt" in target_content:
+                                        combined_target.append(target_content["system_prompt"])
+                                    elif isinstance(target_content, str):
+                                        combined_target.append(target_content)
+                                    else:
+                                        combined_target.append(str(target_content))
+
+                            if combined_target:
+                                # Join all target content for validation
+                                target_str = "\n\n".join(combined_target)
 
                                 # For response, we need to wrap it in a dict for validate_cross_scope
                                 cross_valid, cross_errors = validator.validate_cross_scope(

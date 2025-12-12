@@ -4,60 +4,35 @@ scope: thinking
 pass_threshold: 0.8
 judge_prompt: '## Confidence Calibration Check
 
-
   Evaluate whether confidence scores are appropriate for operation risk level.
 
-
   **Confidence Guidelines by Assessment:**
-
   - **risky=false, complex=false:** 0.85-0.95 (safe simple operations)
-
   - **risky=false, complex=true:** 0.70-0.80 (safe but complex operations)
-
   - **risky=true, complex=false:** 0.60-0.75 (risky but straightforward)
-
   - **risky=true, complex=true:** 0.50-0.65 (risky and complex)
-
   - **Asking clarification (no tool call):** 0.50-0.70 (needs more info)
 
-
   **Operation Risk Levels (for reference):**
-
   - Low risk: read, list, search, get, view, find, query
-
   - Medium risk: create, append, add, update, modify, write
-
   - High risk: delete, remove, replace, overwrite, batch operations
 
-
   **Evaluation Steps:**
-
   1. Check assessment.risky and assessment.complex values
-
   2. Determine expected confidence range from guidelines above
-
   3. Compare actual confidence to expected range
-
   4. Score based on how well it matches
 
-
   **SCORING:**
-
   - **1.0** = Confidence is within expected range for assessment
-
   - **0.8** = Confidence slightly off (within 0.05 of range)
-
   - **0.6** = Confidence moderately off (0.05-0.15 outside range)
-
   - **0.3** = Confidence significantly off (0.15+ outside range)
-
   - **0.0** = Completely wrong (e.g., 0.95 for risky operation)
 
-
   **OUTPUT:**
-
   Return JSON with single field: `confidencecalibration_score` (0.0-1.0)
-
   '
 improver_prompt: |
   Fix the confidence score to match the operation's risk level.
@@ -93,6 +68,8 @@ output_schema:
   properties:
     confidencecalibration_score:
       type: number
+      min: 0.0
+      max: 1.0
       description: Score for Confidence Calibration
   required:
   - confidencecalibration_score

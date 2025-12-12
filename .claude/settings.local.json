@@ -170,7 +170,8 @@
       "Bash(BashOutput e1454a)",
       "Bash(if [ -f Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl ])",
       "Bash(then echo \"=== FIRST IMPROVED EXAMPLE ===\" head -1 Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl)",
-      "Bash(timeout 90 python:*)"
+      "Bash(timeout 90 python:*)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []

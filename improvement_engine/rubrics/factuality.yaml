@@ -110,10 +110,10 @@ output_schema:
   properties:
     factuality_score:
       type: number
-      description: Score for Factuality
+      min: 0.0
+      max: 1.0
   required:
-  - factuality_score
-  additionalProperties: false
+    - factuality_score
 
 # Unified validations format
 validations:
@@ -129,3 +129,28 @@ validations:
         - pattern: '{value}.*(?:will be created|does not exist yet)'
       validate_in: [vault_structure, selected_workspace]
     error: "HALLUCINATED PATH: '{value}' not found in vault_structure or workspaceStructure"
+
+  # Cross-scope validation: Check dates in thinking against system_prompt and user
+  # Dates are almost always hallucinated unless explicitly provided in inputs
+  - cross_scope:
+      from: thinking
+      to: [system_prompt, user]
+      extract:
+        fields: [memory, goal, requirements]
+        # Match various date formats:
+        # - ISO: 2025-12-07, 2024-01-15
+        # - US: 12/07/2025, 1/15/24
+        # - Written: Dec 7, December 7th, Oct 12
+        # - Time references: 14:32 UTC, 2:30 PM
+        pattern: '\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/](?:20)?\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*20\d{2})?|\d{1,2}:\d{2}\s*(?:UTC|AM|PM|am|pm))\b'
+      validate_in_content: true
+    error: "HALLUCINATED DATE: '{value}' not found in system_prompt or user request"
+
+  # Cross-scope validation: Check dates in response against system_prompt and user
+  - cross_scope:
+      from: response
+      to: [system_prompt, user]
+      extract:
+        pattern: '\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/](?:20)?\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*20\d{2})?|\d{1,2}:\d{2}\s*(?:UTC|AM|PM|am|pm))\b'
+      validate_in_content: true
+    error: "HALLUCINATED DATE: '{value}' not found in system_prompt or user request"

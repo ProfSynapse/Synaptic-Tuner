@@ -8,12 +8,14 @@ Each handler encapsulates ALL logic for one scope:
 
 from .base import ScopeHandler
 from .system_prompt_handler import SystemPromptHandler
+from .user_handler import UserHandler
 from .thinking_handler import ThinkingHandler
 from .response_handler import ResponseHandler
 
 # Registry of all handlers
 SCOPE_HANDLERS = {
     "system_prompt": SystemPromptHandler,
+    "user": UserHandler,
     "thinking": ThinkingHandler,
     "response": ResponseHandler,
 }
@@ -45,6 +47,7 @@ def get_handler(scope_name: str, scope_config, scope_extractor, logger=None) -> 
 __all__ = [
     "ScopeHandler",
     "SystemPromptHandler",
+    "UserHandler",
     "ThinkingHandler",
     "ResponseHandler",
     "SCOPE_HANDLERS",

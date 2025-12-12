@@ -62,7 +62,7 @@ class SchemaValidator:
         return (True, [])
 
     def validate(self, data: Dict) -> Tuple[bool, List[str]]:
-        """Validate judge response against output_schema (JSON Schema format)."""
+        """Validate judge response against output_schema."""
         if not self.output_schema:
             return (True, [])
 
@@ -82,6 +82,16 @@ class SchemaValidator:
             type_map = {"string": str, "number": (int, float), "array": list, "object": dict, "boolean": bool}
             if expected_type and not isinstance(value, type_map.get(expected_type, object)):
                 errors.append(f"Field '{field}' must be {expected_type}")
+                continue
+
+            # Check min/max for numbers
+            if expected_type == "number" and isinstance(value, (int, float)):
+                min_val = field_schema.get("min")
+                max_val = field_schema.get("max")
+                if min_val is not None and value < min_val:
+                    errors.append(f"Field '{field}' must be >= {min_val}")
+                if max_val is not None and value > max_val:
+                    errors.append(f"Field '{field}' must be <= {max_val}")
 
         return (len(errors) == 0, errors)
 

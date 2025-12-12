@@ -67,11 +67,21 @@ class CrossScopeValidator:
 
         # STEP 3: Extract valid values from target locations
         validate_in = config.get("validate_in", [])
-        valid_values, searched_locations = self._extract_from_target(
-            target_content,
-            validate_in,
-            extract_config.get("pattern", "")
-        )
+        validate_in_content = config.get("validate_in_content", False)
+
+        if validate_in_content:
+            # For validate_in_content, check if extracted values exist anywhere in target content
+            valid_values, searched_locations = self._find_in_content(
+                target_content,
+                to_validate
+            )
+        else:
+            # For validate_in tags, extract using same pattern from specific tags
+            valid_values, searched_locations = self._extract_from_target(
+                target_content,
+                validate_in,
+                extract_config.get("pattern", "")
+            )
 
         # STEP 4: Compare and report errors
         err_template = error_template or "'{value}' not found"
@@ -100,15 +110,25 @@ class CrossScopeValidator:
         if not source_pattern:
             return extracted
 
-        for field in fields:
-            field_value = self._get_field_value(content, field)
-            if field_value:
-                field_str = self._stringify_value(field_value)
-                try:
-                    matches = re.findall(source_pattern, field_str)
-                    extracted.extend(matches)
-                except re.error as e:
-                    self._log_warning(f"Invalid source pattern: {e}")
+        # If no fields specified, search entire content
+        if not fields:
+            content_str = self._stringify_value(content)
+            try:
+                matches = re.findall(source_pattern, content_str)
+                extracted.extend(matches)
+            except re.error as e:
+                self._log_warning(f"Invalid source pattern: {e}")
+        else:
+            # Search specific fields
+            for field in fields:
+                field_value = self._get_field_value(content, field)
+                if field_value:
+                    field_str = self._stringify_value(field_value)
+                    try:
+                        matches = re.findall(source_pattern, field_str)
+                        extracted.extend(matches)
+                    except re.error as e:
+                        self._log_warning(f"Invalid source pattern: {e}")
 
         return extracted
 
@@ -146,6 +166,28 @@ class CrossScopeValidator:
                 values_to_validate.append(value)
 
         return values_to_validate
+
+    def _find_in_content(
+        self,
+        content: str,
+        values: List[str]
+    ) -> Tuple[Set[str], List[str]]:
+        """
+        Check if extracted values exist anywhere in the target content.
+
+        For validate_in_content mode - does a simple substring search.
+
+        Returns:
+            (set of values that were found, list of locations searched)
+        """
+        found_values: Set[str] = set()
+
+        for value in values:
+            # Simple case-insensitive substring search
+            if value.lower() in content.lower():
+                found_values.add(value)
+
+        return found_values, ["full content"]
 
     def _extract_from_target(
         self,

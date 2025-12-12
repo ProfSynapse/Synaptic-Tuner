@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from improvement_engine.core.models import ImprovementConfig
-from improvement_engine.services.improvement_service import ImprovementService
+from improvement_engine.services import ImprovementService
 from improvement_engine.utils.logger import get_logger
 from improvement_engine.utils.dataset_scanner import DatasetScanner
 from improvement_engine.utils.yaml_loader import load_config

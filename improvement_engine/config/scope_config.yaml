@@ -12,6 +12,15 @@ scopes:
       role: "system"
     markers: {}
 
+  # User message scope (for cross_scope validation)
+  user:
+    description: "User message containing the request or prompt"
+    conversation_role: "user"
+    extraction:
+      method: "role_based"  # Extract by conversation role
+      role: "user"
+    markers: {}
+
   # Thinking block scope
   thinking:
     description: "Structured reasoning block in assistant response"
