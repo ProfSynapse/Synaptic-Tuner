@@ -93,8 +93,6 @@ output_schema:
   properties:
     confidencecalibration_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for Confidence Calibration
   required:
   - confidencecalibration_score

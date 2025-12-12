@@ -1,0 +1,185 @@
+# Example Rubric Template
+# Copy this file and rename to your_rubric.yaml
+
+# =============================================================================
+# REQUIRED FIELDS
+# =============================================================================
+
+name: Example Quality Check
+# Display name for the rubric
+
+description: Validates example content meets quality standards
+# Brief description of what this rubric checks
+
+scope: thinking
+# Which part of the example to evaluate:
+#   - system_prompt: The system role message (string)
+#   - thinking: The <thinking> block (parsed as dict)
+#   - response: Full assistant response (string + tool_calls)
+
+pass_threshold: 0.8
+# Minimum score (0.0-1.0) to pass. Common values:
+#   - 0.7: Lenient (style preferences)
+#   - 0.8: Normal (recommended default)
+#   - 0.9: Strict (critical checks)
+
+# =============================================================================
+# VALIDATIONS (Optional but recommended)
+# =============================================================================
+# Structural validation runs BEFORE the LLM judge.
+# Failures automatically set score to 0.0 and provide specific errors.
+
+validations:
+  # --- FIELD VALIDATION (for parsed dict content like thinking blocks) ---
+
+  # String field with minimum length
+  - field: goal
+    type: string
+    min: 10
+    error: "Goal must be at least {min} characters. Be specific."
+
+  # Array field with minimum items
+  - field: requirements
+    type: array
+    min: 1
+    error: "Add at least {min} requirement(s)."
+
+  # Nested field using dot notation
+  - field: assessment.risky
+    type: boolean
+    error: "assessment.risky must be boolean (true for destructive operations)."
+
+  # Number with min/max range
+  - field: confidence
+    type: number
+    min: 0.0
+    max: 1.0
+    error: "Confidence must be {min}-{max}."
+
+  # --- XML TAG VALIDATION (for system_prompt scope) ---
+
+  # Checks BOTH opening <tag> AND closing </tag>
+  # - match: session_context
+  #   type: xml
+  #   error: "Missing <session_context>...</session_context> tag"
+
+  # --- JSON FIELD VALIDATION (for content within XML tags) ---
+
+  # Top-level JSON field (looks for "field": pattern)
+  # - match: context
+  #   type: json
+  #   in_tag: selected_workspace
+  #   error: "Missing 'context' field in selected_workspace"
+
+  # Nested JSON field (parses JSON, navigates with dot notation)
+  # - match: context.rootFolder
+  #   type: json
+  #   in_tag: selected_workspace
+  #   error: "Missing 'context.rootFolder' in selected_workspace"
+
+  # --- REGEX VALIDATION ---
+
+  # - match: "tool_call:\\s+\\w+"
+  #   type: regex
+  #   error: "Invalid tool call format"
+
+  # --- CONTAINS VALIDATION (default when no type specified) ---
+
+  # - match: "required text"
+  #   error: "Missing required text"
+
+  # --- CROSS-SCOPE VALIDATION ---
+  # Extract values from one scope and validate they exist in another
+
+  # - cross_scope:
+  #     from: thinking           # Source scope
+  #     to: system_prompt        # Target scope to validate against
+  #     extract:
+  #       fields: [goal, plan]   # Fields to extract values from
+  #       pattern: '[\w/-]+\.md' # Regex to find values
+  #     skip_if:                 # Skip validation if matches
+  #       - pattern: '(?:create|new).*{value}'
+  #     validate_in: [vault_structure, selected_workspace]  # Tags to search
+  #   error: "Path '{value}' not found in vault"
+
+# =============================================================================
+# JUDGE PROMPT
+# =============================================================================
+# LLM prompt to evaluate quality after validations pass.
+# Available variables: {current_content}, {system_prompt}, {user_request}
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating the quality of a thinking block for an Obsidian vault assistant.
+
+  **Content to Evaluate:**
+  ```
+  {current_content}
+  ```
+
+  # INSTRUCTIONS
+  1. Check if the goal is clear and specific
+  2. Verify requirements are actionable
+  3. Confirm plan steps are logical
+  4. Assess confidence calibration
+
+  # SCORING
+  - 1.0: Excellent - all criteria met
+  - 0.7-0.9: Good - minor issues
+  - 0.4-0.6: Fair - several issues
+  - 0.0-0.3: Poor - major problems
+
+  # OUTPUT
+  Return JSON: {"example_score": 0.0-1.0}
+
+# =============================================================================
+# IMPROVER PROMPT (Optional)
+# =============================================================================
+# LLM prompt to improve content when judge score is below threshold.
+# Available variables: {current_content}, {feedback}, {format_instructions}
+# Omit this section for judge-only rubrics (no improvement).
+
+improver_prompt: |
+  # CONTEXT
+  You are improving a thinking block that didn't meet quality standards.
+
+  **Current Content:**
+  ```
+  {current_content}
+  ```
+
+  **Feedback:**
+  {feedback}
+
+  # INSTRUCTIONS
+  Fix the issues mentioned in the feedback while preserving correct parts.
+
+  # OUTPUT
+  Return the improved JSON thinking block only. No markdown wrappers.
+
+# =============================================================================
+# OUTPUT SCHEMA
+# =============================================================================
+# JSON Schema defining what the judge must return.
+# The score field name should match what judge_prompt says it outputs.
+
+output_schema:
+  type: object
+  properties:
+    example_score:
+      type: number
+  required:
+    - example_score
+
+# =============================================================================
+# NOTES
+# =============================================================================
+#
+# 1. Validation order: validations run first, then judge
+# 2. Auto-fail: validation errors set score to 0.0 automatically
+# 3. Error interpolation: use {field}, {min}, {max}, {actual}, {value}
+# 4. Scope determines content type:
+#    - system_prompt: raw string
+#    - thinking: parsed dict from JSON in <thinking> tags
+#    - response: string content + tool_calls array
+# 5. Remove unused validation types (they're commented out above)

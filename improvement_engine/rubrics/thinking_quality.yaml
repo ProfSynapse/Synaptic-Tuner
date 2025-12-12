@@ -12,6 +12,11 @@ judge_prompt: |
   {current_content}
   ```
 
+  **System Prompt (for validation):**
+  ```
+  {system_prompt}
+  ```
+
   # MISSION
   Score the thinking block on four criteria: goal clarity, memory context, requirements/plan distinction, and confidence calibration. High-quality thinking blocks enable accurate, contextual responses.
 
@@ -22,11 +27,13 @@ judge_prompt: |
      - 1.0: Ultra-specific with file paths, exact actions (e.g., "Delete Tech Specs Old.md from vault root")
      - 0.5: Moderately specific but missing details
      - 0.0: Vague or generic (e.g., "Help with files")
+     - **0.0 if goal references file paths that DON'T exist in vault_structure/workspaceStructure**
 
   2. **Memory Context** - Does memory explain the user's intent?
      - 1.0: Clear statement of what user wants to accomplish
      - 0.5: Partially explains intent
      - 0.0: Empty, generic, or contains hallucinated dates/history
+     - **0.0 if memory references file paths that DON'T exist in vault_structure/workspaceStructure**
 
   3. **Requirements/Plan Distinction** - Are these properly categorized?
      - Requirements: Prerequisites that must be true (dynamic state checks)
@@ -34,6 +41,7 @@ judge_prompt: |
      - 1.0: Clear distinction, no overlap with system prompt knowledge
      - 0.5: Some confusion between categories
      - 0.0: Duplicated, swapped, or includes redundant checks
+     - **0.0 if requirements/plan reference file paths that DON'T exist**
 
   4. **Confidence Calibration** - Does confidence match operation risk?
      - Risky operations (delete, move, overwrite): confidence 0.3-0.5
@@ -41,6 +49,20 @@ judge_prompt: |
      - Safe/simple operations: confidence 0.85-0.95
      - 1.0: Well-calibrated to risk level
      - 0.0: High confidence for risky operations
+
+  # CRITICAL: PATH VALIDATION (MANDATORY)
+  **You MUST check EVERY file path in the thinking block against the system prompt:**
+  - vault_structure shows root-level files/folders
+  - workspaceStructure (inside selected_workspace) shows workspace files
+
+  **If ANY path doesn't exist, you MUST:**
+  1. Give that criterion 0.0 score
+  2. LIST the hallucinated path in improvement_feedback
+  3. Suggest a replacement from the actual vault_structure
+
+  Example: If thinking says "update Ops/Runbooks/Drift.md" but vault_structure has Content/, Projects/, Archive/:
+  - goal_clarity: 0.0 (path doesn't exist)
+  - improvement_feedback: "HALLUCINATED PATH: 'Ops/Runbooks/Drift.md' does not exist. vault_structure contains: Content/, Projects/, Archive/. Replace with a path that exists OR make the goal generic."
 
   # GUIDELINES
   - Requirements should only check things NOT visible in the system prompt
@@ -57,7 +79,7 @@ judge_prompt: |
     "memory_context": 0.0-1.0,
     "requirements_plan_distinction": 0.0-1.0,
     "confidence_calibration": 0.0-1.0,
-    "improvement_feedback": "Specific suggestions..."
+    "improvement_feedback": "List any HALLUCINATED PATHS here with suggested replacements, then other feedback..."
   }
   ```
   Overall score is the average of the 4 criteria.
@@ -84,11 +106,25 @@ improver_prompt: |
   # MISSION
   Generate an improved thinking block that is specific, factual, and context-aware. The thinking block should leverage information from the system prompt and avoid redundant verification.
 
+  # CRITICAL: FILE PATH VALIDATION
+  **EVERY file path mentioned in goal, memory, requirements, or plan MUST exist in the system prompt.**
+
+  Before writing any path, check:
+  1. Look at `<vault_structure>` for root-level files/folders
+  2. Look at `workspaceStructure` in `<selected_workspace>` for workspace files
+  3. If the path doesn't exist in either, DO NOT use it
+
+  **If the current thinking references a non-existent path:**
+  - Replace it with a file that DOES exist in vault_structure/workspaceStructure
+  - Or make the goal generic (e.g., "help user with their workflow" instead of "update Ops/Runbooks/Drift.md")
+  - NEVER invent or hallucinate file paths
+
   # INSTRUCTIONS
-  1. **GOAL** - Make specific using information from user request and system prompt:
+  1. **GOAL** - Make specific using ONLY paths from vault_structure/workspaceStructure:
      - Use exact file paths visible in vault_structure or workspaceStructure
      - State the action clearly
      - Example: "Delete Tech Specs Old.md from vault root"
+     - If user request is vague, use a generic goal that doesn't assume specific files
 
   2. **MEMORY** - State user's intent based on their request:
      - Describe what the user wants to accomplish
@@ -100,7 +136,7 @@ improver_prompt: |
      - Focus on runtime state: file not locked, no active references
      - Example: ["no other files link to this document"]
 
-  4. **PLAN** - Direct actions without redundant verification:
+  4. **PLAN** - Direct actions using ONLY known files:
      - If file location is known from system prompt, go straight to action
      - For risky operations, include confirmation step
      - Example: ["Ask user for confirmation", "Delete Tech Specs Old.md"]
@@ -119,6 +155,7 @@ improver_prompt: |
   - Keep memory factual without invented dates or history
   - Requirements complement system prompt knowledge, not duplicate it
   - Plan reflects the actual steps needed given what's already known
+  - **NEVER reference file paths that don't exist in vault_structure or workspaceStructure**
 
   # FORMAT
   Output ONLY the improved thinking block as valid JSON. No explanations, no markdown wrapper.
@@ -128,24 +165,14 @@ output_schema:
   properties:
     score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
     goal_clarity:
       type: number
-      minimum: 0.0
-      maximum: 1.0
     memory_context:
       type: number
-      minimum: 0.0
-      maximum: 1.0
     requirements_plan_distinction:
       type: number
-      minimum: 0.0
-      maximum: 1.0
     confidence_calibration:
       type: number
-      minimum: 0.0
-      maximum: 1.0
     improvement_feedback:
       type: string
   required:
@@ -157,33 +184,43 @@ output_schema:
   - improvement_feedback
   additionalProperties: false
 
-content_schema:
-  type: object
-  properties:
-    goal:
-      type: string
-      description: Specific, actionable goal statement
-    memory:
-      type: string
-      description: User intent without fabricated dates/history
-    requirements:
-      type: array
-      minItems: 1
-      description: Dynamic state checks (not redundant with system prompt)
-    plan:
-      type: array
-      minItems: 1
-      description: Direct action steps
-    assessment:
-      type: object
-      properties:
-        risky:
-          type: boolean
-        complex:
-          type: boolean
-      required: [risky, complex]
-    confidence:
-      type: number
-      minimum: 0.0
-      maximum: 1.0
-  required: [goal, memory, requirements, plan, assessment, confidence]
+validations:
+  - field: goal
+    type: string
+    min: 10
+    error: "Goal must be at least {min} characters. Be specific with file paths and actions."
+
+  - field: memory
+    type: string
+    error: "Memory must describe user intent without fabricated dates or history."
+
+  - field: requirements
+    type: array
+    min: 1
+    error: "Add at least {min} requirement(s). Examples: 'file not locked', 'no active references'"
+
+  - field: plan
+    type: array
+    min: 1
+    error: "Add at least {min} step(s) to the plan."
+
+  - field: assessment
+    type: object
+    error: "Assessment must be an object."
+
+  - field: assessment.risky
+    type: boolean
+    error: "assessment.risky must be a boolean (true for delete/move/overwrite)."
+
+  - field: assessment.complex
+    type: boolean
+    error: "assessment.complex must be a boolean (true for multi-step operations)."
+
+  - field: confidence
+    type: number
+    min: 0.0
+    max: 1.0
+    error: "Confidence must be {min}-{max}. Use 0.3-0.5 for risky, 0.6-0.8 moderate, 0.85-0.95 safe."
+
+# NOTE: Cross-scope path validation moved to factuality.yaml
+# This rubric focuses on structure (validations) and quality criteria

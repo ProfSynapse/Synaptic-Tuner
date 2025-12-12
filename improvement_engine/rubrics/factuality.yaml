@@ -74,42 +74,58 @@ improver_prompt: |
   # MISSION
   Generate improved content where every detail can be traced to the inputs.
 
-  # INSTRUCTIONS
+  # INSTRUCTIONS FOR THINKING BLOCKS (JSON with goal, memory, etc.)
+  If the content is a JSON thinking block:
   1. **Fix the memory field**:
      - Replace invented history with simple intent statement
      - Remove dates unless they appear in inputs
      - Example: "User wants to remove obsolete documentation"
 
-  2. **Keep grounded information**:
-     - File paths from vault_structure or workspaceStructure
-     - IDs from session_context
-     - Agent names from available_agents
-     - Direct quotes or paraphrases from user request
+  2. **Fix file paths**:
+     - Only use paths that exist in vault_structure or workspaceStructure
+     - If a path doesn't exist, use a generic description instead
 
-  3. **Use reasonable inferences**:
-     - "This is a destructive operation" (logical)
-     - "File is in the workspace" (from system prompt)
-     - Keep domain knowledge that doesn't invent specifics
+  3. **Output the fixed JSON**
+
+  # INSTRUCTIONS FOR ASSISTANT RESPONSES (plain text)
+  If the content is a plain text response:
+  1. **Keep the response natural and conversational**
+  2. **Don't reference files/dates not in the system prompt**
+  3. **If the response discusses a file that doesn't exist in vault_structure, rewrite to be generic**
+  4. **DO NOT output YAML or structured data - output natural language text**
+  5. **The response should directly address the user's request**
 
   # GUIDELINES
   - Simple statements are better than invented context
-  - "User wants X" is sufficient for memory
   - Trust the system prompt for file locations
+  - For responses: write natural language, NOT structured data
 
   # FORMAT
-  Output ONLY the improved content. No JSON wrapper, no explanations.
+  Output ONLY the improved content.
+  - For thinking: output valid JSON
+  - For responses: output natural language text (NOT YAML, NOT JSON)
 
 output_schema:
   type: object
   properties:
     factuality_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for Factuality
   required:
   - factuality_score
   additionalProperties: false
 
-# No content_schema - structure validation handled by thinking_quality rubric
-# This rubric only checks for hallucinated facts, not structure
+# Unified validations format
+validations:
+  # Cross-scope validation: Check file paths from thinking/response against system_prompt
+  - cross_scope:
+      from: thinking
+      to: system_prompt
+      extract:
+        fields: [goal, memory, requirements, plan]
+        pattern: '(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:md|txt|json|yaml|yml)'
+      skip_if:
+        - pattern: '(?:create|new|generate|add)\s+.*{value}'
+        - pattern: '{value}.*(?:will be created|does not exist yet)'
+      validate_in: [vault_structure, selected_workspace]
+    error: "HALLUCINATED PATH: '{value}' not found in vault_structure or workspaceStructure"

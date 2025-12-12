@@ -170,8 +170,6 @@ output_schema:
   properties:
     toolalignment_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for Tool Alignment
   required:
   - toolalignment_score

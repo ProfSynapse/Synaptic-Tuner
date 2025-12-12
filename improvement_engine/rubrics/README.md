@@ -1,353 +1,351 @@
 # Rubric YAML Structure
 
-This document defines the required structure for rubric YAML files in the improvement engine.
+This document defines the structure for rubric YAML files in the improvement engine.
 
 ## Overview
 
 Rubrics are used to:
-1. **Judge** - Evaluate if an example meets quality standards
-2. **Validate** - Programmatically check structure (XML tags, JSON fields, etc.)
+1. **Validate** - Programmatically check structure (fields, tags, patterns)
+2. **Judge** - LLM evaluation of quality
 3. **Improve** - Generate better versions when quality is low
 
-## Required Fields
+## Quick Start
 
 ```yaml
-name: <string>
-  # Display name for the rubric (e.g., "System Prompt Format")
-
-description: <string>
-  # Brief description of what this rubric validates
-
-scope: <string>
-  # Which part of the example to evaluate
-  # Options: "system_prompt" | "thinking" | "response"
-
-pass_threshold: <float>
-  # Minimum score (0.0-1.0) required to pass
-  # Typical values: 0.8 (strict), 0.9 (very strict)
-
-judge_prompt: |
-  # Prompt for LLM judge to evaluate quality
-  # Should include:
-  #   - Evaluation criteria
-  #   - Scoring guidance (0.0 = fail, 1.0 = perfect)
-  #   - Output format (JSON with score field)
-
-improver_prompt: |
-  # Prompt for LLM to improve content (OPTIONAL)
-  # Template variables available:
-  #   - {current_content}: The content being improved
-  #   - {feedback}: Judge's feedback on what's wrong
-  #   - {format_instructions}: The format_spec content
-  #
-  # If omitted, this rubric is judge-only (no improvement)
-
-format_spec: |
-  # Detailed format specification (OPTIONAL)
-  # Used in improver_prompt as {format_instructions}
-  # Should provide:
-  #   - Examples of correct format
-  #   - Required sections/fields
-  #   - Quality criteria
-
-output_schema:
-  # JSON Schema for judge output validation
-  # Required fields should match what judge_prompt says it will output
-  type: object
-  properties:
-    <score_field_name>:
-      type: number
-      minimum: 0.0
-      maximum: 1.0
-  required:
-    - <score_field_name>
-
-schema_validation:
-  # Programmatic validation rules (OPTIONAL)
-  # Runs BEFORE judge to catch structural errors
-  # Types: xml, json, regex, yaml, code
-  types: [xml, json]
-
-  xml:
-    required_tags:
-      - "<tag_name>"
-
-  json:
-    sections:
-      - tag: xml_tag_containing_json
-        extract_pattern: '\{[\s\S]*\}'
-        required_fields: [field1, field2]
-```
-
-## Minimal Example
-
-```yaml
-name: Simple Quality Check
-description: Basic quality validation
-scope: response
+name: My Rubric
+description: What this rubric checks
+scope: thinking  # system_prompt | thinking | response
 pass_threshold: 0.8
 
+# Structural validation (runs BEFORE judge)
+validations:
+  - field: goal
+    type: string
+    min: 10
+    error: "Goal must be at least 10 characters"
+
+# LLM judge evaluation
 judge_prompt: |
-  Evaluate if the response is clear and helpful.
-
-  Score 1.0 if excellent, 0.0 if poor.
-
-  Output JSON: {"quality_score": 0.0-1.0}
+  Evaluate the content quality...
+  Output JSON: {"my_score": 0.0-1.0}
 
 output_schema:
   type: object
   properties:
-    quality_score:
+    my_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
-  required:
-    - quality_score
+  required: [my_score]
 ```
 
-## Full Example with Improvement
+## Validations
+
+The `validations` list provides structural validation that runs BEFORE the LLM judge. Failures automatically set score to 0.0.
+
+### Field Validation
+
+Validate fields in parsed JSON content (e.g., thinking blocks).
+
+```yaml
+validations:
+  # Basic field check
+  - field: goal
+    type: string
+    min: 10
+    error: "Goal must be at least {min} characters"
+
+  # Array with minimum items
+  - field: requirements
+    type: array
+    min: 1
+    error: "Add at least {min} requirement(s)"
+
+  # Nested field (dot notation)
+  - field: assessment.risky
+    type: boolean
+    error: "assessment.risky must be boolean"
+
+  # Number with range
+  - field: confidence
+    type: number
+    min: 0.0
+    max: 1.0
+    error: "Confidence must be {min}-{max}"
+```
+
+**Keys:**
+| Key | Description |
+|-----|-------------|
+| `field` | Field path (dot notation for nesting) |
+| `type` | `string`, `number`, `array`, `object`, `boolean` |
+| `min` | Minimum (length for string/array, value for number) |
+| `max` | Maximum (length for string/array, value for number) |
+| `error` | Message with `{field}`, `{type}`, `{min}`, `{max}`, `{actual}` |
+
+### XML Tag Validation
+
+Validate XML tags exist (checks BOTH opening and closing).
+
+```yaml
+validations:
+  - match: session_context
+    type: xml
+    error: "Missing <session_context>...</session_context>"
+
+  - match: vault_structure
+    type: xml
+    error: "Missing <vault_structure>...</vault_structure>"
+```
+
+### JSON Field Validation
+
+Validate JSON fields exist within content or specific tags.
+
+```yaml
+validations:
+  # Top-level JSON field (looks for "field": pattern)
+  - match: context
+    type: json
+    in_tag: selected_workspace  # Scope to this tag
+    error: "Missing 'context' field"
+
+  # Nested JSON field (parses JSON, uses dot notation)
+  - match: context.rootFolder
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context.rootFolder'"
+```
+
+### Regex Validation
+
+```yaml
+validations:
+  - match: "tool_call:\\s+\\w+"
+    type: regex
+    error: "Invalid tool call format"
+```
+
+### Contains Validation (Default)
+
+Simple text contains check.
+
+```yaml
+validations:
+  - match: "some required text"
+    error: "Missing required text"
+```
+
+### Cross-Scope Validation
+
+Extract values from one scope and validate they exist in another.
+
+```yaml
+validations:
+  - cross_scope:
+      from: thinking
+      to: system_prompt
+      extract:
+        fields: [goal, memory, plan]
+        pattern: '[\w/-]+\.(?:md|txt|json)'
+      skip_if:
+        - pattern: '(?:create|new).*{value}'
+      validate_in: [vault_structure, selected_workspace]
+    error: "HALLUCINATED: '{value}' not found in vault"
+```
+
+**Keys:**
+| Key | Description |
+|-----|-------------|
+| `from` | Source scope to extract from |
+| `to` | Target scope to validate against |
+| `extract.fields` | Fields to extract values from |
+| `extract.pattern` | Regex to match values |
+| `skip_if` | Skip validation if value matches pattern |
+| `validate_in` | Tags in target to search |
+| `error` | Message with `{value}` interpolation |
+
+## Validation Type Summary
+
+| Type | Key | Purpose |
+|------|-----|---------|
+| Field | `field` | Validate parsed dict fields |
+| XML | `match` + `type: xml` | Check `<tag>` and `</tag>` exist |
+| JSON | `match` + `type: json` | Check JSON field exists |
+| Regex | `match` + `type: regex` | Regex pattern match |
+| Contains | `match` (no type) | Simple text contains |
+| Cross-scope | `cross_scope` | Validate across scopes |
+
+## Complete Examples
+
+### Thinking Block Validation
+
+```yaml
+name: Thinking Quality
+scope: thinking
+pass_threshold: 0.8
+
+validations:
+  - field: goal
+    type: string
+    min: 10
+    error: "Goal must be at least {min} characters"
+
+  - field: requirements
+    type: array
+    min: 1
+    error: "Add at least {min} requirement(s)"
+
+  - field: assessment.risky
+    type: boolean
+    error: "assessment.risky must be boolean"
+
+  - field: confidence
+    type: number
+    min: 0.0
+    max: 1.0
+    error: "Confidence must be {min}-{max}"
+
+judge_prompt: |
+  Evaluate thinking quality...
+  Output: {"thinking_score": 0.0-1.0}
+
+output_schema:
+  type: object
+  properties:
+    thinking_score:
+      type: number
+  required: [thinking_score]
+```
+
+### System Prompt Validation
 
 ```yaml
 name: System Prompt Format
-description: Validates system prompt structure
 scope: system_prompt
-pass_threshold: 0.9
+pass_threshold: 0.8
+
+validations:
+  # Required XML tags
+  - match: session_context
+    type: xml
+    error: "Missing <session_context>...</session_context>"
+
+  - match: vault_structure
+    type: xml
+    error: "Missing <vault_structure>...</vault_structure>"
+
+  - match: selected_workspace
+    type: xml
+    error: "Missing <selected_workspace>...</selected_workspace>"
+
+  # JSON fields in selected_workspace
+  - match: context
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context' field"
+
+  - match: context.rootFolder
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context.rootFolder'"
 
 judge_prompt: |
-  Evaluate if system prompt has required sections:
-  - <session_context>
-  - <vault_structure>
-  - <available_workspaces>
-
-  Score:
-  - 1.0 = All sections present
-  - 0.5 = Some sections missing
-  - 0.0 = Empty or wrong format
-
-  Output JSON: {"format_score": 0.0-1.0}
-
-improver_prompt: |
-  Fix the system prompt based on feedback.
-
-  **Current:**
-  ```
-  {current_content}
-  ```
-
-  **Feedback:**
-  ```
-  {feedback}
-  ```
-
-  **Format Requirements:**
-  {format_instructions}
-
-  Output the improved system prompt.
-
-format_spec: |
-  Required sections:
-  1. <session_context> with sessionId and workspaceId
-  2. <vault_structure> with folders and files
-  3. <available_workspaces> with at least 1 workspace
+  Evaluate system prompt completeness...
+  Output: {"format_score": 0.0-1.0}
 
 output_schema:
   type: object
   properties:
     format_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
-  required:
-    - format_score
+  required: [format_score]
+```
 
-schema_validation:
-  types: [xml]
-  xml:
-    required_tags:
-      - "<session_context>"
-      - "<vault_structure>"
-      - "<available_workspaces>"
+### Cross-Scope Factuality Check
+
+```yaml
+name: Factuality
+scope: [thinking, response]
+pass_threshold: 0.8
+
+validations:
+  - cross_scope:
+      from: thinking
+      to: system_prompt
+      extract:
+        fields: [goal, memory, requirements, plan]
+        pattern: '(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:md|txt)'
+      skip_if:
+        - pattern: '(?:create|new|generate).*{value}'
+      validate_in: [vault_structure, selected_workspace]
+    error: "HALLUCINATED PATH: '{value}' not found"
+
+judge_prompt: |
+  Check for fabricated information...
+  Output: {"factuality_score": 0.0-1.0}
+
+output_schema:
+  type: object
+  properties:
+    factuality_score:
+      type: number
+  required: [factuality_score]
+```
+
+## Other Fields
+
+### Judge Prompt
+
+LLM prompt to evaluate quality. Template variables:
+- `{current_content}` - Content being evaluated
+- `{system_prompt}` - System prompt (if available)
+- `{user_request}` - User message
+
+### Improver Prompt
+
+LLM prompt to improve content. Template variables:
+- `{current_content}` - Content to improve
+- `{feedback}` - Judge's feedback
+- `{format_instructions}` - Format spec content
+
+### Output Schema
+
+Defines what the judge must return:
+
+```yaml
+output_schema:
+  type: object
+  properties:
+    my_score:
+      type: number
+  required: [my_score]
 ```
 
 ## Scope Types
 
-### `system_prompt`
-- Evaluates the system role message in conversations
-- Content: String (system prompt text)
-- Use for: Format validation, completeness checks
+| Scope | Content | Use For |
+|-------|---------|---------|
+| `system_prompt` | String | Format validation, tags |
+| `thinking` | Dict (parsed JSON) | Field validation |
+| `response` | String + tool_calls | Tool alignment |
 
-### `thinking`
-- Evaluates the `<thinking>` block in assistant responses
-- Content: Dict (JSON structure inside thinking tags)
-- Use for: Goal clarity, plan quality, confidence calibration
-
-### `response`
-- Evaluates the full assistant response (text + tool calls)
-- Content: Dict with "content" (string) and "tool_calls" (array)
-- Use for: Tool alignment, destructive safety, factuality
-
-## Schema Validation Types
-
-### XML Validation
-```yaml
-schema_validation:
-  types: [xml]
-  xml:
-    required_tags:
-      - "<tag_name>"
-      - "<another_tag>"
-```
-
-### JSON Validation
-```yaml
-schema_validation:
-  types: [json]
-  json:
-    # Standalone JSON
-    required_fields: [field1, field2]
-
-    # JSON inside XML tags
-    sections:
-      - tag: workspace_info
-        extract_pattern: '\{[\s\S]*\}'
-        required_fields: [context, structure]
-```
-
-### Regex Validation
-```yaml
-schema_validation:
-  types: [regex]
-  regex:
-    patterns:
-      - pattern: 'tool_call:\s*\w+'
-        description: "Must have tool_call: format"
-```
-
-### Multiple Types
-```yaml
-schema_validation:
-  types: [xml, json]  # Both validators run
-  xml:
-    required_tags: ["<selected_workspace>"]
-  json:
-    sections:
-      - tag: selected_workspace
-        required_fields: [context, workspaceStructure]
-```
-
-## Judge Output Schema
-
-The `output_schema` defines what JSON the judge must return. Must have:
-- `type: object`
-- `properties` with score field(s)
-- Each score field: `type: number`, `minimum: 0.0`, `maximum: 1.0`
-- `required` array with score field name(s)
-
-The engine looks for the first score field to determine pass/fail.
-
-## Template Variables
-
-Available in `improver_prompt`:
-
-- `{current_content}` - The content being improved (string for system_prompt, dict for thinking)
-- `{feedback}` - The judge's feedback on what's wrong
-- `{format_instructions}` - The `format_spec` content (if defined)
-
-## Best Practices
-
-1. **Judge Prompts**
-   - Be specific about scoring criteria
-   - Provide examples of good (1.0) vs bad (0.0)
-   - Always specify exact JSON output format
-
-2. **Improver Prompts**
-   - Include both current content and feedback
-   - Reference format_spec for detailed requirements
-   - Request raw output (no markdown wrappers)
-
-3. **Schema Validation**
-   - Use for structural checks (tags, fields exist)
-   - Run before judge to catch obvious errors
-   - Provides specific error messages to judge
-
-4. **Pass Thresholds**
-   - 0.8 = Normal strictness
-   - 0.9 = High strictness (use for critical safety checks)
-   - 0.7 = Lenient (use for style preferences)
-
-5. **Scope Selection**
-   - `system_prompt` = Format and completeness
-   - `thinking` = Reasoning quality, structure
-   - `response` = Tool calls, safety, factuality
-
-## Skip Files
-
-The following files are NOT rubrics and are automatically skipped:
-- `quality_labels.yaml` - Labeling configuration
-- `README.md` - This file
-
-To skip additional files, configure `skip_files` in code.
-
-## File Naming
-
-- Use snake_case: `system_prompt_format.yaml`
-- Rubric key = filename stem (without .yaml)
-- Rubric name can be any display string
-
-## Testing Rubrics
-
-Test a rubric on examples:
+## Testing
 
 ```bash
+# Run rubric on dataset
 python -m improvement_engine.services.rubric_runner \
   --file dataset.jsonl \
   --output improved.jsonl \
-  --rubrics system_prompt_format,thinking_quality \
-  --backend lmstudio \
-  --start-line 1 --end-line 10 \
-  --max-iterations 3
-```
+  --rubrics thinking_quality,system_prompt_format \
+  --backend lmstudio
 
-List available rubrics:
-
-```bash
+# List available rubrics
 python -m improvement_engine.services.rubric_runner --list
 ```
 
-## Common Patterns
+## Best Practices
 
-### Judge-Only Rubric
-```yaml
-# Omit improver_prompt for evaluation-only rubrics
-name: Factuality Check
-# ... judge_prompt, output_schema ...
-# NO improver_prompt = this rubric only evaluates, doesn't improve
-```
-
-### Rubric with Schema Pre-Validation
-```yaml
-# schema_validation runs BEFORE judge
-# Results are shown to judge in prompt
-schema_validation:
-  types: [xml, json]
-  xml:
-    required_tags: ["<tag>"]
-  json:
-    required_fields: [field1]
-```
-
-### Multi-Criteria Rubric
-```yaml
-# Judge can check multiple aspects, output single score
-judge_prompt: |
-  Check:
-  1. Format correctness
-  2. Content quality
-  3. Completeness
-
-  Average score: {"overall_score": 0.0-1.0}
-```
-
----
-
-**Note:** All rubric files are cached after first load for performance. Restart the runner to reload changes.
+1. **Use validations for structural checks** - Faster than LLM, gives specific errors
+2. **Reserve judge for quality evaluation** - Nuanced assessment LLM does better
+3. **Write actionable error messages** - Help the improver fix issues
+4. **Use cross_scope for factuality** - Catch hallucinated paths/names
+5. **Set appropriate thresholds** - 0.8 normal, 0.9 strict, 0.7 lenient

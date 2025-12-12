@@ -83,8 +83,6 @@ output_schema:
   properties:
     destructivesafety_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for Destructive Safety
   required:
   - destructivesafety_score

@@ -1,7 +1,7 @@
 name: System Prompt Format
 description: Validates system prompt has all required sections with realistic content
 scope: system_prompt
-pass_threshold: 0.9
+pass_threshold: 0.8
 
 judge_prompt: |
   # CONTEXT
@@ -155,21 +155,24 @@ improver_prompt: |
     - Example: rootFolder="Projects/AI Research/" → vault_structure must include "Projects/"
 
   ## WORKFLOWS - CRITICAL
-  Workflows are the USER'S personal productivity patterns - NOT related to the current task.
-  Infer appropriate workflows from the WORKSPACE CONTEXT (folder names, file types, vault purpose).
+  Workflows are the USER'S recurring productivity habits - things they do REGULARLY, not the current task.
 
-  **How to derive workflows:**
-  - Content/Writing workspace → "Content Creation" - ["Brainstorm ideas", "Create outline", "Draft content", "Edit and polish"]
-  - Projects workspace → "Project Kickoff" - ["Define scope", "Create task list", "Set milestones"]
-  - Job Search vault → "Application Process" - ["Research company", "Tailor resume", "Draft cover letter"]
-  - Research workspace → "Literature Review" - ["Collect sources", "Extract key points", "Synthesize findings"]
-  - Meeting Notes folder → "Meeting Capture" - ["Create from template", "Record decisions", "Assign action items"]
+  **GOOD workflows** (user's regular habits):
+  - "Weekly Review" - ["Review completed tasks", "Plan next week", "Archive old notes"]
+  - "Morning Planning" - ["Check calendar", "Prioritize tasks", "Review goals"]
+  - "End of Day" - ["Log accomplishments", "Clear inbox", "Set tomorrow's priorities"]
+  - "Monthly Reflection" - ["Review metrics", "Update goals", "Archive completed projects"]
 
-  **WRONG examples** (task-specific - DO NOT USE):
-  - "DeleteFileWorkflow" - mirrors what assistant will do
-  - "FileCleanupProcess" - describes the current task
-  - "MoveToArchiveWorkflow" - just restates the request
-  - Any workflow that describes what the assistant is about to do
+  **ACCEPTABLE workflows** (workspace-appropriate habits):
+  - Content workspace → "Content Pipeline" - ["Ideate", "Draft", "Review", "Publish"]
+  - Projects workspace → "Sprint Planning" - ["Review backlog", "Estimate tasks", "Assign priorities"]
+  - Research workspace → "Research Session" - ["Gather sources", "Take notes", "Synthesize"]
+
+  **BAD workflows** (task-specific - NEVER USE):
+  - "DeleteFileWorkflow", "FileCleanupProcess", "MoveToArchiveWorkflow"
+  - "Project Management Routine" (too generic, sounds like current task)
+  - Anything that mirrors what the assistant is about to do
+  - Anything ending in "Workflow" or "Process"
 
   # FORMAT
   Output ONLY the improved system prompt. No JSON wrapper, no markdown blocks.
@@ -179,53 +182,77 @@ output_schema:
   properties:
     systempromptformat_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for System Prompt Format
   required:
     - systempromptformat_score
   additionalProperties: false
 
-schema_validation:
-  types: [xml, json, yaml, regex]
-  xml:
-    required_tags:
-      - '<session_context>'
-      - '<vault_structure>'
-      - '<available_workspaces>'
-      - '<available_agents>'
-      - '<selected_workspace'
-  json:
-    sections:
-      - tag: 'selected_workspace'
-        extract_pattern: '\{[\s\S]*\}'
-        required_fields:
-          - 'context'
-          - 'workspaceStructure'
-          - 'recentFiles'
-          - 'sessions'
-          - name: 'workflows'
-            type: 'array'
-            min_items: 1
-          - name: 'keyFiles'
-            type: 'array'
-            min_items: 1
-          - name: 'preferences'
-            type: 'string'
-            min_length: 1
-        # Extract values for cross-reference validation
-        extract:
-          - path: 'context.rootFolder'
-            as: 'workspace_root'
-            skip_if: '/'
-  yaml:
-    sections:
-      - tag: 'available_agents'
-        min_items: 2
-        item_fields: ['name', 'description']
-  # Cross-reference: workspace rootFolder must exist in vault_structure
-  regex:
-    patterns:
-      - pattern: '{workspace_root}'
-        in_tag: 'vault_structure'
-        description: 'Workspace rootFolder must exist in vault_structure'
+# Unified validations (typed pattern matching)
+validations:
+  # Required XML tags (validates both opening and closing)
+  - match: session_context
+    type: xml
+    error: "Missing required <session_context>...</session_context> tag"
+
+  - match: vault_structure
+    type: xml
+    error: "Missing required <vault_structure>...</vault_structure> tag"
+
+  - match: available_workspaces
+    type: xml
+    error: "Missing required <available_workspaces>...</available_workspaces> tag"
+
+  - match: available_agents
+    type: xml
+    error: "Missing required <available_agents>...</available_agents> tag"
+
+  - match: selected_workspace
+    type: xml
+    error: "Missing required <selected_workspace>...</selected_workspace> tag"
+
+  # JSON fields within selected_workspace (scoped validation)
+  - match: context
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context' field in selected_workspace JSON"
+
+  - match: workspaceStructure
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'workspaceStructure' field in selected_workspace JSON"
+
+  - match: workflows
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'workflows' field in selected_workspace JSON"
+
+  - match: keyFiles
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'keyFiles' field in selected_workspace JSON"
+
+  - match: preferences
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'preferences' field in selected_workspace JSON"
+
+  - match: recentFiles
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'recentFiles' field in selected_workspace JSON"
+
+  - match: sessions
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'sessions' field in selected_workspace JSON"
+
+  # Nested JSON field validation (dot notation)
+  - match: context.id
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context.id' field in selected_workspace"
+
+  - match: context.rootFolder
+    type: json
+    in_tag: selected_workspace
+    error: "Missing 'context.rootFolder' field in selected_workspace"

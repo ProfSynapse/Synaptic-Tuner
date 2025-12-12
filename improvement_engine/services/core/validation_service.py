@@ -66,8 +66,16 @@ class ValidationService:
             validation_config = rubric.get("validation", {})
             has_tool_validation = "tool_calls" in validation_config and validation_config["tool_calls"].get("enabled", False)
 
+            # Check if rubric has cross_scope validation
+            schema_validation = rubric.get("schema_validation", {})
+            has_cross_scope = "cross_scope" in schema_validation.get("types", [])
+
             # Skip validation if not applicable
-            if scope not in ["thinking", "system_prompt"] and not has_tool_validation:
+            if scope not in ["thinking", "system_prompt", "response"] and not has_tool_validation:
+                continue
+
+            # For response scope, only process if has tool validation OR cross_scope validation
+            if scope == "response" and not has_tool_validation and not has_cross_scope:
                 continue
 
             try:
@@ -94,7 +102,7 @@ class ValidationService:
                 # Validate based on scope type
                 if scope == "system_prompt":
                     system_prompt_text = content if isinstance(content, str) else content.get("system_prompt", "")
-                    is_valid, errors = validator.validate_content(system_prompt_text)
+                    is_valid, errors = validator.validate_system_prompt(system_prompt_text)
                     results[rubric_key] = (is_valid, errors)
 
                 elif scope == "thinking":
@@ -102,9 +110,69 @@ class ValidationService:
                     if isinstance(content, dict):
                         # Use validate_thinking_content() which checks against content_schema
                         is_valid, errors = validator.validate_thinking_content(content)
+
+                        # Check for cross_scope validation
+                        if validator.has_cross_scope_validation():
+                            target_scope = validator.get_cross_scope_target()
+                            if target_scope:
+                                # Extract target scope content from original example
+                                target_content = self.scope_extractor.extract(example, target_scope)
+                                if target_content:
+                                    # If target is system_prompt, it returns a dict with 'system_prompt' key
+                                    if isinstance(target_content, dict) and "system_prompt" in target_content:
+                                        target_str = target_content["system_prompt"]
+                                    elif isinstance(target_content, str):
+                                        target_str = target_content
+                                    else:
+                                        target_str = str(target_content)
+
+                                    # Run cross-scope validation
+                                    cross_valid, cross_errors = validator.validate_cross_scope(
+                                        source_content=content,
+                                        target_content=target_str
+                                    )
+
+                                    if not cross_valid:
+                                        is_valid = False
+                                        errors.extend(cross_errors)
+
                         results[rubric_key] = (is_valid, errors)
                     else:
                         results[rubric_key] = (False, ["Thinking content is not a dict"])
+
+                elif scope == "response" and has_cross_scope:
+                    # Handle cross-scope validation for response scope
+                    # Content is the assistant response (string)
+                    response_text = content if isinstance(content, str) else content.get("content", "")
+
+                    # Create validator and run cross-scope
+                    validator = SchemaValidator(rubric_key, logger=self.logger)
+                    is_valid = True
+                    errors = []
+
+                    if validator.has_cross_scope_validation():
+                        target_scope = validator.get_cross_scope_target()
+                        if target_scope:
+                            target_content = self.scope_extractor.extract(example, target_scope)
+                            if target_content:
+                                if isinstance(target_content, dict) and "system_prompt" in target_content:
+                                    target_str = target_content["system_prompt"]
+                                elif isinstance(target_content, str):
+                                    target_str = target_content
+                                else:
+                                    target_str = str(target_content)
+
+                                # For response, we need to wrap it in a dict for validate_cross_scope
+                                cross_valid, cross_errors = validator.validate_cross_scope(
+                                    source_content={"content": response_text},
+                                    target_content=target_str
+                                )
+
+                                if not cross_valid:
+                                    is_valid = False
+                                    errors.extend(cross_errors)
+
+                    results[rubric_key] = (is_valid, errors)
 
             except Exception as e:
                 self.logger.warning(f"Validation error for {rubric_key}: {e}")

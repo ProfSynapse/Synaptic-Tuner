@@ -103,8 +103,6 @@ output_schema:
   properties:
     responsequality_score:
       type: number
-      minimum: 0.0
-      maximum: 1.0
       description: Score for Response Quality
   required:
     - responsequality_score

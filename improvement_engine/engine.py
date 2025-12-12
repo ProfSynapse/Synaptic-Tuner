@@ -208,45 +208,54 @@ class ImprovementEngine:
                     scope_passed = True
                     break
 
-                # 5. Improve this scope
+                # 5. Collect ALL failing rubrics for this scope
+                failing_rubrics = []
                 for rubric in scope_rubrics:
                     rubric_key = rubric.get("key", rubric.get("name"))
                     rubric_name = rubric.get("name", rubric_key)
                     before_score = scores.get(rubric_name, 0.0)
                     threshold = rubric.get("pass_threshold", 0.8)
 
-                    if before_score >= threshold:
-                        continue  # This rubric passed
+                    # Check if schema validation failed for this rubric
+                    schema_failed = False
+                    if rubric_key in validation_results:
+                        is_valid, _ = validation_results[rubric_key]
+                        schema_failed = not is_valid
 
-                    # Improve the scope with THIS specific rubric
+                    # Add to failing list if judge score failed OR schema failed
+                    if before_score < threshold or schema_failed:
+                        failing_rubrics.append(rubric)
+
+                # 6. Improve with ALL failing rubrics together (single call)
+                if failing_rubrics:
                     improved_example, improve_prompt, improved_content, system_prompt = self._improve_scope_with_logging(
                         improved,
                         scope,
-                        [rubric],  # Pass only this rubric, not all scope_rubrics
+                        failing_rubrics,  # ALL failing rubrics together
                         judgment
                     )
 
                     if improved_example != improved:
-                        # Re-evaluate after improvement
-                        after_validation = self.validation_service.validate_example(improved_example, [rubric])
-                        after_system, after_user = self._build_judge_prompt(improved_example, [rubric], after_validation)
+                        # Re-evaluate after improvement with ALL scope rubrics
+                        after_validation = self.validation_service.validate_example(improved_example, scope_rubrics)
+                        after_system, after_user = self._build_judge_prompt(improved_example, scope_rubrics, after_validation)
                         after_judgment = self.judge_service.judge(
                             after_user,
-                            [rubric],
+                            scope_rubrics,
                             system_prompt=after_system
                         )
-                        after_scores, _ = self._parse_judgment(after_judgment, [rubric], after_validation)
-                        after_score = after_scores.get(rubric_name, 0.0)
+                        after_scores, _ = self._parse_judgment(after_judgment, scope_rubrics, after_validation)
 
-                        # Log improver interaction
+                        # Log improver interaction for the consolidated improvement
+                        rubric_names = ", ".join(r.get("name", "unknown") for r in failing_rubrics)
                         self.interaction_logger.log_improver_interaction(
                             improver_prompt=improve_prompt,
                             improver_response=improved_content or "",
-                            rubric_name=rubric_name,
+                            rubric_name=rubric_names,
                             scope=scope,
-                            before_score=before_score,
-                            after_score=after_score,
-                            improved=(after_score > before_score),
+                            before_score=min(scores.get(r.get("name", ""), 0) for r in failing_rubrics),
+                            after_score=min(after_scores.get(r.get("name", ""), 0) for r in failing_rubrics),
+                            improved=True,
                             example_id=None,
                             system_prompt=system_prompt
                         )
@@ -320,13 +329,17 @@ class ImprovementEngine:
             system_parts.append(rubric.get("judge_prompt", ""))
 
         # Add structure requirements (schema validation results)
-        if validation_results:
-            system_parts.extend(["", "## STRUCTURE REQUIREMENTS"])
+        has_structure_errors = any(not is_valid for is_valid, _ in validation_results.values()) if validation_results else False
+        if validation_results and has_structure_errors:
+            system_parts.extend(["", "## STRUCTURE REQUIREMENTS (MANDATORY)"])
+            system_parts.append("**CRITICAL: Any structure error below MUST result in score 0.0 for that rubric.**")
+            system_parts.append("**You MUST include these errors in your improvement_feedback/overall_feedback.**")
+            system_parts.append("")
             for rubric_key, (is_valid, errors) in validation_results.items():
                 if not is_valid:
-                    system_parts.append(f"\n**{rubric_key}**")
+                    system_parts.append(f"**{rubric_key}** - FAILS SCHEMA:")
                     for error in errors:
-                        system_parts.append(f"  - {error}")
+                        system_parts.append(f"  ❌ {error}")
 
         # Output format
         system_parts.extend(["", "## OUTPUT"])
@@ -347,15 +360,38 @@ class ImprovementEngine:
         rubrics: List[Dict],
         validation_results: Dict
     ) -> Tuple[Dict[str, float], bool]:
-        """Parse judgment and determine pass/fail."""
-        scores = {}
+        """
+        Parse judgment and determine pass/fail.
 
-        # Extract scores for each rubric
+        AUTO-FAIL: If validation fails, score is automatically 0.0
+        regardless of what the judge says.
+        """
+        scores = {}
+        self._mandatory_fixes = []  # Store for improver
+
+        # First, process validation results (AUTO-FAIL on validation errors)
+        failed_rubrics = set()
+        for rubric_key, (is_valid, errors) in validation_results.items():
+            schema_key = f"{rubric_key}{self.scope_config.validation.schema_score_suffix}"
+            scores[schema_key] = 1.0 if is_valid else 0.0
+
+            if not is_valid:
+                # AUTO-FAIL: Set score to 0.0 for this rubric
+                scores[rubric_key] = 0.0
+                failed_rubrics.add(rubric_key)
+                # Collect mandatory fixes
+                self._mandatory_fixes.extend(errors)
+                self.logger.info(f"  AUTO-FAIL: {rubric_key} failed validation ({len(errors)} errors)")
+
+        # Extract judge scores for rubrics that PASSED validation
         for rubric in rubrics:
             rubric_key = rubric.get("name", "unknown")
-            threshold = rubric.get("pass_threshold", 0.8)
 
-            # Find score field
+            # Skip if already auto-failed
+            if rubric_key in failed_rubrics:
+                continue
+
+            # Find score field from judge
             score = None
             score_field = f"{rubric_key}{self.scope_config.judge.score_field_suffix}"
 
@@ -373,11 +409,6 @@ class ImprovementEngine:
                 score = 0.0
 
             scores[rubric_key] = score
-
-        # Add schema validation scores
-        for rubric_key, (is_valid, _) in validation_results.items():
-            schema_key = f"{rubric_key}{self.scope_config.validation.schema_score_suffix}"
-            scores[schema_key] = 1.0 if is_valid else 0.0
 
         # Determine overall pass
         passed = all(
@@ -415,35 +446,40 @@ class ImprovementEngine:
         judgment: Dict
     ) -> Tuple[Dict, str, str, str]:
         """
-        Improve a single scope and return prompt/response for logging.
+        Improve a single scope using ALL provided rubrics together.
 
         Returns:
             Tuple of (improved_example, improve_prompt, improved_content, system_prompt)
         """
-        # Find rubric for this scope (handle both single scope and list scopes)
-        rubric = None
+        # Find ALL rubrics for this scope
+        scope_rubrics = []
         for r in rubrics:
             r_scope = r.get("scope", "response")
             # Support both single scope string and list of scopes
             if isinstance(r_scope, list):
                 if scope in r_scope:
-                    rubric = r
-                    break
+                    scope_rubrics.append(r)
             elif r_scope == scope:
-                rubric = r
-                break
+                scope_rubrics.append(r)
 
-        if not rubric:
-            self.logger.warning(f"No rubric for scope {scope}")
+        if not scope_rubrics:
+            self.logger.warning(f"No rubrics for scope {scope}")
             return example, "", "", ""
 
-        # Build improvement prompt from rubric template
-        template = rubric.get("improver_prompt", "")
-        if not template:
-            self.logger.warning(f"No improver_prompt template for {rubric.get('name')}")
+        # Combine ALL rubric improver_prompts into one consolidated prompt
+        combined_templates = []
+        rubric_names = []
+        for rubric in scope_rubrics:
+            template = rubric.get("improver_prompt", "")
+            if template:
+                rubric_names.append(rubric.get("name", "unknown"))
+                combined_templates.append(f"### {rubric.get('name')} Requirements\n{template}")
+
+        if not combined_templates:
+            self.logger.warning(f"No improver_prompt templates for scope {scope}")
             return example, "", "", ""
 
-        self.logger.info(f"    Improving {scope} with rubric: {rubric.get('name')}")
+        self.logger.info(f"    Improving {scope} with rubrics: {', '.join(rubric_names)}")
 
         # Get scope handler to build prompt variables
         from .services.scope_handlers import get_handler
@@ -456,18 +492,28 @@ class ImprovementEngine:
         feedback = judgment.get(self.scope_config.judge.feedback_field, "")
         template_vars["feedback"] = feedback
 
-        # Build SYSTEM prompt for improver (feedback + role)
+        # Build SYSTEM prompt for improver (mandatory fixes + quality recommendations)
         system_parts = []
-        system_parts.append(f"You are improving {scope} content for the '{rubric.get('name')}' rubric.")
+        system_parts.append(f"You are improving {scope} content to satisfy ALL of these rubrics: {', '.join(rubric_names)}.")
+        system_parts.append("Your improvement must address ALL requirements from ALL rubrics together.")
 
-        # Add feedback to system
+        # Add MANDATORY FIXES first (from validation errors - must be fixed)
+        mandatory_fixes = getattr(self, '_mandatory_fixes', [])
+        if mandatory_fixes:
+            system_parts.extend(["", "## MANDATORY FIXES (Must resolve to pass)"])
+            system_parts.append("These validation errors MUST be fixed:")
+            for fix in mandatory_fixes:
+                system_parts.append(f"  - {fix}")
+
+        # Add QUALITY RECOMMENDATIONS (from judge - optional improvements)
         if feedback:
-            system_parts.extend(["", "## JUDGE FEEDBACK", feedback])
+            system_parts.extend(["", "## QUALITY RECOMMENDATIONS", feedback])
 
         system_prompt = "\n".join(system_parts)
 
-        # Build USER prompt (rendered improver template with all variables)
-        user_prompt = self.prompt_renderer.render_safe(template, template_vars)
+        # Build USER prompt by combining ALL rubric templates
+        combined_template = "\n\n".join(combined_templates)
+        user_prompt = self.prompt_renderer.render_safe(combined_template, template_vars)
 
         # Execute improvement
         improved_content = self.improvement_service.improve(user_prompt, system_prompt)
