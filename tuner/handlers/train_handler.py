@@ -98,7 +98,7 @@ class TrainHandler(BaseHandler):
             print_info(f"Auto-detected platform: {platform_name}")
         else:
             platform_choice = print_menu([
-                ("rtx", f"{BOX['bullet']} NVIDIA GPU (RTX 3090 / CUDA) - SFT or KTO"),
+                ("rtx", f"{BOX['bullet']} NVIDIA GPU (RTX 3090 / CUDA) - SFT, KTO, or GRPO"),
                 ("mac", f"{BOX['bullet']} Apple Silicon (M1/M2/M3) - MLX LoRA"),
             ], "Select platform:")
 

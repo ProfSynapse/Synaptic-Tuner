@@ -61,7 +61,7 @@ class TrainingRunDiscovery:
         Results are sorted by modification time (newest first).
 
         Args:
-            trainer_type: Type of trainer ('sft' or 'kto')
+            trainer_type: Type of trainer ('sft', 'kto', or 'grpo')
             limit: Maximum number of runs to return (default: 10). Use None for no limit.
 
         Returns:

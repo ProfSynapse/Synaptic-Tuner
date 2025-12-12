@@ -1,0 +1,8 @@
+# GRPO training runs from the repo's `unsloth_latest` environment.
+# See `setup_env.sh` and `Trainers/activate_unsloth_latest.sh`.
+#
+# This file is intentionally minimal; do not install Unsloth from here.
+
+python-dotenv
+pyyaml
+datasets

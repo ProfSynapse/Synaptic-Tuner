@@ -95,6 +95,7 @@ class UploadHandler(BaseHandler):
         model_type = print_menu([
             ("sft", f"{BOX['bullet']} SFT model"),
             ("kto", f"{BOX['bullet']} KTO model"),
+            ("grpo", f"{BOX['bullet']} GRPO/GSPO model"),
         ], "Select model type:")
 
         if not model_type:

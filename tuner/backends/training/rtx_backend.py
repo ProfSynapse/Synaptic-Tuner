@@ -63,9 +63,9 @@ class RTXBackend(ITrainingBackend):
         Get available training methods for RTX backend.
 
         Returns:
-            List of method names: ['sft', 'kto']
+            List of method names: ['sft', 'kto', 'grpo']
         """
-        return ["sft", "kto"]
+        return ["sft", "kto", "grpo"]
 
     def load_config(self, method: str) -> TrainingConfig:
         """
