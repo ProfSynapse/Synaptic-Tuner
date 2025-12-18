@@ -1,0 +1,283 @@
+name: memoryManager Tools
+description: Validates memoryManager tool calls use OpenAI format with useTools schema
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating tool calls for the memoryManager agent. Tool calls must use OpenAI format with the useTools schema.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  # REQUIRED FORMAT
+
+  Tool calls MUST use OpenAI tool_calls format with name "useTools":
+  ```json
+  {{
+    "tool_calls": [
+      {{
+        "id": "unique_id",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{...}}, \"calls\": [{{...}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  The `arguments` JSON string must contain:
+  ```json
+  {{
+    "context": {{
+      "workspaceId": "string (from session_context or 'default')",
+      "sessionId": "string (from session_context)",
+      "memory": "string (1-3 sentences)",
+      "goal": "string (1-3 sentences)"
+    }},
+    "calls": [
+      {{
+        "agent": "memoryManager",
+        "tool": "toolName",
+        "params": {{ ... tool-specific params ... }}
+      }}
+    ]
+  }}
+  ```
+
+  ## Valid Tools and Params:
+
+  ### Session Tools
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | createSession | - | name, description, sessionGoal |
+  | listSessions | - | limit, order |
+  | loadSession | sessionId | targetSessionId, sessionName |
+  | updateSession | - | sessionId, name, description, sessionGoal |
+
+  ### State Tools
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | createState | name | description, targetSessionId, tags |
+  | listStates | - | includeContext, limit, order, tags |
+  | loadState | stateId | sessionName, restorationGoal |
+  | updateState | stateId | name, description, addTags, removeTags |
+
+  ### Workspace Tools
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | createWorkspace | name, rootFolder, purpose, currentGoal, workflows | keyFiles, preferences |
+  | listWorkspaces | - | sortBy, order, limit |
+  | loadWorkspace | id | limit |
+  | updateWorkspace | workspaceId, fieldPath, newValue | - |
+
+  # EVALUATION CRITERIA
+
+  1. **Function Name**: Must be exactly "useTools"
+  2. **Arguments Structure**: Must have `context` and `calls` at root
+  3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
+  4. **Calls Array**: Each call must have `agent`, `tool`, `params`
+  5. **Agent Value**: Must be exactly "memoryManager"
+  6. **Tool Value**: Must be valid tool name
+  7. **Params**: Must include all required params for the tool
+
+  # SCORING
+  - **1.0** = Correct format, valid params, proper useTools structure
+  - **0.7-0.9** = Minor param issues
+  - **0.4-0.6** = Wrong structure OR missing required params
+  - **0.0-0.3** = Wrong function name OR completely wrong format
+
+  # OUTPUT
+  Return JSON: `{{"memorymanagertools_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are converting tool calls to the correct OpenAI assistant message format.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # REQUIRED OUTPUT FORMAT
+
+  Output a complete assistant message with `content: null` and `tool_calls` array:
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<random_9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  **CRITICAL**: `content` MUST be `null` (not a string, not empty string).
+
+  ## Valid Tools - see judge prompt for full list
+
+  # INSTRUCTIONS
+
+  1. **Extract IDs from system prompt's <session_context>**
+  2. **Set content to null** (tool-only response)
+  3. **Set function.name to "useTools"**
+  4. **Build arguments with context + calls array**
+
+  # EXAMPLE
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_w8x9y0z1a",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User starting new research project.\", \"goal\": \"Create a new session for research.\"}}, \"calls\": [{{\"agent\": \"memoryManager\", \"tool\": \"createSession\", \"params\": {{\"name\": \"Research Session\", \"description\": \"Session for research tasks\"}}}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  # OUTPUT
+  Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    memorymanagertools_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - memorymanagertools_score
+
+# Output format defines how improved content is applied to the example
+output_format:
+  type: assistant_message
+
+# Validation using tools schema with subtool manifests
+validations:
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            memoryManager:
+              # Session tools
+              createSession:
+                _required: []
+                name: string
+                description: string
+                sessionGoal: string
+              listSessions:
+                _required: []
+                limit: number
+                order: string
+              loadSession:
+                _required: [sessionId]
+                sessionId: string
+                targetSessionId: string
+                sessionName: string
+              updateSession:
+                _required: []
+                sessionId: string
+                name: string
+                description: string
+                sessionGoal: string
+              # State tools
+              createState:
+                _required: [name]
+                name: string
+                description: string
+                targetSessionId: string
+                tags: array
+              listStates:
+                _required: []
+                includeContext: boolean
+                limit: number
+                order: string
+                tags: array
+              loadState:
+                _required: [stateId]
+                stateId: string
+                sessionName: string
+                restorationGoal: string
+              updateState:
+                _required: [stateId]
+                stateId: string
+                name: string
+                description: string
+                addTags: array
+                removeTags: array
+              # Workspace tools
+              createWorkspace:
+                _required: [name, rootFolder, purpose, currentGoal, workflows]
+                name: string
+                rootFolder: string
+                purpose: string
+                currentGoal: string
+                workflows: array
+                keyFiles: array
+                preferences: object
+              listWorkspaces:
+                _required: []
+                sortBy: string
+                order: string
+                limit: number
+              loadWorkspace:
+                _required: [id]
+                id: string
+                limit: number
+              updateWorkspace:
+                _required: [workspaceId, fieldPath, newValue]
+                workspaceId: string
+                fieldPath: string
+                newValue: string
+    error: "useTools validation failed: {details}"

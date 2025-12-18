@@ -73,12 +73,17 @@ class ScopeExtractor:
 
     def _extract_role_based(self, message, scope_def) -> str:
         """Extract content directly from message (for role-based scopes)."""
-        return message.content
+        return message.content or ""
 
     def _extract_pattern_based(self, message, scope_def) -> Optional[Any]:
         """Extract content using regex pattern."""
         pattern = scope_def.extraction.pattern
         if not pattern:
+            return None
+
+        # Handle None content (e.g., non-thinking assistant messages)
+        content = message.content
+        if content is None:
             return None
 
         # Compile pattern with flags
@@ -88,7 +93,7 @@ class ScopeExtractor:
                 flags |= getattr(re, flag_name, 0)
 
         regex = re.compile(pattern, flags)
-        match = regex.search(message.content)
+        match = regex.search(content)
 
         if not match:
             return None
@@ -104,7 +109,7 @@ class ScopeExtractor:
 
     def _extract_exclusion_based(self, message, scope_def, example: dict) -> str:
         """Extract content by excluding other scopes."""
-        content = message.content
+        content = message.content or ""
 
         # Remove each excluded scope
         if scope_def.extraction.exclude:
@@ -208,19 +213,83 @@ class ScopeExtractor:
         """
         Extract tool calls from text content using config-defined markers.
 
+        Supports three formats:
+        1. OpenAI format: {"tool_calls": [{"id": "...", "type": "function", "function": {...}}]}
+        2. JSON block format: ```tool {"name": "X", "arguments": {...}} ```
+        3. Legacy format: tool_name: X, arguments: {...}
+
         Args:
             content: Text content with potential tool calls
 
         Returns:
             List of tool call dicts or None if no tool calls found
         """
+        if content is None:
+            return None
+
+        # First, try OpenAI tool_calls format (from rubric improvers)
+        # This is the preferred format for improved output
+        try:
+            # Strip any surrounding whitespace or code fences
+            stripped = content.strip()
+            if stripped.startswith("```"):
+                # Remove code fence (```json or ```)
+                stripped = re.sub(r'^```\w*\n?', '', stripped)
+                stripped = re.sub(r'\n?```$', '', stripped)
+                stripped = stripped.strip()
+
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict) and "tool_calls" in parsed:
+                tool_calls_data = parsed["tool_calls"]
+                if isinstance(tool_calls_data, list) and len(tool_calls_data) > 0:
+                    # Validate the structure matches OpenAI format
+                    valid_tool_calls = []
+                    for tc in tool_calls_data:
+                        if isinstance(tc, dict) and "function" in tc:
+                            # Already in correct OpenAI format
+                            valid_tool_calls.append(tc)
+                    if valid_tool_calls:
+                        return valid_tool_calls
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        tool_calls = []
+
+        # Second, try to extract from ```tool JSON blocks
+        # This handles improved content from older rubric improvers
+        tool_block_pattern = r'```tool\s*\n(.*?)```'
+        tool_blocks = re.findall(tool_block_pattern, content, re.DOTALL)
+
+        for block in tool_blocks:
+            try:
+                tool_json = json.loads(block.strip())
+                tool_name = tool_json.get("name")
+                arguments = tool_json.get("arguments", {})
+
+                if tool_name:
+                    tool_calls.append({
+                        "id": f"call_{hash(tool_name + str(len(tool_calls))) % 10000:04x}",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": json.dumps(arguments) if isinstance(arguments, dict) else arguments
+                        }
+                    })
+            except json.JSONDecodeError:
+                pass
+
+        # If we found tool calls from JSON blocks, return them
+        if tool_calls:
+            return tool_calls
+
+        # Fallback to legacy format parsing
         scope_def = self.config.get_scope("tool_calls")
         if not scope_def:
             return None
 
         markers = scope_def.markers
 
-        # Check for tool call markers
+        # Check for legacy tool call markers
         if not any([
             markers.block_start and markers.block_start in content,
             markers.block_start_alt and markers.block_start_alt in content,
@@ -229,7 +298,6 @@ class ScopeExtractor:
         ]):
             return None
 
-        tool_calls = []
         lines = content.split("\n")
         i = 0
 

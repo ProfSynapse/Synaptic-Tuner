@@ -70,7 +70,8 @@ def create_client(
             )
         return OpenRouterClient(
             api_key=config.openrouter_api_key,
-            model=config.model
+            model=config.model,
+            provider=config.provider_routing  # Pass provider routing (e.g., {"order": ["Groq"]})
         )
 
     elif config.provider == "lmstudio":

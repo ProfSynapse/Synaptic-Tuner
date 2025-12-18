@@ -7,9 +7,11 @@ All actual work delegated to ImprovementEngine.
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from threading import Lock
+from typing import List, Optional, Tuple
 
 # Add paths for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -66,14 +68,17 @@ class RubricRunner:
 
         config_data = load_config("settings")
         llm_config_data = config_data.get("llm", {})
+        improvement_config = llm_config_data.get("improvement", {})
 
         # Get model based on backend
         if backend == "lmstudio":
             model = "local-model"  # LM Studio uses whatever model is loaded in UI
         elif backend == "ollama":
-            model = llm_config_data.get("ollama_model", "qwen2.5:latest")
+            model = llm_config_data.get("generation", {}).get("model", "qwen2.5:latest")
         else:  # openrouter
-            model = llm_config_data.get("openrouter_model", "anthropic/claude-3.5-sonnet")
+            # Read from llm.improvement.model in settings.yaml
+            model = improvement_config.get("model", "anthropic/claude-3.5-sonnet")
+            self.logger.info(f"Using OpenRouter model: {model}")
 
         # Get host/port from CLI args or environment variables
         lmstudio_host = host if host and backend == "lmstudio" else os.getenv("LMSTUDIO_HOST", "localhost")
@@ -81,9 +86,21 @@ class RubricRunner:
         ollama_host = host if host and backend == "ollama" else os.getenv("OLLAMA_HOST", "localhost")
         ollama_port = port if port and backend == "ollama" else int(os.getenv("OLLAMA_PORT", "11434"))
 
+        # Build provider routing config for OpenRouter (prioritize Groq)
+        provider_routing = None
+        if backend == "openrouter" and "provider_routing" in improvement_config:
+            pr = improvement_config["provider_routing"]
+            provider_routing = {}
+            if "order" in pr:
+                provider_routing["order"] = pr["order"]
+            if "allow_fallbacks" in pr:
+                provider_routing["allow_fallbacks"] = pr["allow_fallbacks"]
+
         config = LLMConfig(
             provider=backend,
             model=model,
+            openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+            provider_routing=provider_routing,
             lmstudio_host=lmstudio_host,
             lmstudio_port=lmstudio_port,
             ollama_host=ollama_host,
@@ -156,7 +173,8 @@ class RubricRunner:
         rubric_keys: List[str],
         start_line: int = 1,
         end_line: Optional[int] = None,
-        max_iterations: int = 3
+        max_iterations: int = 3,
+        workers: int = 1
     ) -> None:
         """
         Run improvement on a JSONL file.
@@ -168,6 +186,7 @@ class RubricRunner:
             start_line: Starting line number (1-indexed)
             end_line: Ending line number (1-indexed, None = all)
             max_iterations: Max improvement iterations per example
+            workers: Number of parallel workers (1 = sequential)
         """
         # Extract dataset name from file path for interaction logging
         # Format: parentFolder_filename (without .jsonl extension)
@@ -197,7 +216,8 @@ class RubricRunner:
 
         print(f"\nProcessing lines {start_line} to {end_line} ({end_idx - start_idx} examples)")
         print(f"Rubrics: {', '.join(rubric_keys)}")
-        print(f"Max iterations: {max_iterations}\n")
+        print(f"Max iterations: {max_iterations}")
+        print(f"Workers: {workers}\n")
 
         # Open output file for incremental writing
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,8 +226,39 @@ class RubricRunner:
         original_examples = []
         results = []
 
+        if workers > 1:
+            # Parallel processing
+            self._run_parallel(
+                lines, start_idx, end_idx, rubric_keys, max_iterations,
+                workers, output_path, original_examples, results
+            )
+        else:
+            # Sequential processing
+            self._run_sequential(
+                lines, start_idx, end_idx, rubric_keys, max_iterations,
+                output_path, original_examples, results
+            )
+
+        print(f"\n✅ Output written to: {output_path}")
+
+        # Write markdown review
+        if original_examples and results:
+            md_path = self._write_markdown_review(output_path, original_examples, results)
+            print(f"📝 Markdown review: {md_path}")
+
+    def _run_sequential(
+        self,
+        lines: List[str],
+        start_idx: int,
+        end_idx: int,
+        rubric_keys: List[str],
+        max_iterations: int,
+        output_path: Path,
+        original_examples: List,
+        results: List
+    ) -> None:
+        """Sequential processing (original behavior)."""
         with open(output_path, 'w', encoding='utf-8') as f_out:
-            # Process each example
             for i in range(start_idx, end_idx):
                 if i >= len(lines):
                     break
@@ -219,7 +270,6 @@ class RubricRunner:
                     example = json.loads(lines[i])
                     original_examples.append(example)
 
-                    # Run improvement engine
                     result = self.engine.run(
                         example=example,
                         rubric_keys=rubric_keys,
@@ -227,25 +277,100 @@ class RubricRunner:
                     )
                     results.append(result)
 
-                    # Display result
                     self._display_result(result)
 
-                    # Write improved example immediately
                     f_out.write(json.dumps(result.improved_example) + '\n')
-                    f_out.flush()  # Ensure it's written to disk
+                    f_out.flush()
 
                 except Exception as e:
                     self.logger.error(f"Error processing line {line_num}: {e}")
-                    # Write original on error
                     f_out.write(lines[i].strip() + '\n')
                     f_out.flush()
 
-        print(f"\n✅ Output written to: {output_path}")
+    def _run_parallel(
+        self,
+        lines: List[str],
+        start_idx: int,
+        end_idx: int,
+        rubric_keys: List[str],
+        max_iterations: int,
+        workers: int,
+        output_path: Path,
+        original_examples: List,
+        results: List
+    ) -> None:
+        """Parallel processing with ThreadPoolExecutor."""
+        # Prepare work items: (index, line_num, example_json)
+        work_items = []
+        for i in range(start_idx, end_idx):
+            if i >= len(lines):
+                break
+            work_items.append((i, i + 1, lines[i]))
 
-        # Write markdown review
-        if original_examples and results:
-            md_path = self._write_markdown_review(output_path, original_examples, results)
-            print(f"📝 Markdown review: {md_path}")
+        total = len(work_items)
+        completed = 0
+        failed = 0
+        passed = 0
+
+        # Results dict to maintain order: {index: (original, result, raw_line)}
+        results_dict = {}
+        print_lock = Lock()
+
+        def process_one(item: Tuple[int, int, str]) -> Tuple[int, dict, Optional[ImprovementResult], str]:
+            """Process a single example. Returns (index, original, result, raw_line)."""
+            idx, line_num, raw_line = item
+            try:
+                example = json.loads(raw_line)
+                result = self.engine.run(
+                    example=example,
+                    rubric_keys=rubric_keys,
+                    max_iterations=max_iterations
+                )
+                return (idx, example, result, raw_line)
+            except Exception as e:
+                with print_lock:
+                    self.logger.error(f"Error processing line {line_num}: {e}")
+                return (idx, None, None, raw_line)
+
+        # Process in parallel
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(process_one, item): item for item in work_items}
+
+            for future in as_completed(futures):
+                idx, example, result, raw_line = future.result()
+                results_dict[idx] = (example, result, raw_line)
+
+                completed += 1
+                if result and result.passed:
+                    passed += 1
+                elif result:
+                    failed += 1
+
+                # Progress update
+                with print_lock:
+                    line_num = idx + 1
+                    status = "✅" if (result and result.passed) else "❌" if result else "⚠️"
+                    print(f"{status} Line {line_num} ({completed}/{total}) - Passed: {passed}, Failed: {failed}")
+
+        # Write results in order
+        with open(output_path, 'w', encoding='utf-8') as f_out:
+            for i in range(start_idx, end_idx):
+                if i not in results_dict:
+                    continue
+
+                example, result, raw_line = results_dict[i]
+
+                if example is not None:
+                    original_examples.append(example)
+
+                if result is not None:
+                    results.append(result)
+                    f_out.write(json.dumps(result.improved_example) + '\n')
+                else:
+                    # Write original on error
+                    f_out.write(raw_line.strip() + '\n')
+
+        print(f"\nCompleted: {completed}, Passed: {passed}, Failed: {failed}")
 
     def run_on_example(
         self,
@@ -339,7 +464,7 @@ class RubricRunner:
 
                 for conv in convs:
                     role = conv.get("role", "unknown").upper()
-                    content = conv.get("content", "")
+                    content = conv.get("content") or ""
 
                     f.write(f"**{role}:**\n\n")
                     # Truncate very long content
@@ -354,7 +479,8 @@ class RubricRunner:
 
                 for conv in improved_convs:
                     role = conv.get("role", "unknown").upper()
-                    content = conv.get("content", "")
+                    # Handle None content (common in non-thinking examples where assistant has tool_calls only)
+                    content = conv.get("content") or ""
 
                     f.write(f"**{role}:**\n\n")
                     # Truncate very long content
@@ -409,6 +535,7 @@ Examples:
     parser.add_argument("--host", help="LLM host")
     parser.add_argument("--port", type=int, help="LLM port")
     parser.add_argument("--config", type=Path, help="Path to scope_config.yaml")
+    parser.add_argument("--workers", type=int, default=1, help="Number of parallel workers (default: 1)")
 
     args = parser.parse_args()
 
@@ -457,7 +584,8 @@ Examples:
         rubric_keys=rubric_keys,
         start_line=args.start_line,
         end_line=args.end_line,
-        max_iterations=args.max_iterations
+        max_iterations=args.max_iterations,
+        workers=args.workers
     )
 
 

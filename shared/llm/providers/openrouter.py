@@ -9,18 +9,24 @@ from ..exceptions import LLMConnectionError, LLMResponseError
 
 
 class OpenRouterClient(BaseLLMClient):
-    """OpenRouter API client with structured output support."""
+    """OpenRouter API client with structured output and provider routing support."""
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, provider: Dict[str, Any] = None):
         """
         Initialize OpenRouter client.
 
         Args:
             api_key: OpenRouter API key
             model: Model name (e.g., 'openai/gpt-5-mini')
+            provider: Optional provider routing config:
+                - order: List of provider names to prioritize (e.g., ["Groq", "Together"])
+                - allow_fallbacks: Whether to fall back to other providers (default: True)
+                - require_parameters: Only use providers supporting all params (default: False)
+                - data_collection: "allow" or "deny" to filter by data policy
         """
         self.api_key = api_key
         self.model = model
+        self.provider = provider
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
 
     @property
@@ -66,6 +72,10 @@ class OpenRouterClient(BaseLLMClient):
             "max_tokens": max_tokens,
         }
 
+        # Add provider routing if configured
+        if self.provider:
+            payload["provider"] = self.provider
+
         try:
             data = self._make_request(payload)
             return data["choices"][0]["message"]["content"]
@@ -96,6 +106,10 @@ class OpenRouterClient(BaseLLMClient):
                 }
             }
         }
+
+        # Add provider routing if configured
+        if self.provider:
+            payload["provider"] = self.provider
 
         try:
             data = self._make_request(payload)

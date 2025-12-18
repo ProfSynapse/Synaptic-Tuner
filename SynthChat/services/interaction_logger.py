@@ -6,6 +6,7 @@ Logs interactions in ChatML format suitable for fine-tuning.
 import json
 from pathlib import Path
 from datetime import datetime
+from threading import Lock
 from typing import Dict, Optional
 from ..utils.logger import ImproveLogger
 
@@ -47,6 +48,7 @@ class InteractionLogger:
         self.output_dir = Path(output_dir)
         self.enabled = enabled
         self.logger = logger or ImproveLogger()
+        self._write_lock = Lock()  # Thread-safe file writes
 
         if self.enabled:
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -236,10 +238,11 @@ class InteractionLogger:
         self._write_interaction(interaction)
 
     def _write_interaction(self, interaction: Dict) -> None:
-        """Write interaction to JSONL file."""
+        """Write interaction to JSONL file (thread-safe)."""
         try:
-            with open(self.log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(interaction, ensure_ascii=False) + "\n")
+            with self._write_lock:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(interaction, ensure_ascii=False) + "\n")
         except Exception as e:
             self.logger.error(f"Failed to write interaction: {e}")
 

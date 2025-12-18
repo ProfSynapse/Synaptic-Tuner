@@ -102,6 +102,30 @@ validations:
   #     validate_in: [vault_structure, selected_workspace]  # Tags to search
   #   error: "Path '{value}' not found in vault"
 
+  # --- TOOL CALL VALIDATION (for response scope) ---
+  # Validate tool calls against a schema manifest
+  # Use _additionalProperties: false to reject extra fields
+
+  # - tools:
+  #     toolName_operation:
+  #       context:
+  #         _additionalProperties: false   # No extra fields allowed!
+  #         workspaceId: string
+  #         sessionId: string
+  #         memory: string
+  #         goal: string
+  #       path: string
+  #       newPath: string
+  #     toolName_otherOperation:
+  #       context:
+  #         _additionalProperties: false
+  #         workspaceId: string
+  #         sessionId: string
+  #         memory: string
+  #         goal: string
+  #       query: string
+  #   error: "Tool validation failed"
+
 # =============================================================================
 # JUDGE PROMPT
 # =============================================================================

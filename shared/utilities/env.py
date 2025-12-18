@@ -23,11 +23,14 @@ def load_env_file(paths: list = None) -> bool:
         return False
 
     if paths is None:
+        # env.py is at shared/utilities/env.py
+        # So .parent.parent.parent gets us to repo root
+        repo_root = Path(__file__).parent.parent.parent
         paths = [
             Path.cwd() / ".env",
             Path.cwd().parent / ".env",
             Path.cwd().parent.parent / ".env",
-            Path(__file__).parent.parent.parent.parent / ".env",
+            repo_root / ".env",
         ]
 
     for path in paths:

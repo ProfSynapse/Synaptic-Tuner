@@ -4,7 +4,7 @@ Single Responsibility: ALL system_prompt scope logic.
 """
 
 import json
-from typing import Dict
+from typing import Dict, Optional
 from .base import ScopeHandler
 
 
@@ -15,7 +15,12 @@ class SystemPromptHandler(ScopeHandler):
     Applies improvements to system message.
     """
 
-    def apply_improvement(self, example: Dict, improved_content: str) -> Dict:
+    def apply_improvement(
+        self,
+        example: Dict,
+        improved_content: str,
+        output_format: Optional[Dict] = None
+    ) -> Dict:
         """
         Apply improved system message.
 

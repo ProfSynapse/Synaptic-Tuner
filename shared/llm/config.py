@@ -18,6 +18,7 @@ class LLMConfig:
 
     # OpenRouter config
     openrouter_api_key: Optional[str] = None
+    provider_routing: Optional[Dict[str, Any]] = None  # OpenRouter provider routing
 
     # LM Studio config
     lmstudio_host: str = "localhost"
@@ -66,12 +67,27 @@ class LLMConfig:
         temperature = float(cfg.get("temperature", 0.7))
         max_tokens = int(cfg.get("max_tokens", 2048))
 
+        # Build provider routing config for OpenRouter
+        provider_routing = None
+        if "provider_routing" in cfg:
+            pr = cfg["provider_routing"]
+            provider_routing = {}
+            if "order" in pr:
+                provider_routing["order"] = pr["order"]
+            if "allow_fallbacks" in pr:
+                provider_routing["allow_fallbacks"] = pr["allow_fallbacks"]
+            if "require_parameters" in pr:
+                provider_routing["require_parameters"] = pr["require_parameters"]
+            if "data_collection" in pr:
+                provider_routing["data_collection"] = pr["data_collection"]
+
         return cls(
             provider=provider.lower(),
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+            provider_routing=provider_routing,
             lmstudio_host=os.getenv("LMSTUDIO_HOST", "localhost"),
             lmstudio_port=int(os.getenv("LMSTUDIO_PORT", "1234")),
             ollama_host=os.getenv("OLLAMA_HOST", "localhost"),
