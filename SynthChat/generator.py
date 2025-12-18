@@ -12,13 +12,13 @@ Architecture:
 """
 
 import json
+import re
 import random
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
-from shared.llm import create_client
 from .utils.yaml_loader import load_yaml
 from .engine import ImprovementEngine
 
@@ -343,15 +343,14 @@ class SynthChatGenerator:
         Returns:
             Generated text
         """
-        # TODO: Implement LLM call using shared.llm client
-        # For now, placeholder
-        if hasattr(self.llm_client, 'chat'):
-            response = self.llm_client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=random.uniform(0.5, 0.9) if randomize else 0.7
-            )
-            return response.choices[0].message.content
-        return ""
+        # shared.llm.chat() returns str directly
+        temperature = random.uniform(0.5, 0.9) if randomize else 0.7
+        response = self.llm_client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=2048
+        )
+        return response
 
     def _build_user_context(self, example: Dict) -> str:
         """Build context for user generation from current example."""
@@ -386,14 +385,83 @@ class SynthChatGenerator:
         """
         Parse assistant response for tool calls and thinking.
 
+        Handles three cases:
+        1. Text-only: content is text, no tool_calls
+        2. Tool-only: content is null or empty, tool_calls present
+        3. Thinking+tool: content contains <thinking>...</thinking>, tool_calls present
+
         Returns:
             Assistant message dict with role, content, and optional tool_calls
         """
-        # TODO: Implement proper parsing for:
-        # - <thinking>...</thinking> extraction
-        # - Tool call detection and formatting
-        # For now, simple structure
-        return {
-            "role": "assistant",
-            "content": content
-        }
+        # Extract thinking block if present
+        thinking_match = re.search(r'<thinking>(.*?)</thinking>', content, re.DOTALL)
+        thinking_block = None
+        if thinking_match:
+            thinking_block = f"<thinking>{thinking_match.group(1)}</thinking>"
+            # Remove thinking from content for tool detection
+            content_without_thinking = content.replace(thinking_match.group(0), '').strip()
+        else:
+            content_without_thinking = content
+
+        # Detect tool calls - look for patterns like:
+        # "tool_name(args)" or "Use: tool_name" or JSON-like tool definitions
+        tool_calls = []
+        tool_pattern = r'(\w+Manager_\w+)\s*\((.*?)\)'
+        tool_matches = re.finditer(tool_pattern, content_without_thinking)
+
+        call_id_counter = 1
+        for match in tool_matches:
+            tool_name = match.group(1)
+            tool_args = match.group(2).strip()
+
+            # Try to parse arguments as JSON
+            try:
+                # Clean up args if needed
+                if not tool_args.startswith('{'):
+                    tool_args = '{' + tool_args + '}'
+                # Validate it's JSON-like
+                arguments_str = tool_args
+            except:
+                # Fallback to empty args
+                arguments_str = "{}"
+
+            tool_calls.append({
+                "id": f"call_{call_id_counter:04d}",
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": arguments_str
+                }
+            })
+            call_id_counter += 1
+
+        # If scenario specifies a tool but we didn't detect it, create from scenario
+        if not tool_calls and scenario.get("type") == "tool":
+            tool_name = scenario.get("tool", "")
+            if tool_name:
+                # Extract any JSON-like content from the response as arguments
+                json_match = re.search(r'\{[^}]+\}', content_without_thinking)
+                arguments_str = json_match.group(0) if json_match else "{}"
+
+                tool_calls.append({
+                    "id": "call_0001",
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": arguments_str
+                    }
+                })
+
+        # Build final message
+        message = {"role": "assistant"}
+
+        if tool_calls:
+            # Tool call case
+            message["tool_calls"] = tool_calls
+            # Content is thinking block only, or null if no thinking
+            message["content"] = thinking_block if thinking_block else None
+        else:
+            # Text-only case
+            message["content"] = content
+
+        return message

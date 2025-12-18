@@ -252,10 +252,114 @@ def validate_mode(args):
     """
     print("=== SynthChat: Validate Mode ===\n")
 
-    # TODO: Implement validation-only mode
-    # Similar to improve but don't apply improvements
-    print("Validate mode not yet implemented")
-    sys.exit(1)
+    # Load configuration
+    config_dir = Path(args.config_dir or "SynthChat/config")
+    settings = load_settings(config_dir)
+    rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
+
+    # Load input dataset
+    if not args.input:
+        print("Error: --input required for validate mode")
+        sys.exit(1)
+
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"Error: Input file not found: {input_path}")
+        sys.exit(1)
+
+    # Load examples
+    examples = []
+    with open(input_path) as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if line:
+                try:
+                    examples.append((line_num, json.loads(line)))
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Skipping malformed JSON at line {line_num}: {e}")
+
+    print(f"Loaded {len(examples)} examples from {input_path}\n")
+
+    # Create LLM client for judging (no improvement needed)
+    print("Initializing validation LLM client...")
+    validate_client = create_llm_client(settings, mode="improvement")
+
+    # Create improvement engine
+    validation_config = config_dir / "validation.yaml"
+    engine = ImprovementEngine(
+        llm_client=validate_client,
+        rubrics_dir=rubrics_dir,
+        config_path=validation_config,
+        enable_interactions=False  # No logging for validation-only
+    )
+
+    # Determine rubrics to use
+    rubrics = args.rubrics or settings["improvement"]["default_rubrics"]
+    if isinstance(rubrics, str):
+        rubrics = [r.strip() for r in rubrics.split(",")]
+
+    print(f"Validating against rubrics: {', '.join(rubrics)}\n")
+
+    # Validate examples (max_iterations=1 means just judge, no improvement)
+    total_passed = 0
+    total_failed = 0
+    failures_by_rubric = {rubric: [] for rubric in rubrics}
+    failing_lines = []
+
+    for line_num, example in examples:
+        try:
+            # Run validation with max_iterations=1 (judge only, no improvement loop)
+            result = engine.run(
+                example=example,
+                rubric_keys=rubrics,
+                max_iterations=1  # Just judge once, don't improve
+            )
+
+            if result.passed:
+                total_passed += 1
+            else:
+                total_failed += 1
+                failing_lines.append(line_num)
+
+                # Track which rubrics failed
+                for rubric in rubrics:
+                    score = result.final_scores.get(rubric, 0.0)
+                    # Load rubric to get threshold
+                    rubric_config = engine.rubric_repo.get_rubric(rubric)
+                    threshold = rubric_config.get("pass_threshold", 0.8)
+                    if score < threshold:
+                        failures_by_rubric[rubric].append(line_num)
+
+        except Exception as e:
+            print(f"  Error validating line {line_num}: {e}")
+            total_failed += 1
+            failing_lines.append(line_num)
+
+    # Print summary
+    total = len(examples)
+    pass_rate = (total_passed / total * 100) if total > 0 else 0
+
+    print(f"\n=== Validation Summary ===")
+    print(f"Total examples: {total}")
+    print(f"Passed: {total_passed} ({pass_rate:.1f}%)")
+    print(f"Failed: {total_failed} ({100 - pass_rate:.1f}%)")
+
+    if failing_lines:
+        print(f"\nFailing lines: {', '.join(map(str, failing_lines[:20]))}")
+        if len(failing_lines) > 20:
+            print(f"  ... and {len(failing_lines) - 20} more")
+
+    print(f"\n=== Failures by Rubric ===")
+    for rubric, failed_lines in failures_by_rubric.items():
+        if failed_lines:
+            print(f"{rubric}: {len(failed_lines)} failures")
+            print(f"  Lines: {', '.join(map(str, failed_lines[:10]))}")
+            if len(failed_lines) > 10:
+                print(f"  ... and {len(failed_lines) - 10} more")
+
+    if total_failed > 0:
+        print(f"\nRun with 'improve' mode to fix failing examples:")
+        print(f"  python -m SynthChat.run improve --input {input_path} --rubrics {','.join(rubrics)}")
 
 
 def _generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> Path:
