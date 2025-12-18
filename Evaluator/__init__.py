@@ -52,6 +52,12 @@ from .behavior_validator import (
     detect_response_type,
     validate_behavior,
 )
+from .rubric_validator import (
+    RubricValidator,
+    RubricValidationResult,
+    FullValidationResult,
+    validate_response,
+)
 
 # Response parsing
 from .response_parser import (
@@ -110,6 +116,11 @@ __all__ = [
     "BehaviorValidationResult",
     "detect_response_type",
     "validate_behavior",
+    # Rubric validation (SynthChat integration)
+    "RubricValidator",
+    "RubricValidationResult",
+    "FullValidationResult",
+    "validate_response",
     # Parsing
     "ParsedResponse",
     "ParsedToolCall",

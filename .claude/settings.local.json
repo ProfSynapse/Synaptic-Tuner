@@ -172,7 +172,8 @@
       "Bash(then echo \"=== FIRST IMPROVED EXAMPLE ===\" head -1 Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl)",
       "Bash(timeout 90 python:*)",
       "Bash(xargs:*)",
-      "WebFetch(domain:openrouter.ai)"
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(for f in contentManager/tools_v1.4.jsonl agentManager/tools_v1.3.jsonl memoryManager/tools_v1.4.jsonl)"
     ],
     "deny": [],
     "ask": []

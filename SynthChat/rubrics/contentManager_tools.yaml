@@ -76,6 +76,8 @@ judge_prompt: |
 
   # EVALUATION CRITERIA
 
+  ## Option A: Tool Call Response
+  If making a tool call:
   1. **Function Name**: Must be exactly "useTools"
   2. **Arguments Structure**: Must have `context` and `calls` at root
   3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
@@ -84,11 +86,21 @@ judge_prompt: |
   6. **Tool Value**: Must be valid tool name
   7. **Params**: Must include all required params for the tool
 
+  ## Option B: Clarification Response (VALID ALTERNATIVE)
+  If the user's request lacks critical information needed for a tool call, the assistant MAY ask for clarification instead. This is VALID when:
+  - The file path is unknown/unspecified and cannot be inferred from vault_structure
+  - The content to modify is unspecified
+  - The operation is ambiguous (e.g., "update the file" without saying what to update)
+
+  A clarification response has:
+  - `content`: A polite question asking for the missing info (file path, content, etc.)
+  - `tool_calls`: null or empty array
+
   # SCORING
-  - **1.0** = Correct format, valid params, proper useTools structure
-  - **0.7-0.9** = Minor param issues
+  - **1.0** = Correct tool call format OR valid clarification request when info is missing
+  - **0.7-0.9** = Minor param issues in tool call
   - **0.4-0.6** = Wrong structure OR missing required params
-  - **0.0-0.3** = Wrong function name OR completely wrong format
+  - **0.0-0.3** = Wrong function name OR completely wrong format OR unnecessary clarification (info was available)
 
   # OUTPUT
   Return JSON: `{{"contentmanagertools_score": 0.0-1.0}}`
@@ -117,7 +129,17 @@ improver_prompt: |
   {feedback}
   ```
 
-  # REQUIRED OUTPUT FORMAT
+  # DECISION: TOOL CALL OR CLARIFICATION?
+
+  First, determine if you have enough information to make a tool call:
+  - Do you know the file path? (Check vault_structure, selected_workspace, or user request)
+  - Do you know what content to read/write/modify?
+  - Is the operation clear?
+
+  **If YES to all**: Make a tool call (Option A below)
+  **If NO to any**: Ask for clarification (Option B below)
+
+  # OPTION A: TOOL CALL RESPONSE
 
   Output a complete assistant message with `content: null` and `tool_calls` array:
 
@@ -159,7 +181,7 @@ improver_prompt: |
   3. **Set function.name to "useTools"**
   4. **Build arguments with context + calls array**
 
-  # EXAMPLE
+  # EXAMPLE (Tool Call)
 
   ```json
   {{
@@ -176,6 +198,22 @@ improver_prompt: |
     ]
   }}
   ```
+
+  # OPTION B: CLARIFICATION RESPONSE
+
+  If you cannot determine the file path or content from the system prompt or user request, ask for clarification:
+
+  ```json
+  {{
+    "content": "I'd be happy to help with that. Could you please specify which file you'd like me to modify?",
+    "tool_calls": null
+  }}
+  ```
+
+  Ask specifically for:
+  - File path (if unknown)
+  - Content to add/modify (if unspecified)
+  - Which specific changes to make (if ambiguous)
 
   # OUTPUT
   Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.

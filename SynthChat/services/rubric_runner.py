@@ -299,7 +299,11 @@ class RubricRunner:
         original_examples: List,
         results: List
     ) -> None:
-        """Parallel processing with ThreadPoolExecutor."""
+        """Parallel processing with ThreadPoolExecutor.
+
+        Writes results incrementally to a temp file as they complete,
+        then reorders at the end. This prevents data loss on crash.
+        """
         # Prepare work items: (index, line_num, example_json)
         work_items = []
         for i in range(start_idx, end_idx):
@@ -312,9 +316,14 @@ class RubricRunner:
         failed = 0
         passed = 0
 
-        # Results dict to maintain order: {index: (original, result, raw_line)}
+        # Temp files for incremental writes (with line numbers for reordering)
+        temp_passed_path = output_path.with_suffix('.temp_passed.jsonl')
+        temp_failed_path = output_path.with_suffix('.failed.jsonl')
+
+        # Track originals/results for markdown review
         results_dict = {}
         print_lock = Lock()
+        write_lock = Lock()
 
         def process_one(item: Tuple[int, int, str]) -> Tuple[int, dict, Optional[ImprovementResult], str]:
             """Process a single example. Returns (index, original, result, raw_line)."""
@@ -332,45 +341,80 @@ class RubricRunner:
                     self.logger.error(f"Error processing line {line_num}: {e}")
                 return (idx, None, None, raw_line)
 
-        # Process in parallel
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(process_one, item): item for item in work_items}
+        # Process in parallel, write incrementally
+        with open(temp_passed_path, 'w', encoding='utf-8') as passed_out, \
+             open(temp_failed_path, 'w', encoding='utf-8') as failed_out:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(process_one, item): item for item in work_items}
 
-            for future in as_completed(futures):
-                idx, example, result, raw_line = future.result()
-                results_dict[idx] = (example, result, raw_line)
+                for future in as_completed(futures):
+                    idx, example, result, raw_line = future.result()
+                    results_dict[idx] = (example, result, raw_line)
 
-                completed += 1
-                if result and result.passed:
-                    passed += 1
-                elif result:
-                    failed += 1
+                    # Write immediately - passed to temp, failed to separate file
+                    with write_lock:
+                        if result is not None and result.passed:
+                            # Only save passed examples to output
+                            passed_out.write(f"{idx}\t{json.dumps(result.improved_example)}\n")
+                            passed_out.flush()
+                        elif result is not None:
+                            # Save failed examples separately for review
+                            failed_out.write(json.dumps({
+                                "line_num": idx + 1,
+                                "original": example,
+                                "improved_attempt": result.improved_example,
+                                "final_scores": result.final_scores,
+                                "iterations": result.iterations
+                            }) + '\n')
+                            failed_out.flush()
+                        else:
+                            # Exception - save original to failed
+                            failed_out.write(json.dumps({
+                                "line_num": idx + 1,
+                                "original": raw_line.strip(),
+                                "error": "Processing exception"
+                            }) + '\n')
+                            failed_out.flush()
 
-                # Progress update
-                with print_lock:
-                    line_num = idx + 1
-                    status = "✅" if (result and result.passed) else "❌" if result else "⚠️"
-                    print(f"{status} Line {line_num} ({completed}/{total}) - Passed: {passed}, Failed: {failed}")
+                    completed += 1
+                    if result and result.passed:
+                        passed += 1
+                    elif result:
+                        failed += 1
 
-        # Write results in order
+                    # Progress update
+                    with print_lock:
+                        line_num = idx + 1
+                        status = "✅" if (result and result.passed) else "❌" if result else "⚠️"
+                        print(f"{status} Line {line_num} ({completed}/{total}) - Passed: {passed}, Failed: {failed}")
+
+        # Reorder passed results and write final output
+        print(f"\nReordering {passed} passed results...")
+        temp_lines = {}
+        with open(temp_passed_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if '\t' in line:
+                    idx_str, content = line.split('\t', 1)
+                    temp_lines[int(idx_str)] = content.strip()
+
         with open(output_path, 'w', encoding='utf-8') as f_out:
             for i in range(start_idx, end_idx):
-                if i not in results_dict:
-                    continue
+                if i in temp_lines:
+                    f_out.write(temp_lines[i] + '\n')
 
-                example, result, raw_line = results_dict[i]
+                    # Populate for markdown review
+                    if i in results_dict:
+                        example, result, _ = results_dict[i]
+                        if example is not None:
+                            original_examples.append(example)
+                        if result is not None:
+                            results.append(result)
 
-                if example is not None:
-                    original_examples.append(example)
-
-                if result is not None:
-                    results.append(result)
-                    f_out.write(json.dumps(result.improved_example) + '\n')
-                else:
-                    # Write original on error
-                    f_out.write(raw_line.strip() + '\n')
-
-        print(f"\nCompleted: {completed}, Passed: {passed}, Failed: {failed}")
+        # Clean up temp file (keep failed file for review)
+        temp_passed_path.unlink()
+        print(f"Completed: {completed}, Passed: {passed}, Failed: {failed}")
+        if failed > 0:
+            print(f"⚠️  Failed examples saved to: {temp_failed_path}")
 
     def run_on_example(
         self,

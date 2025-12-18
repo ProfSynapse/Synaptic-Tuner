@@ -64,6 +64,7 @@ judge_prompt: |
 
   # SCORING
   - **1.0** = All details traceable to inputs or reasonable inference
+  - **1.0** = Clarification request (no tool calls, just asking user for more info)
   - **0.7-0.9** = Minor details without source (e.g., generic descriptions)
   - **0.4-0.6** = Several invented details or hallucinated paths
   - **0.0-0.3** = Major fabrications (wrong paths, invented history)
