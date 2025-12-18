@@ -1,15 +1,25 @@
 name: Factuality
 description: Ensures all details are grounded in system prompt or user request
-scope: [thinking, response]
+scope: response
 pass_threshold: 0.8
 
 judge_prompt: |
   # CONTEXT
-  You are evaluating whether content contains only factual information from the system prompt and user request. The thinking block's memory field is particularly prone to inventing dates, history, and motivations.
+  You are evaluating whether content contains only factual information from the system prompt and user request. For non-thinking examples, focus on tool call arguments. For thinking examples, the memory field is particularly prone to inventing dates and history.
 
-  **Content to Evaluate:**
+  **Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **Response Text:**
   ```
   {current_content}
+  ```
+
+  **Thinking Block (if present):**
+  ```
+  {thinking_content}
   ```
 
   **System Prompt (ground truth):**
@@ -26,28 +36,38 @@ judge_prompt: |
   Score based on whether all details can be traced to the inputs. High-quality training data contains only verifiable information.
 
   # INSTRUCTIONS
+
+  ## For Tool Calls (non-thinking examples):
+  1. Check tool call arguments for invented details:
+     - File paths that don't exist in system prompt's vault_structure
+     - Session/workspace IDs that don't match <session_context>
+     - Content that user didn't specify
+     - Dates/timestamps not in inputs
+
+  2. Valid tool call information:
+     - Paths from vault_structure or workspaceStructure
+     - IDs from <session_context>
+     - Content directly from or paraphrased from user request
+     - Reasonable context descriptions based on task
+
+  ## For Thinking Blocks (when present):
   1. Check the "memory" field carefully for invented details:
      - Dates like "Oct 12", "2025-12-07" (only valid if in inputs)
      - History like "user has been working on", "was requested on"
      - Motivations like "after reviewing", "to restructure"
 
-  2. Check for valid information sources:
-     - Exact text from system prompt or user request
-     - Paraphrases of input information
-     - Tool and agent names from system prompt
-     - Logical inferences (e.g., "delete is irreversible")
-     - General domain knowledge (e.g., "markdown files use .md")
+  2. Check goal/plan for hallucinated paths
 
-  3. Score based on grounding:
-     - 1.0: All details traceable to inputs or reasonable inference
-     - 0.7-0.9: Minor details without source
-     - 0.4-0.6: Several invented details
-     - 0.0-0.3: Major fabrications
+  ## For Response Text:
+  1. Check for references to files not in vault_structure
+  2. Check for dates/history not in inputs
 
-  # GUIDELINES
-  - Memory should describe user's intent from their request
-  - Dates are almost always fabricated unless explicitly stated
-  - "User wants to X" is valid; "User has been doing X since..." is fabrication
+  # SCORING
+  - **1.0** = All details traceable to inputs or reasonable inference
+  - **1.0** = Clarification request (no tool calls, just asking user for more info)
+  - **0.7-0.9** = Minor details without source (e.g., generic descriptions)
+  - **0.4-0.6** = Several invented details or hallucinated paths
+  - **0.0-0.3** = Major fabrications (wrong paths, invented history)
 
   # FORMAT
   Return JSON: `{"factuality_score": 0.0-1.0}`
@@ -56,9 +76,19 @@ improver_prompt: |
   # CONTEXT
   You are improving content to ensure all details are grounded in the system prompt or user request.
 
-  **Current Content:**
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **Current Response Text:**
   ```
   {current_content}
+  ```
+
+  **Thinking Block (if present):**
+  ```
+  {thinking_content}
   ```
 
   **System Prompt (ground truth):**
@@ -71,39 +101,49 @@ improver_prompt: |
   {user_request}
   ```
 
+  **Improvement Feedback:**
+  ```
+  {feedback}
+  ```
+
   # MISSION
   Generate improved content where every detail can be traced to the inputs.
 
-  # INSTRUCTIONS FOR THINKING BLOCKS (JSON with goal, memory, etc.)
-  If the content is a JSON thinking block:
-  1. **Fix the memory field**:
-     - Replace invented history with simple intent statement
-     - Remove dates unless they appear in inputs
-     - Example: "User wants to remove obsolete documentation"
+  # INSTRUCTIONS FOR TOOL CALLS (non-thinking examples)
+  If improving tool calls:
+  1. **Fix file paths in arguments**:
+     - Only use paths from vault_structure or workspaceStructure
+     - If path is hallucinated, find correct path from system prompt
+     - If no matching path exists, make the operation generic
 
-  2. **Fix file paths**:
-     - Only use paths that exist in vault_structure or workspaceStructure
-     - If a path doesn't exist, use a generic description instead
+  2. **Fix session/workspace IDs**:
+     - Extract correct IDs from <session_context> in system prompt
+     - sessionId and workspaceId must match exactly
 
-  3. **Output the fixed JSON**
+  3. **Fix context object fields** (EXACTLY 4 fields):
+     - workspaceId: copy EXACTLY from <session_context>
+     - sessionId: copy EXACTLY from <session_context>
+     - memory: brief summary of conversation (1-3 sentences, factual only)
+     - goal: current objective based on user request (1-3 sentences)
 
-  # INSTRUCTIONS FOR ASSISTANT RESPONSES (plain text)
-  If the content is a plain text response:
-  1. **Keep the response natural and conversational**
-  2. **Don't reference files/dates not in the system prompt**
-  3. **If the response discusses a file that doesn't exist in vault_structure, rewrite to be generic**
-  4. **DO NOT output YAML or structured data - output natural language text**
-  5. **The response should directly address the user's request**
+  4. **Output improved tool call in ```tool format**
 
-  # GUIDELINES
-  - Simple statements are better than invented context
-  - Trust the system prompt for file locations
-  - For responses: write natural language, NOT structured data
+  # INSTRUCTIONS FOR THINKING BLOCKS (when present)
+  If the content has a JSON thinking block:
+  1. **Fix the memory field**: Remove invented dates/history
+  2. **Fix file paths**: Only use paths from vault_structure
+  3. **Output fixed JSON**
 
-  # FORMAT
-  Output ONLY the improved content.
+  # INSTRUCTIONS FOR RESPONSE TEXT
+  If improving response text:
+  1. **Keep natural and conversational**
+  2. **Don't reference files/dates not in system prompt**
+  3. **Output natural language, NOT structured data**
+
+  # OUTPUT FORMAT
+  - For tool calls: output ```tool block with corrected arguments
   - For thinking: output valid JSON
-  - For responses: output natural language text (NOT YAML, NOT JSON)
+  - For text responses: output natural language
 
 output_schema:
   type: object
@@ -154,3 +194,11 @@ validations:
         pattern: '\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/](?:20)?\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*20\d{2})?|\d{1,2}:\d{2}\s*(?:UTC|AM|PM|am|pm))\b'
       validate_in_content: true
     error: "HALLUCINATED DATE: '{value}' not found in system_prompt or user request"
+
+# Enable tool call validation
+# NOTE: check_context_ids is for Claudesidian-MCP datasets that use sessionId/workspaceId
+# Other users should leave this as false (default)
+validation:
+  tool_calls:
+    enabled: true
+    check_context_ids: false  # Set to true for Claudesidian-MCP datasets

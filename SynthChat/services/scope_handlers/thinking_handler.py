@@ -5,7 +5,7 @@ Single Responsibility: ALL thinking scope logic.
 
 import json
 import re
-from typing import Dict
+from typing import Dict, Optional
 from .base import ScopeHandler
 
 
@@ -16,7 +16,12 @@ class ThinkingHandler(ScopeHandler):
     Applies improvements to thinking blocks in assistant messages.
     """
 
-    def apply_improvement(self, example: Dict, improved_content: str) -> Dict:
+    def apply_improvement(
+        self,
+        example: Dict,
+        improved_content: str,
+        output_format: Optional[Dict] = None
+    ) -> Dict:
         """
         Apply improved thinking block.
 

@@ -44,7 +44,8 @@ class ImprovementApplicator:
         self,
         example: Dict,
         scope_name: str,
-        improved_content: str
+        improved_content: str,
+        output_format: Optional[Dict] = None
     ) -> Dict:
         """
         Apply improved content for a scope.
@@ -56,6 +57,8 @@ class ImprovementApplicator:
             example: Original example
             scope_name: Scope that was improved
             improved_content: New content from LLM
+            output_format: Optional output format config from rubric
+                          {type: "assistant_message" | "content_only" | "tool_calls_only"}
 
         Returns:
             Updated example (deep copy)
@@ -66,8 +69,8 @@ class ImprovementApplicator:
             self.logger.warning(f"No handler for scope: {scope_name}")
             return example
 
-        # Delegate to handler
-        return handler.apply_improvement(example, improved_content)
+        # Delegate to handler with output_format
+        return handler.apply_improvement(example, improved_content, output_format)
 
     def _get_handler(self, scope_name: str):
         """Get cached handler instance for scope."""

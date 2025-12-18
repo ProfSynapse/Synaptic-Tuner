@@ -14,12 +14,16 @@ llm:
   # Improvement (cloud recommended - needs strong judge)
   improvement:
     provider: openrouter
-    model: anthropic/claude-3.5-sonnet
-    temperature: 0.0  # Deterministic judging
+    model: openai/gpt-oss-120b
+    temperature: 0.1  # Deterministic judging
     max_tokens: 2048
+    # Provider routing - prioritize specific providers
+    provider_routing:
+      order: ["Groq"]  # Prioritize Groq for speed
+      allow_fallbacks: true  # Fall back to others if Groq unavailable
 
 improvement:
-  max_iterations: 3
+  max_iterations: 10
   on_max_iterations: skip  # skip | fail | save_partial
   default_rubrics:
     - system_prompt_format

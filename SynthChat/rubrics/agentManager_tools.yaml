@@ -1,0 +1,241 @@
+name: agentManager Tools
+description: Validates agentManager tool calls use OpenAI format with useTools schema
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating tool calls for the agentManager agent. Tool calls must use OpenAI format with the useTools schema.
+
+  # REQUIRED FORMAT
+
+  Tool calls MUST use OpenAI tool_calls format with name "useTools":
+  ```json
+  {{
+    "tool_calls": [
+      {{
+        "id": "unique_id",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{...}}, \"calls\": [{{...}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  The `arguments` JSON string must contain:
+  - context: workspaceId, sessionId, memory, goal
+  - calls: array with agent="agentManager", tool, params
+
+  ## Valid Tools: listModels, createAgent, listAgents, getAgent, updateAgent, deleteAgent, generateImage, executePrompts
+
+  # EVALUATION CRITERIA
+
+  ## Option A: Tool Call Response
+  1. **Function Name**: Must be exactly "useTools"
+  2. **Arguments Structure**: Must have `context` and `calls` at root
+  3. **Context Object**: Must have 4 fields (workspaceId, sessionId, memory, goal)
+  4. **Calls Array**: Each call must have `agent`, `tool`, `params`
+  5. **Agent Value**: Must be exactly "agentManager"
+
+  ## Option B: Clarification Response (VALID ALTERNATIVE)
+  If the user's request lacks critical info needed for a tool call, the assistant MAY ask for clarification. Valid when:
+  - Agent name/ID is unknown and cannot be inferred
+  - Required parameters are unspecified
+  - The operation is ambiguous
+
+  A clarification response has:
+  - `content`: A polite question asking for the missing info
+  - `tool_calls`: null or empty array
+
+  # SCORING
+  - **1.0** = Correct tool call format OR valid clarification request when info is missing
+  - **0.7-0.9** = Minor param issues
+  - **0.4-0.6** = Wrong structure OR missing required params
+  - **0.0-0.3** = Wrong function name OR completely wrong format
+
+  # OUTPUT
+  Return JSON: `{{"agentmanagertools_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are converting tool calls to the correct OpenAI assistant message format.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # DECISION: TOOL CALL OR CLARIFICATION?
+
+  First, determine if you have enough information to make a tool call:
+  - Do you know the agent name/ID? (Check system prompt or user request)
+  - Do you have required parameters for the operation?
+  - Is the operation clear?
+
+  **If YES to all**: Make a tool call (Option A below)
+  **If NO to any**: Ask for clarification (Option B below)
+
+  # OPTION A: TOOL CALL RESPONSE
+
+  Output a complete assistant message with `content: null` and `tool_calls` array:
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<random_9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  **CRITICAL**: `content` MUST be `null` (not a string, not empty string).
+
+  ## Valid Tools and Params:
+
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | listModels | - | - |
+  | createAgent | name, description, prompt | isEnabled |
+  | listAgents | - | enabledOnly |
+  | getAgent | - | id, name |
+  | updateAgent | id | name, description, prompt, isEnabled |
+  | deleteAgent | id | - |
+  | generateImage | prompt, provider, savePath | model, aspectRatio, numberOfImages |
+  | executePrompts | prompts | agent, provider, model, temperature, maxTokens |
+
+  # INSTRUCTIONS
+
+  1. **Extract IDs from system prompt's <session_context>**
+  2. **Set content to null** (tool-only response)
+  3. **Set function.name to "useTools"**
+  4. **Build arguments with context + calls array**
+
+  # EXAMPLE (Tool Call)
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_a1b2c3d4e",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User creating agent.\", \"goal\": \"Create research assistant.\"}}, \"calls\": [{{\"agent\": \"agentManager\", \"tool\": \"createAgent\", \"params\": {{\"name\": \"Research Assistant\", \"description\": \"Helps with research\", \"prompt\": \"You are a research assistant.\"}}}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  # OPTION B: CLARIFICATION RESPONSE
+
+  If you cannot determine the agent or required params, ask for clarification:
+
+  ```json
+  {{
+    "content": "I'd be happy to help with that. Could you please specify which agent you'd like me to update?",
+    "tool_calls": null
+  }}
+  ```
+
+  # OUTPUT
+  Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    agentmanagertools_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - agentmanagertools_score
+
+# Output format defines how improved content is applied to the example
+output_format:
+  type: assistant_message
+
+# Validation using tools schema with subtool manifests
+validations:
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            agentManager:
+              listModels:
+                _required: []
+              createAgent:
+                _required: [name, description, prompt]
+                name: string
+                description: string
+                prompt: string
+                isEnabled: boolean
+              listAgents:
+                _required: []
+                enabledOnly: boolean
+              getAgent:
+                _required: []
+                id: string
+                name: string
+              updateAgent:
+                _required: [id]
+                id: string
+                name: string
+                description: string
+                prompt: string
+                isEnabled: boolean
+              deleteAgent:
+                _required: [id]
+                id: string
+              generateImage:
+                _required: [prompt, provider, savePath]
+                prompt: string
+                provider: string
+                savePath: string
+                model: string
+                aspectRatio: string
+                numberOfImages: number
+              executePrompts:
+                _required: [prompts]
+                prompts: array
+                agent: string
+                provider: string
+                model: string
+                temperature: number
+                maxTokens: number
+    error: "useTools validation failed: {details}"

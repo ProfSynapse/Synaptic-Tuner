@@ -1,0 +1,223 @@
+name: vaultLibrarian Tools
+description: Validates vaultLibrarian tool calls use OpenAI format with useTools schema (read-only search)
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating tool calls for the vaultLibrarian agent. Tool calls must use OpenAI format with the useTools schema.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  # REQUIRED FORMAT
+
+  Tool calls MUST use OpenAI tool_calls format with name "useTools":
+  ```json
+  {{
+    "tool_calls": [
+      {{
+        "id": "unique_id",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{...}}, \"calls\": [{{...}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  The `arguments` JSON string must contain:
+  ```json
+  {{
+    "context": {{
+      "workspaceId": "string (from session_context or 'default')",
+      "sessionId": "string (from session_context)",
+      "memory": "string (1-3 sentences)",
+      "goal": "string (1-3 sentences)"
+    }},
+    "calls": [
+      {{
+        "agent": "vaultLibrarian",
+        "tool": "toolName",
+        "params": {{ ... tool-specific params ... }}
+      }}
+    ]
+  }}
+  ```
+
+  ## Valid Tools and Params (all READ-ONLY):
+
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | searchContent | query | limit, includeContent, snippetLength, paths |
+  | searchDirectory | query, paths | searchType, fileTypes, depth, limit |
+  | searchMemory | query, workspaceId | memoryTypes, searchMethod, limit |
+
+  # EVALUATION CRITERIA
+
+  1. **Function Name**: Must be exactly "useTools"
+  2. **Arguments Structure**: Must have `context` and `calls` at root
+  3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
+  4. **Calls Array**: Each call must have `agent`, `tool`, `params`
+  5. **Agent Value**: Must be exactly "vaultLibrarian"
+  6. **Tool Value**: Must be valid tool name
+  7. **Params**: Must include all required params for the tool
+
+  # SCORING
+  - **1.0** = Correct format, valid params, proper useTools structure
+  - **0.7-0.9** = Minor param issues
+  - **0.4-0.6** = Wrong structure OR missing required params
+  - **0.0-0.3** = Wrong function name OR completely wrong format
+
+  # OUTPUT
+  Return JSON: `{{"vaultlibrariantools_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are converting tool calls to the correct OpenAI assistant message format.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # REQUIRED OUTPUT FORMAT
+
+  Output a complete assistant message with `content: null` and `tool_calls` array:
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<random_9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  **CRITICAL**: `content` MUST be `null` (not a string, not empty string).
+
+  ## Valid Tools and Params:
+
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | searchContent | query | limit, includeContent, snippetLength, paths |
+  | searchDirectory | query, paths | searchType, fileTypes, depth, limit |
+  | searchMemory | query, workspaceId | memoryTypes, searchMethod, limit |
+
+  # INSTRUCTIONS
+
+  1. **Extract IDs from system prompt's <session_context>**
+  2. **Set content to null** (tool-only response)
+  3. **Set function.name to "useTools"**
+  4. **Build arguments with context + calls array**
+
+  # EXAMPLE
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_b2c3d4e5f",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User searching for ML content.\", \"goal\": \"Find notes about machine learning.\"}}, \"calls\": [{{\"agent\": \"vaultLibrarian\", \"tool\": \"searchContent\", \"params\": {{\"query\": \"machine learning\", \"includeContent\": true}}}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  # OUTPUT
+  Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    vaultlibrariantools_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - vaultlibrariantools_score
+
+# Output format defines how improved content is applied to the example
+output_format:
+  type: assistant_message
+
+# Validation using tools schema with subtool manifests
+validations:
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            vaultLibrarian:
+              searchContent:
+                _required: [query]
+                query: string
+                limit: number
+                includeContent: boolean
+                snippetLength: number
+                paths: array
+              searchDirectory:
+                _required: [query, paths]
+                query: string
+                paths: array
+                searchType: string
+                fileTypes: array
+                depth: number
+                limit: number
+              searchMemory:
+                _required: [query, workspaceId]
+                query: string
+                workspaceId: string
+                memoryTypes: array
+                searchMethod: string
+                limit: number
+    error: "useTools validation failed: {details}"

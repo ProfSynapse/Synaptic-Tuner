@@ -38,7 +38,8 @@ class ScopeHandler(ABC):
     def apply_improvement(
         self,
         example: Dict,
-        improved_content: str
+        improved_content: str,
+        output_format: Optional[Dict] = None
     ) -> Dict:
         """
         Apply improved content to example.
@@ -46,6 +47,11 @@ class ScopeHandler(ABC):
         Args:
             example: Original example dict
             improved_content: New content from LLM
+            output_format: Optional output format config from rubric
+                          {type: "assistant_message" | "content_only" | "tool_calls_only"}
+                          - assistant_message: Parse as JSON with content + tool_calls
+                          - content_only: Apply as text content (default)
+                          - tool_calls_only: Parse as tool_calls, set content to null
 
         Returns:
             Updated example (should deep copy)

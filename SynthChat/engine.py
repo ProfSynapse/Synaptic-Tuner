@@ -362,9 +362,9 @@ class ImprovementEngine:
         user_msg = conversation.get_user_message()
         assistant_msg = conversation.get_assistant_message()
 
-        system_content = system_msg.content if system_msg else ""
-        user_content = user_msg.content if user_msg else ""
-        assistant_content = assistant_msg.content if assistant_msg else ""
+        system_content = system_msg.content if system_msg and system_msg.content else ""
+        user_content = user_msg.content if user_msg and user_msg.content else ""
+        assistant_content = assistant_msg.content if assistant_msg and assistant_msg.content else ""
 
         # Build SYSTEM prompt (guidance + rubrics + structure)
         system_parts = ["You are a quality judge. Evaluate examples and provide scores with improvement recommendations."]
@@ -398,7 +398,16 @@ class ImprovementEngine:
         user_parts = ["## EXAMPLE TO EVALUATE", ""]
         user_parts.extend(["**System:**", "```", system_content, "```", ""])
         user_parts.extend(["**User:**", "```", user_content, "```", ""])
-        user_parts.extend(["**Assistant:**", "```", assistant_content, "```"])
+        user_parts.extend(["**Assistant:**", "```", assistant_content or "(null)", "```"])
+
+        # Include tool_calls if present (critical for tool-calling rubrics)
+        import json
+        conversations = example.get("conversations", [])
+        for conv in conversations:
+            if conv.get("role") == "assistant" and "tool_calls" in conv:
+                tool_calls = conv["tool_calls"]
+                user_parts.extend(["", "**Tool Calls:**", "```json", json.dumps(tool_calls, indent=2), "```"])
+                break
 
         return "\n".join(system_parts), "\n".join(user_parts)
 
@@ -417,6 +426,13 @@ class ImprovementEngine:
         scores = {}
         self._mandatory_fixes = []  # Store for improver
 
+        # Build mapping from validation key to rubric name
+        key_to_name = {}
+        for rubric in rubrics:
+            rubric_key = rubric.get("key", rubric.get("name"))
+            rubric_name = rubric.get("name", rubric_key)
+            key_to_name[rubric_key] = rubric_name
+
         # First, process validation results (AUTO-FAIL on validation errors)
         failed_rubrics = set()
         for rubric_key, (is_valid, errors) in validation_results.items():
@@ -425,8 +441,10 @@ class ImprovementEngine:
 
             if not is_valid:
                 # AUTO-FAIL: Set score to 0.0 for this rubric
-                scores[rubric_key] = 0.0
-                failed_rubrics.add(rubric_key)
+                # Use rubric NAME (not key) for consistent scoring
+                rubric_name = key_to_name.get(rubric_key, rubric_key)
+                scores[rubric_name] = 0.0
+                failed_rubrics.add(rubric_name)  # Track by name for consistency
                 # Collect mandatory fixes
                 self._mandatory_fixes.extend(errors)
                 self.logger.info(f"  AUTO-FAIL: {rubric_key} failed validation ({len(errors)} errors)")
@@ -573,8 +591,17 @@ class ImprovementEngine:
         content_preview = improved_content[:200] if improved_content else "(empty)"
         self.logger.info(f"    Improver returned ({len(improved_content)} chars): {content_preview}...")
 
-        # Apply improvement
-        improved_example = self.improvement_applicator.apply(example, scope, improved_content)
+        # Extract output_format from rubric(s) - use first one if multiple
+        output_format = None
+        for rubric in scope_rubrics:
+            if "output_format" in rubric:
+                output_format = rubric["output_format"]
+                break
+
+        # Apply improvement with output_format config
+        improved_example = self.improvement_applicator.apply(
+            example, scope, improved_content, output_format
+        )
 
         # Log whether the example changed
         if improved_example == example:

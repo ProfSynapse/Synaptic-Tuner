@@ -8,7 +8,7 @@ comparing content in other scopes against what the user actually said.
 """
 
 import json
-from typing import Dict
+from typing import Dict, Optional
 from .base import ScopeHandler
 
 
@@ -19,7 +19,12 @@ class UserHandler(ScopeHandler):
     Primarily used for extracting user content for cross_scope validation.
     """
 
-    def apply_improvement(self, example: Dict, improved_content: str) -> Dict:
+    def apply_improvement(
+        self,
+        example: Dict,
+        improved_content: str,
+        output_format: Optional[Dict] = None
+    ) -> Dict:
         """
         Apply improved user message.
 

@@ -1,0 +1,4090 @@
+{
+  "contentManager_readContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_readContent",
+    "description": "Validation schema for contentManager_readContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "readContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file to read"
+                },
+                "limit": {
+                  "type": "number",
+                  "description": "Number of lines to read"
+                },
+                "offset": {
+                  "type": "number",
+                  "description": "Line number to start from (1-based)"
+                },
+                "includeLineNumbers": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Include line numbers in output"
+                }
+              },
+              "required": [
+                "filePath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_createContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_createContent",
+    "description": "Validation schema for contentManager_createContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file to create"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "filePath",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_appendContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_appendContent",
+    "description": "Validation schema for contentManager_appendContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "appendContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to append"
+                }
+              },
+              "required": [
+                "filePath",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_prependContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_prependContent",
+    "description": "Validation schema for contentManager_prependContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "prependContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to prepend"
+                }
+              },
+              "required": [
+                "filePath",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_deleteContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_deleteContent",
+    "description": "Validation schema for contentManager_deleteContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "deleteContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to delete"
+                },
+                "similarityThreshold": {
+                  "type": "number",
+                  "default": 0.95,
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Fuzzy match threshold 0.0-1.0"
+                }
+              },
+              "required": [
+                "filePath",
+                "content"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_replaceContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_replaceContent",
+    "description": "Validation schema for contentManager_replaceContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "replaceContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "oldContent": {
+                  "type": "string",
+                  "description": "Content to replace"
+                },
+                "newContent": {
+                  "type": "string",
+                  "description": "Replacement content"
+                },
+                "similarityThreshold": {
+                  "type": "number",
+                  "default": 0.95,
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Fuzzy match threshold 0.0-1.0"
+                }
+              },
+              "required": [
+                "filePath",
+                "oldContent",
+                "newContent"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_findReplaceContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_findReplaceContent",
+    "description": "Validation schema for contentManager_findReplaceContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "findReplaceContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "findText": {
+                  "type": "string",
+                  "description": "Text to find"
+                },
+                "replaceText": {
+                  "type": "string",
+                  "description": "Replacement text"
+                },
+                "replaceAll": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Replace all occurrences"
+                },
+                "caseSensitive": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Case sensitive search"
+                },
+                "wholeWord": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Whole word match"
+                }
+              },
+              "required": [
+                "filePath",
+                "findText",
+                "replaceText"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "contentManager_replaceByLine": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - contentManager_replaceByLine",
+    "description": "Validation schema for contentManager_replaceByLine tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "contentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "replaceByLine"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filePath": {
+                  "type": "string",
+                  "description": "Path to the file"
+                },
+                "startLine": {
+                  "type": "number",
+                  "minimum": 1,
+                  "description": "Start line (1-based)"
+                },
+                "endLine": {
+                  "type": "number",
+                  "minimum": 1,
+                  "description": "End line (inclusive)"
+                },
+                "newContent": {
+                  "type": "string",
+                  "description": "Replacement content"
+                }
+              },
+              "required": [
+                "filePath",
+                "startLine",
+                "endLine",
+                "newContent"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_listDirectory": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_listDirectory",
+    "description": "Validation schema for vaultManager_listDirectory tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listDirectory"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Directory path (use \"\" or \"/\" for root)"
+                },
+                "filter": {
+                  "type": "string",
+                  "description": "Filter pattern"
+                },
+                "depth": {
+                  "type": "number",
+                  "default": 0,
+                  "minimum": 0,
+                  "description": "Recursive depth"
+                },
+                "includeFiles": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Include files in results"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_openNote": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_openNote",
+    "description": "Validation schema for vaultManager_openNote tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "openNote"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path to the note"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "tab",
+                    "split",
+                    "window",
+                    "current"
+                  ],
+                  "default": "current",
+                  "description": "Where to open"
+                },
+                "focus": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Focus the note"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_createFolder": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_createFolder",
+    "description": "Validation schema for vaultManager_createFolder tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createFolder"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path of folder to create"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_editFolder": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_editFolder",
+    "description": "Validation schema for vaultManager_editFolder tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "editFolder"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Current folder path"
+                },
+                "newPath": {
+                  "type": "string",
+                  "description": "New folder path"
+                }
+              },
+              "required": [
+                "path",
+                "newPath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_moveFolder": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_moveFolder",
+    "description": "Validation schema for vaultManager_moveFolder tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "moveFolder"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Folder path"
+                },
+                "newPath": {
+                  "type": "string",
+                  "description": "New path"
+                },
+                "overwrite": {
+                  "type": "boolean",
+                  "description": "Overwrite if exists"
+                }
+              },
+              "required": [
+                "path",
+                "newPath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_deleteFolder": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_deleteFolder",
+    "description": "Validation schema for vaultManager_deleteFolder tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "deleteFolder"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Folder path"
+                },
+                "recursive": {
+                  "type": "boolean",
+                  "description": "Delete recursively"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_moveNote": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_moveNote",
+    "description": "Validation schema for vaultManager_moveNote tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "moveNote"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Note path"
+                },
+                "newPath": {
+                  "type": "string",
+                  "description": "New path"
+                },
+                "overwrite": {
+                  "type": "boolean",
+                  "description": "Overwrite if exists"
+                }
+              },
+              "required": [
+                "path",
+                "newPath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_deleteNote": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_deleteNote",
+    "description": "Validation schema for vaultManager_deleteNote tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "deleteNote"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path to delete"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultManager_duplicateNote": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultManager_duplicateNote",
+    "description": "Validation schema for vaultManager_duplicateNote tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "duplicateNote"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "sourcePath": {
+                  "type": "string",
+                  "description": "Source note path"
+                },
+                "targetPath": {
+                  "type": "string",
+                  "description": "Target path"
+                },
+                "overwrite": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Overwrite if exists"
+                },
+                "autoIncrement": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Auto-increment filename"
+                }
+              },
+              "required": [
+                "sourcePath",
+                "targetPath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultLibrarian_searchContent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultLibrarian_searchContent",
+    "description": "Validation schema for vaultLibrarian_searchContent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultLibrarian"
+            },
+            "tool": {
+              "type": "string",
+              "const": "searchContent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Search query"
+                },
+                "semantic": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "AI search (true) or keyword (false)"
+                },
+                "limit": {
+                  "type": "number",
+                  "default": 10,
+                  "maximum": 50,
+                  "description": "Max results"
+                },
+                "includeContent": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Include snippets"
+                },
+                "snippetLength": {
+                  "type": "number",
+                  "default": 200,
+                  "description": "Snippet length"
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Restrict to paths (glob patterns)"
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultLibrarian_searchDirectory": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultLibrarian_searchDirectory",
+    "description": "Validation schema for vaultLibrarian_searchDirectory tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultLibrarian"
+            },
+            "tool": {
+              "type": "string",
+              "const": "searchDirectory"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "Search term for names/paths"
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "description": "Directories to search (use [\"/\"] for root)"
+                },
+                "searchType": {
+                  "type": "string",
+                  "enum": [
+                    "files",
+                    "folders",
+                    "both"
+                  ],
+                  "default": "both",
+                  "description": "What to search"
+                },
+                "fileTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Extensions without dots (e.g., [\"md\"])"
+                },
+                "depth": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "Max depth"
+                },
+                "pattern": {
+                  "type": "string",
+                  "description": "Regex pattern"
+                },
+                "dateRange": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "end": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "description": "ISO date range"
+                },
+                "limit": {
+                  "type": "number",
+                  "default": 20,
+                  "maximum": 100,
+                  "description": "Max results"
+                },
+                "includeContent": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Include content"
+                }
+              },
+              "required": [
+                "query",
+                "paths"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "vaultLibrarian_searchMemory": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - vaultLibrarian_searchMemory",
+    "description": "Validation schema for vaultLibrarian_searchMemory tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "vaultLibrarian"
+            },
+            "tool": {
+              "type": "string",
+              "const": "searchMemory"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Search query"
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "default": "global-workspace",
+                  "description": "Workspace ID"
+                },
+                "memoryTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "traces",
+                      "toolCalls",
+                      "sessions",
+                      "states",
+                      "workspaces"
+                    ]
+                  },
+                  "description": "Memory types to search"
+                },
+                "dateRange": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "end": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "description": "ISO date range"
+                },
+                "limit": {
+                  "type": "number",
+                  "default": 20,
+                  "maximum": 100,
+                  "description": "Max results"
+                },
+                "searchMethod": {
+                  "type": "string",
+                  "enum": [
+                    "semantic",
+                    "exact",
+                    "mixed"
+                  ],
+                  "default": "mixed",
+                  "description": "Search method"
+                },
+                "filterBySession": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Current session only"
+                }
+              },
+              "required": [
+                "query",
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_createSession": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_createSession",
+    "description": "Validation schema for memoryManager_createSession tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createSession"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Session name"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Session description"
+                },
+                "sessionGoal": {
+                  "type": "string",
+                  "description": "Goal/focus"
+                },
+                "context": {
+                  "type": [
+                    "object",
+                    "string"
+                  ],
+                  "description": "Context data"
+                },
+                "previousSessionId": {
+                  "type": "string",
+                  "description": "Continue from session"
+                },
+                "newSessionId": {
+                  "type": "string",
+                  "description": "Custom session ID"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_listSessions": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_listSessions",
+    "description": "Validation schema for memoryManager_listSessions tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listSessions"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "number",
+                  "description": "Max results"
+                },
+                "order": {
+                  "type": "string",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "description": "Sort order"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_loadSession": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_loadSession",
+    "description": "Validation schema for memoryManager_loadSession tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "loadSession"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "description": "Session ID to load"
+                }
+              },
+              "required": [
+                "sessionId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_updateSession": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_updateSession",
+    "description": "Validation schema for memoryManager_updateSession tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "updateSession"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "description": "Session ID"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "New name"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "New description"
+                },
+                "sessionGoal": {
+                  "type": "string",
+                  "description": "New goal"
+                }
+              },
+              "required": [
+                "sessionId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_createWorkspace": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_createWorkspace",
+    "description": "Validation schema for memoryManager_createWorkspace tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createWorkspace"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Workspace name"
+                },
+                "rootFolder": {
+                  "type": "string",
+                  "description": "Root folder path"
+                },
+                "purpose": {
+                  "type": "string",
+                  "description": "Overall purpose"
+                },
+                "currentGoal": {
+                  "type": "string",
+                  "description": "Current focus"
+                },
+                "workflows": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "when": {
+                        "type": "string"
+                      },
+                      "steps": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "when",
+                      "steps"
+                    ]
+                  },
+                  "description": "Workflows [{name, when, steps}]"
+                },
+                "keyFiles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Key file paths"
+                },
+                "preferences": {
+                  "type": "string",
+                  "description": "User preferences"
+                },
+                "dedicatedAgentId": {
+                  "type": "string",
+                  "description": "Dedicated agent ID"
+                }
+              },
+              "required": [
+                "name",
+                "rootFolder",
+                "purpose",
+                "currentGoal",
+                "workflows"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_listWorkspaces": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_listWorkspaces",
+    "description": "Validation schema for memoryManager_listWorkspaces tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listWorkspaces"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "number",
+                  "description": "Max results"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_loadWorkspace": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_loadWorkspace",
+    "description": "Validation schema for memoryManager_loadWorkspace tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "loadWorkspace"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string",
+                  "description": "Workspace ID to load"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_updateWorkspace": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_updateWorkspace",
+    "description": "Validation schema for memoryManager_updateWorkspace tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "updateWorkspace"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string",
+                  "description": "Workspace ID"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "New name"
+                },
+                "purpose": {
+                  "type": "string",
+                  "description": "New purpose"
+                },
+                "currentGoal": {
+                  "type": "string",
+                  "description": "New goal"
+                },
+                "workflows": {
+                  "type": "array",
+                  "description": "New workflows"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_createState": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_createState",
+    "description": "Validation schema for memoryManager_createState tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createState"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "State name/title"
+                },
+                "conversationContext": {
+                  "type": "string",
+                  "description": "What was happening"
+                },
+                "activeTask": {
+                  "type": "string",
+                  "description": "Current task"
+                },
+                "activeFiles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Files being worked on"
+                },
+                "nextSteps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Next actions"
+                },
+                "reasoning": {
+                  "type": "string",
+                  "description": "Why saving now"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Additional notes"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tags"
+                }
+              },
+              "required": [
+                "name",
+                "conversationContext",
+                "activeTask",
+                "activeFiles",
+                "nextSteps",
+                "reasoning"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_listStates": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_listStates",
+    "description": "Validation schema for memoryManager_listStates tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listStates"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "type": "number",
+                  "description": "Max results"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_loadState": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_loadState",
+    "description": "Validation schema for memoryManager_loadState tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "loadState"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "stateId": {
+                  "type": "string",
+                  "description": "State ID to load"
+                }
+              },
+              "required": [
+                "stateId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "memoryManager_updateState": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - memoryManager_updateState",
+    "description": "Validation schema for memoryManager_updateState tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "memoryManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "updateState"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "stateId": {
+                  "type": "string",
+                  "description": "State ID"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "New name"
+                },
+                "conversationContext": {
+                  "type": "string",
+                  "description": "New context"
+                },
+                "activeTask": {
+                  "type": "string",
+                  "description": "New task"
+                }
+              },
+              "required": [
+                "stateId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "commandManager_listCommands": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - commandManager_listCommands",
+    "description": "Validation schema for commandManager_listCommands tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "commandManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listCommands"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "filter": {
+                  "type": "string",
+                  "description": "Filter pattern"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "commandManager_executeCommand": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - commandManager_executeCommand",
+    "description": "Validation schema for commandManager_executeCommand tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "commandManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "executeCommand"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "commandId": {
+                  "type": "string",
+                  "description": "Command ID to execute"
+                }
+              },
+              "required": [
+                "commandId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_listModels": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_listModels",
+    "description": "Validation schema for agentManager_listModels tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listModels"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_createAgent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_createAgent",
+    "description": "Validation schema for agentManager_createAgent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "createAgent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "description": "Unique name"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "description": "Description"
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Agent prompt/persona"
+                },
+                "isEnabled": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Enabled status"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "prompt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_listAgents": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_listAgents",
+    "description": "Validation schema for agentManager_listAgents tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "listAgents"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "enabledOnly": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Only enabled agents"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_getAgent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_getAgent",
+    "description": "Validation schema for agentManager_getAgent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "getAgent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Agent ID"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Agent name"
+                }
+              },
+              "required": [],
+              "oneOf": [
+                {
+                  "required": [
+                    "id"
+                  ]
+                },
+                {
+                  "required": [
+                    "name"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_updateAgent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_updateAgent",
+    "description": "Validation schema for agentManager_updateAgent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "updateAgent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Agent ID"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "New name"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "New description"
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "New prompt"
+                },
+                "isEnabled": {
+                  "type": "boolean",
+                  "description": "Enabled status"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_deleteAgent": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_deleteAgent",
+    "description": "Validation schema for agentManager_deleteAgent tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "deleteAgent"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Agent ID or name"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_generateImage": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_generateImage",
+    "description": "Validation schema for agentManager_generateImage tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "generateImage"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32000,
+                  "description": "Image description"
+                },
+                "savePath": {
+                  "type": "string",
+                  "pattern": "^[^/].*\\.(png|jpg|jpeg|webp)$",
+                  "description": "Vault path (e.g., \"images/out.png\")"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "google",
+                    "openrouter"
+                  ],
+                  "default": "google",
+                  "description": "AI provider"
+                },
+                "model": {
+                  "type": "string",
+                  "enum": [
+                    "gemini-2.5-flash-image",
+                    "gemini-3-pro-image-preview",
+                    "flux-2-pro",
+                    "flux-2-flex"
+                  ],
+                  "default": "gemini-2.5-flash-image",
+                  "description": "Model"
+                },
+                "aspectRatio": {
+                  "type": "string",
+                  "enum": [
+                    "1:1",
+                    "2:3",
+                    "3:2",
+                    "3:4",
+                    "4:3",
+                    "4:5",
+                    "5:4",
+                    "9:16",
+                    "16:9",
+                    "21:9"
+                  ],
+                  "description": "Aspect ratio"
+                },
+                "numberOfImages": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 4,
+                  "description": "Number of images (1-4)"
+                },
+                "imageSize": {
+                  "type": "string",
+                  "enum": [
+                    "1K",
+                    "2K",
+                    "4K"
+                  ],
+                  "description": "Resolution (4K only for 3-pro)"
+                },
+                "referenceImages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 14,
+                  "description": "Reference image paths (max 3 for 2.5, max 14 for 3-pro)"
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "png",
+                    "jpeg",
+                    "webp"
+                  ],
+                  "description": "Output format"
+                }
+              },
+              "required": [
+                "prompt",
+                "savePath"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  },
+  "agentManager_executePrompts": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "useTool - agentManager_executePrompts",
+    "description": "Validation schema for agentManager_executePrompts tool call",
+    "type": "object",
+    "properties": {
+      "context": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "description": "Scope identifier (use \"default\" for global)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session name (system assigns ID)"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Conversation essence (1-3 sentences)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Current objective (1-3 sentences)"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Rules/limits (1-3 sentences)"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId",
+          "memory",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "calls": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "const": "agentManager"
+            },
+            "tool": {
+              "type": "string",
+              "const": "executePrompts"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "prompts": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text",
+                          "image"
+                        ],
+                        "description": "Request type"
+                      },
+                      "prompt": {
+                        "type": "string",
+                        "description": "Prompt text"
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "Custom ID"
+                      },
+                      "sequence": {
+                        "type": "number",
+                        "description": "Execution order"
+                      },
+                      "parallelGroup": {
+                        "type": "string",
+                        "description": "Parallel execution group"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "description": "Provider override"
+                      },
+                      "model": {
+                        "type": "string",
+                        "description": "Model override"
+                      },
+                      "agent": {
+                        "type": "string",
+                        "description": "Custom agent name"
+                      },
+                      "contextFiles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Context files"
+                      },
+                      "includePreviousResults": {
+                        "type": "boolean",
+                        "description": "Include previous results"
+                      },
+                      "contextFromSteps": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Step IDs to include"
+                      },
+                      "savePath": {
+                        "type": "string",
+                        "description": "For image: save path (REQUIRED for type=image)"
+                      },
+                      "aspectRatio": {
+                        "type": "string",
+                        "description": "For image: aspect ratio"
+                      },
+                      "action": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "save",
+                              "append",
+                              "prepend"
+                            ]
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        },
+                        "description": "Save result to file"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "prompt"
+                    ]
+                  },
+                  "description": "Array of prompt configs"
+                },
+                "mergeResponses": {
+                  "type": "boolean",
+                  "description": "Merge all responses"
+                }
+              },
+              "required": [
+                "prompts"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent",
+            "tool",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "context",
+      "calls"
+    ],
+    "additionalProperties": false
+  }
+}
