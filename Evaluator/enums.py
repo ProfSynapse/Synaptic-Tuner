@@ -51,6 +51,9 @@ class BackendType(str, Enum):
     VLLM = "vllm"
     """vLLM high-performance inference server (OpenAI-compatible API)."""
 
+    LLAMACPP = "llamacpp"
+    """llama.cpp local inference via llama-cli (direct GGUF execution)."""
+
     def __str__(self) -> str:
         return self.value
 

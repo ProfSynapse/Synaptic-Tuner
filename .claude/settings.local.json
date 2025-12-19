@@ -174,7 +174,10 @@
       "Bash(xargs:*)",
       "WebFetch(domain:openrouter.ai)",
       "Bash(for f in contentManager/tools_v1.4.jsonl agentManager/tools_v1.3.jsonl memoryManager/tools_v1.4.jsonl)",
-      "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/llama-cli:*)"
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/llama-cli:*)",
+      "Bash(git clone:*)",
+      "Bash(llama.cpp/build/bin/llama-cli:*)",
+      "Bash(Trainers/llama.cpp/build/bin/llama-cli:*)"
     ],
     "deny": [],
     "ask": []

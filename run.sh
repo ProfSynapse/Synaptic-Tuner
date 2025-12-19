@@ -29,6 +29,98 @@ elif [ -f /opt/conda/etc/profile.d/conda.sh ]; then
 fi
 
 # ============================================================================
+# LLAMA.CPP CHECK - Auto-clone and build for GGUF evaluation
+# ============================================================================
+check_and_build_llamacpp() {
+    local LLAMA_CPP_DIR="$SCRIPT_DIR/Trainers/llama.cpp"
+    local LLAMA_CLI="$LLAMA_CPP_DIR/build/bin/llama-cli"
+
+    # Check if llama-cli already exists and is executable
+    if [ -x "$LLAMA_CLI" ]; then
+        return 0
+    fi
+
+    echo ""
+    echo "⚠ llama.cpp not found or not built"
+    echo "  Required for: GGUF model evaluation via CLI"
+    echo ""
+
+    # Check if we're in an interactive terminal
+    if [ -t 0 ]; then
+        read -p "Clone and build llama.cpp now? (Y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            echo "⚠ Skipping llama.cpp setup"
+            echo "  GGUF evaluation will not be available"
+            return 0
+        fi
+    else
+        echo "Non-interactive mode - auto-building llama.cpp..."
+    fi
+
+    # Clone if needed
+    if [ ! -d "$LLAMA_CPP_DIR" ]; then
+        echo "[1/2] Cloning llama.cpp..."
+        git clone https://github.com/ggerganov/llama.cpp.git "$LLAMA_CPP_DIR"
+    else
+        echo "[1/2] llama.cpp directory exists, skipping clone"
+    fi
+
+    # Determine build flags based on platform
+    local CMAKE_FLAGS=""
+    local PLATFORM_DESC=""
+
+    case "$(uname -s)" in
+        Darwin)
+            if [ "$(uname -m)" = "arm64" ]; then
+                CMAKE_FLAGS="-DGGML_METAL=ON"
+                PLATFORM_DESC="Apple Silicon (Metal)"
+            else
+                CMAKE_FLAGS=""
+                PLATFORM_DESC="Intel Mac (CPU)"
+            fi
+            ;;
+        Linux)
+            # Check for NVIDIA GPU
+            if command -v nvidia-smi &>/dev/null; then
+                CMAKE_FLAGS="-DGGML_CUDA=ON"
+                PLATFORM_DESC="Linux (CUDA)"
+            else
+                CMAKE_FLAGS=""
+                PLATFORM_DESC="Linux (CPU)"
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            # Windows - assume CUDA
+            CMAKE_FLAGS="-DGGML_CUDA=ON"
+            PLATFORM_DESC="Windows (CUDA)"
+            ;;
+        *)
+            CMAKE_FLAGS=""
+            PLATFORM_DESC="Unknown (CPU)"
+            ;;
+    esac
+
+    echo "[2/2] Building llama.cpp for $PLATFORM_DESC..."
+    echo "      cmake flags: $CMAKE_FLAGS"
+
+    cd "$LLAMA_CPP_DIR"
+    cmake -B build $CMAKE_FLAGS
+    cmake --build build --config Release -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    cd "$SCRIPT_DIR"
+
+    # Verify
+    if [ -x "$LLAMA_CLI" ]; then
+        echo "✓ llama.cpp built successfully"
+        echo "  Platform: $PLATFORM_DESC"
+    else
+        echo "⚠ llama.cpp build may have failed"
+        echo "  Try manually: cd Trainers/llama.cpp && cmake -B build $CMAKE_FLAGS && cmake --build build"
+    fi
+    echo ""
+}
+
+# ============================================================================
 # DEPENDENCY CHECK - Auto-install missing packages for Ministral 3 / Transformers 5
 # ============================================================================
 check_and_install_deps() {
@@ -291,6 +383,9 @@ except Exception as e:
             # This path should rarely be hit now due to the catch-all above
             echo "⚠ Startup check failed (Code $EXIT_CODE). Proceeding with caution..."
         fi
+
+        # Check llama.cpp for GGUF evaluation support
+        check_and_build_llamacpp
     else
         echo "⚠ Environment $UNSLOTH_ENV not found."
 

@@ -226,6 +226,44 @@ class VLLMSettings(BaseBackendSettings):
     gpu_memory_utilization: float = 0.9
 
 
+@dataclass
+class LlamaCppSettings:
+    """Settings for llama.cpp direct execution via llama-cli.
+
+    Unlike other backends, llama.cpp doesn't use a server - it runs
+    llama-cli directly for each inference request.
+
+    Attributes:
+        model: Path to the GGUF model file
+        llama_cli_path: Path to llama-cli executable (auto-detected if not set)
+        chat_template: Chat template to use (default: chatml)
+        context_size: Context window size (default: 4096)
+        gpu_layers: Number of layers to offload to GPU (-1 = all, default: -1)
+        temperature: Sampling temperature
+        top_p: Top-p sampling
+        max_tokens: Maximum tokens to generate
+        seed: Optional random seed
+    """
+
+    model: str  # Path to GGUF file
+    llama_cli_path: Optional[str] = None
+    chat_template: str = "chatml"
+    context_size: int = 4096
+    gpu_layers: int = -1  # -1 = auto (all layers)
+    temperature: float = 0.2
+    top_p: float = 0.9
+    max_tokens: int = 1024
+    seed: Optional[int] = None
+
+    # These are required by the BackendSettings protocol but not used
+    host: str = field(default="localhost")
+    port: int = field(default=0)
+
+    def base_url(self) -> str:
+        """Not applicable for llama.cpp (runs locally)."""
+        return f"file://{self.model}"
+
+
 # ---------------------------------------------------------------------------
 # Prompt Filtering
 # ---------------------------------------------------------------------------

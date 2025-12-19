@@ -104,6 +104,54 @@ class EvalHandler(BaseHandler):
                 print(f"  [{i}] {m}")
             print()
 
+    def _display_gguf_models_table(self, backend, models: List[str]) -> None:
+        """
+        Display available GGUF models with detailed info.
+
+        Args:
+            backend: LlamaCppBackend instance (for get_model_info)
+            models: List of GGUF file paths
+        """
+        from pathlib import Path
+
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title="Available GGUF Models",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Name", style="white")
+            table.add_column("Quant", style=COLORS["purple"])
+            table.add_column("Size", style="dim", justify="right")
+            table.add_column("Type", style=COLORS["aqua"])
+
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).stem)
+                quant = info.get("quantization") or "-"
+                size = f"{info.get('size_gb', 0):.1f}GB"
+                trainer = info.get("trainer_type", "-").upper()
+
+                table.add_row(str(i), name, quant, size, trainer)
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print("\nAvailable GGUF models:")
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).stem)
+                quant = info.get("quantization") or ""
+                size = info.get("size_gb", 0)
+                quant_str = f" ({quant})" if quant else ""
+                print(f"  [{i}] {name}{quant_str} [{size:.1f}GB]")
+            print()
+
     def _display_prompt_sets_table(self, prompt_sets: List[Tuple[str, str, int]]) -> None:
         """
         Display available prompt sets in a table.
@@ -148,8 +196,9 @@ class EvalHandler(BaseHandler):
 
         # Step 1: Select backend
         backend_choice = print_menu([
-            ("ollama", f"{BOX['bullet']} Ollama (local)"),
-            ("lmstudio", f"{BOX['bullet']} LM Studio (local)"),
+            ("llamacpp", f"{BOX['star']} llama.cpp (GGUF - direct, fastest)"),
+            ("ollama", f"{BOX['bullet']} Ollama (local server)"),
+            ("lmstudio", f"{BOX['bullet']} LM Studio (local server)"),
         ], "Select backend:")
 
         if not backend_choice:
@@ -159,7 +208,11 @@ class EvalHandler(BaseHandler):
         print_info(f"Fetching models from {backend_choice}...")
 
         try:
-            backend = EvaluationBackendRegistry.get(backend_choice)
+            # Pass repo_root for llamacpp backend to find models
+            if backend_choice == "llamacpp":
+                backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
+            else:
+                backend = EvaluationBackendRegistry.get(backend_choice)
         except ValueError as e:
             print_error(str(e))
             return 1
@@ -167,7 +220,8 @@ class EvalHandler(BaseHandler):
         # Validate connection
         is_connected, error = backend.validate_connection()
         if not is_connected:
-            print_error(f"Cannot connect to {backend_choice}: {error}")
+            print_error(f"Cannot connect to {backend_choice}:")
+            print_info(error)
             if backend_choice == "lmstudio":
                 print_info("Make sure LM Studio server is running on http://localhost:1234")
             return 1
@@ -175,13 +229,21 @@ class EvalHandler(BaseHandler):
         # List models
         models = backend.list_models()
         if not models:
-            print_error(f"No models found. Is {backend_choice} running?")
+            print_error(f"No models found.")
             if backend_choice == "lmstudio":
                 print_info("Make sure LM Studio server is running on http://localhost:1234")
+            elif backend_choice == "llamacpp":
+                print_info("No GGUF models found in training outputs.")
+                print_info("Train a model first, then convert to GGUF.")
+            elif backend_choice == "ollama":
+                print_info("Is Ollama running? Check with: ollama list")
             return 1
 
         # Step 3: Display models and select
-        self._display_models_table(backend_choice, models)
+        if backend_choice == "llamacpp":
+            self._display_gguf_models_table(backend, models)
+        else:
+            self._display_models_table(backend_choice, models)
 
         while True:
             try:

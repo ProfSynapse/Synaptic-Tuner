@@ -58,16 +58,17 @@ from .runner import evaluate_cases
 def parse_args(argv: List[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Evaluate tool-calling models via Ollama or LM Studio.",
+        description="Evaluate tool-calling models via Ollama, LM Studio, or llama.cpp.",
         epilog="""
 Backend Configuration:
   Ollama:    OLLAMA_HOST (default: 127.0.0.1), OLLAMA_PORT (default: 11434)
   LM Studio: LMSTUDIO_HOST (default: 127.0.0.1), LMSTUDIO_PORT (default: 1234)
+  llama.cpp: --model should be path to GGUF file (e.g., ./model.Q4_K_M.gguf)
         """,
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio"],
+        choices=["ollama", "lmstudio", "llamacpp"],
         default="ollama",
         help="Backend to use for evaluation (default: ollama)",
     )
