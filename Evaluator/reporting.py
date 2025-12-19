@@ -39,7 +39,11 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     behavior_failures = Counter()
     for record in records:
         if record.error:
-            failure_reasons[record.error] += 1
+            # Truncate long error messages to avoid dumping prompts
+            error_msg = record.error
+            if len(error_msg) > 150:
+                error_msg = error_msg[:150] + "..."
+            failure_reasons[error_msg] += 1
         elif record.validator and not record.validator.passed:
             for issue in record.validator.issues:
                 if issue.level.upper() == "ERROR":

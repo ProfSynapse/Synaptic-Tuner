@@ -177,7 +177,11 @@
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/llama-cli:*)",
       "Bash(git clone:*)",
       "Bash(llama.cpp/build/bin/llama-cli:*)",
-      "Bash(Trainers/llama.cpp/build/bin/llama-cli:*)"
+      "Bash(Trainers/llama.cpp/build/bin/llama-cli:*)",
+      "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/pip install:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/build/bin/llama-cli:*)",
+      "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)",
+      "Bash(TORCHDYNAMO_DISABLE=1 /home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)"
     ],
     "deny": [],
     "ask": []

@@ -6,6 +6,10 @@ once and the LoRA adapter is applied on top.
 """
 from __future__ import annotations
 
+import os
+# Disable torch.compile to avoid nvcc permission issues on WSL
+os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+
 import json
 import time
 from pathlib import Path
@@ -76,6 +80,16 @@ class UnslothClient:
         if not base_model_name:
             raise BackendError("base_model_name_or_path not found in adapter_config.json")
 
+        # Check for vision-language models
+        auto_mapping = adapter_config.get("auto_mapping", {})
+        base_model_class = auto_mapping.get("base_model_class", "")
+        self._is_vl_model = (
+            "VL" in base_model_class or
+            "Vision" in base_model_class or
+            "-VL" in base_model_name.upper() or
+            "Qwen3VL" in base_model_class
+        )
+
         try:
             from unsloth import FastLanguageModel
         except ImportError:
@@ -116,36 +130,45 @@ class UnslothClient:
         start_time = time.time()
 
         try:
-            # Format messages using chat template
+            # Convert messages to list of dicts (ensure serializable format)
+            msg_list = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+            # For VL models, self._tokenizer is actually a Processor (e.g., Qwen3VLProcessor)
+            # We need to use the inner tokenizer for text-only inference
+            # The processor's __call__ expects images, but .tokenizer handles text
+            actual_tokenizer = getattr(self._tokenizer, 'tokenizer', self._tokenizer)
+
+            # Apply chat template
             prompt = self._tokenizer.apply_chat_template(
-                messages,
+                msg_list,
                 tokenize=False,
                 add_generation_prompt=True,
             )
 
-            # Tokenize
-            inputs = self._tokenizer(
+            # Tokenize using the actual tokenizer (not processor)
+            inputs = actual_tokenizer(
                 prompt,
                 return_tensors="pt",
                 truncation=True,
                 max_length=self.settings.max_seq_length,
             ).to(self._model.device)
 
-            # Generate
+            # Generate (use actual_tokenizer for pad_token_id on VL models)
+            pad_token_id = getattr(actual_tokenizer, 'pad_token_id', None) or getattr(actual_tokenizer, 'eos_token_id', None)
             outputs = self._model.generate(
                 **inputs,
                 max_new_tokens=self.settings.max_tokens,
                 temperature=self.settings.temperature if self.settings.temperature > 0 else None,
                 top_p=self.settings.top_p,
                 do_sample=self.settings.temperature > 0,
-                pad_token_id=self._tokenizer.pad_token_id or self._tokenizer.eos_token_id,
+                pad_token_id=pad_token_id,
                 use_cache=True,
             )
 
-            # Decode only the new tokens
+            # Decode only the new tokens (use actual_tokenizer for VL models)
             input_length = inputs["input_ids"].shape[1]
             response_tokens = outputs[0][input_length:]
-            response_text = self._tokenizer.decode(response_tokens, skip_special_tokens=True)
+            response_text = actual_tokenizer.decode(response_tokens, skip_special_tokens=True)
 
             latency = time.time() - start_time
 
