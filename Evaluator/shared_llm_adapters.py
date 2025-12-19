@@ -15,7 +15,7 @@ from typing import Any, Dict, Mapping, Sequence
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
 
-from .config import LMStudioSettings, OllamaSettings
+from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings
 from .protocols import BackendError, BackendResponse
 from .base_client import extract_message_content
 
@@ -197,3 +197,48 @@ class SharedOllamaAdapter(SharedLLMAdapter):
     @property
     def _client_name(self) -> str:
         return "Ollama (Shared)"
+
+
+class SharedOpenRouterAdapter(SharedLLMAdapter):
+    """OpenRouter adapter using shared LLM client.
+
+    Provides access to OpenRouter's cloud inference API with multiple
+    model providers available.
+    """
+
+    settings: OpenRouterSettings  # Type narrowing
+
+    def __init__(
+        self,
+        settings: OpenRouterSettings,
+        timeout: float = 60.0,
+        retries: int = 2,
+    ):
+        """Initialize OpenRouter adapter.
+
+        Args:
+            settings: OpenRouter settings
+            timeout: Request timeout
+            retries: Retry attempts
+        """
+        super().__init__(
+            provider="openrouter",
+            settings=settings,
+            timeout=timeout,
+            retries=retries
+        )
+
+    @property
+    def _client_name(self) -> str:
+        return "OpenRouter"
+
+    def is_server_running(self) -> bool:
+        """Check if OpenRouter API is accessible."""
+        is_running = super().is_server_running()
+        if not is_running:
+            import os
+            if not os.environ.get("OPENROUTER_API_KEY"):
+                print("\n⚠ OPENROUTER_API_KEY environment variable not set")
+                print("Set it in your .env file or export it:")
+                print("  export OPENROUTER_API_KEY=sk-or-...")
+        return is_running

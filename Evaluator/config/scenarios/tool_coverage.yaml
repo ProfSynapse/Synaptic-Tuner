@@ -1,0 +1,287 @@
+# Tool Coverage Test Scenarios
+# Tests that each tool can be called correctly
+# References tool_schema.yaml, behaviors.yaml, response_types.yaml
+
+name: Tool Coverage Tests
+description: Verify each tool can be called correctly with proper parameters
+
+# ============================================================
+# DEFAULTS
+# ============================================================
+# Shared settings for all tests in this file
+
+defaults:
+  system_prompt_template: standard_vault
+  response_type: tool_only
+  behaviors:
+    - context_complete
+
+# ============================================================
+# VAULT MANAGER TESTS
+# ============================================================
+
+tests:
+  # --- Folder Operations ---
+
+  - id: vaultManager_moveFolder
+    tags: [vaultManager, folder, move]
+    question: "Move the Projects/Old folder to Archive/Old"
+    expect:
+      tool: vaultManager_moveFolder
+      params_include:
+        path: "Projects/Old"
+        newPath: "Archive/Old"
+
+  - id: vaultManager_createFolder
+    tags: [vaultManager, folder, create]
+    question: "Create a new folder called Research/2024"
+    expect:
+      tool: vaultManager_createFolder
+      params_include:
+        path: "Research/2024"
+
+  - id: vaultManager_deleteFolder
+    tags: [vaultManager, folder, delete]
+    question: "Delete the Archive/Deprecated folder"
+    expect:
+      tool: vaultManager_deleteFolder
+      params_include:
+        path: "Archive/Deprecated"
+
+  - id: vaultManager_listDirectory
+    tags: [vaultManager, folder, list]
+    question: "Show me what's in the Projects folder"
+    expect:
+      tool: vaultManager_listDirectory
+      params_include:
+        path: "Projects"
+
+  # --- Note Operations ---
+
+  - id: vaultManager_moveNote
+    tags: [vaultManager, note, move]
+    question: "Move the note Inbox/task.md to Projects/Tasks/task.md"
+    expect:
+      tool: vaultManager_moveNote
+      params_include:
+        path: "Inbox/task.md"
+        newPath: "Projects/Tasks/task.md"
+
+  - id: vaultManager_createNote
+    tags: [vaultManager, note, create]
+    question: "Create a new note called Meeting Notes.md in the Meetings folder"
+    expect:
+      tool: vaultManager_createNote
+      params_include:
+        path: "Meetings/Meeting Notes.md"
+
+  - id: vaultManager_deleteNote
+    tags: [vaultManager, note, delete]
+    question: "Delete the note Archive/old-draft.md"
+    expect:
+      tool: vaultManager_deleteNote
+      params_include:
+        path: "Archive/old-draft.md"
+
+  - id: vaultManager_renameNote
+    tags: [vaultManager, note, rename]
+    question: "Rename Projects/draft.md to Projects/final.md"
+    expect:
+      tool: vaultManager_renameNote
+      params_include:
+        path: "Projects/draft.md"
+        newName: "final.md"
+
+  - id: vaultManager_getWorkspaceStructure
+    tags: [vaultManager, structure]
+    question: "Show me the structure of my vault"
+    expect:
+      tool: vaultManager_getWorkspaceStructure
+
+# ============================================================
+# CONTENT MANAGER TESTS
+# ============================================================
+
+  - id: contentManager_readContent
+    tags: [contentManager, read]
+    question: "Read the contents of README.md"
+    expect:
+      tool: contentManager_readContent
+      params_include:
+        filePath: "README.md"
+
+  - id: contentManager_writeContent
+    tags: [contentManager, write]
+    question: "Write 'Hello World' to a new file called test.md"
+    expect:
+      tool: contentManager_writeContent
+      params_include:
+        filePath: "test.md"
+        content: "Hello World"
+
+  - id: contentManager_appendContent
+    tags: [contentManager, append]
+    question: "Add '## New Section' to the end of Notes/project.md"
+    expect:
+      tool: contentManager_appendContent
+      params_include:
+        filePath: "Notes/project.md"
+
+  - id: contentManager_replaceByLine
+    tags: [contentManager, edit]
+    question: "Replace line 12 in Projects/Runbooks/Backup.md with '5. Validate restores weekly on staging environment.'"
+    expect:
+      tool: contentManager_replaceByLine
+      params_include:
+        filePath: "Projects/Runbooks/Backup.md"
+        lineNumber: 12
+
+  - id: contentManager_insertAtLine
+    tags: [contentManager, insert]
+    question: "Insert a new line '## Overview' at line 2 in README.md"
+    expect:
+      tool: contentManager_insertAtLine
+      params_include:
+        filePath: "README.md"
+        lineNumber: 2
+
+  - id: contentManager_deleteLines
+    tags: [contentManager, delete]
+    question: "Delete lines 5 through 10 in Notes/draft.md"
+    expect:
+      tool: contentManager_deleteLines
+      params_include:
+        filePath: "Notes/draft.md"
+        startLine: 5
+
+# ============================================================
+# VAULT LIBRARIAN TESTS
+# ============================================================
+
+  - id: vaultLibrarian_searchContent
+    tags: [vaultLibrarian, search]
+    question: "Search for notes containing 'machine learning'"
+    expect:
+      tool: vaultLibrarian_searchContent
+      params_include:
+        query: "machine learning"
+
+  - id: vaultLibrarian_searchByTags
+    tags: [vaultLibrarian, tags]
+    question: "Find all notes tagged with #project"
+    expect:
+      tool: vaultLibrarian_searchByTags
+      params_include:
+        tags: ["project"]
+
+  - id: vaultLibrarian_searchDirectory
+    tags: [vaultLibrarian, search, directory]
+    question: "Find all files with 'config' in the name"
+    expect:
+      tool: vaultLibrarian_searchDirectory
+      params_include:
+        query: "config"
+
+  - id: vaultLibrarian_getRecentFiles
+    tags: [vaultLibrarian, recent]
+    question: "Show me the 10 most recently modified files"
+    expect:
+      tool: vaultLibrarian_getRecentFiles
+      params_include:
+        limit: 10
+
+  - id: vaultLibrarian_analyzeTags
+    tags: [vaultLibrarian, tags, analyze]
+    question: "Give me an overview of all tags used in my vault"
+    expect:
+      tool: vaultLibrarian_analyzeTags
+
+  - id: vaultLibrarian_findOrphanNotes
+    tags: [vaultLibrarian, orphan]
+    question: "Find notes that have no links to other notes"
+    expect:
+      tool: vaultLibrarian_findOrphanNotes
+
+  - id: vaultLibrarian_findBrokenLinks
+    tags: [vaultLibrarian, links]
+    question: "Check for any broken links in my vault"
+    expect:
+      tool: vaultLibrarian_findBrokenLinks
+
+# ============================================================
+# AGENT MANAGER TESTS
+# ============================================================
+
+  - id: agentManager_createAgent
+    tags: [agentManager, create]
+    question: "Create a new agent called 'ResearchBot' with the system prompt 'You are a research assistant'"
+    expect:
+      tool: agentManager_createAgent
+      params_include:
+        name: "ResearchBot"
+
+  - id: agentManager_deleteAgent
+    tags: [agentManager, delete]
+    question: "Delete the agent with ID agent_123"
+    expect:
+      tool: agentManager_deleteAgent
+      params_include:
+        agentId: "agent_123"
+
+  - id: agentManager_delegateToAgent
+    tags: [agentManager, delegate]
+    question: "Ask agent_456 to summarize the project notes"
+    expect:
+      tool: agentManager_delegateToAgent
+      params_include:
+        agentId: "agent_456"
+
+  - id: agentManager_listAgents
+    tags: [agentManager, list]
+    question: "List all available agents"
+    expect:
+      tool: agentManager_listAgents
+
+  - id: agentManager_getAgentStatus
+    tags: [agentManager, status]
+    question: "What's the status of agent_789?"
+    expect:
+      tool: agentManager_getAgentStatus
+      params_include:
+        agentId: "agent_789"
+
+# ============================================================
+# MEMORY MANAGER TESTS
+# ============================================================
+
+  - id: memoryManager_storeMemory
+    tags: [memoryManager, store]
+    question: "Remember that the project deadline is January 15th"
+    expect:
+      tool: memoryManager_storeMemory
+
+  - id: memoryManager_recallMemory
+    tags: [memoryManager, recall]
+    question: "What was the project deadline I mentioned?"
+    expect:
+      tool: memoryManager_recallMemory
+
+  - id: memoryManager_searchMemory
+    tags: [memoryManager, search]
+    question: "Search my memories for anything about deadlines"
+    expect:
+      tool: memoryManager_searchMemory
+      params_include:
+        query: "deadlines"
+
+  - id: memoryManager_deleteMemory
+    tags: [memoryManager, delete]
+    question: "Forget what I told you about the old password"
+    expect:
+      tool: memoryManager_deleteMemory
+
+  - id: memoryManager_listMemories
+    tags: [memoryManager, list]
+    question: "Show me all the things you remember"
+    expect:
+      tool: memoryManager_listMemories

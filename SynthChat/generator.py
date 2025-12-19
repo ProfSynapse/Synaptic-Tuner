@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
 from .utils.yaml_loader import load_yaml
+from .utils.docs_loader import DocFile
 from .engine import ImprovementEngine
 
 
@@ -128,7 +129,8 @@ class SynthChatGenerator:
         self,
         targets: Dict[str, int],  # {scenario_key: count}
         max_iterations: int = 3,
-        randomize_params: bool = True
+        randomize_params: bool = True,
+        doc_context: Optional[DocFile] = None
     ) -> List[GenerationResult]:
         """
         Generate a batch of examples from scenario targets.
@@ -137,6 +139,8 @@ class SynthChatGenerator:
             targets: Dictionary mapping scenario keys to counts
             max_iterations: Max improvement iterations per stage
             randomize_params: Whether to randomize LLM parameters
+            doc_context: Optional document context for template variables
+                        Makes {doc_content} and {doc_path} available in prompts
 
         Returns:
             List of GenerationResult objects
@@ -162,7 +166,8 @@ class SynthChatGenerator:
                     scenario_key,
                     scenario,
                     max_iterations,
-                    randomize_params
+                    randomize_params,
+                    doc_context
                 )
                 results.append(result)
 
@@ -173,7 +178,8 @@ class SynthChatGenerator:
         scenario_key: str,
         scenario: Dict,
         max_iterations: int,
-        randomize_params: bool
+        randomize_params: bool,
+        doc_context: Optional[DocFile] = None
     ) -> GenerationResult:
         """
         Generate a single example through stage-by-stage pipeline.
@@ -188,11 +194,26 @@ class SynthChatGenerator:
             scenario: Scenario configuration
             max_iterations: Max improvement iterations per stage
             randomize_params: Whether to randomize LLM parameters
+            doc_context: Optional document context for template variables
 
         Returns:
             GenerationResult with final example and metrics
         """
         prompts = scenario.get("prompts", {})
+
+        # Build template variables from doc context
+        template_vars = {}
+        if doc_context:
+            template_vars["doc_content"] = doc_context.content
+            template_vars["doc_path"] = doc_context.path
+
+        def render_prompt(prompt: str) -> str:
+            """Render template variables in prompt."""
+            result = prompt
+            for key, value in template_vars.items():
+                result = result.replace(f"{{{key}}}", value)
+            return result
+
         example = {"conversations": []}
         stage_failures = []
         total_iterations = 0
@@ -201,7 +222,7 @@ class SynthChatGenerator:
         system_enabled = scenario.get("system", True)
         if system_enabled and isinstance(system_enabled, bool):
             # Generate system prompt
-            system_prompt = prompts.get("system", "")
+            system_prompt = render_prompt(prompts.get("system", ""))
             system_content = self._call_llm(system_prompt, randomize_params)
 
             # Add to conversations
@@ -235,7 +256,7 @@ class SynthChatGenerator:
                 })
 
         # Stage 2: User request
-        user_prompt = prompts.get("user", "")
+        user_prompt = render_prompt(prompts.get("user", ""))
         # Pass current example as context for user generation
         user_context = self._build_user_context(example)
         user_content = self._call_llm(f"{user_context}\n\n{user_prompt}", randomize_params)
@@ -259,7 +280,7 @@ class SynthChatGenerator:
                 stage_failures.append("user")
 
         # Stage 3: Assistant response
-        assistant_prompt = prompts.get("assistant", "")
+        assistant_prompt = render_prompt(prompts.get("assistant", ""))
         assistant_context = self._build_assistant_context(example, scenario)
         assistant_content = self._call_llm(
             f"{assistant_context}\n\n{assistant_prompt}",
@@ -289,6 +310,8 @@ class SynthChatGenerator:
             "type": scenario.get("type", "unknown"),
             "generated_at": datetime.utcnow().isoformat()
         }
+        if doc_context:
+            example["metadata"]["source_doc"] = doc_context.path
 
         return GenerationResult(
             example=example,
@@ -365,13 +388,17 @@ class SynthChatGenerator:
         conversations = example.get("conversations", [])
         context_parts = []
 
-        # System context
-        if conversations and conversations[0]["role"] == "system":
-            context_parts.append(f"Workspace context:\n{conversations[0]['content']}")
+        # System context (if present)
+        for msg in conversations:
+            if msg["role"] == "system":
+                context_parts.append(f"Workspace context:\n{msg['content']}")
+                break
 
-        # User request
-        if len(conversations) > 1:
-            context_parts.append(f"User request:\n{conversations[-1]['content']}")
+        # User request (find the last user message)
+        for msg in reversed(conversations):
+            if msg["role"] == "user":
+                context_parts.append(f"User request:\n{msg['content']}")
+                break
 
         # Scenario hints
         scenario_type = scenario.get("type", "")

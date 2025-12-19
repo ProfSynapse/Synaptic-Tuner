@@ -1,0 +1,164 @@
+# Evaluation Run Configuration
+# Defines how to run evaluations - scenarios, model, output, scoring
+
+# ============================================================
+# RUN CONFIGURATION
+# ============================================================
+
+run:
+  name: "Tool Evaluation Suite"
+  description: "Comprehensive evaluation of tool-calling capabilities"
+
+  # Which scenario files to run (relative to config/scenarios/)
+  scenarios:
+    - tool_coverage.yaml
+    - behavior_tests.yaml
+
+  # Filter tests by tags (optional)
+  # Only runs tests matching ANY of these tags
+  # Omit or set to [] to run all tests
+  tag_filter: []
+
+  # Exclude tests with these tags
+  exclude_tags:
+    - skip
+    - wip
+
+# ============================================================
+# MODEL CONFIGURATION
+# ============================================================
+
+model:
+  # Backend to use: lmstudio, ollama, openrouter, unsloth
+  backend: lmstudio
+
+  # Model name (backend-specific)
+  name: "qwen2.5-7b-instruct"
+
+  # Backend connection settings
+  connection:
+    host: "localhost"
+    port: 1234
+    # For openrouter:
+    # api_key: "${OPENROUTER_API_KEY}"
+
+  # Inference settings
+  inference:
+    temperature: 0.7
+    max_tokens: 2048
+    seed: 42  # For reproducibility
+
+# ============================================================
+# OUTPUT CONFIGURATION
+# ============================================================
+
+output:
+  # Output directory (relative to Evaluator/)
+  directory: "results/{timestamp}"
+
+  # Output formats to generate
+  formats:
+    - json       # Full results with all details
+    - markdown   # Human-readable summary
+    - csv        # For spreadsheet analysis
+
+  # Include raw responses in output
+  include_raw_responses: true
+
+  # Include failed cases details
+  include_failure_details: true
+
+# ============================================================
+# SCORING CONFIGURATION
+# ============================================================
+
+scoring:
+  # Minimum pass rate to consider run successful
+  pass_threshold: 0.8
+
+  # Weight different aspects of validation
+  weights:
+    # Tool called correctly
+    tool_correct: 1.0
+
+    # Parameters match expected
+    params_correct: 0.5
+
+    # Behavior check passed
+    behavior_pass: 0.3
+
+    # Response type matched
+    response_type_match: 0.2
+
+  # How to combine scores
+  combination: "weighted_average"  # or "all_must_pass"
+
+  # Per-category thresholds (optional)
+  category_thresholds:
+    vaultManager: 0.85
+    contentManager: 0.80
+    vaultLibrarian: 0.75
+    behavior: 0.70
+
+# ============================================================
+# EXECUTION SETTINGS
+# ============================================================
+
+execution:
+  # Parallel execution (if backend supports)
+  parallel: false
+  max_workers: 4
+
+  # Timeout per request (seconds)
+  timeout: 60
+
+  # Retry failed requests
+  retry:
+    enabled: true
+    max_attempts: 2
+    delay_seconds: 1
+
+  # Progress reporting
+  progress:
+    show_progress_bar: true
+    log_each_result: true
+    verbose: false
+
+# ============================================================
+# PRESETS
+# ============================================================
+# Named configurations for common scenarios
+
+presets:
+  quick:
+    description: "Quick smoke test"
+    scenarios:
+      - tool_coverage.yaml
+    tag_filter:
+      - vaultManager
+    model:
+      inference:
+        max_tokens: 512
+
+  full:
+    description: "Full evaluation suite"
+    scenarios:
+      - tool_coverage.yaml
+      - behavior_tests.yaml
+    scoring:
+      pass_threshold: 0.85
+
+  behavior_only:
+    description: "Behavior tests only"
+    scenarios:
+      - behavior_tests.yaml
+    scoring:
+      weights:
+        behavior_pass: 1.0
+        tool_correct: 0.5
+
+  strict:
+    description: "Strict validation"
+    scoring:
+      pass_threshold: 0.95
+      combination: "all_must_pass"

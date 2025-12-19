@@ -11,27 +11,28 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Type, Union
 
-from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings, UnslothSettings
+from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings
 from .enums import BackendType
 from .vllm_client import VLLMClient
 from .llamacpp_client import LlamaCppClient
 from .unsloth_client import UnslothClient
 from .protocols import BackendClient, BackendSettings
-from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter
+from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter, SharedOpenRouterAdapter
 
 # Type alias for settings types
-SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings]
-ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, UnslothClient]
+SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings]
+ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, UnslothClient, SharedOpenRouterAdapter]
 
 
 # Registry mapping backend types to their client and settings classes
-# Uses shared LLM adapters for LM Studio and Ollama (reduces code duplication)
+# Uses shared LLM adapters for LM Studio, Ollama, and OpenRouter (reduces code duplication)
 _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
     BackendType.OLLAMA: SharedOllamaAdapter,
     BackendType.LMSTUDIO: SharedLMStudioAdapter,
     BackendType.VLLM: VLLMClient,
     BackendType.LLAMACPP: LlamaCppClient,
     BackendType.UNSLOTH: UnslothClient,
+    BackendType.OPENROUTER: SharedOpenRouterAdapter,
 }
 
 _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
@@ -40,6 +41,7 @@ _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
     BackendType.VLLM: VLLMSettings,
     BackendType.LLAMACPP: LlamaCppSettings,
     BackendType.UNSLOTH: UnslothSettings,
+    BackendType.OPENROUTER: OpenRouterSettings,
 }
 
 

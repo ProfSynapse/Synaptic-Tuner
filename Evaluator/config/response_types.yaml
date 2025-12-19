@@ -1,0 +1,138 @@
+# Response Types Configuration
+# Defines what valid responses look like
+# Used to validate response format without hardcoding in Python
+
+# ============================================================
+# RESPONSE TYPE DEFINITIONS
+# ============================================================
+
+response_types:
+  # Tool call only - no explanatory text
+  tool_only:
+    description: "Response contains only tool call(s), minimal or no explanation"
+    requirements:
+      has_tool_calls: true
+      text_content:
+        max_length: 50  # Allow minimal formatting/acknowledgment
+        # e.g., "Done." or "Here you go:" is fine
+
+  # Tool call with explanation
+  tool_with_explanation:
+    description: "Tool call accompanied by explanation before/after"
+    requirements:
+      has_tool_calls: true
+      text_content:
+        min_length: 30  # Must have meaningful explanation
+
+  # Text only - no tool calls
+  text_only:
+    description: "Pure text response, no tool calls"
+    requirements:
+      has_tool_calls: false
+      text_content:
+        min_length: 10
+
+  # Clarification request
+  clarification:
+    description: "Asking user for more information before acting"
+    requirements:
+      has_tool_calls: false
+      text_content:
+        contains_any:
+          - "?"
+          - "which"
+          - "what"
+          - "could you"
+          - "can you clarify"
+          - "please specify"
+          - "would you like"
+          - "do you mean"
+          - "did you mean"
+
+  # Confirmation before destructive action
+  confirmation_request:
+    description: "Asking for confirmation before proceeding with destructive action"
+    requirements:
+      has_tool_calls: false
+      text_content:
+        contains_any:
+          - "confirm"
+          - "are you sure"
+          - "proceed"
+          - "this will delete"
+          - "this action"
+          - "cannot be undone"
+          - "irreversible"
+
+  # Multi-tool batch operation
+  batch_operation:
+    description: "Response with multiple tool calls (batch)"
+    requirements:
+      has_tool_calls: true
+      min_tool_calls: 2
+      text_content:
+        optional: true  # May or may not have explanation
+
+  # Information gathering (search/read before action)
+  information_gathering:
+    description: "Using search/read tools to gather information first"
+    requirements:
+      has_tool_calls: true
+      tool_categories:
+        any_of:
+          - search    # vaultLibrarian_search*
+          - read      # contentManager_readContent
+          - list      # vaultManager_listDirectory
+
+  # Error recovery response
+  error_recovery:
+    description: "Response after encountering an error"
+    requirements:
+      text_content:
+        contains_any:
+          - "error"
+          - "failed"
+          - "couldn't"
+          - "unable"
+          - "try"
+          - "instead"
+          - "alternative"
+
+# ============================================================
+# RESPONSE TYPE ALIASES
+# ============================================================
+# Shorthand for common combinations
+
+aliases:
+  # Model should act directly
+  direct_action: tool_only
+
+  # Model should think then act
+  thoughtful_action: tool_with_explanation
+
+  # Model should ask first
+  ask_first: clarification
+
+  # Model should verify before destructive action
+  verify_first: confirmation_request
+
+  # Model doing batch work
+  batch: batch_operation
+
+  # Model gathering info
+  research: information_gathering
+
+# ============================================================
+# DEFAULT BEHAVIORS
+# ============================================================
+# What to expect when response_type not specified
+
+defaults:
+  # Default expected response type if not specified
+  default_type: tool_with_explanation
+
+  # How strict to be about text length requirements
+  text_length_tolerance: 0.2  # 20% tolerance
+
+  # Whether to fail on unexpected response type
+  strict_type_matching: false

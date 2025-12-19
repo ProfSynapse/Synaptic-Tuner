@@ -783,7 +783,10 @@
         "ws_1732300800000_atlasroll"
       ],
       "agent_ids": []
-    }
+    },
+    "acceptable_tools": [
+      "TEXT_ONLY"
+    ]
   },
   {
     "id": "RP_text_only_error_clarification",
@@ -813,7 +816,10 @@
         "ws_1732300800000_atlasroll"
       ],
       "agent_ids": []
-    }
+    },
+    "acceptable_tools": [
+      "TEXT_ONLY"
+    ]
   },
   {
     "id": "RP_text_only_empty_results",
@@ -843,7 +849,10 @@
         "ws_1732300800000_atlasroll"
       ],
       "agent_ids": []
-    }
+    },
+    "acceptable_tools": [
+      "TEXT_ONLY"
+    ]
   },
   {
     "id": "RP_text_only_confirmation_needed",
@@ -871,7 +880,10 @@
         "ws_1732300800000_atlasroll"
       ],
       "agent_ids": []
-    }
+    },
+    "acceptable_tools": [
+      "TEXT_ONLY"
+    ]
   },
   {
     "id": "RP_tool_only_clear_single_target",

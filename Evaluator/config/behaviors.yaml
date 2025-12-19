@@ -1,0 +1,318 @@
+# Behaviors Configuration
+# Defines reusable behavior checks for test scenarios
+# All checks are generic - no hardcoded tool names
+
+# ============================================================
+# BEHAVIOR CHECK DEFINITIONS
+# ============================================================
+# Each behavior maps to a generic check function with parameters.
+# Tests reference these by name and can override params.
+
+behaviors:
+
+  # --------------------------------------------------------
+  # TOOL-RELATED CHECKS
+  # --------------------------------------------------------
+
+  # Check if a specific tool was called
+  uses_tool:
+    check: tool_called
+    params:
+      tool: "{tool_name}"  # Parameterized - filled in by test
+
+  # Check if any of specified tools was called (OR logic)
+  uses_any_of_tools:
+    check: any_tool_called
+    params:
+      tools: "{tool_list}"
+
+  # Check if all specified tools were called (AND logic)
+  uses_all_tools:
+    check: all_tools_called
+    params:
+      tools: "{tool_list}"
+
+  # Check tool call count
+  calls_multiple_tools:
+    check: tool_count
+    params:
+      min: 2
+      max: null  # No upper limit
+
+  calls_single_tool:
+    check: tool_count
+    params:
+      min: 1
+      max: 1
+
+  # Check tool parameters
+  tool_has_params:
+    check: tool_params_present
+    params:
+      tool: "{tool_name}"
+      required_params: "{param_list}"
+
+  # Check tool NOT called (anti-pattern)
+  avoids_tool:
+    check: tool_not_called
+    params:
+      tool: "{tool_name}"
+
+  # --------------------------------------------------------
+  # CONTEXT CHECKS
+  # --------------------------------------------------------
+
+  # All required context fields present
+  context_complete:
+    check: fields_present
+    params:
+      in: context
+      fields:
+        - sessionId
+        - workspaceId
+        - memory
+        - goal
+
+  # Context has meaningful content
+  context_populated:
+    check: fields_min_length
+    params:
+      in: context
+      fields:
+        memory: 10
+        goal: 5
+
+  # Session ID matches expected
+  session_id_matches:
+    check: field_equals
+    params:
+      in: context
+      field: sessionId
+      value: "{expected_session_id}"
+
+  # Workspace ID matches expected
+  workspace_id_matches:
+    check: field_equals
+    params:
+      in: context
+      field: workspaceId
+      value: "{expected_workspace_id}"
+
+  # --------------------------------------------------------
+  # TEXT CONTENT CHECKS
+  # --------------------------------------------------------
+
+  # Response contains clarification question
+  asks_clarification:
+    check: text_contains_any
+    params:
+      patterns:
+        - "?"
+        - "which"
+        - "what"
+        - "clarify"
+        - "specify"
+        - "could you"
+        - "would you"
+
+  # Response explains reasoning
+  explains_reasoning:
+    check: text_min_length
+    params:
+      min: 50
+
+  # Response is concise
+  minimal_text:
+    check: text_max_length
+    params:
+      max: 30
+
+  # Response mentions a file
+  mentions_file:
+    check: text_matches
+    params:
+      pattern: "\\b[\\w/\\-]+\\.(md|txt|json|yaml)\\b"
+
+  # Response mentions a path
+  mentions_path:
+    check: text_matches
+    params:
+      pattern: "\\b[\\w/\\-]+/[\\w/\\-]+\\b"
+
+  # Response contains specific text
+  contains_text:
+    check: text_contains
+    params:
+      text: "{expected_text}"
+
+  # Response does NOT contain text (anti-pattern)
+  avoids_text:
+    check: text_not_contains
+    params:
+      patterns: "{forbidden_patterns}"
+
+  # --------------------------------------------------------
+  # BEHAVIORAL PATTERNS
+  # --------------------------------------------------------
+
+  # Verifies before destructive action (search/list first)
+  verifies_before_delete:
+    check: tool_sequence
+    params:
+      first_any_of:
+        - vaultManager_listDirectory
+        - vaultLibrarian_searchContent
+        - vaultLibrarian_searchDirectory
+        - contentManager_readContent
+      not_first:
+        - vaultManager_deleteFolder
+        - vaultManager_deleteNote
+        - contentManager_deleteLines
+
+  # Reads before writing
+  reads_before_write:
+    check: tool_sequence
+    params:
+      first_any_of:
+        - contentManager_readContent
+      before:
+        - contentManager_writeContent
+        - contentManager_replaceByLine
+        - contentManager_insertAtLine
+
+  # Searches before acting on ambiguous request
+  searches_first:
+    check: tool_sequence
+    params:
+      first_any_of:
+        - vaultLibrarian_searchContent
+        - vaultLibrarian_searchDirectory
+        - vaultLibrarian_searchByTags
+
+  # --------------------------------------------------------
+  # ERROR RECOVERY CHECKS
+  # --------------------------------------------------------
+
+  # Suggests alternative approach
+  suggests_alternative:
+    check: text_contains_any
+    params:
+      patterns:
+        - "instead"
+        - "alternative"
+        - "try"
+        - "another"
+        - "different"
+
+  # Acknowledges limitation
+  acknowledges_limitation:
+    check: text_contains_any
+    params:
+      patterns:
+        - "cannot"
+        - "can't"
+        - "unable"
+        - "not possible"
+        - "limitation"
+
+  # --------------------------------------------------------
+  # BATCH OPERATION CHECKS
+  # --------------------------------------------------------
+
+  # Response uses batch format correctly
+  valid_batch_format:
+    check: batch_structure
+    params:
+      min_calls: 2
+      strategy_valid: true
+
+  # Batch uses serial strategy
+  batch_serial:
+    check: batch_strategy
+    params:
+      strategy: "serial"
+
+  # Batch uses parallel strategy
+  batch_parallel:
+    check: batch_strategy
+    params:
+      strategy: "parallel"
+
+# ============================================================
+# CHECK TYPE IMPLEMENTATIONS
+# ============================================================
+# Documents what each check type does. The Python validator
+# implements these generically based on check type.
+
+check_types:
+  tool_called:
+    description: "Check if specific tool was called"
+    params: [tool]
+
+  any_tool_called:
+    description: "Check if any of the tools were called (OR)"
+    params: [tools]
+
+  all_tools_called:
+    description: "Check if all tools were called (AND)"
+    params: [tools]
+
+  tool_not_called:
+    description: "Check that tool was NOT called"
+    params: [tool]
+
+  tool_count:
+    description: "Check number of tool calls"
+    params: [min, max]
+
+  tool_params_present:
+    description: "Check tool has required params"
+    params: [tool, required_params]
+
+  tool_sequence:
+    description: "Check tool call ordering"
+    params: [first_any_of, before, not_first]
+
+  fields_present:
+    description: "Check fields exist in object"
+    params: [in, fields]
+
+  fields_min_length:
+    description: "Check field values have min length"
+    params: [in, fields]
+
+  field_equals:
+    description: "Check field equals expected value"
+    params: [in, field, value]
+
+  text_contains:
+    description: "Check text contains substring"
+    params: [text]
+
+  text_contains_any:
+    description: "Check text contains any of patterns"
+    params: [patterns]
+
+  text_not_contains:
+    description: "Check text does NOT contain patterns"
+    params: [patterns]
+
+  text_matches:
+    description: "Check text matches regex"
+    params: [pattern]
+
+  text_min_length:
+    description: "Check text meets min length"
+    params: [min]
+
+  text_max_length:
+    description: "Check text under max length"
+    params: [max]
+
+  batch_structure:
+    description: "Check batch operation structure"
+    params: [min_calls, strategy_valid]
+
+  batch_strategy:
+    description: "Check batch uses specific strategy"
+    params: [strategy]

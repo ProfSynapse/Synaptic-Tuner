@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from shared.llm import create_client
 from .utils.yaml_loader import load_yaml
+from .utils.docs_loader import DocsLoader, DocFile
 from .engine import ImprovementEngine
 from .generator import SynthChatGenerator, ScenarioLoader
 
@@ -118,13 +119,40 @@ def generate_mode(args):
         print(f"  {scenario_key}: {count}")
     print(f"Total: {sum(targets.values())} examples\n")
 
+    # Load docs if provided
+    docs: List[DocFile] = []
+    if args.docs:
+        print(f"Loading docs from: {args.docs}")
+        docs = DocsLoader().load(args.docs)
+        print(f"Loaded {len(docs)} document(s)")
+        print(f"Will generate {args.per_doc} example(s) per doc\n")
+
     # Generate
     max_iterations = args.max_iterations or settings["improvement"]["max_iterations"]
-    results = generator.generate_batch(
-        targets=targets,
-        max_iterations=max_iterations,
-        randomize_params=True
-    )
+    results = []
+
+    if docs:
+        # Docs-based generation: loop through each doc
+        total_docs = len(docs)
+        for doc_idx, doc in enumerate(docs, 1):
+            print(f"\n--- Document {doc_idx}/{total_docs}: {doc.path} ---")
+            for rep in range(args.per_doc):
+                if args.per_doc > 1:
+                    print(f"  Repetition {rep + 1}/{args.per_doc}")
+                batch_results = generator.generate_batch(
+                    targets=targets,
+                    max_iterations=max_iterations,
+                    randomize_params=True,
+                    doc_context=doc
+                )
+                results.extend(batch_results)
+    else:
+        # Standard generation (no docs)
+        results = generator.generate_batch(
+            targets=targets,
+            max_iterations=max_iterations,
+            randomize_params=True
+        )
 
     # Save results
     output_file = args.output or _generate_output_path(settings)
@@ -446,6 +474,8 @@ def main():
     generate_parser.add_argument("--targets-file", help="JSON file with generation targets")
     generate_parser.add_argument("--scenarios", nargs="+", help="Specific scenarios to generate")
     generate_parser.add_argument("--max-iterations", type=int, help="Max improvement iterations")
+    generate_parser.add_argument("--docs", help="Path to doc file or folder (seed data for generation)")
+    generate_parser.add_argument("--per-doc", type=int, default=1, help="Examples to generate per doc (default: 1)")
 
     # Improve command
     improve_parser = subparsers.add_parser("improve", help="Improve existing dataset")

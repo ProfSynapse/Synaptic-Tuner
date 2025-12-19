@@ -57,6 +57,9 @@ class BackendType(str, Enum):
     UNSLOTH = "unsloth"
     """Direct Unsloth/LoRA inference (loads adapter on base model)."""
 
+    OPENROUTER = "openrouter"
+    """OpenRouter API (cloud inference with multiple model providers)."""
+
     def __str__(self) -> str:
         return self.value
 

@@ -1,0 +1,22 @@
+# Test scenario for docs-based generation
+# Uses {doc_content} and {doc_path} template variables
+
+scenarios:
+  docs_qa_test:
+    type: docs_based
+    system: false  # Skip system prompt generation for this test
+
+    prompts:
+      user: |
+        Based on the following documentation, generate a realistic user question that someone learning this topic might ask. The question should be specific and answerable from the documentation.
+
+        <documentation>
+        {doc_content}
+        </documentation>
+
+        Generate ONLY the user question, nothing else. Be natural and conversational.
+
+      assistant: |
+        You are a helpful assistant. Answer the user's question based on the documentation provided in the context. Be concise but thorough.
+
+        If you need to reason through the answer, use a <thinking> block first.

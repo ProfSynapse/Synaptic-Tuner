@@ -43,6 +43,7 @@ from .config import (
     expand_path,
     parse_tags,
 )
+from .config_loader import ConfigLoader, load_yaml_scenarios
 from .prompt_sets import filter_prompts, load_prompt_cases
 from .reporting import (
     build_run_payload,
@@ -68,12 +69,29 @@ Backend Configuration:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio", "llamacpp", "unsloth"],
+        choices=["ollama", "lmstudio", "llamacpp", "unsloth", "openrouter"],
         default="ollama",
         help="Backend to use for evaluation (default: ollama)",
     )
     parser.add_argument("--model", required=True, help="Model name (e.g., claudesidian-mcp)")
-    parser.add_argument("--prompt-set", default="Evaluator/prompts/baseline.json", help="Path to prompt set file")
+    parser.add_argument("--prompt-set", default="Evaluator/prompts/baseline.json", help="Path to prompt set file (JSON)")
+
+    # YAML config-driven options
+    parser.add_argument(
+        "--config-dir",
+        default="Evaluator/config",
+        help="Path to YAML config directory (default: Evaluator/config)",
+    )
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        dest="scenarios",
+        help="YAML scenario file(s) to run (can specify multiple). Overrides --prompt-set",
+    )
+    parser.add_argument(
+        "--preset",
+        help="Preset from eval_run.yaml (e.g., 'quick', 'full', 'behavior_only')",
+    )
     parser.add_argument("--tags", help="Comma-separated tag filter")
     parser.add_argument("--limit", type=int, help="Max prompts to evaluate")
     parser.add_argument("--temperature", type=float, default=0.2)
@@ -120,29 +138,61 @@ def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
 
     # Resolve paths
-    prompt_path = expand_path(args.prompt_set)
     output_path = expand_path(args.output) if args.output else default_output_path()
     markdown_path = expand_path(args.markdown) if args.markdown else None
+    config_dir = expand_path(args.config_dir)
 
-    # Build configuration
-    prompt_filter = PromptFilter(tags=parse_tags(args.tags), limit=args.limit)
-    config = EvaluatorConfig(
-        prompts_path=prompt_path,
-        output_path=output_path,
-        save_markdown=bool(markdown_path),
-        filter=prompt_filter,
-        retries=args.retries,
-        request_timeout=args.timeout,
-        dry_run=args.dry_run,
-    )
-    config.validate()
+    # Determine if using YAML scenarios or JSON prompt-set
+    use_yaml = args.scenarios or args.preset
+
+    if use_yaml:
+        # Load from YAML config system
+        tag_filter = parse_tags(args.tags) if args.tags else None
+        selected_cases = load_yaml_scenarios(
+            config_dir=config_dir,
+            scenario_files=args.scenarios,
+            preset=args.preset,
+            tag_filter=tag_filter,
+        )
+
+        if args.limit and len(selected_cases) > args.limit:
+            selected_cases = selected_cases[:args.limit]
+
+        # Build minimal config for output paths
+        config = EvaluatorConfig(
+            prompts_path=config_dir / "scenarios",  # For metadata
+            output_path=output_path,
+            save_markdown=bool(markdown_path),
+            filter=PromptFilter(tags=tag_filter, limit=args.limit),
+            retries=args.retries,
+            request_timeout=args.timeout,
+            dry_run=args.dry_run,
+        )
+        prompt_path = config_dir / "scenarios"  # For reporting
+        total_cases = len(selected_cases)  # No separate total when using YAML
+    else:
+        # Load from JSON prompt-set (original behavior)
+        prompt_path = expand_path(args.prompt_set)
+        prompt_filter = PromptFilter(tags=parse_tags(args.tags), limit=args.limit)
+        config = EvaluatorConfig(
+            prompts_path=prompt_path,
+            output_path=output_path,
+            save_markdown=bool(markdown_path),
+            filter=prompt_filter,
+            retries=args.retries,
+            request_timeout=args.timeout,
+            dry_run=args.dry_run,
+        )
+        config.validate()
+
+        # Load and filter prompts
+        cases = load_prompt_cases(config.prompts_path)
+        selected_cases = filter_prompts(cases, config.filter)
+        total_cases = len(cases)
+
     config.ensure_output_parent()
     if markdown_path:
         markdown_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Load and filter prompts
-    cases = load_prompt_cases(config.prompts_path)
-    selected_cases = filter_prompts(cases, config.filter)
     if not selected_cases:
         print("No prompts matched the provided filters.", file=sys.stderr)
         return 1
@@ -213,7 +263,7 @@ def main(argv: List[str] | None = None) -> int:
     print()  # Blank line before summary
 
     # Build and save results
-    metadata = build_metadata(config, settings, len(cases), len(selected_cases), args.backend)
+    metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
     payload = build_run_payload(records, metadata=metadata)
     write_json(config.output_path, payload)
     print(f"Results saved to {config.output_path}")

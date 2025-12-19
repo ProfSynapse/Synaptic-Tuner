@@ -261,6 +261,39 @@ class UnslothSettings:
 
 
 @dataclass
+class OpenRouterSettings:
+    """Settings for OpenRouter API (cloud inference).
+
+    OpenRouter provides access to multiple model providers through a single API.
+    Requires OPENROUTER_API_KEY environment variable.
+
+    Environment variables:
+    - OPENROUTER_API_KEY: Your OpenRouter API key (required)
+
+    Attributes:
+        model: Model ID (e.g., "qwen/qwen-2.5-72b-instruct", "anthropic/claude-3.5-sonnet")
+        temperature: Sampling temperature
+        top_p: Top-p sampling
+        max_tokens: Maximum tokens to generate
+        seed: Optional random seed
+    """
+
+    model: str  # OpenRouter model ID
+    temperature: float = 0.2
+    top_p: float = 0.9
+    max_tokens: int = 1024
+    seed: Optional[int] = None
+
+    # Required by BackendSettings protocol but not used for API
+    host: str = field(default="openrouter.ai")
+    port: int = field(default=443)
+
+    def base_url(self) -> str:
+        """Return OpenRouter API base URL."""
+        return "https://openrouter.ai/api/v1"
+
+
+@dataclass
 class LlamaCppSettings:
     """Settings for llama.cpp direct execution via llama-cli.
 
