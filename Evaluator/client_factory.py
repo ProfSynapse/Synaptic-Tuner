@@ -15,23 +15,22 @@ from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSett
 from .enums import BackendType
 from .vllm_client import VLLMClient
 from .llamacpp_client import LlamaCppClient
-from .unsloth_client import UnslothClient
 from .protocols import BackendClient, BackendSettings
-from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter, SharedOpenRouterAdapter
+from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter, SharedOpenRouterAdapter, SharedUnslothAdapter
 
 # Type alias for settings types
 SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings]
-ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, UnslothClient, SharedOpenRouterAdapter]
+ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, SharedUnslothAdapter, SharedOpenRouterAdapter]
 
 
 # Registry mapping backend types to their client and settings classes
-# Uses shared LLM adapters for LM Studio, Ollama, and OpenRouter (reduces code duplication)
+# Uses shared LLM adapters for LM Studio, Ollama, OpenRouter, and Unsloth (reduces code duplication)
 _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
     BackendType.OLLAMA: SharedOllamaAdapter,
     BackendType.LMSTUDIO: SharedLMStudioAdapter,
     BackendType.VLLM: VLLMClient,
     BackendType.LLAMACPP: LlamaCppClient,
-    BackendType.UNSLOTH: UnslothClient,
+    BackendType.UNSLOTH: SharedUnslothAdapter,
     BackendType.OPENROUTER: SharedOpenRouterAdapter,
 }
 

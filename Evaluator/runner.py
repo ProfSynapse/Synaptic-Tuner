@@ -37,16 +37,36 @@ class EvaluationRecord:
     behavior: Optional[BehaviorValidationResult] = None
 
     @property
-    def passed(self) -> bool:
-        """Check if evaluation passed all validations."""
+    def status(self) -> str:
+        """Get evaluation status: 'pass', 'warn', or 'fail'.
+
+        - pass: Tool correct + behavior expectations met (or no behavior expectations)
+        - warn: Tool correct + behavior expectations NOT met
+        - fail: Tool incorrect OR error
+        """
         if self.error is not None:
-            return False
+            return "fail"
         if self.validator is None or not self.validator.passed:
-            return False
-        # If behavior expectations exist, behavior validation must also pass
+            return "fail"
+        # Schema passed - check behavior
         if self.behavior is not None and not self.behavior.passed:
-            return False
-        return True
+            return "warn"
+        return "pass"
+
+    @property
+    def passed(self) -> bool:
+        """Check if evaluation passed all validations (pass or warn)."""
+        return self.status in ("pass", "warn")
+
+    @property
+    def failed(self) -> bool:
+        """Check if evaluation hard-failed (tool incorrect or error)."""
+        return self.status == "fail"
+
+    @property
+    def warned(self) -> bool:
+        """Check if evaluation warned (tool correct but behavior failed)."""
+        return self.status == "warn"
 
     @property
     def schema_passed(self) -> bool:

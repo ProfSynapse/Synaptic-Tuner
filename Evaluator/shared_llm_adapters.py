@@ -15,7 +15,7 @@ from typing import Any, Dict, Mapping, Sequence
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
 
-from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings
+from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, UnslothSettings
 from .protocols import BackendError, BackendResponse
 from .base_client import extract_message_content
 
@@ -242,3 +242,118 @@ class SharedOpenRouterAdapter(SharedLLMAdapter):
                 print("Set it in your .env file or export it:")
                 print("  export OPENROUTER_API_KEY=sk-or-...")
         return is_running
+
+
+class SharedUnslothAdapter:
+    """Unsloth adapter using shared LLM client for direct LoRA inference.
+
+    This adapter wraps the shared UnslothClient to provide the Evaluator's
+    BackendClient interface. Unlike HTTP-based adapters, this loads the model
+    directly in-process.
+
+    Note: Does not inherit from SharedLLMAdapter because Unsloth requires
+    different initialization (adapter path instead of host/port).
+    """
+
+    settings: UnslothSettings  # Type narrowing
+
+    def __init__(
+        self,
+        settings: UnslothSettings,
+        timeout: float = 120.0,
+        retries: int = 2,
+    ):
+        """Initialize Unsloth adapter with shared LLM client.
+
+        Args:
+            settings: Unsloth settings with adapter path
+            timeout: Not used (kept for interface compatibility)
+            retries: Not used (kept for interface compatibility)
+        """
+        self.settings = settings
+        self.timeout = timeout
+        self.retries = retries
+        self.client: BaseLLMClient = None
+
+        # Create shared Unsloth client
+        try:
+            from shared.llm.providers.unsloth import UnslothClient as SharedUnslothClient
+
+            self.client = SharedUnslothClient(
+                adapter_path=settings.model,
+                max_seq_length=settings.max_seq_length,
+                load_in_4bit=settings.load_in_4bit,
+                top_p=settings.top_p,
+            )
+        except LLMError as e:
+            raise BackendError(f"Failed to create Unsloth client: {e}")
+        except Exception as e:
+            raise BackendError(f"Failed to load model: {e}")
+
+    def chat(self, messages: Sequence[Mapping[str, str]]) -> BackendResponse:
+        """Send chat request and return BackendResponse.
+
+        Args:
+            messages: Chat messages
+
+        Returns:
+            BackendResponse with latency and raw data
+
+        Raises:
+            BackendError: If inference fails
+        """
+        if self.client is None:
+            raise BackendError("Model not loaded")
+
+        try:
+            start = time.perf_counter()
+
+            # Use shared client's chat method
+            response_text = self.client.chat(
+                messages=list(messages),
+                temperature=self.settings.temperature,
+                max_tokens=self.settings.max_tokens
+            )
+
+            latency_s = time.perf_counter() - start
+
+            return BackendResponse(
+                message=response_text,
+                raw={
+                    "content": response_text,
+                    "model": self.settings.model,
+                },
+                latency_s=latency_s
+            )
+
+        except LLMError as e:
+            raise BackendError(f"Inference failed: {e}")
+
+    def is_server_running(self) -> bool:
+        """Check if model is loaded (no server for Unsloth).
+
+        Returns:
+            True if model is loaded and ready
+        """
+        if self.client is None:
+            return False
+        try:
+            return self.client.test_connection()
+        except Exception:
+            return False
+
+    def list_models(self) -> list:
+        """Return the loaded model/adapter."""
+        if self.client:
+            return self.client.list_models()
+        return []
+
+    def unload(self) -> None:
+        """Unload the model to free memory."""
+        if self.client and hasattr(self.client, 'unload'):
+            self.client.unload()
+            self.client = None
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        self.unload()

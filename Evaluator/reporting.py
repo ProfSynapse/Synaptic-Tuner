@@ -12,22 +12,32 @@ from .runner import EvaluationRecord
 
 def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     total = len(records)
-    passed = sum(1 for record in records if record.passed)
     errors = sum(1 for record in records if record.error)
+
+    # Count by status: pass, warn, fail
+    status_counts = Counter(record.status for record in records)
+    passed = status_counts.get("pass", 0)
+    warned = status_counts.get("warn", 0)
+    failed = status_counts.get("fail", 0)
 
     # Track schema vs behavior pass rates separately
     schema_passed = sum(1 for record in records if record.schema_passed)
     behavior_tested = sum(1 for record in records if record.behavior is not None)
     behavior_passed = sum(1 for record in records if record.behavior_passed and record.behavior is not None)
 
-    by_tag = defaultdict(lambda: {"total": 0, "passed": 0, "schema_passed": 0, "behavior_passed": 0, "behavior_tested": 0})
+    by_tag = defaultdict(lambda: {"total": 0, "passed": 0, "warned": 0, "failed": 0, "schema_passed": 0, "behavior_passed": 0, "behavior_tested": 0})
     for record in records:
         tags = record.case.tags or ["__untagged__"]
         for tag in tags:
             bucket = by_tag[tag]
             bucket["total"] += 1
-            if record.passed:
+            status = record.status
+            if status == "pass":
                 bucket["passed"] += 1
+            elif status == "warn":
+                bucket["warned"] += 1
+            else:
+                bucket["failed"] += 1
             if record.schema_passed:
                 bucket["schema_passed"] += 1
             if record.behavior is not None:
@@ -57,7 +67,8 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     return {
         "total": total,
         "passed": passed,
-        "failed": total - passed,
+        "warned": warned,
+        "failed": failed,
         "request_errors": errors,
         "pass_rate": (passed / total) if total else 0,
         # Detailed breakdown
@@ -70,6 +81,8 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             tag: {
                 "total": bucket["total"],
                 "passed": bucket["passed"],
+                "warned": bucket["warned"],
+                "failed": bucket["failed"],
                 "pass_rate": (bucket["passed"] / bucket["total"]) if bucket["total"] else 0,
                 "schema_passed": bucket["schema_passed"],
                 "behavior_tested": bucket["behavior_tested"],
@@ -85,17 +98,27 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
 
 def console_summary(records: Sequence[EvaluationRecord]) -> str:
     stats = aggregate_stats(records)
+    # Build summary line with pass/warn/fail
+    summary_parts = [f"{stats['passed']} passed"]
+    if stats['warned'] > 0:
+        summary_parts.append(f"{stats['warned']} warned")
+    summary_parts.append(f"{stats['failed']} failed")
+
     lines = [
-        f"Evaluated {stats['total']} prompt(s): {stats['passed']} passed, {stats['failed']} failed.",
+        f"Evaluated {stats['total']} prompt(s): {', '.join(summary_parts)}.",
         f"  Schema validation: {stats['schema_passed']}/{stats['total']} ({stats['schema_pass_rate']*100:.1f}%)",
     ]
     if stats['behavior_tested'] > 0:
         lines.append(f"  Behavior validation: {stats['behavior_passed']}/{stats['behavior_tested']} ({stats['behavior_pass_rate']*100:.1f}%)")
     lines.append(f"Request errors: {stats['request_errors']}")
-    lines.append("Pass rate by tag:")
+    lines.append("Results by tag:")
     for tag, bucket in stats["by_tag"].items():
-        percent = bucket["pass_rate"] * 100
-        line = f"  - {tag}: {bucket['passed']}/{bucket['total']} ({percent:.1f}%)"
+        # Show pass/warn/fail counts
+        parts = [f"{bucket['passed']}P"]
+        if bucket["warned"] > 0:
+            parts.append(f"{bucket['warned']}W")
+        parts.append(f"{bucket['failed']}F")
+        line = f"  - {tag}: {'/'.join(parts)} ({bucket['total']} total)"
         if bucket["behavior_tested"] > 0:
             beh_pct = bucket["behavior_pass_rate"] * 100
             line += f" [behavior: {bucket['behavior_passed']}/{bucket['behavior_tested']} ({beh_pct:.1f}%)]"

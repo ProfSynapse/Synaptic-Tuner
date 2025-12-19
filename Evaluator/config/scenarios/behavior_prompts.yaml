@@ -250,6 +250,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_createWorkspace
+  acceptable_tools:
+  - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -347,6 +349,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_loadWorkspace
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -367,6 +371,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_loadWorkspace
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -416,6 +422,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_createWorkspace
+  acceptable_tools:
+  - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -489,6 +497,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultManager_moveNote
+  acceptable_tools:
+  - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -541,6 +551,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_createState
+  acceptable_tools:
+  - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -629,6 +641,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - memoryManager_loadWorkspace
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -705,6 +719,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -748,6 +764,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultManager_moveNote
+  acceptable_tools:
+  - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:

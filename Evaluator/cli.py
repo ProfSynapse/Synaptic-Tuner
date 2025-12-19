@@ -262,15 +262,19 @@ def main(argv: List[str] | None = None) -> int:
         if _RICH_AVAILABLE:
             line = Text()
             line.append("  ")
-            if record.passed:
+            status = record.status
+            if status == "pass":
                 line.append("✓ PASS", style="bold green")
+            elif status == "warn":
+                line.append("⚠ WARN", style="bold yellow")
             else:
                 line.append("✗ FAIL", style="bold red")
             line.append(f"  {name} ", style="white")
             line.append(f"({latency})", style="dim")
             _console.print(line)
 
-            if not record.passed:
+            # Show details for FAIL and WARN
+            if status in ("fail", "warn"):
                 if record.error:
                     _console.print(f"         [yellow]Error:[/yellow] {record.error}")
                 elif record.validator:
@@ -287,26 +291,44 @@ def main(argv: List[str] | None = None) -> int:
                                 text = text[:text_max_len] + "..."
                             _console.print(f"         [{clr_text}]{lbl_said}:[/{clr_text}] \"{text}\"")
 
-                    # Show expected tools
-                    expected = record.case.expected_tools or record.case.acceptable_tools
-                    if expected:
-                        exp_str = ', '.join(expected)
-                        if "TEXT_ONLY" in expected:
-                            exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
-                        _console.print(f"         [{clr_expected}]{lbl_expected}:[/{clr_expected}] {exp_str}")
+                    # Show expected tools (only for failures, not warns since tool was correct)
+                    if status == "fail":
+                        expected = record.case.expected_tools or record.case.acceptable_tools
+                        if expected:
+                            exp_str = ', '.join(expected)
+                            if "TEXT_ONLY" in expected:
+                                exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
+                            _console.print(f"         [{clr_expected}]{lbl_expected}:[/{clr_expected}] {exp_str}")
 
                     # Show concise reason using config-driven simplification
+                    shown_why = False
                     if record.validator.issues:
                         for issue in record.validator.issues:
                             msg = simplify_issue_message(issue.message, display_config)
                             if msg is None:
                                 continue
                             _console.print(f"         [{clr_why}]{lbl_why}:[/{clr_why}] {msg}")
+                            shown_why = True
+                            break
+
+                    # Also show behavior validation issues (for warns or if no schema issues)
+                    if not shown_why and record.behavior and not record.behavior.passed:
+                        for issue in record.behavior.issues:
+                            msg = simplify_issue_message(issue.message, display_config)
+                            if msg is None:
+                                continue
+                            _console.print(f"         [{clr_why}]{lbl_why}:[/{clr_why}] {msg}")
                             break
         else:
-            status = "✓ PASS" if record.passed else "✗ FAIL"
-            print(f"  {status}  {name} ({latency})")
-            if not record.passed:
+            status = record.status
+            if status == "pass":
+                status_str = "✓ PASS"
+            elif status == "warn":
+                status_str = "⚠ WARN"
+            else:
+                status_str = "✗ FAIL"
+            print(f"  {status_str}  {name} ({latency})")
+            if status in ("fail", "warn"):
                 if record.error:
                     print(f"         Error: {record.error}")
                 elif record.validator:
@@ -321,14 +343,27 @@ def main(argv: List[str] | None = None) -> int:
                             if len(text) > text_max_len:
                                 text = text[:text_max_len] + "..."
                             print(f"         {lbl_said}: \"{text}\"")
-                    expected = record.case.expected_tools or record.case.acceptable_tools
-                    if expected:
-                        exp_str = ', '.join(expected)
-                        if "TEXT_ONLY" in expected:
-                            exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
-                        print(f"         {lbl_expected}: {exp_str}")
+                    # Show expected tools (only for failures, not warns since tool was correct)
+                    if status == "fail":
+                        expected = record.case.expected_tools or record.case.acceptable_tools
+                        if expected:
+                            exp_str = ', '.join(expected)
+                            if "TEXT_ONLY" in expected:
+                                exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
+                            print(f"         {lbl_expected}: {exp_str}")
+                    shown_why = False
                     if record.validator.issues:
                         for issue in record.validator.issues:
+                            msg = simplify_issue_message(issue.message, display_config)
+                            if msg is None:
+                                continue
+                            print(f"         {lbl_why}: {msg}")
+                            shown_why = True
+                            break
+
+                    # Also show behavior validation issues if schema passed but behavior failed
+                    if not shown_why and record.behavior and not record.behavior.passed:
+                        for issue in record.behavior.issues:
                             msg = simplify_issue_message(issue.message, display_config)
                             if msg is None:
                                 continue

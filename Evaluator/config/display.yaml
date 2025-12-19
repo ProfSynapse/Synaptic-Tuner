@@ -11,7 +11,7 @@
 # sky:    "#29ABE2" - Info, selections (Summer Sky)
 # cream:  "#FBF7F1" - Light text (Floral White)
 
-# Labels for failure output
+# Labels for output
 labels:
   model_called: "Model called"
   model_said: "Model said"
@@ -20,6 +20,10 @@ labels:
   no_tool_call: "(text response)"
   text_only_hint: "(ask/clarify)"
   wrong_tool: "Wrong tool - should have used expected tool"
+  # Status labels (can customize if needed)
+  status_pass: "PASS"
+  status_warn: "WARN"
+  status_fail: "FAIL"
 
 # Text response display settings
 text_response:
