@@ -620,50 +620,57 @@ def _run_evaluation_loop(
 def _select_prompt_set() -> Union[str, List[str]]:
     """Let user choose which test suite to run.
 
+    Dynamically discovers YAML scenario files from config/scenarios/.
+
     Returns:
         Path string or list of paths for 'all'.
     """
-    paths = {
-        "1": "Evaluator/prompts/behavior_prompts.json",
-        "2": "Evaluator/prompts/tool_prompts.json",
-        "3": "Evaluator/prompts/baseline.json",
-        "4": "Evaluator/prompts/tool_combos.json",
-    }
+    from pathlib import Path
 
-    counts = {k: count_prompts(v) for k, v in paths.items()}
-    behavior_pattern_count = count_behavior_patterns(paths["1"])
-    total_count = sum(counts.values())
+    # Discover scenario files dynamically
+    scenarios_dir = Path(__file__).parent / "config" / "scenarios"
+    yaml_files = sorted(scenarios_dir.glob("*.yaml"))
 
-    prompt_sets = {
-        "1": {
-            "name": "Behavior Rubric Tests",
-            "path": paths["1"],
-            "desc": f"{counts['1']} prompts testing {behavior_pattern_count} behavior patterns (Recommended)",
-        },
-        "2": {
-            "name": "Full Tool Coverage",
-            "path": paths["2"],
-            "desc": f"{counts['2']} prompts - one test per tool",
-        },
-        "3": {
-            "name": "Baseline Tests",
-            "path": paths["3"],
-            "desc": f"{counts['3']} general prompts with behavior expectations",
-        },
-        "4": {
-            "name": "Multi-Step Workflows",
-            "path": paths["4"],
-            "desc": f"{counts['4']} prompts testing complex tool sequences",
-        },
-        "5": {
-            "name": "Run All Tests",
-            "path": "ALL",
-            "desc": f"Run all 4 test suites sequentially ({total_count} total prompts)",
-        },
+    if not yaml_files:
+        print(color("No scenario files found in config/scenarios/", "red"))
+        return ""
+
+    # Build prompt sets from discovered files
+    prompt_sets = {}
+    all_paths = []
+
+    for idx, yaml_path in enumerate(yaml_files, start=1):
+        rel_path = f"Evaluator/config/scenarios/{yaml_path.name}"
+        prompt_count = count_prompts(rel_path)
+        behavior_count = count_behavior_patterns(rel_path)
+
+        # Create friendly name from filename
+        name = yaml_path.stem.replace("_", " ").title()
+
+        # Build description
+        if behavior_count > 0:
+            desc = f"{prompt_count} prompts testing {behavior_count} behavior patterns"
+        else:
+            desc = f"{prompt_count} prompts"
+
+        prompt_sets[str(idx)] = {
+            "name": name,
+            "path": rel_path,
+            "desc": desc,
+        }
+        all_paths.append(rel_path)
+
+    # Add "Run All" option
+    total_count = sum(count_prompts(p) for p in all_paths)
+    all_key = str(len(prompt_sets) + 1)
+    prompt_sets[all_key] = {
+        "name": "Run All Tests",
+        "path": "ALL",
+        "desc": f"Run all {len(yaml_files)} test suites ({total_count} total prompts)",
     }
 
     print(color("\nSelect test suite:", "magenta"))
-    for key in sorted(prompt_sets.keys()):
+    for key in sorted(prompt_sets.keys(), key=int):
         pset = prompt_sets[key]
         print(f"{color(f'[{key}]', 'yellow')} {pset['name']}")
         print(f"     {color(pset['desc'], 'cyan')}")
@@ -676,14 +683,9 @@ def _select_prompt_set() -> Union[str, List[str]]:
             selected = prompt_sets[choice]
             print(color(f"Selected: {selected['name']}", "green"))
             if selected["path"] == "ALL":
-                return [
-                    prompt_sets["1"]["path"],
-                    prompt_sets["2"]["path"],
-                    prompt_sets["3"]["path"],
-                    prompt_sets["4"]["path"],
-                ]
+                return all_paths
             return selected["path"]
-        print("Please enter a valid option (1-5).", file=sys.stderr)
+        print(f"Please enter a valid option (1-{all_key}).", file=sys.stderr)
 
 
 if __name__ == "__main__":

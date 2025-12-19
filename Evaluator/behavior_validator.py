@@ -97,6 +97,7 @@ def validate_behavior(
     behavior_expectations: Optional[Dict[str, Any]] = None,
     expected_response_type: Optional[str] = None,
     anti_patterns: Optional[Dict[str, bool]] = None,
+    extracted_tool_names: Optional[List[str]] = None,
 ) -> BehaviorValidationResult:
     """Validate model response against behavior expectations.
 
@@ -105,6 +106,9 @@ def validate_behavior(
         behavior_expectations: Dict of expected behaviors (from prompt case)
         expected_response_type: Expected response type (text_only, tool_only, tool_text)
         anti_patterns: Dict of anti-patterns that should NOT be present
+        extracted_tool_names: Tool names already extracted by schema validation
+                             (with useTools expansion applied). If provided, these
+                             are used instead of parsing the response again.
 
     Returns:
         BehaviorValidationResult with pass/fail and detailed issues
@@ -115,6 +119,10 @@ def validate_behavior(
     # Parse response once (single source of truth)
     parsed = parse_response(response)
     actual_type = str(parsed.response_type)
+
+    # Use extracted tool names if provided (already expanded by schema validator)
+    if extracted_tool_names is not None:
+        parsed._extracted_tool_names = extracted_tool_names
 
     # Check response type if specified
     if expected_response_type:
@@ -320,15 +328,30 @@ def _check_expectation(
             )
         return None
 
-    # Execute prompt usage expectations (delegation)
-    # Supports both old (executePrompt) and new (executePrompts) tool names
-    if expectation in ("delegates_complex_task", "uses_execute_prompt", "uses_execute_prompts"):
-        tool_name = parsed.first_tool_call.name if parsed.first_tool_call else None
-        uses_execute_prompt = tool_name in ("agentManager_executePrompt", "agentManager_executePrompts")
-        passed = uses_execute_prompt if value else True
+    # Delegation expectations - value specifies the expected tool name
+    # e.g., delegates_complex_task: agentManager_executePrompts
+    # Uses extracted tool names from schema validation (already expanded from useTools)
+    if expectation in ("delegates_complex_task", "uses_execute_prompt", "uses_execute_prompts", "delegates_to"):
+        # Value can be True (legacy) or a tool name string
+        expected_tool = value if isinstance(value, str) else None
+
+        # Use extracted tool names from schema validation (already expanded)
+        # This avoids hardcoding any tool call structure
+        extracted_names = getattr(parsed, '_extracted_tool_names', None)
+        if extracted_names:
+            tool_name = extracted_names[0] if extracted_names else None
+        else:
+            tool_name = parsed.first_tool_call.name if parsed.first_tool_call else None
+
+        # Check if tool matches expected (if specified) or just that a tool was called
+        if expected_tool:
+            passed = tool_name == expected_tool
+        else:
+            passed = has_tool  # Legacy: just check that delegation happened
+
         return BehaviorIssue(
             check=expectation,
-            expected="agentManager_executePrompt(s)",
+            expected=expected_tool or "any tool call",
             actual=tool_name or "no tool",
             passed=passed,
             message=f"{expectation}: {'PASS' if passed else 'FAIL'} - tool={tool_name}"

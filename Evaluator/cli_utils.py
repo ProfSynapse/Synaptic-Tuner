@@ -22,7 +22,7 @@ from .config import (
 )
 from .enums import BackendType
 from .protocols import BackendError, ModelListingClient
-from .prompt_sets import PromptCase, load_prompt_cases
+from .prompt_sets import PromptCase
 from .runner import EvaluationRecord
 
 
@@ -233,7 +233,7 @@ def build_metadata(
         "request_timeout": config.request_timeout,
         "retries": config.retries,
         "dry_run": config.dry_run,
-        "tags_filter": list(config.filter.tags) if config.filter else [],
+        "tags_filter": list(config.filter.tags) if config.filter and config.filter.tags else [],
         "limit": config.filter.limit if config.filter else None,
     }
 
@@ -403,10 +403,10 @@ def print_banner(title: str, subtitle: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 def count_prompts(path_str: str) -> int:
-    """Count prompts in a JSON prompt set file.
+    """Count prompts in a YAML scenario file.
 
     Args:
-        path_str: Path to prompt file
+        path_str: Path to YAML scenario file
 
     Returns:
         Number of prompts, or 0 if error
@@ -414,7 +414,10 @@ def count_prompts(path_str: str) -> int:
     try:
         path = expand_path(path_str)
         if path.exists():
-            cases = load_prompt_cases(path)
+            from .config_loader import load_yaml_scenarios
+            # config_dir is parent of 'scenarios' folder
+            config_dir = path.parent.parent
+            cases = load_yaml_scenarios(config_dir=config_dir, scenario_files=[path.name])
             return len(cases)
     except Exception:
         pass
@@ -422,10 +425,10 @@ def count_prompts(path_str: str) -> int:
 
 
 def count_behavior_patterns(path_str: str) -> int:
-    """Count unique behavior patterns in a prompt set.
+    """Count unique behavior patterns in a YAML scenario file.
 
     Args:
-        path_str: Path to prompt file
+        path_str: Path to YAML scenario file
 
     Returns:
         Number of unique behavior pattern tags, or 0 if error
@@ -433,7 +436,10 @@ def count_behavior_patterns(path_str: str) -> int:
     try:
         path = expand_path(path_str)
         if path.exists():
-            cases = load_prompt_cases(path)
+            from .config_loader import load_yaml_scenarios
+            # config_dir is parent of 'scenarios' folder
+            config_dir = path.parent.parent
+            cases = load_yaml_scenarios(config_dir=config_dir, scenario_files=[path.name])
             behavior_tags = set()
             behavior_prefixes = {
                 "intellectual_humility", "verification_before_action", "context_continuity",

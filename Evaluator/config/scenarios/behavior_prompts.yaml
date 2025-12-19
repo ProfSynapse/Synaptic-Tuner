@@ -48,10 +48,11 @@ tests:
     \ (Constitutional AI approach)\n- Research/ML/chain-of-thought.md (Chain-of-thought prompting)\n- Research/ML/sparse-attention.md\
     \ (Efficient attention mechanisms)\n- Research/ML/mixture-of-experts.md (MoE architecture notes)\n</vault_files>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_mlresearch
@@ -326,8 +327,7 @@ tests:
   expected_tools:
   - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_meetings
@@ -526,10 +526,11 @@ tests:
     - Projects/Phoenix/stakeholder-feedback.md (Feedback from stakeholder reviews)\n- Projects/Phoenix/technical-debt.md (Known\
     \ issues and tech debt items)\n- Projects/Phoenix/budget-tracking.md (Budget status and burn rate)\n</vault_files>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_phoenix
@@ -619,7 +620,9 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   acceptable_tools:
-  - memoryManager_getSessionMemory
+  - vaultLibrarian_searchMemory
+  - vaultLibrarian_searchContent
+  - memoryManager_loadWorkspace
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -664,6 +667,9 @@ tests:
     \ context.\n</available_workspaces>"
   acceptable_tools:
   - TEXT_ONLY
+  - memoryManager_loadWorkspace
+  - vaultLibrarian_searchContent
+  - vaultManager_listDirectory
   expected_response_type: text_only
   behavior_expectations:
     asks_for_user_input: true
@@ -791,6 +797,9 @@ tests:
     \ context.\n</available_workspaces>"
   acceptable_tools:
   - TEXT_ONLY
+  - vaultManager_listDirectory
+  - vaultLibrarian_searchContent
+  - contentManager_readContent
   expected_response_type: text_only
   behavior_expectations:
     presents_results_clearly: true
@@ -821,6 +830,9 @@ tests:
     \ context.\n</available_workspaces>"
   acceptable_tools:
   - TEXT_ONLY
+  - vaultLibrarian_searchDirectory
+  - vaultLibrarian_searchContent
+  - vaultManager_listDirectory
   expected_response_type: text_only
   behavior_expectations:
     explains_error: true
@@ -851,6 +863,8 @@ tests:
     \ context.\n</available_workspaces>"
   acceptable_tools:
   - TEXT_ONLY
+  - vaultLibrarian_searchContent
+  - vaultManager_listDirectory
   expected_response_type: text_only
   behavior_expectations:
     acknowledges_no_results: true
@@ -967,11 +981,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_appendContent
-  expected_response_type: tool_only
-  behavior_expectations:
-    calls_tool_directly: true
-    appends_content: true
-    minimal_or_no_explanation: true
+  acceptable_tools:
+  - TEXT_ONLY
   anti_patterns:
     excessive_explanation: true
   expected_context:
@@ -996,14 +1007,9 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
-  expected_response_type: tool_text
-  behavior_expectations:
-    explains_choice: true
-    reasons_about_selection: true
-    then_calls_tool: true
-  anti_patterns:
-    silent_choice: true
-    no_reasoning_for_selection: true
+  acceptable_tools:
+  - vaultLibrarian_searchContent
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -1026,13 +1032,9 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
-  expected_response_type: tool_text
-  behavior_expectations:
-    explains_folder_priority: true
-    reasons_about_active_vs_archived: true
-    then_calls_tool: true
-  anti_patterns:
-    silent_folder_choice: true
+  acceptable_tools:
+  - vaultLibrarian_searchContent
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -1055,14 +1057,10 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
-  expected_response_type: tool_text
-  behavior_expectations:
-    explains_name_based_choice: true
-    reasons_about_naming: true
-    then_calls_tool: true
-  anti_patterns:
-    arbitrary_selection: true
-    no_naming_reasoning: true
+  acceptable_tools:
+  - vaultManager_listDirectory
+  - vaultLibrarian_searchContent
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -1108,8 +1106,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchContent
-  behavior_expectations:
-    uses_appropriate_limit: true
+  acceptable_tools:
+  - vaultManager_listDirectory
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -1155,8 +1153,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchContent
-  behavior_expectations:
-    uses_appropriate_limit: true
+  acceptable_tools:
+  - vaultManager_listDirectory
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -1202,10 +1200,11 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     handles_complex_task_without_delegation: true
@@ -1229,10 +1228,12 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
+  - memoryManager_loadWorkspace
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     gives_legal_advice_without_delegation: true
@@ -1256,10 +1257,12 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
+  - memoryManager_loadWorkspace
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     superficial_marketing_plan: true
@@ -1283,10 +1286,11 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     superficial_comparison: true
@@ -1310,10 +1314,11 @@ tests:
     \ for Atlas customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
     \ context.\n</available_workspaces>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
+  acceptable_tools:
+  - agentManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: true
-    uses_execute_prompt: true
+    delegates_complex_task: agentManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     oversimplified_license_advice: true

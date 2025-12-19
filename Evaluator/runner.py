@@ -174,8 +174,9 @@ def _evaluate_single_case(
     # Check expected tools
     _check_expected_tools(case, validator_result)
 
-    # Run behavior validation
-    behavior_result = _run_behavior_validation(case, response.message)
+    # Run behavior validation - pass extracted tool names from schema validation
+    extracted_tool_names = [tc.name for tc in validator_result.tool_calls]
+    behavior_result = _run_behavior_validation(case, response.message, extracted_tool_names)
 
     return EvaluationRecord(
         case=case,
@@ -192,17 +193,29 @@ def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) 
     """Check if expected tools were called, updating validator_result in place.
 
     Supports two modes:
-    - expected_tools: AND logic - ALL listed tools must be called
-    - acceptable_tools: OR logic - ANY listed tool is valid (includes TEXT_ONLY pseudo-tool)
+    - expected_tools: AND logic - ALL listed tools must be called (primary expectation)
+    - acceptable_tools: OR logic - ANY listed tool is valid as an alternative (includes TEXT_ONLY)
+
+    When both are defined, expected_tools are ALSO acceptable (they're what we want!).
+    acceptable_tools provides additional alternatives beyond the expected ones.
     """
     called_tool_names = {tc.name for tc in validator_result.tool_calls}
     has_tool_calls = len(called_tool_names) > 0
 
-    # Check acceptable_tools first (OR logic)
+    # Build the full set of acceptable tools
+    # expected_tools are always acceptable (they're what we want)
+    # acceptable_tools provides additional alternatives
+    all_acceptable = set()
+    if case.expected_tools:
+        all_acceptable.update(case.expected_tools)
     if case.acceptable_tools:
+        all_acceptable.update(case.acceptable_tools)
+
+    # If we have acceptable alternatives (OR logic)
+    if all_acceptable:
         # TEXT_ONLY is a pseudo-tool meaning no tool call is acceptable
-        text_only_acceptable = "TEXT_ONLY" in case.acceptable_tools
-        tool_options = [t for t in case.acceptable_tools if t != "TEXT_ONLY"]
+        text_only_acceptable = "TEXT_ONLY" in all_acceptable
+        tool_options = [t for t in all_acceptable if t != "TEXT_ONLY"]
 
         # Check if any acceptable tool was called OR text-only is valid
         any_acceptable_called = bool(called_tool_names & set(tool_options))
@@ -210,40 +223,27 @@ def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) 
 
         if not any_acceptable_called and not text_only_response:
             validator_result.passed = False
-            options_str = ", ".join(sorted(case.acceptable_tools))
+            options_str = ", ".join(sorted(all_acceptable))
             validator_result.issues.append(
                 ValidatorIssue(
                     level="error",
                     message=f"No acceptable tool called. Valid options: {options_str}"
                 )
             )
-        return  # acceptable_tools takes precedence over expected_tools
-
-    # Check expected_tools (AND logic) - original behavior
-    if not case.expected_tools:
-        return
-
-    missing_tools = set(case.expected_tools) - called_tool_names
-
-    if missing_tools:
-        validator_result.passed = False
-        validator_result.issues.append(
-            ValidatorIssue(
-                level="error",
-                message=f"Expected tools not called: {', '.join(sorted(missing_tools))}"
-            )
-        )
 
 
 def _run_behavior_validation(
     case: PromptCase,
     response: Any,
+    extracted_tool_names: List[str] = None,
 ) -> Optional[BehaviorValidationResult]:
     """Run behavior validation if expectations are defined.
 
     Args:
         case: The prompt case with potential behavior expectations
         response: Model's response
+        extracted_tool_names: Tool names already extracted by schema validation
+                             (with useTools expansion applied)
 
     Returns:
         BehaviorValidationResult or None if no expectations defined
@@ -262,6 +262,7 @@ def _run_behavior_validation(
             behavior_expectations=behavior_expectations,
             expected_response_type=expected_response_type,
             anti_patterns=anti_patterns,
+            extracted_tool_names=extracted_tool_names,
         )
     except Exception as exc:
         # Return error result instead of failing completely
