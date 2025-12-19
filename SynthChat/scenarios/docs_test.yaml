@@ -1,22 +1,67 @@
-# Test scenario for docs-based generation
+# Docs-based generation scenarios
 # Uses {doc_content} and {doc_path} template variables
 
 scenarios:
+  # Simple Q&A - assistant is an expert, user is a learner
   docs_qa_test:
     type: docs_based
-    system: false  # Skip system prompt generation for this test
 
     prompts:
-      user: |
-        Based on the following documentation, generate a realistic user question that someone learning this topic might ask. The question should be specific and answerable from the documentation.
+      # Assistant's system prompt - static template with doc content
+      assistant_system: |
+        You are a helpful technical assistant with expertise in the following topic.
+        Use this documentation to answer questions accurately and helpfully:
 
         <documentation>
         {doc_content}
         </documentation>
 
-        Generate ONLY the user question, nothing else. Be natural and conversational.
+        When answering:
+        - Be concise but thorough
+        - Use examples from the documentation when relevant
+        - If something isn't covered in the docs, say so
+
+      # User's persona - guides generation, NOT in final output
+      user_system: |
+        You are a developer who is learning about this topic.
+        You have some technical background but are new to this specific area.
+        Ask genuine questions that show curiosity and a desire to understand.
+        Your questions should be specific enough to be answerable from the documentation.
+
+      # User message generation
+      user: |
+        Based on your persona and the documentation context, generate a natural question.
+        Output ONLY the question - no explanations or meta-commentary.
+
+      # Assistant response generation
+      assistant: |
+        Answer the user's question based on the documentation.
+        Use a <thinking> block first to reason through the answer, then provide a clear response.
+
+  # Debugging scenario - user has a problem
+  docs_debug_test:
+    type: docs_based
+
+    prompts:
+      assistant_system: |
+        You are a senior developer helping debug issues related to:
+
+        <documentation>
+        {doc_content}
+        </documentation>
+
+        Help users troubleshoot problems by asking clarifying questions and suggesting solutions.
+
+      user_system: |
+        You are a developer who ran into a problem while working with this technology.
+        You've tried some things but are stuck. Describe your issue in a natural way,
+        including what you tried and what error or unexpected behavior you're seeing.
+
+      user: |
+        Describe a realistic problem you're having based on the documentation topic.
+        Include specific details like error messages or unexpected behavior.
+        Output ONLY your problem description.
 
       assistant: |
-        You are a helpful assistant. Answer the user's question based on the documentation provided in the context. Be concise but thorough.
-
-        If you need to reason through the answer, use a <thinking> block first.
+        Help debug the user's issue. First use a <thinking> block to analyze the problem,
+        then provide troubleshooting steps or a solution.

@@ -61,16 +61,16 @@ class EvalHandler(BaseHandler):
         """This handler supports direct CLI invocation."""
         return True
 
-    def _list_prompt_sets(self) -> List[Tuple[str, str, int]]:
+    def _list_scenarios(self):
         """
-        List available prompt sets with their prompt counts.
+        List available YAML scenarios.
 
         Returns:
-            List of (name, description, count) tuples
+            List of PromptSetInfo objects
         """
         from tuner.discovery import PromptSetDiscovery
         discovery = PromptSetDiscovery(repo_root=self.repo_root)
-        return discovery.discover()
+        return discovery.discover_all()
 
     def _display_models_table(self, backend: str, models: List[str]) -> None:
         """
@@ -199,19 +199,19 @@ class EvalHandler(BaseHandler):
                 print(f"  [{i}] {timestamp} ({base}) [{trainer}]")
             print()
 
-    def _display_prompt_sets_table(self, prompt_sets: List[Tuple[str, str, int]]) -> None:
+    def _display_scenarios_table(self, scenarios) -> None:
         """
-        Display available prompt sets in a table.
+        Display available YAML scenarios in a table.
 
         Args:
-            prompt_sets: List of (name, description, count) tuples
+            scenarios: List of PromptSetInfo objects
         """
         if RICH_AVAILABLE:
             from rich.table import Table
             from rich import box as rich_box
 
             table = Table(
-                title="Available Prompt Sets",
+                title="Available Test Scenarios",
                 box=rich_box.ROUNDED,
                 border_style=COLORS["cello"],
             )
@@ -220,16 +220,16 @@ class EvalHandler(BaseHandler):
             table.add_column("Description", style="dim")
             table.add_column("Tests", style=COLORS["aqua"], justify="right")
 
-            for i, (name, desc, count) in enumerate(prompt_sets, 1):
-                table.add_row(str(i), name, desc, str(count))
+            for i, info in enumerate(scenarios, 1):
+                table.add_row(str(i), info.name, info.description, str(info.count))
 
             console.print()
             console.print(table)
             console.print()
         else:
-            print("\nAvailable prompt sets:")
-            for i, (name, desc, count) in enumerate(prompt_sets, 1):
-                print(f"  [{i}] {name} ({count} tests) - {desc}")
+            print("\nAvailable test scenarios:")
+            for i, info in enumerate(scenarios, 1):
+                print(f"  [{i}] {info.name} ({info.count} tests) - {info.description}")
             print()
 
     def handle(self) -> int:
@@ -309,35 +309,32 @@ class EvalHandler(BaseHandler):
                 pass
             print_error("Invalid selection.")
 
-        # Step 4: List prompt sets
-        prompt_sets = self._list_prompt_sets()
+        # Step 4: List YAML scenarios
+        scenarios = self._list_scenarios()
 
-        if not prompt_sets:
-            print_error("No prompt sets found in Evaluator/prompts/")
+        if not scenarios:
+            print_error("No test scenarios found in Evaluator/config/scenarios/")
             return 1
 
-        # Step 5: Display prompt sets and select
-        self._display_prompt_sets_table(prompt_sets)
+        # Step 5: Display scenarios and select
+        self._display_scenarios_table(scenarios)
 
         while True:
             try:
-                sel = prompt(f"Select prompt set (1-{len(prompt_sets)})", "1")
+                sel = prompt(f"Select test scenario (1-{len(scenarios)})", "1")
                 idx = int(sel) - 1
-                if 0 <= idx < len(prompt_sets):
-                    prompt_set = prompt_sets[idx][0]
-                    prompt_count = prompt_sets[idx][2]
+                if 0 <= idx < len(scenarios):
+                    selected = scenarios[idx]
                     break
             except ValueError:
                 pass
             print_error("Invalid selection.")
 
-        prompt_file = self.repo_root / "Evaluator" / "prompts" / f"{prompt_set}.json"
-
         # Step 6: Display configuration and confirm
         print_config({
             "Backend": backend_choice,
             "Model": model,
-            "Prompts": f"{prompt_file.name} ({prompt_count} tests)",
+            "Scenario": f"{selected.name} ({selected.count} tests)",
         }, "Evaluation Configuration")
 
         if not confirm("Start evaluation?"):
@@ -360,7 +357,7 @@ class EvalHandler(BaseHandler):
             python, "-m", "Evaluator.cli",
             "--backend", backend_choice,
             "--model", model,
-            "--prompt-set", str(prompt_file),
+            "--scenario", selected.path.name,
             "--output", str(output_json),
             "--markdown", str(output_md)
         ]

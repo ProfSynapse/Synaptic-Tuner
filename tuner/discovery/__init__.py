@@ -16,11 +16,12 @@ systems to enumerate available resources:
 from tuner.discovery.training_runs import TrainingRunDiscovery
 from tuner.discovery.checkpoints import CheckpointDiscovery
 from tuner.discovery.models import ModelDiscovery
-from tuner.discovery.prompt_sets import PromptSetDiscovery
+from tuner.discovery.prompt_sets import PromptSetDiscovery, PromptSetInfo
 
 __all__ = [
     "TrainingRunDiscovery",
     "CheckpointDiscovery",
     "ModelDiscovery",
     "PromptSetDiscovery",
+    "PromptSetInfo",
 ]

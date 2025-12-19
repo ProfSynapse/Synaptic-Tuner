@@ -43,8 +43,7 @@ from .config import (
     expand_path,
     parse_tags,
 )
-from .config_loader import ConfigLoader, load_yaml_scenarios
-from .prompt_sets import filter_prompts, load_prompt_cases
+from .config_loader import load_yaml_scenarios
 from .reporting import (
     build_run_payload,
     console_summary,
@@ -74,9 +73,6 @@ Backend Configuration:
         help="Backend to use for evaluation (default: ollama)",
     )
     parser.add_argument("--model", required=True, help="Model name (e.g., claudesidian-mcp)")
-    parser.add_argument("--prompt-set", default="Evaluator/prompts/baseline.json", help="Path to prompt set file (JSON)")
-
-    # YAML config-driven options
     parser.add_argument(
         "--config-dir",
         default="Evaluator/config",
@@ -142,53 +138,35 @@ def main(argv: List[str] | None = None) -> int:
     markdown_path = expand_path(args.markdown) if args.markdown else None
     config_dir = expand_path(args.config_dir)
 
-    # Determine if using YAML scenarios or JSON prompt-set
-    use_yaml = args.scenarios or args.preset
+    # Require --scenario or --preset
+    if not args.scenarios and not args.preset:
+        print("Error: --scenario is required. Example: --scenario behavior_prompts.yaml", file=sys.stderr)
+        return 1
 
-    if use_yaml:
-        # Load from YAML config system
-        tag_filter = parse_tags(args.tags) if args.tags else None
-        selected_cases = load_yaml_scenarios(
-            config_dir=config_dir,
-            scenario_files=args.scenarios,
-            preset=args.preset,
-            tag_filter=tag_filter,
-        )
+    # Load from YAML config system
+    tag_filter = parse_tags(args.tags) if args.tags else None
+    selected_cases = load_yaml_scenarios(
+        config_dir=config_dir,
+        scenario_files=args.scenarios,
+        preset=args.preset,
+        tag_filter=tag_filter,
+    )
 
-        if args.limit and len(selected_cases) > args.limit:
-            selected_cases = selected_cases[:args.limit]
+    if args.limit and len(selected_cases) > args.limit:
+        selected_cases = selected_cases[:args.limit]
 
-        # Build minimal config for output paths
-        config = EvaluatorConfig(
-            prompts_path=config_dir / "scenarios",  # For metadata
-            output_path=output_path,
-            save_markdown=bool(markdown_path),
-            filter=PromptFilter(tags=tag_filter, limit=args.limit),
-            retries=args.retries,
-            request_timeout=args.timeout,
-            dry_run=args.dry_run,
-        )
-        prompt_path = config_dir / "scenarios"  # For reporting
-        total_cases = len(selected_cases)  # No separate total when using YAML
-    else:
-        # Load from JSON prompt-set (original behavior)
-        prompt_path = expand_path(args.prompt_set)
-        prompt_filter = PromptFilter(tags=parse_tags(args.tags), limit=args.limit)
-        config = EvaluatorConfig(
-            prompts_path=prompt_path,
-            output_path=output_path,
-            save_markdown=bool(markdown_path),
-            filter=prompt_filter,
-            retries=args.retries,
-            request_timeout=args.timeout,
-            dry_run=args.dry_run,
-        )
-        config.validate()
-
-        # Load and filter prompts
-        cases = load_prompt_cases(config.prompts_path)
-        selected_cases = filter_prompts(cases, config.filter)
-        total_cases = len(cases)
+    # Build config for output paths
+    config = EvaluatorConfig(
+        prompts_path=config_dir / "scenarios",
+        output_path=output_path,
+        save_markdown=bool(markdown_path),
+        filter=PromptFilter(tags=tag_filter, limit=args.limit),
+        retries=args.retries,
+        request_timeout=args.timeout,
+        dry_run=args.dry_run,
+    )
+    prompt_path = config_dir / "scenarios"
+    total_cases = len(selected_cases)
 
     config.ensure_output_parent()
     if markdown_path:

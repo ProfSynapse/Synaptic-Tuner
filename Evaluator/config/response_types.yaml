@@ -123,6 +123,14 @@ aliases:
   research: information_gathering
 
 # ============================================================
+# PSEUDO-TOOLS
+# ============================================================
+# Special markers that aren't real tools but indicate valid responses
+
+pseudo_tools:
+  TEXT_ONLY: "Indicates text-only response is acceptable (no tool call)"
+
+# ============================================================
 # DEFAULT BEHAVIORS
 # ============================================================
 # What to expect when response_type not specified
@@ -136,3 +144,6 @@ defaults:
 
   # Whether to fail on unexpected response type
   strict_type_matching: false
+
+  # Pseudo-tool for text-only responses
+  text_only_marker: TEXT_ONLY

@@ -218,47 +218,72 @@ class SynthChatGenerator:
         stage_failures = []
         total_iterations = 0
 
-        # Stage 1: System prompt (if enabled)
+        # Stage 1: Assistant's system prompt
+        # Priority: assistant_system > system (legacy) > system: true (generate)
+        assistant_system_prompt = prompts.get("assistant_system")
         system_enabled = scenario.get("system", True)
-        if system_enabled and isinstance(system_enabled, bool):
-            # Generate system prompt
-            system_prompt = render_prompt(prompts.get("system", ""))
-            system_content = self._call_llm(system_prompt, randomize_params)
 
-            # Add to conversations
+        if assistant_system_prompt:
+            # New style: assistant_system in prompts (static template with vars)
+            system_content = render_prompt(assistant_system_prompt)
             example["conversations"].append({
                 "role": "system",
                 "content": system_content
             })
 
-            # Validate/improve system stage
-            if self.enable_stage_validation:
-                improved, iterations, passed = self._improve_stage(
-                    example,
-                    stage="system_prompt",
-                    rubrics=["system_prompt_format"],
-                    max_iterations=max_iterations
-                )
-                example = improved
-                total_iterations += iterations
-                if not passed:
-                    stage_failures.append("system_prompt")
+        elif system_enabled and isinstance(system_enabled, bool):
+            # Legacy: generate system prompt from "system" prompt
+            system_prompt = render_prompt(prompts.get("system", ""))
+            if system_prompt:
+                system_content = self._call_llm(system_prompt, randomize_params)
+
+                example["conversations"].append({
+                    "role": "system",
+                    "content": system_content
+                })
+
+                # Validate/improve system stage
+                if self.enable_stage_validation:
+                    improved, iterations, passed = self._improve_stage(
+                        example,
+                        stage="system_prompt",
+                        rubrics=["system_prompt_format"],
+                        max_iterations=max_iterations
+                    )
+                    example = improved
+                    total_iterations += iterations
+                    if not passed:
+                        stage_failures.append("system_prompt")
 
         elif isinstance(system_enabled, dict) and "template" in system_enabled:
-            # Use fixed template
+            # Use fixed template file
             template_path = Path(system_enabled["template"])
             if template_path.exists():
                 with open(template_path) as f:
-                    system_content = f.read()
+                    system_content = render_prompt(f.read())
                 example["conversations"].append({
                     "role": "system",
                     "content": system_content
                 })
 
         # Stage 2: User request
+        # Check for user_system (persona) to guide user generation
+        user_system_prompt = prompts.get("user_system", "")
+        if user_system_prompt:
+            user_system_prompt = render_prompt(user_system_prompt)
+
         user_prompt = render_prompt(prompts.get("user", ""))
-        # Pass current example as context for user generation
-        user_context = self._build_user_context(example)
+
+        # Build context for user generation
+        user_context_parts = []
+        if user_system_prompt:
+            user_context_parts.append(f"Your persona:\n{user_system_prompt}")
+        # Add assistant's system context if present
+        existing_context = self._build_user_context(example)
+        if existing_context:
+            user_context_parts.append(existing_context)
+
+        user_context = "\n\n".join(user_context_parts)
         user_content = self._call_llm(f"{user_context}\n\n{user_prompt}", randomize_params)
 
         example["conversations"].append({

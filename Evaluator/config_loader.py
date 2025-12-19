@@ -208,6 +208,10 @@ class ConfigLoader:
     ) -> PromptCase:
         """Convert a single test definition to a PromptCase.
 
+        Supports two formats:
+        1. Migrated JSON format: expected_tools, acceptable_tools, system directly on test
+        2. New YAML format: nested under 'expect' key
+
         Args:
             test: Test definition from YAML
             defaults: Scenario defaults
@@ -217,14 +221,22 @@ class ConfigLoader:
         """
         expect = test.get("expect", {})
 
-        # Build expected_tools from expect.tool
+        # Build expected_tools - check both formats
         expected_tools: List[str] = []
-        if "tool" in expect:
+        if test.get("expected_tools"):
+            # Migrated JSON format
+            expected_tools = test["expected_tools"]
+        elif "tool" in expect:
+            # New YAML format
             expected_tools = [expect["tool"]]
 
-        # Build acceptable_tools from expect.acceptable
+        # Build acceptable_tools - check both formats
         acceptable_tools: List[str] = []
-        if "acceptable" in expect:
+        if test.get("acceptable_tools"):
+            # Migrated JSON format
+            acceptable_tools = test["acceptable_tools"]
+        elif "acceptable" in expect:
+            # New YAML format
             for option in expect["acceptable"]:
                 if "tool" in option:
                     acceptable_tools.append(option["tool"])
@@ -238,21 +250,35 @@ class ConfigLoader:
         # Build metadata
         metadata: Dict[str, Any] = {}
 
-        # Add system prompt from template
-        template_name = test.get("system_prompt_template") or defaults.get("system_prompt_template")
-        if template_name:
-            system_prompt = self._render_template(template_name, test)
-            metadata["system"] = system_prompt
+        # Add system prompt - check direct field first, then template
+        if test.get("system"):
+            # Direct system prompt from migrated JSON
+            metadata["system"] = test["system"]
+        else:
+            # Try template
+            template_name = test.get("system_prompt_template") or defaults.get("system_prompt_template")
+            if template_name:
+                system_prompt = self._render_template(template_name, test)
+                metadata["system"] = system_prompt
 
-        # Add behavior expectations
-        behaviors = test.get("behaviors", defaults.get("behaviors", []))
+        # Add behavior expectations - check both formats
+        behaviors = test.get("behavior_expectations") or test.get("behaviors", defaults.get("behaviors", []))
         if behaviors:
             metadata["behavior_expectations"] = behaviors
 
-        # Add response type expectation
-        response_type = expect.get("response_type") or defaults.get("response_type")
+        # Add response type expectation - check both formats
+        response_type = test.get("expected_response_type") or expect.get("response_type") or defaults.get("response_type")
         if response_type:
             metadata["expected_response_type"] = response_type
+
+        # Add anti-patterns from migrated format
+        anti_patterns = test.get("anti_patterns") or test.get("anti_patterns_to_avoid")
+        if anti_patterns:
+            metadata["anti_patterns_to_avoid"] = anti_patterns
+
+        # Add expected context for ID validation
+        if test.get("expected_context"):
+            metadata["expected_context"] = test["expected_context"]
 
         # Add params expectations for validation
         if "params_include" in expect:

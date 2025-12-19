@@ -11,8 +11,8 @@ run:
 
   # Which scenario files to run (relative to config/scenarios/)
   scenarios:
-    - tool_coverage.yaml
-    - behavior_tests.yaml
+    - tool_prompts.yaml
+    - behavior_prompts.yaml
 
   # Filter tests by tags (optional)
   # Only runs tests matching ANY of these tags
