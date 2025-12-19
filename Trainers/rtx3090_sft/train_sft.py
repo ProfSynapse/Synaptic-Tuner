@@ -425,23 +425,7 @@ def run(args: argparse.Namespace):
         }
     )
 
-    # Load dataset
-    train_dataset, eval_dataset = load_and_prepare_dataset(
-        dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
-        data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
-        local_file=config.dataset.local_file,
-        num_proc=config.dataset.num_proc,
-        test_size=config.dataset.test_size,
-        split_dataset=args.split_dataset or config.dataset.split_dataset,
-        filter_desirable=config.dataset.filter_desirable
-    )
-    run_metadata["train_size"] = len(train_dataset)
-    run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
-
-    # Print samples
-    print_dataset_samples(train_dataset, num_samples=2)
-
-    # Load model and tokenizer
+    # Load model and tokenizer FIRST (needed for packing preprocessing)
     model, tokenizer = load_model_and_tokenizer(
         model_name=config.model.model_name,
         max_seq_length=config.model.max_seq_length,
@@ -472,6 +456,25 @@ def run(args: argparse.Namespace):
 
     tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
     print(f"✓ Applied {chat_template_name} chat template via Unsloth")
+
+    # Load dataset (with preprocessing if packing is enabled)
+    use_packing = config.training.packing
+    train_dataset, eval_dataset = load_and_prepare_dataset(
+        dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
+        data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
+        local_file=config.dataset.local_file,
+        num_proc=config.dataset.num_proc,
+        test_size=config.dataset.test_size,
+        split_dataset=args.split_dataset or config.dataset.split_dataset,
+        filter_desirable=config.dataset.filter_desirable,
+        tokenizer=tokenizer if use_packing else None,
+        apply_chat_template=use_packing  # Preprocess for packing support
+    )
+    run_metadata["train_size"] = len(train_dataset)
+    run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
+
+    # Print samples
+    print_dataset_samples(train_dataset, num_samples=2)
 
     # Apply LoRA adapters
     model = apply_lora_adapters(
@@ -576,34 +579,40 @@ def run(args: argparse.Namespace):
         return formatted
 
     # Configure SFT training arguments
-    training_args = SFTConfig(
-        output_dir=config.training.output_dir,
-        per_device_train_batch_size=config.training.per_device_train_batch_size,
-        gradient_accumulation_steps=config.training.gradient_accumulation_steps,
-        learning_rate=config.training.learning_rate,
-        max_grad_norm=config.training.max_grad_norm,
-        lr_scheduler_type=config.training.lr_scheduler_type,
-        max_seq_length=config.training.max_seq_length,
-        packing=config.training.packing,
-        gradient_checkpointing=config.training.gradient_checkpointing,
-        optim=config.training.optim,
-        fp16=not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
-        bf16=is_bfloat16_supported() if config.training.bf16 is True else config.training.bf16,
-        num_train_epochs=1 if args.max_steps else config.training.num_train_epochs,
-        max_steps=args.max_steps if args.max_steps else -1,
-        warmup_ratio=config.training.warmup_ratio,
-        logging_steps=config.training.logging_steps,
-        save_steps=config.training.save_steps,
-        save_total_limit=config.training.save_total_limit,
-        dataloader_num_workers=config.training.dataloader_num_workers,
-        dataloader_pin_memory=config.training.dataloader_pin_memory,
-        eval_strategy=config.training.eval_strategy if eval_dataset else "no",
-        eval_steps=config.training.eval_steps if eval_dataset else None,
-        report_to="wandb" if config.use_wandb else "none",
-        run_name=config.wandb_run_name if config.use_wandb else None,
-        seed=config.seed,
-        dataset_kwargs={"add_special_tokens": False},
-    )
+    sft_config_kwargs = {
+        "output_dir": config.training.output_dir,
+        "per_device_train_batch_size": config.training.per_device_train_batch_size,
+        "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
+        "learning_rate": config.training.learning_rate,
+        "max_grad_norm": config.training.max_grad_norm,
+        "lr_scheduler_type": config.training.lr_scheduler_type,
+        "max_seq_length": config.training.max_seq_length,
+        "packing": use_packing,
+        "gradient_checkpointing": config.training.gradient_checkpointing,
+        "optim": config.training.optim,
+        "fp16": not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
+        "bf16": is_bfloat16_supported() if config.training.bf16 is True else config.training.bf16,
+        "num_train_epochs": 1 if args.max_steps else config.training.num_train_epochs,
+        "max_steps": args.max_steps if args.max_steps else -1,
+        "warmup_ratio": config.training.warmup_ratio,
+        "logging_steps": config.training.logging_steps,
+        "save_steps": config.training.save_steps,
+        "save_total_limit": config.training.save_total_limit,
+        "dataloader_num_workers": config.training.dataloader_num_workers,
+        "dataloader_pin_memory": config.training.dataloader_pin_memory,
+        "eval_strategy": config.training.eval_strategy if eval_dataset else "no",
+        "eval_steps": config.training.eval_steps if eval_dataset else None,
+        "report_to": "wandb" if config.use_wandb else "none",
+        "run_name": config.wandb_run_name if config.use_wandb else None,
+        "seed": config.seed,
+        "dataset_kwargs": {"add_special_tokens": False},
+    }
+
+    # When packing is enabled, use preprocessed 'text' column
+    if use_packing:
+        sft_config_kwargs["dataset_text_field"] = "text"
+
+    training_args = SFTConfig(**sft_config_kwargs)
 
     # Print training configuration
     print("\n" + "=" * 60)
@@ -663,15 +672,21 @@ def run(args: argparse.Namespace):
 
     # Initialize SFT Trainer (NO ref_model needed!)
     print("Initializing SFT Trainer...")
-    trainer = SFTTrainer(
-        model=model,
-        args=training_args,
-        tokenizer=tokenizer,  # Use 'tokenizer' or 'processing_class'
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        callbacks=callbacks,
-        formatting_func=format_chat_template,
-    )
+    trainer_kwargs = {
+        "model": model,
+        "args": training_args,
+        "tokenizer": tokenizer,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "callbacks": callbacks,
+    }
+
+    # Only use formatting_func when packing is disabled
+    # When packing is enabled, we use the preprocessed 'text' column instead
+    if not use_packing:
+        trainer_kwargs["formatting_func"] = format_chat_template
+
+    trainer = SFTTrainer(**trainer_kwargs)
 
     print("[OK] SFT trainer initialized with metrics tracking")
     print()

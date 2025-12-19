@@ -3,8 +3,57 @@ Data loading and preprocessing for SFT training.
 SFT uses conversational format natively - much simpler than KTO!
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from datasets import load_dataset, Dataset
+
+
+def sanitize_conversations(messages: list) -> list:
+    """
+    Sanitize conversations to handle None content and tool_calls.
+    Converts tool_calls to text format for compatibility with chat templates.
+    """
+    import json
+    sanitized = []
+    for msg in messages:
+        new_msg = dict(msg)
+
+        # Handle None content
+        content = new_msg.get("content")
+        if content is None:
+            content = ""
+
+        # If there are tool_calls, render them as text
+        if "tool_calls" in new_msg and new_msg["tool_calls"]:
+            tool_text_parts = []
+            for tc in new_msg["tool_calls"]:
+                func = tc.get("function", {})
+                name = func.get("name", "unknown")
+                args = func.get("arguments", "{}")
+                # Parse arguments if it's a string
+                if isinstance(args, str):
+                    try:
+                        args_obj = json.loads(args)
+                        args_formatted = json.dumps(args_obj, indent=2)
+                    except json.JSONDecodeError:
+                        args_formatted = args
+                else:
+                    args_formatted = json.dumps(args, indent=2)
+                tool_text_parts.append(f"tool_call: {name}\narguments: {args_formatted}")
+
+            # Combine content with tool calls
+            if content:
+                content = content + "\n\n" + "\n\n".join(tool_text_parts)
+            else:
+                content = "\n\n".join(tool_text_parts)
+
+        new_msg["content"] = content
+
+        # Remove tool_calls since we've rendered them to content
+        if "tool_calls" in new_msg:
+            del new_msg["tool_calls"]
+
+        sanitized.append(new_msg)
+    return sanitized
 
 
 def load_and_prepare_dataset(
@@ -14,7 +63,9 @@ def load_and_prepare_dataset(
     num_proc: int = 1,
     test_size: float = 0.1,
     split_dataset: bool = False,
-    filter_desirable: bool = False
+    filter_desirable: bool = False,
+    tokenizer: Any = None,
+    apply_chat_template: bool = False
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset for SFT training.
@@ -27,6 +78,8 @@ def load_and_prepare_dataset(
         test_size: Fraction of data for validation
         split_dataset: Whether to create train/val split
         filter_desirable: Filter for label=True examples only (if dataset has labels)
+        tokenizer: Tokenizer for applying chat template (required if apply_chat_template=True)
+        apply_chat_template: If True, preprocesses dataset with chat template for packing support
 
     Returns:
         Tuple of (train_dataset, eval_dataset or None)
@@ -70,9 +123,34 @@ def load_and_prepare_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
-    # SFTTrainer handles "conversations" format natively
-    # No conversion needed - just use the dataset as-is!
-    print("\nSFT uses conversational format natively - no preprocessing needed!")
+    # Apply chat template preprocessing if requested (enables packing)
+    if apply_chat_template:
+        if tokenizer is None:
+            raise ValueError("tokenizer is required when apply_chat_template=True")
+
+        print("\nApplying chat template for packing support...")
+        messages_key = "messages" if "messages" in raw_datasets.column_names else "conversations"
+
+        def format_example(example):
+            """Apply chat template to create 'text' field."""
+            msgs = example[messages_key]
+            sanitized_msgs = sanitize_conversations(msgs)
+            text = tokenizer.apply_chat_template(
+                sanitized_msgs,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            return {"text": text}
+
+        raw_datasets = raw_datasets.map(
+            format_example,
+            num_proc=num_proc,
+            desc="Applying chat template"
+        )
+        print(f"Added 'text' column with formatted conversations")
+    else:
+        print("\nSFT uses conversational format natively - no preprocessing needed!")
+
     train_dataset = raw_datasets
 
     # Optional train/validation split
