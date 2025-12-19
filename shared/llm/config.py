@@ -11,8 +11,8 @@ class LLMConfig:
     """Configuration for LLM clients."""
 
     # Provider selection
-    provider: str  # 'openrouter', 'lmstudio', or 'ollama'
-    model: str
+    provider: str  # 'openrouter', 'lmstudio', 'ollama', or 'unsloth'
+    model: str  # Model name or path to LoRA adapter (for unsloth)
     temperature: float = 0.7
     max_tokens: int = 2048
 
@@ -27,6 +27,11 @@ class LLMConfig:
     # Ollama config
     ollama_host: str = "localhost"
     ollama_port: int = 11434
+
+    # Unsloth config (direct LoRA inference)
+    unsloth_max_seq_length: int = 4096
+    unsloth_load_in_4bit: bool = True
+    unsloth_top_p: float = 0.9
 
     @classmethod
     def from_env(cls, env_prefix: str = "IMPROVEMENT", config_defaults: Optional[Dict[str, Any]] = None) -> "LLMConfig":
@@ -92,6 +97,10 @@ class LLMConfig:
             lmstudio_port=int(os.getenv("LMSTUDIO_PORT", "1234")),
             ollama_host=os.getenv("OLLAMA_HOST", "localhost"),
             ollama_port=int(os.getenv("OLLAMA_PORT", "11434")),
+            # Unsloth config
+            unsloth_max_seq_length=int(cfg.get("max_seq_length", os.getenv("UNSLOTH_MAX_SEQ_LENGTH", "4096"))),
+            unsloth_load_in_4bit=cfg.get("load_in_4bit", os.getenv("UNSLOTH_LOAD_IN_4BIT", "true").lower() == "true"),
+            unsloth_top_p=float(cfg.get("top_p", os.getenv("UNSLOTH_TOP_P", "0.9"))),
         )
 
     def validate(self) -> None:
@@ -101,7 +110,7 @@ class LLMConfig:
         Raises:
             ValueError: If configuration is invalid
         """
-        valid_providers = ["openrouter", "lmstudio", "ollama"]
+        valid_providers = ["openrouter", "lmstudio", "ollama", "unsloth"]
         if self.provider not in valid_providers:
             raise ValueError(
                 f"Invalid provider '{self.provider}'. "
@@ -112,6 +121,17 @@ class LLMConfig:
             raise ValueError(
                 "OPENROUTER_API_KEY environment variable is required for OpenRouter"
             )
+
+        if self.provider == "unsloth":
+            # For unsloth, model is the adapter path
+            adapter_path = Path(self.model)
+            if not adapter_path.exists():
+                raise ValueError(f"Unsloth adapter path not found: {self.model}")
+            if not (adapter_path / "adapter_config.json").exists():
+                raise ValueError(
+                    f"adapter_config.json not found in {self.model}. "
+                    "Is this a valid LoRA adapter directory?"
+                )
 
         if not self.model:
             raise ValueError("Model name is required")

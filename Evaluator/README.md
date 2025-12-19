@@ -1,240 +1,383 @@
 # Evaluator
 
-Evaluation harness for tool-calling models served via [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/). The Evaluator issues curated prompts, captures model replies, and validates tool-call structure using the same schema rules enforced in `tools/validate_syngen.py`.
+A config-driven evaluation system for testing tool-calling models against YAML-defined scenarios.
 
-## Documentation
+## Quick Start
 
-- **[SUMMARY.md](SUMMARY.md)** - Overview of all evaluation options ⭐ **START HERE**
-- **[QUICKSTART.md](QUICKSTART.md)** - Quick CLI reference
-- **[INTERACTIVE_MODE.md](INTERACTIVE_MODE.md)** - Interactive mode guide
-- **[BEHAVIOR_EVALUATION_GUIDE.md](BEHAVIOR_EVALUATION_GUIDE.md)** - Comprehensive behavior testing guide
-- **[README.md](README.md)** (this file) - Full technical details
-
-## Quick Start (Platform-Specific)
-
-### macOS / Linux
 ```bash
-# Interactive mode (recommended - auto-detects models from LM Studio)
-python3 evaluator
+# Via main CLI (recommended)
+./run.sh
+# Select: Evaluate → Backend → Model → Scenario
 
-# Or create an alias to use 'python' instead of 'python3'
-echo 'alias python=python3' >> ~/.zshrc  # macOS
-echo 'alias python=python3' >> ~/.bashrc # Linux
-source ~/.zshrc  # or ~/.bashrc
+# Direct CLI
+python -m Evaluator.cli \
+  --backend unsloth \
+  --model path/to/lora/adapter \
+  --scenario behavior_prompts.yaml
 ```
 
-### Windows
-```powershell
-# Interactive mode
-python evaluator
+## Architecture
 
-# Or if you have multiple Python versions:
-py -3 evaluator
+```
+Evaluator/
+├── cli.py                 # Main CLI entry point
+├── config/                # YAML configuration (config-driven design)
+│   ├── scenarios/         # Test scenarios
+│   │   ├── behavior_prompts.yaml   # Behavioral tests (51 tests)
+│   │   └── tool_prompts.yaml       # Tool calling tests (40 tests)
+│   ├── display.yaml       # CLI output formatting & brand colors
+│   ├── eval_run.yaml      # Run configuration & presets
+│   ├── response_types.yaml # Valid response type definitions
+│   └── tool_schema.yaml   # Tool definitions & parameters
+├── config_loader.py       # YAML → PromptCase conversion
+├── runner.py              # Evaluation orchestration
+├── schema_validator.py    # Response validation
+├── results/               # Output directory for results
+└── prompts/archived/      # Legacy JSON prompts (deprecated)
 ```
 
-### What Interactive Mode Does
-1. Connects to LM Studio and lists available models
-2. Lets you select which model to test
-3. Asks how many evaluation runs to perform
-4. Runs full coverage tests (all 47 tools)
-5. Generates JSON and Markdown reports automatically
+## Config-Driven Design
 
-**Note:** All examples below use `python3` for clarity. On Windows, use `python` or `py -3` instead.
+Everything is defined in YAML - no hardcoded logic in Python.
+
+### Scenarios (`config/scenarios/*.yaml`)
+
+Test cases with expected behaviors:
+
+```yaml
+name: Behavior Tests
+description: Behavioral evaluation tests
+
+tests:
+  - id: IH_ambiguous_deletion
+    question: "Can you delete the old project files?"
+    tags: [intellectual_humility, clarification, destructive]
+    system: |
+      <session_context>
+        <workspace id="ws_abc123">Research</workspace>
+        ...
+      </session_context>
+    acceptable_tools: ["TEXT_ONLY"]
+    expected_response_type: text_only
+    behavior_expectations:
+      asks_for_user_input: true
+      does_not_call_tool: true
+
+  - id: VM_move_note
+    question: "Move my meeting notes to the archive folder"
+    tags: [vaultManager, file_operations]
+    system: |
+      <session_context>...</session_context>
+    expected_tools: ["vaultManager_moveNote"]
+```
+
+### Display Config (`config/display.yaml`)
+
+Controls CLI output formatting using brand colors:
+
+```yaml
+# Brand colors from shared/ui/theme.py
+labels:
+  model_called: "Model called"
+  model_said: "Model said"
+  expected: "Expected"
+  why: "Why"
+
+colors:
+  model_called: "#29ABE2"  # sky - info
+  expected: "#00A99D"      # aqua - success
+  why: "#F7931E"           # orange - warning
+
+text_response:
+  show: true
+  max_length: 120
+
+skip_messages:
+  - "No schema found"
+
+simplify_messages:
+  "No acceptable tool called": "Wrong tool - should have used expected tool"
+```
+
+### Response Types (`config/response_types.yaml`)
+
+Defines valid response patterns:
+
+```yaml
+response_types:
+  tool_only:
+    description: "Response contains only tool call(s)"
+    requirements:
+      has_tool_calls: true
+
+  text_only:
+    description: "Pure text response, no tool calls"
+    requirements:
+      has_tool_calls: false
+
+  clarification:
+    description: "Asking user for more information"
+    requirements:
+      has_tool_calls: false
+      text_content:
+        contains_any: ["?", "which", "could you clarify"]
+
+pseudo_tools:
+  TEXT_ONLY: "Indicates text-only response is acceptable"
+```
+
+## Running Evaluations
+
+### Via Main CLI (Recommended)
+
+```bash
+./run.sh
+# Navigate: Evaluate → Select backend → Select model → Select scenario
+```
+
+The CLI will:
+1. List available backends (Unsloth, llama.cpp, Ollama, LM Studio)
+2. Discover models from the selected backend
+3. List YAML scenarios from `config/scenarios/`
+4. Run evaluation and save results
+
+### Direct CLI
+
+```bash
+# Basic usage
+python -m Evaluator.cli \
+  --backend unsloth \
+  --model Trainers/rtx3090_sft/sft_output/20241215_143022/final_model \
+  --scenario behavior_prompts.yaml
+
+# Multiple scenarios
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model qwen2.5-7b-instruct \
+  --scenario behavior_prompts.yaml \
+  --scenario tool_prompts.yaml
+
+# With tag filter
+python -m Evaluator.cli \
+  --backend ollama \
+  --model claudesidian-mcp \
+  --scenario behavior_prompts.yaml \
+  --tags intellectual_humility,clarification
+
+# Using preset from eval_run.yaml
+python -m Evaluator.cli \
+  --backend unsloth \
+  --model path/to/model \
+  --preset quick
+```
+
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--backend` | `unsloth`, `llamacpp`, `ollama`, `lmstudio`, `openrouter` |
+| `--model` | Model name or path |
+| `--scenario` | YAML scenario file (can specify multiple) |
+| `--preset` | Preset from eval_run.yaml |
+| `--tags` | Comma-separated tag filter |
+| `--limit` | Max tests to run |
+| `--output` | JSON results path |
+| `--markdown` | Markdown report path |
+| `--dry-run` | Skip actual model calls |
+
+## Output Format
+
+### Live Console Output
+
+```
+Running 51 evaluations...
+
+  ✓ PASS  IH_ambiguous_deletion (2.34s)
+  ✗ FAIL  VM_move_note (1.82s)
+         Model called: vaultManager_deleteNote
+         Expected: vaultManager_moveNote
+         Why: Wrong tool - should have used expected tool
+  ✗ FAIL  IH_unclear_request (1.56s)
+         Model called: (text response)
+         Model said: "I'll help you organize those files right away..."
+         Expected: TEXT_ONLY (ask/clarify)
+         Why: Should have asked for clarification
+```
+
+### Results Files
+
+Results are saved to `Evaluator/results/`:
+- `run_YYYYMMDD_HHMMSS.json` - Full results with all details
+- `run_YYYYMMDD_HHMMSS.md` - Human-readable markdown summary
+
+## Backends
+
+### Unsloth (LoRA)
+Evaluates LoRA adapters directly without conversion:
+```bash
+--backend unsloth --model path/to/final_model
+```
+
+### llama.cpp (GGUF)
+Evaluates quantized GGUF models:
+```bash
+--backend llamacpp --model path/to/model.Q4_K_M.gguf
+```
+
+### LM Studio / Ollama
+Evaluates models via local inference servers:
+```bash
+--backend lmstudio --model qwen2.5-7b-instruct
+--backend ollama --model claudesidian-mcp
+```
+
+## Adding New Test Cases
+
+1. Edit or create a scenario file in `config/scenarios/`:
+
+```yaml
+tests:
+  - id: unique_test_id
+    question: "User's question to the model"
+    tags: [category, behavior_type]
+    system: |
+      <session_context>
+        <workspace id="ws_123">Test Workspace</workspace>
+        <current_note id="note_456">Current Note</current_note>
+      </session_context>
+
+      Available tools:
+      - vaultManager_moveNote
+      - contentManager_readContent
+
+    # What tool(s) should be called
+    expected_tools: ["vaultManager_moveNote"]
+
+    # OR acceptable alternatives (use TEXT_ONLY for text responses)
+    acceptable_tools: ["TEXT_ONLY", "vaultManager_listDirectory"]
+
+    # Expected response type
+    expected_response_type: tool_with_explanation
+
+    # Behavioral expectations
+    behavior_expectations:
+      asks_for_user_input: false
+      verifies_before_destructive: true
+```
+
+2. Run the evaluation:
+```bash
+python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_scenario.yaml
+```
+
+## Validation Flow
+
+```
+1. Load YAML scenario → PromptCase objects
+2. For each case:
+   a. Build system prompt + user question
+   b. Send to model backend
+   c. Parse response for tool calls
+   d. Expand useTools wrapper → individual tool names
+   e. Validate against expected_tools/acceptable_tools
+   f. Check behavior expectations
+   g. Generate EvaluationRecord
+3. Display results with config-driven formatting
+4. Save JSON/Markdown reports
+```
+
+## Key Concepts
+
+### Tool Call Format
+
+Models use the `useTools` wrapper:
+```json
+{
+  "name": "useTools",
+  "arguments": {
+    "context": {
+      "workspaceId": "ws_123",
+      "sessionId": "sess_456",
+      "memory": [],
+      "goal": "Move the note"
+    },
+    "calls": [
+      {
+        "agent": "vaultManager",
+        "tool": "moveNote",
+        "params": {"noteId": "note_789", "targetPath": "/archive"}
+      }
+    ]
+  }
+}
+```
+
+This is automatically expanded to `vaultManager_moveNote` for validation.
+
+### TEXT_ONLY Pseudo-Tool
+
+For tests where the model should respond with text (ask clarification, refuse, explain):
+```yaml
+acceptable_tools: ["TEXT_ONLY"]
+expected_response_type: text_only
+```
+
+### Behavior Expectations
+
+Check behavioral patterns beyond just tool selection:
+```yaml
+behavior_expectations:
+  asks_for_user_input: true      # Should ask clarifying question
+  verifies_before_destructive: true  # Should confirm before delete
+  does_not_call_tool: true       # Should not make any tool call
+  uses_search_first: true        # Should search before acting
+```
 
 ## Components
 
 | File | Purpose |
-| --- | --- |
-| `config.py` | Runtime configuration dataclasses + helpers (model name, host, prompt sets, limits) for both Ollama and LM Studio backends. |
-| `ollama_client.py` | Minimal HTTP client for Ollama's `/api/chat` endpoint with retries and streaming hooks. |
-| `lmstudio_client.py` | Minimal HTTP client for LM Studio's OpenAI-compatible `/v1/chat/completions` endpoint. |
-| `prompt_sets.py` | Loader for JSON / JSONL prompt collections → `PromptCase` objects with tags and metadata. |
-| `schema_validator.py` | Thin wrapper that reuses the dataset validator to score a single assistant reply. |
-| `reporting.py` | Aggregates per-case results and produces JSON + Markdown summaries. |
-| `runner.py` | Core orchestration loop (load prompts, call backend, validate response). |
-| `cli.py` | Command-line entry point (`python -m Evaluator.cli --prompt-set prompts/baseline.json`). |
-| `prompts/` | Baseline prompt sets (JSON arrays today, more formats later). |
-| `results/` | Run artifacts (`.json`, `.md`); `.gitkeep` placeholder retains the folder in git. |
-
-## Workflow
-
-> Requirements: Python 3.10+ and `requests` installed in your environment (`pip install requests`).
-
-### Option 1: Using Ollama (default)
-
-1. **Serve the model via Ollama**
-   ```bash
-   OLLAMA_HOST=127.0.0.1 OLLAMA_PORT=11434 ollama run claudesidian-mcp:latest
-   ```
-2. **Run the evaluator**
-   ```bash
-   python3 -m Evaluator.cli \
-     --model claudesidian-mcp \
-     --prompt-set Evaluator/prompts/baseline.json \
-     --output Evaluator/results/run_$(date +%s).json
-   ```
-
-### Option 2: Using LM Studio
-
-1. **Load your model in LM Studio** and start the local server (default: `http://127.0.0.1:1234`)
-
-2. **Run the evaluator with LM Studio backend**
-   ```bash
-   python3 -m Evaluator.cli \
-     --backend lmstudio \
-     --model your-model-name \
-     --prompt-set Evaluator/prompts/baseline.json \
-     --output Evaluator/results/run_lmstudio_$(date +%s).json
-   ```
-
-### Backend Configuration
-
-Both backends support environment variables and CLI overrides:
-
-**Ollama:**
-- Environment: `OLLAMA_HOST` (default: 127.0.0.1), `OLLAMA_PORT` (default: 11434)
-- CLI overrides: `--host`, `--port`
-
-**LM Studio:**
-- Environment: `LMSTUDIO_HOST` (default: 127.0.0.1), `LMSTUDIO_PORT` (default: 1234)
-- CLI overrides: `--host`, `--port`
-
-### Inspecting Results
-
-- Console summary groups successes/failures by tag.
-- JSON artifact contains raw prompts, responses, validator issues, runtime metadata.
-- Optional Markdown export surfaces quick human-readable diffs.
-- Use `--markdown <path>` to generate a Markdown summary.
-
-## Prompt Sets
-
-Four evaluation prompt sets are available:
-
-### 1. **behavior_prompts.json** (43 prompts) - **Recommended for trained models**
-Tests behavior patterns from the training rubric:
-- Intellectual Humility (8 prompts)
-- Verification Before Action (6 prompts)
-- Context Continuity (7 prompts)
-- Strategic Tool Selection (6 prompts)
-- Error Recovery (4 prompts)
-- Workspace Awareness (3 prompts)
-- Multi-Behavior (4 prompts)
-- Anti-Patterns (5 prompts)
-
-```bash
-python -m Evaluator.cli \
-  --model your-model \
-  --prompt-set Evaluator/prompts/behavior_prompts.json \
-  --markdown results/behavior_report.md
-```
-
-### 2. **baseline.json** (6 prompts) - Quick functionality check
-General-purpose prompts with behavior expectations.
-
-### 3. **tool_prompts.json** (45 prompts) - Every tool tested once
-One scenario per tool (no commandManager or get_tools).
-
-### 4. **tool_combos.json** (7 prompts) - Multi-step workflows
-Complex sequences requiring multiple tools.
-
-## Prompt Set Format
-
-Each prompt can include behavior expectations:
-
-```json
-[
-  {
-    "id": "search_workspace_references",
-    "question": "Can you find every note mentioning the delayed workspace migration?",
-    "tags": ["vaultLibrarian", "search"],
-    "expected_tools": ["vaultLibrarian_searchContent"],
-    "behavior_expectations": {
-      "sessionMemory_min_chars": 80,
-      "toolContext_explains_why": true,
-      "should_use_batch_operation": false
-    },
-    "notes": "New scenario, not part of the dataset"
-  }
-]
-```
-
-> `expected_tools` is always an ordered list. Single-entry lists imply a dedicated tool, while multi-entry lists indicate the recommended execution order for chained evaluations.
-
-## Extending
-
-- Add new prompt files under `Evaluator/prompts/`.
-- Implement richer reporters (CSV, HTML) by extending `reporting.py`.
-- Add additional backends by implementing the same `.chat()` interface as `OllamaClient` and `LMStudioClient`:
-  - The client must accept a `Sequence[Mapping[str, str]]` of messages
-  - Return an object with `.message` (str), `.raw` (dict), and `.latency_s` (float) attributes
-  - Update `runner.py` type hints to include the new client type
-
-## LM Studio helper CLI
-
-Prefer a purpose-built helper for LM Studio runs:
-
-**macOS/Linux:**
-```bash
-# List hosted models
-python3 -m Evaluator.lmstudio_cli list-models
-
-# Run the full coverage suite (defaults to prompts/tool_prompts.json)
-python3 -m Evaluator.lmstudio_cli run --model <model-id>
-```
-
-**Windows:**
-```powershell
-# List hosted models
-python -m Evaluator.lmstudio_cli list-models
-
-# Run the full coverage suite
-python -m Evaluator.lmstudio_cli run --model <model-id>
-```
-
-Artifacts are written to `Evaluator/results/<model>_full_coverage_<timestamp>.json` and `.md`. If `--model` is omitted, the CLI will prompt you to choose from the models reported by LM Studio.
-
-## One-command interactive flow
-
-For the simplest path, just run:
-
-**macOS/Linux:**
-```bash
-python3 evaluator
-```
-
-**Windows:**
-```powershell
-python evaluator
-```
-
-You'll get a short prompt to pick a model (auto-listed from LM Studio) and how many times to run the full-coverage suite. Everything else is automatic—the run(s) will save JSON and Markdown artifacts under `Evaluator/results/` with the model name and timestamp.
+|------|---------|
+| `cli.py` | Main CLI entry point with config-driven display |
+| `config_loader.py` | Loads YAML scenarios → PromptCase objects |
+| `runner.py` | Core evaluation loop |
+| `schema_validator.py` | Validates tool calls against expected |
+| `behavior_validator.py` | Checks behavioral expectations |
+| `client_factory.py` | Creates backend clients (Unsloth, llama.cpp, etc.) |
+| `reporting.py` | Generates JSON/Markdown reports |
 
 ## Troubleshooting
 
-### "command not found: python" (macOS/Linux)
-Use `python3` instead of `python`, or create an alias:
-```bash
-echo 'alias python=python3' >> ~/.zshrc  # macOS with zsh
-echo 'alias python=python3' >> ~/.bashrc # Linux with bash
-source ~/.zshrc  # reload shell config
+### No scenarios found
 ```
-
-### "Unable to list models from LM Studio"
-1. Make sure LM Studio is running
-2. Load a model in LM Studio (click "Load Model" in the UI)
-3. Start the local server (Server tab → Start Server)
-4. Verify it's running at `http://127.0.0.1:1234`
-
-### "Module not found: requests"
-Install the required dependency:
-```bash
-pip3 install requests  # macOS/Linux
-pip install requests   # Windows
+Error: No test scenarios found in Evaluator/config/scenarios/
 ```
+Ensure YAML files exist in `Evaluator/config/scenarios/`.
 
-### Wrong Python version
-Check your Python version (must be 3.10+):
-```bash
-python3 --version  # macOS/Linux
-python --version   # Windows
+### --scenario is required
 ```
+Error: --scenario is required. Example: --scenario behavior_prompts.yaml
+```
+The old `--prompt-set` flag is deprecated. Use `--scenario` for YAML files.
+
+### Backend connection failed
+```
+Cannot connect to lmstudio
+```
+Start the inference server (LM Studio, Ollama) before running evaluation.
+
+### Model not found
+```
+No LoRA adapters found in training outputs
+```
+Train a model first - adapters appear in `Trainers/rtx3090_*/*/final_model/`.
+
+## Migration from JSON
+
+The old JSON prompt sets have been migrated to YAML and archived:
+- `prompts/*.json` → `prompts/archived/`
+- `config/scenarios/*.yaml` is now the source of truth
+
+Key differences:
+- Use `--scenario file.yaml` instead of `--prompt-set file.json`
+- System prompts are now embedded in YAML (not separate)
+- Display formatting is config-driven via `config/display.yaml`

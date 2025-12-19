@@ -9,7 +9,10 @@ import argparse
 import json
 import os
 import sys
-from typing import List
+from pathlib import Path
+from typing import Any, Dict, List
+
+import yaml
 
 # Force UTF-8 output for Windows to handle unicode characters like ✓
 if sys.platform == "win32":
@@ -53,6 +56,38 @@ from .reporting import (
     generate_evaluation_model_card_section,
 )
 from .runner import evaluate_cases
+
+
+def load_display_config(config_dir: Path) -> Dict[str, Any]:
+    """Load display configuration from YAML."""
+    display_path = config_dir / "display.yaml"
+    if display_path.exists():
+        with open(display_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def simplify_issue_message(msg: str, display_config: Dict[str, Any]) -> str | None:
+    """Apply configured simplifications to issue messages.
+
+    Returns None if message should be skipped entirely.
+    """
+    # Check skip list
+    for skip_pattern in display_config.get("skip_messages", []):
+        if skip_pattern in msg:
+            return None
+
+    # Apply simplifications
+    for pattern, replacement in display_config.get("simplify_messages", {}).items():
+        if pattern in msg:
+            if replacement is None:
+                # Truncate at pattern
+                return msg.split(pattern)[0].strip()
+            else:
+                # Replace with configured message
+                return replacement
+
+    return msg
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -175,6 +210,11 @@ def main(argv: List[str] | None = None) -> int:
         print("No prompts matched the provided filters.", file=sys.stderr)
         return 1
 
+    # Load display configuration
+    display_config = load_display_config(config_dir)
+    labels = display_config.get("labels", {})
+    colors = display_config.get("colors", {})
+
     # Get settings kwargs for host/port overrides
     settings_kwargs = build_settings_kwargs(args)
 
@@ -195,10 +235,29 @@ def main(argv: List[str] | None = None) -> int:
         retries=config.retries,
     )
 
-    # Live output callback with colored output
+    # Live output callback (uses display_config from outer scope)
     def on_record(record):
         name = record.case.case_id or "unnamed"
         latency = f"{record.latency_s:.2f}s" if record.latency_s else "-"
+
+        # Get labels from config with defaults
+        lbl_called = labels.get("model_called", "Model called")
+        lbl_said = labels.get("model_said", "Model said")
+        lbl_expected = labels.get("expected", "Expected")
+        lbl_why = labels.get("why", "Why")
+        lbl_no_tool = labels.get("no_tool_call", "(text response)")
+        lbl_text_hint = labels.get("text_only_hint", "(ask/clarify)")
+
+        # Get colors from config with defaults
+        clr_called = colors.get("model_called", "cyan")
+        clr_expected = colors.get("expected", "green")
+        clr_why = colors.get("why", "yellow")
+
+        # Text response settings
+        text_config = display_config.get("text_response", {})
+        show_text = text_config.get("show", True)
+        text_max_len = text_config.get("max_length", 120)
+        clr_text = text_config.get("color", "#33475B")
 
         if _RICH_AVAILABLE:
             line = Text()
@@ -214,18 +273,67 @@ def main(argv: List[str] | None = None) -> int:
             if not record.passed:
                 if record.error:
                     _console.print(f"         [yellow]Error:[/yellow] {record.error}")
-                elif record.validator and not record.validator.passed:
-                    for issue in record.validator.issues[:2]:
-                        _console.print(f"         [dim]-[/dim] [yellow]{issue.message}[/yellow]")
+                elif record.validator:
+                    # Show what tool(s) the model actually called
+                    if record.validator.tool_calls:
+                        called = [tc.name for tc in record.validator.tool_calls]
+                        _console.print(f"         [{clr_called}]{lbl_called}:[/{clr_called}] {', '.join(called)}")
+                    else:
+                        _console.print(f"         [{clr_called}]{lbl_called}:[/{clr_called}] [dim]{lbl_no_tool}[/dim]")
+                        # Show the actual text response
+                        if show_text and record.response_text:
+                            text = str(record.response_text).replace('\n', ' ').strip()
+                            if len(text) > text_max_len:
+                                text = text[:text_max_len] + "..."
+                            _console.print(f"         [{clr_text}]{lbl_said}:[/{clr_text}] \"{text}\"")
+
+                    # Show expected tools
+                    expected = record.case.expected_tools or record.case.acceptable_tools
+                    if expected:
+                        exp_str = ', '.join(expected)
+                        if "TEXT_ONLY" in expected:
+                            exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
+                        _console.print(f"         [{clr_expected}]{lbl_expected}:[/{clr_expected}] {exp_str}")
+
+                    # Show concise reason using config-driven simplification
+                    if record.validator.issues:
+                        for issue in record.validator.issues:
+                            msg = simplify_issue_message(issue.message, display_config)
+                            if msg is None:
+                                continue
+                            _console.print(f"         [{clr_why}]{lbl_why}:[/{clr_why}] {msg}")
+                            break
         else:
             status = "✓ PASS" if record.passed else "✗ FAIL"
             print(f"  {status}  {name} ({latency})")
             if not record.passed:
                 if record.error:
                     print(f"         Error: {record.error}")
-                elif record.validator and not record.validator.passed:
-                    for issue in record.validator.issues[:2]:
-                        print(f"         - {issue.message}")
+                elif record.validator:
+                    if record.validator.tool_calls:
+                        called = [tc.name for tc in record.validator.tool_calls]
+                        print(f"         {lbl_called}: {', '.join(called)}")
+                    else:
+                        print(f"         {lbl_called}: {lbl_no_tool}")
+                        # Show the actual text response
+                        if show_text and record.response_text:
+                            text = str(record.response_text).replace('\n', ' ').strip()
+                            if len(text) > text_max_len:
+                                text = text[:text_max_len] + "..."
+                            print(f"         {lbl_said}: \"{text}\"")
+                    expected = record.case.expected_tools or record.case.acceptable_tools
+                    if expected:
+                        exp_str = ', '.join(expected)
+                        if "TEXT_ONLY" in expected:
+                            exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
+                        print(f"         {lbl_expected}: {exp_str}")
+                    if record.validator.issues:
+                        for issue in record.validator.issues:
+                            msg = simplify_issue_message(issue.message, display_config)
+                            if msg is None:
+                                continue
+                            print(f"         {lbl_why}: {msg}")
+                            break
 
     print(f"\nRunning {len(selected_cases)} evaluations...\n")
 

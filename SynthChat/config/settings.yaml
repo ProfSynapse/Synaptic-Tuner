@@ -3,6 +3,7 @@
 
 llm:
   # Generation (local is fine - just creating raw examples)
+  # Options: lmstudio, ollama, openrouter, unsloth
   generation:
     provider: lmstudio
     model: local-model
@@ -10,6 +11,16 @@ llm:
     port: 1234
     temperature: 0.7
     max_tokens: 2048
+
+  # Example: Use Unsloth with a LoRA adapter for generation
+  # generation:
+  #   provider: unsloth
+  #   model: /path/to/lora_adapter  # Directory with adapter_config.json
+  #   max_seq_length: 4096
+  #   load_in_4bit: true
+  #   top_p: 0.9
+  #   temperature: 0.7
+  #   max_tokens: 2048
 
   # Improvement (cloud recommended - needs strong judge)
   improvement:

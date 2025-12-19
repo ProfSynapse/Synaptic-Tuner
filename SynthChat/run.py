@@ -47,14 +47,24 @@ def create_llm_client(config: Dict, mode: str = "generation"):
     provider = llm_config.get("provider", "lmstudio")
     model = llm_config.get("model", "local-model")
 
+    # Build config defaults from settings
+    config_defaults = {
+        "provider": provider,
+        "model": model,
+        "temperature": llm_config.get("temperature", 0.7),
+        "max_tokens": llm_config.get("max_tokens", 2048),
+    }
+
+    # Provider-specific config
+    if provider == "unsloth":
+        config_defaults["max_seq_length"] = llm_config.get("max_seq_length", 4096)
+        config_defaults["load_in_4bit"] = llm_config.get("load_in_4bit", True)
+        config_defaults["top_p"] = llm_config.get("top_p", 0.9)
+    elif "provider_routing" in llm_config:
+        config_defaults["provider_routing"] = llm_config["provider_routing"]
+
     # Create client using shared.llm factory
-    client = create_client(
-        provider=provider,
-        model=model,
-        host=llm_config.get("host"),
-        port=llm_config.get("port"),
-        api_key=None  # Will read from env
-    )
+    client = create_client(config_defaults=config_defaults)
     return client
 
 

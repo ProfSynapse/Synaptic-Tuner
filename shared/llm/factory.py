@@ -8,6 +8,7 @@ from .exceptions import LLMConfigError
 from .providers.openrouter import OpenRouterClient
 from .providers.lmstudio import LMStudioClient
 from .providers.ollama import OllamaClient
+from .providers.unsloth import UnslothClient
 
 
 def create_client(
@@ -88,10 +89,18 @@ def create_client(
             model=config.model
         )
 
+    elif config.provider == "unsloth":
+        return UnslothClient(
+            adapter_path=config.model,
+            max_seq_length=config.unsloth_max_seq_length,
+            load_in_4bit=config.unsloth_load_in_4bit,
+            top_p=config.unsloth_top_p,
+        )
+
     else:
         raise LLMConfigError(
             f"Unknown provider: {config.provider}. "
-            f"Supported: openrouter, lmstudio, ollama"
+            f"Supported: openrouter, lmstudio, ollama, unsloth"
         )
 
 
@@ -102,4 +111,4 @@ def list_providers() -> list:
     Returns:
         List of provider names
     """
-    return ["openrouter", "lmstudio", "ollama"]
+    return ["openrouter", "lmstudio", "ollama", "unsloth"]

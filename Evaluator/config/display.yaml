@@ -1,0 +1,49 @@
+# Display Configuration
+# Controls how evaluation results are shown in the CLI
+
+# =============================================================================
+# BRAND COLORS (from shared/ui/theme.py)
+# =============================================================================
+# aqua:   "#00A99D" - Primary, success (Persian Green)
+# purple: "#93278F" - Accent, emphasis (Dark Purple)
+# cello:  "#33475B" - Subtle, borders (Cello)
+# orange: "#F7931E" - Warning, attention (Carrot Orange)
+# sky:    "#29ABE2" - Info, selections (Summer Sky)
+# cream:  "#FBF7F1" - Light text (Floral White)
+
+# Labels for failure output
+labels:
+  model_called: "Model called"
+  model_said: "Model said"
+  expected: "Expected"
+  why: "Why"
+  no_tool_call: "(text response)"
+  text_only_hint: "(ask/clarify)"
+  wrong_tool: "Wrong tool - should have used expected tool"
+
+# Text response display settings
+text_response:
+  # Show text response when no tool was called
+  show: true
+  # Maximum characters to display (truncate with ...)
+  max_length: 120
+  # Color for the response text
+  color: "#33475B"  # cello - muted
+
+# Issue message filters
+# Messages containing these strings are skipped (not shown)
+skip_messages:
+  - "No schema found"
+
+# Issue message simplifications
+# If message contains key, replace with value (or truncate at key if value is null)
+simplify_messages:
+  "No acceptable tool called": "Wrong tool - should have used expected tool"
+  "Valid options:": null  # Truncate at this point (redundant with Expected)
+
+# Colors (rich markup) - using brand colors
+colors:
+  model_called: "#29ABE2"  # sky - info blue
+  expected: "#00A99D"      # aqua - success/primary
+  why: "#F7931E"           # orange - warning/attention
+  no_tool_call: "#33475B"  # cello - muted/subtle

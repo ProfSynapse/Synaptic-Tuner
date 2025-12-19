@@ -126,6 +126,7 @@ tests:
   acceptable_tools:
   - vaultManager_listDirectory
   - vaultLibrarian_searchDirectory
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -147,6 +148,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -168,6 +171,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -268,6 +273,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -288,6 +295,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -458,6 +467,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - contentManager_readContent
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -552,6 +563,8 @@ tests:
     \ context.\n</available_workspaces>"
   expected_tools:
   - vaultLibrarian_searchDirectory
+  acceptable_tools:
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -573,6 +586,7 @@ tests:
   acceptable_tools:
   - vaultLibrarian_searchContent
   - vaultLibrarian_searchDirectory
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -713,6 +727,7 @@ tests:
   acceptable_tools:
   - vaultManager_listDirectory
   - vaultLibrarian_searchDirectory
+  - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
