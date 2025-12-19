@@ -104,6 +104,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.gguf_handler import GGUFHandler
         from tuner.handlers.improve_handler import handle_improve
+        from tuner.handlers.inference_handler import InferenceHandler
 
         # Step 1: Detect environment and load .env
         env = detect_environment()
@@ -115,6 +116,7 @@ class MainMenuHandler(BaseHandler):
         # Step 3: Define menu options
         menu_options = [
             ("train", f"{BOX['star']} Train a model (SFT, KTO, or MLX)"),
+            ("run", f"{BOX['star']} Run model (chat with your trained model)"),
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
             ("gguf", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
@@ -126,6 +128,7 @@ class MainMenuHandler(BaseHandler):
         # Step 4: Create handler instances
         handlers = {
             "train": TrainHandler(),
+            "run": InferenceHandler(),
             "upload": UploadHandler(),
             "gguf": GGUFHandler(),
             "eval": EvalHandler(),
