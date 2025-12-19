@@ -11,16 +11,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Type, Union
 
-from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings
+from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings, UnslothSettings
 from .enums import BackendType
 from .vllm_client import VLLMClient
 from .llamacpp_client import LlamaCppClient
+from .unsloth_client import UnslothClient
 from .protocols import BackendClient, BackendSettings
 from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter
 
 # Type alias for settings types
-SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings]
-ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient]
+SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings]
+ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, UnslothClient]
 
 
 # Registry mapping backend types to their client and settings classes
@@ -30,6 +31,7 @@ _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
     BackendType.LMSTUDIO: SharedLMStudioAdapter,
     BackendType.VLLM: VLLMClient,
     BackendType.LLAMACPP: LlamaCppClient,
+    BackendType.UNSLOTH: UnslothClient,
 }
 
 _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
@@ -37,6 +39,7 @@ _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
     BackendType.LMSTUDIO: LMStudioSettings,
     BackendType.VLLM: VLLMSettings,
     BackendType.LLAMACPP: LlamaCppSettings,
+    BackendType.UNSLOTH: UnslothSettings,
 }
 
 

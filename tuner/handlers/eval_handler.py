@@ -152,6 +152,53 @@ class EvalHandler(BaseHandler):
                 print(f"  [{i}] {name}{quant_str} [{size:.1f}GB]")
             print()
 
+    def _display_lora_models_table(self, backend, models: List[str]) -> None:
+        """
+        Display available LoRA adapters with detailed info.
+
+        Args:
+            backend: UnslothBackend instance (for get_model_info)
+            models: List of adapter directory paths
+        """
+        from pathlib import Path
+
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title="Available LoRA Adapters",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Run", style="white")
+            table.add_column("Base Model", style=COLORS["aqua"])
+            table.add_column("Type", style=COLORS["purple"])
+            table.add_column("Size", style="dim", justify="right")
+
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                timestamp = info.get("timestamp", "unknown")
+                base = info.get("base_model_short", "unknown")
+                trainer = info.get("trainer_type", "-").upper()
+                size = f"{info.get('size_mb', 0):.0f}MB" if info.get('size_mb') else "-"
+
+                table.add_row(str(i), timestamp, base, trainer, size)
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print("\nAvailable LoRA adapters:")
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                timestamp = info.get("timestamp", "unknown")
+                base = info.get("base_model_short", "unknown")
+                trainer = info.get("trainer_type", "-").upper()
+                print(f"  [{i}] {timestamp} ({base}) [{trainer}]")
+            print()
+
     def _display_prompt_sets_table(self, prompt_sets: List[Tuple[str, str, int]]) -> None:
         """
         Display available prompt sets in a table.
@@ -196,7 +243,8 @@ class EvalHandler(BaseHandler):
 
         # Step 1: Select backend
         backend_choice = print_menu([
-            ("llamacpp", f"{BOX['star']} llama.cpp (GGUF - direct, fastest)"),
+            ("unsloth", f"{BOX['star']} Unsloth (LoRA - direct, no conversion)"),
+            ("llamacpp", f"{BOX['bullet']} llama.cpp (GGUF - fast, portable)"),
             ("ollama", f"{BOX['bullet']} Ollama (local server)"),
             ("lmstudio", f"{BOX['bullet']} LM Studio (local server)"),
         ], "Select backend:")
@@ -208,8 +256,8 @@ class EvalHandler(BaseHandler):
         print_info(f"Fetching models from {backend_choice}...")
 
         try:
-            # Pass repo_root for llamacpp backend to find models
-            if backend_choice == "llamacpp":
+            # Pass repo_root for backends that discover local models
+            if backend_choice in ("llamacpp", "unsloth"):
                 backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
             else:
                 backend = EvaluationBackendRegistry.get(backend_choice)
@@ -235,6 +283,9 @@ class EvalHandler(BaseHandler):
             elif backend_choice == "llamacpp":
                 print_info("No GGUF models found in training outputs.")
                 print_info("Train a model first, then convert to GGUF.")
+            elif backend_choice == "unsloth":
+                print_info("No LoRA adapters found in training outputs.")
+                print_info("Train a model first - the final_model/ directory will appear.")
             elif backend_choice == "ollama":
                 print_info("Is Ollama running? Check with: ollama list")
             return 1
@@ -242,6 +293,8 @@ class EvalHandler(BaseHandler):
         # Step 3: Display models and select
         if backend_choice == "llamacpp":
             self._display_gguf_models_table(backend, models)
+        elif backend_choice == "unsloth":
+            self._display_lora_models_table(backend, models)
         else:
             self._display_models_table(backend_choice, models)
 

@@ -68,7 +68,7 @@ Backend Configuration:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio", "llamacpp"],
+        choices=["ollama", "lmstudio", "llamacpp", "unsloth"],
         default="ollama",
         help="Backend to use for evaluation (default: ollama)",
     )

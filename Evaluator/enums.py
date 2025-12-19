@@ -54,6 +54,9 @@ class BackendType(str, Enum):
     LLAMACPP = "llamacpp"
     """llama.cpp local inference via llama-cli (direct GGUF execution)."""
 
+    UNSLOTH = "unsloth"
+    """Direct Unsloth/LoRA inference (loads adapter on base model)."""
+
     def __str__(self) -> str:
         return self.value
 

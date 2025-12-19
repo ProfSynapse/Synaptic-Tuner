@@ -227,6 +227,40 @@ class VLLMSettings(BaseBackendSettings):
 
 
 @dataclass
+class UnslothSettings:
+    """Settings for direct Unsloth/LoRA inference.
+
+    This loads a LoRA adapter and applies it to the base model for inference.
+    No server needed - runs directly in-process.
+
+    Attributes:
+        model: Path to LoRA adapter directory (e.g., final_model/)
+        max_seq_length: Maximum sequence length (default: 4096)
+        load_in_4bit: Load base model in 4-bit for memory efficiency (default: True)
+        temperature: Sampling temperature (0 = greedy)
+        top_p: Top-p sampling
+        max_tokens: Maximum tokens to generate
+        seed: Optional random seed
+    """
+
+    model: str  # Path to LoRA adapter directory
+    max_seq_length: int = 4096
+    load_in_4bit: bool = True
+    temperature: float = 0.2
+    top_p: float = 0.9
+    max_tokens: int = 1024
+    seed: Optional[int] = None
+
+    # Required by BackendSettings protocol but not used
+    host: str = field(default="localhost")
+    port: int = field(default=0)
+
+    def base_url(self) -> str:
+        """Not applicable for direct inference."""
+        return f"file://{self.model}"
+
+
+@dataclass
 class LlamaCppSettings:
     """Settings for llama.cpp direct execution via llama-cli.
 
