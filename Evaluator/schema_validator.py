@@ -21,6 +21,43 @@ class ToolCall:
     arguments: Dict[str, Any]
 
 
+def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
+    """Expand useTools wrapper into individual tool calls.
+
+    useTools format:
+    {
+        "name": "useTools",
+        "arguments": {
+            "context": {...},
+            "calls": [{"agent": "vaultManager", "tool": "moveNote", "params": {...}}]
+        }
+    }
+
+    Becomes: [ToolCall(name="vaultManager_moveNote", arguments={...})]
+    """
+    expanded = []
+    for tc in tool_calls:
+        if tc.name == "useTools" and isinstance(tc.arguments, dict):
+            calls = tc.arguments.get("calls", [])
+            if isinstance(calls, list):
+                for call in calls:
+                    if isinstance(call, dict):
+                        agent = call.get("agent", "")
+                        tool = call.get("tool", "")
+                        params = call.get("params", {})
+                        if agent and tool:
+                            # Construct full tool name: agent_tool
+                            full_name = f"{agent}_{tool}"
+                            expanded.append(ToolCall(name=full_name, arguments=params))
+            # If no valid calls found, keep the original useTools
+            if not expanded:
+                expanded.append(tc)
+        else:
+            # Not useTools, keep as-is
+            expanded.append(tc)
+    return expanded
+
+
 @dataclass
 class ValidatorIssue:
     level: str
@@ -129,6 +166,10 @@ def validate_assistant_response(
         report.add("ERROR", f"Assistant response must be string or dict, got {type(content).__name__}")
 
     issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
+
+    # Expand useTools wrapper into individual tool calls
+    # This allows expected_tools to use actual tool names like "vaultManager_moveNote"
+    tool_calls = _expand_use_tools(tool_calls)
 
     # Validate IDs against eval context if provided
     context_validation = None

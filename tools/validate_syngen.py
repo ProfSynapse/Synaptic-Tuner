@@ -555,21 +555,20 @@ def validate_context(args: dict, report: ExampleReport) -> None:
     # 2. New Format: Top-level 'sessionId' and 'workspaceId' (metadata in thinking block)
 
     if "context" in args:
-        # --- OLD FORMAT (Nested in 'context' object) ---
+        # --- CONTEXT OBJECT FORMAT ---
         ctx = args.get("context")
         if not isinstance(ctx, dict):
             report.add("ERROR", "context must be an object")
             return
-            
+
         # Validate required fields in context object
+        # New format uses: workspaceId, sessionId, memory, goal
+        # Old format used: sessionDescription, sessionMemory, toolContext, primaryGoal, subgoal
         required_fields = [
             "sessionId",
             "workspaceId",
-            "sessionDescription",
-            "sessionMemory",
-            "toolContext",
-            "primaryGoal",
-            "subgoal",
+            "memory",
+            "goal",
         ]
         for field in required_fields:
             if field not in ctx:

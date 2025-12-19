@@ -17,6 +17,7 @@ class PromptCase:
     question: str
     tags: List[str] = field(default_factory=list)
     expected_tools: List[str] = field(default_factory=list)
+    acceptable_tools: List[str] = field(default_factory=list)  # OR logic - any of these is valid
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def chat_messages(self) -> List[Dict[str, str]]:
@@ -60,9 +61,10 @@ def _build_case(idx: int, payload: Mapping[str, Any]) -> PromptCase:
     case_id = payload.get("id") or f"case_{idx + 1:04d}"
     tags = _string_list(payload.get("tags", []))
     expected = _string_list(payload.get("expected_tools", []))
+    acceptable = _string_list(payload.get("acceptable_tools", []))
 
-    metadata = {k: v for k, v in payload.items() if k not in {"id", "question", "prompt", "tags", "expected_tools"}}
-    return PromptCase(case_id=case_id, question=question.strip(), tags=tags, expected_tools=expected, metadata=metadata)
+    metadata = {k: v for k, v in payload.items() if k not in {"id", "question", "prompt", "tags", "expected_tools", "acceptable_tools"}}
+    return PromptCase(case_id=case_id, question=question.strip(), tags=tags, expected_tools=expected, acceptable_tools=acceptable, metadata=metadata)
 
 
 def _string_list(value: Any) -> List[str]:

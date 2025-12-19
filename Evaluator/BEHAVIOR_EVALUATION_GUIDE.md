@@ -105,41 +105,60 @@ Each prompt can include a `behavior_expectations` object defining what the model
   "id": "example_prompt",
   "question": "User request text",
   "tags": ["behavior_category", "tool_family"],
-  "expected_tools": ["tool_name"],
+  "expected_tools": ["vaultManager_moveFolder"],
   "behavior_expectations": {
     "should_verify_before_action": true,
     "should_acknowledge_ambiguity": true,
     "should_use_batch_operation": true,
-    "sessionMemory_min_chars": 80,
-    "sessionMemory_references_prior_actions": true,
-    "toolContext_explains_why": true,
-    "toolContext_shows_workflow_position": true,
-    "goals_show_progression": true
+    "memory_min_chars": 80,
+    "goal_explains_why": true
   },
   "anti_patterns_to_avoid": {
     "direct_delete_without_search": true,
-    "weak_sessionMemory": true,
+    "weak_memory": true,
     "no_workflow_context": true
   }
 }
 ```
 
+### Tool Call Context Structure (NEW)
+
+Tool calls now use a `context` object with these fields:
+
+```json
+{
+  "context": {
+    "workspaceId": "default|ws_<id>",
+    "sessionId": "session_<timestamp>_<random>",
+    "memory": "1-3 sentence description of conversation history/intent",
+    "goal": "1-3 sentence current objective based on user request",
+    "constraints": "(optional) Rules/limits"
+  },
+  "path": "...",
+  "newPath": "..."
+}
+```
+
+**Field Mapping (Old → New):**
+- `sessionMemory` → `memory` (conversation essence)
+- `toolContext` → `goal` (current objective)
+- `primaryGoal` / `subGoal` → consolidated into `goal`
+
 ### Common Behavior Expectations
 
 **Intellectual Humility:**
 - `should_verify_before_action` - Searches/checks before acting
-- `should_acknowledge_ambiguity` - sessionMemory notes uncertainty
+- `should_acknowledge_ambiguity` - memory notes uncertainty
 - `should_search_when_uncertain` - Uses search when path/target unclear
-- `should_escalate_complex_reasoning` - Uses executePrompt for complex decisions
-- `sessionMemory_mentions_uncertainty` - Explicitly states what's unclear
+- `should_escalate_complex_reasoning` - Uses executePrompts for complex decisions
+- `memory_mentions_uncertainty` - Explicitly states what's unclear
 
 **Context Continuity:**
-- `sessionMemory_min_chars` - Minimum character count (typically 80+)
-- `sessionMemory_references_prior_actions` - Mentions previous steps
-- `sessionMemory_includes_specific_counts` - Uses concrete numbers
-- `toolContext_shows_workflow_position` - Explains step in sequence
-- `toolContext_explains_why` - Provides reasoning, not just action
-- `goals_show_progression` - primaryGoal → subgoal decomposition
+- `memory_min_chars` - Minimum character count (typically 80+) [also: `sessionMemory_min_chars`]
+- `memory_references_prior_actions` - Mentions previous steps
+- `memory_includes_specific_counts` - Uses concrete numbers
+- `goal_shows_workflow_position` - Explains step in sequence
+- `goal_explains_why` - Provides reasoning, not just action [also: `toolContext_explains_why`]
 
 **Verification Before Action:**
 - `should_verify_before_delete` - Searches before deletion
@@ -155,15 +174,15 @@ Each prompt can include a `behavior_expectations` object defining what the model
 
 **Error Recovery:**
 - `should_fallback_to_search_on_error` - Tries alternative approach
-- `should_escalate_after_multiple_failures` - Uses executePrompt after 2+ fails
-- `sessionMemory_acknowledges_failure` - Notes what didn't work
-- `toolContext_explains_adaptation` - Explains why new approach
+- `should_escalate_after_multiple_failures` - Uses executePrompts after 2+ fails
+- `memory_acknowledges_failure` - Notes what didn't work
+- `goal_explains_adaptation` - Explains why new approach
 
 **Workspace Awareness:**
 - `should_load_workspace_first` - Loads workspace context before operations
 - `should_reference_workspace_structure` - Uses workspace directoryStructure
 - `should_follow_workspace_workflow` - Adheres to workspace workflows
-- `sessionMemory_mentions_workspace_context` - References workspace data
+- `memory_mentions_workspace_context` - References workspace data
 
 ---
 

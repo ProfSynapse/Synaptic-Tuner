@@ -133,6 +133,7 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
         "question": record.case.question,
         "tags": record.case.tags,
         "expected_tools": record.case.expected_tools,
+        "acceptable_tools": record.case.acceptable_tools,
         "response_text": record.response_text,
         "latency_s": record.latency_s,
         "passed": record.passed,

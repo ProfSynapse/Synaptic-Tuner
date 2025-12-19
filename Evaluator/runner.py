@@ -169,11 +169,40 @@ def _evaluate_single_case(
 
 
 def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) -> None:
-    """Check if expected tools were called, updating validator_result in place."""
+    """Check if expected tools were called, updating validator_result in place.
+
+    Supports two modes:
+    - expected_tools: AND logic - ALL listed tools must be called
+    - acceptable_tools: OR logic - ANY listed tool is valid (includes TEXT_ONLY pseudo-tool)
+    """
+    called_tool_names = {tc.name for tc in validator_result.tool_calls}
+    has_tool_calls = len(called_tool_names) > 0
+
+    # Check acceptable_tools first (OR logic)
+    if case.acceptable_tools:
+        # TEXT_ONLY is a pseudo-tool meaning no tool call is acceptable
+        text_only_acceptable = "TEXT_ONLY" in case.acceptable_tools
+        tool_options = [t for t in case.acceptable_tools if t != "TEXT_ONLY"]
+
+        # Check if any acceptable tool was called OR text-only is valid
+        any_acceptable_called = bool(called_tool_names & set(tool_options))
+        text_only_response = not has_tool_calls and text_only_acceptable
+
+        if not any_acceptable_called and not text_only_response:
+            validator_result.passed = False
+            options_str = ", ".join(sorted(case.acceptable_tools))
+            validator_result.issues.append(
+                ValidatorIssue(
+                    level="error",
+                    message=f"No acceptable tool called. Valid options: {options_str}"
+                )
+            )
+        return  # acceptable_tools takes precedence over expected_tools
+
+    # Check expected_tools (AND logic) - original behavior
     if not case.expected_tools:
         return
 
-    called_tool_names = {tc.name for tc in validator_result.tool_calls}
     missing_tools = set(case.expected_tools) - called_tool_names
 
     if missing_tools:

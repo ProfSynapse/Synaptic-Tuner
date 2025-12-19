@@ -250,28 +250,32 @@ def _check_expectation(
             )
 
     # Context quality expectations
-    if expectation == "sessionMemory_min_chars" and context:
-        session_memory = context.get("sessionMemory", "")
-        actual_len = len(session_memory)
+    # Supports both old (sessionMemory) and new (memory) field names
+    if expectation in ("sessionMemory_min_chars", "memory_min_chars") and context:
+        # Check both old and new field names
+        memory_content = context.get("memory", "") or context.get("sessionMemory", "")
+        actual_len = len(memory_content)
         passed = actual_len >= value
         return BehaviorIssue(
             check=expectation,
             expected=f">= {value} chars",
             actual=f"{actual_len} chars",
             passed=passed,
-            message=f"sessionMemory length: {'PASS' if passed else 'FAIL'} - {actual_len} chars (min: {value})"
+            message=f"memory length: {'PASS' if passed else 'FAIL'} - {actual_len} chars (min: {value})"
         )
 
-    if expectation == "toolContext_explains_why" and context:
-        tool_context = context.get("toolContext", "")
-        has_explanation = len(tool_context) > 50
+    # Supports both old (toolContext) and new (goal) field names
+    if expectation in ("toolContext_explains_why", "goal_explains_why") and context:
+        # Check both old and new field names
+        goal_content = context.get("goal", "") or context.get("toolContext", "")
+        has_explanation = len(goal_content) > 50
         passed = has_explanation if value else True
         return BehaviorIssue(
             check=expectation,
             expected=value,
-            actual=f"{len(tool_context)} chars",
+            actual=f"{len(goal_content)} chars",
             passed=passed,
-            message=f"toolContext explains why: {'PASS' if passed else 'FAIL'} - {len(tool_context)} chars"
+            message=f"goal explains why: {'PASS' if passed else 'FAIL'} - {len(goal_content)} chars"
         )
 
     # Workflow continuation expectations
@@ -299,15 +303,17 @@ def _check_expectation(
         )
 
     if expectation in ("explains_limit_reasoning", "sessionMemory_explains_limit_choice",
-                       "sessionMemory_explains_temporal_limit", "limit_matches_expected_count"):
+                       "sessionMemory_explains_temporal_limit", "memory_explains_limit_choice",
+                       "memory_explains_temporal_limit", "limit_matches_expected_count"):
         if context:
-            session_memory = context.get("sessionMemory", "")
+            # Check both old and new field names
+            memory_content = context.get("memory", "") or context.get("sessionMemory", "")
             reasoning_keywords = ["limit", "typically", "usually", "expect", "approximate", "estimate", "reasonable"]
-            has_limit_reasoning = any(word in session_memory.lower() for word in reasoning_keywords)
+            has_limit_reasoning = any(word in memory_content.lower() for word in reasoning_keywords)
             passed = has_limit_reasoning if value else True
             return BehaviorIssue(
                 check=expectation,
-                expected="sessionMemory explains limit choice",
+                expected="memory explains limit choice",
                 actual=f"has_reasoning={has_limit_reasoning}",
                 passed=passed,
                 message=f"{expectation}: {'PASS' if passed else 'FAIL'}"
@@ -315,13 +321,14 @@ def _check_expectation(
         return None
 
     # Execute prompt usage expectations (delegation)
-    if expectation in ("delegates_complex_task", "uses_execute_prompt"):
+    # Supports both old (executePrompt) and new (executePrompts) tool names
+    if expectation in ("delegates_complex_task", "uses_execute_prompt", "uses_execute_prompts"):
         tool_name = parsed.first_tool_call.name if parsed.first_tool_call else None
-        uses_execute_prompt = tool_name == "agentManager_executePrompt"
+        uses_execute_prompt = tool_name in ("agentManager_executePrompt", "agentManager_executePrompts")
         passed = uses_execute_prompt if value else True
         return BehaviorIssue(
             check=expectation,
-            expected="agentManager_executePrompt",
+            expected="agentManager_executePrompt(s)",
             actual=tool_name or "no tool",
             passed=passed,
             message=f"{expectation}: {'PASS' if passed else 'FAIL'} - tool={tool_name}"
