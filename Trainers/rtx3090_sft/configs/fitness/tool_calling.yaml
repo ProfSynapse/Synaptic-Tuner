@@ -269,17 +269,6 @@ validations:
                 temperature: number
                 maxTokens: number
 
-            # =================================================================
-            # commandManager - Obsidian command execution
-            # =================================================================
-            commandManager:
-              listCommands:
-                _required: []
-                filter: string
-              executeCommand:
-                _required: [commandId]
-                commandId: string
-
     error: "useTools validation failed: {details}"
 
 # Scoring configuration
@@ -313,4 +302,3 @@ scoring:
 # - vaultLibrarian: Search operations (searchContent, searchDirectory)
 # - memoryManager: Session/state/workspace management
 # - agentManager: Agent CRUD and model operations
-# - commandManager: Obsidian command execution
