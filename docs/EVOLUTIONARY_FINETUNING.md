@@ -873,6 +873,258 @@ if config.evolutionary.enabled:
 
 ---
 
+## Future Work: Exploration vs Exploitation
+
+> **Status:** Not implemented. Current system uses pure exploitation (always picks best candidate).
+> These are ideas for Phase 3 if the basic evolutionary approach proves valuable.
+
+### The Problem
+
+The current selection method is **greedy** - always picks the highest fitness candidate:
+
+```python
+# Current: Pure exploitation
+best_candidate = max(candidates, key=lambda c: c.fitness)
+```
+
+This can get stuck in local optima. The "best" immediate choice isn't always the best long-term choice.
+
+### Option 1: Q-Learning for Gradient Selection
+
+**Idea**: Learn which *types* of gradient modifications work best in different situations.
+
+```
+State (s):  Representation of current training state
+            - Current loss
+            - Gradient norm
+            - Training step
+            - Recent fitness trend
+
+Action (a): Which candidate type to apply
+            - "pure" (unmodified gradient)
+            - "noisy_low" (small noise)
+            - "noisy_high" (large noise)
+            - "scaled_up" (1.5x)
+            - "scaled_down" (0.5x)
+
+Reward (r): Fitness improvement over baseline
+            fitness_after - fitness_before
+
+Q(s,a):     Expected long-term value of taking action a in state s
+```
+
+**Implementation sketch:**
+
+```python
+class QLearningGradientSelector:
+    def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.2):
+        self.q_table = defaultdict(float)  # (state, action) -> value
+        self.alpha = alpha   # Learning rate
+        self.gamma = gamma   # Discount factor
+        self.epsilon = epsilon  # Exploration rate
+
+    def discretize_state(self, loss, grad_norm, step, fitness_trend):
+        # Bin continuous values into discrete states
+        loss_bin = int(loss * 10)
+        grad_bin = int(np.log10(grad_norm + 1e-8))
+        trend_bin = "improving" if fitness_trend > 0 else "declining"
+        return (loss_bin, grad_bin, step // 100, trend_bin)
+
+    def select_action(self, state, candidates):
+        if random.random() < self.epsilon:
+            # EXPLORE: Try random candidate
+            return random.choice(candidates)
+        else:
+            # EXPLOIT: Pick best Q-value
+            q_values = [(c, self.q_table[(state, c.description)]) for c in candidates]
+            return max(q_values, key=lambda x: x[1])[0]
+
+    def update(self, state, action, reward, next_state):
+        # Q-learning update
+        old_q = self.q_table[(state, action)]
+        max_next_q = max(self.q_table[(next_state, a)] for a in self.actions)
+        new_q = old_q + self.alpha * (reward + self.gamma * max_next_q - old_q)
+        self.q_table[(state, action)] = new_q
+```
+
+**What it learns:**
+- "When loss is high and gradient is large, noisy exploration helps"
+- "When already converging, pure gradient is safest"
+- "After 500 steps, scaled-down gradients prevent overshooting"
+
+### Option 2: UCB (Upper Confidence Bound)
+
+**Idea**: Balance exploitation with uncertainty. Prefer candidates we haven't tried much.
+
+```python
+class UCBSelector:
+    def __init__(self, c=2.0):
+        self.c = c  # Exploration weight
+        self.counts = defaultdict(int)    # Times each candidate type chosen
+        self.values = defaultdict(float)  # Average fitness for each type
+        self.total = 0
+
+    def select(self, candidates):
+        self.total += 1
+
+        ucb_scores = []
+        for candidate in candidates:
+            ctype = candidate.description
+
+            if self.counts[ctype] == 0:
+                # Never tried - infinite UCB (forces exploration)
+                ucb = float('inf')
+            else:
+                # UCB formula: exploitation + exploration bonus
+                exploit = self.values[ctype]
+                explore = self.c * sqrt(log(self.total) / self.counts[ctype])
+                ucb = exploit + explore
+
+            ucb_scores.append((candidate, ucb))
+
+        return max(ucb_scores, key=lambda x: x[1])[0]
+
+    def update(self, candidate, fitness):
+        ctype = candidate.description
+        self.counts[ctype] += 1
+        # Running average
+        self.values[ctype] += (fitness - self.values[ctype]) / self.counts[ctype]
+```
+
+**Effect**: Automatically balances "try what worked" with "explore what we haven't tried enough"
+
+### Option 3: A* for Trajectory Planning
+
+**Idea**: Instead of greedy single-step selection, plan multiple steps ahead.
+
+```
+Start:     Current weights W₀
+Goal:      Weights that achieve fitness > 0.95
+Actions:   Gradient candidates
+Cost g(n): Steps taken
+Heuristic h(n): 1.0 - current_fitness (distance to goal)
+```
+
+```python
+class AStarGradientPlanner:
+    def __init__(self, model, lookahead=3):
+        self.lookahead = lookahead
+
+    def plan(self, current_weights, candidates_per_step=4):
+        """
+        A* search through gradient space.
+        Returns: Best sequence of gradient applications.
+        """
+        # Priority queue: (f_score, path, weights)
+        start = (self.heuristic(current_weights), [], current_weights)
+        frontier = [start]
+
+        while frontier:
+            f_score, path, weights = heapq.heappop(frontier)
+
+            # Goal check
+            if self.evaluate_fitness(weights) > 0.95:
+                return path  # Return winning sequence
+
+            # Reached lookahead limit
+            if len(path) >= self.lookahead:
+                continue
+
+            # Expand: try each candidate
+            for candidate in self.generate_candidates(weights):
+                new_weights = self.apply_candidate(weights, candidate)
+                new_path = path + [candidate]
+
+                g = len(new_path)  # Cost so far
+                h = self.heuristic(new_weights)  # Estimated remaining
+                f = g + h
+
+                heapq.heappush(frontier, (f, new_path, new_weights))
+
+        return path  # Best path found
+
+    def heuristic(self, weights):
+        # Admissible heuristic: distance to goal
+        fitness = self.evaluate_fitness(weights)
+        return 1.0 - fitness
+```
+
+**Problem**: Expensive - need to evaluate many weight combinations. Could mitigate with:
+- Beam search (keep top-k paths only)
+- Monte Carlo Tree Search (MCTS) for sampling
+
+### Option 4: Adaptive Epsilon-Greedy (Recommended First Step)
+
+**Idea**: Simple ε-greedy that adapts based on progress.
+
+```python
+class AdaptiveSelector:
+    def __init__(self):
+        self.epsilon = 0.3  # Start with 30% exploration
+        self.fitness_history = []
+        self.window = 50
+
+    def select(self, candidates):
+        # Adapt epsilon based on progress
+        if len(self.fitness_history) >= self.window:
+            recent = self.fitness_history[-self.window:]
+            trend = recent[-1] - recent[0]
+
+            if trend > 0.1:
+                # Making good progress - exploit more
+                self.epsilon = max(0.05, self.epsilon * 0.95)
+            elif trend < -0.05:
+                # Declining - explore more
+                self.epsilon = min(0.5, self.epsilon * 1.1)
+
+        if random.random() < self.epsilon:
+            # EXPLORE
+            return random.choice(candidates)
+        else:
+            # EXPLOIT
+            return max(candidates, key=lambda c: c.fitness)
+
+    def update(self, fitness):
+        self.fitness_history.append(fitness)
+```
+
+### Comparison Table
+
+| Approach | Exploration Method | Complexity | Best For |
+|----------|-------------------|------------|----------|
+| **Current (greedy)** | None | Simplest | Baseline testing |
+| **ε-greedy** | Random with probability ε | Simple | Quick wins |
+| **Adaptive ε** | Adjust ε based on progress | Simple | Practical default |
+| **UCB** | Bonus for under-tried options | Medium | Balanced exploration |
+| **Q-Learning** | Learn which modifications work when | Higher | Long training runs |
+| **A\*** | Multi-step lookahead | Expensive | Small models, critical quality |
+
+### Implementation Priority
+
+1. **Phase 2 (Current)**: Pure exploitation - test if evolutionary approach helps at all
+2. **Phase 3a**: Add Adaptive ε-greedy - simple, low risk
+3. **Phase 3b**: Add UCB tracking - more principled exploration
+4. **Phase 3c**: Q-Learning - if training runs are long enough to learn patterns
+
+### Config Extension (Future)
+
+```yaml
+evolutionary:
+  enabled: true
+  candidates: 4
+
+  # Future: exploration settings
+  exploration:
+    method: "adaptive_epsilon"  # or "ucb", "q_learning", "greedy"
+    params:
+      initial_epsilon: 0.3
+      min_epsilon: 0.05
+      max_epsilon: 0.5
+      adaptation_window: 50
+```
+
+---
+
 ## Summary
 
 **Phase 1** unifies validation across all systems:
