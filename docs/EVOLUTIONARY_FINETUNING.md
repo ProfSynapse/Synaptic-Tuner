@@ -1,16 +1,13 @@
-# Evolutionary Fine-Tuning
+# Unified Validation & Evolutionary Fine-Tuning
 
-Design document for integrating evolutionary algorithms into the fine-tuning pipeline.
+Design document for unifying config-driven validation across the codebase, then building evolutionary training on top.
 
 ## Table of Contents
 
 1. [Philosophy](#philosophy)
-2. [Problem Statement](#problem-statement)
-3. [Solution Overview](#solution-overview)
-4. [Architecture](#architecture)
-5. [Config-Driven Design](#config-driven-design)
-6. [Implementation Guide](#implementation-guide)
-7. [Pseudocode](#pseudocode)
+2. [Phase 1: Unified Validation Architecture](#phase-1-unified-validation-architecture)
+3. [Phase 2: Evolutionary Fine-Tuning](#phase-2-evolutionary-fine-tuning)
+4. [Implementation Roadmap](#implementation-roadmap)
 
 ---
 
@@ -21,251 +18,279 @@ Design document for integrating evolutionary algorithms into the fine-tuning pip
 1. **Config-Driven Everything**
    - Developers configure behavior through YAML, not code changes
    - New use cases = new config files, not new Python modules
-   - Same config format across all systems (SynthChat, Training, Evaluation)
+   - Same config format across all systems (SynthChat, Evaluator, Trainer)
 
 2. **No Code Duplication**
    - Shared infrastructure lives in `shared/`
-   - Both SynthChat and Trainers import from the same source
+   - All systems import from the same source
    - Single source of truth for validation logic
 
-3. **Maximum Flexibility**
+3. **Format-Agnostic Validation**
+   - Parsing layer handles model-specific formats (Qwen, Mistral, ChatML, OpenAI)
+   - Validation layer operates on normalized structures
+   - Adding a new model format = one code change in parsing, zero changes elsewhere
+
+4. **Maximum Flexibility**
    - No hardcoded field names or schemas
    - Validation rules are data, not code
-   - Strategy parameters are passed through, not interpreted
-
-4. **Compute Efficiency**
-   - Evolutionary selection adds minimal overhead
-   - Fitness evaluation uses schema validation, not LLM calls
-   - Single backward pass per step, multiple cheap forward passes
+   - Same rubric YAML works in SynthChat, Evaluator, and Trainer
 
 ---
 
-## Problem Statement
+## Phase 1: Unified Validation Architecture
 
-### The Challenge with Tool Internalization
+### The Problem
 
-Training a model to use tools correctly involves:
-- **Discrete decisions**: Which tool to call (gradient signal is noisy)
-- **Structured output**: Exact JSON format required (partial credit is meaningless)
-- **Pattern matching**: Intent → tool mapping (many valid paths)
+Three systems need the same validation logic:
 
-Standard gradient descent struggles because:
-```
-Gradient says: "Adjust weights in this direction"
-But we don't know if that direction actually improves tool selection
-We just apply it and hope
-```
+| System | Purpose | Current State |
+|--------|---------|---------------|
+| **SynthChat** | Validate/improve training examples | Has canonical validators |
+| **Evaluator** | Validate model responses during eval | Imports via hacky path manipulation |
+| **Trainer** | Compute fitness during training | No access yet |
 
-### What We Want
-
-Evolutionary selection pressure **during training**:
-```
-Gradient says: "Here's a direction"
-We generate multiple candidates around that direction
-We TEST each candidate: "Does this actually improve tool calling?"
-We apply only the winning candidate
-```
-
-### Constraints
-
-- **24GB VRAM** for a 2B model
-- **No LLM judge calls** during training (too expensive)
-- **Config-driven** fitness evaluation
-- **Reuse existing infrastructure** (validators, rubrics)
-
----
-
-## Solution Overview
-
-### Approach: Gradient + Evolution Strategy Hybrid (C-Lite)
-
-Instead of parallel training runs or post-hoc selection, we do **micro-evolution within each training step**:
+#### Current Architecture (Fragmented)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     SINGLE TRAINING STEP                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. FORWARD + BACKWARD (standard, done once)                    │
-│     Input → Model → Loss → Gradient G                          │
-│                                                                 │
-│  2. CANDIDATE GENERATION (new)                                  │
-│     G + noise₁ → Candidate 1                                   │
-│     G + noise₂ → Candidate 2                                   │
-│     G × scale  → Candidate 3                                   │
-│     G (pure)   → Candidate 4                                   │
-│                                                                 │
-│  3. FITNESS EVALUATION (new, cheap)                             │
-│     For each candidate:                                         │
-│       - Temporarily apply to weights                            │
-│       - Forward pass on eval batch                              │
-│       - Schema validation (no LLM) → fitness score              │
-│       - Revert weights                                          │
-│                                                                 │
-│  4. SELECTION (new)                                             │
-│     Apply only the highest-fitness candidate                    │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+SynthChat/services/validators/
+├── structure_validator.py      ← Canonical validation logic
+├── cross_scope_validator.py
+├── facade.py                   ← SynthChat-specific coordinator
+└── content/
+    ├── json_validator.py
+    ├── xml_validator.py
+    └── registry.py
 
-### Why This Works
-
-- **Backward pass**: Done once (expensive, ~3-4x forward)
-- **Forward passes**: Done N times (cheap, parallelizable)
-- **Fitness evaluation**: Schema validation, ~0.1ms per example
-- **Total overhead**: ~3x slower per step, but better gradient quality
-
-### Fitness Without LLM
-
-Tool calls are structured data. Validation is deterministic:
-
-```
-Level 1: Format valid?     → Contains "tool_call:", valid JSON
-Level 2: Tool valid?       → Tool name in manifest
-Level 3: Schema valid?     → Required fields present, correct types
-Level 4: Context aligned?  → IDs match expected values
-```
-
-All levels use existing `StructureValidator` with config-driven rules.
-
----
-
-## Architecture
-
-### Current State
-
-```
-SynthChat/
-└── services/
-    └── validators/           # Validation logic (stuck in SynthChat)
-        ├── structure_validator.py
-        ├── cross_scope_validator.py
-        └── content/
-            ├── json_validator.py
-            └── xml_validator.py
+Evaluator/
+├── rubric_validator.py         ← HACK: imports StructureValidator via
+│                                  importlib path manipulation
+├── behavior_validator.py       ← Own validation logic
+├── schema_validator.py         ← Tool call format validation
+├── tool_call_parser.py         ← Format parsing (Qwen, Mistral)
+└── response_parser.py          ← Response parsing
 
 Trainers/
-└── rtx3090_sft/
-    └── train_sft.py          # No evolutionary support
+└── (nothing)                   ← Will need same validation
 ```
 
-### Target State
+**Problems:**
+1. `Evaluator/rubric_validator.py` lines 15-28 use hacky `importlib` to import from SynthChat
+2. Format parsing lives in Evaluator, schema validation in SynthChat
+3. No clean way for Trainers to access either
+4. Duplication of coordination logic between systems
+
+### The Solution
+
+Move all validation to `shared/validation/` with clean imports everywhere.
+
+#### Target Architecture (Unified)
 
 ```
-shared/
-├── validation/               # MOVED from SynthChat
-│   ├── structure_validator.py
-│   ├── cross_scope_validator.py
-│   ├── content/
-│   │   ├── json_validator.py
-│   │   └── xml_validator.py
-│   ├── fitness.py            # NEW: Thin wrapper → 0.0-1.0 score
-│   └── configs/              # Validation configs (same format as rubrics)
-│       └── tool_calling.yaml
+shared/validation/                      ← SINGLE SOURCE OF TRUTH
+├── __init__.py                         ← Public API exports
 │
-└── evolutionary/             # NEW: Evolutionary training components
-    ├── candidate_generator.py
-    ├── strategies/
-    │   ├── base.py
-    │   ├── gradient_noise.py
-    │   ├── scale_variation.py
-    │   └── component_dropout.py
-    └── trainer_wrapper.py
+├── parsing/                            ← Layer 1: Format Detection
+│   ├── __init__.py
+│   ├── tool_call_parser.py             (FROM Evaluator)
+│   ├── response_parser.py              (FROM Evaluator)
+│   └── formats/                        ← Extensible format handlers
+│       ├── __init__.py
+│       ├── base.py                     ← Abstract format handler
+│       ├── qwen.py                     ← <tool_call>...</tool_call>
+│       ├── mistral.py                  ← [TOOL_CALLS] [...]
+│       ├── chatml.py                   ← tool_call: ...\narguments: ...
+│       ├── openai.py                   ← {"tool_calls": [...]}
+│       └── registry.py                 ← Format auto-detection
+│
+├── validators/                         ← Layer 2: Schema Validation
+│   ├── __init__.py
+│   ├── structure_validator.py          (FROM SynthChat)
+│   ├── cross_scope_validator.py        (FROM SynthChat)
+│   └── content/                        ← Content-type validators
+│       ├── __init__.py
+│       ├── base.py                     (FROM SynthChat)
+│       ├── json_validator.py           (FROM SynthChat)
+│       ├── xml_validator.py            (FROM SynthChat)
+│       ├── regex_validator.py          (FROM SynthChat)
+│       ├── yaml_validator.py           (FROM SynthChat)
+│       ├── code_validator.py           (FROM SynthChat)
+│       └── registry.py                 (FROM SynthChat)
+│
+├── rubric/                             ← Rubric Management
+│   ├── __init__.py
+│   ├── loader.py                       (FROM SynthChat services/data/)
+│   ├── cache.py                        (FROM SynthChat services/data/)
+│   └── repository.py                   (FROM SynthChat services/data/)
+│
+├── results.py                          ← Unified result types
+│
+└── fitness.py                          ← Layer 3: Scoring (for Trainer)
 
-SynthChat/
-└── services/
-    └── validators/
-        └── __init__.py       # Just: from shared.validation import *
+───────────────────────────────────────────────────────────────────────
 
-Trainers/
+SynthChat/services/validators/          ← Thin re-exports
+└── __init__.py
+    # Backwards compatibility
+    from shared.validation.validators import (
+        StructureValidator,
+        CrossScopeValidator,
+    )
+    from shared.validation.validators.content import (
+        ContentValidatorRegistry,
+        # ... etc
+    )
+
+Evaluator/                              ← Clean imports
+├── rubric_validator.py
+│   from shared.validation import RubricValidator
+├── schema_validator.py
+│   from shared.validation.parsing import parse_response
+└── tool_call_parser.py
+    # DELETED - now in shared/validation/parsing/
+
+Trainers/                               ← Direct access
 └── rtx3090_sft/
-    ├── train_sft.py          # Wraps trainer with evolutionary if enabled
-    └── configs/
-        ├── config.yaml       # Add evolutionary section
-        └── fitness/
-            └── tool_calling.yaml
+    from shared.validation import FitnessEvaluator
 ```
 
-### Dependency Flow
+### Two-Layer Architecture
+
+The key insight: **Format parsing and schema validation are separate concerns.**
 
 ```
-shared/validation/
-       ↑
-       ├──────────────────┐
-       │                  │
-SynthChat/services/   Trainers/rtx3090_sft/
-       │                  │
-       │                  ↓
-       │           shared/evolutionary/
-       │                  │
-       └──────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                       MODEL OUTPUT (any format)                     │
+│                                                                     │
+│  Qwen:    "<tool_call>{"name": "useTools", ...}</tool_call>"       │
+│  Mistral: "[TOOL_CALLS] [{"name": "useTools", ...}]"               │
+│  ChatML:  "tool_call: useTools\narguments: {...}"                  │
+│  OpenAI:  {"tool_calls": [{"function": {"name": "useTools"}}]}     │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 LAYER 1: FORMAT PARSING                             │
+│                 shared/validation/parsing/                          │
+│                                                                     │
+│  • Auto-detects format (Qwen, Mistral, ChatML, OpenAI)             │
+│  • Handles model-specific markers and syntax                        │
+│  • Normalizes to common structure                                   │
+│  • Extensible: add new formats without changing validation          │
+│                                                                     │
+│  INPUT:  Raw string or dict (any format)                           │
+│  OUTPUT: ParsedResponse(tool_calls=[ToolCall(name, arguments)])    │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 LAYER 2: SCHEMA VALIDATION                          │
+│                 shared/validation/validators/                       │
+│                                                                     │
+│  • Config-driven rules (from YAML - same format as rubrics)        │
+│  • Validates normalized structure (format-agnostic)                │
+│  • Tool manifest validation                                         │
+│  • Field existence, types, constraints                              │
+│  • Cross-scope validation                                           │
+│                                                                     │
+│  INPUT:  ParsedResponse (normalized)                               │
+│  OUTPUT: (is_valid: bool, errors: List[str])                       │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                     ┌─────────────┼─────────────┐
+                     │             │             │
+                     ▼             ▼             ▼
+              ┌──────────┐  ┌──────────┐  ┌──────────┐
+              │SynthChat │  │Evaluator │  │ Trainer  │
+              │          │  │          │  │          │
+              │ Improve  │  │ Report   │  │ Fitness  │
+              │ examples │  │ results  │  │ score    │
+              └──────────┘  └──────────┘  └──────────┘
 ```
 
----
+### Why Format-Agnostic Matters
 
-## Config-Driven Design
+Different models represent tool calls differently:
 
-### Training Config (`config.yaml`)
+| Model | Format | Marker |
+|-------|--------|--------|
+| Qwen | XML-like | `<tool_call>...</tool_call>` |
+| Mistral | Bracket prefix | `[TOOL_CALLS] [...]` |
+| ChatML | Text markers | `tool_call: ...\narguments: ...` |
+| OpenAI | Structured dict | `{"tool_calls": [...]}` |
 
-Minimal additions to existing config:
+**The validation config should NOT know about formats:**
 
 ```yaml
-# Existing training config...
-model:
-  model_name: "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
-
-training:
-  learning_rate: 2e-4
-  # ... existing fields ...
-
-# NEW: Evolutionary section
-evolutionary:
-  enabled: false                    # Toggle on/off
-
-  # Path to validation config (same format as rubrics)
-  validation_config: "configs/fitness/tool_calling.yaml"
-
-  # Number of candidates per step
-  candidates: 4
-
-  # Eval batch size for fitness evaluation
-  eval_batch_size: 4
-
-  # Strategy configuration (generic, passed through)
-  strategy:
-    type: "gradient_noise"          # Strategy name (looked up in registry)
-    params:                         # Passed directly to strategy
-      noise_scale: 0.1
-
-  # Scoring configuration (generic, passed through)
-  scoring:
-    method: "error_count"           # binary | error_count | weighted
-    params:
-      base_score: 0.2
-      max_errors_before_zero: 5
+# BAD - Hardcodes format, breaks when switching models
+validations:
+  - match: "<tool_call>"           # Only works for Qwen
+    type: contains
+  - match: "[TOOL_CALLS]"          # Only works for Mistral
+    type: contains
 ```
 
-### Validation Config (Same Format as Rubrics)
+```yaml
+# GOOD - Validates parsed structure, works with any model
+validations:
+  - tools:
+      useTools:
+        _required: ["context", "calls"]
+        context:
+          sessionId: string
+          workspaceId: string
+```
+
+The `tools:` validation type operates on **parsed tool calls**, not raw text. The parsing layer handles format detection automatically.
+
+### Adding a New Model Format
+
+When a new model comes out with a different tool call format:
+
+1. **Add format handler** to `shared/validation/parsing/formats/`:
+```python
+# shared/validation/parsing/formats/newmodel.py
+
+class NewModelFormatHandler(BaseFormatHandler):
+    """Handle NewModel's [TOOLS]...[/TOOLS] format."""
+
+    def can_parse(self, content: str) -> bool:
+        return "[TOOLS]" in content
+
+    def parse(self, content: str) -> List[ToolCall]:
+        # Extract and parse tool calls
+        ...
+```
+
+2. **Register in registry**:
+```python
+# shared/validation/parsing/formats/registry.py
+
+FORMAT_HANDLERS = [
+    NewModelFormatHandler(),  # Add new format
+    QwenFormatHandler(),
+    MistralFormatHandler(),
+    ChatMLFormatHandler(),
+    OpenAIFormatHandler(),
+]
+```
+
+3. **All existing validation configs work unchanged** - they validate the parsed structure, not the raw format.
+
+### Config Format: Same as Rubrics
+
+The validation config uses the **exact same format** as existing rubrics. No new syntax to learn.
 
 ```yaml
-# configs/fitness/tool_calling.yaml
-# Uses EXACT same format as SynthChat rubrics
+# This works as both:
+# - A SynthChat rubric (for improvement engine)
+# - An Evaluator rubric (for model evaluation)
+# - A Trainer fitness config (for evolutionary training)
 
-name: "tool_calling_fitness"
-description: "Fitness evaluation for tool internalization"
+name: "tool_calling"
+description: "Validate tool call structure and context"
 scope: response
 
-# Standard validations array - same as rubrics
 validations:
-  # Format validation
-  - match: "tool_call:"
-    type: contains
-    error: "Missing tool_call marker"
-
-  - match: '"name":\s*"'
-    type: regex
-    error: "No tool name found"
-
   # Tool manifest validation
   - tools:
       useTools:
@@ -298,128 +323,169 @@ validations:
       match_pattern: "sessionId:\\s*([\\w-]+)"
     error: "sessionId doesn't match system prompt"
 
-# Optional: scoring weights per validation
+# Optional: scoring config (used by Trainer)
 scoring:
-  method: "weighted"
-  weights:
-    format: 0.2
-    tools: 0.5
-    cross_scope: 0.3
+  method: "error_count"
+  params:
+    max_errors_before_zero: 5
 ```
 
-### Adding a New Use Case
+### Unified Result Types
 
-Developer workflow for a completely different use case (e.g., code generation):
+All systems use the same result types:
 
-1. **Create validation config**:
-```yaml
-# configs/fitness/code_generation.yaml
-name: "code_generation_fitness"
-scope: response
-
-validations:
-  - match: "```python"
-    type: contains
-    error: "No Python code block"
-
-  - match: "def\\s+\\w+\\s*\\("
-    type: regex
-    error: "No function definition found"
-
-  - field: "has_docstring"
-    type: boolean
-    error: "Missing docstring"
-```
-
-2. **Point training config at it**:
-```yaml
-evolutionary:
-  enabled: true
-  validation_config: "configs/fitness/code_generation.yaml"
-```
-
-3. **Run training** - no code changes needed.
-
----
-
-## Implementation Guide
-
-### Phase 1: Move Validators to Shared
-
-**Files to move:**
-```
-SynthChat/services/validators/ → shared/validation/
-├── structure_validator.py
-├── cross_scope_validator.py
-├── base.py
-├── facade.py
-└── content/
-    ├── json_validator.py
-    ├── xml_validator.py
-    ├── regex_validator.py
-    ├── yaml_validator.py
-    ├── code_validator.py
-    └── registry.py
-```
-
-**Update imports in SynthChat:**
 ```python
-# SynthChat/services/validators/__init__.py
-from shared.validation import (
+# shared/validation/results.py
+
+@dataclass
+class ToolCall:
+    """Normalized tool call (format-agnostic)."""
+    name: str
+    arguments: Dict[str, Any]
+
+@dataclass
+class ParsedResponse:
+    """Result of format parsing."""
+    tool_calls: List[ToolCall]
+    text_content: Optional[str]
+    raw_content: str
+    format_detected: str  # "qwen", "mistral", "chatml", "openai"
+
+@dataclass
+class ValidationResult:
+    """Result of schema validation."""
+    passed: bool
+    errors: List[str]
+    validated_tools: List[ToolCall]
+
+@dataclass
+class FitnessResult:
+    """Result of fitness evaluation (for Trainer)."""
+    score: float  # 0.0 - 1.0
+    validation_result: ValidationResult
+    level_scores: Dict[str, float]  # Per-validation-level breakdown
+```
+
+### Public API
+
+Clean, simple imports for all systems:
+
+```python
+# shared/validation/__init__.py
+
+# Layer 1: Parsing
+from .parsing import (
+    parse_response,
+    parse_tool_calls,
+    ParsedResponse,
+    ToolCall,
+)
+
+# Layer 2: Validation
+from .validators import (
     StructureValidator,
     CrossScopeValidator,
-    SchemaValidator,
-    # ... etc
+    validate_against_rubric,
+    ValidationResult,
+)
+
+# Rubric Management
+from .rubric import (
+    RubricLoader,
+    RubricCache,
+    load_rubric,
+)
+
+# Layer 3: Fitness (for Trainer)
+from .fitness import (
+    FitnessEvaluator,
+    FitnessResult,
 )
 ```
 
-### Phase 2: Create Fitness Wrapper
-
-**New file:** `shared/validation/fitness.py`
-
-Thin wrapper that:
-1. Loads validation config (same format as rubrics)
-2. Delegates to `StructureValidator`
-3. Converts validation results to 0.0-1.0 score
-
-### Phase 3: Create Evolutionary Components
-
-**New directory:** `shared/evolutionary/`
-
-```
-shared/evolutionary/
-├── __init__.py
-├── fitness.py              # Re-export from validation
-├── candidate_generator.py  # Generate weight update candidates
-├── strategies/
-│   ├── __init__.py
-│   ├── registry.py         # Strategy lookup by name
-│   ├── base.py             # Abstract strategy interface
-│   ├── gradient_noise.py   # G + gaussian noise
-│   ├── scale_variation.py  # G * random scales
-│   └── component_dropout.py # G with random dropout
-└── trainer_wrapper.py      # Wraps any HF Trainer
-```
-
-### Phase 4: Integrate into Training
-
-**Modify:** `train_sft.py` and `train_kto.py`
+**Usage in each system:**
 
 ```python
-# At trainer initialization
-if config.evolutionary.enabled:
-    from shared.evolutionary import EvolutionaryTrainerWrapper
-    trainer = EvolutionaryTrainerWrapper(
-        base_trainer=trainer,
-        config=config.evolutionary,
-    )
+# SynthChat - improvement engine
+from shared.validation import StructureValidator, parse_response
+
+def improve_example(example):
+    parsed = parse_response(example["assistant_content"])
+    is_valid, errors = validator.validate(parsed, rubric["validations"])
+    if not is_valid:
+        # Trigger improvement...
+
+# Evaluator - model evaluation
+from shared.validation import parse_response, validate_against_rubric
+
+def evaluate_response(response, rubric_key):
+    parsed = parse_response(response)
+    result = validate_against_rubric(parsed, rubric_key)
+    return result.to_dict()
+
+# Trainer - evolutionary fitness
+from shared.validation import FitnessEvaluator
+
+evaluator = FitnessEvaluator(config_path="configs/fitness/tool_calling.yaml")
+score = evaluator.evaluate(model_output, example)  # Returns 0.0-1.0
 ```
 
 ---
 
-## Pseudocode
+## Phase 2: Evolutionary Fine-Tuning
 
-### Fitness Evaluator
+> **Prerequisite:** Phase 1 must be complete. Evolutionary training depends on unified validation for fitness evaluation.
+
+### The Problem
+
+Training a model to use tools correctly involves:
+- **Discrete decisions**: Which tool to call (gradient signal is noisy)
+- **Structured output**: Exact JSON format required
+- **Pattern matching**: Intent → tool mapping
+
+Standard gradient descent struggles because:
+```
+Gradient says: "Adjust weights in this direction"
+But we don't know if that direction improves tool selection
+We just apply it and hope
+```
+
+### The Solution: Gradient + ES Hybrid
+
+Instead of blindly applying gradients, test candidates first:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     SINGLE TRAINING STEP                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. FORWARD + BACKWARD (standard, done once)                        │
+│     Input → Model → Loss → Gradient G                              │
+│                                                                     │
+│  2. CANDIDATE GENERATION                                            │
+│     G + noise₁ → Candidate 1                                       │
+│     G + noise₂ → Candidate 2                                       │
+│     G × scale  → Candidate 3                                       │
+│     G (pure)   → Candidate 4                                       │
+│                                                                     │
+│  3. FITNESS EVALUATION (uses unified validation!)                   │
+│     For each candidate:                                             │
+│       - Temporarily apply to weights                                │
+│       - Forward pass on eval batch                                  │
+│       - Parse output (Layer 1 - format agnostic)                   │
+│       - Validate (Layer 2 - config-driven)                         │
+│       - Compute fitness score                                       │
+│       - Revert weights                                              │
+│                                                                     │
+│  4. SELECTION                                                       │
+│     Apply only the highest-fitness candidate                        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Fitness Evaluation
+
+Uses the unified validation from Phase 1:
 
 ```python
 # shared/validation/fitness.py
@@ -427,368 +493,250 @@ if config.evolutionary.enabled:
 class FitnessEvaluator:
     """
     Config-driven fitness evaluation.
-    Loads validation config, delegates to StructureValidator.
+    Wraps unified parsing + validation layers.
     """
 
     def __init__(self, config_path: Path):
-        # Load config (same format as rubrics)
+        # Load validation config (same format as rubrics!)
         self.config = load_yaml(config_path)
         self.validations = self.config.get("validations", [])
         self.scoring = self.config.get("scoring", {})
 
-        # Reuse existing validators
+        # Use shared validators
         self.validator = StructureValidator()
 
     def evaluate(self, model_output: str, example: Dict) -> float:
-        """
-        Evaluate output against config-driven validations.
-        Returns: 0.0 to 1.0
-        """
-        # Parse output (reuse existing parsing)
-        data = self._parse_output(model_output)
+        # Layer 1: Parse (format-agnostic)
+        parsed = parse_response(model_output)
 
-        # Run validations (reuse existing validator)
+        if not parsed.tool_calls:
+            return 0.0  # No valid tool calls
+
+        # Layer 2: Validate (config-driven)
+        data = {
+            "tool_calls": [
+                {"name": tc.name, "arguments": tc.arguments}
+                for tc in parsed.tool_calls
+            ]
+        }
+
         is_valid, errors = self.validator.validate(
             data=data,
             validations=self.validations,
-            raw_content=model_output
         )
 
-        # Convert to score
+        # Layer 3: Score
         return self._compute_score(is_valid, errors)
 
     def _compute_score(self, is_valid: bool, errors: List[str]) -> float:
         method = self.scoring.get("method", "error_count")
-        params = self.scoring.get("params", {})
 
         if method == "binary":
             return 1.0 if is_valid else 0.0
-
         elif method == "error_count":
-            max_errors = params.get("max_errors_before_zero", 5)
-            if not errors:
-                return 1.0
+            max_errors = self.scoring.get("params", {}).get("max_errors_before_zero", 5)
             return max(0.0, 1.0 - len(errors) / max_errors)
-
-        elif method == "weighted":
-            # Use per-validation weights from config
-            return self._weighted_score(errors)
 
         return 0.5
 ```
 
-### Candidate Generator
+### Training Config
 
-```python
-# shared/evolutionary/candidate_generator.py
+Minimal additions to existing config:
 
-class CandidateGenerator:
-    """
-    Generate candidate weight updates from gradient.
-    Strategy is config-driven.
-    """
+```yaml
+# Trainers/rtx3090_sft/configs/config.yaml
 
-    def __init__(self, strategy_config: Dict):
-        strategy_type = strategy_config.get("type", "gradient_noise")
-        strategy_params = strategy_config.get("params", {})
+model:
+  model_name: "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
 
-        # Look up strategy in registry
-        self.strategy = get_strategy(strategy_type, strategy_params)
+training:
+  learning_rate: 2e-4
+  # ... existing fields ...
 
-    def generate(self, gradient: Dict[str, Tensor], n: int) -> List[Dict[str, Tensor]]:
-        """
-        Generate n candidate weight updates from gradient.
-        """
-        return self.strategy.generate(gradient, n)
+# NEW: Evolutionary section (optional, disabled by default)
+evolutionary:
+  enabled: false
 
+  # Points to validation config (same format as rubrics!)
+  validation_config: "configs/fitness/tool_calling.yaml"
 
-# shared/evolutionary/strategies/gradient_noise.py
+  candidates: 4
+  eval_batch_size: 4
 
-class GradientNoiseStrategy:
-    """Add Gaussian noise to gradient."""
-
-    def __init__(self, noise_scale: float = 0.1):
-        self.noise_scale = noise_scale
-
-    def generate(self, gradient: Dict[str, Tensor], n: int) -> List[Dict[str, Tensor]]:
-        candidates = [gradient]  # Always include pure gradient
-
-        for _ in range(n - 1):
-            noisy = {}
-            for name, grad in gradient.items():
-                noise = torch.randn_like(grad) * self.noise_scale * grad.abs().mean()
-                noisy[name] = grad + noise
-            candidates.append(noisy)
-
-        return candidates
-
-
-# shared/evolutionary/strategies/scale_variation.py
-
-class ScaleVariationStrategy:
-    """Multiply gradient by random scales."""
-
-    def __init__(self, scales: List[float] = None):
-        self.scales = scales or [0.5, 0.75, 1.0, 1.25, 1.5]
-
-    def generate(self, gradient: Dict[str, Tensor], n: int) -> List[Dict[str, Tensor]]:
-        # Select n scales (with replacement if needed)
-        selected = random.choices(self.scales, k=n)
-
-        candidates = []
-        for scale in selected:
-            scaled = {name: grad * scale for name, grad in gradient.items()}
-            candidates.append(scaled)
-
-        return candidates
+  strategy:
+    type: "gradient_noise"
+    params:
+      noise_scale: 0.1
 ```
 
-### Evolutionary Trainer Wrapper
+### Compute Analysis
 
-```python
-# shared/evolutionary/trainer_wrapper.py
-
-class EvolutionaryTrainerWrapper:
-    """
-    Wraps any HuggingFace Trainer with evolutionary selection.
-
-    Intercepts the training step to:
-    1. Capture gradient
-    2. Generate candidates
-    3. Evaluate fitness
-    4. Apply best candidate
-    """
-
-    def __init__(
-        self,
-        base_trainer,
-        config: Dict,
-    ):
-        self.trainer = base_trainer
-        self.config = config
-
-        # Initialize components from config
-        self.fitness_evaluator = FitnessEvaluator(
-            Path(config.get("validation_config"))
-        )
-        self.candidate_generator = CandidateGenerator(
-            config.get("strategy", {})
-        )
-        self.n_candidates = config.get("candidates", 4)
-        self.eval_batch_size = config.get("eval_batch_size", 4)
-
-        # Get eval examples from dataset
-        self.eval_examples = self._prepare_eval_examples()
-
-        # Patch the training step
-        self._patch_training_step()
-
-    def _patch_training_step(self):
-        """Replace trainer's training_step with evolutionary version."""
-        original_step = self.trainer.training_step
-
-        def evolutionary_step(model, inputs):
-            # 1. Standard forward/backward
-            loss = original_step(model, inputs)
-
-            # 2. Capture gradient before optimizer step
-            gradient = self._capture_gradient(model)
-
-            # 3. Generate candidates
-            candidates = self.candidate_generator.generate(
-                gradient, self.n_candidates
-            )
-
-            # 4. Evaluate each candidate
-            scores = []
-            for candidate in candidates:
-                score = self._evaluate_candidate(model, candidate)
-                scores.append(score)
-
-            # 5. Select best
-            best_idx = scores.index(max(scores))
-            best_candidate = candidates[best_idx]
-
-            # 6. Replace gradient with best candidate
-            self._apply_candidate_as_gradient(model, best_candidate)
-
-            return loss
-
-        self.trainer.training_step = evolutionary_step
-
-    def _capture_gradient(self, model) -> Dict[str, Tensor]:
-        """Capture current gradients from model parameters."""
-        gradient = {}
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                gradient[name] = param.grad.clone()
-        return gradient
-
-    def _evaluate_candidate(self, model, candidate: Dict[str, Tensor]) -> float:
-        """
-        Evaluate a candidate weight update.
-
-        1. Temporarily apply candidate
-        2. Generate on eval examples
-        3. Score with fitness evaluator
-        4. Revert weights
-        """
-        # Store original weights
-        original_weights = {
-            name: param.data.clone()
-            for name, param in model.named_parameters()
-            if name in candidate
-        }
-
-        try:
-            # Temporarily apply candidate
-            with torch.no_grad():
-                for name, param in model.named_parameters():
-                    if name in candidate:
-                        param.data -= self.trainer.args.learning_rate * candidate[name]
-
-            # Generate and score
-            scores = []
-            for example in self.eval_examples[:self.eval_batch_size]:
-                output = self._generate(model, example["prompt"])
-                score = self.fitness_evaluator.evaluate(output, example)
-                scores.append(score)
-
-            return sum(scores) / len(scores)
-
-        finally:
-            # Revert weights
-            with torch.no_grad():
-                for name, param in model.named_parameters():
-                    if name in original_weights:
-                        param.data = original_weights[name]
-
-    def _apply_candidate_as_gradient(self, model, candidate: Dict[str, Tensor]):
-        """Replace model gradients with candidate values."""
-        for name, param in model.named_parameters():
-            if name in candidate:
-                param.grad = candidate[name]
-
-    def _generate(self, model, prompt: str) -> str:
-        """Generate model output for a prompt."""
-        # Use trainer's tokenizer
-        inputs = self.trainer.tokenizer(
-            prompt,
-            return_tensors="pt"
-        ).to(model.device)
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.7,
-            )
-
-        return self.trainer.tokenizer.decode(
-            outputs[0], skip_special_tokens=True
-        )
-
-    def train(self, *args, **kwargs):
-        """Delegate to base trainer."""
-        return self.trainer.train(*args, **kwargs)
-```
-
-### Integration in train_sft.py
-
-```python
-# Trainers/rtx3090_sft/train_sft.py
-
-def main():
-    # ... existing setup ...
-
-    config = load_config()
-
-    # ... model, tokenizer, dataset setup ...
-
-    # Initialize base trainer
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        train_dataset=train_dataset,
-        # ... other args ...
-    )
-
-    # Wrap with evolutionary if enabled
-    if config.evolutionary.enabled:
-        from shared.evolutionary import EvolutionaryTrainerWrapper
-
-        print("=" * 60)
-        print("EVOLUTIONARY TRAINING ENABLED")
-        print(f"  Candidates per step: {config.evolutionary.candidates}")
-        print(f"  Strategy: {config.evolutionary.strategy.type}")
-        print(f"  Validation config: {config.evolutionary.validation_config}")
-        print("=" * 60)
-
-        trainer = EvolutionaryTrainerWrapper(
-            base_trainer=trainer,
-            config=config.evolutionary,
-        )
-
-    # Training proceeds normally
-    trainer.train()
-```
-
----
-
-## Compute Analysis
-
-### Per-Step Overhead
+For 2B model on 24GB VRAM:
 
 | Operation | Time | Count | Total |
 |-----------|------|-------|-------|
 | Backward pass | 300ms | 1 | 300ms |
-| Forward pass (generate) | 100ms | 4 candidates × 4 examples | 1600ms |
-| Schema validation | 0.1ms | 4 × 4 | ~0ms |
-| Weight manipulation | 1ms | 4 × 2 (apply + revert) | 8ms |
-| **Total** | | | **~1900ms** |
+| Forward pass (generate) | 100ms | 4 × 4 | 1600ms |
+| Parse + validate | ~1ms | 16 | ~16ms |
+| **Total per step** | | | **~1900ms** |
 
-### Comparison
+~4-5x slower per step, but potentially fewer steps to converge.
 
-| Mode | Time per Step | Quality |
-|------|---------------|---------|
-| Standard training | ~400ms | Baseline |
-| Evolutionary (N=4, eval=4) | ~1900ms | Better gradient selection |
-
-~4-5x slower per step, but potentially fewer steps needed to converge.
-
-### Memory Usage (2B model, 24GB VRAM)
-
-| Component | Memory |
-|-----------|--------|
-| Base model (4-bit) | ~2GB |
-| LoRA adapters | ~100MB |
-| Training overhead | ~6GB |
-| Gradient storage (N=4) | ~400MB |
-| **Total** | **~8.5GB** |
-
-Easily fits in 24GB with headroom for batch size.
+Memory fits easily: ~8.5GB used of 24GB available.
 
 ---
 
-## Future Extensions
+## Implementation Roadmap
 
-1. **Adaptive N**: Start with more candidates, reduce as training stabilizes
-2. **Fitness caching**: Skip re-evaluation if candidate is similar to previous
-3. **Population across steps**: Maintain a population of weight vectors across multiple steps
-4. **Latent space evolution**: Apply evolutionary pressure in hidden state space
-5. **Multi-objective fitness**: Balance multiple validation criteria with Pareto selection
+### Phase 1: Unified Validation (Do First)
+
+#### Step 1.1: Create shared/validation/ structure
+
+```bash
+mkdir -p shared/validation/{parsing/formats,validators/content,rubric}
+```
+
+#### Step 1.2: Move parsing from Evaluator
+
+```
+Evaluator/tool_call_parser.py → shared/validation/parsing/tool_call_parser.py
+Evaluator/response_parser.py  → shared/validation/parsing/response_parser.py
+```
+
+Refactor into format handlers:
+```
+shared/validation/parsing/formats/
+├── base.py       # Abstract handler
+├── qwen.py       # Extract from tool_call_parser.py
+├── mistral.py    # Extract from tool_call_parser.py
+├── chatml.py     # Extract from response_parser.py
+├── openai.py     # Handle dict format
+└── registry.py   # Auto-detection logic
+```
+
+#### Step 1.3: Move validators from SynthChat
+
+```
+SynthChat/services/validators/structure_validator.py    → shared/validation/validators/
+SynthChat/services/validators/cross_scope_validator.py  → shared/validation/validators/
+SynthChat/services/validators/base.py                   → shared/validation/validators/
+SynthChat/services/validators/content/                  → shared/validation/validators/content/
+```
+
+#### Step 1.4: Move rubric loading from SynthChat
+
+```
+SynthChat/services/data/rubric_loader.py     → shared/validation/rubric/loader.py
+SynthChat/services/data/rubric_cache.py      → shared/validation/rubric/cache.py
+SynthChat/services/data/rubric_repository.py → shared/validation/rubric/repository.py
+```
+
+#### Step 1.5: Create unified result types
+
+```python
+# shared/validation/results.py
+# Define ToolCall, ParsedResponse, ValidationResult, FitnessResult
+```
+
+#### Step 1.6: Create public API
+
+```python
+# shared/validation/__init__.py
+# Export clean public interface
+```
+
+#### Step 1.7: Update SynthChat imports
+
+```python
+# SynthChat/services/validators/__init__.py
+from shared.validation.validators import *
+from shared.validation.validators.content import *
+```
+
+#### Step 1.8: Update Evaluator imports
+
+```python
+# Evaluator/rubric_validator.py
+from shared.validation import RubricValidator, StructureValidator
+# Remove hacky importlib code!
+
+# Evaluator/schema_validator.py
+from shared.validation.parsing import parse_response
+```
+
+#### Step 1.9: Delete duplicated files
+
+```bash
+rm Evaluator/tool_call_parser.py  # Now in shared/
+# Keep thin re-export wrappers for backwards compatibility
+```
+
+#### Step 1.10: Test all systems still work
+
+```bash
+# Test SynthChat
+python -m SynthChat.services.rubric_runner --list
+
+# Test Evaluator
+python -m Evaluator.cli --help
+
+# Run any existing tests
+pytest
+```
+
+### Phase 2: Evolutionary Training (After Phase 1)
+
+#### Step 2.1: Create fitness evaluator
+
+```python
+# shared/validation/fitness.py
+# Thin wrapper: parse → validate → score
+```
+
+#### Step 2.2: Create evolutionary components
+
+```
+shared/evolutionary/
+├── candidate_generator.py
+├── strategies/
+│   ├── gradient_noise.py
+│   ├── scale_variation.py
+│   └── component_dropout.py
+└── trainer_wrapper.py
+```
+
+#### Step 2.3: Integrate into Trainers
+
+```python
+# Trainers/rtx3090_sft/train_sft.py
+if config.evolutionary.enabled:
+    from shared.evolutionary import EvolutionaryTrainerWrapper
+    trainer = EvolutionaryTrainerWrapper(trainer, config.evolutionary)
+```
+
+#### Step 2.4: Add fitness config
+
+```yaml
+# Trainers/rtx3090_sft/configs/fitness/tool_calling.yaml
+# Same format as rubrics!
+```
 
 ---
 
 ## Summary
 
-This design integrates evolutionary selection into fine-tuning by:
+**Phase 1** unifies validation across all systems:
+- Single source of truth in `shared/validation/`
+- Format-agnostic parsing layer
+- Config-driven validation layer
+- Same rubric format everywhere
+- Clean imports, no hacks
 
-1. **Reusing existing infrastructure** - Validators move to `shared/`, no duplication
-2. **Config-driven fitness** - Same YAML format as rubrics
-3. **Minimal code changes** - Wrapper around existing trainers
-4. **Compute efficient** - Schema validation, not LLM calls
-5. **Maximum flexibility** - New use cases = new YAML files
+**Phase 2** builds evolutionary training on top:
+- Uses unified validation for fitness evaluation
+- Config-driven fitness scoring
+- Gradient + ES hybrid approach
+- Minimal changes to existing training code
 
-The core insight: **Tool calls are structured data. Structured data can be validated programmatically. Validation results become fitness scores. Fitness scores guide evolutionary selection.**
+**The key insight:** Tool calls are structured data. Format parsing normalizes any model output. Config-driven validation checks the structure. The same validation pipeline works for data generation (SynthChat), model evaluation (Evaluator), and training (evolutionary fitness).
