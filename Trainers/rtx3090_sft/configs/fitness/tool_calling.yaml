@@ -1,26 +1,286 @@
 # =============================================================================
 # Fitness Evaluation Config: Tool Calling
-# Used by evolutionary training to score candidate gradient updates
-# Same validation format as improvement_engine rubrics
+# Comprehensive validation for Claudesidian useTools schema
+# Same format as SynthChat rubrics - validates against all agents
 # =============================================================================
 
-# Validation rules - format-agnostic, applied after parsing
+name: Tool Calling Fitness
+description: Validates tool calls use OpenAI format with useTools schema for all agents
+
+# Validation rules - uses same format as SynthChat rubrics
 validations:
-  # Require tool calls to be present
-  - type: required_field
-    field: tool_calls
-    description: "Response must contain tool calls"
+  # Main useTools schema validation - includes all agents
+  - tools:
+      useTools:
+        # Context is required for all tool calls
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
 
-  # Validate tool call structure
-  - type: json
-    field: tool_calls[0].function.arguments
-    description: "Tool arguments must be valid JSON"
+        # Calls array structure
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
 
-  # Tool name must be non-empty
-  - type: regex
-    field: tool_calls[0].function.name
-    pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
-    description: "Tool name must be valid identifier"
+          # Per-agent tool manifests
+          _subtools:
+            # =================================================================
+            # vaultManager - File/folder operations
+            # =================================================================
+            vaultManager:
+              listDirectory:
+                _required: [path]
+                path: string
+                filter: string
+                depth: number
+                includeFiles: boolean
+              openNote:
+                _required: [path]
+                path: string
+                mode: string
+                focus: boolean
+              createFolder:
+                _required: [path]
+                path: string
+              editFolder:
+                _required: [path, newPath]
+                path: string
+                newPath: string
+              moveFolder:
+                _required: [path, newPath]
+                path: string
+                newPath: string
+                overwrite: boolean
+              deleteFolder:
+                _required: [path]
+                path: string
+                recursive: boolean
+              moveNote:
+                _required: [path, newPath]
+                path: string
+                newPath: string
+                overwrite: boolean
+              deleteNote:
+                _required: [path]
+                path: string
+              duplicateNote:
+                _required: [sourcePath, targetPath]
+                sourcePath: string
+                targetPath: string
+                overwrite: boolean
+                autoIncrement: boolean
+
+            # =================================================================
+            # contentManager - Content editing operations
+            # =================================================================
+            contentManager:
+              readContent:
+                _required: [filePath]
+                filePath: string
+                limit: number
+                offset: number
+                includeLineNumbers: boolean
+              createContent:
+                _required: [filePath, content]
+                filePath: string
+                content: string
+              appendContent:
+                _required: [filePath, content]
+                filePath: string
+                content: string
+              prependContent:
+                _required: [filePath, content]
+                filePath: string
+                content: string
+              deleteContent:
+                _required: [filePath, content]
+                filePath: string
+                content: string
+                similarityThreshold: number
+              replaceContent:
+                _required: [filePath, oldContent, newContent]
+                filePath: string
+                oldContent: string
+                newContent: string
+                similarityThreshold: number
+              replaceByLine:
+                _required: [filePath, startLine, endLine, newContent]
+                filePath: string
+                startLine: number
+                endLine: number
+                newContent: string
+              findReplaceContent:
+                _required: [filePath, findText, replaceText]
+                filePath: string
+                findText: string
+                replaceText: string
+                replaceAll: boolean
+                caseSensitive: boolean
+
+            # =================================================================
+            # vaultLibrarian - Read-only search operations
+            # =================================================================
+            vaultLibrarian:
+              searchContent:
+                _required: [query]
+                query: string
+                limit: number
+                includeContent: boolean
+                snippetLength: number
+                paths: array
+              searchDirectory:
+                _required: [query, paths]
+                query: string
+                paths: array
+                searchType: string
+                fileTypes: array
+                depth: number
+                limit: number
+              searchMemory:
+                _required: [query, workspaceId]
+                query: string
+                workspaceId: string
+                memoryTypes: array
+                searchMethod: string
+                limit: number
+
+            # =================================================================
+            # memoryManager - Session/state/workspace management
+            # =================================================================
+            memoryManager:
+              # Session tools
+              createSession:
+                _required: []
+                name: string
+                description: string
+                sessionGoal: string
+              listSessions:
+                _required: []
+                limit: number
+                order: string
+              loadSession:
+                _required: [sessionId]
+                sessionId: string
+                targetSessionId: string
+                sessionName: string
+              updateSession:
+                _required: []
+                sessionId: string
+                name: string
+                description: string
+                sessionGoal: string
+              # State tools
+              createState:
+                _required: [name]
+                name: string
+                description: string
+                targetSessionId: string
+                tags: array
+              listStates:
+                _required: []
+                includeContext: boolean
+                limit: number
+                order: string
+                tags: array
+              loadState:
+                _required: [stateId]
+                stateId: string
+                sessionName: string
+                restorationGoal: string
+              updateState:
+                _required: [stateId]
+                stateId: string
+                name: string
+                description: string
+                addTags: array
+                removeTags: array
+              # Workspace tools
+              createWorkspace:
+                _required: [name, rootFolder, purpose, currentGoal, workflows]
+                name: string
+                rootFolder: string
+                purpose: string
+                currentGoal: string
+                workflows: array
+                keyFiles: array
+                preferences: object
+              listWorkspaces:
+                _required: []
+                sortBy: string
+                order: string
+                limit: number
+              loadWorkspace:
+                _required: [id]
+                id: string
+                limit: number
+              updateWorkspace:
+                _required: [workspaceId, fieldPath, newValue]
+                workspaceId: string
+                fieldPath: string
+                newValue: string
+
+            # =================================================================
+            # agentManager - Agent/model management
+            # =================================================================
+            agentManager:
+              listModels:
+                _required: []
+              createAgent:
+                _required: [name, description, prompt]
+                name: string
+                description: string
+                prompt: string
+                isEnabled: boolean
+              listAgents:
+                _required: []
+                enabledOnly: boolean
+              getAgent:
+                _required: []
+                id: string
+                name: string
+              updateAgent:
+                _required: [id]
+                id: string
+                name: string
+                description: string
+                prompt: string
+                isEnabled: boolean
+              deleteAgent:
+                _required: [id]
+                id: string
+              generateImage:
+                _required: [prompt, provider, savePath]
+                prompt: string
+                provider: string
+                savePath: string
+                model: string
+                aspectRatio: string
+                numberOfImages: number
+              executePrompts:
+                _required: [prompts]
+                prompts: array
+                agent: string
+                provider: string
+                model: string
+                temperature: number
+                maxTokens: number
+
+            # =================================================================
+            # commandManager - Obsidian command execution
+            # =================================================================
+            commandManager:
+              listCommands:
+                _required: []
+                filter: string
+              executeCommand:
+                _required: [commandId]
+                commandId: string
+
+    error: "useTools validation failed: {details}"
 
 # Scoring configuration
 scoring:
@@ -33,12 +293,24 @@ scoring:
   params:
     # For error_count: Number of errors that result in score = 0.0
     max_errors_before_zero: 5
+    # For error_penalty: Fixed penalty per error
+    penalty_per_error: 0.15
 
   # Score for responses with no tool calls at all
+  # Set to 0.0 to penalize missing tool calls
+  # Set to a positive value if text-only responses are acceptable
   no_tool_call_score: 0.0
 
 # Notes:
-# - This config is used during evolutionary training to evaluate
-#   generated responses and select the best gradient update
-# - The same validation rules apply as in improvement_engine rubrics
-# - Scores range from 0.0 (worst) to 1.0 (best)
+# - This config consolidates all agent schemas from SynthChat rubrics
+# - Same validation format used by improvement_engine
+# - During evolutionary training, responses are scored 0.0-1.0
+# - Higher scores = better fitness for gradient selection
+#
+# Agents included:
+# - vaultManager: File/folder operations (move, delete, create)
+# - contentManager: Content editing (read, write, replace)
+# - vaultLibrarian: Search operations (searchContent, searchDirectory)
+# - memoryManager: Session/state/workspace management
+# - agentManager: Agent CRUD and model operations
+# - commandManager: Obsidian command execution
