@@ -455,6 +455,7 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
         self,
         config_path: Path,
         output_path: Path,
+        model_name: str = "model",
     ) -> bool:
         """
         Compile model for WebGPU (creates .wasm file).
@@ -462,14 +463,21 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
         Args:
             config_path: Path to mlc-chat-config.json
             output_path: Path for output .wasm file
+            model_name: Model name for system lib prefix
 
         Returns:
             True if successful
         """
+        # Generate a safe system lib prefix from model name
+        # Replace non-alphanumeric chars with underscore
+        import re
+        safe_prefix = re.sub(r'[^a-zA-Z0-9]', '_', model_name)
+
         # Use Python with WSL patch for MLC CLI
+        # --system-lib-prefix is required for newer MLC-LLM versions
         compile_code = WSL_PATCH_CODE + f"""
 from mlc_llm.cli.compile import main
-main(['{config_path}', '--device', 'webgpu', '-o', '{output_path}'])
+main(['{config_path}', '--device', 'webgpu', '--system-lib-prefix', '{safe_prefix}', '-o', '{output_path}'])
 """
         try:
             with branded_spinner("Compiling WebGPU library"):
@@ -678,7 +686,7 @@ print("Done!")
                 config_path = quant_dir / "mlc-chat-config.json"
                 wasm_path = webgpu_dir / f"{model_name}-{quant}-webgpu.wasm"
 
-                if self.compile_webgpu(config_path, wasm_path):
+                if self.compile_webgpu(config_path, wasm_path, model_name=quant_name):
                     created_paths.append(wasm_path)
                 else:
                     print("  ⚠ WASM compilation failed (weights still usable)")
