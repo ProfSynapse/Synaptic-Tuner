@@ -1,0 +1,42 @@
+"""
+Gradient modification strategies for evolutionary training.
+
+Each strategy provides a way to generate candidate gradient updates
+from the base computed gradient.
+"""
+
+from .base import BaseStrategy, GradientCandidate
+from .gradient_noise import GradientNoiseStrategy
+from .scale_variation import ScaleVariationStrategy
+from .combined import CombinedStrategy
+
+__all__ = [
+    "BaseStrategy",
+    "GradientCandidate",
+    "GradientNoiseStrategy",
+    "ScaleVariationStrategy",
+    "CombinedStrategy",
+]
+
+
+def get_strategy(name: str, **kwargs) -> BaseStrategy:
+    """
+    Factory function to get strategy by name.
+
+    Args:
+        name: Strategy name ('gradient_noise', 'scale_variation', 'combined')
+        **kwargs: Strategy-specific parameters
+
+    Returns:
+        Configured strategy instance
+    """
+    strategies = {
+        "gradient_noise": GradientNoiseStrategy,
+        "scale_variation": ScaleVariationStrategy,
+        "combined": CombinedStrategy,
+    }
+
+    if name not in strategies:
+        raise ValueError(f"Unknown strategy: {name}. Available: {list(strategies.keys())}")
+
+    return strategies[name](**kwargs)

@@ -76,6 +76,9 @@ if sys.platform == 'win32':
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+# Add shared to path for evolutionary module
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from unsloth import is_bfloat16_supported
 from trl import SFTConfig, SFTTrainer
 
@@ -93,6 +96,36 @@ from src.model_loader import (
     check_gpu_memory
 )
 from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback
+
+# Evolutionary training (optional)
+try:
+    from shared.evolutionary import EvolutionaryTrainerWrapper
+    from shared.evolutionary.config import EvolutionaryConfig as EvoConfig
+    EVOLUTIONARY_AVAILABLE = True
+except ImportError:
+    EVOLUTIONARY_AVAILABLE = False
+
+
+def convert_to_evo_config(config_evo) -> "EvoConfig":
+    """Convert config_loader EvolutionaryConfig to shared.evolutionary.EvolutionaryConfig."""
+    if not EVOLUTIONARY_AVAILABLE:
+        return None
+
+    return EvoConfig(
+        enabled=config_evo.enabled,
+        num_candidates=config_evo.candidates,
+        eval_batch_size=config_evo.eval_batch_size,
+        validation_config_path=config_evo.validation_config,
+        strategy=config_evo.strategy.type,
+        noise_scale=config_evo.strategy.params.get('noise_scale', 0.1),
+        scale_factors=config_evo.strategy.params.get('scale_factors', [0.5, 1.0, 1.5, 2.0]),
+        selection_method=config_evo.selection.method,
+        min_fitness_improvement=config_evo.selection.min_improvement,
+        eval_frequency=config_evo.eval_frequency,
+        cache_baseline=config_evo.cache_baseline,
+        log_candidates=config_evo.logging.candidates,
+        log_selected=config_evo.logging.selected,
+    )
 
 
 def setup_wandb():
@@ -255,6 +288,16 @@ def build_training_lineage(
     if training_time_seconds:
         lineage["results"]["training_time_seconds"] = round(training_time_seconds, 1)
         lineage["results"]["training_time_formatted"] = f"{training_time_seconds // 3600:.0f}h {(training_time_seconds % 3600) // 60:.0f}m {training_time_seconds % 60:.0f}s"
+
+    # Add evolutionary training info if available
+    if hasattr(config, 'evolutionary') and config.evolutionary.enabled:
+        lineage["evolutionary"] = {
+            "enabled": True,
+            "strategy": config.evolutionary.strategy.type,
+            "candidates": config.evolutionary.candidates,
+            "selection_method": config.evolutionary.selection.method,
+            "eval_frequency": config.evolutionary.eval_frequency,
+        }
 
     return lineage
 
@@ -689,6 +732,23 @@ def run(args: argparse.Namespace):
     trainer = SFTTrainer(**trainer_kwargs)
 
     print("[OK] SFT trainer initialized with metrics tracking")
+
+    # Check if evolutionary training is enabled
+    evo_wrapper = None
+    if hasattr(config, 'evolutionary') and config.evolutionary.enabled:
+        if not EVOLUTIONARY_AVAILABLE:
+            print("[WARN] Evolutionary training requested but shared.evolutionary module not available")
+        else:
+            evo_config = convert_to_evo_config(config.evolutionary)
+            evo_wrapper = EvolutionaryTrainerWrapper(
+                trainer=trainer,
+                config=evo_config,
+                tokenizer=tokenizer,
+            )
+            print(f"[OK] Evolutionary training enabled:")
+            print(f"     Strategy: {config.evolutionary.strategy.type}")
+            print(f"     Candidates: {config.evolutionary.candidates}")
+            print(f"     Selection: {config.evolutionary.selection.method}")
     print()
 
     # Check memory before training
@@ -697,11 +757,19 @@ def run(args: argparse.Namespace):
     # Train the model
     print("\n" + "=" * 60)
     print("STARTING TRAINING")
+    if evo_wrapper:
+        print("(Evolutionary gradient selection enabled)")
     print("=" * 60 + "\n")
 
     import time
     training_start_time = time.time()
-    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+
+    # Use evolutionary wrapper if enabled, otherwise standard training
+    if evo_wrapper:
+        evo_wrapper.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    else:
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+
     training_end_time = time.time()
     training_time_seconds = training_end_time - training_start_time
 

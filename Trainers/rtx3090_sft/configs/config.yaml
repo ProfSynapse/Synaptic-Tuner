@@ -104,6 +104,44 @@ wandb:
 # Random seed
 seed: 42
 
+# ============================================================================
+# Evolutionary Training (Optional)
+# Gradient + ES Hybrid: Generate N gradient candidates, evaluate, apply best
+# ============================================================================
+evolutionary:
+  enabled: false  # Set to true to enable evolutionary selection
+
+  # Number of gradient candidates to evaluate per step
+  candidates: 4
+
+  # Batch size for fitness evaluation (can be smaller than training batch)
+  eval_batch_size: 2
+
+  # Validation config for fitness scoring
+  # Uses same format as validation rubrics
+  validation_config: null  # Path to fitness config, e.g., "configs/fitness/tool_calling.yaml"
+
+  # Strategy for generating gradient candidates
+  strategy:
+    type: "gradient_noise"  # Options: gradient_noise, scale_variation, combined
+    params:
+      noise_scale: 0.1  # For gradient_noise: std dev relative to gradient norm
+      scale_factors: [0.5, 1.0, 1.5, 2.0]  # For scale_variation: multipliers
+
+  # Selection method for choosing best candidate
+  selection:
+    method: "best"  # Options: best, tournament, proportional
+    min_improvement: 0.0  # Only apply if improves fitness by this much
+
+  # Performance tuning
+  eval_frequency: 1  # Evaluate every N steps (1 = every step)
+  cache_baseline: true  # Cache baseline fitness to avoid recomputing
+
+  # Logging
+  logging:
+    candidates: true  # Log all candidate fitness scores
+    selected: true  # Log which candidate was selected
+
 # Notes:
 # - This is optimized for RTX 3090 24GB VRAM
 # - Expected VRAM usage: ~7-9GB for 7B model

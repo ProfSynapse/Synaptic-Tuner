@@ -101,6 +101,41 @@ class WandbConfig:
 
 
 @dataclass
+class EvolutionaryStrategyConfig:
+    """Evolutionary strategy configuration."""
+    type: str = "gradient_noise"
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvolutionarySelectionConfig:
+    """Evolutionary selection configuration."""
+    method: str = "best"
+    min_improvement: float = 0.0
+
+
+@dataclass
+class EvolutionaryLoggingConfig:
+    """Evolutionary logging configuration."""
+    candidates: bool = True
+    selected: bool = True
+
+
+@dataclass
+class EvolutionaryConfig:
+    """Evolutionary training configuration."""
+    enabled: bool = False
+    candidates: int = 4
+    eval_batch_size: int = 2
+    validation_config: Optional[str] = None
+    strategy: EvolutionaryStrategyConfig = field(default_factory=EvolutionaryStrategyConfig)
+    selection: EvolutionarySelectionConfig = field(default_factory=EvolutionarySelectionConfig)
+    eval_frequency: int = 1
+    cache_baseline: bool = True
+    logging: EvolutionaryLoggingConfig = field(default_factory=EvolutionaryLoggingConfig)
+
+
+@dataclass
 class Config:
     """Master configuration combining all sub-configs."""
     model: ModelConfig
@@ -108,6 +143,7 @@ class Config:
     training: SFTTrainingConfig
     dataset: DatasetConfig
     wandb: WandbConfig
+    evolutionary: EvolutionaryConfig = field(default_factory=EvolutionaryConfig)
     seed: int = 42
 
     @property
@@ -175,6 +211,43 @@ def dict_to_dataclass(cls, data: Dict[str, Any]):
     return cls(**converted_data)
 
 
+def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
+    """Load evolutionary config from YAML dict."""
+    if not evo_data:
+        return EvolutionaryConfig()
+
+    # Parse nested configs
+    strategy_data = evo_data.get('strategy', {})
+    strategy_config = EvolutionaryStrategyConfig(
+        type=strategy_data.get('type', 'gradient_noise'),
+        params=strategy_data.get('params', {}),
+    )
+
+    selection_data = evo_data.get('selection', {})
+    selection_config = EvolutionarySelectionConfig(
+        method=selection_data.get('method', 'best'),
+        min_improvement=selection_data.get('min_improvement', 0.0),
+    )
+
+    logging_data = evo_data.get('logging', {})
+    logging_config = EvolutionaryLoggingConfig(
+        candidates=logging_data.get('candidates', True),
+        selected=logging_data.get('selected', True),
+    )
+
+    return EvolutionaryConfig(
+        enabled=evo_data.get('enabled', False),
+        candidates=evo_data.get('candidates', 4),
+        eval_batch_size=evo_data.get('eval_batch_size', 2),
+        validation_config=evo_data.get('validation_config'),
+        strategy=strategy_config,
+        selection=selection_config,
+        eval_frequency=evo_data.get('eval_frequency', 1),
+        cache_baseline=evo_data.get('cache_baseline', True),
+        logging=logging_config,
+    )
+
+
 def load_config(config_path: str = None) -> Config:
     """
     Load YAML config and convert to Config dataclass.
@@ -193,6 +266,7 @@ def load_config(config_path: str = None) -> Config:
     training_config = dict_to_dataclass(SFTTrainingConfig, yaml_config['training'])
     dataset_config = dict_to_dataclass(DatasetConfig, yaml_config['dataset'])
     wandb_config = dict_to_dataclass(WandbConfig, yaml_config.get('wandb', {}))
+    evolutionary_config = load_evolutionary_config(yaml_config.get('evolutionary', {}))
 
     return Config(
         model=model_config,
@@ -200,6 +274,7 @@ def load_config(config_path: str = None) -> Config:
         training=training_config,
         dataset=dataset_config,
         wandb=wandb_config,
+        evolutionary=evolutionary_config,
         seed=yaml_config.get('seed', 42)
     )
 

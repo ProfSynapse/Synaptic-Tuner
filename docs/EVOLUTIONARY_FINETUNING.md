@@ -4,14 +4,15 @@ Design document for unifying config-driven validation across the codebase, then 
 
 > **Status:**
 > - ✅ **Phase 1 COMPLETE** - Unified validation architecture implemented in `shared/validation/`
-> - ⏳ **Phase 2 PENDING** - Evolutionary fine-tuning (ready to start)
+> - ✅ **Phase 2 COMPLETE** - Evolutionary fine-tuning implemented in `shared/evolutionary/`
 
 ## Table of Contents
 
 1. [Philosophy](#philosophy)
 2. [Phase 1: Unified Validation Architecture](#phase-1-unified-validation-architecture) ✅
-3. [Phase 2: Evolutionary Fine-Tuning](#phase-2-evolutionary-fine-tuning)
-4. [Implementation Roadmap](#implementation-roadmap)
+3. [Phase 2: Evolutionary Fine-Tuning](#phase-2-evolutionary-fine-tuning) ✅
+4. [Usage Guide](#usage-guide) ← NEW
+5. [Implementation Roadmap](#implementation-roadmap)
 
 ---
 
@@ -605,6 +606,133 @@ For 2B model on 24GB VRAM:
 ~4-5x slower per step, but potentially fewer steps to converge.
 
 Memory fits easily: ~8.5GB used of 24GB available.
+
+---
+
+## Usage Guide
+
+> ✅ **Phase 2 is complete!** Here's how to use evolutionary training.
+
+### Quick Start
+
+1. **Enable evolutionary training in config:**
+
+```yaml
+# Trainers/rtx3090_sft/configs/config.yaml
+
+evolutionary:
+  enabled: true  # Enable evolutionary selection
+  candidates: 4
+  validation_config: "configs/fitness/tool_calling.yaml"  # Fitness config
+
+  strategy:
+    type: "gradient_noise"  # or "scale_variation", "combined"
+    params:
+      noise_scale: 0.1
+
+  selection:
+    method: "best"  # or "tournament", "proportional"
+```
+
+2. **Create a fitness config (or use the example):**
+
+```yaml
+# Trainers/rtx3090_sft/configs/fitness/tool_calling.yaml
+
+validations:
+  - type: required_field
+    field: tool_calls
+    description: "Response must contain tool calls"
+
+  - type: json
+    field: tool_calls[0].function.arguments
+    description: "Tool arguments must be valid JSON"
+
+scoring:
+  method: error_count
+  params:
+    max_errors_before_zero: 5
+```
+
+3. **Run training as normal:**
+
+```bash
+python train_sft.py --model-size 7b
+```
+
+The trainer will automatically use evolutionary gradient selection when `evolutionary.enabled: true`.
+
+### Architecture Overview
+
+```
+shared/evolutionary/
+├── __init__.py              # Public exports
+├── config.py                # EvolutionaryConfig dataclass
+├── candidate_generator.py   # Generate gradient candidates
+├── trainer_wrapper.py       # Wraps HuggingFace trainer
+└── strategies/
+    ├── base.py              # BaseStrategy, GradientCandidate
+    ├── gradient_noise.py    # Add Gaussian noise to gradients
+    ├── scale_variation.py   # Scale gradients by different factors
+    └── combined.py          # Mix multiple strategies
+```
+
+### Strategy Options
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| `gradient_noise` | Add Gaussian noise to gradients | Exploration, escaping local minima |
+| `scale_variation` | Scale gradients by [0.5, 1.0, 1.5, 2.0] | Finding optimal learning rate |
+| `combined` | Mix of pure, scaled, and noisy variants | General use |
+
+### Selection Methods
+
+| Method | Description |
+|--------|-------------|
+| `best` | Always pick highest fitness candidate |
+| `tournament` | Pick 2 random, return better one (maintains diversity) |
+| `proportional` | Probability proportional to fitness |
+
+### Performance Considerations
+
+- **Eval frequency**: Set `eval_frequency: 2` or higher to reduce overhead
+- **Candidates**: 4 is a good default; more = better selection but slower
+- **Eval batch size**: Smaller batches are faster but noisier
+- **Strategy**: `gradient_noise` with low noise is safest starting point
+
+### Programmatic Usage
+
+```python
+from shared.evolutionary import (
+    EvolutionaryTrainerWrapper,
+    EvolutionaryConfig,
+    CandidateGenerator,
+)
+from shared.validation import FitnessEvaluator
+
+# Create config
+evo_config = EvolutionaryConfig(
+    enabled=True,
+    num_candidates=4,
+    strategy="gradient_noise",
+    noise_scale=0.1,
+    validation_config_path="configs/fitness/tool_calling.yaml",
+)
+
+# Wrap any HuggingFace-compatible trainer
+evo_wrapper = EvolutionaryTrainerWrapper(
+    trainer=sft_trainer,
+    config=evo_config,
+    tokenizer=tokenizer,
+)
+
+# Train with evolutionary selection
+evo_wrapper.train()
+
+# Get training stats
+stats = evo_wrapper.get_stats()
+print(f"Best fitness history: {stats['best_fitness_history']}")
+```
 
 ---
 

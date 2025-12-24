@@ -1,0 +1,44 @@
+# =============================================================================
+# Fitness Evaluation Config: Tool Calling
+# Used by evolutionary training to score candidate gradient updates
+# Same validation format as improvement_engine rubrics
+# =============================================================================
+
+# Validation rules - format-agnostic, applied after parsing
+validations:
+  # Require tool calls to be present
+  - type: required_field
+    field: tool_calls
+    description: "Response must contain tool calls"
+
+  # Validate tool call structure
+  - type: json
+    field: tool_calls[0].function.arguments
+    description: "Tool arguments must be valid JSON"
+
+  # Tool name must be non-empty
+  - type: regex
+    field: tool_calls[0].function.name
+    pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    description: "Tool name must be valid identifier"
+
+# Scoring configuration
+scoring:
+  # How to compute fitness from validation results
+  # - binary: 1.0 if all pass, 0.0 if any fail
+  # - error_count: Linear decrease based on error count
+  # - error_penalty: Fixed penalty per error
+  method: error_count
+
+  params:
+    # For error_count: Number of errors that result in score = 0.0
+    max_errors_before_zero: 5
+
+  # Score for responses with no tool calls at all
+  no_tool_call_score: 0.0
+
+# Notes:
+# - This config is used during evolutionary training to evaluate
+#   generated responses and select the best gradient update
+# - The same validation rules apply as in improvement_engine rubrics
+# - Scores range from 0.0 (worst) to 1.0 (best)

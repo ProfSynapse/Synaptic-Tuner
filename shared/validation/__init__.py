@@ -33,6 +33,11 @@ from .rubric import (
     RubricCache,
     RubricRepository,
 )
+from .fitness import (
+    FitnessEvaluator,
+    FitnessResult,
+    create_fitness_evaluator,
+)
 
 __all__ = [
     # Parsing
@@ -52,4 +57,8 @@ __all__ = [
     "RubricLoader",
     "RubricCache",
     "RubricRepository",
+    # Fitness
+    "FitnessEvaluator",
+    "FitnessResult",
+    "create_fitness_evaluator",
 ]
