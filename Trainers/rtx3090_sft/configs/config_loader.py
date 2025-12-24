@@ -131,6 +131,7 @@ class EvolutionaryConfig:
     strategy: EvolutionaryStrategyConfig = field(default_factory=EvolutionaryStrategyConfig)
     selection: EvolutionarySelectionConfig = field(default_factory=EvolutionarySelectionConfig)
     eval_frequency: int = 1
+    warmup_steps: int = 0
     cache_baseline: bool = True
     logging: EvolutionaryLoggingConfig = field(default_factory=EvolutionaryLoggingConfig)
 
@@ -243,6 +244,7 @@ def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
         strategy=strategy_config,
         selection=selection_config,
         eval_frequency=evo_data.get('eval_frequency', 1),
+        warmup_steps=evo_data.get('warmup_steps', 0),
         cache_baseline=evo_data.get('cache_baseline', True),
         logging=logging_config,
     )

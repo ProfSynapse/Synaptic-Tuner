@@ -51,6 +51,10 @@ class EvolutionaryConfig:
     eval_frequency: int = 1
     """Evaluate every N training steps (1 = every step, 2 = every other step)."""
 
+    warmup_steps: int = 0
+    """Steps to train normally before enabling evolutionary selection.
+    Allows the model to learn basic patterns first. Recommended: 100-500 for SFT."""
+
     cache_baseline: bool = True
     """Cache baseline fitness to avoid recomputing."""
 
@@ -75,6 +79,7 @@ class EvolutionaryConfig:
             selection_method=data.get("selection", {}).get("method", "best"),
             min_fitness_improvement=data.get("selection", {}).get("min_improvement", 0.0),
             eval_frequency=data.get("eval_frequency", 1),
+            warmup_steps=data.get("warmup_steps", 0),
             cache_baseline=data.get("cache_baseline", True),
             log_candidates=data.get("logging", {}).get("candidates", True),
             log_selected=data.get("logging", {}).get("selected", True),
@@ -99,6 +104,7 @@ class EvolutionaryConfig:
                 "min_improvement": self.min_fitness_improvement,
             },
             "eval_frequency": self.eval_frequency,
+            "warmup_steps": self.warmup_steps,
             "cache_baseline": self.cache_baseline,
             "logging": {
                 "candidates": self.log_candidates,

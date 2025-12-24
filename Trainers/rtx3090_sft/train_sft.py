@@ -122,6 +122,7 @@ def convert_to_evo_config(config_evo) -> "EvoConfig":
         selection_method=config_evo.selection.method,
         min_fitness_improvement=config_evo.selection.min_improvement,
         eval_frequency=config_evo.eval_frequency,
+        warmup_steps=config_evo.warmup_steps,
         cache_baseline=config_evo.cache_baseline,
         log_candidates=config_evo.logging.candidates,
         log_selected=config_evo.logging.selected,
@@ -749,6 +750,8 @@ def run(args: argparse.Namespace):
             print(f"     Strategy: {config.evolutionary.strategy.type}")
             print(f"     Candidates: {config.evolutionary.candidates}")
             print(f"     Selection: {config.evolutionary.selection.method}")
+            if config.evolutionary.warmup_steps > 0:
+                print(f"     Warmup: {config.evolutionary.warmup_steps} steps of standard training first")
     print()
 
     # Check memory before training

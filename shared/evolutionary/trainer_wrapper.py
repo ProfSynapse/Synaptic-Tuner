@@ -113,6 +113,8 @@ class EvolutionaryTrainerWrapper:
 
         logger.info(f"Starting evolutionary training with {self.config.num_candidates} candidates")
         logger.info(f"Strategy: {self.config.strategy}, Selection: {self.config.selection_method}")
+        if self.config.warmup_steps > 0:
+            logger.info(f"Warmup: {self.config.warmup_steps} steps of standard training first")
 
         # Install the evolutionary training step
         self._install_evolutionary_step()
@@ -152,6 +154,12 @@ class EvolutionaryTrainerWrapper:
         4. Apply best candidate's gradient
         """
         self.current_step += 1
+
+        # Check if we're still in warmup phase
+        if self.current_step <= self.config.warmup_steps:
+            if self.current_step == self.config.warmup_steps:
+                logger.info(f"Warmup complete at step {self.current_step}, enabling evolutionary selection")
+            return self._original_training_step(model, inputs, num_items_in_batch)
 
         # Check if we should do evolutionary selection this step
         if self.current_step % self.config.eval_frequency != 0:

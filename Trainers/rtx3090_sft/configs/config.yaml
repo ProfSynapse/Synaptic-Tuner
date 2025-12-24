@@ -135,6 +135,7 @@ evolutionary:
 
   # Performance tuning
   eval_frequency: 1  # Evaluate every N steps (1 = every step)
+  warmup_steps: 200  # Train normally for N steps before enabling evolutionary
   cache_baseline: true  # Cache baseline fitness to avoid recomputing
 
   # Logging
