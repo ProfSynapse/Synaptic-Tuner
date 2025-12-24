@@ -3,8 +3,7 @@
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
-from .structure_validator import StructureValidator
-from .cross_scope_validator import CrossScopeValidator
+from shared.validation.validators import StructureValidator, CrossScopeValidator
 from ...utils.yaml_loader import load_yaml
 
 

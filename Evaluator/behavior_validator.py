@@ -17,6 +17,8 @@ from .response_parser import (
     parse_response,
     get_text_content,
     get_text_length,
+    extract_arguments_from_response,
+    extract_context_from_response,
 )
 
 
@@ -68,24 +70,6 @@ def detect_response_type(response: Union[str, Dict[str, Any]]) -> str:
     """
     parsed = parse_response(response)
     return str(parsed.response_type)
-
-
-def extract_arguments_from_response(
-    response: Union[str, Dict[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    """Extract full arguments dict from tool call."""
-    parsed = parse_response(response)
-    if parsed.first_tool_call:
-        return parsed.first_tool_call.arguments
-    return None
-
-
-def extract_context_from_response(
-    response: Union[str, Dict[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    """Extract context object from tool call arguments."""
-    parsed = parse_response(response)
-    return parsed.context
 
 
 # ---------------------------------------------------------------------------

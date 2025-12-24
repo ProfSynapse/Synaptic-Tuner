@@ -1,12 +1,11 @@
 """
-Schema validator - DEPRECATED module, re-exports from validators/ package.
+Schema validator - backward compatibility re-export.
 
-This file is kept for backward compatibility. Import directly from:
-    from SynthChat.services.validators import SchemaValidator
+The SchemaValidator facade is in SynthChat.services.validators.facade.
+This module re-exports for backward compatibility.
 """
 
-# Re-export from new location for backward compatibility
-from .validators import (
+from SynthChat.services.validators import (
     SchemaValidator,
     StructureValidator,
     CrossScopeValidator,

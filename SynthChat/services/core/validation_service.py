@@ -7,7 +7,7 @@ Delegates all validation logic to StructureValidator.
 from typing import Dict, List, Tuple, Optional
 
 from ..parsing import ScopeExtractor
-from ..validators import StructureValidator
+from shared.validation.validators import StructureValidator
 from ...config import ScopeConfig
 from ...utils.logger import ImproveLogger
 

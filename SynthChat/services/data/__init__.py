@@ -1,18 +1,28 @@
-"""Data access layer for rubrics.
+"""
+Data layer - re-exports rubric management from shared.validation.
 
-Provides:
-- RubricLoader: Loads YAML files (I/O only)
-- RubricCache: Caches rubrics in memory (caching only)
-- RubricRepository: Facade coordinating loader + cache (query interface)
+All rubric implementations have been moved to shared/validation/rubric/
+for use across SynthChat, Evaluator, and Trainer modules.
 """
 
-from .rubric_loader import RubricLoader
-from .rubric_cache import RubricCache
-from .rubric_repository import RubricRepository, RubricMetadata
+from shared.validation.rubric import (
+    RubricLoader,
+    RubricCache,
+    RubricRepository,
+)
 
-__all__ = [
-    "RubricLoader",
-    "RubricCache",
-    "RubricRepository",
-    "RubricMetadata",
-]
+# Keep local RubricMetadata if it exists
+try:
+    from .rubric_repository import RubricMetadata
+    __all__ = [
+        "RubricLoader",
+        "RubricCache",
+        "RubricRepository",
+        "RubricMetadata",
+    ]
+except ImportError:
+    __all__ = [
+        "RubricLoader",
+        "RubricCache",
+        "RubricRepository",
+    ]

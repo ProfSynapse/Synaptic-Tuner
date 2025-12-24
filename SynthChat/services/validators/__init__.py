@@ -1,14 +1,32 @@
-"""Validators package - SOLID-compliant schema validation."""
+"""
+Validators module - re-exports from shared.validation.
 
+All validator implementations have been moved to shared/validation/validators/
+for use across SynthChat, Evaluator, and Trainer modules.
+"""
+
+from shared.validation.validators import (
+    ContentValidatorProtocol,
+    BaseContentValidator,
+    StructureValidator,
+    CrossScopeValidator,
+    XmlContentValidator,
+    JsonContentValidator,
+    YamlContentValidator,
+    RegexContentValidator,
+    CodeContentValidator,
+)
 from .facade import SchemaValidator
-from .structure_validator import StructureValidator
-from .cross_scope_validator import CrossScopeValidator
-from .base import BaseContentValidator, ContentValidatorProtocol
 
 __all__ = [
-    "SchemaValidator",
+    "ContentValidatorProtocol",
+    "BaseContentValidator",
     "StructureValidator",
     "CrossScopeValidator",
-    "BaseContentValidator",
-    "ContentValidatorProtocol",
+    "XmlContentValidator",
+    "JsonContentValidator",
+    "YamlContentValidator",
+    "RegexContentValidator",
+    "CodeContentValidator",
+    "SchemaValidator",
 ]

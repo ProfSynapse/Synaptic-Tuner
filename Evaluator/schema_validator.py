@@ -12,7 +12,7 @@ if str(tools_dir) not in sys.path:
     sys.path.insert(0, str(tools_dir))
 
 import validate_syngen as dataset_validator
-from .tool_call_parser import parse_qwen_tool_calls
+from shared.validation.parsing import parse_qwen_tool_calls
 
 
 @dataclass

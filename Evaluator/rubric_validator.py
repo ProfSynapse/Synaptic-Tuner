@@ -5,27 +5,13 @@ validation between training data generation and model evaluation.
 """
 
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-# Import StructureValidator directly (avoid SynthChat's complex init)
-synthchat_validators = Path(__file__).parent.parent / 'SynthChat' / 'services' / 'validators'
-if str(synthchat_validators.parent.parent) not in sys.path:
-    sys.path.insert(0, str(synthchat_validators.parent.parent))
-
-# Direct import to avoid circular dependency issues
-import importlib.util
-spec = importlib.util.spec_from_file_location(
-    "structure_validator",
-    synthchat_validators / "structure_validator.py"
-)
-structure_validator_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(structure_validator_module)
-StructureValidator = structure_validator_module.StructureValidator
+from shared.validation.validators import StructureValidator
 
 
 @dataclass
