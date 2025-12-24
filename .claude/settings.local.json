@@ -181,7 +181,8 @@
       "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/pip install:*)",
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/build/bin/llama-cli:*)",
       "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)",
-      "Bash(TORCHDYNAMO_DISABLE=1 /home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)"
+      "Bash(TORCHDYNAMO_DISABLE=1 /home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": [],
     "ask": []
