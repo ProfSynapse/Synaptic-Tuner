@@ -60,6 +60,9 @@ class BackendType(str, Enum):
     OPENROUTER = "openrouter"
     """OpenRouter API (cloud inference with multiple model providers)."""
 
+    MLC = "mlc"
+    """MLC-LLM inference (WebGPU/MLC format models via mlc_llm serve)."""
+
     def __str__(self) -> str:
         return self.value
 

@@ -199,6 +199,53 @@ class EvalHandler(BaseHandler):
                 print(f"  [{i}] {timestamp} ({base}) [{trainer}]")
             print()
 
+    def _display_mlc_models_table(self, backend, models: List[str]) -> None:
+        """
+        Display available MLC/WebGPU models with detailed info.
+
+        Args:
+            backend: MLCBackend instance (for get_model_info)
+            models: List of MLC model directory paths
+        """
+        from pathlib import Path
+
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title="Available MLC/WebGPU Models",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Name", style="white")
+            table.add_column("Arch", style=COLORS["aqua"])
+            table.add_column("Quant", style=COLORS["purple"])
+            table.add_column("Type", style="dim")
+
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).name)
+                arch = info.get("architecture") or "-"
+                quant = info.get("quantization") or "-"
+                trainer = info.get("trainer_type", "-").upper()
+
+                table.add_row(str(i), name, arch, quant, trainer)
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print("\nAvailable MLC/WebGPU models:")
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).name)
+                quant = info.get("quantization") or ""
+                quant_str = f" ({quant})" if quant else ""
+                print(f"  [{i}] {name}{quant_str}")
+            print()
+
     def _display_scenarios_table(self, scenarios) -> None:
         """
         Display available YAML scenarios in a table.
@@ -245,6 +292,7 @@ class EvalHandler(BaseHandler):
         backend_choice = print_menu([
             ("unsloth", f"{BOX['star']} Unsloth (LoRA - direct, no conversion)"),
             ("llamacpp", f"{BOX['bullet']} llama.cpp (GGUF - fast, portable)"),
+            ("mlc", f"{BOX['bullet']} MLC/WebLLM (WebGPU - browser-based)"),
             ("ollama", f"{BOX['bullet']} Ollama (local server)"),
             ("lmstudio", f"{BOX['bullet']} LM Studio (local server)"),
         ], "Select backend:")
@@ -257,7 +305,7 @@ class EvalHandler(BaseHandler):
 
         try:
             # Pass repo_root for backends that discover local models
-            if backend_choice in ("llamacpp", "unsloth"):
+            if backend_choice in ("llamacpp", "unsloth", "mlc"):
                 backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
             else:
                 backend = EvaluationBackendRegistry.get(backend_choice)
@@ -286,6 +334,9 @@ class EvalHandler(BaseHandler):
             elif backend_choice == "unsloth":
                 print_info("No LoRA adapters found in training outputs.")
                 print_info("Train a model first - the final_model/ directory will appear.")
+            elif backend_choice == "mlc":
+                print_info("No MLC/WebGPU models found in training outputs.")
+                print_info("Train a model first, then use Upload -> WebGPU/MLC conversion.")
             elif backend_choice == "ollama":
                 print_info("Is Ollama running? Check with: ollama list")
             return 1
@@ -295,6 +346,8 @@ class EvalHandler(BaseHandler):
             self._display_gguf_models_table(backend, models)
         elif backend_choice == "unsloth":
             self._display_lora_models_table(backend, models)
+        elif backend_choice == "mlc":
+            self._display_mlc_models_table(backend, models)
         else:
             self._display_models_table(backend_choice, models)
 
@@ -308,6 +361,10 @@ class EvalHandler(BaseHandler):
             except ValueError:
                 pass
             print_error("Invalid selection.")
+
+        # MLC: Skip to browser-based evaluation (tests selected in browser)
+        if backend_choice == "mlc":
+            return self._run_mlc_evaluation(model, None)
 
         # Step 4: List YAML scenarios
         scenarios = self._list_scenarios()
@@ -342,6 +399,10 @@ class EvalHandler(BaseHandler):
             return 0
 
         # Step 7: Execute evaluation
+        if backend_choice == "mlc":
+            # MLC uses browser-based WebLLM evaluation
+            return self._run_mlc_evaluation(model, selected)
+
         python = self.get_conda_python()
 
         # Generate timestamped output paths
@@ -373,3 +434,30 @@ class EvalHandler(BaseHandler):
             print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
 
         return result.returncode
+
+    def _run_mlc_evaluation(self, model_path: str, scenario=None) -> int:
+        """
+        Run MLC/WebLLM browser-based evaluation.
+
+        Args:
+            model_path: Path to MLC model directory
+            scenario: Selected scenario info (optional, tests selected in browser)
+
+        Returns:
+            Exit code (0 = success)
+        """
+        from Evaluator.mlc_eval_handler import run_mlc_evaluation
+
+        print_info("Launching WebLLM browser-based evaluation...")
+        print_info(f"Model: {Path(model_path).name}")
+        print_info("Select tests in browser, then click 'Run Evaluation'")
+        print()
+
+        config_dir = self.repo_root / "Evaluator" / "config"
+
+        return run_mlc_evaluation(
+            model_path=model_path,
+            config_dir=str(config_dir),
+            port=8080,
+            open_browser=True,
+        )

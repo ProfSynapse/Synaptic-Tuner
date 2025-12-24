@@ -47,6 +47,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.gguf_handler import GGUFHandler
         from tuner.handlers.improve_handler import handle_improve
         from tuner.handlers.inference_handler import InferenceHandler
+        from tuner.handlers.webllm_handler import WebLLMHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         print(f"Error: Handlers not yet implemented: {e}")
@@ -66,6 +67,7 @@ def route_command(args: Namespace) -> int:
         'pipeline': PipelineHandler,
         'gguf': GGUFHandler,
         'run': InferenceHandler,
+        'webllm': WebLLMHandler,
     }
 
     # Execute handler

@@ -60,11 +60,95 @@ SUPPORTED_QUANTIZATIONS = [
 # Conversation templates for common models
 CONV_TEMPLATES = {
     "mistral": "mistral_default",
-    "qwen": "qwen2",
+    "qwen": "chatml",  # Qwen3 uses ChatML
+    "qwen3": "chatml",
     "llama": "llama-3",
     "phi": "phi-3",
     "gemma": "gemma",
 }
+
+# WSL monkey-patch code for MLC imports (handles permission errors on Windows paths)
+WSL_PATCH_CODE = '''
+import os
+import sys
+import pathlib
+
+# Preserve Linux paths and CUDA, avoid Windows paths that cause permission errors
+linux_paths = [p for p in os.environ.get('PATH', '').split(':') if not p.startswith('/mnt/c')]
+# Ensure CUDA is in PATH for nvcc
+cuda_paths = ['/usr/local/cuda/bin', '/usr/local/cuda-12.8/bin', '/usr/local/cuda-12/bin', '/usr/local/cuda-11/bin']
+for cuda_path in cuda_paths:
+    if os.path.isdir(cuda_path) and cuda_path not in linux_paths:
+        linux_paths.insert(0, cuda_path)
+if linux_paths:
+    os.environ['PATH'] = ':'.join(linux_paths)
+
+# Monkey-patch pathlib to handle PermissionError on Windows paths
+_original_is_dir = pathlib.Path.is_dir
+def _safe_is_dir(self):
+    try:
+        return _original_is_dir(self)
+    except PermissionError:
+        return False
+pathlib.Path.is_dir = _safe_is_dir
+
+_original_stat = pathlib.Path.stat
+def _safe_stat(self, *args, **kwargs):
+    try:
+        return _original_stat(self, *args, **kwargs)
+    except PermissionError:
+        raise FileNotFoundError(f"Skipped: {self}")
+pathlib.Path.stat = _safe_stat
+'''
+
+def get_python_executable() -> str:
+    """Get the Python executable path where MLC-LLM is installed."""
+    import os
+    # Prefer miniconda base where MLC is installed
+    candidates = [
+        "/home/profsynapse/miniconda3/bin/python",
+        os.path.expanduser("~/miniconda3/bin/python"),
+        os.path.expanduser("~/anaconda3/bin/python"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    # Fallback to current
+    import sys
+    return sys.executable
+
+
+def detect_cuda_version() -> str:
+    """Detect CUDA version and return appropriate MLC package suffix."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            # Check for CUDA version from nvcc if available
+            nvcc_result = subprocess.run(
+                ["nvcc", "--version"], capture_output=True, text=True, timeout=10
+            )
+            if nvcc_result.returncode == 0 and "12." in nvcc_result.stdout:
+                # CUDA 12.x - use cu128 (compatible with 12.4-12.8)
+                return "cu128"
+            # Default to cu128 if nvidia-smi works
+            return "cu128"
+    except Exception:
+        pass
+    # No CUDA detected, use CPU
+    return "cpu"
+
+def get_working_directory() -> str:
+    """Get a working directory that avoids WSL permission issues."""
+    import os
+    # Try home directory first, then /tmp
+    home = os.path.expanduser("~")
+    if os.path.isdir(home) and not home.startswith("/mnt/c"):
+        return home
+    return "/tmp"
 
 # Spinner frames
 BUBBLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -141,19 +225,25 @@ class WebGPUConverter:
             Tuple of (available, message)
         """
         try:
+            # Use Python with WSL patch to check MLC availability
+            check_code = WSL_PATCH_CODE + """
+from mlc_llm import MLCEngine
+print("OK")
+"""
             result = subprocess.run(
-                ["mlc_llm", "--help"],
+                [get_python_executable(), "-c", check_code],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=30,
+                cwd=get_working_directory()
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and "OK" in result.stdout:
                 return True, "MLC-LLM is available"
-            return False, "MLC-LLM command failed"
+            return False, f"MLC-LLM import failed: {result.stderr[:200]}"
         except FileNotFoundError:
-            return False, "MLC-LLM not installed. Run setup with --with-webgpu"
+            return False, "Python not found"
         except subprocess.TimeoutExpired:
-            return False, "MLC-LLM command timed out"
+            return False, "MLC-LLM check timed out"
         except Exception as e:
             return False, f"Error checking MLC-LLM: {e}"
 
@@ -174,11 +264,18 @@ class WebGPUConverter:
         print(f"  MLC-LLM not found. Installing...")
 
         try:
-            # Install mlc-llm-nightly (includes pre-built binaries)
+            # Detect CUDA version and select appropriate packages
+            cuda_suffix = detect_cuda_version()
+            llm_pkg = f"mlc-llm-nightly-{cuda_suffix}"
+            ai_pkg = f"mlc-ai-nightly-{cuda_suffix}"
+            print(f"  Detected platform: {cuda_suffix}, installing {llm_pkg}...")
+
+            # Install mlc-llm-nightly with correct CUDA/CPU suffix
+            python_exe = get_python_executable()
             with branded_spinner("Installing MLC-LLM"):
                 result = subprocess.run(
-                    ["pip", "install", "--pre", "mlc-llm-nightly", "mlc-ai-nightly", "-f",
-                     "https://mlc.ai/wheels"],
+                    [python_exe, "-m", "pip", "install", "--pre", "-U",
+                     llm_pkg, ai_pkg, "-f", "https://mlc.ai/wheels"],
                     capture_output=True,
                     text=True,
                     timeout=600
@@ -268,20 +365,19 @@ class WebGPUConverter:
         Returns:
             True if successful
         """
-        cmd = [
-            "mlc_llm", "convert_weight",
-            str(model_path),
-            "--quantization", quantization,
-            "-o", str(output_dir),
-        ]
-
+        # Use Python with WSL patch for MLC CLI
+        convert_code = WSL_PATCH_CODE + f"""
+from mlc_llm.cli.convert_weight import main
+main(['{model_path}', '--quantization', '{quantization}', '-o', '{output_dir}'])
+"""
         try:
             with branded_spinner(f"Converting weights ({quantization})"):
                 result = subprocess.run(
-                    cmd,
+                    [get_python_executable(), "-c", convert_code],
                     capture_output=True,
                     text=True,
                     timeout=1800,  # 30 minutes for large models
+                    cwd=get_working_directory()
                 )
 
             if result.returncode != 0:
@@ -325,23 +421,19 @@ class WebGPUConverter:
         if conv_template is None:
             conv_template = self.detect_conv_template(model_path)
 
-        cmd = [
-            "mlc_llm", "gen_config",
-            str(model_path),
-            "--quantization", quantization,
-            "--conv-template", conv_template,
-            "--context-window-size", str(context_window_size),
-            "--prefill-chunk-size", str(prefill_chunk_size),
-            "-o", str(output_dir),
-        ]
-
+        # Use Python with WSL patch for MLC CLI
+        gen_config_code = WSL_PATCH_CODE + f"""
+from mlc_llm.cli.gen_config import main
+main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{conv_template}', '--context-window-size', '{context_window_size}', '--prefill-chunk-size', '{prefill_chunk_size}', '-o', '{output_dir}'])
+"""
         try:
             with branded_spinner("Generating MLC config"):
                 result = subprocess.run(
-                    cmd,
+                    [get_python_executable(), "-c", gen_config_code],
                     capture_output=True,
                     text=True,
                     timeout=120,
+                    cwd=get_working_directory()
                 )
 
             if result.returncode != 0:
@@ -374,20 +466,19 @@ class WebGPUConverter:
         Returns:
             True if successful
         """
-        cmd = [
-            "mlc_llm", "compile",
-            str(config_path),
-            "--device", "webgpu",
-            "-o", str(output_path),
-        ]
-
+        # Use Python with WSL patch for MLC CLI
+        compile_code = WSL_PATCH_CODE + f"""
+from mlc_llm.cli.compile import main
+main(['{config_path}', '--device', 'webgpu', '-o', '{output_path}'])
+"""
         try:
             with branded_spinner("Compiling WebGPU library"):
                 result = subprocess.run(
-                    cmd,
+                    [get_python_executable(), "-c", compile_code],
                     capture_output=True,
                     text=True,
                     timeout=1800,  # 30 minutes for compilation
+                    cwd=get_working_directory()
                 )
 
             if result.returncode != 0:
@@ -477,25 +568,86 @@ class WebGPUConverter:
         adapter_config = model_path / "adapter_config.json"
         if adapter_config.exists():
             print("\n⚠ LoRA adapters detected - merging first...")
-            # Use temp dir for merged model
-            temp_dir = Path(tempfile.mkdtemp())
-            merged_path = temp_dir / "merged"
+            # Save merged model alongside the training run (persistent, not temp)
+            merged_path = model_path.parent / "merged-16bit"
 
-            try:
-                from unsloth import FastLanguageModel
-
-                model, tokenizer = FastLanguageModel.from_pretrained(
-                    model_name=str(model_path),
-                    max_seq_length=context_window_size,
-                    load_in_4bit=False,
-                )
-                model.save_pretrained_merged(str(merged_path), tokenizer, save_method="merged_16bit")
+            # Check if already merged
+            if merged_path.exists() and any(merged_path.glob("*.safetensors")):
+                print(f"  ✓ Found existing merged model at: {merged_path}")
                 model_path = merged_path
-                print("  ✓ LoRA merged to 16-bit")
-            except ImportError:
-                print("  ✗ Unsloth not available for LoRA merge")
-                print("  Please merge LoRA adapters first or install Unsloth")
-                return []
+            else:
+                # Use Unsloth via subprocess for reliable 4-bit -> 16-bit merge
+                merged_path.mkdir(parents=True, exist_ok=True)
+
+                # Find Unsloth Python
+                unsloth_python = None
+                for p in [
+                    "/home/profsynapse/.conda/envs/unsloth_latest/bin/python",
+                    os.path.expanduser("~/.conda/envs/unsloth_latest/bin/python"),
+                    "/home/profsynapse/.conda/envs/unsloth_env/bin/python",
+                    os.path.expanduser("~/.conda/envs/unsloth_env/bin/python"),
+                ]:
+                    if os.path.isfile(p):
+                        unsloth_python = p
+                        break
+
+                if not unsloth_python:
+                    print("  ✗ Unsloth environment not found")
+                    print("  Please merge LoRA adapters first using the upload handler")
+                    return []
+
+                merge_script = WSL_PATCH_CODE + f'''
+import os
+os.chdir(os.path.expanduser("~"))
+
+from unsloth import FastLanguageModel
+import torch
+
+lora_path = "{model_path}"
+output_path = "{merged_path}"
+
+print(f"Loading from: {{lora_path}}")
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=lora_path,
+    max_seq_length={context_window_size},
+    dtype=torch.float16,
+    load_in_4bit=True,
+)
+
+print("Saving merged 16-bit model...")
+model.save_pretrained_merged(output_path, tokenizer, save_method="merged_16bit")
+print("Done!")
+'''
+
+                print(f"  Merging via Unsloth (subprocess)...")
+                try:
+                    with branded_spinner("Merging LoRA adapters"):
+                        result = subprocess.run(
+                            [unsloth_python, "-c", merge_script],
+                            capture_output=True,
+                            text=True,
+                            timeout=600,
+                            cwd=get_working_directory()
+                        )
+
+                    if result.returncode != 0:
+                        print(f"  ✗ Merge failed: {result.stderr[:500]}")
+                        return []
+
+                    # Verify merge succeeded
+                    if not any(merged_path.glob("*.safetensors")):
+                        print(f"  ✗ Merge produced no output files")
+                        return []
+
+                    print("  ✓ LoRA merged via Unsloth")
+                    model_path = merged_path
+
+                except subprocess.TimeoutExpired:
+                    print("  ✗ Merge timed out")
+                    return []
+                except Exception as e:
+                    print(f"  ✗ Merge error: {e}")
+                    return []
 
         for i, quant in enumerate(quantizations, 1):
             quant_name = f"{model_name}-{quant}-MLC"

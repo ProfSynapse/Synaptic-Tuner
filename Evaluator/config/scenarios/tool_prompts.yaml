@@ -84,7 +84,7 @@ tests:
     - agent_1732300800002_incident_scribe
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
-- id: agentManager_executePrompt
+- id: agentManager_executePrompts
   question: 'Send the prompt "Summarize all sync failure incidents from the past week and list their root causes" to the Workspace
     Auditor agent (id: agent_1732300800000_workspace_auditor) and return the raw response.'
   tags:
@@ -115,7 +115,7 @@ tests:
     ]}\n  ],\n  \"preferences\": \"All incidents must include timestamp, severity, and root cause analysis.\",\n  \"sessions\"\
     : []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll

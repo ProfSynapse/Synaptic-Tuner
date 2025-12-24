@@ -22,7 +22,7 @@ from pathlib import Path
 
 from tuner.core.interfaces import ITrainingBackend, IEvaluationBackend
 from tuner.backends.training import RTXBackend, MacBackend
-from tuner.backends.evaluation import OllamaBackend, LMStudioBackend, LlamaCppBackend, UnslothBackend
+from tuner.backends.evaluation import OllamaBackend, LMStudioBackend, LlamaCppBackend, UnslothBackend, MLCBackend
 
 
 class TrainingBackendRegistry:
@@ -212,3 +212,4 @@ EvaluationBackendRegistry.register("ollama", OllamaBackend)
 EvaluationBackendRegistry.register("lmstudio", LMStudioBackend)
 EvaluationBackendRegistry.register("llamacpp", LlamaCppBackend)
 EvaluationBackendRegistry.register("unsloth", UnslothBackend)
+EvaluationBackendRegistry.register("mlc", MLCBackend)

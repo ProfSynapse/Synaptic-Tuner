@@ -293,6 +293,48 @@ class OpenRouterSettings:
         return "https://openrouter.ai/api/v1"
 
 
+def _env_mlc_host() -> str:
+    return _env_str("MLC_HOST", "127.0.0.1")
+
+
+def _env_mlc_port() -> int:
+    return _env_int("MLC_PORT", 8080)
+
+
+@dataclass
+class MLCSettings:
+    """Settings for MLC-LLM inference via mlc_llm serve.
+
+    MLC-LLM runs an OpenAI-compatible server for models converted to MLC format.
+    The client starts the server automatically and cleans up on exit.
+
+    Environment variables:
+    - MLC_HOST: Server hostname (default: 127.0.0.1)
+    - MLC_PORT: Server port (default: 8080)
+
+    Attributes:
+        model: Path to MLC model directory (contains mlc-chat-config.json)
+        host: Server hostname
+        port: Server port
+        temperature: Sampling temperature
+        top_p: Top-p sampling
+        max_tokens: Maximum tokens to generate
+        seed: Optional random seed
+    """
+
+    model: str  # Path to MLC model directory
+    host: str = field(default_factory=_env_mlc_host)
+    port: int = field(default_factory=_env_mlc_port)
+    temperature: float = 0.2
+    top_p: float = 0.9
+    max_tokens: int = 1024
+    seed: Optional[int] = None
+
+    def base_url(self) -> str:
+        """Return the base URL for the MLC server."""
+        return f"http://{self.host}:{self.port}"
+
+
 @dataclass
 class LlamaCppSettings:
     """Settings for llama.cpp direct execution via llama-cli.

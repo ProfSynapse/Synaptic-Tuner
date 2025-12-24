@@ -181,7 +181,16 @@
       "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/pip install:*)",
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/build/bin/llama-cli:*)",
       "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)",
-      "Bash(TORCHDYNAMO_DISABLE=1 /home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)"
+      "Bash(TORCHDYNAMO_DISABLE=1 /home/profsynapse/.conda/envs/unsloth_latest/bin/python:*)",
+      "Bash(mlc_llm:*)",
+      "Bash(/home/profsynapse/.conda/envs/unsloth_latest/bin/pip show:*)",
+      "Bash(/home/profsynapse/miniconda3/bin/pip show:*)",
+      "Bash(\"https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_80/Qwen3-4B-q4f16_1-ctx4k_cs1k-webgpu.wasm\")",
+      "Bash(/home/profsynapse/miniconda3/bin/pip install:*)",
+      "Bash(/home/profsynapse/miniconda3/bin/pip uninstall:*)",
+      "Bash(/home/profsynapse/miniconda3/bin/pip index:*)",
+      "WebFetch(domain:mlc.ai)",
+      "Bash(fuser:*)"
     ],
     "deny": [],
     "ask": []
