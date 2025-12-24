@@ -172,6 +172,14 @@ python -m improvement_engine.services.rubric_runner --list
 
 Run `--list` to see all available rubrics with descriptions.
 
+### Unified validation architecture
+
+The improvement engine uses a shared validation infrastructure (`shared/validation/`) that's also used by the Evaluator and training pipelines. This provides:
+
+- **Format-agnostic parsing**: Auto-detects Qwen, Mistral, ChatML, and OpenAI tool call formats
+- **Config-driven validation**: Same YAML rubric format works across all systems
+- **Cross-scope validation**: Validate content across different parts of the response
+
 ### Cross-scope validation
 
 Rubrics can validate content across different scopes. For example, the factuality rubric extracts dates and file paths from the thinking block and validates they exist in the system prompt or user request:
@@ -229,6 +237,10 @@ ls -lt improvement_engine/interactions/ | head -5
 - `Evaluator/` - evaluation CLIs, prompt sets, and result reports.
 - `Datasets/` - datasets and metadata; validation utilities in `tools/`.
 - `improvement_engine/` - dataset quality improvement with LLM-based judging and rubrics.
+- `shared/` - shared infrastructure used across all modules:
+  - `validation/` - unified validation (format-agnostic parsing, config-driven validators, rubric loading)
+  - `llm/` - unified LLM client (OpenRouter, LMStudio, Ollama)
+  - `utilities/` - common utilities (paths, env, YAML loading)
 - `docs/` and `finetuning-strategy.md` - architecture and deep-dive notes.
 - `CLAUDE.md` - project-wide development guide and FAQs.
 
