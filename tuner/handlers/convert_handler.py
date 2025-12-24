@@ -1,7 +1,7 @@
 """
 Model conversion handler.
 
-Location: tuner/handlers/gguf_handler.py
+Location: tuner/handlers/convert_handler.py
 Purpose: Handle model conversion workflow via interactive menu
 Used by: CLI router (cli/router.py)
 
@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Optional, List
 
 from .base import BaseHandler
+from tuner.discovery import CheckpointDiscovery
 
 
-class GGUFHandler(BaseHandler):
+class ConvertHandler(BaseHandler):
     """
     Handler for model conversion operations.
 
@@ -31,7 +32,7 @@ class GGUFHandler(BaseHandler):
     @property
     def name(self) -> str:
         """Handler identifier."""
-        return "gguf"
+        return "convert"
 
     def can_handle_direct_mode(self) -> bool:
         """This handler supports direct CLI invocation."""
@@ -111,25 +112,30 @@ class GGUFHandler(BaseHandler):
                 table.add_column("#", style="cyan", width=3)
                 table.add_column("Type", style="magenta", width=5)
                 table.add_column("Run", style="green")
-                table.add_column("Model", style="yellow")
-                table.add_column("Has GGUF", style="blue")
+                table.add_column("Final", style="yellow", width=5)
+                table.add_column("CPs", style="blue", width=4)
 
                 for i, run in enumerate(all_runs[:10], 1):  # Show last 10
-                    has_gguf = "Yes" if (run['path'] / "gguf").exists() else "No"
-                    # Try to get model name from config or path
-                    model_name = run.get('model', run['path'].name)
+                    has_final = "✓" if (run['path'] / "final_model").exists() else "-"
+                    # Count checkpoints
+                    checkpoints_dir = run['path'] / "checkpoints"
+                    cp_count = 0
+                    if checkpoints_dir.exists():
+                        cp_count = len(list(checkpoints_dir.glob("checkpoint-*")))
                     table.add_row(
                         str(i),
                         run['type'],
                         run['path'].name,
-                        model_name[:30] if len(model_name) > 30 else model_name,
-                        has_gguf
+                        has_final,
+                        str(cp_count)
                     )
                 console.print(table)
             else:
                 for i, run in enumerate(all_runs[:10], 1):
-                    has_gguf = "Yes" if (run['path'] / "gguf").exists() else "No"
-                    print(f"  {i}. [{run['type']}] {run['path'].name} (GGUF: {has_gguf})")
+                    has_final = "✓" if (run['path'] / "final_model").exists() else "-"
+                    checkpoints_dir = run['path'] / "checkpoints"
+                    cp_count = len(list(checkpoints_dir.glob("checkpoint-*"))) if checkpoints_dir.exists() else 0
+                    print(f"  {i}. [{run['type']}] {run['path'].name} (Final: {has_final}, CPs: {cp_count})")
 
             # Select run
             print()
@@ -149,19 +155,46 @@ class GGUFHandler(BaseHandler):
                 print("Invalid selection")
                 return 1
 
-            # Find final_model directory
-            model_path = selected_run['path'] / "final_model"
-            if not model_path.exists():
-                # Try checkpoints
-                checkpoints = selected_run['path'] / "checkpoints"
-                if checkpoints.exists():
-                    checkpoint_dirs = sorted(checkpoints.iterdir(), reverse=True)
-                    if checkpoint_dirs:
-                        model_path = checkpoint_dirs[0]
+            # Discover checkpoints with metrics
+            checkpoints = CheckpointDiscovery.discover(selected_run['path'])
 
-            if not model_path.exists():
-                print(f"No model found in {selected_run['path']}")
+            if not checkpoints:
+                print(f"No checkpoints found in {selected_run['path']}")
                 return 1
+
+            # Determine training type for metric display
+            training_type = selected_run['type'].lower()
+
+            # If only one checkpoint (final_model), use it directly
+            if len(checkpoints) == 1 and checkpoints[0].is_final:
+                print("\nUsing final_model")
+                model_path = checkpoints[0].path
+            else:
+                # Display checkpoint table with loss values
+                from tuner.ui import print_checkpoint_table
+                print()
+                print_checkpoint_table(checkpoints, training_type)
+
+                # Select checkpoint
+                if RICH_AVAILABLE and Prompt:
+                    cp_selection = Prompt.ask(
+                        "Select checkpoint",
+                        default="1",
+                        choices=[str(i) for i in range(1, len(checkpoints) + 1)]
+                    )
+                else:
+                    cp_selection = input(f"Select checkpoint [1-{len(checkpoints)}] (1): ").strip() or "1"
+
+                try:
+                    cp_idx = int(cp_selection) - 1
+                    if 0 <= cp_idx < len(checkpoints):
+                        model_path = checkpoints[cp_idx].path
+                    else:
+                        print("Invalid selection")
+                        return 1
+                except ValueError:
+                    print("Invalid selection")
+                    return 1
 
             print(f"\nSelected: {model_path}")
 
