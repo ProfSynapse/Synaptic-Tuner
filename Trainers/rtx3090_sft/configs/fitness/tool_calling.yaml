@@ -168,17 +168,21 @@ validations:
                 targetSessionId: string
                 sessionName: string
               updateSession:
-                _required: []
+                _required: [sessionId]
                 sessionId: string
                 name: string
                 description: string
                 sessionGoal: string
               # State tools
               createState:
-                _required: [name]
+                _required: [name, conversationContext, activeTask, activeFiles, nextSteps, reasoning]
                 name: string
+                conversationContext: string
+                activeTask: string
+                activeFiles: array
+                nextSteps: array
+                reasoning: string
                 description: string
-                targetSessionId: string
                 tags: array
               listStates:
                 _required: []
@@ -214,14 +218,15 @@ validations:
                 order: string
                 limit: number
               loadWorkspace:
-                _required: [id]
-                id: string
-                limit: number
-              updateWorkspace:
-                _required: [workspaceId, fieldPath, newValue]
+                _required: [workspaceId]
                 workspaceId: string
-                fieldPath: string
-                newValue: string
+              updateWorkspace:
+                _required: [workspaceId]
+                workspaceId: string
+                name: string
+                purpose: string
+                currentGoal: string
+                workflows: array
 
             # =================================================================
             # agentManager - Agent/model management
@@ -253,13 +258,16 @@ validations:
                 _required: [id]
                 id: string
               generateImage:
-                _required: [prompt, provider, savePath]
+                _required: [prompt, savePath]
                 prompt: string
-                provider: string
                 savePath: string
+                provider: string
                 model: string
                 aspectRatio: string
                 numberOfImages: number
+                imageSize: string
+                referenceImages: array
+                format: string
               executePrompts:
                 _required: [prompts]
                 prompts: array
