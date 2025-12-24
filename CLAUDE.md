@@ -68,7 +68,11 @@ Toolset-Training/
 ├── shared/                    # Shared infrastructure
 │   ├── llm/                   # Unified LLM client (OpenRouter, LMStudio, Ollama)
 │   ├── upload/                # Upload framework
-│   └── utilities/             # Path, env utilities
+│   ├── utilities/             # Path, env, YAML loading utilities
+│   └── validation/            # Unified validation (used by SynthChat, Evaluator, Trainer)
+│       ├── parsing/           # Format-agnostic response parsing (Qwen/Mistral/ChatML)
+│       ├── validators/        # Config-driven validators (XML, JSON, YAML, regex, code)
+│       └── rubric/            # Rubric loading and caching
 │
 └── web-ui/                    # Next.js dataset editor
     └── npm run dev            # Start dev server
@@ -340,6 +344,8 @@ python train_sft.py --model-size 7b --batch-size 4
 - `Trainers/rtx3090_kto/README.md` - KTO training guide
 - `improvement_engine/README.md` - Dataset improvement guide
 - `KTO_TRAINING_REFERENCE.md` - KTO interleaving requirement
+- `docs/EVOLUTIONARY_FINETUNING.md` - Unified validation & evolutionary training design
+- `shared/validation/README.md` - Shared validation module guide
 - `docs/` - Architecture specs
 
 ## Getting Help

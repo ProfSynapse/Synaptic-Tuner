@@ -2,10 +2,14 @@
 
 Design document for unifying config-driven validation across the codebase, then building evolutionary training on top.
 
+> **Status:**
+> - ✅ **Phase 1 COMPLETE** - Unified validation architecture implemented in `shared/validation/`
+> - ⏳ **Phase 2 PENDING** - Evolutionary fine-tuning (ready to start)
+
 ## Table of Contents
 
 1. [Philosophy](#philosophy)
-2. [Phase 1: Unified Validation Architecture](#phase-1-unified-validation-architecture)
+2. [Phase 1: Unified Validation Architecture](#phase-1-unified-validation-architecture) ✅
 3. [Phase 2: Evolutionary Fine-Tuning](#phase-2-evolutionary-fine-tuning)
 4. [Implementation Roadmap](#implementation-roadmap)
 
@@ -39,51 +43,68 @@ Design document for unifying config-driven validation across the codebase, then 
 
 ## Phase 1: Unified Validation Architecture
 
-### The Problem
+> ✅ **COMPLETED** - All validation code now lives in `shared/validation/`
+
+### Quick Usage
+
+```python
+# Import from shared validation
+from shared.validation import (
+    parse_response,           # Format-agnostic parsing
+    ParsedResponse,           # Normalized response
+    StructureValidator,       # Config-driven validation
+    RubricLoader,            # Rubric management
+)
+
+# Parse any format (Qwen, Mistral, ChatML, OpenAI)
+parsed = parse_response(model_output)
+if parsed.has_tool_calls:
+    tool_name = parsed.first_tool_call.name
+    args = parsed.first_tool_call.arguments
+
+# Validate with config
+validator = StructureValidator()
+is_valid, errors = validator.validate(data, validations)
+```
+
+### The Problem (Solved)
 
 Three systems need the same validation logic:
 
-| System | Purpose | Current State |
-|--------|---------|---------------|
-| **SynthChat** | Validate/improve training examples | Has canonical validators |
-| **Evaluator** | Validate model responses during eval | Imports via hacky path manipulation |
-| **Trainer** | Compute fitness during training | No access yet |
+| System | Purpose | Status |
+|--------|---------|--------|
+| **SynthChat** | Validate/improve training examples | ✅ Uses `shared.validation` |
+| **Evaluator** | Validate model responses during eval | ✅ Uses `shared.validation` |
+| **Trainer** | Compute fitness during training | ⏳ Ready for Phase 2 |
 
-#### Current Architecture (Fragmented)
+#### Previous Architecture (Fragmented) - NOW FIXED
+
+The old fragmented structure has been consolidated into `shared/validation/`:
 
 ```
-SynthChat/services/validators/
-├── structure_validator.py      ← Canonical validation logic
-├── cross_scope_validator.py
-├── facade.py                   ← SynthChat-specific coordinator
-└── content/
-    ├── json_validator.py
-    ├── xml_validator.py
-    └── registry.py
+# OLD (fragmented):
+SynthChat/services/validators/     ← Had canonical validators
+Evaluator/                         ← Had hacky importlib imports
+Trainers/                          ← Had no access
 
-Evaluator/
-├── rubric_validator.py         ← HACK: imports StructureValidator via
-│                                  importlib path manipulation
-├── behavior_validator.py       ← Own validation logic
-├── schema_validator.py         ← Tool call format validation
-├── tool_call_parser.py         ← Format parsing (Qwen, Mistral)
-└── response_parser.py          ← Response parsing
-
-Trainers/
-└── (nothing)                   ← Will need same validation
+# NEW (unified):
+shared/validation/                 ← Single source of truth
+├── parsing/                       ← Format-agnostic parsing
+├── validators/                    ← Config-driven validation
+└── rubric/                        ← Rubric management
 ```
 
-**Problems:**
-1. `Evaluator/rubric_validator.py` lines 15-28 use hacky `importlib` to import from SynthChat
-2. Format parsing lives in Evaluator, schema validation in SynthChat
-3. No clean way for Trainers to access either
-4. Duplication of coordination logic between systems
+**Problems SOLVED:**
+1. ~~`Evaluator/rubric_validator.py` lines 15-28 use hacky `importlib`~~ → Now uses clean imports
+2. ~~Format parsing lives in Evaluator, schema validation in SynthChat~~ → Both in shared/
+3. ~~No clean way for Trainers to access either~~ → Direct imports from shared/
+4. ~~Duplication of coordination logic between systems~~ → Single implementation
 
-### The Solution
+### The Solution (Implemented)
 
-Move all validation to `shared/validation/` with clean imports everywhere.
+All validation now lives in `shared/validation/` with clean imports everywhere.
 
-#### Target Architecture (Unified)
+#### Current Architecture (Unified)
 
 ```
 shared/validation/                      ← SINGLE SOURCE OF TRUTH
