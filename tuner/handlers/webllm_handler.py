@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from tuner.handlers.base import BaseHandler
-from tuner.discovery import TrainingRunDiscovery
+from tuner.discovery import TrainingRunDiscovery, CheckpointDiscovery
 from tuner.ui import (
     print_menu,
     print_header,
@@ -22,6 +22,7 @@ from tuner.ui import (
     print_error,
     print_info,
     print_table,
+    print_checkpoint_table,
     confirm,
     prompt,
     BOX,
@@ -124,13 +125,19 @@ class WebLLMHandler(BaseHandler):
         # Step 3: Display runs and select
         run_data = []
         for i, run in enumerate(runs, 1):
+            has_final = "✓" if (run / "final_model").exists() else "-"
             # Check if merged model exists
             merged_path = run / "merged-16bit"
             has_merged = merged_path.exists() and any(merged_path.glob("*.safetensors"))
-            status = "merged" if has_merged else "lora only"
-            run_data.append([str(i), run.name, status])
+            status = "merged" if has_merged else "-"
+            # Count checkpoints
+            checkpoints_dir = run / "checkpoints"
+            checkpoint_count = 0
+            if checkpoints_dir.exists():
+                checkpoint_count = len(list(checkpoints_dir.glob("checkpoint-*")))
+            run_data.append([str(i), run.name, has_final, str(checkpoint_count), status])
 
-        print_table(run_data, ["#", "Training Run", "Status"],
+        print_table(run_data, ["#", "Training Run", "Final", "CPs", "Merged"],
                    title=f"Available {model_type.upper()} Training Runs")
 
         while True:
@@ -144,19 +151,34 @@ class WebLLMHandler(BaseHandler):
                 pass
             print_error("Invalid selection.")
 
-        # Step 4: Check for merged model
+        # Step 4: Select checkpoint with metrics
+        checkpoints = CheckpointDiscovery.discover(selected_run)
+
+        if not checkpoints:
+            print_error("No checkpoints found in training run")
+            return 1
+
+        # If only one checkpoint (final_model), use it directly
+        if len(checkpoints) == 1 and checkpoints[0].is_final:
+            print_info("Using final_model")
+            lora_path = checkpoints[0].path
+        else:
+            # Display checkpoint table with loss values
+            print_checkpoint_table(checkpoints, model_type)
+
+            while True:
+                try:
+                    sel = prompt(f"Select checkpoint (1-{len(checkpoints)})", "1")
+                    idx = int(sel) - 1
+                    if 0 <= idx < len(checkpoints):
+                        lora_path = checkpoints[idx].path
+                        break
+                except ValueError:
+                    pass
+                print_error("Invalid selection.")
+
+        # Step 5: Check for existing merged model
         merged_path = selected_run / "merged-16bit"
-        lora_path = selected_run / "final_model"
-
-        if not lora_path.exists():
-            # Check checkpoints
-            checkpoints = list(selected_run.glob("checkpoint-*"))
-            if checkpoints:
-                lora_path = sorted(checkpoints)[-1]  # Latest checkpoint
-            else:
-                print_error("No model found in training run")
-                return 1
-
         needs_merge = not (merged_path.exists() and any(merged_path.glob("*.safetensors")))
 
         if needs_merge:
