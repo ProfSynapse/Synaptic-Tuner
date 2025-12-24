@@ -158,24 +158,118 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
         let evaluationResults = [];
         let currentTests = [];
         let isRunning = false;
+        let toolSchema = null;  // Loaded from tool_schema.yaml
 
-        const TOOL_PATTERNS = [
-            /tool_call:\\s*(\\w+)/gi,
-            /<tool_call>\\s*(\\w+)/gi,
-            /"name":\\s*"(\\w+)"/gi,
-            /(\\w+Manager_\\w+)/g,
-            /(\\w+Librarian_\\w+)/g
-        ];
+        // Load tool schema configuration
+        async function loadToolSchema() {{
+            const statusEl = document.getElementById('test-status');
+            try {{
+                const response = await fetch('http://localhost:{port}/config/tool_schema.yaml');
+                if (!response.ok) {{
+                    console.warn('Could not load tool_schema.yaml, using defaults');
+                    statusEl.textContent = 'Warning: tool_schema.yaml not found';
+                    return null;
+                }}
+                const yamlText = await response.text();
+                toolSchema = jsyaml.load(yamlText);
+                const wrapper = toolSchema?.tool_format?.wrapper || 'none';
+                const pattern = toolSchema?.tool_format?.wrapper_structure?.calls?.tool_name_pattern || 'N/A';
+                statusEl.innerHTML = `Tool schema loaded: wrapper=<strong>${{wrapper}}</strong>, pattern=<strong>${{pattern}}</strong>`;
+                console.log('Loaded tool schema:', toolSchema);
+                return toolSchema;
+            }} catch (error) {{
+                console.warn('Error loading tool schema:', error);
+                statusEl.textContent = 'Error loading tool_schema.yaml';
+                return null;
+            }}
+        }}
 
+        // Expand a tool call using config from tool_schema.yaml
+        function expandToolCall(name, args) {{
+            const tools = [];
+
+            // Get wrapper config from loaded schema
+            const wrapper = toolSchema?.tool_format?.wrapper;
+            const wrapperStructure = toolSchema?.tool_format?.wrapper_structure;
+
+            // Check if this is a wrapper call that needs expansion
+            if (wrapper && name === wrapper && args && args.calls) {{
+                // Get the pattern for constructing tool names (default: {{agent}}_{{tool}})
+                const pattern = wrapperStructure?.calls?.tool_name_pattern || '{{agent}}_{{tool}}';
+
+                for (const call of args.calls) {{
+                    // Apply the pattern from config
+                    let fullName = pattern
+                        .replace('{{agent}}', call.agent || '')
+                        .replace('{{tool}}', call.tool || '');
+
+                    if (fullName && fullName !== '_') {{
+                        tools.push(fullName);
+                    }}
+                }}
+                return tools;
+            }}
+
+            // Not a wrapper - return the name as-is
+            if (name) {{
+                tools.push(name);
+            }}
+            return tools;
+        }}
+
+        // Extract tool calls from response (config-driven)
         function extractToolCalls(response) {{
-            const tools = new Set();
-            for (const pattern of TOOL_PATTERNS) {{
-                const matches = response.matchAll(new RegExp(pattern));
-                for (const match of matches) {{
-                    if (match[1]) tools.add(match[1]);
+            const tools = [];
+
+            // 1. Qwen format: <tool_call>{{"name": "...", "arguments": {{...}}}}</tool_call>
+            const qwenPattern = /<tool_call>([\\s\\S]*?)<\\/tool_call>/g;
+            let qwenMatch;
+            while ((qwenMatch = qwenPattern.exec(response)) !== null) {{
+                try {{
+                    const jsonStr = qwenMatch[1].trim();
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed.name) {{
+                        // Expand using config (handles wrapper like useTools)
+                        const expanded = expandToolCall(parsed.name, parsed.arguments);
+                        for (const t of expanded) {{
+                            if (!tools.includes(t)) tools.push(t);
+                        }}
+                    }}
+                }} catch (e) {{
+                    // Try to extract name from malformed JSON
+                    const nameMatch = qwenMatch[1].match(/"name"\\s*:\\s*"([^"]+)"/);
+                    if (nameMatch && !tools.includes(nameMatch[1])) {{
+                        tools.push(nameMatch[1]);
+                    }}
                 }}
             }}
-            return Array.from(tools);
+
+            // 2. ChatML format: tool_call: toolName\\narguments: {{...}}
+            const chatmlPattern = /tool_call:\\s*(\\w+)/gi;
+            let chatmlMatch;
+            while ((chatmlMatch = chatmlPattern.exec(response)) !== null) {{
+                if (chatmlMatch[1] && !tools.includes(chatmlMatch[1])) {{
+                    tools.push(chatmlMatch[1]);
+                }}
+            }}
+
+            // 3. Mistral format: [TOOL_CALLS] [{{...}}]
+            const mistralMatch = response.match(/\\[TOOL_CALLS\\]\\s*(\\[.*?\\])/s);
+            if (mistralMatch) {{
+                try {{
+                    const calls = JSON.parse(mistralMatch[1]);
+                    for (const call of calls) {{
+                        if (call.name) {{
+                            const expanded = expandToolCall(call.name, call.arguments);
+                            for (const t of expanded) {{
+                                if (!tools.includes(t)) tools.push(t);
+                            }}
+                        }}
+                    }}
+                }} catch (e) {{}}
+            }}
+
+            return tools;
         }}
 
         function evaluateResponse(test, response, tools) {{
@@ -328,6 +422,8 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
 
                     const resultDiv = document.createElement('div');
                     resultDiv.className = `result-item ${{result.passed ? 'passed' : 'failed'}}`;
+                    // Escape HTML in content to prevent XSS
+                    const escapeHtml = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     resultDiv.innerHTML = `
                         <div class="result-header">
                             <span class="status">${{result.passed ? '✓' : '✗'}}</span>
@@ -335,11 +431,11 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
                             <span class="latency">${{result.latency_ms}}ms</span>
                         </div>
                         <div class="result-details">
-                            <div><strong>Question:</strong> ${{test.question.substring(0, 100)}}...</div>
                             <div><strong>Expected:</strong> ${{result.expected_tools.join(', ') || 'N/A'}}</div>
                             <div><strong>Found:</strong> ${{result.extracted_tools.join(', ') || 'None'}}</div>
                             <div><strong>Notes:</strong> ${{result.notes.join('; ')}}</div>
-                            <details><summary>Full Response</summary><pre>${{content.substring(0, 500)}}${{content.length > 500 ? '...' : ''}}</pre></details>
+                            <details><summary>Show Question</summary><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${{escapeHtml(test.question)}}</pre></details>
+                            <details open><summary>Full Response</summary><pre style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;">${{escapeHtml(content)}}</pre></details>
                         </div>
                     `;
                     resultsEl.appendChild(resultDiv);
@@ -457,7 +553,10 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
             }}
         }}
 
-        window.addEventListener('DOMContentLoaded', () => {{
+        window.addEventListener('DOMContentLoaded', async () => {{
+            // Load tool schema config first (for wrapper expansion)
+            await loadToolSchema();
+
             document.getElementById('load-model-btn').addEventListener('click', initEngine);
             document.getElementById('load-tools-btn').addEventListener('click', () => loadTests('tools'));
             document.getElementById('load-behaviors-btn').addEventListener('click', () => loadTests('behaviors'));

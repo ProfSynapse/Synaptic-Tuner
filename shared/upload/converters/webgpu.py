@@ -67,6 +67,27 @@ CONV_TEMPLATES = {
     "gemma": "gemma",
 }
 
+# Prebuilt WASM URLs for common model architectures
+# Fine-tuned models can reuse the base architecture's WASM
+PREBUILT_WASM_BASE = "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_80"
+PREBUILT_WASMS = {
+    # Qwen3 models (architecture-compatible with fine-tuned versions)
+    ("qwen3", "4b", "q4f16_1"): "Qwen3-4B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "4b", "q4f32_1"): "Qwen3-4B-q4f32_1-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "4b", "q0f16"): "Qwen3-4B-q0f16-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "1.7b", "q4f16_1"): "Qwen3-1.7B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "1.7b", "q4f32_1"): "Qwen3-1.7B-q4f32_1-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "0.6b", "q4f16_1"): "Qwen3-0.6B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    ("qwen3", "8b", "q4f16_1"): "Qwen3-8B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    # Llama 3 models
+    ("llama", "8b", "q4f16_1"): "Llama-3-8B-Instruct-q4f16_1-MLC-ctx4k_cs1k-webgpu.wasm",
+    ("llama", "8b", "q4f32_1"): "Llama-3-8B-Instruct-q4f32_1-MLC-ctx4k_cs1k-webgpu.wasm",
+    # Mistral models
+    ("mistral", "7b", "q4f16_1"): "Mistral-7B-Instruct-v0.2-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    # Phi models
+    ("phi", "3.5b", "q4f16_1"): "Phi-3.5-mini-instruct-q4f16_1-MLC-ctx4k_cs1k-webgpu.wasm",
+}
+
 # WSL monkey-patch code for MLC imports (handles permission errors on Windows paths)
 WSL_PATCH_CODE = '''
 import os
@@ -451,19 +472,105 @@ main(['{model_path}', '--quantization', '{quantization}', '--conv-template', '{c
             print(f"  ✗ Config generation error: {e}")
             return False
 
+    def _detect_model_size(self, model_path: Path) -> Optional[str]:
+        """Detect model size from config for prebuilt WASM lookup."""
+        config_json = model_path / "config.json"
+        if not config_json.exists():
+            return None
+
+        try:
+            with open(config_json) as f:
+                config = json.load(f)
+
+            # Check hidden_size to determine approximate size
+            hidden_size = config.get("hidden_size", 0)
+            num_layers = config.get("num_hidden_layers", 0)
+
+            # Approximate size detection based on architecture
+            if hidden_size <= 1024 and num_layers <= 16:
+                return "0.6b"
+            elif hidden_size <= 2048 and num_layers <= 28:
+                return "1.7b"
+            elif hidden_size <= 2560 and num_layers <= 36:
+                return "4b"
+            elif hidden_size <= 4096 and num_layers <= 32:
+                return "8b"
+            else:
+                return None
+        except (json.JSONDecodeError, KeyError):
+            return None
+
+    def _download_prebuilt_wasm(
+        self,
+        model_type: str,
+        model_size: str,
+        quantization: str,
+        output_path: Path,
+    ) -> bool:
+        """
+        Download prebuilt WASM from WebLLM binary repository.
+
+        Fine-tuned models can reuse the base architecture's WASM since
+        the execution code is the same - only the weights differ.
+        """
+        key = (model_type.lower(), model_size.lower(), quantization.lower())
+
+        if key not in PREBUILT_WASMS:
+            print(f"  ⚠ No prebuilt WASM available for {model_type} {model_size} {quantization}")
+            print(f"    Available architectures: qwen3, llama, mistral, phi")
+            return False
+
+        wasm_file = PREBUILT_WASMS[key]
+        url = f"{PREBUILT_WASM_BASE}/{wasm_file}"
+
+        print(f"  Downloading prebuilt WASM from WebLLM...")
+        print(f"    {wasm_file}")
+
+        try:
+            result = subprocess.run(
+                ["curl", "-L", url, "-o", str(output_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                print(f"  ✗ Download failed: {result.stderr[:200]}")
+                return False
+
+            if not output_path.exists() or output_path.stat().st_size < 1000:
+                print(f"  ✗ Download produced invalid file")
+                return False
+
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+            print(f"  ✓ Downloaded {output_path.name} ({size_mb:.1f} MB)")
+            return True
+
+        except Exception as e:
+            print(f"  ✗ Download error: {e}")
+            return False
+
     def compile_webgpu(
         self,
         config_path: Path,
         output_path: Path,
         model_name: str = "model",
+        model_path: Optional[Path] = None,
+        quantization: str = "q4f16_1",
     ) -> bool:
         """
         Compile model for WebGPU (creates .wasm file).
+
+        If compilation fails, attempts to download a prebuilt WASM
+        from WebLLM's binary repository (works for fine-tuned models
+        since they share the base architecture).
 
         Args:
             config_path: Path to mlc-chat-config.json
             output_path: Path for output .wasm file
             model_name: Model name for system lib prefix
+            model_path: Path to model for architecture detection
+            quantization: Quantization method used
 
         Returns:
             True if successful
@@ -490,8 +597,21 @@ main(['{config_path}', '--device', 'webgpu', '--system-lib-prefix', '{safe_prefi
                 )
 
             if result.returncode != 0:
-                print(f"  ✗ WebGPU compilation failed:")
-                print(f"    {result.stderr[:500]}")
+                print(f"  ✗ WebGPU compilation failed (TVM error)")
+
+                # Attempt prebuilt fallback if model_path provided
+                if model_path:
+                    print("  → Trying prebuilt WASM fallback...")
+                    model_type = self.detect_conv_template(model_path)
+                    # Map conv template back to model type
+                    type_map = {"chatml": "qwen3", "llama-3": "llama", "mistral_default": "mistral", "phi-3": "phi"}
+                    model_type = type_map.get(model_type, model_type)
+
+                    model_size = self._detect_model_size(model_path)
+                    if model_size:
+                        return self._download_prebuilt_wasm(model_type, model_size, quantization, output_path)
+
+                print(f"    {result.stderr[:300]}")
                 return False
 
             if not output_path.exists():
@@ -686,7 +806,13 @@ print("Done!")
                 config_path = quant_dir / "mlc-chat-config.json"
                 wasm_path = webgpu_dir / f"{model_name}-{quant}-webgpu.wasm"
 
-                if self.compile_webgpu(config_path, wasm_path, model_name=quant_name):
+                # Pass model_path and quant for prebuilt fallback if compilation fails
+                if self.compile_webgpu(
+                    config_path, wasm_path,
+                    model_name=quant_name,
+                    model_path=model_path,
+                    quantization=quant
+                ):
                     created_paths.append(wasm_path)
                 else:
                     print("  ⚠ WASM compilation failed (weights still usable)")

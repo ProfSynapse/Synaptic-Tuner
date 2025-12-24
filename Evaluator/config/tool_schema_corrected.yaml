@@ -1,0 +1,400 @@
+# Tool Schema Configuration (AUTO-GENERATED from tool-schemas.json)
+# Source of truth: tool-schemas.json
+# Do not edit manually - regenerate with: python Tools/audit_tool_schemas.py
+
+tool_format:
+  wrapper: useTools
+  wrapper_structure:
+    context:
+      required:
+      - sessionId
+      - workspaceId
+      - memory
+      - goal
+      optional:
+      - constraints
+    calls:
+      type: array
+      item_fields:
+      - agent
+      - tool
+      - params
+      tool_name_pattern: '{agent}_{tool}'
+    batch:
+      enabled: true
+      default_strategy: serial
+      strategy_field: strategy
+      valid_strategies:
+      - serial
+      - parallel
+tools:
+  agentManager:
+  - name: createAgent
+    description: createAgent operation
+    params:
+      required:
+      - name
+      - description
+      - prompt
+      optional:
+      - isEnabled
+  - name: deleteAgent
+    description: deleteAgent operation
+    params:
+      required:
+      - id
+      optional: []
+  - name: executePrompts
+    description: executePrompts operation
+    params:
+      required:
+      - prompts
+      optional:
+      - mergeResponses
+  - name: generateImage
+    description: generateImage operation
+    params:
+      required:
+      - prompt
+      - savePath
+      optional:
+      - provider
+      - model
+      - aspectRatio
+      - numberOfImages
+      - imageSize
+      - referenceImages
+      - format
+  - name: getAgent
+    description: getAgent operation
+    params:
+      required: []
+      optional:
+      - id
+      - name
+  - name: listAgents
+    description: listAgents operation
+    params:
+      required: []
+      optional:
+      - enabledOnly
+  - name: listModels
+    description: listModels operation
+    params:
+      required: []
+      optional: []
+  - name: updateAgent
+    description: updateAgent operation
+    params:
+      required:
+      - id
+      optional:
+      - name
+      - description
+      - prompt
+      - isEnabled
+  commandManager:
+  - name: executeCommand
+    description: executeCommand operation
+    params:
+      required:
+      - commandId
+      optional: []
+  - name: listCommands
+    description: listCommands operation
+    params:
+      required: []
+      optional:
+      - filter
+  contentManager:
+  - name: appendContent
+    description: appendContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: createContent
+    description: createContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: deleteContent
+    description: deleteContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional:
+      - similarityThreshold
+  - name: findReplaceContent
+    description: findReplaceContent operation
+    params:
+      required:
+      - filePath
+      - findText
+      - replaceText
+      optional:
+      - replaceAll
+      - caseSensitive
+      - wholeWord
+  - name: prependContent
+    description: prependContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: readContent
+    description: readContent operation
+    params:
+      required:
+      - filePath
+      optional:
+      - limit
+      - offset
+      - includeLineNumbers
+  - name: replaceByLine
+    description: replaceByLine operation
+    params:
+      required:
+      - filePath
+      - startLine
+      - endLine
+      - newContent
+      optional: []
+  - name: replaceContent
+    description: replaceContent operation
+    params:
+      required:
+      - filePath
+      - oldContent
+      - newContent
+      optional:
+      - similarityThreshold
+  memoryManager:
+  - name: createSession
+    description: createSession operation
+    params:
+      required: []
+      optional:
+      - name
+      - description
+      - sessionGoal
+      - context
+      - previousSessionId
+      - newSessionId
+  - name: createState
+    description: createState operation
+    params:
+      required:
+      - name
+      - conversationContext
+      - activeTask
+      - activeFiles
+      - nextSteps
+      - reasoning
+      optional:
+      - description
+      - tags
+  - name: createWorkspace
+    description: createWorkspace operation
+    params:
+      required:
+      - name
+      - rootFolder
+      - purpose
+      - currentGoal
+      - workflows
+      optional:
+      - keyFiles
+      - preferences
+      - dedicatedAgentId
+  - name: listSessions
+    description: listSessions operation
+    params:
+      required: []
+      optional:
+      - limit
+      - order
+  - name: listStates
+    description: listStates operation
+    params:
+      required: []
+      optional:
+      - limit
+  - name: listWorkspaces
+    description: listWorkspaces operation
+    params:
+      required: []
+      optional:
+      - limit
+  - name: loadSession
+    description: loadSession operation
+    params:
+      required:
+      - sessionId
+      optional: []
+  - name: loadState
+    description: loadState operation
+    params:
+      required:
+      - stateId
+      optional: []
+  - name: loadWorkspace
+    description: loadWorkspace operation
+    params:
+      required:
+      - workspaceId
+      optional: []
+  - name: updateSession
+    description: updateSession operation
+    params:
+      required:
+      - sessionId
+      optional:
+      - name
+      - description
+      - sessionGoal
+  - name: updateState
+    description: updateState operation
+    params:
+      required:
+      - stateId
+      optional:
+      - name
+      - conversationContext
+      - activeTask
+  - name: updateWorkspace
+    description: updateWorkspace operation
+    params:
+      required:
+      - workspaceId
+      optional:
+      - name
+      - purpose
+      - currentGoal
+      - workflows
+  vaultLibrarian:
+  - name: searchContent
+    description: searchContent operation
+    params:
+      required:
+      - query
+      optional:
+      - semantic
+      - limit
+      - includeContent
+      - snippetLength
+      - paths
+  - name: searchDirectory
+    description: searchDirectory operation
+    params:
+      required:
+      - query
+      - paths
+      optional:
+      - searchType
+      - fileTypes
+      - depth
+      - pattern
+      - dateRange
+      - limit
+      - includeContent
+  - name: searchMemory
+    description: searchMemory operation
+    params:
+      required:
+      - query
+      - workspaceId
+      optional:
+      - memoryTypes
+      - dateRange
+      - limit
+      - searchMethod
+      - filterBySession
+  vaultManager:
+  - name: createFolder
+    description: createFolder operation
+    params:
+      required:
+      - path
+      optional: []
+  - name: deleteFolder
+    description: deleteFolder operation
+    params:
+      required:
+      - path
+      optional:
+      - recursive
+  - name: deleteNote
+    description: deleteNote operation
+    params:
+      required:
+      - path
+      optional: []
+  - name: duplicateNote
+    description: duplicateNote operation
+    params:
+      required:
+      - sourcePath
+      - targetPath
+      optional:
+      - overwrite
+      - autoIncrement
+  - name: editFolder
+    description: editFolder operation
+    params:
+      required:
+      - path
+      - newPath
+      optional: []
+  - name: listDirectory
+    description: listDirectory operation
+    params:
+      required:
+      - path
+      optional:
+      - filter
+      - depth
+      - includeFiles
+  - name: moveFolder
+    description: moveFolder operation
+    params:
+      required:
+      - path
+      - newPath
+      optional:
+      - overwrite
+  - name: moveNote
+    description: moveNote operation
+    params:
+      required:
+      - path
+      - newPath
+      optional:
+      - overwrite
+  - name: openNote
+    description: openNote operation
+    params:
+      required:
+      - path
+      optional:
+      - mode
+      - focus
+validation:
+  context_required: true
+  allow_unknown_tools: false
+  allow_extra_params: true
+  path_patterns:
+    valid: ^[\w\-./]+$
+    invalid_chars:
+    - <
+    - '>'
+    - ':'
+    - '"'
+    - '|'
+    - '?'
+    - '*'
