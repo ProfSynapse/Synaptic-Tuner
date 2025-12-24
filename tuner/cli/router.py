@@ -28,7 +28,7 @@ def route_command(args: Namespace) -> int:
         eval     -> EvalHandler
         generate -> GenerateHandler
         pipeline -> PipelineHandler
-        gguf     -> GGUFHandler
+        convert  -> ConvertHandler
         (none)   -> MainMenuHandler
 
     Example:
@@ -44,9 +44,10 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
-        from tuner.handlers.gguf_handler import GGUFHandler
+        from tuner.handlers.convert_handler import ConvertHandler
         from tuner.handlers.improve_handler import handle_improve
         from tuner.handlers.inference_handler import InferenceHandler
+        from tuner.handlers.webllm_handler import WebLLMHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         print(f"Error: Handlers not yet implemented: {e}")
@@ -64,8 +65,9 @@ def route_command(args: Namespace) -> int:
         'generate': GenerateHandler,
         'improve': handle_improve,  # Function-based handler
         'pipeline': PipelineHandler,
-        'gguf': GGUFHandler,
+        'convert': ConvertHandler,
         'run': InferenceHandler,
+        'webllm': WebLLMHandler,
     }
 
     # Execute handler

@@ -3,7 +3,7 @@ description: Tests for each tool to verify correct tool selection and parameter 
 tests:
 - id: agentManager_createAgent
   question: Create a new agent called "Vault Curator" with the description "Culls outdated workspace docs for the Atlas program".
-    Use the model "gpt-4o-mini" and set the temperature to 0.3.
+    Use the prompt "You are a documentation curator that identifies and removes outdated content from the workspace."
   tags:
   - agentManager
   - single-tool
@@ -84,7 +84,7 @@ tests:
     - agent_1732300800002_incident_scribe
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
-- id: agentManager_executePrompt
+- id: agentManager_executePrompts
   question: 'Send the prompt "Summarize all sync failure incidents from the past week and list their root causes" to the Workspace
     Auditor agent (id: agent_1732300800000_workspace_auditor) and return the raw response.'
   tags:
@@ -115,7 +115,7 @@ tests:
     ]}\n  ],\n  \"preferences\": \"All incidents must include timestamp, severity, and root cause analysis.\",\n  \"sessions\"\
     : []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompt
+  - agentManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -173,7 +173,7 @@ tests:
     - agent_1732300800004_qa_prototype
 - id: agentManager_getAgent
   question: 'Get the full configuration for the Release Briefing agent (id: agent_1732300800001_release_briefing) so I can
-    see its temperature and tool permissions.'
+    see its name, description, and prompt.'
   tags:
   - agentManager
   - single-tool
@@ -305,8 +305,8 @@ tests:
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
 - id: agentManager_updateAgent
-  question: 'Update the Incident Scribe agent (id: agent_1732300800002_incident_scribe) to use the model "gpt-4o" and set
-    its temperature to 0.2.'
+  question: 'Update the Incident Scribe agent (id: agent_1732300800002_incident_scribe) to change its description to "Documents and tracks all system incidents and post-mortems"
+    and update the prompt to "You are a detailed incident reporter. Document issues thoroughly with root cause analysis."'
   tags:
   - agentManager
   - single-tool
@@ -709,7 +709,7 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: memoryManager_createWorkspace
-  question: Create a new workspace called "Helios Rollout" with the description "Project tracking for Helios customer rollout"
+  question: Create a new workspace called "Helios Rollout" with the purpose "Project tracking for Helios customer rollout"
     and root folder "Projects/Helios/".
   tags:
   - memoryManager
@@ -1029,7 +1029,7 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: memoryManager_updateWorkspace
-  question: 'Update the Phoenix Migration workspace (id: ws_1732300800001_phoenixmg) to change its description to "Phoenix
+  question: 'Update the Phoenix Migration workspace (id: ws_1732300800001_phoenixmg) to change its purpose to "Phoenix
     system migration - compliance audit pending".'
   tags:
   - memoryManager

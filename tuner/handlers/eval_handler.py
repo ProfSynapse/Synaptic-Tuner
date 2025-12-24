@@ -21,6 +21,7 @@ from typing import List, Tuple
 
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import EvaluationBackendRegistry
+from tuner.discovery import TrainingRunDiscovery, CheckpointDiscovery
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
 from shared.ui import (
@@ -199,6 +200,233 @@ class EvalHandler(BaseHandler):
                 print(f"  [{i}] {timestamp} ({base}) [{trainer}]")
             print()
 
+    def _display_mlc_models_table(self, backend, models: List[str]) -> None:
+        """
+        Display available MLC/WebGPU models with detailed info.
+
+        Args:
+            backend: MLCBackend instance (for get_model_info)
+            models: List of MLC model directory paths
+        """
+        from pathlib import Path
+
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title="Available MLC/WebGPU Models",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Name", style="white")
+            table.add_column("Arch", style=COLORS["aqua"])
+            table.add_column("Quant", style=COLORS["purple"])
+            table.add_column("Type", style="dim")
+
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).name)
+                arch = info.get("architecture") or "-"
+                quant = info.get("quantization") or "-"
+                trainer = info.get("trainer_type", "-").upper()
+
+                table.add_row(str(i), name, arch, quant, trainer)
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print("\nAvailable MLC/WebGPU models:")
+            for i, model_path in enumerate(models, 1):
+                info = backend.get_model_info(model_path)
+                name = info.get("name", Path(model_path).name)
+                quant = info.get("quantization") or ""
+                quant_str = f" ({quant})" if quant else ""
+                print(f"  [{i}] {name}{quant_str}")
+            print()
+
+    def _display_training_runs_table(self, runs: List[Path], trainer_type: str) -> None:
+        """
+        Display available training runs in a table.
+
+        Args:
+            runs: List of training run directory paths
+            trainer_type: Type of trainer ('sft' or 'kto')
+        """
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title=f"Available {trainer_type.upper()} Training Runs",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Run", style="white")
+            table.add_column("Has Final", style=COLORS["aqua"], justify="center")
+            table.add_column("Checkpoints", style=COLORS["purple"], justify="right")
+
+            for i, run_path in enumerate(runs, 1):
+                timestamp = run_path.name
+                has_final = "✓" if (run_path / "final_model").exists() else "-"
+
+                # Count checkpoints
+                checkpoints_dir = run_path / "checkpoints"
+                checkpoint_count = 0
+                if checkpoints_dir.exists():
+                    checkpoint_count = len(list(checkpoints_dir.glob("checkpoint-*")))
+
+                table.add_row(str(i), timestamp, has_final, str(checkpoint_count))
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print(f"\nAvailable {trainer_type.upper()} training runs:")
+            for i, run_path in enumerate(runs, 1):
+                timestamp = run_path.name
+                has_final = "(final)" if (run_path / "final_model").exists() else ""
+                print(f"  [{i}] {timestamp} {has_final}")
+            print()
+
+    def _display_checkpoints_table(self, checkpoints: List, trainer_type: str) -> None:
+        """
+        Display available checkpoints with metrics in a table.
+
+        Args:
+            checkpoints: List of CheckpointInfo objects
+            trainer_type: Type of trainer ('sft' or 'kto') for metric display
+        """
+        if RICH_AVAILABLE:
+            from rich.table import Table
+            from rich import box as rich_box
+
+            table = Table(
+                title="Available Checkpoints",
+                box=rich_box.ROUNDED,
+                border_style=COLORS["cello"],
+            )
+            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
+            table.add_column("Checkpoint", style="white")
+            table.add_column("Step", style=COLORS["aqua"], justify="right")
+            table.add_column("Loss", style=COLORS["purple"], justify="right")
+            if trainer_type == "kto":
+                table.add_column("KL", style="dim", justify="right")
+                table.add_column("Margin", style="dim", justify="right")
+            table.add_column("Epoch", style="dim", justify="right")
+
+            for i, cp in enumerate(checkpoints, 1):
+                if cp.is_final:
+                    name = "final_model ★"
+                    step_str = "-"
+                else:
+                    name = f"checkpoint-{cp.step}"
+                    step_str = str(cp.step)
+
+                loss = cp.metrics.get("loss")
+                loss_str = f"{loss:.4f}" if loss is not None else "-"
+
+                epoch = cp.metrics.get("epoch")
+                epoch_str = f"{epoch:.2f}" if epoch is not None else "-"
+
+                if trainer_type == "kto":
+                    kl = cp.metrics.get("kl")
+                    kl_str = f"{kl:.4f}" if kl is not None else "-"
+                    margin = cp.metrics.get("rewards/margins")
+                    margin_str = f"{margin:.4f}" if margin is not None else "-"
+                    table.add_row(str(i), name, step_str, loss_str, kl_str, margin_str, epoch_str)
+                else:
+                    table.add_row(str(i), name, step_str, loss_str, epoch_str)
+
+            console.print()
+            console.print(table)
+            console.print()
+        else:
+            print("\nAvailable checkpoints:")
+            for i, cp in enumerate(checkpoints, 1):
+                if cp.is_final:
+                    name = "final_model"
+                else:
+                    name = f"checkpoint-{cp.step}"
+                loss = cp.metrics.get("loss", "N/A")
+                loss_str = f"loss={loss:.4f}" if isinstance(loss, (int, float)) else f"loss={loss}"
+                print(f"  [{i}] {name} ({loss_str})")
+            print()
+
+    def _select_unsloth_model(self) -> Tuple[str, str]:
+        """
+        Two-step model selection for Unsloth backend.
+
+        Step 1: Select training run
+        Step 2: Select checkpoint (final or intermediate)
+
+        Returns:
+            Tuple of (model_path, trainer_type) or (None, None) if cancelled
+        """
+        # Discover training runs for both SFT and KTO
+        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+
+        sft_runs = discovery.discover("sft", limit=10)
+        kto_runs = discovery.discover("kto", limit=10)
+
+        if not sft_runs and not kto_runs:
+            print_error("No training runs found.")
+            print_info("Train a model first - the final_model/ directory will appear.")
+            return None, None
+
+        # Let user choose trainer type first
+        trainer_options = []
+        if sft_runs:
+            trainer_options.append(("sft", f"SFT ({len(sft_runs)} runs)"))
+        if kto_runs:
+            trainer_options.append(("kto", f"KTO ({len(kto_runs)} runs)"))
+
+        trainer_type = print_menu(trainer_options, "Select training type:")
+        if not trainer_type:
+            return None, None
+
+        runs = sft_runs if trainer_type == "sft" else kto_runs
+
+        # Display and select training run
+        self._display_training_runs_table(runs, trainer_type)
+
+        while True:
+            try:
+                sel = prompt(f"Select training run (1-{len(runs)})", "1")
+                idx = int(sel) - 1
+                if 0 <= idx < len(runs):
+                    selected_run = runs[idx]
+                    break
+            except ValueError:
+                pass
+            print_error("Invalid selection.")
+
+        # Discover checkpoints for selected run
+        checkpoints = CheckpointDiscovery.discover(selected_run)
+
+        if not checkpoints:
+            print_error("No checkpoints found in selected run.")
+            return None, None
+
+        # Display and select checkpoint
+        self._display_checkpoints_table(checkpoints, trainer_type)
+
+        while True:
+            try:
+                sel = prompt(f"Select checkpoint (1-{len(checkpoints)})", "1")
+                idx = int(sel) - 1
+                if 0 <= idx < len(checkpoints):
+                    selected_checkpoint = checkpoints[idx]
+                    break
+            except ValueError:
+                pass
+            print_error("Invalid selection.")
+
+        return str(selected_checkpoint.path), trainer_type
+
     def _display_scenarios_table(self, scenarios) -> None:
         """
         Display available YAML scenarios in a table.
@@ -245,6 +473,7 @@ class EvalHandler(BaseHandler):
         backend_choice = print_menu([
             ("unsloth", f"{BOX['star']} Unsloth (LoRA - direct, no conversion)"),
             ("llamacpp", f"{BOX['bullet']} llama.cpp (GGUF - fast, portable)"),
+            ("mlc", f"{BOX['bullet']} MLC/WebLLM (WebGPU - browser-based)"),
             ("ollama", f"{BOX['bullet']} Ollama (local server)"),
             ("lmstudio", f"{BOX['bullet']} LM Studio (local server)"),
         ], "Select backend:")
@@ -253,61 +482,85 @@ class EvalHandler(BaseHandler):
             return 0
 
         # Step 2: Get backend and list models
-        print_info(f"Fetching models from {backend_choice}...")
-
-        try:
-            # Pass repo_root for backends that discover local models
-            if backend_choice in ("llamacpp", "unsloth"):
-                backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
-            else:
-                backend = EvaluationBackendRegistry.get(backend_choice)
-        except ValueError as e:
-            print_error(str(e))
-            return 1
-
-        # Validate connection
-        is_connected, error = backend.validate_connection()
-        if not is_connected:
-            print_error(f"Cannot connect to {backend_choice}:")
-            print_info(error)
-            if backend_choice == "lmstudio":
-                print_info("Make sure LM Studio server is running on http://localhost:1234")
-            return 1
-
-        # List models
-        models = backend.list_models()
-        if not models:
-            print_error(f"No models found.")
-            if backend_choice == "lmstudio":
-                print_info("Make sure LM Studio server is running on http://localhost:1234")
-            elif backend_choice == "llamacpp":
-                print_info("No GGUF models found in training outputs.")
-                print_info("Train a model first, then convert to GGUF.")
-            elif backend_choice == "unsloth":
-                print_info("No LoRA adapters found in training outputs.")
-                print_info("Train a model first - the final_model/ directory will appear.")
-            elif backend_choice == "ollama":
-                print_info("Is Ollama running? Check with: ollama list")
-            return 1
-
-        # Step 3: Display models and select
-        if backend_choice == "llamacpp":
-            self._display_gguf_models_table(backend, models)
-        elif backend_choice == "unsloth":
-            self._display_lora_models_table(backend, models)
-        else:
-            self._display_models_table(backend_choice, models)
-
-        while True:
+        # Unsloth uses special two-step flow (training run → checkpoint)
+        if backend_choice == "unsloth":
+            # Validate Unsloth is available first
             try:
-                sel = prompt(f"Select model (1-{len(models)})", "1")
-                idx = int(sel) - 1
-                if 0 <= idx < len(models):
-                    model = models[idx]
-                    break
-            except ValueError:
-                pass
-            print_error("Invalid selection.")
+                backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
+            except ValueError as e:
+                print_error(str(e))
+                return 1
+
+            is_connected, error = backend.validate_connection()
+            if not is_connected:
+                print_error(f"Cannot connect to {backend_choice}:")
+                print_info(error)
+                return 1
+
+            # Use two-step selection: training run → checkpoint
+            model, trainer_type = self._select_unsloth_model()
+            if not model:
+                return 0  # User cancelled
+        else:
+            print_info(f"Fetching models from {backend_choice}...")
+
+            try:
+                # Pass repo_root for backends that discover local models
+                if backend_choice in ("llamacpp", "mlc"):
+                    backend = EvaluationBackendRegistry.get(backend_choice, repo_root=self.repo_root)
+                else:
+                    backend = EvaluationBackendRegistry.get(backend_choice)
+            except ValueError as e:
+                print_error(str(e))
+                return 1
+
+            # Validate connection
+            is_connected, error = backend.validate_connection()
+            if not is_connected:
+                print_error(f"Cannot connect to {backend_choice}:")
+                print_info(error)
+                if backend_choice == "lmstudio":
+                    print_info("Make sure LM Studio server is running on http://localhost:1234")
+                return 1
+
+            # List models
+            models = backend.list_models()
+            if not models:
+                print_error(f"No models found.")
+                if backend_choice == "lmstudio":
+                    print_info("Make sure LM Studio server is running on http://localhost:1234")
+                elif backend_choice == "llamacpp":
+                    print_info("No GGUF models found in training outputs.")
+                    print_info("Train a model first, then convert to GGUF.")
+                elif backend_choice == "mlc":
+                    print_info("No MLC/WebGPU models found in training outputs.")
+                    print_info("Train a model first, then use Upload -> WebGPU/MLC conversion.")
+                elif backend_choice == "ollama":
+                    print_info("Is Ollama running? Check with: ollama list")
+                return 1
+
+            # Step 3: Display models and select
+            if backend_choice == "llamacpp":
+                self._display_gguf_models_table(backend, models)
+            elif backend_choice == "mlc":
+                self._display_mlc_models_table(backend, models)
+            else:
+                self._display_models_table(backend_choice, models)
+
+            while True:
+                try:
+                    sel = prompt(f"Select model (1-{len(models)})", "1")
+                    idx = int(sel) - 1
+                    if 0 <= idx < len(models):
+                        model = models[idx]
+                        break
+                except ValueError:
+                    pass
+                print_error("Invalid selection.")
+
+        # MLC: Skip to browser-based evaluation (tests selected in browser)
+        if backend_choice == "mlc":
+            return self._run_mlc_evaluation(model, None)
 
         # Step 4: List YAML scenarios
         scenarios = self._list_scenarios()
@@ -342,6 +595,10 @@ class EvalHandler(BaseHandler):
             return 0
 
         # Step 7: Execute evaluation
+        if backend_choice == "mlc":
+            # MLC uses browser-based WebLLM evaluation
+            return self._run_mlc_evaluation(model, selected)
+
         python = self.get_conda_python()
 
         # Generate timestamped output paths
@@ -373,3 +630,30 @@ class EvalHandler(BaseHandler):
             print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
 
         return result.returncode
+
+    def _run_mlc_evaluation(self, model_path: str, scenario=None) -> int:
+        """
+        Run MLC/WebLLM browser-based evaluation.
+
+        Args:
+            model_path: Path to MLC model directory
+            scenario: Selected scenario info (optional, tests selected in browser)
+
+        Returns:
+            Exit code (0 = success)
+        """
+        from Evaluator.mlc_eval_handler import run_mlc_evaluation
+
+        print_info("Launching WebLLM browser-based evaluation...")
+        print_info(f"Model: {Path(model_path).name}")
+        print_info("Select tests in browser, then click 'Run Evaluation'")
+        print()
+
+        config_dir = self.repo_root / "Evaluator" / "config"
+
+        return run_mlc_evaluation(
+            model_path=model_path,
+            config_dir=str(config_dir),
+            port=8080,
+            open_browser=True,
+        )

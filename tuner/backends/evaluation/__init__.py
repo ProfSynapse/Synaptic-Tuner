@@ -10,6 +10,7 @@ This module provides backends for evaluating models via local inference:
 - LMStudioBackend: LM Studio HTTP API-based model listing and inference
 - LlamaCppBackend: llama.cpp direct GGUF execution via llama-cli
 - UnslothBackend: Direct Unsloth/LoRA inference (loads adapter on base model)
+- MLCBackend: MLC/WebLLM browser-based inference via WebGPU
 """
 
 from .base import IEvaluationBackend
@@ -17,6 +18,7 @@ from .ollama_backend import OllamaBackend
 from .lmstudio_backend import LMStudioBackend
 from .llamacpp_backend import LlamaCppBackend
 from .unsloth_backend import UnslothBackend
+from .mlc_backend import MLCBackend
 
 __all__ = [
     "IEvaluationBackend",
@@ -24,4 +26,5 @@ __all__ = [
     "LMStudioBackend",
     "LlamaCppBackend",
     "UnslothBackend",
+    "MLCBackend",
 ]

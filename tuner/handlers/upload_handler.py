@@ -112,9 +112,16 @@ class UploadHandler(BaseHandler):
         # Step 4: Display runs and select
         run_data = []
         for i, run in enumerate(runs, 1):
-            run_data.append([str(i), run.name])
+            has_final = "✓" if (run / "final_model").exists() else "-"
+            # Count checkpoints
+            checkpoints_dir = run / "checkpoints"
+            checkpoint_count = 0
+            if checkpoints_dir.exists():
+                checkpoint_count = len(list(checkpoints_dir.glob("checkpoint-*")))
+            run_data.append([str(i), run.name, has_final, str(checkpoint_count)])
 
-        print_table(run_data, ["#", "Training Run"], title=f"Available {model_type.upper()} Training Runs")
+        print_table(run_data, ["#", "Training Run", "Final", "Checkpoints"],
+                   title=f"Available {model_type.upper()} Training Runs")
 
         while True:
             try:

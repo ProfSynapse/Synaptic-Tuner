@@ -1,276 +1,400 @@
-# Tool Schema Configuration
-# Defines how tools are structured and validated
-# The evaluator reads this - no hardcoded tool names in Python
-
-# ============================================================
-# TOOL FORMAT DEFINITION
-# ============================================================
-# This section defines HOW tool calls appear in responses.
-# Supports both wrapper-based and direct tool call formats.
+# Tool Schema Configuration (AUTO-GENERATED from tool-schemas.json)
+# Source of truth: tool-schemas.json
+# Do not edit manually - regenerate with: python Tools/audit_tool_schemas.py
 
 tool_format:
-  # Option 1: Wrapper-based (your useTools format)
-  wrapper: "useTools"
-
+  wrapper: useTools
   wrapper_structure:
-    # Context fields that must/can appear
     context:
       required:
-        - sessionId
-        - workspaceId
-        - memory
-        - goal
+      - sessionId
+      - workspaceId
+      - memory
+      - goal
       optional:
-        - constraints
-
-    # The calls array structure
+      - constraints
     calls:
       type: array
       item_fields:
-        - agent      # e.g., "vaultManager"
-        - tool       # e.g., "moveFolder"
-        - params     # tool-specific parameters
-
-      # How to construct full tool name for validation
-      # {agent}_{tool} -> "vaultManager_moveFolder"
-      tool_name_pattern: "{agent}_{tool}"
-
-    # Batch operation support
+      - agent
+      - tool
+      - params
+      tool_name_pattern: '{agent}_{tool}'
     batch:
       enabled: true
-      default_strategy: "serial"
-      strategy_field: "strategy"  # Optional field in calls
+      default_strategy: serial
+      strategy_field: strategy
       valid_strategies:
-        - serial
-        - parallel
-
-  # Option 2: Direct tool calls (uncomment to use instead)
-  # wrapper: null
-  # direct_structure:
-  #   naming: "{tool_name}"
-  #   context_location: "first_param"  # or "separate_field"
-  #   context_fields: [session, workspace]
-
-# ============================================================
-# TOOL DEFINITIONS
-# ============================================================
-# Define all valid tools grouped by agent.
-# The validator uses this to check tool names and parameters.
-
+      - serial
+      - parallel
 tools:
-  vaultManager:
-    - name: moveFolder
-      description: "Move a folder to a new location"
-      params:
-        required: [path, newPath]
-        optional: [overwrite]
-
-    - name: createFolder
-      description: "Create a new folder"
-      params:
-        required: [path]
-        optional: []
-
-    - name: deleteFolder
-      description: "Delete a folder"
-      params:
-        required: [path]
-        optional: [recursive]
-
-    - name: listDirectory
-      description: "List contents of a directory"
-      params:
-        required: [path]
-        optional: [recursive, filter]
-
-    - name: moveNote
-      description: "Move a note to a new location"
-      params:
-        required: [path, newPath]
-        optional: [overwrite]
-
-    - name: createNote
-      description: "Create a new note"
-      params:
-        required: [path]
-        optional: [content, template]
-
-    - name: deleteNote
-      description: "Delete a note"
-      params:
-        required: [path]
-        optional: []
-
-    - name: renameNote
-      description: "Rename a note"
-      params:
-        required: [path, newName]
-        optional: []
-
-    - name: getWorkspaceStructure
-      description: "Get the vault/workspace structure"
-      params:
-        required: []
-        optional: [path, depth]
-
-  contentManager:
-    - name: readContent
-      description: "Read content from a file"
-      params:
-        required: [filePath]
-        optional: [limit, offset]
-
-    - name: writeContent
-      description: "Write content to a file"
-      params:
-        required: [filePath, content]
-        optional: [overwrite]
-
-    - name: appendContent
-      description: "Append content to a file"
-      params:
-        required: [filePath, content]
-        optional: []
-
-    - name: replaceByLine
-      description: "Replace specific lines in a file"
-      params:
-        required: [filePath, lineNumber, newContent]
-        optional: []
-
-    - name: insertAtLine
-      description: "Insert content at a specific line"
-      params:
-        required: [filePath, lineNumber, content]
-        optional: []
-
-    - name: deleteLines
-      description: "Delete specific lines from a file"
-      params:
-        required: [filePath, startLine]
-        optional: [endLine]
-
-  vaultLibrarian:
-    - name: searchContent
-      description: "Search content across the vault"
-      params:
-        required: [query]
-        optional: [path, limit, fileTypes]
-
-    - name: searchByTags
-      description: "Search notes by tags"
-      params:
-        required: [tags]
-        optional: [path, matchAll]
-
-    - name: searchDirectory
-      description: "Search for files/folders by name"
-      params:
-        required: [query]
-        optional: [path, type]
-
-    - name: getRecentFiles
-      description: "Get recently modified files"
-      params:
-        required: []
-        optional: [limit, path]
-
-    - name: analyzeTags
-      description: "Analyze tag usage across vault"
-      params:
-        required: []
-        optional: [path]
-
-    - name: findOrphanNotes
-      description: "Find notes with no links"
-      params:
-        required: []
-        optional: [path]
-
-    - name: findBrokenLinks
-      description: "Find broken internal links"
-      params:
-        required: []
-        optional: [path]
-
   agentManager:
-    - name: createAgent
-      description: "Create a new agent"
-      params:
-        required: [name, systemPrompt]
-        optional: [tools, model]
-
-    - name: deleteAgent
-      description: "Delete an agent"
-      params:
-        required: [agentId]
-        optional: []
-
-    - name: delegateToAgent
-      description: "Delegate a task to another agent"
-      params:
-        required: [agentId, task]
-        optional: [context]
-
-    - name: listAgents
-      description: "List all available agents"
-      params:
-        required: []
-        optional: [filter]
-
-    - name: getAgentStatus
-      description: "Get status of an agent"
-      params:
-        required: [agentId]
-        optional: []
-
+  - name: createAgent
+    description: createAgent operation
+    params:
+      required:
+      - name
+      - description
+      - prompt
+      optional:
+      - isEnabled
+  - name: deleteAgent
+    description: deleteAgent operation
+    params:
+      required:
+      - id
+      optional: []
+  - name: executePrompts
+    description: executePrompts operation
+    params:
+      required:
+      - prompts
+      optional:
+      - mergeResponses
+  - name: generateImage
+    description: generateImage operation
+    params:
+      required:
+      - prompt
+      - savePath
+      optional:
+      - provider
+      - model
+      - aspectRatio
+      - numberOfImages
+      - imageSize
+      - referenceImages
+      - format
+  - name: getAgent
+    description: getAgent operation
+    params:
+      required: []
+      optional:
+      - id
+      - name
+  - name: listAgents
+    description: listAgents operation
+    params:
+      required: []
+      optional:
+      - enabledOnly
+  - name: listModels
+    description: listModels operation
+    params:
+      required: []
+      optional: []
+  - name: updateAgent
+    description: updateAgent operation
+    params:
+      required:
+      - id
+      optional:
+      - name
+      - description
+      - prompt
+      - isEnabled
+  commandManager:
+  - name: executeCommand
+    description: executeCommand operation
+    params:
+      required:
+      - commandId
+      optional: []
+  - name: listCommands
+    description: listCommands operation
+    params:
+      required: []
+      optional:
+      - filter
+  contentManager:
+  - name: appendContent
+    description: appendContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: createContent
+    description: createContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: deleteContent
+    description: deleteContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional:
+      - similarityThreshold
+  - name: findReplaceContent
+    description: findReplaceContent operation
+    params:
+      required:
+      - filePath
+      - findText
+      - replaceText
+      optional:
+      - replaceAll
+      - caseSensitive
+      - wholeWord
+  - name: prependContent
+    description: prependContent operation
+    params:
+      required:
+      - filePath
+      - content
+      optional: []
+  - name: readContent
+    description: readContent operation
+    params:
+      required:
+      - filePath
+      optional:
+      - limit
+      - offset
+      - includeLineNumbers
+  - name: replaceByLine
+    description: replaceByLine operation
+    params:
+      required:
+      - filePath
+      - startLine
+      - endLine
+      - newContent
+      optional: []
+  - name: replaceContent
+    description: replaceContent operation
+    params:
+      required:
+      - filePath
+      - oldContent
+      - newContent
+      optional:
+      - similarityThreshold
   memoryManager:
-    - name: storeMemory
-      description: "Store information in memory"
-      params:
-        required: [key, value]
-        optional: [tags, ttl]
-
-    - name: recallMemory
-      description: "Recall information from memory"
-      params:
-        required: [key]
-        optional: []
-
-    - name: searchMemory
-      description: "Search memories by content or tags"
-      params:
-        required: [query]
-        optional: [tags, limit]
-
-    - name: deleteMemory
-      description: "Delete a memory entry"
-      params:
-        required: [key]
-        optional: []
-
-    - name: listMemories
-      description: "List all memory entries"
-      params:
-        required: []
-        optional: [tags, limit]
-
-# ============================================================
-# VALIDATION RULES
-# ============================================================
-# Additional validation rules beyond basic structure
-
+  - name: createSession
+    description: createSession operation
+    params:
+      required: []
+      optional:
+      - name
+      - description
+      - sessionGoal
+      - context
+      - previousSessionId
+      - newSessionId
+  - name: createState
+    description: createState operation
+    params:
+      required:
+      - name
+      - conversationContext
+      - activeTask
+      - activeFiles
+      - nextSteps
+      - reasoning
+      optional:
+      - description
+      - tags
+  - name: createWorkspace
+    description: createWorkspace operation
+    params:
+      required:
+      - name
+      - rootFolder
+      - purpose
+      - currentGoal
+      - workflows
+      optional:
+      - keyFiles
+      - preferences
+      - dedicatedAgentId
+  - name: listSessions
+    description: listSessions operation
+    params:
+      required: []
+      optional:
+      - limit
+      - order
+  - name: listStates
+    description: listStates operation
+    params:
+      required: []
+      optional:
+      - limit
+  - name: listWorkspaces
+    description: listWorkspaces operation
+    params:
+      required: []
+      optional:
+      - limit
+  - name: loadSession
+    description: loadSession operation
+    params:
+      required:
+      - sessionId
+      optional: []
+  - name: loadState
+    description: loadState operation
+    params:
+      required:
+      - stateId
+      optional: []
+  - name: loadWorkspace
+    description: loadWorkspace operation
+    params:
+      required:
+      - workspaceId
+      optional: []
+  - name: updateSession
+    description: updateSession operation
+    params:
+      required:
+      - sessionId
+      optional:
+      - name
+      - description
+      - sessionGoal
+  - name: updateState
+    description: updateState operation
+    params:
+      required:
+      - stateId
+      optional:
+      - name
+      - conversationContext
+      - activeTask
+  - name: updateWorkspace
+    description: updateWorkspace operation
+    params:
+      required:
+      - workspaceId
+      optional:
+      - name
+      - purpose
+      - currentGoal
+      - workflows
+  vaultLibrarian:
+  - name: searchContent
+    description: searchContent operation
+    params:
+      required:
+      - query
+      optional:
+      - semantic
+      - limit
+      - includeContent
+      - snippetLength
+      - paths
+  - name: searchDirectory
+    description: searchDirectory operation
+    params:
+      required:
+      - query
+      - paths
+      optional:
+      - searchType
+      - fileTypes
+      - depth
+      - pattern
+      - dateRange
+      - limit
+      - includeContent
+  - name: searchMemory
+    description: searchMemory operation
+    params:
+      required:
+      - query
+      - workspaceId
+      optional:
+      - memoryTypes
+      - dateRange
+      - limit
+      - searchMethod
+      - filterBySession
+  vaultManager:
+  - name: createFolder
+    description: createFolder operation
+    params:
+      required:
+      - path
+      optional: []
+  - name: deleteFolder
+    description: deleteFolder operation
+    params:
+      required:
+      - path
+      optional:
+      - recursive
+  - name: deleteNote
+    description: deleteNote operation
+    params:
+      required:
+      - path
+      optional: []
+  - name: duplicateNote
+    description: duplicateNote operation
+    params:
+      required:
+      - sourcePath
+      - targetPath
+      optional:
+      - overwrite
+      - autoIncrement
+  - name: editFolder
+    description: editFolder operation
+    params:
+      required:
+      - path
+      - newPath
+      optional: []
+  - name: listDirectory
+    description: listDirectory operation
+    params:
+      required:
+      - path
+      optional:
+      - filter
+      - depth
+      - includeFiles
+  - name: moveFolder
+    description: moveFolder operation
+    params:
+      required:
+      - path
+      - newPath
+      optional:
+      - overwrite
+  - name: moveNote
+    description: moveNote operation
+    params:
+      required:
+      - path
+      - newPath
+      optional:
+      - overwrite
+  - name: openNote
+    description: openNote operation
+    params:
+      required:
+      - path
+      optional:
+      - mode
+      - focus
 validation:
-  # Require context on every tool call
   context_required: true
-
-  # Allow unknown tools (for extensibility)
   allow_unknown_tools: false
-
-  # Allow extra params not in schema
   allow_extra_params: true
-
-  # Path validation patterns
   path_patterns:
-    valid: "^[\\w\\-./]+$"
-    invalid_chars: ["<", ">", ":", "\"", "|", "?", "*"]
+    valid: ^[\w\-./]+$
+    invalid_chars:
+    - <
+    - '>'
+    - ':'
+    - '"'
+    - '|'
+    - '?'
+    - '*'

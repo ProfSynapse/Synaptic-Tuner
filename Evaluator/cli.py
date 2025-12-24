@@ -103,9 +103,9 @@ Backend Configuration:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio", "llamacpp", "unsloth", "openrouter"],
-        default="ollama",
-        help="Backend to use for evaluation (default: ollama)",
+        choices=["ollama", "lmstudio", "llamacpp", "unsloth", "openrouter", "mlc"],
+        default=None,  # Auto-detect based on model path
+        help="Backend to use for evaluation (auto-detects MLC models, default: ollama)",
     )
     parser.add_argument("--model", required=True, help="Model name (e.g., claudesidian-mcp)")
     parser.add_argument(
@@ -131,6 +131,8 @@ Backend Configuration:
     parser.add_argument("--seed", type=int, help="Optional generation seed")
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
+    parser.add_argument("--mlc-port", type=int, default=8000, help="Port for MLC/WebLLM HTTP server (default: 8000)")
+    parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser for MLC evaluation")
     parser.add_argument("--retries", type=int, default=2, help="HTTP retry attempts")
     parser.add_argument("--timeout", type=float, default=60.0, help="Request timeout (seconds)")
     parser.add_argument("--output", help="Where to write JSON results (defaults to Evaluator/results/run_<ts>.json)")
@@ -164,9 +166,47 @@ Backend Configuration:
     return parser.parse_args(argv)
 
 
+def _is_mlc_model(model_path: str) -> bool:
+    """Check if the model path points to an MLC model."""
+    path = Path(model_path)
+
+    # Check for MLC indicators in the path
+    if "-MLC" in str(path) or "webgpu" in str(path).lower():
+        return True
+
+    # Check if path is a directory with mlc-chat-config.json
+    if path.is_dir():
+        if (path / "mlc-chat-config.json").exists():
+            return True
+        # Check subdirectories
+        for subdir in path.iterdir() if path.exists() else []:
+            if subdir.is_dir() and (subdir / "mlc-chat-config.json").exists():
+                return True
+
+    return False
+
+
 def main(argv: List[str] | None = None) -> int:
     """Main entry point for CLI evaluation."""
     args = parse_args(argv or sys.argv[1:])
+
+    # Auto-detect MLC models if backend not specified
+    if args.backend is None:
+        if _is_mlc_model(args.model):
+            args.backend = "mlc"
+        else:
+            args.backend = "ollama"  # Default
+
+    # Handle MLC backend specially - requires browser-based evaluation
+    if args.backend == "mlc":
+        from .mlc_eval_handler import run_mlc_evaluation
+        config_dir = expand_path(args.config_dir)
+        return run_mlc_evaluation(
+            model_path=args.model,
+            config_dir=config_dir,
+            port=args.mlc_port,
+            open_browser=not args.no_browser,
+        )
 
     # Resolve paths
     output_path = expand_path(args.output) if args.output else default_output_path()

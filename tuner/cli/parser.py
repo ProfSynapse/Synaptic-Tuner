@@ -43,6 +43,7 @@ Commands:
   improve   Improve dataset quality (LLM-based)
   pipeline  Full pipeline (train -> upload -> eval)
   gguf      Convert model to GGUF format
+  webllm    Convert model for WebLLM/browser deployment
 
 Examples:
   python tuner.py           # Interactive mode
@@ -54,13 +55,14 @@ Examples:
   python tuner.py improve   # Improve dataset quality
   python tuner.py pipeline  # Run full pipeline
   python tuner.py gguf      # Convert to GGUF format
+  python tuner.py webllm    # Convert for WebLLM/MLC
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "upload", "eval", "run", "generate", "improve", "pipeline", "gguf"],
+        choices=["train", "upload", "eval", "run", "generate", "improve", "pipeline", "gguf", "webllm"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 

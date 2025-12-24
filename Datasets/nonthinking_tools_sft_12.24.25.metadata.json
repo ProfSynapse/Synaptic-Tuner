@@ -1,0 +1,68 @@
+{
+  "created": "2025-12-24T10:09:50.804704",
+  "source": "non-thinking tools_datasets merge 12.24.25",
+  "version": "nonthinking-latest",
+  "agents": [
+    "vaultManager",
+    "contentManager",
+    "memoryManager",
+    "vaultLibrarian",
+    "agentManager"
+  ],
+  "agent_versions": {
+    "vaultManager": "v1.5_passed_only",
+    "contentManager": "v1.6",
+    "memoryManager": "v1.6",
+    "vaultLibrarian": "v1.5",
+    "agentManager": "v1.5"
+  },
+  "agent_stats": {
+    "vaultManager": {
+      "total": 1463,
+      "positive": 1024,
+      "negative": 0,
+      "no_label": 439,
+      "version": "v1.5_passed_only",
+      "file": "tools_v1.5_passed_only.jsonl"
+    },
+    "contentManager": {
+      "total": 1483,
+      "positive": 1041,
+      "negative": 0,
+      "no_label": 442,
+      "version": "v1.6",
+      "file": "tools_v1.6.jsonl"
+    },
+    "memoryManager": {
+      "total": 1684,
+      "positive": 1188,
+      "negative": 0,
+      "no_label": 496,
+      "version": "v1.6",
+      "file": "tools_v1.6.jsonl"
+    },
+    "vaultLibrarian": {
+      "total": 939,
+      "positive": 663,
+      "negative": 0,
+      "no_label": 276,
+      "version": "v1.5",
+      "file": "tools_v1.5.jsonl"
+    },
+    "agentManager": {
+      "total": 1024,
+      "positive": 748,
+      "negative": 0,
+      "no_label": 276,
+      "version": "v1.5",
+      "file": "tools_v1.5.jsonl"
+    }
+  },
+  "total_examples": 6593,
+  "positive_examples": 4664,
+  "negative_examples": 0,
+  "no_label_examples": 1929,
+  "shuffled": true,
+  "format": "SFT-compatible ChatML",
+  "notes": "Merged latest non-thinking tool datasets; auto-selects newest version per agent"
+}

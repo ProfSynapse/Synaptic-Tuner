@@ -102,7 +102,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.eval_handler import EvalHandler
         from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
-        from tuner.handlers.gguf_handler import GGUFHandler
+        from tuner.handlers.convert_handler import ConvertHandler
         from tuner.handlers.improve_handler import handle_improve
         from tuner.handlers.inference_handler import InferenceHandler
 
@@ -118,7 +118,7 @@ class MainMenuHandler(BaseHandler):
             ("train", f"{BOX['star']} Train a model (SFT, KTO, or MLX)"),
             ("run", f"{BOX['star']} Run model (chat with your trained model)"),
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
-            ("gguf", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
+            ("convert", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
             ("generate", f"{BOX['bullet']} Synth Chat (SelfPlay data generation)"),
             ("improve", f"{BOX['bullet']} Improvement Engine (clean datasets)"),
@@ -130,7 +130,7 @@ class MainMenuHandler(BaseHandler):
             "train": TrainHandler(),
             "run": InferenceHandler(),
             "upload": UploadHandler(),
-            "gguf": GGUFHandler(),
+            "convert": ConvertHandler(),
             "eval": EvalHandler(),
             "generate": GenerateHandler(),
             "improve": handle_improve,
