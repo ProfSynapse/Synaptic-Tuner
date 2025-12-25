@@ -36,6 +36,7 @@ class ModelConfig:
     dtype: Optional[str]
     load_in_4bit: bool
     chat_template: Optional[str] = None
+    lora_path: Optional[str] = None  # Path to SFT LoRA checkpoint for continued training
 
 
 @dataclass
