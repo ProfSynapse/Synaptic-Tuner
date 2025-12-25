@@ -4,12 +4,15 @@
 # ============================================================================
 
 # Model Configuration
+# For GSPO test: Load from SFT checkpoint trained on 2/3 split
 model:
-  model_name: "unsloth/mistral-7b-instruct-v0.3-bnb-4bit"
+  # Base model (same as SFT)
+  model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
+  # Path to SFT LoRA adapters (checkpoint from latest run)
+  lora_path: "../rtx3090_sft/sft_output_rtx3090/20251225_125047/checkpoints/checkpoint-1150"
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
-  # Optional override; if null, inferred from model name.
   chat_template: null
 
 # LoRA Adapter Configuration
@@ -36,7 +39,7 @@ training:
   output_dir: "./grpo_output_rtx3090"
 
   # Performance
-  per_device_train_batch_size: 1
+  per_device_train_batch_size: 4
   gradient_accumulation_steps: 4
 
   # Generation
@@ -77,42 +80,39 @@ training:
 
 # Dataset Configuration
 dataset:
-  dataset_name: "professorsynapse/claudesidian-behaviors-merged"
-  dataset_file: "behavior_gspo_v1.3.jsonl"
-  # Prefer local file for RTX training runs; path is relative to Trainers/rtx3090_grpo/
-  local_file: "../../Datasets/archived datasets/behavior_gspo_v1.3.jsonl"
+  dataset_name: null  # Not using HuggingFace
+  dataset_file: null
+  # Local GSPO test dataset (1/3 of Dec 24 SFT data)
+  local_file: "../../Datasets/gspo_test_33pct_12.25.jsonl"
   num_proc: 1
   prompt_column: "prompt"
 
+# Schema Configuration
+# Defines how to parse tool calls and context from model output
+schema:
+  # Path to tool schema YAML (relative to repo root or absolute)
+  tool_schema_path: "../../Evaluator/config/tool_schema.yaml"
+
 # Rewards Configuration
-# - Built-ins live in src/rewards.py (registry).
-# - Custom rewards can be loaded from a module import path OR a file path.
+# - All rewards are YAML-driven (configs/rewards/*.yaml)
+# - Scoring compares model output against ground truth from dataset
 rewards:
-  # Built-in reward components (config-driven selection)
+  # Reward components (loaded from configs/rewards/)
   items:
-    - name: "tool_selection"
+    # Primary reward: Full args comparison (context + tool + params)
+    - name: "args_match"
       weight: 1.0
-      params:
-        ground_truth_field: "ground_truth_tool"
-        partial_credit: 0.3
+      params: {}  # Uses ground_truth_args_json from dataset
+
+    # Secondary: Ensure valid JSON structure
     - name: "json_structure"
-      weight: 1.0
+      weight: 0.3
       params:
         reward_value: 0.3
-    - name: "context_completeness"
-      weight: 1.0
-      params:
-        reward_value: 0.5
-        required_fields:
-          - "sessionId"
-          - "workspaceId"
-          - "sessionDescription"
-          - "sessionMemory"
-          - "toolContext"
-          - "primaryGoal"
-          - "subgoal"
+
+    # Secondary: Ensure tool call format is correct
     - name: "format"
-      weight: 1.0
+      weight: 0.2
       params:
         reward_value: 0.2
 

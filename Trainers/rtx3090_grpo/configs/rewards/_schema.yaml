@@ -1,0 +1,26 @@
+# Shared Schema Reference for GRPO Rewards
+# All reward rubrics inherit from this
+
+# Path to tool schema (source of truth for structure)
+tool_schema_path: ../../../Evaluator/config/tool_schema.yaml
+
+# Extraction paths (derived from tool_schema.yaml)
+# These define WHERE to find data in model output
+extraction:
+  # How to find the arguments JSON in tool call output
+  arguments_path: 'tool_calls[0].function.arguments'
+
+  # Once we have arguments, where is context?
+  context_path: 'context'
+
+  # Where are the tool calls?
+  calls_path: 'calls'
+
+# Parsing hints
+parsing:
+  # Arguments may be JSON string (escaped) or dict
+  arguments_format: json_string_or_dict
+
+  # Tool name construction pattern (from tool_schema.yaml)
+  # {agent}_{tool} -> e.g., "vaultManager_createFolder"
+  tool_name_pattern: '{agent}_{tool}'

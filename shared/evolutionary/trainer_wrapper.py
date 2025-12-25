@@ -96,6 +96,10 @@ class EvolutionaryTrainerWrapper:
         # Store original training step
         self._original_training_step = None
 
+        # Eval batch rotation - iterator that cycles through batches
+        self._eval_dataloader = None
+        self._eval_batch_iterator = None
+
         # Validate config
         issues = config.validate()
         if issues:
@@ -154,6 +158,10 @@ class EvolutionaryTrainerWrapper:
         4. Apply best candidate's gradient
         """
         self.current_step += 1
+
+        # Debug: Log first few steps and when evolutionary kicks in
+        if self.current_step <= 5 or self.current_step == self.config.warmup_steps + 1:
+            print(f"[EVO DEBUG] Step {self.current_step}, warmup_steps={self.config.warmup_steps}, in_warmup={self.current_step <= self.config.warmup_steps}")
 
         # Check if we're still in warmup phase
         if self.current_step <= self.config.warmup_steps:
@@ -227,57 +235,118 @@ class EvolutionaryTrainerWrapper:
         candidates: List[GradientCandidate],
     ) -> List[GradientCandidate]:
         """
-        Evaluate fitness of each candidate.
+        Evaluate fitness of each candidate using validation loss.
 
         For each candidate:
         1. Temporarily apply its gradients
-        2. Take an optimizer step
-        3. Generate responses
-        4. Evaluate fitness
-        5. Revert to original weights
+        2. Compute loss on held-out validation batch (rotated each step)
+        3. Use inverse loss as fitness (lower loss = higher fitness)
+        4. Restore ALL modified weights
+
+        This is Unsloth-compatible because:
+        - Only clones trainable params (mostly LoRA, small)
+        - Uses forward pass only, no generate()
+        - Works with Unsloth's optimized training
         """
-        model.eval()
+        # Get a ROTATED validation batch (different each step)
+        eval_batch = self._get_eval_batch()
+        if eval_batch is None:
+            # Fallback to gradient-norm fitness if no eval batch
+            return self._evaluate_candidates_by_gradient_norm(candidates)
 
-        # Save original model state
-        original_state = {
-            name: param.data.clone()
-            for name, param in model.named_parameters()
-        }
+        # Get list of param names we'll modify (from first candidate)
+        # All candidates have same param names, just different values
+        params_to_modify = set(candidates[0].gradients.keys()) if candidates else set()
 
-        eval_prompts = self._get_eval_prompts()
+        # Clone ALL params we're going to modify (not just LoRA)
+        # This fixes the restore bug
+        saved_state = {}
+        for name, param in model.named_parameters():
+            if name in params_to_modify:
+                saved_state[name] = param.data.clone()
+
+        lr = self.trainer.args.learning_rate
 
         for candidate in candidates:
             try:
-                # Apply candidate gradients temporarily
-                CandidateGenerator.apply_gradients(model, candidate.gradients)
-
-                # Simulate optimizer step (apply gradients to weights)
+                # Apply candidate gradients to weights temporarily
                 with torch.no_grad():
                     for name, param in model.named_parameters():
-                        if param.grad is not None:
-                            # Simple SGD-like update for evaluation
-                            lr = self.trainer.args.learning_rate
-                            param.data.sub_(lr * param.grad)
+                        if name in candidate.gradients:
+                            # SGD-like update
+                            param.data.sub_(lr * candidate.gradients[name])
 
-                # Generate responses and evaluate fitness
-                fitness_scores = []
-                for prompt in eval_prompts[:self.config.eval_batch_size]:
-                    response = self._generate_response(model, prompt)
-                    result = self.fitness_evaluator.evaluate(response)
-                    fitness_scores.append(result.score)
+                # Compute validation loss
+                model.eval()
+                with torch.no_grad():
+                    outputs = model(**eval_batch)
+                    val_loss = outputs.loss.item() if hasattr(outputs, 'loss') else outputs[0].item()
 
-                # Average fitness
-                candidate.fitness = sum(fitness_scores) / max(len(fitness_scores), 1)
+                # Fitness = inverse of loss (lower loss = higher fitness)
+                # Normalize to reasonable range
+                candidate.fitness = 1.0 / (1.0 + val_loss)
+                candidate.metadata["val_loss"] = val_loss
 
             finally:
-                # Restore original weights
+                # Restore ALL modified weights (not just LoRA)
                 with torch.no_grad():
                     for name, param in model.named_parameters():
-                        if name in original_state:
-                            param.data.copy_(original_state[name])
+                        if name in saved_state:
+                            param.data.copy_(saved_state[name])
 
         model.train()
         return candidates
+
+    def _evaluate_candidates_by_gradient_norm(
+        self,
+        candidates: List[GradientCandidate],
+    ) -> List[GradientCandidate]:
+        """Fallback: evaluate by gradient norm (fast, no forward pass)."""
+        for candidate in candidates:
+            total_norm = 0.0
+            num_params = 0
+            for name, grad in candidate.gradients.items():
+                total_norm += grad.norm().item() ** 2
+                num_params += 1
+            rms_norm = (total_norm / max(num_params, 1)) ** 0.5
+            candidate.fitness = 1.0 / (1.0 + rms_norm)
+            candidate.metadata["rms_grad_norm"] = rms_norm
+        return candidates
+
+    def _get_eval_batch(self) -> Optional[Dict[str, torch.Tensor]]:
+        """
+        Get a ROTATED batch for validation loss evaluation.
+
+        Each call returns a different batch, cycling through the dataloader.
+        This prevents overfitting to a single evaluation batch.
+        """
+        try:
+            # Initialize dataloader and iterator if needed
+            if self._eval_dataloader is None:
+                if hasattr(self.trainer, 'get_eval_dataloader') and self.trainer.eval_dataset is not None:
+                    self._eval_dataloader = self.trainer.get_eval_dataloader()
+                elif hasattr(self.trainer, 'get_train_dataloader'):
+                    self._eval_dataloader = self.trainer.get_train_dataloader()
+                else:
+                    return None
+                self._eval_batch_iterator = iter(self._eval_dataloader)
+
+            # Get next batch, cycling back to start if exhausted
+            try:
+                batch = next(self._eval_batch_iterator)
+            except StopIteration:
+                # Reset iterator and get first batch
+                self._eval_batch_iterator = iter(self._eval_dataloader)
+                batch = next(self._eval_batch_iterator)
+
+            # Move to device
+            device = next(self.trainer.model.parameters()).device
+            return {k: v.to(device) if hasattr(v, 'to') else v
+                    for k, v in batch.items()}
+
+        except Exception as e:
+            logger.warning(f"Could not get eval batch: {e}")
+            return None
 
     def _generate_response(
         self,

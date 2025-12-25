@@ -1,0 +1,63 @@
+{
+  "created": "2025-12-07T17:05:48.223387",
+  "source": "tools_datasets thinking merge 12.7.25",
+  "version": "thinking-latest",
+  "agents": [
+    "vaultManager",
+    "contentManager",
+    "memoryManager",
+    "vaultLibrarian",
+    "agentManager"
+  ],
+  "agent_versions": {
+    "vaultManager": "v1.5",
+    "contentManager": "v1.5",
+    "memoryManager": "v1.5.1",
+    "vaultLibrarian": "v1.5",
+    "agentManager": "v1.5"
+  },
+  "agent_stats": {
+    "vaultManager": {
+      "total": 1131,
+      "positive": 692,
+      "negative": 0,
+      "no_label": 439,
+      "version": "v1.5"
+    },
+    "contentManager": {
+      "total": 1140,
+      "positive": 707,
+      "negative": 0,
+      "no_label": 433,
+      "version": "v1.5"
+    },
+    "memoryManager": {
+      "total": 1224,
+      "positive": 777,
+      "negative": 0,
+      "no_label": 447,
+      "version": "v1.5.1"
+    },
+    "vaultLibrarian": {
+      "total": 791,
+      "positive": 492,
+      "negative": 0,
+      "no_label": 299,
+      "version": "v1.5"
+    },
+    "agentManager": {
+      "total": 710,
+      "positive": 456,
+      "negative": 0,
+      "no_label": 254,
+      "version": "v1.5"
+    }
+  },
+  "total_examples": 4996,
+  "positive_examples": 3124,
+  "negative_examples": 0,
+  "no_label_examples": 1872,
+  "shuffled": true,
+  "format": "SFT-compatible ChatML",
+  "notes": "Merged latest thinking tool datasets; auto-selects newest version per agent"
+}

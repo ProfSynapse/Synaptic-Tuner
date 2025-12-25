@@ -102,4 +102,7 @@ def print_dataset_samples(dataset: Dataset, num_samples: int = 2):
                 print(f"prompt (messages): {p[:2]} ...")
         if "ground_truth_tool" in ex:
             print(f"ground_truth_tool: {ex['ground_truth_tool']}")
+        if "ground_truth_args_json" in ex:
+            args_preview = ex['ground_truth_args_json'][:200] if isinstance(ex['ground_truth_args_json'], str) else str(ex['ground_truth_args_json'])[:200]
+            print(f"ground_truth_args_json: {args_preview}...")
         print("-" * 60)

@@ -191,7 +191,20 @@
       "Bash(/home/profsynapse/miniconda3/bin/pip uninstall:*)",
       "Bash(/home/profsynapse/miniconda3/bin/pip index:*)",
       "WebFetch(domain:mlc.ai)",
-      "Bash(fuser:*)"
+      "Bash(fuser:*)",
+      "Bash(while read line)",
+      "Bash(do echo \"$line\")",
+      "Bash(for dir in /mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/*/)",
+      "Bash(do if [ -d \"$dirfinal_model\" ])",
+      "Bash(then echo \"$dir has final_model\")",
+      "Bash(fi)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/merged-16bit )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/llama.cpp/build/bin/llama-quantize:*)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/nexus-quark-q3.0.5-f16.gguf )",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/nexus-quark-q3.0.5-Q4_K_M.gguf )",
+      "Bash(Q4_K_M)",
+      "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/nexus-quark-q3.0.5-Q5_K_M.gguf )",
+      "Bash(Q5_K_M)"
     ],
     "deny": [],
     "ask": []

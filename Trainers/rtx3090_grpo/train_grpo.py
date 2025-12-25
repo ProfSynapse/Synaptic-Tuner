@@ -59,6 +59,7 @@ from configs.config_loader import load_config  # noqa: E402
 from src.data_loader import load_raw_dataset, format_dataset_for_grpo, print_dataset_samples  # noqa: E402
 from src.model_loader import (  # noqa: E402
     load_model_and_tokenizer,
+    load_from_sft_checkpoint,
     get_text_tokenizer,
     apply_lora_adapters,
     check_gpu_memory,
@@ -215,13 +216,26 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print_dataset_samples(raw_dataset, num_samples=2)
 
     # Load model + tokenizer/processor
-    model, tok_or_proc, is_vl = load_model_and_tokenizer(
-        model_name=config.model.model_name,
-        max_seq_length=config.model.max_seq_length,
-        dtype=config.model.dtype,
-        load_in_4bit=config.model.load_in_4bit,
-        hf_token=hf_token,
-    )
+    lora_path = getattr(config.model, 'lora_path', None)
+    if lora_path:
+        # Load from SFT checkpoint (merge LoRA first)
+        model, tok_or_proc, is_vl = load_from_sft_checkpoint(
+            base_model_name=config.model.model_name,
+            lora_path=lora_path,
+            max_seq_length=config.model.max_seq_length,
+            dtype=config.model.dtype,
+            load_in_4bit=config.model.load_in_4bit,
+            hf_token=hf_token,
+        )
+    else:
+        # Load base model
+        model, tok_or_proc, is_vl = load_model_and_tokenizer(
+            model_name=config.model.model_name,
+            max_seq_length=config.model.max_seq_length,
+            dtype=config.model.dtype,
+            load_in_4bit=config.model.load_in_4bit,
+            hf_token=hf_token,
+        )
     tokenizer = get_text_tokenizer(tok_or_proc)
 
     # Apply chat template (config override wins; else inferred)

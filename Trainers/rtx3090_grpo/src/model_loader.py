@@ -158,6 +158,83 @@ def apply_lora_adapters(
     return model
 
 
+def load_from_sft_checkpoint(
+    base_model_name: str,
+    lora_path: str,
+    max_seq_length: int = 2048,
+    dtype: Optional[str] = None,
+    load_in_4bit: bool = True,
+    hf_token: Optional[str] = None,
+) -> Tuple[object, object, bool]:
+    """
+    Load base model with SFT LoRA adapters for continued training (GSPO).
+
+    Args:
+        base_model_name: Name of base model (e.g., "unsloth/Qwen3-1.7B-unsloth-bnb-4bit")
+        lora_path: Path to SFT LoRA adapters directory
+        max_seq_length: Maximum sequence length
+        dtype: Data type (auto-detect if None)
+        load_in_4bit: Whether to use 4-bit quantization
+        hf_token: Optional HuggingFace token
+
+    Returns:
+        (model, tokenizer, is_vision_model)
+    """
+    from pathlib import Path
+    from peft import PeftModel
+
+    lora_path = Path(lora_path)
+    if not lora_path.exists():
+        raise FileNotFoundError(f"LoRA checkpoint not found: {lora_path}")
+
+    print("=" * 60)
+    print("LOADING MODEL FROM SFT CHECKPOINT")
+    print("=" * 60)
+    print(f"Base model: {base_model_name}")
+    print(f"LoRA path: {lora_path}")
+    print(f"Max sequence length: {max_seq_length}")
+
+    is_vl = _is_vision_model(base_model_name)
+
+    # Load base model
+    if is_vl:
+        if not _VISION_AVAILABLE:
+            raise ImportError("Vision model support not available")
+        model, processor = FastVisionModel.from_pretrained(
+            model_name=base_model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
+        tokenizer_or_processor = processor
+    else:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=base_model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
+        tokenizer_or_processor = tokenizer
+
+    # Load LoRA adapters
+    print(f"\nLoading LoRA adapters from: {lora_path}")
+    model = PeftModel.from_pretrained(model, str(lora_path))
+
+    # Merge LoRA for efficient inference/training
+    print("Merging LoRA adapters into base model...")
+    model = model.merge_and_unload()
+
+    print(f"\n✓ Model loaded with SFT LoRA merged")
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"✓ GPU: {gpu_name}")
+    print("=" * 60)
+
+    return model, tokenizer_or_processor, is_vl
+
+
 def check_gpu_memory():
     """Print current GPU memory usage."""
     if torch.cuda.is_available():

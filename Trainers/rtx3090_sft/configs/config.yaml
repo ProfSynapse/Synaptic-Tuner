@@ -9,7 +9,7 @@ model:
   # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
   # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
   # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "unsloth/Qwen3-VL-4B-Instruct-unsloth-bnb-4bit"
+  model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
 
   # Model parameters
   max_seq_length: 2048 
@@ -18,8 +18,8 @@ model:
 
 # LoRA Adapter Configuration
 lora:
-  r: 32
-  lora_alpha: 64
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0.05
   bias: "none"
   target_modules:
@@ -40,7 +40,7 @@ training:
 
   # Batch configuration
   per_device_train_batch_size: 2  
-  gradient_accumulation_steps: 4  
+  gradient_accumulation_steps: 2  
 
   # Learning rate
   learning_rate: 2e-4  # vs KTO's 2e-7
@@ -84,7 +84,8 @@ dataset:
   dataset_file: "reasoning_tools_sft_12.7.25.jsonl"  # 6,794 examples (removed 10 corrupted)
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/nonthinking_tools_sft_12.18.25.jsonl"
+  # Using 2/3 split for GSPO testing (1/3 held out for GSPO)
+  local_file: "../../Datasets/sft_train_67pct_12.25.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
@@ -109,7 +110,7 @@ seed: 42
 # Gradient + ES Hybrid: Generate N gradient candidates, evaluate, apply best
 # ============================================================================
 evolutionary:
-  enabled: false  # Set to true to enable evolutionary selection
+  enabled: false  # Disabled - high gradient norms, needs tuning
 
   # Number of gradient candidates to evaluate per step
   candidates: 4
@@ -119,7 +120,7 @@ evolutionary:
 
   # Validation config for fitness scoring
   # Uses same format as validation rubrics
-  validation_config: null  # Path to fitness config, e.g., "configs/fitness/tool_calling.yaml"
+  validation_config: "configs/fitness/tool_calling.yaml"
 
   # Strategy for generating gradient candidates
   strategy:
@@ -135,7 +136,7 @@ evolutionary:
 
   # Performance tuning
   eval_frequency: 1  # Evaluate every N steps (1 = every step)
-  warmup_steps: 200  # Train normally for N steps before enabling evolutionary
+  warmup_steps: 0  # Train normally for N steps before enabling evolutionary
   cache_baseline: true  # Cache baseline fitness to avoid recomputing
 
   # Logging

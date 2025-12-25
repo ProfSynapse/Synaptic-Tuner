@@ -1,0 +1,26 @@
+# Format Reward
+# Rewards model for using correct tool call format
+
+name: format
+description: Validates model uses the expected tool call format
+
+inherit: _schema.yaml
+
+scope: response
+
+# What format to check for
+validation:
+  # Check for useTools wrapper (from tool_schema.yaml)
+  - match: '"name":\s*"useTools"'
+    type: regex
+    error: "Missing useTools wrapper"
+
+  # Check for arguments field
+  - match: '"arguments"'
+    type: contains
+    error: "Missing arguments field"
+
+scoring:
+  strategy: binary
+  on_pass: 1.0
+  on_fail: 0.0

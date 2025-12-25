@@ -1,0 +1,63 @@
+{
+  "created": "2025-11-29T09:15:43.506477",
+  "source": "tools_datasets merge v1.5 11.29.25",
+  "version": "1.5",
+  "agents": [
+    "vaultManager",
+    "contentManager",
+    "memoryManager",
+    "vaultLibrarian",
+    "agentManager"
+  ],
+  "agent_versions": {
+    "agentManager": "v1.3",
+    "contentManager": "v1.4",
+    "memoryManager": "v1.4",
+    "vaultLibrarian": "v1.3",
+    "vaultManager": "v1.3"
+  },
+  "agent_stats": {
+    "vaultManager": {
+      "total": 1469,
+      "positive": 1028,
+      "negative": 0,
+      "no_label": 441,
+      "version": "v1.3"
+    },
+    "contentManager": {
+      "total": 1491,
+      "positive": 1045,
+      "negative": 0,
+      "no_label": 446,
+      "version": "v1.4"
+    },
+    "memoryManager": {
+      "total": 1697,
+      "positive": 1197,
+      "negative": 0,
+      "no_label": 500,
+      "version": "v1.4"
+    },
+    "vaultLibrarian": {
+      "total": 1113,
+      "positive": 790,
+      "negative": 0,
+      "no_label": 323,
+      "version": "v1.3"
+    },
+    "agentManager": {
+      "total": 1024,
+      "positive": 748,
+      "negative": 0,
+      "no_label": 276,
+      "version": "v1.3"
+    }
+  },
+  "total_examples": 6794,
+  "positive_examples": 4808,
+  "negative_examples": 0,
+  "no_label_examples": 1986,
+  "shuffled": true,
+  "format": "SFT-compatible ChatML",
+  "notes": "v1.5 fixes: removed 10 corrupted examples (malformed responses) from contentManager and memoryManager"
+}

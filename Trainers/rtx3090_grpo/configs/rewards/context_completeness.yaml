@@ -1,0 +1,42 @@
+# Context Completeness Reward
+# Rewards model for filling in all required context fields
+
+name: context_completeness
+description: Validates context object has all required fields with meaningful content
+
+# Inherit schema from _schema.yaml
+inherit: _schema.yaml
+
+# What to validate (references tool_schema.yaml structure)
+scope: context
+
+# Validation rules - field requirements come from tool_schema.yaml
+# but we can add quality checks here
+validation:
+  # Required fields from schema (auto-loaded from tool_schema.yaml)
+  use_schema_required: true
+
+  # Additional quality checks
+  quality:
+    - field: memory
+      type: string
+      min: 20
+      error: "memory should be descriptive (min {min} chars)"
+
+    - field: goal
+      type: string
+      min: 10
+      error: "goal should be specific (min {min} chars)"
+
+# Scoring configuration
+scoring:
+  # proportional: score = fields_valid / fields_total
+  # binary: 1.0 if all pass, 0.0 if any fail
+  # weighted: each field has a weight
+  strategy: proportional
+
+  # Base score when validation passes
+  max_score: 1.0
+
+  # Bonus for optional fields (constraints)
+  optional_bonus: 0.1

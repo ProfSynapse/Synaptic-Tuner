@@ -1,0 +1,44 @@
+# JSON Structure Reward
+# Rewards model for producing valid JSON tool call structure
+
+name: json_structure
+description: Validates tool call arguments are valid JSON with expected structure
+
+inherit: _schema.yaml
+
+scope: arguments
+
+# Validation using tool_schema.yaml structure
+validation:
+  # Must parse as valid JSON
+  - type: json_parse
+    error: "Arguments must be valid JSON"
+
+  # Must have context object
+  - field: context
+    type: object
+    error: "Missing context object"
+
+  # Must have calls array
+  - field: calls
+    type: array
+    min: 1
+    error: "Missing or empty calls array"
+
+  # Each call must have required fields
+  - field: calls
+    item_validation:
+      - field: agent
+        type: string
+        error: "Call missing agent field"
+      - field: tool
+        type: string
+        error: "Call missing tool field"
+      - field: params
+        type: object
+        error: "Call missing params object"
+
+scoring:
+  strategy: binary
+  on_pass: 1.0
+  on_fail: 0.0

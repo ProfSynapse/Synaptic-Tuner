@@ -1,0 +1,44 @@
+# Args Match Reward
+# Validates predicted args match ground truth (context, agent, tool, params)
+
+name: args_match
+description: Validates tool call args match ground truth from dataset
+
+inherit: _schema.yaml
+
+scope: arguments
+
+# Ground truth comes from dataset as JSON string
+ground_truth:
+  field: ground_truth_args_json
+  parse: json  # Parse JSON string before comparing
+
+# What to compare
+comparison:
+  # Context fields to match
+  context_fields:
+    - workspaceId
+    - sessionId
+    - memory
+    - goal
+
+  # Call fields to match
+  call_fields:
+    - agent
+    - tool
+    - params
+
+# Scoring
+scoring:
+  strategy: weighted
+
+  weights:
+    context_match: 0.4      # 40% for context fields
+    tool_match: 0.3         # 30% for correct agent_tool
+    params_match: 0.3       # 30% for params match
+
+  # Partial credit for context
+  context_partial: true     # Score = fields_matched / total_fields
+
+  # Params matching strategy
+  params_strategy: key_overlap  # Score based on key overlap

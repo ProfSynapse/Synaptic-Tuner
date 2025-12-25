@@ -435,7 +435,7 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: contentManager_deleteContent
-  question: Delete the file Scratch/Temp-Migration-Checklist.md because we're redoing it from scratch.
+  question: Delete the sentence "We are migrating." from the file Scratch/Temp-Migration-Checklist.md. You have my permission.
   tags:
   - contentManager
   - single-tool

@@ -39,4 +39,11 @@ def get_strategy(name: str, **kwargs) -> BaseStrategy:
     if name not in strategies:
         raise ValueError(f"Unknown strategy: {name}. Available: {list(strategies.keys())}")
 
-    return strategies[name](**kwargs)
+    # Filter kwargs to only those accepted by the strategy
+    strategy_cls = strategies[name]
+    import inspect
+    sig = inspect.signature(strategy_cls.__init__)
+    valid_params = set(sig.parameters.keys()) - {"self"}
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_params}
+
+    return strategy_cls(**filtered_kwargs)

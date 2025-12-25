@@ -1,0 +1,32 @@
+# Tool Selection Reward
+# Rewards model for selecting the correct tool
+
+name: tool_selection
+description: Validates model selects correct tool for the task
+
+inherit: _schema.yaml
+
+scope: calls
+
+# Ground truth field in dataset
+ground_truth:
+  field: ground_truth_tool
+  # How to extract predicted tool from model output
+  extract_pattern: '{agent}_{tool}'  # from tool_schema.yaml
+
+# Scoring
+scoring:
+  strategy: tiered
+
+  tiers:
+    # Exact match
+    - condition: exact_match
+      score: 1.0
+
+    # Same agent, wrong tool (partial credit)
+    - condition: agent_match
+      score: 0.3
+
+    # Wrong agent
+    - condition: no_match
+      score: 0.0
