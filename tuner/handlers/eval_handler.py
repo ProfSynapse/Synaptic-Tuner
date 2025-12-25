@@ -316,6 +316,8 @@ class EvalHandler(BaseHandler):
             if trainer_type == "kto":
                 table.add_column("KL", style="dim", justify="right")
                 table.add_column("Margin", style="dim", justify="right")
+            elif trainer_type == "grpo":
+                table.add_column("Reward", style="dim", justify="right")
             table.add_column("Epoch", style="dim", justify="right")
 
             for i, cp in enumerate(checkpoints, 1):
@@ -338,6 +340,10 @@ class EvalHandler(BaseHandler):
                     margin = cp.metrics.get("rewards/margins")
                     margin_str = f"{margin:.4f}" if margin is not None else "-"
                     table.add_row(str(i), name, step_str, loss_str, kl_str, margin_str, epoch_str)
+                elif trainer_type == "grpo":
+                    reward = cp.metrics.get("reward") or cp.metrics.get("rewards/mean")
+                    reward_str = f"{reward:.4f}" if reward is not None else "-"
+                    table.add_row(str(i), name, step_str, loss_str, reward_str, epoch_str)
                 else:
                     table.add_row(str(i), name, step_str, loss_str, epoch_str)
 
@@ -366,13 +372,14 @@ class EvalHandler(BaseHandler):
         Returns:
             Tuple of (model_path, trainer_type) or (None, None) if cancelled
         """
-        # Discover training runs for both SFT and KTO
+        # Discover training runs for SFT, KTO, and GRPO
         discovery = TrainingRunDiscovery(repo_root=self.repo_root)
 
         sft_runs = discovery.discover("sft", limit=10)
         kto_runs = discovery.discover("kto", limit=10)
+        grpo_runs = discovery.discover("grpo", limit=10)
 
-        if not sft_runs and not kto_runs:
+        if not sft_runs and not kto_runs and not grpo_runs:
             print_error("No training runs found.")
             print_info("Train a model first - the final_model/ directory will appear.")
             return None, None
@@ -383,12 +390,19 @@ class EvalHandler(BaseHandler):
             trainer_options.append(("sft", f"SFT ({len(sft_runs)} runs)"))
         if kto_runs:
             trainer_options.append(("kto", f"KTO ({len(kto_runs)} runs)"))
+        if grpo_runs:
+            trainer_options.append(("grpo", f"GRPO/GSPO ({len(grpo_runs)} runs)"))
 
         trainer_type = print_menu(trainer_options, "Select training type:")
         if not trainer_type:
             return None, None
 
-        runs = sft_runs if trainer_type == "sft" else kto_runs
+        if trainer_type == "sft":
+            runs = sft_runs
+        elif trainer_type == "kto":
+            runs = kto_runs
+        else:
+            runs = grpo_runs
 
         # Display and select training run
         self._display_training_runs_table(runs, trainer_type)

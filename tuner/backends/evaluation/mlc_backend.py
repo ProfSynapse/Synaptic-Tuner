@@ -54,6 +54,7 @@ class MLCBackend(IEvaluationBackend):
         Searches for MLC model directories in:
         - Trainers/rtx3090_sft/sft_output_rtx3090/**/webgpu/*-MLC/
         - Trainers/rtx3090_kto/kto_output_rtx3090/**/webgpu/*-MLC/
+        - Trainers/rtx3090_grpo/grpo_output_rtx3090/**/webgpu/*-MLC/
 
         Returns:
             List of MLC model directory paths (absolute paths)
@@ -71,6 +72,7 @@ class MLCBackend(IEvaluationBackend):
         output_patterns = [
             "rtx3090_sft/sft_output_rtx3090",
             "rtx3090_kto/kto_output_rtx3090",
+            "rtx3090_grpo/grpo_output_rtx3090",
         ]
 
         for pattern in output_patterns:
@@ -168,6 +170,8 @@ class MLCBackend(IEvaluationBackend):
             info["trainer_type"] = "sft"
         elif "kto_output" in str(path):
             info["trainer_type"] = "kto"
+        elif "grpo_output" in str(path):
+            info["trainer_type"] = "grpo"
 
         # Get run timestamp from parent directory structure
         # Path structure: .../YYYYMMDD_HHMMSS/model-name/webgpu/model-dir

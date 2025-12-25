@@ -116,6 +116,7 @@ class LlamaCppBackend(IEvaluationBackend):
         Searches for GGUF files in:
         - Trainers/rtx3090_sft/sft_output_rtx3090/**/gguf/*.gguf
         - Trainers/rtx3090_kto/kto_output_rtx3090/**/gguf/*.gguf
+        - Trainers/rtx3090_grpo/grpo_output_rtx3090/**/gguf/*.gguf
 
         Returns:
             List of GGUF file paths (absolute paths)
@@ -133,6 +134,7 @@ class LlamaCppBackend(IEvaluationBackend):
         output_patterns = [
             "rtx3090_sft/sft_output_rtx3090",
             "rtx3090_kto/kto_output_rtx3090",
+            "rtx3090_grpo/grpo_output_rtx3090",
         ]
 
         for pattern in output_patterns:
@@ -217,6 +219,8 @@ class LlamaCppBackend(IEvaluationBackend):
             trainer_type = "sft"
         elif "kto_output" in str(path):
             trainer_type = "kto"
+        elif "grpo_output" in str(path):
+            trainer_type = "grpo"
 
         return {
             "name": name,

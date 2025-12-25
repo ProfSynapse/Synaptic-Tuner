@@ -64,6 +64,7 @@ class UnslothBackend(IEvaluationBackend):
         output_patterns = [
             "rtx3090_sft/sft_output_rtx3090",
             "rtx3090_kto/kto_output_rtx3090",
+            "rtx3090_grpo/grpo_output_rtx3090",
         ]
 
         for pattern in output_patterns:
@@ -142,6 +143,8 @@ class UnslothBackend(IEvaluationBackend):
             trainer_type = "sft"
         elif "kto_output" in str(path):
             trainer_type = "kto"
+        elif "grpo_output" in str(path):
+            trainer_type = "grpo"
 
         # Extract run timestamp from parent directory
         timestamp = path.parent.name if path.parent else "unknown"
