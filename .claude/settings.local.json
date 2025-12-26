@@ -204,7 +204,10 @@
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/nexus-quark-q3.0.5-Q4_K_M.gguf )",
       "Bash(Q4_K_M)",
       "Bash(/mnt/f/Code/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/20251224_101211/nexus-quark-q3.0.5-Q5_K_M.gguf )",
-      "Bash(Q5_K_M)"
+      "Bash(Q5_K_M)",
+      "Bash(git push:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(PYTHONPATH=. python3:*)"
     ],
     "deny": [],
     "ask": []

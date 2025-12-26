@@ -39,8 +39,8 @@ training:
   output_dir: "./grpo_output_rtx3090"
 
   # Performance
-  per_device_train_batch_size: 4
-  gradient_accumulation_steps: 4
+  per_device_train_batch_size: 6
+  gradient_accumulation_steps: 6
 
   # Generation
   num_generations: 4
@@ -56,6 +56,11 @@ training:
   num_train_epochs: 1
   # If > 0, overrides epoch-based training.
   max_steps: -1
+
+  # KL penalty coefficient (critical for preventing divergence!)
+  # Higher = stronger penalty for diverging from reference model
+  # Default TRL is 0.04, but we use 0.1 for more stability
+  beta: 0.1
 
   # Precision
   fp16: false

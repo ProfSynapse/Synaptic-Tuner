@@ -4,12 +4,15 @@ Model loading helpers for GRPO / GSPO training using Unsloth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Tuple
 
 import torch
 
 from unsloth import FastLanguageModel
+
+# Import shared merge utilities
+from shared.model_loading import resolve_model_path
 
 # Optional: FastVisionModel for VL models
 try:
@@ -167,11 +170,13 @@ def load_from_sft_checkpoint(
     hf_token: Optional[str] = None,
 ) -> Tuple[object, object, bool]:
     """
-    Load base model with SFT LoRA adapters for continued training (GSPO).
+    Load a merged SFT model for continued GRPO training.
+
+    If given a LoRA checkpoint, automatically merges it first.
 
     Args:
-        base_model_name: Name of base model (e.g., "unsloth/Qwen3-1.7B-unsloth-bnb-4bit")
-        lora_path: Path to SFT LoRA adapters directory
+        base_model_name: Name of base model (for VL detection)
+        lora_path: Path to merged model or LoRA checkpoint
         max_seq_length: Maximum sequence length
         dtype: Data type (auto-detect if None)
         load_in_4bit: Whether to use 4-bit quantization
@@ -180,28 +185,23 @@ def load_from_sft_checkpoint(
     Returns:
         (model, tokenizer, is_vision_model)
     """
-    from pathlib import Path
-    from peft import PeftModel
-
-    lora_path = Path(lora_path)
-    if not lora_path.exists():
-        raise FileNotFoundError(f"LoRA checkpoint not found: {lora_path}")
+    # Use shared merge utilities to resolve path (auto-merge if LoRA)
+    model_path, was_merged = resolve_model_path(lora_path, max_seq_length)
 
     print("=" * 60)
-    print("LOADING MODEL FROM SFT CHECKPOINT")
+    print("LOADING MERGED SFT MODEL")
     print("=" * 60)
-    print(f"Base model: {base_model_name}")
-    print(f"LoRA path: {lora_path}")
+    print(f"Model path: {model_path}")
     print(f"Max sequence length: {max_seq_length}")
 
     is_vl = _is_vision_model(base_model_name)
 
-    # Load base model
+    # Load the merged model
     if is_vl:
         if not _VISION_AVAILABLE:
             raise ImportError("Vision model support not available")
         model, processor = FastVisionModel.from_pretrained(
-            model_name=base_model_name,
+            model_name=str(model_path),
             max_seq_length=max_seq_length,
             dtype=dtype,
             load_in_4bit=load_in_4bit,
@@ -210,7 +210,7 @@ def load_from_sft_checkpoint(
         tokenizer_or_processor = processor
     else:
         model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=base_model_name,
+            model_name=str(model_path),
             max_seq_length=max_seq_length,
             dtype=dtype,
             load_in_4bit=load_in_4bit,
@@ -218,15 +218,7 @@ def load_from_sft_checkpoint(
         )
         tokenizer_or_processor = tokenizer
 
-    # Load LoRA adapters
-    print(f"\nLoading LoRA adapters from: {lora_path}")
-    model = PeftModel.from_pretrained(model, str(lora_path))
-
-    # Merge LoRA for efficient inference/training
-    print("Merging LoRA adapters into base model...")
-    model = model.merge_and_unload()
-
-    print(f"\n✓ Model loaded with SFT LoRA merged")
+    print(f"\n✓ Merged model loaded")
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         print(f"✓ GPU: {gpu_name}")

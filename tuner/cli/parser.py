@@ -39,6 +39,7 @@ Commands:
   upload    Upload submenu
   eval      Evaluation submenu
   run       Run model inference (chat with your model)
+  merge     Merge LoRA into base model (for GRPO or upload)
   generate  Generate synthetic data (SelfPlay)
   improve   Improve dataset quality (LLM-based)
   pipeline  Full pipeline (train -> upload -> eval)
@@ -51,6 +52,7 @@ Examples:
   python tuner.py upload    # Go directly to upload
   python tuner.py eval      # Go directly to evaluation
   python tuner.py run       # Run/chat with a trained model
+  python tuner.py merge     # Merge LoRA adapters
   python tuner.py generate  # Generate synthetic data
   python tuner.py improve   # Improve dataset quality
   python tuner.py pipeline  # Run full pipeline
@@ -62,7 +64,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "upload", "eval", "run", "generate", "improve", "pipeline", "gguf", "webllm"],
+        choices=["train", "upload", "eval", "run", "merge", "generate", "improve", "pipeline", "gguf", "webllm"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 

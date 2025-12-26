@@ -45,6 +45,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
         from tuner.handlers.convert_handler import ConvertHandler
+        from tuner.handlers.merge_handler import MergeHandler
         from tuner.handlers.improve_handler import handle_improve
         from tuner.handlers.inference_handler import InferenceHandler
         from tuner.handlers.webllm_handler import WebLLMHandler
@@ -66,6 +67,7 @@ def route_command(args: Namespace) -> int:
         'improve': handle_improve,  # Function-based handler
         'pipeline': PipelineHandler,
         'convert': ConvertHandler,
+        'merge': MergeHandler,
         'run': InferenceHandler,
         'webllm': WebLLMHandler,
     }

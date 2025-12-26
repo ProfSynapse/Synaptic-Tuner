@@ -48,15 +48,18 @@ try:  # noqa: E402
 except Exception:
     pass
 
-# Add src to path
+# Add src and repo root to path (for shared module)
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # repo root
 
 from unsloth import is_bfloat16_supported  # noqa: E402
 from unsloth.chat_templates import get_chat_template  # noqa: E402
 from trl import GRPOConfig, GRPOTrainer  # noqa: E402
 
-from configs.config_loader import load_config  # noqa: E402
+import yaml  # noqa: E402
 from src.data_loader import load_raw_dataset, format_dataset_for_grpo, print_dataset_samples  # noqa: E402
+
+
 from src.model_loader import (  # noqa: E402
     load_model_and_tokenizer,
     load_from_sft_checkpoint,
@@ -66,6 +69,14 @@ from src.model_loader import (  # noqa: E402
 )
 from src.rewards import build_combined_reward_function  # noqa: E402
 from src.training_callbacks import MetricsTableCallback  # noqa: E402
+
+
+def load_config(config_path: str | None = None) -> dict:
+    """Load YAML config as plain dict."""
+    if config_path is None:
+        config_path = str(Path(__file__).parent / "configs" / "config.yaml")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def setup_wandb() -> bool:
@@ -100,47 +111,51 @@ def _detect_chat_template(model_name: str) -> str:
     return "chatml"
 
 
-def _build_grpo_config(config, checkpoints_dir: Path) -> GRPOConfig:
+def _build_grpo_config(config: dict, checkpoints_dir: Path) -> GRPOConfig:
     import inspect
 
+    training = config['training']
     bf16_supported = is_bfloat16_supported()
-    bf16 = bool(config.training.bf16 and bf16_supported)
-    fp16 = bool(config.training.fp16 and not bf16)
+    bf16 = bool(training.get('bf16') and bf16_supported)
+    fp16 = bool(training.get('fp16') and not bf16)
     if not bf16 and not fp16:
         fp16 = not bf16_supported
 
     args: Dict[str, Any] = {
         "output_dir": str(checkpoints_dir),
-        "per_device_train_batch_size": int(config.training.per_device_train_batch_size),
-        "gradient_accumulation_steps": int(config.training.gradient_accumulation_steps),
-        "num_generations": int(config.training.num_generations),
-        "max_prompt_length": int(config.training.max_prompt_length),
-        "max_completion_length": int(config.training.max_completion_length),
-        "temperature": float(config.training.temperature),
-        "learning_rate": float(config.training.learning_rate),
-        "weight_decay": float(config.training.weight_decay),
-        "warmup_ratio": float(config.training.warmup_ratio),
-        "lr_scheduler_type": str(config.training.lr_scheduler_type),
-        "optim": str(config.training.optim),
-        "logging_steps": int(config.training.logging_steps),
-        "save_steps": int(config.training.save_steps),
-        "save_total_limit": int(config.training.save_total_limit),
-        "num_train_epochs": int(config.training.num_train_epochs),
+        "per_device_train_batch_size": int(training['per_device_train_batch_size']),
+        "gradient_accumulation_steps": int(training['gradient_accumulation_steps']),
+        "num_generations": int(training['num_generations']),
+        "max_prompt_length": int(training['max_prompt_length']),
+        "max_completion_length": int(training['max_completion_length']),
+        "temperature": float(training['temperature']),
+        "learning_rate": float(training['learning_rate']),
+        "weight_decay": float(training['weight_decay']),
+        "warmup_ratio": float(training['warmup_ratio']),
+        "lr_scheduler_type": str(training['lr_scheduler_type']),
+        "optim": str(training['optim']),
+        "logging_steps": int(training['logging_steps']),
+        "save_steps": int(training['save_steps']),
+        "save_total_limit": int(training['save_total_limit']),
+        "num_train_epochs": int(training['num_train_epochs']),
         "fp16": fp16,
         "bf16": bf16,
-        "seed": int(config.seed),
-        "report_to": str(config.training.report_to),
+        "seed": int(config.get('seed', 42)),
+        "report_to": str(training.get('report_to', 'none')),
+        # KL penalty coefficient - critical for preventing divergence
+        "beta": float(training.get('beta', 0.1)),
     }
 
-    if int(config.training.max_steps) and int(config.training.max_steps) > 0:
-        args["max_steps"] = int(config.training.max_steps)
+    max_steps = training.get('max_steps', 0)
+    if max_steps and int(max_steps) > 0:
+        args["max_steps"] = int(max_steps)
 
     # GSPO toggle uses sequence-level importance sampling.
-    if bool(config.training.use_gspo):
+    if training.get('use_gspo'):
         args["importance_sampling_level"] = "sequence"
 
     # Optional pass-through args (only if supported by GRPOConfig)
-    extra_args = config.training.extra_args or {}
+    extra_args = training.get('extra_args') or {}
     if not isinstance(extra_args, dict):
         raise TypeError("training.extra_args must be a mapping/dict")
     args.update(extra_args)
@@ -174,27 +189,33 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def run(args: argparse.Namespace) -> Dict[str, Any]:
     config = load_config(args.config)
+    model_cfg = config['model']
+    training_cfg = config['training']
+    dataset_cfg = config['dataset']
+    lora_cfg = config['lora']
+    wandb_cfg = config.get('wandb', {})
+    rewards_cfg = config.get('rewards', {})
 
+    # CLI overrides
     if args.model_name:
-        config.model.model_name = args.model_name
+        model_cfg['model_name'] = args.model_name
     if args.dataset_name:
-        config.dataset.dataset_name = args.dataset_name
+        dataset_cfg['dataset_name'] = args.dataset_name
     if args.dataset_file:
-        config.dataset.dataset_file = args.dataset_file
+        dataset_cfg['dataset_file'] = args.dataset_file
     if args.local_file:
-        config.dataset.local_file = args.local_file
+        dataset_cfg['local_file'] = args.local_file
     if args.use_gspo:
-        config.training.use_gspo = True
+        training_cfg['use_gspo'] = True
 
-    if config.wandb.enabled:
-        config.use_wandb = setup_wandb()
-        if config.use_wandb:
-            config.training.report_to = "wandb"
+    if wandb_cfg.get('enabled'):
+        if setup_wandb():
+            training_cfg['report_to'] = "wandb"
 
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_output_dir = Path(config.training.output_dir)
+    base_output_dir = Path(training_cfg['output_dir'])
     run_dir = base_output_dir / timestamp
 
     checkpoints_dir = run_dir / "checkpoints"
@@ -207,55 +228,57 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"  Logs: {logs_dir}\n")
 
     # Load dataset (raw, then formatted after chat template applied)
+    local_file = dataset_cfg.get('local_file')
     raw_dataset = load_raw_dataset(
-        dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
-        data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
-        local_file=config.dataset.local_file,
-        num_proc=config.dataset.num_proc,
+        dataset_name=dataset_cfg.get('dataset_name') if not local_file else None,
+        data_files=dataset_cfg.get('dataset_file') if not local_file else None,
+        local_file=local_file,
+        num_proc=dataset_cfg.get('num_proc', 1),
     )
     print_dataset_samples(raw_dataset, num_samples=2)
 
     # Load model + tokenizer/processor
-    lora_path = getattr(config.model, 'lora_path', None)
+    lora_path = model_cfg.get('lora_path')
     if lora_path:
         # Load from SFT checkpoint (merge LoRA first)
         model, tok_or_proc, is_vl = load_from_sft_checkpoint(
-            base_model_name=config.model.model_name,
+            base_model_name=model_cfg['model_name'],
             lora_path=lora_path,
-            max_seq_length=config.model.max_seq_length,
-            dtype=config.model.dtype,
-            load_in_4bit=config.model.load_in_4bit,
+            max_seq_length=model_cfg['max_seq_length'],
+            dtype=model_cfg.get('dtype'),
+            load_in_4bit=model_cfg.get('load_in_4bit', True),
             hf_token=hf_token,
         )
     else:
         # Load base model
         model, tok_or_proc, is_vl = load_model_and_tokenizer(
-            model_name=config.model.model_name,
-            max_seq_length=config.model.max_seq_length,
-            dtype=config.model.dtype,
-            load_in_4bit=config.model.load_in_4bit,
+            model_name=model_cfg['model_name'],
+            max_seq_length=model_cfg['max_seq_length'],
+            dtype=model_cfg.get('dtype'),
+            load_in_4bit=model_cfg.get('load_in_4bit', True),
             hf_token=hf_token,
         )
     tokenizer = get_text_tokenizer(tok_or_proc)
 
     # Apply chat template (config override wins; else inferred)
-    chat_template_name = config.model.chat_template or _detect_chat_template(config.model.model_name)
+    chat_template_name = model_cfg.get('chat_template') or _detect_chat_template(model_cfg['model_name'])
     tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
     print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
-    # Apply LoRA
+    # Apply LoRA for GRPO training
+    # (If loading from SFT checkpoint, the SFT LoRA was already merged into base weights)
     model = apply_lora_adapters(
         model=model,
         is_vision_model=is_vl,
-        r=config.lora.r,
-        lora_alpha=config.lora.lora_alpha,
-        lora_dropout=config.lora.lora_dropout,
-        bias=config.lora.bias,
-        target_modules=config.lora.target_modules,
-        use_gradient_checkpointing=config.lora.use_gradient_checkpointing,
-        random_state=config.lora.random_state,
-        use_rslora=getattr(config.lora, "use_rslora", False),
-        use_dora=getattr(config.lora, "use_dora", False),
+        r=lora_cfg['r'],
+        lora_alpha=lora_cfg['lora_alpha'],
+        lora_dropout=lora_cfg['lora_dropout'],
+        bias=lora_cfg['bias'],
+        target_modules=lora_cfg['target_modules'],
+        use_gradient_checkpointing=lora_cfg['use_gradient_checkpointing'],
+        random_state=lora_cfg['random_state'],
+        use_rslora=lora_cfg.get('use_rslora', False),
+        use_dora=lora_cfg.get('use_dora', False),
     )
     check_gpu_memory()
 
@@ -263,13 +286,13 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     formatted_dataset = format_dataset_for_grpo(
         raw_dataset,
         tokenizer=tokenizer,
-        prompt_column=config.dataset.prompt_column,
-        num_proc=config.dataset.num_proc,
+        prompt_column=dataset_cfg.get('prompt_column', 'prompt'),
+        num_proc=dataset_cfg.get('num_proc', 1),
     )
 
     # Rewards
     reward_fn, reward_plan = build_combined_reward_function(
-        rewards_config=config.rewards,
+        rewards_config=rewards_cfg,
         base_dir=Path(__file__).parent,
     )
     print("\nReward configuration:")
@@ -282,16 +305,16 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print("\n" + "=" * 60)
     print("GRPO TRAINING CONFIGURATION")
     print("=" * 60)
-    print(f"Mode: {'GSPO' if config.training.use_gspo else 'GRPO'}")
-    print(f"Model: {config.model.model_name}")
+    print(f"Mode: {'GSPO' if training_cfg.get('use_gspo') else 'GRPO'}")
+    print(f"Model: {model_cfg['model_name']}")
     print(f"Dataset: {len(formatted_dataset)} examples")
     print(f"Output: {checkpoints_dir}")
-    print(f"Batch: {config.training.per_device_train_batch_size} x {config.training.gradient_accumulation_steps}")
-    print(f"Generations per prompt: {config.training.num_generations}")
-    print(f"Max prompt len: {config.training.max_prompt_length}")
-    print(f"Max completion len: {config.training.max_completion_length}")
-    print(f"Learning rate: {config.training.learning_rate}")
-    print(f"Report to: {config.training.report_to}")
+    print(f"Batch: {training_cfg['per_device_train_batch_size']} x {training_cfg['gradient_accumulation_steps']}")
+    print(f"Generations per prompt: {training_cfg['num_generations']}")
+    print(f"Max prompt len: {training_cfg['max_prompt_length']}")
+    print(f"Max completion len: {training_cfg['max_completion_length']}")
+    print(f"Learning rate: {training_cfg['learning_rate']}")
+    print(f"Report to: {training_cfg.get('report_to', 'none')}")
     print("=" * 60 + "\n")
 
     if args.dry_run:
@@ -300,7 +323,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     callbacks = [
         MetricsTableCallback(
-            log_every_n_steps=config.training.logging_steps,
+            log_every_n_steps=training_cfg['logging_steps'],
             output_dir=str(run_dir),
         )
     ]

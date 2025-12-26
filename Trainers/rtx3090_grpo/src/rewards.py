@@ -269,6 +269,12 @@ class RewardRubric:
         pred_context = data.get("context", {})
         gt_context = gt_args.get("context", {})
 
+        # Defensive: ensure contexts are dicts (model may output string)
+        if not isinstance(pred_context, dict):
+            pred_context = {}
+        if not isinstance(gt_context, dict):
+            gt_context = {}
+
         if context_fields and gt_context:
             context_matches = 0
             for field in context_fields:

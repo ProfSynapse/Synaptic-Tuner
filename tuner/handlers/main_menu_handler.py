@@ -103,6 +103,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.generate_handler import GenerateHandler
         from tuner.handlers.pipeline_handler import PipelineHandler
         from tuner.handlers.convert_handler import ConvertHandler
+        from tuner.handlers.merge_handler import MergeHandler
         from tuner.handlers.improve_handler import handle_improve
         from tuner.handlers.inference_handler import InferenceHandler
 
@@ -115,8 +116,9 @@ class MainMenuHandler(BaseHandler):
 
         # Step 3: Define menu options
         menu_options = [
-            ("train", f"{BOX['star']} Train a model (SFT, KTO, or MLX)"),
+            ("train", f"{BOX['star']} Train a model (SFT, KTO, GRPO)"),
             ("run", f"{BOX['star']} Run model (chat with your trained model)"),
+            ("merge", f"{BOX['bullet']} Merge LoRA (prepare for GRPO or upload)"),
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
             ("convert", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
@@ -129,6 +131,7 @@ class MainMenuHandler(BaseHandler):
         handlers = {
             "train": TrainHandler(),
             "run": InferenceHandler(),
+            "merge": MergeHandler(),
             "upload": UploadHandler(),
             "convert": ConvertHandler(),
             "eval": EvalHandler(),
