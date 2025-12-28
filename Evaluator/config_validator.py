@@ -32,9 +32,9 @@ class ValidationIssue:
 @dataclass
 class ParsedToolCall:
     """A parsed tool call from the response."""
-    name: str  # Full tool name (e.g., "vaultManager_moveFolder")
-    agent: Optional[str] = None  # Agent part (e.g., "vaultManager")
-    tool: Optional[str] = None  # Tool part (e.g., "moveFolder")
+    name: str  # Full tool name (e.g., "storageManager_move")
+    agent: Optional[str] = None  # Agent part (e.g., "storageManager")
+    tool: Optional[str] = None  # Tool part (e.g., "move")
     params: Dict[str, Any] = field(default_factory=dict)
     context: Dict[str, Any] = field(default_factory=dict)
 
@@ -605,7 +605,7 @@ class ConfigDrivenValidator:
         issues: List[ValidationIssue],
     ) -> None:
         """Validate a single behavior (no OR)."""
-        # Handle parameterized behaviors: uses_tool(vaultManager_moveFolder)
+        # Handle parameterized behaviors: uses_tool(storageManager_move)
         param_match = re.match(r'(\w+)\(([^)]+)\)', behavior)
         if param_match:
             behavior_name = param_match.group(1)

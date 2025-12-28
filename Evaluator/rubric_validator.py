@@ -99,7 +99,7 @@ class RubricValidator:
 
         Args:
             response: Assistant response dict with 'content' and/or 'tool_calls'
-            rubric_key: Rubric to validate against (e.g., 'vaultManager_tools')
+            rubric_key: Rubric to validate against (e.g., 'storageManager_tools')
             system_prompt: Optional system prompt for cross-scope validation
 
         Returns:
@@ -152,7 +152,7 @@ class RubricValidator:
     def validate_tool_calls(
         self,
         tool_calls: List[Dict],
-        agent: str = "vaultManager"
+        agent: str = "storageManager"
     ) -> RubricValidationResult:
         """
         Validate tool calls against an agent's rubric.
@@ -161,7 +161,7 @@ class RubricValidator:
 
         Args:
             tool_calls: List of tool call dicts
-            agent: Agent name to determine rubric (default: vaultManager)
+            agent: Agent name to determine rubric (default: storageManager)
 
         Returns:
             RubricValidationResult
@@ -210,7 +210,7 @@ class RubricValidator:
     def extract_and_validate(
         self,
         raw_response: str,
-        agent: str = "vaultManager"
+        agent: str = "storageManager"
     ) -> Tuple[RubricValidationResult, Optional[Dict]]:
         """
         Parse raw response text and validate.

@@ -5,12 +5,18 @@ llm:
   # Generation (local is fine - just creating raw examples)
   # Options: lmstudio, ollama, openrouter, unsloth
   generation:
-    provider: lmstudio
-    model: local-model
-    host: localhost
-    port: 1234
+    provider: openrouter
+    model: google/gemini-2.0-flash-001
     temperature: 0.7
-    max_tokens: 2048
+    max_tokens: 4096  # Increased for content writing scenarios
+  # Commented out for testing - restore when LM Studio running
+  # generation:
+  #   provider: lmstudio
+  #   model: local-model
+  #   host: localhost
+  #   port: 1234
+  #   temperature: 0.7
+  #   max_tokens: 4096
 
   # Example: Use Unsloth with a LoRA adapter for generation
   # generation:
@@ -76,13 +82,20 @@ cost_tracking:
 defaults:
   targets:
     # Tool scenarios
-    vaultManager_createFolder: 50
-    vaultManager_deleteFolder: 30
-    vaultManager_moveNote: 30
-    vaultManager_listDirectory: 40
+    storageManager_createFolder: 50
+    storageManager_archive: 30
+    storageManager_move: 30
+    storageManager_list: 40
     contentManager_createContent: 40
     contentManager_updateContent: 30
-    agentManager_delegateTask: 25
+    promptManager_delegateTask: 25
+
+    # Content writing scenarios (longer form content with frontmatter)
+    contentManager_write_research: 50
+    contentManager_write_blog: 50
+    contentManager_write_creative: 40
+    contentManager_write_documentation: 50
+    contentManager_write_journal: 40
 
     # Behavioral scenarios
     intellectual_humility: 25

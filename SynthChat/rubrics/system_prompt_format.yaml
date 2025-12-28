@@ -15,7 +15,7 @@ judge_prompt: |
      - `<session_context>` with sessionId and workspaceId
      - `<vault_structure>` with root-level folders and files
      - `<available_workspaces>` with 1-2 workspace definitions
-     - `<available_agents>` with 2-3 agent definitions (YAML)
+     - `<available_prompts>` with 2-3 custom prompt definitions (YAML)
      - `<selected_workspace>` with JSON (context, workspaceStructure, recentFiles, keyFiles, workflows, preferences, sessions)
 
   2. Check hierarchy consistency:
@@ -93,16 +93,16 @@ improver_prompt: |
     Root folder: Research/
   </available_workspaces>
 
-  <available_agents>
-  - name: FileManagerAgent
-    description: Handles file and folder operations including move, copy, rename, and delete
-
+  <available_prompts>
   - name: ResearchAssistant
     description: Organizes research notes, generates summaries, and maintains citations
 
-  - name: ProductivityAgent
-    description: Tracks habits, suggests workflow improvements, and manages reviews
-  </available_agents>
+  - name: WritingCoach
+    description: Provides feedback on clarity, structure, and style for written content
+
+  - name: Summarizer
+    description: Creates concise summaries of long documents and notes
+  </available_prompts>
 
   <selected_workspace name="Research Hub" id="ws_research_hub">
   This workspace is currently selected.
@@ -173,7 +173,7 @@ improver_prompt: |
   Generate unique, contextually appropriate content:
   - Folder names: Projects/, Content/, Archive/, Vehicles/, Studios/, Research/
   - Workspace names: Project Hub, Content Studio, Research Lab, Vehicle Tracker
-  - Agent names: FileManager, ContentEditor, TaskPlanner, ResearchAssistant
+  - Prompt names: ResearchAssistant, WritingCoach, Summarizer, TaskPlanner
   - Workflows: Based on workspace purpose, not current task
 
   # FORMAT
@@ -204,9 +204,9 @@ validations:
     type: xml
     error: "Missing required <available_workspaces>...</available_workspaces> tag"
 
-  - match: available_agents
+  - match: available_prompts
     type: xml
-    error: "Missing required <available_agents>...</available_agents> tag"
+    error: "Missing required <available_prompts>...</available_prompts> tag"
 
   - match: selected_workspace
     type: xml

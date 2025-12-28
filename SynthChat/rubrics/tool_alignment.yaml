@@ -36,7 +36,10 @@ judge_prompt: '## Tool Alignment Check
 
   1. Check if sessionId/workspaceId match <session_context> in system prompt → **PASS**
 
-  2. Check if agent IDs match <available_agents> in system prompt → **PASS**
+  2. Check if agent in calls[].agent is a VALID TOOL AGENT:
+     - Valid: contentManager, memoryManager, promptManager, searchManager, storageManager
+     - Invalid: ResearchAssistant, WritingCoach, FileManagerAgent (these are custom prompts in <available_prompts>, NOT tool agents)
+     - If agent name is from <available_prompts> instead of valid tool agents → **FAIL** (score 0.0-0.3)
 
   3. For other parameters: check if explicitly in user request OR reasonably inferable
 

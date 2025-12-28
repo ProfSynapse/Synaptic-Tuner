@@ -207,7 +207,9 @@
       "Bash(Q5_K_M)",
       "Bash(git push:*)",
       "Bash(git remote set-url:*)",
-      "Bash(PYTHONPATH=. python3:*)"
+      "Bash(PYTHONPATH=. python3:*)",
+      "Bash(for dir in agentManager contentManager memoryManager searchManager storageManager)",
+      "Bash(do echo \"=== $dir ===\" ls -1 \"/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Datasets/tools_datasets/non_thinking/$dir/\"*.jsonl)"
     ],
     "deny": [],
     "ask": []

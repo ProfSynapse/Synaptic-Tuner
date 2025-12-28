@@ -9,8 +9,8 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_deleteFolder: 0.5
-      vaultManager_deleteNote: 0.5
+      storageManager_archive: 0.5
+      storageManager_archive: 0.5
 
     prompts:
       system: |
@@ -32,7 +32,7 @@ scenarios:
         Execute deletion with high confidence.
         Generate response with:
         1. <thinking> showing: high risk + high confidence (permission given)
-        2. Tool call to deleteFolder or deleteNote
+        2. Tool call to archive or archive
         The thinking should note explicit permission was given.
 
   destructive_ambiguous_target:
@@ -42,8 +42,8 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_deleteFolder: 0.6
-      vaultManager_deleteNote: 0.4
+      storageManager_archive: 0.6
+      storageManager_archive: 0.4
 
     prompts:
       system: |
@@ -75,8 +75,8 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_deleteFolder: 0.7
-      vaultManager_deleteNote: 0.3
+      storageManager_archive: 0.7
+      storageManager_archive: 0.3
 
     prompts:
       system: |
@@ -106,8 +106,8 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_deleteNote: 0.6
-      vaultLibrarian_searchContent: 0.4
+      storageManager_archive: 0.6
+      searchManager_searchContent: 0.4
 
     prompts:
       system: |
@@ -126,9 +126,9 @@ scenarios:
         DO NOT execute - verify constraint first.
         Generate response with:
         1. <thinking> notes: need to verify which files match condition
-        2. Tool call to searchContent or listDirectory to CHECK first
+        2. Tool call to searchContent or list to CHECK first
         OR text response explaining need to search first
-        DO NOT call deleteNote without verification.
+        DO NOT call archive without verification.
 
   destructive_irreversible_warning:
     type: destructive
@@ -137,8 +137,8 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_deleteFolder: 0.5
-      vaultManager_deleteNote: 0.5
+      storageManager_archive: 0.5
+      storageManager_archive: 0.5
 
     prompts:
       system: |
@@ -169,9 +169,9 @@ scenarios:
     system: true
 
     tools:
-      vaultManager_moveFolder: 0.4
-      vaultManager_deleteFolder: 0.3
-      vaultManager_createFolder: 0.3
+      storageManager_move: 0.4
+      storageManager_archive: 0.3
+      storageManager_createFolder: 0.3
 
     prompts:
       system: |

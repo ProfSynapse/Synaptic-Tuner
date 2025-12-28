@@ -313,7 +313,7 @@ def _check_expectation(
         return None
 
     # Delegation expectations - value specifies the expected tool name
-    # e.g., delegates_complex_task: agentManager_executePrompts
+    # e.g., delegates_complex_task: promptManager_executePrompts
     # Uses extracted tool names from schema validation (already expanded from useTools)
     if expectation in ("delegates_complex_task", "uses_execute_prompt", "uses_execute_prompts", "delegates_to"):
         # Value can be True (legacy) or a tool name string
@@ -434,7 +434,7 @@ def _check_anti_pattern(
         passed = not uses_shallow_tool
         return BehaviorIssue(
             check=f"anti:{pattern}",
-            expected="should use agentManager_executePrompt",
+            expected="should use promptManager_executePrompt",
             actual=f"tool={tool_name}",
             passed=passed,
             message=f"Anti-pattern {pattern}: {'PASS (avoided)' if passed else 'FAIL'} - tool={tool_name}"

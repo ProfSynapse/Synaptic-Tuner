@@ -1,0 +1,706 @@
+# Content Writing Scenarios for SynthChat
+# Each scenario is SELF-CONTAINED with all definitions inline
+# No external dependencies - everything needed is in the scenario
+
+scenarios:
+  # ============================================
+  # RESEARCH NOTES
+  # ============================================
+  contentManager_write_research:
+    type: tool
+    agent: contentManager
+    tool: write
+    max_tokens: 4096
+
+    # Tool call format definition (self-contained)
+    tool_format:
+      wrapper: useTools
+      context:
+        required: [sessionId, workspaceId, memory, goal]
+      params:
+        required: [path, content]
+
+    # Validation rubrics for this scenario
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, content_writing_quality]
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt for a RESEARCHER or STUDENT.
+
+        REQUIRED STRUCTURE - You MUST include ALL of these sections:
+
+        1. <session_context>
+           IMPORTANT: When using tools, include these values:
+           - sessionId: "unique-session-id"
+           - workspaceId: "workspace-id"
+           </session_context>
+
+        2. <vault_structure>
+           Folders:
+            - Research/
+            - Projects/
+            - Archive/
+           Files:
+            - README.md
+           </vault_structure>
+
+        3. <available_workspaces>
+           - Workspace Name (id: "workspace-id")
+             Description: What this workspace is for
+             Root folder: Research/
+           </available_workspaces>
+
+        4. <available_prompts>
+           - name: ResearchAssistant
+             description: Helps with research tasks
+           - name: Summarizer
+             description: Creates summaries
+           </available_prompts>
+
+        5. <selected_workspace name="Name" id="workspace-id">
+           {
+             "context": {
+               "id": "workspace-id",
+               "name": "Workspace Name",
+               "description": "Description",
+               "rootFolder": "Research/"
+             },
+             "workspaceStructure": [
+               {"path": "", "type": "folder", "children": ["Papers/", "Notes/"]}
+             ],
+             "recentFiles": ["Papers/recent.md"],
+             "keyFiles": ["index.md"],
+             "workflows": [
+               {"name": "Weekly Review", "steps": ["Review notes", "Update index"]}
+             ],
+             "preferences": "Use Markdown with YAML frontmatter.",
+             "sessions": []
+           }
+           </selected_workspace>
+
+        Make it feel like an active research project with realistic context.
+        Generate UNIQUE content - different folder names, workspace names, file paths.
+
+      user: |
+        OUTPUT ONLY the user's request - no preamble.
+
+        Generate a natural request to CREATE research notes on a specific topic.
+        Examples: "Write up my notes on the transformer paper", "Document my literature review"
+
+        The request should mention a specific topic and imply substantive content needed.
+        OUTPUT ONLY THE REQUEST TEXT.
+
+      assistant: |
+        Generate a tool call to write research notes. OUTPUT ONLY VALID JSON.
+
+        Required format:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_XXXXXXXXX",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<extract from system prompt>",
+                  "workspaceId": "<extract from system prompt>",
+                  "memory": "<brief session context>",
+                  "goal": "<your goal>"
+                },
+                "calls": [{
+                  "agent": "contentManager",
+                  "tool": "write",
+                  "params": {
+                    "path": "<appropriate path in workspace>",
+                    "content": "<full markdown content>"
+                  }
+                }]
+              }
+            }
+          }]
+        }
+
+        The params.content MUST include:
+
+        1. YAML frontmatter (raw --- delimiters, NO code fence):
+           - title, description, tags (array), aliases, category: "research"
+
+        2. Research content (500-1500 words):
+           - Use ## headings naturally
+           - Include findings, analysis, implications
+           - Obsidian formatting: [[wikilinks]], callouts
+
+        OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.
+
+  # ============================================
+  # BLOG POSTS / ESSAYS
+  # ============================================
+  contentManager_write_blog:
+    type: tool
+    agent: contentManager
+    tool: write
+    max_tokens: 4096
+
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, content_writing_quality]
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt for a WRITER or CONTENT CREATOR.
+
+        REQUIRED STRUCTURE - You MUST include ALL of these sections:
+
+        1. <session_context>
+           IMPORTANT: When using tools, include these values:
+           - sessionId: "unique-session-id"
+           - workspaceId: "workspace-id"
+           </session_context>
+
+        2. <vault_structure>
+           Folders:
+            - Drafts/
+            - Published/
+            - Blog/
+            - Essays/
+           Files:
+            - README.md
+           </vault_structure>
+
+        3. <available_workspaces>
+           - Blog Workspace (id: "blog-workspace")
+             Description: Content creation and blog posts
+             Root folder: Blog/
+           </available_workspaces>
+
+        4. <available_prompts>
+           - name: WritingCoach
+             description: Provides feedback on writing
+           - name: Summarizer
+             description: Creates summaries
+           </available_prompts>
+
+        5. <selected_workspace name="Blog" id="blog-workspace">
+           {
+             "context": {
+               "id": "blog-workspace",
+               "name": "Blog Workspace",
+               "description": "Content creation",
+               "rootFolder": "Blog/"
+             },
+             "workspaceStructure": [
+               {"path": "", "type": "folder", "children": ["Drafts/", "Published/"]}
+             ],
+             "recentFiles": ["Drafts/latest-post.md"],
+             "keyFiles": ["style-guide.md"],
+             "workflows": [
+               {"name": "Content Pipeline", "steps": ["Draft", "Edit", "Publish"]}
+             ],
+             "preferences": "Use engaging prose with clear structure.",
+             "sessions": []
+           }
+           </selected_workspace>
+
+        Make it feel like an active content creation setup.
+        Generate UNIQUE content - different topics, workspace names, file paths.
+
+      user: |
+        OUTPUT ONLY the user's request - no preamble, no explanation.
+
+        Generate a natural user request to WRITE a blog post or essay.
+
+        Examples:
+        - "Write a blog post about the future of AI in creative industries"
+        - "Draft an essay on productivity systems for knowledge workers"
+        - "Create a post explaining quantum computing for beginners"
+        - "Write an opinion piece on remote work culture"
+        - "Draft a technical blog post about microservices architecture"
+
+        The request should:
+        - Specify a clear topic
+        - Imply a target audience
+        - Optionally mention tone (casual, professional, technical)
+
+        OUTPUT ONLY THE REQUEST TEXT - nothing else.
+
+      assistant: |
+        Generate a tool call to write a blog post/essay. OUTPUT ONLY VALID JSON.
+
+        Required format:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_XXXXXXXXX",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<extract from system prompt>",
+                  "workspaceId": "<extract from system prompt>",
+                  "memory": "<brief session context>",
+                  "goal": "<your goal>"
+                },
+                "calls": [{
+                  "agent": "contentManager",
+                  "tool": "write",
+                  "params": {
+                    "path": "<appropriate path in workspace>",
+                    "content": "<full markdown content>"
+                  }
+                }]
+              }
+            }
+          }]
+        }
+
+        The params.content MUST include:
+
+        1. YAML frontmatter (raw --- delimiters, NO code fence):
+           - title, description, tags (array), aliases, category: "blog"
+
+        2. Blog content (800-2000 words):
+           - Engaging hook/introduction
+           - Use ## headings naturally
+           - Clear conclusion with takeaways
+           - Practical examples throughout
+
+        3. Writing quality:
+           - Clear, engaging prose
+           - Reader-focused language
+           - Concrete examples
+
+        OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.
+
+  # ============================================
+  # CREATIVE WRITING
+  # ============================================
+  contentManager_write_creative:
+    type: tool
+    agent: contentManager
+    tool: write
+    max_tokens: 4096
+
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, content_writing_quality]
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt for a CREATIVE WRITER.
+
+        REQUIRED STRUCTURE - You MUST include ALL of these sections:
+
+        1. <session_context>
+           IMPORTANT: When using tools, include these values:
+           - sessionId: "unique-session-id"
+           - workspaceId: "workspace-id"
+           </session_context>
+
+        2. <vault_structure>
+           Folders:
+            - Stories/
+            - Characters/
+            - Worldbuilding/
+            - Drafts/
+            - Poetry/
+           Files:
+            - README.md
+           </vault_structure>
+
+        3. <available_workspaces>
+           - Creative Workspace (id: "creative-workspace")
+             Description: Fiction writing and worldbuilding
+             Root folder: Stories/
+           </available_workspaces>
+
+        4. <available_prompts>
+           - name: WritingCoach
+             description: Provides feedback on prose
+           - name: CharacterHelper
+             description: Develops character arcs
+           </available_prompts>
+
+        5. <selected_workspace name="Creative" id="creative-workspace">
+           {
+             "context": {
+               "id": "creative-workspace",
+               "name": "Creative Workspace",
+               "description": "Fiction writing project",
+               "rootFolder": "Stories/"
+             },
+             "workspaceStructure": [
+               {"path": "", "type": "folder", "children": ["Chapters/", "Characters/", "Worldbuilding/"]}
+             ],
+             "recentFiles": ["Chapters/chapter-01.md"],
+             "keyFiles": ["outline.md", "characters.md"],
+             "workflows": [
+               {"name": "Writing Session", "steps": ["Outline", "Draft", "Revise"]}
+             ],
+             "preferences": "Use vivid prose with strong sensory details.",
+             "sessions": []
+           }
+           </selected_workspace>
+
+        Make it feel like an active creative writing setup with:
+        - Ongoing story or project context
+        - Character or world references
+        - Genre context (sci-fi, fantasy, literary, etc.)
+
+        Generate UNIQUE content - different project names, character names, story concepts.
+
+      user: |
+        OUTPUT ONLY the user's request - no preamble, no explanation.
+
+        Generate a natural user request for CREATIVE writing.
+
+        Examples:
+        - "Write a short story about a time traveler who can only go forward"
+        - "Create a character backstory for the antagonist in my novel"
+        - "Write a scene where the protagonist discovers the truth"
+        - "Draft the opening chapter of my fantasy novel"
+        - "Create a poem about the passage of time"
+        - "Write dialogue between the two main characters meeting for the first time"
+
+        The request should:
+        - Specify the type of creative content
+        - Provide enough context for the narrative
+        - Optionally mention style, tone, or genre
+
+        OUTPUT ONLY THE REQUEST TEXT - nothing else.
+
+      assistant: |
+        Generate a tool call to write creative content. OUTPUT ONLY VALID JSON.
+
+        Required format:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_XXXXXXXXX",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<extract from system prompt>",
+                  "workspaceId": "<extract from system prompt>",
+                  "memory": "<brief session context>",
+                  "goal": "<your goal>"
+                },
+                "calls": [{
+                  "agent": "contentManager",
+                  "tool": "write",
+                  "params": {
+                    "path": "<appropriate path in workspace>",
+                    "content": "<full markdown content>"
+                  }
+                }]
+              }
+            }
+          }]
+        }
+
+        The params.content MUST include:
+
+        1. YAML frontmatter (raw --- delimiters, NO code fence):
+           - title, description, tags (array), aliases, category: "creative"
+
+        2. Creative content (500-2000 words):
+           - Engaging narrative voice
+           - Vivid descriptions and sensory details
+           - Character development and dialogue
+           - Natural scene breaks or transitions
+
+        3. Writing craft:
+           - Show don't tell
+           - Strong opening hook
+           - Emotional resonance
+
+        OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.
+
+  # ============================================
+  # DOCUMENTATION / HOW-TO
+  # ============================================
+  contentManager_write_documentation:
+    type: tool
+    agent: contentManager
+    tool: write
+    max_tokens: 4096
+
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, content_writing_quality]
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt for someone writing DOCUMENTATION or TUTORIALS.
+
+        REQUIRED STRUCTURE - You MUST include ALL of these sections:
+
+        1. <session_context>
+           IMPORTANT: When using tools, include these values:
+           - sessionId: "unique-session-id"
+           - workspaceId: "workspace-id"
+           </session_context>
+
+        2. <vault_structure>
+           Folders:
+            - Docs/
+            - Tutorials/
+            - Guides/
+            - API/
+            - Processes/
+           Files:
+            - README.md
+           </vault_structure>
+
+        3. <available_workspaces>
+           - Documentation Workspace (id: "docs-workspace")
+             Description: Technical documentation and guides
+             Root folder: Docs/
+           </available_workspaces>
+
+        4. <available_prompts>
+           - name: TechnicalEditor
+             description: Reviews technical accuracy
+           - name: Summarizer
+             description: Creates summaries
+           </available_prompts>
+
+        5. <selected_workspace name="Docs" id="docs-workspace">
+           {
+             "context": {
+               "id": "docs-workspace",
+               "name": "Documentation Workspace",
+               "description": "Technical documentation",
+               "rootFolder": "Docs/"
+             },
+             "workspaceStructure": [
+               {"path": "", "type": "folder", "children": ["Guides/", "API/", "Tutorials/"]}
+             ],
+             "recentFiles": ["Guides/getting-started.md"],
+             "keyFiles": ["index.md", "style-guide.md"],
+             "workflows": [
+               {"name": "Doc Review", "steps": ["Draft", "Technical Review", "Publish"]}
+             ],
+             "preferences": "Use clear, concise language with code examples.",
+             "sessions": []
+           }
+           </selected_workspace>
+
+        Make it feel like an active documentation effort with technical context.
+        Generate UNIQUE content - different project names, tool names, API concepts.
+
+      user: |
+        OUTPUT ONLY the user's request - no preamble, no explanation.
+
+        Generate a natural user request to CREATE documentation or a tutorial.
+
+        Examples:
+        - "Write a guide on setting up the development environment"
+        - "Create documentation for the new API endpoints"
+        - "Write a tutorial on using our deployment pipeline"
+        - "Document the process for onboarding new team members"
+        - "Create a how-to guide for configuring the CI/CD system"
+        - "Write step-by-step instructions for the data migration process"
+
+        The request should:
+        - Specify what to document
+        - Imply the target audience
+        - Optionally mention technical details
+
+        OUTPUT ONLY THE REQUEST TEXT - nothing else.
+
+      assistant: |
+        Generate a tool call to write documentation. OUTPUT ONLY VALID JSON.
+
+        Required format:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_XXXXXXXXX",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<extract from system prompt>",
+                  "workspaceId": "<extract from system prompt>",
+                  "memory": "<brief session context>",
+                  "goal": "<your goal>"
+                },
+                "calls": [{
+                  "agent": "contentManager",
+                  "tool": "write",
+                  "params": {
+                    "path": "<appropriate path in workspace>",
+                    "content": "<full markdown content>"
+                  }
+                }]
+              }
+            }
+          }]
+        }
+
+        The params.content MUST include:
+
+        1. YAML frontmatter (raw --- delimiters, NO code fence):
+           - title, description, tags (array), aliases, category: "documentation"
+
+        2. Documentation content (500-1500 words):
+           - Use ## headings naturally
+           - Prerequisites, steps, examples
+           - Troubleshooting if appropriate
+
+        3. Technical formatting:
+           - Code blocks with syntax highlighting
+           - Numbered steps for procedures
+           - Callouts: `> [!warning]`, `> [!tip]`
+           - Tables for configuration
+
+        OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.
+
+  # ============================================
+  # JOURNAL / REFLECTION
+  # ============================================
+  contentManager_write_journal:
+    type: tool
+    agent: contentManager
+    tool: write
+    max_tokens: 4096
+
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, content_writing_quality]
+
+    prompts:
+      system: |
+        Generate a realistic Obsidian vault system prompt for someone who keeps a JOURNAL or DAILY NOTES.
+
+        REQUIRED STRUCTURE - You MUST include ALL of these sections:
+
+        1. <session_context>
+           IMPORTANT: When using tools, include these values:
+           - sessionId: "unique-session-id"
+           - workspaceId: "workspace-id"
+           </session_context>
+
+        2. <vault_structure>
+           Folders:
+            - Daily/
+            - Journal/
+            - Reflections/
+            - Goals/
+            - Gratitude/
+           Files:
+            - README.md
+           </vault_structure>
+
+        3. <available_workspaces>
+           - Personal Workspace (id: "personal-workspace")
+             Description: Daily journaling and reflections
+             Root folder: Journal/
+           </available_workspaces>
+
+        4. <available_prompts>
+           - name: ReflectionGuide
+             description: Prompts deeper thinking
+           - name: Summarizer
+             description: Creates summaries
+           </available_prompts>
+
+        5. <selected_workspace name="Personal" id="personal-workspace">
+           {
+             "context": {
+               "id": "personal-workspace",
+               "name": "Personal Workspace",
+               "description": "Daily journaling",
+               "rootFolder": "Journal/"
+             },
+             "workspaceStructure": [
+               {"path": "", "type": "folder", "children": ["Daily/", "Reflections/", "Goals/"]}
+             ],
+             "recentFiles": ["Daily/2024-01-15.md"],
+             "keyFiles": ["templates/daily.md", "goals-2024.md"],
+             "workflows": [
+               {"name": "Morning Routine", "steps": ["Gratitude", "Intentions", "Review"]}
+             ],
+             "preferences": "Use first-person, reflective tone.",
+             "sessions": []
+           }
+           </selected_workspace>
+
+        Make it feel like an active personal knowledge management system.
+        Generate UNIQUE content - different themes, life contexts, reflection topics.
+
+      user: |
+        OUTPUT ONLY the user's request - no preamble, no explanation.
+
+        Generate a natural user request to CREATE a journal entry or reflection.
+
+        Examples:
+        - "Write my daily journal entry reflecting on today's accomplishments"
+        - "Create a reflection on what I learned this week"
+        - "Write a gratitude entry for today"
+        - "Document my thoughts on the career decision I'm facing"
+        - "Create a weekly review summarizing my progress on goals"
+        - "Write a reflection on the book I just finished"
+
+        The request should:
+        - Indicate the type of reflection
+        - Provide context for meaningful content
+        - Optionally mention what to focus on
+
+        OUTPUT ONLY THE REQUEST TEXT - nothing else.
+
+      assistant: |
+        Generate a tool call to write a journal/reflection entry. OUTPUT ONLY VALID JSON.
+
+        Required format:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_XXXXXXXXX",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<extract from system prompt>",
+                  "workspaceId": "<extract from system prompt>",
+                  "memory": "<brief session context>",
+                  "goal": "<your goal>"
+                },
+                "calls": [{
+                  "agent": "contentManager",
+                  "tool": "write",
+                  "params": {
+                    "path": "<appropriate path in workspace>",
+                    "content": "<full markdown content>"
+                  }
+                }]
+              }
+            }
+          }]
+        }
+
+        The params.content MUST include:
+
+        1. YAML frontmatter (raw --- delimiters, NO code fence):
+           - title, description, tags (array), aliases, category: "journal"
+
+        2. Journal content (300-800 words):
+           - Personal, authentic voice
+           - First-person perspective
+           - Reflections, insights, takeaways
+           - Use ## headings naturally
+
+        3. Personal formatting:
+           - Honest, reflective tone
+           - Links to related entries [[]]
+           - Emotional authenticity
+
+        OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.

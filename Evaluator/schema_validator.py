@@ -29,11 +29,11 @@ def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
         "name": "useTools",
         "arguments": {
             "context": {...},
-            "calls": [{"agent": "vaultManager", "tool": "moveNote", "params": {...}}]
+            "calls": [{"agent": "storageManager", "tool": "move", "params": {...}}]
         }
     }
 
-    Becomes: [ToolCall(name="vaultManager_moveNote", arguments={...})]
+    Becomes: [ToolCall(name="storageManager_move", arguments={...})]
     """
     expanded = []
     for tc in tool_calls:
@@ -168,7 +168,7 @@ def validate_assistant_response(
     issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
 
     # Expand useTools wrapper into individual tool calls
-    # This allows expected_tools to use actual tool names like "vaultManager_moveNote"
+    # This allows expected_tools to use actual tool names like "storageManager_move"
     tool_calls = _expand_use_tools(tool_calls)
 
     # Validate IDs against eval context if provided
@@ -248,8 +248,8 @@ def _validate_ids_against_context(
                     message=f"Tool call #{idx}: workspaceId '{tool_workspace_id}' not in context {valid_workspace_ids}"
                 ))
 
-        # Check agent IDs for agentManager tools
-        if tc.name.startswith("agentManager_") and valid_agent_ids:
+        # Check agent IDs for promptManager tools
+        if tc.name.startswith("promptManager_") and valid_agent_ids:
             agent_id = tc.arguments.get("id") or tc.arguments.get("agent")
             if agent_id and agent_id.startswith("agent_"):
                 matches = agent_id in valid_agent_ids

@@ -171,7 +171,7 @@ scenarios:
     prompts:
       system: |
         Generate workspace with multiple agents available.
-        Include contentManager, vaultManager, vaultLibrarian.
+        Include contentManager, storageManager, searchManager.
 
       user: |
         Generate request that could use different tools:

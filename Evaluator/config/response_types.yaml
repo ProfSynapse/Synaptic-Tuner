@@ -80,9 +80,9 @@ response_types:
       has_tool_calls: true
       tool_categories:
         any_of:
-          - search    # vaultLibrarian_search*
+          - search    # searchManager_search*
           - read      # contentManager_readContent
-          - list      # vaultManager_listDirectory
+          - list      # storageManager_list
 
   # Error recovery response
   error_recovery:

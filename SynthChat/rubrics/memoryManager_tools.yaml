@@ -74,9 +74,8 @@ judge_prompt: |
   | tool | required params | optional params |
   |------|-----------------|-----------------|
   | listStates | - | includeArchived, tags, page, pageSize, order |
-  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | description, tags |
+  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | tags |
   | loadState | name | - |
-  | archiveState | name | restore |
 
   # EVALUATION CRITERIA
 
@@ -179,9 +178,8 @@ improver_prompt: |
   | tool | required params | optional params |
   |------|-----------------|-----------------|
   | listStates | - | includeArchived, tags, page, pageSize, order |
-  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | description, tags |
+  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | tags |
   | loadState | name | - |
-  | archiveState | name | restore |
 
   # INSTRUCTIONS
 
@@ -304,13 +302,8 @@ validations:
                 activeTask: string
                 activeFiles: array
                 nextSteps: array
-                description: string
                 tags: array
               loadState:
                 _required: [name]
                 name: string
-              archiveState:
-                _required: [name]
-                name: string
-                restore: boolean
     error: "useTools validation failed: {details}"

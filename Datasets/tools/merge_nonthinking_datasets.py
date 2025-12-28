@@ -26,43 +26,41 @@ def parse_version(version_str: str) -> tuple:
         return (0, 0, 0)
 
 
-def find_latest_version(agent_dir: Path, prefer_passed_only: bool = True) -> str:
-    """Return the latest tools_v*.jsonl version for the given agent directory."""
+def find_latest_version(agent_dir: Path) -> tuple:
+    """Return the latest version file for the given agent directory.
+
+    Returns (version_str, prefix) where prefix is 'tools' or 'text_only'.
+    Prefers clean version numbers (e.g., v2.0) over suffixed versions (e.g., v1.5_passed_only).
+    """
     if not agent_dir.exists():
-        return None
+        return None, None
 
     candidates = []
-    for file in agent_dir.glob("tools_v*.jsonl"):
-        name = file.name
-        # Skip failed, review, test, and experimental files
-        if "failed" in name or "review" in name or "test" in name or "_full" in name:
-            continue
-        if not name.startswith("tools_v") or not name.endswith(".jsonl"):
-            continue
 
-        # Extract version string
-        version_str = name[len("tools_v"): -len(".jsonl")]
-        candidates.append((version_str, file))
+    # Check for both tools_v*.jsonl and text_only_v*.jsonl patterns
+    for prefix in ["tools", "text_only"]:
+        for file in agent_dir.glob(f"{prefix}_v*.jsonl"):
+            name = file.name
+            # Skip failed, review, test, and experimental files
+            if "failed" in name or "review" in name or "test" in name or "_full" in name:
+                continue
+
+            # Extract version string
+            version_str = name[len(f"{prefix}_v"): -len(".jsonl")]
+            candidates.append((version_str, prefix, file))
 
     if not candidates:
-        return None
+        return None, None
 
-    # First, check for _passed_only files (these are the cleaned versions)
-    passed_only = [c for c in candidates if "passed_only" in c[0]]
-    if passed_only and prefer_passed_only:
-        # Sort passed_only by version and return highest
-        passed_only.sort(key=lambda x: parse_version(x[0]), reverse=True)
-        return passed_only[0][0]
-
-    # Otherwise, filter to just clean version numbers (no suffix)
+    # Prefer clean version numbers (no suffix like _passed_only)
     clean_versions = [c for c in candidates if "_" not in c[0]]
     if clean_versions:
         clean_versions.sort(key=lambda x: parse_version(x[0]), reverse=True)
-        return clean_versions[0][0]
+        return clean_versions[0][0], clean_versions[0][1]
 
-    # Fallback to any candidate
+    # Fallback to _passed_only or other suffixed versions
     candidates.sort(key=lambda x: parse_version(x[0]), reverse=True)
-    return candidates[0][0]
+    return candidates[0][0], candidates[0][1]
 
 
 def load_dataset(file_path: Path) -> List[Dict]:
@@ -94,14 +92,12 @@ def main():
     output_dir = Path(__file__).parent.parent
     output_file = output_dir / f"nonthinking_tools_sft_{args.date}.jsonl"
 
-    # Agent categories
+    # Agent categories - dynamically find all agent folders (including text_only)
     agents = [
-        "vaultManager",
-        "contentManager",
-        "memoryManager",
-        "vaultLibrarian",
-        "agentManager",
+        d.name for d in tools_datasets_dir.iterdir()
+        if d.is_dir() and not d.name.startswith('.')
     ]
+    agents.sort()  # Consistent ordering
 
     # Load all datasets
     print("Loading latest non-thinking tools datasets...")
@@ -111,13 +107,13 @@ def main():
 
     for agent in agents:
         agent_dir = tools_datasets_dir / agent
-        latest_version = find_latest_version(agent_dir)
+        latest_version, file_prefix = find_latest_version(agent_dir)
         if not latest_version:
             print(f"  WARNING: No dataset found for {agent} in {agent_dir}")
             continue
 
         version_tag = f"v{latest_version}"
-        file_path = agent_dir / f"tools_{version_tag}.jsonl"
+        file_path = agent_dir / f"{file_prefix}_{version_tag}.jsonl"
         if not file_path.exists():
             print(f"  WARNING: Expected file not found: {file_path}")
             continue
