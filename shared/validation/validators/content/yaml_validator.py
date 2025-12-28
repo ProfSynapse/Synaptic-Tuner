@@ -27,7 +27,7 @@ class YamlContentValidator(BaseContentValidator):
         2. YAML in XML sections:
            yaml:
              sections:
-               - tag: 'available_agents'
+               - tag: 'available_prompts'
                  min_items: 2
                  item_fields: [name, description]
 

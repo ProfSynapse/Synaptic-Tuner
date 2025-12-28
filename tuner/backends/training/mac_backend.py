@@ -2,7 +2,7 @@
 Location: /mnt/f/Code/Toolset-Training/tuner/backends/training/mac_backend.py
 
 Purpose:
-    Apple Silicon (M1/M2/M3) training backend implementation for MLX LoRA training.
+    Apple Silicon (M1/M2/M3/M4) training backend implementation for MLX LoRA training.
     Handles configuration loading from YAML files and execution of training scripts
     via subprocess.
 
@@ -10,14 +10,14 @@ Usage:
     from tuner.backends.training.mac_backend import MacBackend
 
     backend = MacBackend(repo_root=Path("/path/to/repo"))
-    config = backend.load_config("mlx")
+    config = backend.load_config("sft")
     exit_code = backend.execute(config, python_path="/path/to/python")
 
 Dependencies:
     - tuner.core.interfaces.ITrainingBackend
     - tuner.core.config.TrainingConfig
     - tuner.core.exceptions.ConfigurationError
-    - Trainers/mistral_lora_mac/config/config.yaml
+    - Trainers/mlx_sft_mac/config/config.yaml
 """
 
 import yaml
@@ -34,8 +34,8 @@ class MacBackend(ITrainingBackend):
     """
     Apple Silicon (Mac) training backend (MLX LoRA).
 
-    Supports one training method:
-    - MLX: LoRA fine-tuning using Apple's MLX framework optimized for Metal GPU
+    Supports training methods:
+    - sft: Supervised fine-tuning using MLX framework optimized for Metal GPU
 
     Uses configuration from YAML file in the Mac trainer directory.
     """
@@ -59,16 +59,16 @@ class MacBackend(ITrainingBackend):
         Get available training methods for Mac backend.
 
         Returns:
-            List of method names: ['mlx']
+            List of method names: ['sft']
         """
-        return ["mlx"]
+        return ["sft"]
 
     def load_config(self, method: str) -> TrainingConfig:
         """
         Load configuration from YAML file.
 
         Args:
-            method: Training method (must be 'mlx')
+            method: Training method (must be 'sft')
 
         Returns:
             Parsed training configuration
@@ -82,7 +82,7 @@ class MacBackend(ITrainingBackend):
                 f"Available: {self.get_available_methods()}"
             )
 
-        trainer_dir = self.repo_root / "Trainers" / "mistral_lora_mac"
+        trainer_dir = self.repo_root / "Trainers" / "mlx_sft_mac"
         config_path = trainer_dir / "config" / "config.yaml"
 
         if not config_path.exists():
@@ -130,69 +130,20 @@ class MacBackend(ITrainingBackend):
         import time
         from tuner.ui import console, RICH_AVAILABLE
 
-        # Mac trainer uses main.py with --config flag
+        # MLX SFT trainer uses train_sft.py with --config flag
         cmd = [
             python_path,
-            "main.py",
+            "train_sft.py",
             "--config",
             str(config.config_path)
         ]
         
-        if not RICH_AVAILABLE:
+        # Run training with live output (no buffering)
+        try:
             result = subprocess.run(cmd, cwd=str(config.trainer_dir))
             return result.returncode
-
-        # Interactive execution with loader
-        try:
-            process = subprocess.Popen(
-                cmd,
-                cwd=str(config.trainer_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                encoding='utf-8',
-                errors='replace'
-            )
-
-            # Use a thread to peek at the output so we don't block the spinner
-            output_started = threading.Event()
-            first_char = []
-
-            def wait_for_output():
-                try:
-                    char = process.stdout.read(1)
-                    if char:
-                        first_char.append(char)
-                except Exception:
-                    pass
-                finally:
-                    output_started.set()
-
-            reader_thread = threading.Thread(target=wait_for_output, daemon=True)
-            reader_thread.start()
-
-            with console.status("[bold aqua]Initializing MLX & Metal Kernels...[/bold aqua]", spinner="dots12"):
-                while not output_started.is_set():
-                    if process.poll() is not None:
-                        break
-                    time.sleep(0.1)
-
-            if not first_char and process.poll() is not None:
-                return process.returncode
-
-            if first_char:
-                sys.stdout.write(first_char[0])
-                sys.stdout.flush()
-            
-            shutil.copyfileobj(process.stdout, sys.stdout)
-            
-            return process.wait()
-
         except KeyboardInterrupt:
             print("\nTraining interrupted by user.")
-            if 'process' in locals():
-                process.terminate()
             return 130
         except Exception as e:
             print(f"Execution error: {e}")
@@ -212,6 +163,6 @@ class MacBackend(ITrainingBackend):
             if mx.metal.is_available():
                 return True, ""
             else:
-                return False, "Metal GPU not available. Ensure you're on Apple Silicon (M1/M2/M3)."
+                return False, "Metal GPU not available. Ensure you're on Apple Silicon (M1/M2/M3/M4)."
         except ImportError:
-            return False, "MLX not installed. Install via: pip install mlx"
+            return False, "MLX not installed. Install via: pip install mlx mlx-lm"

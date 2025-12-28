@@ -157,7 +157,12 @@ class TrainHandler(BaseHandler):
             return 0
 
         # Step 8: Execute training
-        python = self.get_conda_python()
+        # Mac uses system python3 (no conda needed), NVIDIA uses conda python
+        if platform_choice == "mac":
+            import shutil
+            python = shutil.which("python3") or "python3"
+        else:
+            python = self.get_conda_python()
         print_info(f"Executing training with: {python}")
         print()
 

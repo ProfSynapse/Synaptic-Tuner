@@ -1,0 +1,103 @@
+# ============================================================================
+# MLX SFT Training Configuration for Apple Silicon (M1/M2/M3/M4)
+# Supervised Fine-Tuning for tool-calling instruction learning
+# ============================================================================
+
+# Model Configuration
+model:
+  # Qwen3-0.6B is ideal for M4 24GB - small enough for fast iteration
+  # Use mlx-community converted models for native MLX support
+  name: "mlx-community/Qwen3-0.6B-4bit"  # Qwen3 0.6B 4-bit quantized
+
+  # Alternative models (uncomment to use):
+  # name: "mlx-community/Qwen3-1.7B-4bit"    # Larger, still fits M4 24GB
+  # name: "mlx-community/Qwen3-4B-4bit"      # 4B, may be slower
+  # name: "Qwen/Qwen3-0.6B-MLX-4bit"         # Official Qwen MLX version
+
+  max_seq_length: 3200  # Context window (fits all examples)
+  dtype: "float16"      # MLX native float16 (no need for bfloat16)
+
+# LoRA Adapter Configuration (matches RTX 3090 settings)
+lora:
+  rank: 64              # LoRA rank (r)
+  alpha: 128            # LoRA alpha = 2 * rank
+  dropout: 0.05         # Dropout for regularization
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# SFT Training Configuration
+training:
+  # Training schedule
+  num_epochs: 1                    # SFT typically needs 2-3 epochs
+  per_device_batch_size: 2         # Batch size (M4 can handle 4-8)
+  gradient_accumulation_steps: 2   # Effective batch = 8
+
+  # Learning rate (higher than KTO, like RTX 3090 SFT)
+  learning_rate: 2.0e-4            # 2e-4 for SFT
+  warmup_steps: 50                 # ~10% warmup
+  max_grad_norm: 1.0               # Gradient clipping
+  weight_decay: 0.01               # Weight decay for regularization
+
+  # Logging and saving
+  logging_steps: 50                # Log every 10 steps
+  save_steps: 100                  # Save checkpoint every 100 steps
+  eval_steps: 100                  # Evaluate every 100 steps
+
+  # Optional: max_steps to limit training (useful for testing)
+  # max_steps: 500                 # Uncomment to limit training
+
+  seed: 42
+
+# Dataset Configuration
+data:
+  # Path relative to mlx_sft_mac directory (train_sft.py location)
+  dataset_path: "../../Datasets/nonthinking_tools_sft_12.28.25.jsonl"
+
+  train_split: 0.9                 # 90% train, 10% validation
+  shuffle: true
+  seed: 42
+  max_seq_length: 3200             # Must match model.max_seq_length
+
+# Output Configuration
+output:
+  base_dir: "./sft_output_mac"     # Base output directory
+  checkpoint_dir: "checkpoints"    # Subdirectory for checkpoints
+  logs_dir: "logs"                 # Subdirectory for logs
+  keep_last_n_checkpoints: 3       # Keep last N checkpoints
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  console: true
+  file: true
+  json_logs: true
+
+# Evaluation Configuration
+evaluation:
+  sample_prompts:
+    - "Help me organize my vault"
+    - "Create a new note about project planning"
+    - "Search for notes containing 'meeting'"
+  max_new_tokens: 256
+  temperature: 0.7
+  top_p: 0.9
+
+# System Configuration
+system:
+  device: "metal"                  # Use Metal GPU on Apple Silicon
+  memory_limit_gb: 20              # Reserve ~4GB for system
+  num_workers: 0                   # MLX doesn't use multiprocessing
+
+# ============================================================================
+# Notes:
+# - Optimized for Apple Silicon M4 24GB RAM
+# - Expected memory usage: ~8-12 GB for 0.5B-1.5B models
+# - Training time: ~30-60 minutes for 2 epochs with 4,500 examples
+# - Uses MLX-community pre-converted models for best compatibility
+# ============================================================================

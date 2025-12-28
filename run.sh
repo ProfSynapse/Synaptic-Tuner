@@ -244,6 +244,131 @@ check_and_install_deps() {
     fi
 }
 
+# ============================================================================
+# PLATFORM DETECTION - Mac uses system Python with MLX, others use Conda
+# ============================================================================
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    # Apple Silicon Mac - use system Python with MLX (no conda needed)
+
+    # Auto-install missing dependencies
+    MISSING_DEPS=()
+
+    if ! python3 -c "import mlx" 2>/dev/null; then
+        MISSING_DEPS+=("mlx")
+    fi
+    if ! python3 -c "import mlx_lm" 2>/dev/null; then
+        MISSING_DEPS+=("mlx-lm")
+    fi
+    if ! python3 -c "import rich" 2>/dev/null; then
+        MISSING_DEPS+=("rich")
+    fi
+    if ! python3 -c "import yaml" 2>/dev/null; then
+        MISSING_DEPS+=("pyyaml")
+    fi
+    if ! python3 -c "import transformers" 2>/dev/null; then
+        MISSING_DEPS+=("transformers")
+    fi
+
+    if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+        echo "🍎 Apple Silicon detected - installing dependencies..."
+        echo "   Missing: ${MISSING_DEPS[*]}"
+        echo ""
+        pip3 install "${MISSING_DEPS[@]}" --quiet
+        echo "✓ Dependencies installed"
+        echo ""
+    fi
+
+    # Animated startup with progress bar (same as NVIDIA path but for Mac/MLX)
+    python3 -c "
+import sys
+import os
+from time import sleep
+
+sys.path.append(os.getcwd())
+
+try:
+    from rich.console import Console, Group
+    from rich.live import Live
+    from rich.align import Align
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+    from rich.text import Text
+    from Trainers.shared.ui.theme import get_animated_logo_frame, TAGLINE, COLORS
+
+    console = Console()
+
+    # Phase 1: Logo animation
+    with Live(console=console, refresh_per_second=10, transient=False) as live:
+        for i in range(8):
+            frame_text = Text.from_markup(get_animated_logo_frame(i))
+            tagline_align = Align.center(TAGLINE)
+            live.update(Group(frame_text, tagline_align))
+            sleep(0.1)
+
+    # Phase 2: Mac-specific checks
+    console.print()
+
+    def run_check(name, import_cmd):
+        import subprocess
+        try:
+            subprocess.run(
+                [sys.executable, '-c', import_cmd],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    checks = [
+        ('Initializing Metal GPU (MLX)...', 'import mlx.core as mx; assert mx.metal.is_available()'),
+        ('Loading model loaders (mlx_lm)...', 'import mlx_lm'),
+        ('Preparing tokenizers (Transformers)...', 'import transformers'),
+    ]
+
+    purple = '#93278F'
+    aqua = '#00A99D'
+
+    with Progress(
+        SpinnerColumn('dots', style=f'bold {purple}'),
+        TextColumn('[bold cyan]{task.description}'),
+        BarColumn(bar_width=30, style=purple, complete_style=aqua),
+        console=console,
+        transient=True
+    ) as progress:
+        task = progress.add_task('Starting...', total=len(checks))
+
+        for desc, cmd in checks:
+            progress.update(task, description=desc)
+            sleep(0.3)
+
+            if not run_check(desc, cmd):
+                console.print(f'[red]✗ Check failed: {desc}[/red]')
+                sys.exit(1)
+
+            progress.advance(task)
+
+    # Ready message
+    ready = Text('✓ SYNAPTIC TUNER ready (Apple Silicon)', style=f'bold {aqua}')
+    console.print(Align.center(ready))
+    console.print()
+
+except ImportError:
+    print('🍎 Apple Silicon - MLX Backend')
+    print('  SYNAPTIC TUNER ready')
+    print()
+except Exception as e:
+    print(f'Startup error: {e}')
+"
+
+    # Run CLI directly with python3
+    python3 tuner.py "$@"
+    exit $?
+fi
+
+# ============================================================================
+# NVIDIA/Linux path - requires Conda with Unsloth
+# ============================================================================
 if [ -n "$CONDA_SH" ]; then
     source "$CONDA_SH" 2>/dev/null
     if conda env list 2>/dev/null | grep -q "$UNSLOTH_ENV"; then
