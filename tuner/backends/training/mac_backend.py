@@ -115,7 +115,7 @@ class MacBackend(ITrainingBackend):
 
     def execute(self, config: TrainingConfig, python_path: str) -> int:
         """
-        Execute training script via subprocess.
+        Execute training script via subprocess with live progress display.
 
         Args:
             config: Training configuration
@@ -124,12 +124,6 @@ class MacBackend(ITrainingBackend):
         Returns:
             Exit code (0 = success, non-zero = failure)
         """
-        import sys
-        import shutil
-        import threading
-        import time
-        from tuner.ui import console, RICH_AVAILABLE
-
         # MLX SFT trainer uses train_sft.py with --config flag
         cmd = [
             python_path,
@@ -137,17 +131,32 @@ class MacBackend(ITrainingBackend):
             "--config",
             str(config.config_path)
         ]
-        
-        # Run training with live output (no buffering)
+
+        # Try to use the fancy progress display
         try:
-            result = subprocess.run(cmd, cwd=str(config.trainer_dir))
-            return result.returncode
-        except KeyboardInterrupt:
-            print("\nTraining interrupted by user.")
-            return 130
-        except Exception as e:
-            print(f"Execution error: {e}")
-            return 1
+            from Trainers.shared.ui.training_progress import run_with_progress
+
+            # Calculate total steps from config
+            total_steps = 0  # Will be auto-detected from output
+
+            return run_with_progress(
+                cmd=cmd,
+                cwd=str(config.trainer_dir),
+                total_steps=total_steps,
+                model_name=config.model_name.split('/')[-1],
+                platform="Apple Silicon (MLX)"
+            )
+        except ImportError:
+            # Fallback to simple subprocess
+            try:
+                result = subprocess.run(cmd, cwd=str(config.trainer_dir))
+                return result.returncode
+            except KeyboardInterrupt:
+                print("\nTraining interrupted by user.")
+                return 130
+            except Exception as e:
+                print(f"Execution error: {e}")
+                return 1
 
     def validate_environment(self) -> tuple[bool, str]:
         """
