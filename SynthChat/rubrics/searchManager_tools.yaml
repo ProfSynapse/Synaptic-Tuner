@@ -1,11 +1,11 @@
-name: vaultLibrarian Tools
-description: Validates vaultLibrarian tool calls use OpenAI format with useTools schema (read-only search)
+name: searchManager Tools
+description: Validates searchManager tool calls use OpenAI format with useTools schema (read-only search)
 scope: response
 pass_threshold: 0.8
 
 judge_prompt: |
   # CONTEXT
-  You are evaluating tool calls for the vaultLibrarian agent. Tool calls must use OpenAI format with the useTools schema.
+  You are evaluating tool calls for the searchManager agent. Tool calls must use OpenAI format with the useTools schema.
 
   **Tool Calls to Evaluate:**
   ```json
@@ -51,7 +51,7 @@ judge_prompt: |
     }},
     "calls": [
       {{
-        "agent": "vaultLibrarian",
+        "agent": "searchManager",
         "tool": "toolName",
         "params": {{ ... tool-specific params ... }}
       }}
@@ -73,7 +73,7 @@ judge_prompt: |
   2. **Arguments Structure**: Must have `context` and `calls` at root
   3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
   4. **Calls Array**: Each call must have `agent`, `tool`, `params`
-  5. **Agent Value**: Must be exactly "vaultLibrarian"
+  5. **Agent Value**: Must be exactly "searchManager"
   6. **Tool Value**: Must be valid tool name
   7. **Params**: Must include all required params for the tool
 
@@ -84,7 +84,7 @@ judge_prompt: |
   - **0.0-0.3** = Wrong function name OR completely wrong format
 
   # OUTPUT
-  Return JSON: `{{"vaultlibrariantools_score": 0.0-1.0}}`
+  Return JSON: `{{"searchmanagertools_score": 0.0-1.0}}`
 
 improver_prompt: |
   # CONTEXT
@@ -158,7 +158,7 @@ improver_prompt: |
         "type": "function",
         "function": {{
           "name": "useTools",
-          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User searching for ML content.\", \"goal\": \"Find notes about machine learning.\"}}, \"calls\": [{{\"agent\": \"vaultLibrarian\", \"tool\": \"searchContent\", \"params\": {{\"query\": \"machine learning\", \"includeContent\": true}}}}]}}"
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User searching for ML content.\", \"goal\": \"Find notes about machine learning.\"}}, \"calls\": [{{\"agent\": \"searchManager\", \"tool\": \"searchContent\", \"params\": {{\"query\": \"machine learning\", \"includeContent\": true}}}}]}}"
         }}
       }}
     ]
@@ -171,12 +171,12 @@ improver_prompt: |
 output_schema:
   type: object
   properties:
-    vaultlibrariantools_score:
+    searchmanagertools_score:
       type: number
       min: 0.0
       max: 1.0
   required:
-    - vaultlibrariantools_score
+    - searchmanagertools_score
 
 # Output format defines how improved content is applied to the example
 output_format:
@@ -197,7 +197,7 @@ validations:
             tool: string
             params: object
           _subtools:
-            vaultLibrarian:
+            searchManager:
               searchContent:
                 _required: [query]
                 query: string

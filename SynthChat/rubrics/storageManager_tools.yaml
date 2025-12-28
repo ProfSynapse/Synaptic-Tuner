@@ -1,11 +1,11 @@
-name: vaultManager Tools
-description: Validates vaultManager tool calls use OpenAI format with useTools schema
+name: storageManager Tools
+description: Validates storageManager tool calls use OpenAI format with useTools schema
 scope: response
 pass_threshold: 0.8
 
 judge_prompt: |
   # CONTEXT
-  You are evaluating tool calls for the vaultManager agent. Tool calls must use OpenAI format with the useTools schema.
+  You are evaluating tool calls for the storageManager agent. Tool calls must use OpenAI format with the useTools schema.
 
   **Tool Calls to Evaluate:**
   ```json
@@ -51,7 +51,7 @@ judge_prompt: |
     }},
     "calls": [
       {{
-        "agent": "vaultManager",
+        "agent": "storageManager",
         "tool": "toolName",
         "params": {{ ... tool-specific params ... }}
       }}
@@ -63,26 +63,23 @@ judge_prompt: |
 
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | listDirectory | path | filter, depth, includeFiles |
-  | openNote | path | mode, focus |
+  | list | path | filter |
+  | open | path | mode, focus |
   | createFolder | path | - |
-  | editFolder | path, newPath | - |
-  | moveFolder | path, newPath | overwrite |
-  | deleteFolder | path | recursive |
-  | moveNote | path, newPath | overwrite |
-  | deleteNote | path | - |
-  | duplicateNote | sourcePath, targetPath | overwrite, autoIncrement |
+  | move | path, newPath | overwrite |
+  | archive | path | - |
+  | copy | path, newPath | overwrite |
 
-  ## DESTRUCTIVE TOOLS: deleteFolder, deleteNote, moveFolder (overwrite), moveNote (overwrite)
+  ## DESTRUCTIVE TOOLS: archive, move (overwrite)
 
   # EVALUATION CRITERIA
 
-  1. **Function Name**: Must be exactly "useTools" (not "vaultManager_moveFolder" etc.)
+  1. **Function Name**: Must be exactly "useTools" (not "storageManager_move" etc.)
   2. **Arguments Structure**: Must have `context` and `calls` at root
   3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
   4. **Calls Array**: Each call must have `agent`, `tool`, `params`
-  5. **Agent Value**: Must be exactly "vaultManager"
-  6. **Tool Value**: Must be valid tool name (listDirectory, openNote, etc.)
+  5. **Agent Value**: Must be exactly "storageManager"
+  6. **Tool Value**: Must be valid tool name (list, open, etc.)
   7. **Params**: Must include all required params for the tool
 
   # SCORING
@@ -92,7 +89,7 @@ judge_prompt: |
   - **0.0-0.3** = Wrong function name OR completely wrong format
 
   # OUTPUT
-  Return JSON: `{{"vaultmanagertools_score": 0.0-1.0}}`
+  Return JSON: `{{"storagemanagertools_score": 0.0-1.0}}`
 
 improver_prompt: |
   # CONTEXT
@@ -151,7 +148,7 @@ improver_prompt: |
     }},
     "calls": [
       {{
-        "agent": "vaultManager",
+        "agent": "storageManager",
         "tool": "<toolName without prefix>",
         "params": {{ <tool-specific parameters> }}
       }}
@@ -163,15 +160,12 @@ improver_prompt: |
 
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | listDirectory | path | filter, depth, includeFiles |
-  | openNote | path | mode, focus |
+  | list | path | filter |
+  | open | path | mode, focus |
   | createFolder | path | - |
-  | editFolder | path, newPath | - |
-  | moveFolder | path, newPath | overwrite |
-  | deleteFolder | path | recursive |
-  | moveNote | path, newPath | overwrite |
-  | deleteNote | path | - |
-  | duplicateNote | sourcePath, targetPath | overwrite, autoIncrement |
+  | move | path, newPath | overwrite |
+  | archive | path | - |
+  | copy | path, newPath | overwrite |
 
   # INSTRUCTIONS
 
@@ -191,7 +185,7 @@ improver_prompt: |
         "type": "function",
         "function": {{
           "name": "useTools",
-          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User reorganizing vault.\", \"goal\": \"Move LightRay to archive.\"}}, \"calls\": [{{\"agent\": \"vaultManager\", \"tool\": \"moveFolder\", \"params\": {{\"path\": \"Studios/Boards/LightRay\", \"newPath\": \"Studios/Archive/LightRay\"}}}}]}}"
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User reorganizing vault.\", \"goal\": \"Move LightRay to archive.\"}}, \"calls\": [{{\"agent\": \"storageManager\", \"tool\": \"move\", \"params\": {{\"path\": \"Studios/Boards/LightRay\", \"newPath\": \"Studios/Archive/LightRay\"}}}}]}}"
         }}
       }}
     ]
@@ -204,12 +198,12 @@ improver_prompt: |
 output_schema:
   type: object
   properties:
-    vaultmanagertools_score:
+    storagemanagertools_score:
       type: number
       min: 0.0
       max: 1.0
   required:
-    - vaultmanagertools_score
+    - storagemanagertools_score
 
 # Output format defines how improved content is applied to the example
 # assistant_message: Parse as JSON with {content: null|string, tool_calls: [...]}
@@ -232,14 +226,12 @@ validations:
             tool: string
             params: object
           _subtools:
-            vaultManager:
-              listDirectory:
+            storageManager:
+              list:
                 _required: [path]
                 path: string
                 filter: string
-                depth: number
-                includeFiles: boolean
-              openNote:
+              open:
                 _required: [path]
                 path: string
                 mode: string
@@ -247,31 +239,17 @@ validations:
               createFolder:
                 _required: [path]
                 path: string
-              editFolder:
-                _required: [path, newPath]
-                path: string
-                newPath: string
-              moveFolder:
+              move:
                 _required: [path, newPath]
                 path: string
                 newPath: string
                 overwrite: boolean
-              deleteFolder:
+              archive:
                 _required: [path]
                 path: string
-                recursive: boolean
-              moveNote:
+              copy:
                 _required: [path, newPath]
                 path: string
                 newPath: string
                 overwrite: boolean
-              deleteNote:
-                _required: [path]
-                path: string
-              duplicateNote:
-                _required: [sourcePath, targetPath]
-                sourcePath: string
-                targetPath: string
-                overwrite: boolean
-                autoIncrement: boolean
     error: "useTools validation failed: {details}"

@@ -61,29 +61,22 @@ judge_prompt: |
 
   ## Valid Tools and Params:
 
-  ### Session Tools
+  ### Workspace Tools
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | createSession | - | name, description, sessionGoal |
-  | listSessions | - | limit, order |
-  | loadSession | sessionId | targetSessionId, sessionName |
-  | updateSession | - | sessionId, name, description, sessionGoal |
+  | loadWorkspace | id | limit |
+  | listWorkspaces | - | includeArchived, sortBy, order, limit |
+  | createWorkspace | name, description, rootFolder, purpose, workflows | keyFiles, preferences, dedicatedAgentId, relatedFolders, relatedFiles |
+  | updateWorkspace | workspaceId | name, description, rootFolder, purpose, workflows, keyFiles, preferences |
+  | archiveWorkspace | name | restore |
 
   ### State Tools
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | createState | name | description, targetSessionId, tags |
-  | listStates | - | includeContext, limit, order, tags |
-  | loadState | stateId | sessionName, restorationGoal |
-  | updateState | stateId | name, description, addTags, removeTags |
-
-  ### Workspace Tools
-  | tool | required params | optional params |
-  |------|-----------------|-----------------|
-  | createWorkspace | name, rootFolder, purpose, currentGoal, workflows | keyFiles, preferences |
-  | listWorkspaces | - | sortBy, order, limit |
-  | loadWorkspace | id | limit |
-  | updateWorkspace | workspaceId, fieldPath, newValue | - |
+  | listStates | - | includeArchived, tags, page, pageSize, order |
+  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | description, tags |
+  | loadState | name | - |
+  | archiveState | name | restore |
 
   # EVALUATION CRITERIA
 
@@ -98,7 +91,7 @@ judge_prompt: |
 
   ## Option B: Clarification Response (VALID ALTERNATIVE)
   If the user's request lacks critical info needed for a tool call, the assistant MAY ask for clarification. Valid when:
-  - Session/state/workspace ID is unknown and cannot be inferred
+  - State/workspace ID is unknown and cannot be inferred
   - Required parameters are unspecified
   - The operation is ambiguous
 
@@ -142,7 +135,7 @@ improver_prompt: |
   # DECISION: TOOL CALL OR CLARIFICATION?
 
   First, determine if you have enough information to make a tool call:
-  - Do you know the session/state/workspace ID? (Check system prompt or user request)
+  - Do you know the state/workspace ID? (Check system prompt or user request)
   - Do you have required parameters for the operation?
   - Is the operation clear?
 
@@ -171,7 +164,24 @@ improver_prompt: |
 
   **CRITICAL**: `content` MUST be `null` (not a string, not empty string).
 
-  ## Valid Tools - see judge prompt for full list
+  ## Valid Tools
+
+  ### Workspace Tools
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | loadWorkspace | id | limit |
+  | listWorkspaces | - | includeArchived, sortBy, order, limit |
+  | createWorkspace | name, description, rootFolder, purpose, workflows | keyFiles, preferences, dedicatedAgentId, relatedFolders, relatedFiles |
+  | updateWorkspace | workspaceId | name, description, rootFolder, purpose, workflows, keyFiles, preferences |
+  | archiveWorkspace | name | restore |
+
+  ### State Tools
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | listStates | - | includeArchived, tags, page, pageSize, order |
+  | createState | name, conversationContext, activeTask, activeFiles, nextSteps | description, tags |
+  | loadState | name | - |
+  | archiveState | name | restore |
 
   # INSTRUCTIONS
 
@@ -191,7 +201,7 @@ improver_prompt: |
         "type": "function",
         "function": {{
           "name": "useTools",
-          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User starting new research project.\", \"goal\": \"Create a new session for research.\"}}, \"calls\": [{{\"agent\": \"memoryManager\", \"tool\": \"createSession\", \"params\": {{\"name\": \"Research Session\", \"description\": \"Session for research tasks\"}}}}]}}"
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User starting new research project.\", \"goal\": \"Create a new state for research.\"}}, \"calls\": [{{\"agent\": \"memoryManager\", \"tool\": \"createState\", \"params\": {{\"name\": \"Research State\", \"conversationContext\": \"User is beginning research\", \"activeTask\": \"Research tasks\", \"activeFiles\": [], \"nextSteps\": [\"Gather sources\"]}}}}]}}"
         }}
       }}
     ]
@@ -200,11 +210,11 @@ improver_prompt: |
 
   # OPTION B: CLARIFICATION RESPONSE
 
-  If you cannot determine the session/state/workspace or required params, ask for clarification:
+  If you cannot determine the state/workspace or required params, ask for clarification:
 
   ```json
   {{
-    "content": "I'd be happy to help with that. Could you please specify which session you'd like me to load?",
+    "content": "I'd be happy to help with that. Could you please specify which state you'd like me to load?",
     "tool_calls": null
   }}
   ```
@@ -242,74 +252,65 @@ validations:
             params: object
           _subtools:
             memoryManager:
-              # Session tools
-              createSession:
-                _required: []
-                name: string
-                description: string
-                sessionGoal: string
-              listSessions:
-                _required: []
-                limit: number
-                order: string
-              loadSession:
-                _required: [sessionId]
-                sessionId: string
-                targetSessionId: string
-                sessionName: string
-              updateSession:
-                _required: []
-                sessionId: string
-                name: string
-                description: string
-                sessionGoal: string
-              # State tools
-              createState:
-                _required: [name]
-                name: string
-                description: string
-                targetSessionId: string
-                tags: array
-              listStates:
-                _required: []
-                includeContext: boolean
-                limit: number
-                order: string
-                tags: array
-              loadState:
-                _required: [stateId]
-                stateId: string
-                sessionName: string
-                restorationGoal: string
-              updateState:
-                _required: [stateId]
-                stateId: string
-                name: string
-                description: string
-                addTags: array
-                removeTags: array
               # Workspace tools
-              createWorkspace:
-                _required: [name, rootFolder, purpose, currentGoal, workflows]
-                name: string
-                rootFolder: string
-                purpose: string
-                currentGoal: string
-                workflows: array
-                keyFiles: array
-                preferences: object
-              listWorkspaces:
-                _required: []
-                sortBy: string
-                order: string
-                limit: number
               loadWorkspace:
                 _required: [id]
                 id: string
                 limit: number
+              listWorkspaces:
+                _required: []
+                includeArchived: boolean
+                sortBy: string
+                order: string
+                limit: number
+              createWorkspace:
+                _required: [name, description, rootFolder, purpose, workflows]
+                name: string
+                description: string
+                rootFolder: string
+                purpose: string
+                workflows: array
+                keyFiles: array
+                preferences: object
+                dedicatedAgentId: string
+                relatedFolders: array
+                relatedFiles: array
               updateWorkspace:
-                _required: [workspaceId, fieldPath, newValue]
+                _required: [workspaceId]
                 workspaceId: string
-                fieldPath: string
-                newValue: string
+                name: string
+                description: string
+                rootFolder: string
+                purpose: string
+                workflows: array
+                keyFiles: array
+                preferences: object
+              archiveWorkspace:
+                _required: [name]
+                name: string
+                restore: boolean
+              # State tools
+              listStates:
+                _required: []
+                includeArchived: boolean
+                tags: array
+                page: number
+                pageSize: number
+                order: string
+              createState:
+                _required: [name, conversationContext, activeTask, activeFiles, nextSteps]
+                name: string
+                conversationContext: string
+                activeTask: string
+                activeFiles: array
+                nextSteps: array
+                description: string
+                tags: array
+              loadState:
+                _required: [name]
+                name: string
+              archiveState:
+                _required: [name]
+                name: string
+                restore: boolean
     error: "useTools validation failed: {details}"

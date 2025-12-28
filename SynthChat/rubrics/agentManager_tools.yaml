@@ -29,7 +29,7 @@ judge_prompt: |
   - context: workspaceId, sessionId, memory, goal
   - calls: array with agent="agentManager", tool, params
 
-  ## Valid Tools: listModels, createAgent, listAgents, getAgent, updateAgent, deleteAgent, generateImage, executePrompts
+  ## Valid Tools: listModels, createAgent, listAgents, getAgent, updateAgent, archiveAgent, generateImage, executePrompts
 
   # EVALUATION CRITERIA
 
@@ -119,14 +119,14 @@ improver_prompt: |
 
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | listModels | - | - |
   | createAgent | name, description, prompt | isEnabled |
-  | listAgents | - | enabledOnly |
-  | getAgent | - | id, name |
   | updateAgent | id | name, description, prompt, isEnabled |
-  | deleteAgent | id | - |
-  | generateImage | prompt, provider, savePath | model, aspectRatio, numberOfImages |
-  | executePrompts | prompts | agent, provider, model, temperature, maxTokens |
+  | getAgent | - | id, name |
+  | listAgents | - | enabledOnly, includeArchived |
+  | archiveAgent | name | - |
+  | executePrompts | prompts | mergeResponses |
+  | generateImage | prompt, savePath | provider, model, aspectRatio, numberOfImages, imageSize, referenceImages, format |
+  | listModels | - | - |
 
   # INSTRUCTIONS
 
@@ -208,6 +208,7 @@ validations:
               listAgents:
                 _required: []
                 enabledOnly: boolean
+                includeArchived: boolean
               getAgent:
                 _required: []
                 id: string
@@ -219,23 +220,22 @@ validations:
                 description: string
                 prompt: string
                 isEnabled: boolean
-              deleteAgent:
-                _required: [id]
-                id: string
+              archiveAgent:
+                _required: [name]
+                name: string
               generateImage:
-                _required: [prompt, provider, savePath]
+                _required: [prompt, savePath]
                 prompt: string
-                provider: string
                 savePath: string
+                provider: string
                 model: string
                 aspectRatio: string
                 numberOfImages: number
+                imageSize: string
+                referenceImages: array
+                format: string
               executePrompts:
                 _required: [prompts]
                 prompts: array
-                agent: string
-                provider: string
-                model: string
-                temperature: number
-                maxTokens: number
+                mergeResponses: boolean
     error: "useTools validation failed: {details}"
