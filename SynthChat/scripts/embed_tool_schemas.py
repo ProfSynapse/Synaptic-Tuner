@@ -77,7 +77,7 @@ def convert_json_schema_to_simple(json_schema: Dict) -> Dict:
 
 
 def group_tools_by_agent(tools: Dict) -> Dict[str, Dict]:
-    """Group tools by agent prefix (e.g., vaultManager_, contentManager_)."""
+    """Group tools by agent prefix (e.g., storageManager_, contentManager_)."""
     agents = {}
 
     for tool_name, schema in tools.items():

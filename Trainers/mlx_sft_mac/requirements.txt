@@ -1,0 +1,21 @@
+# MLX SFT Training Requirements for Apple Silicon
+# Install with: pip install -r requirements.txt
+
+# MLX framework (Apple's ML library)
+mlx>=0.20.0
+mlx-lm>=0.24.0  # For loading HuggingFace models
+
+# HuggingFace
+transformers>=4.52.0
+huggingface-hub>=0.20.0
+tokenizers>=0.15.0
+
+# Data processing
+numpy>=1.24.0
+tqdm>=4.65.0
+
+# Configuration
+pyyaml>=6.0
+
+# Utilities
+psutil>=5.9.0  # Memory monitoring

@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from shared.llm import create_client
 from .utils.yaml_loader import load_yaml
@@ -32,20 +34,23 @@ def load_settings(config_dir: Path) -> Dict:
     return load_yaml(settings_path)
 
 
-def create_llm_client(config: Dict, mode: str = "generation"):
+def create_llm_client(config: Dict, mode: str = "generation",
+                      provider_override: str = None, model_override: str = None):
     """
     Create LLM client for generation or improvement.
 
     Args:
         config: Settings configuration
         mode: "generation" or "improvement"
+        provider_override: CLI override for provider (optional)
+        model_override: CLI override for model (optional)
 
     Returns:
         LLM client from shared.llm
     """
     llm_config = config["llm"].get(mode, {})
-    provider = llm_config.get("provider", "lmstudio")
-    model = llm_config.get("model", "local-model")
+    provider = provider_override or llm_config.get("provider", "lmstudio")
+    model = model_override or llm_config.get("model", "local-model")
 
     # Build config defaults from settings
     config_defaults = {
@@ -88,10 +93,12 @@ def generate_mode(args):
     scenarios_dir = Path(args.scenarios_dir or "SynthChat/scenarios")
     rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
 
-    # Create LLM clients
+    # Create LLM clients (CLI args override settings.yaml)
     print("Initializing LLM clients...")
-    gen_client = create_llm_client(settings, mode="generation")
-    improve_client = create_llm_client(settings, mode="improvement")
+    gen_client = create_llm_client(settings, mode="generation",
+                                   provider_override=args.provider, model_override=args.model)
+    improve_client = create_llm_client(settings, mode="improvement",
+                                       provider_override=args.provider, model_override=args.model)
 
     # Create improvement engine
     validation_config = config_dir / "validation.yaml"
@@ -139,6 +146,7 @@ def generate_mode(args):
 
     # Generate
     max_iterations = args.max_iterations or settings["improvement"]["max_iterations"]
+    num_workers = args.workers or 1
     results = []
 
     if docs:
@@ -156,8 +164,51 @@ def generate_mode(args):
                     doc_context=doc
                 )
                 results.extend(batch_results)
+    elif num_workers > 1:
+        # Parallel generation with multiple workers
+        print(f"Using {num_workers} parallel workers\n")
+
+        # Build work items
+        work_items = []
+        worker_id = 0
+        for scenario_key, count in targets.items():
+            scenario = generator.scenario_loader.get_scenario(scenario_key)
+            if not scenario:
+                print(f"Warning: Scenario not found: {scenario_key}")
+                continue
+            for _ in range(count):
+                work_items.append((
+                    scenario_key, scenario, max_iterations,
+                    config_dir, scenarios_dir, rubrics_dir,
+                    settings, args.provider, args.model, None, worker_id
+                ))
+                worker_id += 1
+
+        total = len(work_items)
+        completed = 0
+        lock = threading.Lock()
+
+        def update_progress():
+            nonlocal completed
+            with lock:
+                completed += 1
+                print(f"\rProgress: {completed}/{total} ({completed/total*100:.1f}%)", end="", flush=True)
+
+        # Execute in parallel
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(_generate_single_example, item): item for item in work_items}
+
+            for future in as_completed(futures):
+                result, error = future.result()
+                if error:
+                    print(f"\n{error}")
+                if result:
+                    results.append(result)
+                update_progress()
+
+        print()  # Newline after progress
     else:
-        # Standard generation (no docs)
+        # Standard sequential generation (no docs)
         results = generator.generate_batch(
             targets=targets,
             max_iterations=max_iterations,
@@ -165,7 +216,7 @@ def generate_mode(args):
         )
 
     # Save results
-    output_file = args.output or _generate_output_path(settings)
+    output_file = Path(args.output) if args.output else _generate_output_path(settings)
     _save_results(results, output_file, settings)
 
     # Print summary
@@ -217,9 +268,10 @@ def improve_mode(args):
 
     print(f"Loaded {len(examples)} examples from {input_path}\n")
 
-    # Create LLM client
+    # Create LLM client (CLI args override settings.yaml)
     print("Initializing improvement LLM client...")
-    improve_client = create_llm_client(settings, mode="improvement")
+    improve_client = create_llm_client(settings, mode="improvement",
+                                       provider_override=args.provider, model_override=args.model)
 
     # Create improvement engine
     validation_config = config_dir / "validation.yaml"
@@ -318,9 +370,10 @@ def validate_mode(args):
 
     print(f"Loaded {len(examples)} examples from {input_path}\n")
 
-    # Create LLM client for judging (no improvement needed)
+    # Create LLM client for judging (CLI args override settings.yaml)
     print("Initializing validation LLM client...")
-    validate_client = create_llm_client(settings, mode="improvement")
+    validate_client = create_llm_client(settings, mode="improvement",
+                                        provider_override=args.provider, model_override=args.model)
 
     # Create improvement engine
     validation_config = config_dir / "validation.yaml"
@@ -398,6 +451,52 @@ def validate_mode(args):
     if total_failed > 0:
         print(f"\nRun with 'improve' mode to fix failing examples:")
         print(f"  python -m SynthChat.run improve --input {input_path} --rubrics {','.join(rubrics)}")
+
+
+def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir: Path,
+                              settings: Dict, provider: str = None, model: str = None):
+    """Create a new generator instance for a worker thread."""
+    gen_client = create_llm_client(settings, mode="generation",
+                                   provider_override=provider, model_override=model)
+    improve_client = create_llm_client(settings, mode="improvement",
+                                       provider_override=provider, model_override=model)
+
+    validation_config = config_dir / "validation.yaml"
+    engine = ImprovementEngine(
+        llm_client=improve_client,
+        rubrics_dir=rubrics_dir,
+        config_path=validation_config,
+        enable_interactions=settings["logging"]["save_interactions"]
+    )
+
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=gen_client,
+        engine=engine,
+        enable_stage_validation=settings["generation"]["stage_validation"]
+    )
+    return generator
+
+
+def _generate_single_example(args_tuple):
+    """Worker function to generate a single example."""
+    (scenario_key, scenario, max_iterations, config_dir, scenarios_dir,
+     rubrics_dir, settings, provider, model, doc_context, worker_id) = args_tuple
+
+    try:
+        # Each worker creates its own generator (thread-safe LLM clients)
+        generator = _create_worker_generator(
+            config_dir, scenarios_dir, rubrics_dir, settings, provider, model
+        )
+
+        result = generator._generate_single(
+            scenario_key, scenario, max_iterations, True, doc_context
+        )
+        return result, None
+    except Exception as e:
+        return None, f"Worker {worker_id} error for {scenario_key}: {e}"
 
 
 def _generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> Path:
@@ -484,8 +583,11 @@ def main():
     generate_parser.add_argument("--targets-file", help="JSON file with generation targets")
     generate_parser.add_argument("--scenarios", nargs="+", help="Specific scenarios to generate")
     generate_parser.add_argument("--max-iterations", type=int, help="Max improvement iterations")
+    generate_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
+    generate_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
     generate_parser.add_argument("--docs", help="Path to doc file or folder (seed data for generation)")
     generate_parser.add_argument("--per-doc", type=int, default=1, help="Examples to generate per doc (default: 1)")
+    generate_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
 
     # Improve command
     improve_parser = subparsers.add_parser("improve", help="Improve existing dataset")
@@ -497,6 +599,9 @@ def main():
     improve_parser.add_argument("--start-line", type=int, help="Start line (1-indexed)")
     improve_parser.add_argument("--end-line", type=int, help="End line (inclusive)")
     improve_parser.add_argument("--max-iterations", type=int, help="Max improvement iterations")
+    improve_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
+    improve_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
+    improve_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
 
     # Validate command
     validate_parser = subparsers.add_parser("validate", help="Validate dataset (no improvement)")
@@ -504,6 +609,8 @@ def main():
     validate_parser.add_argument("--config-dir", help="Config directory path")
     validate_parser.add_argument("--rubrics-dir", help="Rubrics directory path")
     validate_parser.add_argument("--rubrics", help="Comma-separated rubric names")
+    validate_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
+    validate_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
 
     args = parser.parse_args()
 

@@ -208,8 +208,10 @@
       "Bash(git push:*)",
       "Bash(git remote set-url:*)",
       "Bash(PYTHONPATH=. python3:*)",
-      "mcp__plugin_serena_serena__get_symbols_overview",
-      "mcp__plugin_serena_serena__list_dir"
+      "Bash(for dir in agentManager contentManager memoryManager searchManager storageManager)",
+      "Bash(do echo \"=== $dir ===\" ls -1 \"/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Datasets/tools_datasets/non_thinking/$dir/\"*.jsonl)",
+      "Bash(timeout 300 python3:*)",
+      "Bash(pip3 install:*)"
     ],
     "deny": [],
     "ask": []

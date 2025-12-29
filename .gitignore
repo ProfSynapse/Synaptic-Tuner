@@ -110,4 +110,5 @@ llama.cpp/
 docs/
 interactions/
 webllm_output/
+sft_output_mac/
 grpo_output_rtx3090/

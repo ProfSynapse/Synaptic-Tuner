@@ -61,18 +61,13 @@ judge_prompt: |
 
   ## Valid Tools and Params:
 
-  | tool | required params | optional params |
-  |------|-----------------|-----------------|
-  | readContent | filePath | limit, offset, includeLineNumbers |
-  | createContent | filePath, content | - |
-  | appendContent | filePath, content | - |
-  | prependContent | filePath, content | - |
-  | deleteContent | filePath, content | similarityThreshold |
-  | replaceContent | filePath, oldContent, newContent | similarityThreshold |
-  | replaceByLine | filePath, startLine, endLine, newContent | - |
-  | findReplaceContent | filePath, findText, replaceText | replaceAll, caseSensitive |
+  | tool | required params | optional params | notes |
+  |------|-----------------|-----------------|-------|
+  | read | path, startLine | endLine | Replaces readContent. startLine is REQUIRED (use 1 for beginning) |
+  | write | path, content | overwrite | Replaces createContent. Creates new files |
+  | update | path, content, startLine | endLine | Replaces appendContent (startLine=-1), prependContent (startLine=1), replaceContent, replaceByLine, deleteContent (content=""), findReplaceContent |
 
-  ## DESTRUCTIVE TOOLS: deleteContent, replaceContent, replaceByLine, findReplaceContent
+  ## DESTRUCTIVE TOOLS: update (when modifying/deleting content)
 
   # EVALUATION CRITERIA
 
@@ -163,16 +158,11 @@ improver_prompt: |
 
   ## Valid Tools and Params:
 
-  | tool | required params | optional params |
-  |------|-----------------|-----------------|
-  | readContent | filePath | limit, offset, includeLineNumbers |
-  | createContent | filePath, content | - |
-  | appendContent | filePath, content | - |
-  | prependContent | filePath, content | - |
-  | deleteContent | filePath, content | similarityThreshold |
-  | replaceContent | filePath, oldContent, newContent | similarityThreshold |
-  | replaceByLine | filePath, startLine, endLine, newContent | - |
-  | findReplaceContent | filePath, findText, replaceText | replaceAll, caseSensitive |
+  | tool | required params | optional params | notes |
+  |------|-----------------|-----------------|-------|
+  | read | path, startLine | endLine | Replaces readContent. startLine is REQUIRED (use 1 for beginning) |
+  | write | path, content | overwrite | Replaces createContent. Creates new files |
+  | update | path, content, startLine | endLine | Replaces appendContent (startLine=-1), prependContent (startLine=1), replaceContent, replaceByLine, deleteContent (content=""), findReplaceContent |
 
   # INSTRUCTIONS
 
@@ -192,7 +182,7 @@ improver_prompt: |
         "type": "function",
         "function": {{
           "name": "useTools",
-          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User wants to read their todo file.\", \"goal\": \"Read and display the todo.md contents.\"}}, \"calls\": [{{\"agent\": \"contentManager\", \"tool\": \"readContent\", \"params\": {{\"filePath\": \"notes/todo.md\"}}}}]}}"
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User wants to read their todo file.\", \"goal\": \"Read and display the todo.md contents.\"}}, \"calls\": [{{\"agent\": \"contentManager\", \"tool\": \"read\", \"params\": {{\"path\": \"notes/todo.md\", \"startLine\": 1}}}}]}}"
         }}
       }}
     ]
@@ -248,46 +238,20 @@ validations:
             params: object
           _subtools:
             contentManager:
-              readContent:
-                _required: [filePath]
-                filePath: string
-                limit: number
-                offset: number
-                includeLineNumbers: boolean
-              createContent:
-                _required: [filePath, content]
-                filePath: string
-                content: string
-              appendContent:
-                _required: [filePath, content]
-                filePath: string
-                content: string
-              prependContent:
-                _required: [filePath, content]
-                filePath: string
-                content: string
-              deleteContent:
-                _required: [filePath, content]
-                filePath: string
-                content: string
-                similarityThreshold: number
-              replaceContent:
-                _required: [filePath, oldContent, newContent]
-                filePath: string
-                oldContent: string
-                newContent: string
-                similarityThreshold: number
-              replaceByLine:
-                _required: [filePath, startLine, endLine, newContent]
-                filePath: string
+              read:
+                _required: [path, startLine]
+                path: string
                 startLine: number
                 endLine: number
-                newContent: string
-              findReplaceContent:
-                _required: [filePath, findText, replaceText]
-                filePath: string
-                findText: string
-                replaceText: string
-                replaceAll: boolean
-                caseSensitive: boolean
+              write:
+                _required: [path, content]
+                path: string
+                content: string
+                overwrite: boolean
+              update:
+                _required: [path, content, startLine]
+                path: string
+                content: string
+                startLine: number
+                endLine: number
     error: "useTools validation failed: {details}"

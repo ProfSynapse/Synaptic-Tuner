@@ -160,13 +160,12 @@ behaviors:
     check: tool_sequence
     params:
       first_any_of:
-        - vaultManager_listDirectory
-        - vaultLibrarian_searchContent
-        - vaultLibrarian_searchDirectory
+        - storageManager_list
+        - searchManager_searchContent
+        - searchManager_searchDirectory
         - contentManager_readContent
       not_first:
-        - vaultManager_deleteFolder
-        - vaultManager_deleteNote
+        - storageManager_archive
         - contentManager_deleteLines
 
   # Reads before writing
@@ -185,9 +184,9 @@ behaviors:
     check: tool_sequence
     params:
       first_any_of:
-        - vaultLibrarian_searchContent
-        - vaultLibrarian_searchDirectory
-        - vaultLibrarian_searchByTags
+        - searchManager_searchContent
+        - searchManager_searchDirectory
+        - searchManager_searchByTags
 
   # --------------------------------------------------------
   # ERROR RECOVERY CHECKS

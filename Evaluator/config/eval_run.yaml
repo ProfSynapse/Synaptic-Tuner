@@ -95,9 +95,9 @@ scoring:
 
   # Per-category thresholds (optional)
   category_thresholds:
-    vaultManager: 0.85
+    storageManager: 0.85
     contentManager: 0.80
-    vaultLibrarian: 0.75
+    searchManager: 0.75
     behavior: 0.70
 
 # ============================================================
@@ -135,7 +135,7 @@ presets:
     scenarios:
       - tool_coverage.yaml
     tag_filter:
-      - vaultManager
+      - storageManager
     model:
       inference:
         max_tokens: 512

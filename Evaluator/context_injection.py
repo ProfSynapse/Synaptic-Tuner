@@ -89,14 +89,14 @@ class EvaluationContext:
         return prompt
 
     def _build_available_agents(self) -> str:
-        prompt = "<available_agents>\n"
+        prompt = "<available_prompts>\n"
         prompt += "The following custom agents are available:\n\n"
 
         for agent in self.agents:
             prompt += f'- {agent.name} (id: "{agent.id}")\n'
             prompt += f"  {agent.description}\n\n"
 
-        prompt += "</available_agents>"
+        prompt += "</available_prompts>"
         return prompt
 
     def to_expected_context(self) -> Dict[str, Any]:

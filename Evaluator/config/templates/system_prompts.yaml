@@ -79,15 +79,15 @@ templates:
       - workspaceId: "{workspace_id}"
       </session_context>
 
-      <available_agents>
+      <available_prompts>
       {agent_list}
-      </available_agents>
+      </available_prompts>
 
       <vault_structure>
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant that can coordinate with other agents. Use agentManager tools to delegate tasks to specialized agents when appropriate.
+      You are an AI assistant that can coordinate with other agents. Use promptManager tools to delegate tasks to specialized agents when appropriate.
 
     defaults:
       session_id: "session_multi_agent"

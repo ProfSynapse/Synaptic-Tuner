@@ -11,9 +11,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n -\
     \ Projects/Legacy/\n - Projects/Archive/\n - Templates/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/requirements.md\n - Projects/Phoenix/design.md\n - Projects/Legacy/old-api.md\n\
     \ - Projects/Legacy/deprecated-utils.md\n - Projects/Archive/2022-reports.md\n - Projects/Archive/2023-backups.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"README.md\"]},\n    {\"path\": \"\
     Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\", \"Legacy/\", \"Archive/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\", \"\
@@ -48,9 +48,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Research/\n - Research/ML/\n - Research/ML/Transformers/\n\
     \ - Research/ML/RL/\n - Notes/\n\nFiles:\n - README.md\n - Research/ML/attention-is-all-you-need.md\n - Research/ML/bert-pretraining.md\n - Research/ML/gpt-scaling-laws.md\n - Research/ML/rlhf-instruct-tuning.md\n\
     \ - Research/ML/constitutional-ai.md\n - Research/ML/chain-of-thought.md\n - Research/ML/sparse-attention.md\n - Research/ML/mixture-of-experts.md\n</vault_structure>\n\n<available_workspaces>\n- ML\
-    \ Research (id: \"ws_1732300800000_mlresearch\")\n  Description: Machine learning research papers and notes\n  Root folder: Research/ML/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_litrev\
+    \ Research (id: \"ws_1732300800000_mlresearch\")\n  Description: Machine learning research papers and notes\n  Root folder: Research/ML/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_litrev\
     \ - Literature Reviewer\n  Purpose: Synthesizes research papers and creates comprehensive literature reviews\n- agent_1732300800000_synthesis - Research Synthesizer\n  Purpose: Combines findings from\
-    \ multiple sources into coherent summaries\n</available_agents>\n\n<selected_workspace name=\"ML Research\" id=\"ws_1732300800000_mlresearch\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
+    \ multiple sources into coherent summaries\n</available_prompts>\n\n<selected_workspace name=\"ML Research\" id=\"ws_1732300800000_mlresearch\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
     : {\n    \"id\": \"ws_1732300800000_mlresearch\",\n    \"name\": \"ML Research\",\n    \"description\": \"Machine learning research papers and notes\",\n    \"rootFolder\": \"Research/ML/\"\n  },\n\
     \  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Research/\", \"Notes/\", \"README.md\"]},\n    {\"path\": \"Research/\", \"type\": \"folder\", \"children\"\
     : [\"ML/\"]},\n    {\"path\": \"Research/ML/\", \"type\": \"folder\", \"children\": [\"Transformers/\", \"RL/\", \"attention-is-all-you-need.md\", \"bert-pretraining.md\", \"gpt-scaling-laws.md\", \"\
@@ -59,11 +59,11 @@ tests:
     \    {\"name\": \"Paper Analysis\", \"steps\": [\"Read abstract\", \"Note methodology\", \"Summarize findings\"]},\n    {\"name\": \"Weekly Reading\", \"steps\": [\"Select papers\", \"Take notes\",\
     \ \"Update index\"]}\n  ],\n  \"preferences\": \"Use Markdown headers for sections. Tag papers by topic.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_mlresearch
@@ -83,9 +83,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Meetings/\n - Meetings/Standups/\n\
     \ - Meetings/Planning/\n - Meetings/Reviews/\n - Archive/\n - Archive/2023/\n - Archive/2024/\n - Archive/Meetings/\n\nFiles:\n - README.md\n - Meetings/Standups/daily-2024-12-01.md\n - Meetings/Standups/daily-2024-12-02.md\n\
     \ - Meetings/Planning/sprint-42.md\n - Meetings/Planning/sprint-43.md\n - Meetings/Reviews/quarterly-q4.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Meetings/\", \"Archive/\", \"README.md\"]},\n    {\"\
     path\": \"Meetings/\", \"type\": \"folder\", \"children\": [\"Standups/\", \"Planning/\", \"Reviews/\"]},\n    {\"path\": \"Meetings/Standups/\", \"type\": \"folder\", \"children\": [\"daily-2024-12-01.md\"\
@@ -119,9 +119,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Config/\n\
     \ - Config/\n - Config/Environments/\n\nFiles:\n - README.md\n - Projects/Atlas/config.yaml\n - Projects/Atlas/Config/api-config.json\n - Projects/Atlas/Config/database.yaml\n - Config/app-config.yaml\n\
     \ - Config/Environments/dev.yaml\n - Config/Environments/prod.yaml\n - Config/Environments/staging.yaml\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Config/\", \"README.md\"]},\n    {\"path\": \"Projects/Atlas/\"\
     , \"type\": \"folder\", \"children\": [\"Config/\", \"config.yaml\"]},\n    {\"path\": \"Projects/Atlas/Config/\", \"type\": \"folder\", \"children\": [\"api-config.json\", \"database.yaml\"]},\n  \
@@ -131,8 +131,8 @@ tests:
     steps\": [\"Clone repository\", \"Install dependencies\", \"Configure secrets\"]}\n  ],\n  \"preferences\": \"Use YAML for configs. Store secrets in environment variables.\",\n  \"sessions\": []\n}\n\
     </selected_workspace>"
   acceptable_tools:
-  - vaultLibrarian_searchContent
-  - vaultLibrarian_searchDirectory
+  - searchManager_searchContent
+  - searchManager_searchDirectory
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -150,9 +150,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n -\
     \ Projects/test/\n - Archive/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/design.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Projects/\"\
     , \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\", \"test/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\"\
@@ -161,8 +161,8 @@ tests:
     \ tests\", \"Submit PR\"]},\n    {\"name\": \"Bug Triage\", \"steps\": [\"Reproduce issue\", \"Identify root cause\", \"Implement fix\"]}\n  ],\n  \"preferences\": \"Use semantic versioning. Keep test\
     \ folders separate from source.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   acceptable_tools:
-  - vaultManager_listDirectory
-  - vaultLibrarian_searchDirectory
+  - storageManager_list
+  - searchManager_searchDirectory
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -180,9 +180,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Settings/\n - Config/\n\
     \nFiles:\n - README.md\n - Settings/settings.yaml\n - Settings/database.yaml\n - Config/app-config.yaml\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Settings/\", \"Config/\", \"README.md\"]},\n    {\"\
     path\": \"Settings/\", \"type\": \"folder\", \"children\": [\"settings.yaml\", \"database.yaml\"]},\n    {\"path\": \"Config/\", \"type\": \"folder\", \"children\": [\"app-config.yaml\"]}\n  ],\n  \"\
@@ -190,7 +190,7 @@ tests:
     \ database\", \"Run migration scripts\", \"Verify data integrity\"]},\n    {\"name\": \"Config Audit\", \"steps\": [\"Review all configs\", \"Check for deprecated values\", \"Update documentation\"\
     ]}\n  ],\n  \"preferences\": \"Use connection pooling. Rotate credentials quarterly.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -210,8 +210,8 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Docs/\n - Docs/API/\n - Docs/Guides/\n -\
     \ Archive/\n\nFiles:\n - README.md\n - Docs/API/v1-endpoints.md\n - Docs/API/v2-endpoints.md\n - Docs/API/v3-endpoints.md\n - Docs/API/deprecated-v1-auth.md\n - Docs/API/deprecated-v1-users.md\n - Docs/Guides/getting-started.md\n\
     </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\
-    \n<available_agents>\n- agent_1732300800000_taskplanner - Task Planner\n  Purpose: Organizes tasks, sets priorities, and tracks progress\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose:\
-    \ Analyzes data patterns and generates insights\n- agent_1732300800000_factchecker - Fact Checker\n  Purpose: Verifies information accuracy and identifies sources\n</available_agents>\n\n<selected_workspace\
+    \n<available_prompts>\n- agent_1732300800000_taskplanner - Task Planner\n  Purpose: Organizes tasks, sets priorities, and tracks progress\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose:\
+    \ Analyzes data patterns and generates insights\n- agent_1732300800000_factchecker - Fact Checker\n  Purpose: Verifies information accuracy and identifies sources\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\"\
     ,\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\"\
     : [\"Projects/\", \"Docs/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Docs/\", \"type\": \"folder\", \"children\": [\"API/\", \"Guides/\"]},\n    {\"path\": \"Docs/API/\", \"type\": \"folder\"\
@@ -220,7 +220,7 @@ tests:
     , \"Update changelog\"]},\n    {\"name\": \"Documentation Review\", \"steps\": [\"Check for broken links\", \"Update screenshots\", \"Verify code samples\"]}\n  ],\n  \"preferences\": \"Use OpenAPI\
     \ format. Keep deprecated docs for 2 major versions.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -240,8 +240,8 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Inbox/\n - Docs/\n - Archive/\n\nFiles:\n\
     \ - README.md\n - Inbox/api-integration-notes.md\n - Inbox/meeting-summary-dec.md\n - Inbox/bug-report-login.md\n - Inbox/feature-request-dark-mode.md\n - Inbox/deployment-checklist.md\n - Inbox/user-feedback-survey.md\n\
     </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\
-    \n<available_agents>\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose:\
-    \ Helps with drafting, editing, and formatting documents\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose: Analyzes data patterns and generates insights\n</available_agents>\n\n<selected_workspace\
+    \n<available_prompts>\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose:\
+    \ Helps with drafting, editing, and formatting documents\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose: Analyzes data patterns and generates insights\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\"\
     ,\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\"\
     : [\"Projects/\", \"Inbox/\", \"Docs/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Inbox/\", \"type\": \"folder\", \"children\": [\"api-integration-notes.md\", \"meeting-summary-dec.md\", \"\
@@ -252,7 +252,7 @@ tests:
     \ (Meeting notes)\n- Inbox/bug-report-login.md (Bug report)\n- Inbox/feature-request-dark-mode.md (Feature request)\n- Inbox/deployment-checklist.md (DevOps)\n- Inbox/user-feedback-survey.md (User research)\n\
     \nThese files cover different topics: API docs, meetings, bugs, features, devops, and user research. Would you like me to organize them?\n</prior_conversation>"
   expected_tools:
-  - vaultManager_createFolder
+  - storageManager_createFolder
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -272,9 +272,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Downloads/\n - Research/\n - Research/Papers/\n\
     \ - Research/Papers/2017/\n - Research/Papers/2018/\n - Research/Papers/2020/\n - Research/Papers/2022/\n\nFiles:\n - README.md\n - Downloads/transformer-attention-2017.pdf.md\n - Downloads/bert-pretraining-2018.pdf.md\n\
     \ - Downloads/gpt3-language-models-2020.pdf.md\n - Downloads/constitutional-ai-2022.pdf.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description:\
-    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
+    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
     \ documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n\
-    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
+    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
     \ selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
     : \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Downloads/\", \"Research/\", \"README.md\"]},\n    {\"path\": \"Downloads/\"\
     , \"type\": \"folder\", \"children\": [\"transformer-attention-2017.pdf.md\", \"bert-pretraining-2018.pdf.md\", \"gpt3-language-models-2020.pdf.md\", \"constitutional-ai-2022.pdf.md\"]},\n    {\"path\"\
@@ -285,7 +285,7 @@ tests:
     - Downloads/gpt3-language-models-2020.pdf.md\n- Downloads/constitutional-ai-2022.pdf.md\n\nUser: Create a folder structure for organizing these by year\n\nAssistant: I've created the following folder\
     \ structure:\n- Research/Papers/2017/\n- Research/Papers/2018/\n- Research/Papers/2020/\n- Research/Papers/2022/\n\nReady to move the papers into their respective year folders.\n</prior_conversation>"
   expected_tools:
-  - vaultManager_moveNote
+  - storageManager_move
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -294,7 +294,7 @@ tests:
     workspace_ids:
     - ws_1732300800000_atlasroll
     agent_ids: []
-  notes: Should use moveNote (validator expands useTools to actual tool names)
+  notes: Should use move (validator expands useTools to actual tool names)
 - id: CC_multi_step_project_setup
   question: Create a new project workspace for the Atlas redesign with folders for UI, Backend, and Documentation
   tags:
@@ -304,9 +304,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n -\
     \ Templates/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/design.md\n - Templates/project-template.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id:\
-    \ \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\"\
     , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"\
@@ -335,9 +335,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Meetings/\n - Meetings/Standups/\n - Archive/\n\
     \nFiles:\n - README.md\n - Meetings/Standups/2024-12-19.md\n - Meetings/Standups/2024-12-18.md\n - Meetings/Standups/2024-12-17.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id:\
-    \ \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Meetings/\"\
     , \"Archive/\", \"README.md\"]},\n    {\"path\": \"Meetings/\", \"type\": \"folder\", \"children\": [\"Standups/\"]},\n    {\"path\": \"Meetings/Standups/\", \"type\": \"folder\", \"children\": [\"\
@@ -345,7 +345,7 @@ tests:
     \ Standup\", \"steps\": [\"Review blockers\", \"Share updates\", \"Plan day\"]},\n    {\"name\": \"Weekly Sync\", \"steps\": [\"Review metrics\", \"Discuss priorities\", \"Assign actions\"]}\n  ],\n\
     \  \"preferences\": \"Use ISO date format for meeting notes. Tag attendees in frontmatter.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -363,16 +363,16 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Config/\n - Docs/\n\nFiles:\n - README.md\n\
     \ - Config/api-config.yaml\n - Config/app-settings.json\n - Docs/api-changelog.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description:\
-    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
+    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
     \ documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n\
-    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
+    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
     \ selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
     : \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Config/\", \"Docs/\", \"README.md\"]},\n    {\"path\": \"Config/\", \"\
     type\": \"folder\", \"children\": [\"api-config.yaml\", \"app-settings.json\"]}\n  ],\n  \"recentFiles\": [\"Config/api-config.yaml\"],\n  \"keyFiles\": [\"Config/api-config.yaml\", \"README.md\"],\n\
     \  \"workflows\": [\n    {\"name\": \"Version Bump\", \"steps\": [\"Update version number\", \"Update changelog\", \"Tag release\"]},\n    {\"name\": \"Deploy\", \"steps\": [\"Run tests\", \"Build artifacts\"\
     , \"Push to staging\"]}\n  ],\n  \"preferences\": \"Use semantic versioning. Document all config changes.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -393,8 +393,8 @@ tests:
     \ - Archive/\n\nFiles:\n - README.md\n - Meetings/2024-Q4/2024-10-03-sprint-planning.md\n - Meetings/2024-Q4/2024-10-10-architecture-review.md\n - Meetings/2024-Q4/2024-10-17-stakeholder-sync.md\n -\
     \ Meetings/2024-Q4/2024-10-24-retrospective.md\n - Meetings/2024-Q4/2024-10-31-incident-postmortem.md\n - Meetings/2024-Q4/2024-11-07-sprint-planning.md\n - Meetings/2024-Q4/2024-11-14-design-review.md\n\
     \ - Meetings/2024-Q4/2024-11-21-quarterly-review.md\n</vault_structure>\n\n<available_workspaces>\n- Team Meetings (id: \"ws_1732300800000_meetings\")\n  Description: Meeting notes and action items\n\
-    \  Root folder: Meetings/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_notesasst - Meeting Notes Assistant\n  Purpose: Processes meeting recordings and notes to create structured\
-    \ summaries\n- agent_1732300800000_summarybot - Summary Writer\n  Purpose: Creates concise executive summaries from detailed documents\n</available_agents>\n\n<selected_workspace name=\"Team Meetings\"\
+    \  Root folder: Meetings/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_notesasst - Meeting Notes Assistant\n  Purpose: Processes meeting recordings and notes to create structured\
+    \ summaries\n- agent_1732300800000_summarybot - Summary Writer\n  Purpose: Creates concise executive summaries from detailed documents\n</available_prompts>\n\n<selected_workspace name=\"Team Meetings\"\
     \ id=\"ws_1732300800000_meetings\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_meetings\",\n    \"name\": \"Team Meetings\",\n    \"description\":\
     \ \"Meeting notes and action items\",\n    \"rootFolder\": \"Meetings/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Meetings/\", \"Archive/\", \"\
     README.md\"]},\n    {\"path\": \"Meetings/\", \"type\": \"folder\", \"children\": [\"2024-Q4/\", \"2024-Q3/\"]},\n    {\"path\": \"Meetings/2024-Q4/\", \"type\": \"folder\", \"children\": [\"2024-10-03-sprint-planning.md\"\
@@ -403,9 +403,9 @@ tests:
     \ Planning\", \"steps\": [\"Review backlog\", \"Estimate points\", \"Commit to sprint\"]},\n    {\"name\": \"Retro\", \"steps\": [\"What went well\", \"What to improve\", \"Action items\"]}\n  ],\n\
     \  \"preferences\": \"Use ISO date format in filenames. Include attendees in frontmatter.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_meetings
@@ -424,9 +424,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Finance/\n - Finance/2024/\n - Reports/\n\
     \nFiles:\n - README.md\n - Finance/budget-tracker.md\n - Finance/2024/Q4-expenses.md\n - Reports/monthly-summary.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Finance/\", \"Reports/\", \"README.md\"]},\n    {\"\
     path\": \"Finance/\", \"type\": \"folder\", \"children\": [\"2024/\", \"budget-tracker.md\"]}\n  ],\n  \"recentFiles\": [\"Finance/budget-tracker.md\"],\n  \"keyFiles\": [\"Finance/budget-tracker.md\"\
@@ -452,9 +452,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Finance/\n - Finance/Reviews/\n - Archive/\n\
     \nFiles:\n - README.md\n - Finance/overview.md\n - Finance/Reviews/2024-11.md\n - Finance/Reviews/2024-10.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
     )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Finance (id: \"ws_1732300800000_finance\")\n  Description: Financial tracking and reporting\n  Root folder:\
-    \ Finance/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
+    \ Finance/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
     \ - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple\
-    \ sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
+    \ sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
     ,\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\"\
     , \"type\": \"folder\", \"children\": [\"Projects/\", \"Finance/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Finance/\", \"type\": \"folder\", \"children\": [\"Reviews/\", \"overview.md\"]}\n\
     \  ],\n  \"recentFiles\": [\"Finance/Reviews/2024-11.md\"],\n  \"keyFiles\": [\"Finance/overview.md\", \"README.md\"],\n  \"workflows\": [\n    {\"name\": \"Code Review\", \"steps\": [\"Create PR\"\
@@ -481,8 +481,8 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Tests/\n - Tests/Unit/\n - Tests/Integration/\n\
     \ - Tests/E2E/\n - Tests/Archive/\n - Archive/\n\nFiles:\n - README.md\n - Tests/Unit/auth-test.md\n - Tests/Unit/api-test.md\n - Tests/Integration/db-test.md\n - Tests/E2E/login-flow.md\n - Tests/Archive/Q3-results.md\n\
     </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\
-    \n<available_agents>\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose: Helps with drafting, editing, and formatting documents\n- agent_1732300800000_brainstorm - Brainstorm Partner\n\
-    \  Purpose: Generates creative ideas and explores possibilities\n- agent_1732300800000_meetingbot - Meeting Summarizer\n  Purpose: Creates structured summaries from meeting notes\n</available_agents>\n\
+    \n<available_prompts>\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose: Helps with drafting, editing, and formatting documents\n- agent_1732300800000_brainstorm - Brainstorm Partner\n\
+    \  Purpose: Generates creative ideas and explores possibilities\n- agent_1732300800000_meetingbot - Meeting Summarizer\n  Purpose: Creates structured summaries from meeting notes\n</available_prompts>\n\
     \n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
     : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\"\
     , \"children\": [\"Projects/\", \"Tests/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Tests/\", \"type\": \"folder\", \"children\": [\"Unit/\", \"Integration/\", \"E2E/\", \"Archive/\"]}\n  ],\n\
@@ -513,9 +513,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Research/\n - Templates/\n\
     \nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Templates/workspace-template.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description:\
-    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
+    \ Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical\
     \ documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n\
-    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
+    \  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently\
     \ selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
     : \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Research/\", \"Templates/\", \"README.md\"]},\n    {\"path\": \"Projects/\"\
     , \"type\": \"folder\", \"children\": [\"Atlas/\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"README.md\", \"Templates/workspace-template.md\"],\n  \"workflows\"\
@@ -544,8 +544,8 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Modules/\n - Modules/Core/\n - Modules/Legacy/\n\
     \ - Modules/Experimental/\n - Archive/\n\nFiles:\n - README.md\n - Modules/Core/auth.md\n - Modules/Core/api.md\n - Modules/Legacy/v1-connector.md\n - Modules/Legacy/old-parser.md\n - Modules/Experimental/beta-feature.md\n\
     </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\
-    \n<available_agents>\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose: Helps with drafting, editing, and formatting documents\n- agent_1732300800000_factchecker - Fact Checker\n  Purpose:\
-    \ Verifies information accuracy and identifies sources\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose: Analyzes data patterns and generates insights\n</available_agents>\n\n<selected_workspace\
+    \n<available_prompts>\n- agent_1732300800000_writerassist - Writing Assistant\n  Purpose: Helps with drafting, editing, and formatting documents\n- agent_1732300800000_factchecker - Fact Checker\n  Purpose:\
+    \ Verifies information accuracy and identifies sources\n- agent_1732300800000_dataanalyst - Data Analyst\n  Purpose: Analyzes data patterns and generates insights\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\"\
     ,\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\"\
     : [\"Projects/\", \"Modules/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Modules/\", \"type\": \"folder\", \"children\": [\"Core/\", \"Legacy/\", \"Experimental/\"]}\n  ],\n  \"recentFiles\"\
@@ -576,9 +576,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Config/\n - Config/Environments/\n - Secrets/\n\
     \nFiles:\n - README.md\n - Config/main-config.yaml\n - Config/Environments/production.yaml\n - Config/Environments/staging.yaml\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"\
-    ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter -\
+    ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter -\
     \ Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Config/\",\
     \ \"Secrets/\", \"README.md\"]},\n    {\"path\": \"Config/\", \"type\": \"folder\", \"children\": [\"Environments/\", \"main-config.yaml\"]}\n  ],\n  \"recentFiles\": [\"Config/main-config.yaml\"],\n\
@@ -586,7 +586,7 @@ tests:
     name\": \"Rollback\", \"steps\": [\"Identify issue\", \"Revert config\", \"Verify fix\"]}\n  ],\n  \"preferences\": \"Store sensitive data encrypted. Use environment-specific configs.\",\n  \"sessions\"\
     : []\n}\n</selected_workspace>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -604,16 +604,16 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Research/\n - Research/Unsorted/\n - Research/Organized/\n\
     \ - Archive/\n\nFiles:\n - README.md\n - Research/Unsorted/paper-1.md\n - Research/Unsorted/paper-2.md\n - Research/Unsorted/paper-3.md\n - Research/Organized/ml-papers.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Research/\"\
     , \"Archive/\", \"README.md\"]},\n    {\"path\": \"Research/\", \"type\": \"folder\", \"children\": [\"Unsorted/\", \"Organized/\"]}\n  ],\n  \"recentFiles\": [\"Research/Unsorted/paper-1.md\"],\n \
     \ \"keyFiles\": [\"README.md\"],\n  \"workflows\": [\n    {\"name\": \"Literature Review\", \"steps\": [\"Search papers\", \"Read abstracts\", \"Summarize findings\"]},\n    {\"name\": \"Reference Check\"\
     , \"steps\": [\"Find citations\", \"Verify sources\", \"Update bibliography\"]}\n  ],\n  \"preferences\": \"Organize papers by topic. Use consistent naming.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultManager_moveNote
+  - storageManager_move
   acceptable_tools:
   - TEXT_ONLY
   behavior_expectations:
@@ -635,9 +635,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Phoenix/\n - Projects/Phoenix/Planning/\n\
     \ - Archive/\n\nFiles:\n - README.md\n - Projects/Phoenix/overview.md\n - Projects/Phoenix/timeline.md\n - Projects/Phoenix/requirements.md\n - Projects/Phoenix/architecture-decisions.md\n - Projects/Phoenix/team-capacity.md\n\
     \ - Projects/Phoenix/dependencies.md\n - Projects/Phoenix/stakeholder-feedback.md\n - Projects/Phoenix/technical-debt.md\n - Projects/Phoenix/budget-tracking.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Phoenix Project (id: \"ws_1732300800000_phoenix\")\n  Description: Phoenix initiative project tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_riskanalyst\
+    - Phoenix Project (id: \"ws_1732300800000_phoenix\")\n  Description: Phoenix initiative project tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_riskanalyst\
     \ - Risk Analyst\n  Purpose: Identifies project risks, blockers, and develops mitigation strategies\n- agent_1732300800000_projadvisor - Project Advisor\n  Purpose: Provides strategic guidance on project\
-    \ planning and execution\n</available_agents>\n\n<selected_workspace name=\"Phoenix Project\" id=\"ws_1732300800000_phoenix\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\"\
+    \ planning and execution\n</available_prompts>\n\n<selected_workspace name=\"Phoenix Project\" id=\"ws_1732300800000_phoenix\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\"\
     : \"ws_1732300800000_phoenix\",\n    \"name\": \"Phoenix Project\",\n    \"description\": \"Phoenix initiative project tracking\",\n    \"rootFolder\": \"Projects/Phoenix/\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"Planning/\"\
     , \"overview.md\", \"timeline.md\", \"requirements.md\", \"architecture-decisions.md\", \"team-capacity.md\", \"dependencies.md\", \"stakeholder-feedback.md\", \"technical-debt.md\", \"budget-tracking.md\"\
@@ -645,11 +645,11 @@ tests:
     \  \"workflows\": [\n    {\"name\": \"Sprint Planning\", \"steps\": [\"Review backlog\", \"Estimate work\", \"Commit to sprint\"]},\n    {\"name\": \"Stakeholder Review\", \"steps\": [\"Prepare demo\"\
     , \"Collect feedback\", \"Update roadmap\"]}\n  ],\n  \"preferences\": \"Track blockers in timeline. Update status weekly.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_phoenix
@@ -668,9 +668,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Checkpoints/\n - Archive/\n\
     \nFiles:\n - README.md\n - Projects/Atlas/current-progress.md\n - Projects/Atlas/implementation.md\n - Checkpoints/2024-12-01.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"\
-    ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter -\
+    ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter -\
     \ Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Checkpoints/\"\
     , \"Archive/\", \"README.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"current-progress.md\", \"implementation.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/current-progress.md\"\
@@ -698,9 +698,9 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Meetings/\n - Meetings/Retros/\n - Reports/\n\
     \ - Archive/\n\nFiles:\n - README.md\n - Meetings/Retros/sprint-42-retro.md\n - Meetings/Retros/sprint-43-retro.md\n - Reports/Q3-summary.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout\
-    \ (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project\
     \ tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Meetings/\"\
     , \"Reports/\", \"Archive/\", \"README.md\"]},\n    {\"path\": \"Meetings/\", \"type\": \"folder\", \"children\": [\"Retros/\"]}\n  ],\n  \"recentFiles\": [\"Meetings/Retros/sprint-43-retro.md\"],\n\
@@ -708,8 +708,8 @@ tests:
     , \"steps\": [\"Gather feedback\", \"Identify improvements\", \"Create actions\"]}\n  ],\n  \"preferences\": \"Name retros by sprint number. Store quarterly docs in Reports/.\",\n  \"sessions\": []\n\
     }\n</selected_workspace>"
   acceptable_tools:
-  - vaultLibrarian_searchContent
-  - vaultLibrarian_searchDirectory
+  - searchManager_searchContent
+  - searchManager_searchDirectory
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -727,17 +727,17 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Agents/\n - Sessions/\n - Archive/\n\nFiles:\n\
     \ - README.md\n - Agents/agent-configs.md\n - Sessions/2024-12-20.md\n - Sessions/2024-12-19.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n\
-    \  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    \  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
     \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\"\
     ,\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Agents/\", \"Sessions/\", \"Archive/\", \"README.md\"\
     ]}\n  ],\n  \"recentFiles\": [\"Sessions/2024-12-20.md\"],\n  \"keyFiles\": [\"Agents/agent-configs.md\", \"README.md\"],\n  \"workflows\": [\n    {\"name\": \"Agent Setup\", \"steps\": [\"Define purpose\"\
     , \"Configure tools\", \"Test behavior\"]},\n    {\"name\": \"Session Review\", \"steps\": [\"Summarize discussion\", \"Extract actions\", \"Archive notes\"]}\n  ],\n  \"preferences\": \"Document agent\
     \ configs. Keep session logs for reference.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   acceptable_tools:
-  - vaultLibrarian_searchMemory
-  - vaultLibrarian_searchContent
+  - searchManager_searchMemory
+  - searchManager_searchContent
   - memoryManager_loadWorkspace
   - TEXT_ONLY
   expected_context:
@@ -756,9 +756,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Finance/\n - Finance/Budgets/\n - Finance/Expenses/\n -\
     \ Finance/Reports/\n - Finance/Archive/\n\nFiles:\n - Finance/Budgets/2024-Q4-budget.md\n - Finance/Budgets/monthly-budget-template.md\n - Finance/Expenses/2024-11-expenses.md\n - Finance/Expenses/2024-12-expenses.md\n\
     \ - Finance/Reports/quarterly-summary.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Finance Operations (id: \"ws_1732300800000_financeops\"\
-    )\n  Description: Budget tracking and financial reporting\n  Root folder: Finance/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n\
+    )\n  Description: Budget tracking and financial reporting\n  Root folder: Finance/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n\
     - agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project\
-    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace\
+    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Finance Operations\" id=\"ws_1732300800000_financeops\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"finance\",\n    \"purpose\": \"Budget tracking and\
     \ expense management\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Finance/Budgets\", \"purpose\": \"Budget documents\"},\n    {\"path\": \"Finance/Expenses\", \"purpose\": \"Monthly expense\
     \ logs\"},\n    {\"path\": \"Finance/Reports\", \"purpose\": \"Financial summaries\"}\n  ],\n  \"recentFiles\": [\n    \"Finance/Expenses/2024-12-expenses.md\",\n    \"Finance/Budgets/2024-Q4-budget.md\"\
@@ -766,9 +766,9 @@ tests:
     : \"Budget template\"}\n  ],\n  \"workflows\": [\n    \"Monthly expense reconciliation\",\n    \"Quarterly budget review\",\n    \"Year-end financial close\"\n  ],\n  \"preferences\": \"Use standardized\
     \ formatting for financial documents. Include date in filename.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   - memoryManager_loadWorkspace
   - TEXT_ONLY
   expected_context:
@@ -788,9 +788,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Alpha/\n - Projects/Beta/\n - Projects/Gamma/\n\
     \ - Archive/\n - Archive/2024/\n - Archive/2023/\n\nFiles:\n - Projects/Alpha/readme.md\n - Projects/Alpha/tasks.md\n - Projects/Beta/readme.md\n - Projects/Beta/deliverables.md\n - Projects/Gamma/readme.md\n\
     </vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Project Management Office (id: \"ws_1732300800000_pmoffice\")\n  Description: Multi-project tracking\
-    \ and coordination\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ and coordination\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Project Management Office\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Project Management Office\"\
     \ id=\"ws_1732300800000_pmoffice\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"project-management\",\n    \"purpose\": \"Tracking multiple concurrent projects\"\
     \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Projects/Alpha\", \"purpose\": \"Alpha project files\"},\n    {\"path\": \"Projects/Beta\", \"purpose\": \"Beta project files\"},\n    {\"path\"\
     : \"Projects/Gamma\", \"purpose\": \"Gamma project files\"},\n    {\"path\": \"Archive\", \"purpose\": \"Completed project archives\"}\n  ],\n  \"recentFiles\": [\n    \"Projects/Beta/deliverables.md\"\
@@ -799,8 +799,8 @@ tests:
   acceptable_tools:
   - TEXT_ONLY
   - memoryManager_loadWorkspace
-  - vaultLibrarian_searchContent
-  - vaultManager_listDirectory
+  - searchManager_searchContent
+  - storageManager_list
   expected_response_type: text_only
   behavior_expectations:
     asks_for_user_input: true
@@ -824,9 +824,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Meetings/\n - Archive/\n\
     \nFiles:\n - Projects/Atlas/api-documentation.md\n - Projects/Atlas/api-changelog.md\n - Projects/Atlas/integration-guide.md\n - Meetings/2024-11-15-api-review.md\n - Archive/atlas-api-v1-deprecated.md\n\
     </vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ customer rollout\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
     ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"project\",\n    \"purpose\": \"Atlas customer rollout tracking\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"Projects/Atlas\", \"purpose\": \"Core project documentation\"},\n    {\"path\": \"Meetings\", \"purpose\": \"Meeting notes\"},\n    {\"path\": \"Archive\", \"purpose\": \"Deprecated\
     \ documentation\"}\n  ],\n  \"recentFiles\": [\n    \"Projects/Atlas/api-documentation.md\",\n    \"Projects/Atlas/integration-guide.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"API documentation\
@@ -835,7 +835,7 @@ tests:
     \ - Version history\n3. Projects/Atlas/integration-guide.md - Integration instructions\n4. Meetings/2024-11-15-api-review.md - API design meeting\n5. Archive/atlas-api-v1-deprecated.md - Old version\
     \ docs\n\nWould you like me to read any of these files?\n</prior_conversation>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   behavior_expectations:
     sessionMemory_min_chars: 80
   expected_context:
@@ -854,16 +854,16 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Documentation/\n - Documentation/Platforms/\n - Documentation/APIs/\n\
     \ - Projects/\n - Archive/\n\nFiles:\n - Documentation/Platforms/atlas-specs.md\n - Documentation/Platforms/horizon-specs.md\n - Documentation/APIs/rest-api-guide.md\n - Projects/platform-comparison.md\n\
     </vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Technical Specifications (id: \"ws_1732300800000_techspecs\")\n  Description: Platform and API\
-    \ documentation\n  Root folder: Documentation/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ documentation\n  Root folder: Documentation/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Technical Specifications\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Technical Specifications\"\
     \ id=\"ws_1732300800000_techspecs\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"documentation\",\n    \"purpose\": \"Technical specifications and platform docs\"\
     \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Documentation/Platforms\", \"purpose\": \"Platform specifications\"},\n    {\"path\": \"Documentation/APIs\", \"purpose\": \"API documentation\"\
     },\n    {\"path\": \"Projects\", \"purpose\": \"Project-specific docs\"}\n  ],\n  \"recentFiles\": [\n    \"Documentation/Platforms/atlas-specs.md\",\n    \"Documentation/APIs/rest-api-guide.md\"\n\
     \  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Documentation review\",\n    \"Spec updates\",\n    \"API versioning\"\n  ],\n  \"preferences\": \"Use consistent formatting for specifications.\
     \ Include version numbers.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   acceptable_tools:
   - TEXT_ONLY
   expected_context:
@@ -883,17 +883,17 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Development/\n - Development/prototypes/\n - Development/prototypes/old/\n\
     \ - Development/src/\n - Development/tests/\n - Archive/\n\nFiles:\n - Development/prototypes/old/prototype-v1.md\n - Development/prototypes/old/prototype-v2.md\n - Development/prototypes/current-design.md\n\
     \ - Development/src/main.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Development Project (id: \"ws_1732300800000_devproject\")\n  Description:\
-    \ Software development workspace\n  Root folder: Development/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ Software development workspace\n  Root folder: Development/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Development Project\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Development Project\"\
     \ id=\"ws_1732300800000_devproject\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"development\",\n    \"purpose\": \"Software development documentation\"\n  },\n\
     \  \"workspaceStructure\": [\n    {\"path\": \"Development/prototypes\", \"purpose\": \"Design prototypes\"},\n    {\"path\": \"Development/src\", \"purpose\": \"Source documentation\"},\n    {\"path\"\
     : \"Development/tests\", \"purpose\": \"Test documentation\"}\n  ],\n  \"recentFiles\": [\n    \"Development/prototypes/current-design.md\",\n    \"Development/src/main.md\"\n  ],\n  \"keyFiles\": [],\n\
     \  \"workflows\": [\n    \"Code review\",\n    \"Feature development\",\n    \"Bug triage\"\n  ],\n  \"preferences\": \"Archive old prototypes before deletion. Verify contents first.\",\n  \"sessions\"\
     : []\n}\n</selected_workspace>"
   acceptable_tools:
-  - vaultManager_listDirectory
-  - vaultLibrarian_searchDirectory
+  - storageManager_list
+  - searchManager_searchDirectory
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -911,9 +911,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Documents/\n - Documents/Reports/\n - Documents/Notes/\n\
     \ - Inbox/\n - Archive/\n\nFiles:\n - Inbox/report-draft.md\n - Inbox/meeting-notes.md\n - Inbox/todo-list.md\n - Documents/Reports/q3-report.md\n - Documents/Notes/project-ideas.md\n</vault_structure>\n\
     \n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- File Organization (id: \"ws_1732300800000_fileorg\")\n  Description: Document organization and filing\n  Root folder:\
-    \ Documents/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
+    \ Documents/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose:\
     \ Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot\
-    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"File Organization\" id=\"ws_1732300800000_fileorg\">\n\
+    \ - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"File Organization\" id=\"ws_1732300800000_fileorg\">\n\
     This workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"organization\",\n    \"purpose\": \"Document organization and filing\"\n  },\n  \"workspaceStructure\": [\n    {\"path\"\
     : \"Documents/Reports\", \"purpose\": \"Finalized reports\"},\n    {\"path\": \"Documents/Notes\", \"purpose\": \"Meeting notes and ideas\"},\n    {\"path\": \"Inbox\", \"purpose\": \"Unsorted incoming\
     \ files\"}\n  ],\n  \"recentFiles\": [\n    \"Inbox/report-draft.md\",\n    \"Inbox/meeting-notes.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Inbox processing\",\n    \"Document archival\"\
@@ -921,7 +921,7 @@ tests:
     \ my inbox folder\n\nAssistant: Here are the files in your Inbox folder:\n1. report-draft.md - A draft report document\n2. meeting-notes.md - Notes from a recent meeting\n3. todo-list.md - Task list\n\
     \nWould you like me to help organize these files?\n</prior_conversation>"
   expected_tools:
-  - vaultManager_moveNote
+  - storageManager_move
   acceptable_tools:
   - TEXT_ONLY
   behavior_expectations:
@@ -944,18 +944,18 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/2022/\n - Projects/2023/\n - Archive/\n\
     \nFiles:\n - Projects/2022/old-prototype.md\n - Projects/2023/abandoned-idea.md\n - Archive/legacy-project.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in\
     \ this vault:\n\n- Project Archive (id: \"ws_1732300800000_projarch\")\n  Description: Historical project documentation\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get\
-    \ full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
+    \ full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
     \ - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple\
-    \ sources\n</available_agents>\n\n<selected_workspace name=\"Project Archive\" id=\"ws_1732300800000_projarch\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"archive\"\
+    \ sources\n</available_prompts>\n\n<selected_workspace name=\"Project Archive\" id=\"ws_1732300800000_projarch\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"archive\"\
     ,\n    \"purpose\": \"Historical project documentation\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Projects/2022\", \"purpose\": \"2022 projects\"},\n    {\"path\": \"Projects/2023\", \"\
     purpose\": \"2023 projects\"},\n    {\"path\": \"Archive\", \"purpose\": \"Completed archives\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Project retrospective\"\
     ,\n    \"Archive review\",\n    \"Documentation cleanup\"\n  ],\n  \"preferences\": \"Preserve original dates. Keep context in filenames.\",\n  \"sessions\": []\n}\n</selected_workspace>\n\n<prior_conversation>\n\
     User: Search for old project files that might be candidates for cleanup\n\nAssistant: I'll search for older project files.\n</prior_conversation>"
   acceptable_tools:
   - TEXT_ONLY
-  - vaultManager_listDirectory
-  - vaultLibrarian_searchContent
-  - contentManager_readContent
+  - storageManager_list
+  - searchManager_searchContent
+  - contentManager_read
   expected_response_type: text_only
   behavior_expectations:
     presents_results_clearly: true
@@ -981,9 +981,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Config/\n - Config/templates/\n - Settings/\n - Settings/database/\n\
     \nFiles:\n - Config/templates/database-template.yaml\n - Settings/database/db-config.yaml\n - Settings/database/connection-settings.yaml\n</vault_structure>\n\n<available_workspaces>\nThe following\
     \ workspaces are available in this vault:\n\n- Dev Configuration (id: \"ws_1732300800000_devconfig\")\n  Description: Development configuration files\n  Root folder: Config/\n\nUse memoryManager with\
-    \ loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
+    \ loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
     \ and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose:\
-    \ Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Dev Configuration\" id=\"ws_1732300800000_devconfig\">\nThis workspace is currently selected.\n\
+    \ Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Dev Configuration\" id=\"ws_1732300800000_devconfig\">\nThis workspace is currently selected.\n\
     \n{\n  \"context\": {\n    \"domain\": \"configuration\",\n    \"purpose\": \"Development configuration management\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Config/templates\", \"purpose\"\
     : \"Configuration templates\"},\n    {\"path\": \"Settings/database\", \"purpose\": \"Database configurations\"}\n  ],\n  \"recentFiles\": [\n    \"Settings/database/db-config.yaml\"\n  ],\n  \"keyFiles\"\
     : [],\n  \"workflows\": [\n    \"Configuration update\",\n    \"Environment setup\",\n    \"Settings migration\"\n  ],\n  \"preferences\": \"Use YAML format. Keep templates separate from active configs.\"\
@@ -991,9 +991,9 @@ tests:
     </prior_conversation>"
   acceptable_tools:
   - TEXT_ONLY
-  - vaultLibrarian_searchDirectory
-  - vaultLibrarian_searchContent
-  - vaultManager_listDirectory
+  - searchManager_searchDirectory
+  - searchManager_searchContent
+  - storageManager_list
   expected_response_type: text_only
   behavior_expectations:
     explains_error: true
@@ -1020,9 +1020,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Research/\n - Research/AI/\n - Research/Data/\n - Notes/\n\
     \nFiles:\n - Research/AI/neural-networks.md\n - Research/AI/deep-learning-overview.md\n - Research/Data/analysis-methods.md\n - Notes/project-ideas.md\n</vault_structure>\n\n<available_workspaces>\n\
     The following workspaces are available in this vault:\n\n- Research Notes (id: \"ws_1732300800000_research\")\n  Description: Research documentation and notes\n  Root folder: Research/\n\nUse memoryManager\
-    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
+    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
     \ and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose:\
-    \ Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Research Notes\" id=\"ws_1732300800000_research\">\nThis workspace is currently selected.\n\
+    \ Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Research Notes\" id=\"ws_1732300800000_research\">\nThis workspace is currently selected.\n\
     \n{\n  \"context\": {\n    \"domain\": \"research\",\n    \"purpose\": \"Research documentation and notes\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Research/AI\", \"purpose\": \"AI research\
     \ notes\"},\n    {\"path\": \"Research/Data\", \"purpose\": \"Data analysis research\"},\n    {\"path\": \"Notes\", \"purpose\": \"General notes\"}\n  ],\n  \"recentFiles\": [\n    \"Research/AI/neural-networks.md\"\
     \n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Literature review\",\n    \"Note organization\",\n    \"Topic synthesis\"\n  ],\n  \"preferences\": \"Use clear titles. Link related notes.\",\n\
@@ -1030,8 +1030,8 @@ tests:
     \ algorithms.\n</prior_conversation>"
   acceptable_tools:
   - TEXT_ONLY
-  - vaultLibrarian_searchContent
-  - vaultManager_listDirectory
+  - searchManager_searchContent
+  - storageManager_list
   expected_response_type: text_only
   behavior_expectations:
     acknowledges_no_results: true
@@ -1058,9 +1058,9 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Archive/\n - Archive/2023/\n - Documents/\n\nFiles:\n -\
     \ Archive/temp-2022.md\n - Archive/2023/quarterly-report.md\n - Documents/active-notes.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- File\
     \ Cleanup (id: \"ws_1732300800000_cleanup\")\n  Description: Archive and temporary file management\n  Root folder: Archive/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n\
-    </available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr -\
+    </available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr -\
     \ Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple\
-    \ sources\n</available_agents>\n\n<selected_workspace name=\"File Cleanup\" id=\"ws_1732300800000_cleanup\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"maintenance\"\
+    \ sources\n</available_prompts>\n\n<selected_workspace name=\"File Cleanup\" id=\"ws_1732300800000_cleanup\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"maintenance\"\
     ,\n    \"purpose\": \"Archive and temporary file management\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Archive\", \"purpose\": \"Archived files\"},\n    {\"path\": \"Archive/2023\", \"purpose\"\
     : \"2023 archives\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Quarterly cleanup\",\n    \"Temp file removal\",\n    \"Archive organization\"\n  ],\n  \"preferences\"\
     : \"Confirm before bulk deletions.\",\n  \"sessions\": []\n}\n</selected_workspace>\n\n<prior_conversation>\nUser: Delete the temp-2023.md file from the archive\n\nAssistant: I'll delete the temp-2023.md\
@@ -1090,15 +1090,15 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_archivemgr\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Archive/\n - Archive/2022/\n - Archive/2023/\n\nFiles:\n\
     \ - Archive/2022/old-prototype.md\n - Archive/2023/notes.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Archive Manager (id: \"ws_1732300800000_archivemgr\"\
-    )\n  Description: Archive file management\n  Root folder: Archive/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    )\n  Description: Archive file management\n  Root folder: Archive/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Archive Manager\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Archive Manager\" id=\"\
     ws_1732300800000_archivemgr\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"archive\",\n    \"purpose\": \"Archive file management\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"Archive/2022\", \"purpose\": \"2022 archives\"},\n    {\"path\": \"Archive/2023\", \"purpose\": \"2023 archives\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\": [],\n  \"workflows\"\
     : [\n    \"Archive cleanup\",\n    \"File organization\",\n    \"Retention review\"\n  ],\n  \"preferences\": \"Process single files without confirmation.\",\n  \"sessions\": []\n}\n</selected_workspace>\n\
     \n<prior_conversation>\nUser: Find and delete the old prototype file from 2022\n\nAssistant: I'll search for the old prototype file in the 2022 archive.\n</prior_conversation>"
   expected_tools:
-  - vaultManager_deleteNote
+  - storageManager_archive
   expected_response_type: tool_only
   behavior_expectations:
     calls_tool_directly: true
@@ -1122,16 +1122,16 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_projsetup\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/ExistingProject/\n - Templates/\n\
     \nFiles:\n - Templates/project-template.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Project Setup (id: \"ws_1732300800000_projsetup\"\
-    )\n  Description: New project initialization\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    )\n  Description: New project initialization\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Project Setup\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Project Setup\" id=\"\
     ws_1732300800000_projsetup\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"project-management\",\n    \"purpose\": \"New project initialization\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"Projects\", \"purpose\": \"Active projects\"},\n    {\"path\": \"Templates\", \"purpose\": \"Project templates\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\": [],\n  \"workflows\"\
     : [\n    \"Project scaffolding\",\n    \"Template application\",\n    \"Structure setup\"\n  ],\n  \"preferences\": \"Create standard subfolders for new projects.\",\n  \"sessions\": []\n}\n</selected_workspace>\n\
     \n<prior_conversation>\nUser: Create a new project called NewProject with docs, src, and tests subfolders\n\nAssistant: I'll create the NewProject folder structure for you. Let me start by creating\
     \ the main project folder.\n</prior_conversation>"
   expected_tools:
-  - vaultManager_createFolder
+  - storageManager_createFolder
   expected_response_type: tool_only
   behavior_expectations:
     continues_workflow_silently: true
@@ -1155,16 +1155,16 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_budgetmgr\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Finance/\n\nFiles:\n - Projects/budget-2024.md\n\
     \ - Finance/expenses.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Budget Manager (id: \"ws_1732300800000_budgetmgr\")\n  Description:\
-    \ Budget tracking and updates\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter\
+    \ Budget tracking and updates\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter\
     \ - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n\
-    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Budget Manager\" id=\"\
+    - agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Budget Manager\" id=\"\
     ws_1732300800000_budgetmgr\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"finance\",\n    \"purpose\": \"Budget tracking and updates\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"Projects\", \"purpose\": \"Project budgets\"},\n    {\"path\": \"Finance\", \"purpose\": \"Financial records\"}\n  ],\n  \"recentFiles\": [\n    \"Projects/budget-2024.md\"\n \
     \ ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Budget updates\",\n    \"Expense tracking\",\n    \"Financial reporting\"\n  ],\n  \"preferences\": \"Append new entries to existing files.\",\n\
     \  \"sessions\": []\n}\n</selected_workspace>\n\n<prior_conversation>\nUser: Add a new line item of $5,000 for Q2 marketing to the 2024 budget\n\nAssistant: I'll find the 2024 budget file and add the\
     \ new line item.\n</prior_conversation>"
   expected_tools:
-  - contentManager_appendContent
+  - contentManager_update
   acceptable_tools:
   - TEXT_ONLY
   anti_patterns:
@@ -1185,17 +1185,17 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_configmgr\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Config/\n - Settings/\n\nFiles:\n - Config/dev.yaml\n -\
     \ Config/prod.yaml\n - Config/test.yaml\n - Settings/defaults.yaml\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Config Manager (id: \"ws_1732300800000_configmgr\"\
-    )\n  Description: Configuration file management\n  Root folder: Config/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n-\
+    )\n  Description: Configuration file management\n  Root folder: Config/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n-\
     \ agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project\
-    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace\
+    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Config Manager\" id=\"ws_1732300800000_configmgr\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"configuration\",\n    \"purpose\": \"Configuration file\
     \ management\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Config\", \"purpose\": \"Environment configs\"},\n    {\"path\": \"Settings\", \"purpose\": \"Default settings\"}\n  ],\n  \"recentFiles\"\
     : [],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Config updates\",\n    \"Environment setup\",\n    \"Setting synchronization\"\n  ],\n  \"preferences\": \"Default to dev environment when unspecified.\"\
     ,\n  \"sessions\": []\n}\n</selected_workspace>\n\n<prior_conversation>\nUser: Show me the database connection settings\n\nAssistant: I'll search for configuration files with database settings.\n</prior_conversation>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -1214,17 +1214,17 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Active/\n - Projects/Archived/\n\
     \nFiles:\n - Projects/Active/tasks.md\n - Projects/Active/notes.md\n - Projects/Archived/old.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\
     \n- Project Tracker (id: \"ws_1732300800000_projtrack\")\n  Description: Active and archived project tracking\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
-    \ context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
+    \ context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
     \ - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple\
-    \ sources\n</available_agents>\n\n<selected_workspace name=\"Project Tracker\" id=\"ws_1732300800000_projtrack\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"project-management\"\
+    \ sources\n</available_prompts>\n\n<selected_workspace name=\"Project Tracker\" id=\"ws_1732300800000_projtrack\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"project-management\"\
     ,\n    \"purpose\": \"Track active and archived projects\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Projects/Active\", \"purpose\": \"Current active projects\"},\n    {\"path\": \"Projects/Archived\"\
     , \"purpose\": \"Completed/archived projects\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Project review\",\n    \"Task management\",\n    \"Project archival\"\n\
     \  ],\n  \"preferences\": \"Prioritize Active folder over Archived.\",\n  \"sessions\": []\n}\n</selected_workspace>\n\n<prior_conversation>\nUser: Find the project task list\n\nAssistant: I'll search\
     \ for task-related files in the project folders.\n</prior_conversation>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -1242,18 +1242,18 @@ tests:
   system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_notesmgr\"\
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Notes/\n - Archive/\n\nFiles:\n - Notes/important.md\n\
     \ - Notes/draft.md\n - Notes/archived.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this vault:\n\n- Notes Manager (id: \"ws_1732300800000_notesmgr\")\n\
-    \  Description: Note organization and management\n  Root folder: Notes/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n-\
+    \  Description: Note organization and management\n  Root folder: Notes/\n\nUse memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n-\
     \ agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project\
-    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace\
+    \ milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Notes Manager\" id=\"ws_1732300800000_notesmgr\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"notes\",\n    \"purpose\": \"Note organization and management\"\
     \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Notes\", \"purpose\": \"Active notes\"},\n    {\"path\": \"Archive\", \"purpose\": \"Archived notes\"}\n  ],\n  \"recentFiles\": [],\n  \"keyFiles\"\
     : [],\n  \"workflows\": [\n    \"Note review\",\n    \"Draft finalization\",\n    \"Note archival\"\n  ],\n  \"preferences\": \"Prioritize notes marked 'important' over drafts.\",\n  \"sessions\": []\n\
     }\n</selected_workspace>\n\n<prior_conversation>\nUser: Find the note I was working on\n\nAssistant: I'll search for your notes.\n</prior_conversation>"
   expected_tools:
-  - contentManager_readContent
+  - contentManager_read
   acceptable_tools:
-  - vaultManager_listDirectory
-  - vaultLibrarian_searchContent
+  - storageManager_list
+  - searchManager_searchContent
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -1272,16 +1272,16 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Meetings/\n - Meetings/2024-12/\n - Meetings/2024-11/\n\
     \ - Meetings/Archive/\n\nFiles:\n - Meetings/2024-12/standup-2024-12-20.md\n - Meetings/2024-12/planning-2024-12-18.md\n - Meetings/2024-11/review-2024-11-30.md\n</vault_structure>\n\n<available_workspaces>\n\
     The following workspaces are available in this vault:\n\n- Meeting Notes (id: \"ws_1732300800000_meetings\")\n  Description: Meeting notes organization\n  Root folder: Meetings/\n\nUse memoryManager\
-    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
+    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation\
     \ and user guides\n- agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose:\
-    \ Gathers and synthesizes information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Meeting Notes\" id=\"ws_1732300800000_meetings\">\nThis workspace is currently selected.\n\
+    \ Gathers and synthesizes information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Meeting Notes\" id=\"ws_1732300800000_meetings\">\nThis workspace is currently selected.\n\
     \n{\n  \"context\": {\n    \"domain\": \"meetings\",\n    \"purpose\": \"Meeting notes organization\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Meetings/2024-12\", \"purpose\": \"December\
     \ 2024 meetings\"},\n    {\"path\": \"Meetings/2024-11\", \"purpose\": \"November 2024 meetings\"},\n    {\"path\": \"Meetings/Archive\", \"purpose\": \"Archived meetings\"}\n  ],\n  \"recentFiles\"\
     : [\n    \"Meetings/2024-12/standup-2024-12-20.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Meeting capture\",\n    \"Action item tracking\",\n    \"Meeting archival\"\n  ],\n  \"preferences\"\
     : \"Organize by month. Include date in filename.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   acceptable_tools:
-  - vaultLibrarian_searchContent
-  - vaultLibrarian_searchDirectory
+  - searchManager_searchContent
+  - searchManager_searchDirectory
   behavior_expectations:
     uses_appropriate_limit: true
   expected_context:
@@ -1301,16 +1301,16 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Current/\n - Projects/Archive/\n\
     \nFiles:\n - Projects/Current/readme.md\n - Projects/Current/tasks.md\n - Projects/Archive/old-project.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available in this\
     \ vault:\n\n- Recent Projects (id: \"ws_1732300800000_recentproj\")\n  Description: Recent project files\n  Root folder: Projects/\n\nUse memoryManager with loadWorkspace mode to get full workspace\
-    \ context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
+    \ context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n- agent_1732300800000_projectmgr\
     \ - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes information from multiple\
-    \ sources\n</available_agents>\n\n<selected_workspace name=\"Recent Projects\" id=\"ws_1732300800000_recentproj\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"projects\"\
+    \ sources\n</available_prompts>\n\n<selected_workspace name=\"Recent Projects\" id=\"ws_1732300800000_recentproj\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"projects\"\
     ,\n    \"purpose\": \"Recent project files\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Projects/Current\", \"purpose\": \"Current projects\"},\n    {\"path\": \"Projects/Archive\", \"purpose\"\
     : \"Archived projects\"}\n  ],\n  \"recentFiles\": [\n    \"Projects/Current/readme.md\",\n    \"Projects/Current/tasks.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Project updates\",\n\
     \    \"Status review\",\n    \"File organization\"\n  ],\n  \"preferences\": \"Focus on Current folder for recent work.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   acceptable_tools:
-  - vaultManager_listDirectory
+  - storageManager_list
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_recentproj
@@ -1328,14 +1328,14 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Documentation/\n - Documentation/API/\n - Documentation/Guides/\n\
     \nFiles:\n - Documentation/API/endpoints.md\n - Documentation/API/authentication.md\n - Documentation/Guides/quickstart.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are\
     \ available in this vault:\n\n- API Documentation (id: \"ws_1732300800000_apidocs\")\n  Description: API documentation and guides\n  Root folder: Documentation/\n\nUse memoryManager with loadWorkspace\
-    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
+    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
     - agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes\
-    \ information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"API Documentation\" id=\"ws_1732300800000_apidocs\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
+    \ information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"API Documentation\" id=\"ws_1732300800000_apidocs\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
     : {\n    \"domain\": \"documentation\",\n    \"purpose\": \"API documentation and guides\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Documentation/API\", \"purpose\": \"API reference docs\"\
     },\n    {\"path\": \"Documentation/Guides\", \"purpose\": \"User guides\"}\n  ],\n  \"recentFiles\": [\n    \"Documentation/API/endpoints.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"\
     Doc updates\",\n    \"API versioning\",\n    \"Guide creation\"\n  ],\n  \"preferences\": \"Keep API docs current with implementation.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   behavior_expectations:
     uses_appropriate_limit: true
     sessionMemory_min_chars: 60
@@ -1356,16 +1356,16 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Config/\n - Config/environments/\n - Config/services/\n\
     \nFiles:\n - Config/app.yaml\n - Config/environments/dev.yaml\n - Config/environments/prod.yaml\n - Config/services/database.yaml\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces\
     \ are available in this vault:\n\n- System Configuration (id: \"ws_1732300800000_sysconfig\")\n  Description: System configuration files\n  Root folder: Config/\n\nUse memoryManager with loadWorkspace\
-    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
+    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
     - agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes\
-    \ information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"System Configuration\" id=\"ws_1732300800000_sysconfig\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
+    \ information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"System Configuration\" id=\"ws_1732300800000_sysconfig\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
     : {\n    \"domain\": \"configuration\",\n    \"purpose\": \"System configuration files\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Config/environments\", \"purpose\": \"Environment configs\"\
     },\n    {\"path\": \"Config/services\", \"purpose\": \"Service configs\"}\n  ],\n  \"recentFiles\": [\n    \"Config/app.yaml\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Config updates\"\
     ,\n    \"Environment sync\",\n    \"Service configuration\"\n  ],\n  \"preferences\": \"Use YAML format. Separate by environment.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - vaultLibrarian_searchContent
+  - searchManager_searchContent
   acceptable_tools:
-  - vaultManager_listDirectory
+  - storageManager_list
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_sysconfig
@@ -1384,16 +1384,16 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Logs/\n - Logs/errors/\n - Logs/access/\n - Logs/debug/\n\
     \nFiles:\n - Logs/errors/2024-12-20.md\n - Logs/errors/2024-12-19.md\n - Logs/errors/2024-12-18.md\n - Logs/access/2024-12-20.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces\
     \ are available in this vault:\n\n- Development Logs (id: \"ws_1732300800000_devlogs\")\n  Description: Application logs and debugging\n  Root folder: Logs/\n\nUse memoryManager with loadWorkspace mode\
-    \ to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
+    \ to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_docwriter - Documentation Writer\n  Purpose: Creates technical documentation and user guides\n\
     - agent_1732300800000_projectmgr - Project Coordinator\n  Purpose: Tracks project milestones and coordinates tasks\n- agent_1732300800000_researchbot - Research Assistant\n  Purpose: Gathers and synthesizes\
-    \ information from multiple sources\n</available_agents>\n\n<selected_workspace name=\"Development Logs\" id=\"ws_1732300800000_devlogs\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
+    \ information from multiple sources\n</available_prompts>\n\n<selected_workspace name=\"Development Logs\" id=\"ws_1732300800000_devlogs\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
     : {\n    \"domain\": \"logging\",\n    \"purpose\": \"Application logs and debugging\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Logs/errors\", \"purpose\": \"Error logs\"},\n    {\"path\"\
     : \"Logs/access\", \"purpose\": \"Access logs\"},\n    {\"path\": \"Logs/debug\", \"purpose\": \"Debug logs\"}\n  ],\n  \"recentFiles\": [\n    \"Logs/errors/2024-12-20.md\"\n  ],\n  \"keyFiles\": [],\n\
     \  \"workflows\": [\n    \"Log analysis\",\n    \"Error investigation\",\n    \"Log archival\"\n  ],\n  \"preferences\": \"Organize by date. Keep recent logs accessible.\",\n  \"sessions\": []\n}\n\
     </selected_workspace>"
   acceptable_tools:
-  - vaultLibrarian_searchContent
-  - vaultLibrarian_searchDirectory
+  - searchManager_searchContent
+  - searchManager_searchDirectory
   behavior_expectations:
     uses_appropriate_limit: true
   expected_context:
@@ -1413,19 +1413,19 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Architecture/\n - Architecture/diagrams/\n - Architecture/decisions/\n\
     \ - Documentation/\n\nFiles:\n - Architecture/system-overview.md\n - Architecture/decisions/adr-001.md\n - Documentation/requirements.md\n</vault_structure>\n\n<available_workspaces>\nThe following\
     \ workspaces are available in this vault:\n\n- Technical Architecture (id: \"ws_1732300800000_techarch\")\n  Description: System architecture and design\n  Root folder: Architecture/\n\nUse memoryManager\
-    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_archadvsr - Architecture Advisor\n  Purpose: Designs scalable system architectures\
-    \ and provides technical guidance\n- agent_1732300800000_sysdesign - Systems Designer\n  Purpose: Creates detailed technical designs and infrastructure plans\n</available_agents>\n\n<selected_workspace\
+    \ with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_archadvsr - Architecture Advisor\n  Purpose: Designs scalable system architectures\
+    \ and provides technical guidance\n- agent_1732300800000_sysdesign - Systems Designer\n  Purpose: Creates detailed technical designs and infrastructure plans\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Technical Architecture\" id=\"ws_1732300800000_techarch\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"architecture\",\n    \"purpose\": \"System architecture\
     \ and design\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Architecture/diagrams\", \"purpose\": \"Architecture diagrams\"},\n    {\"path\": \"Architecture/decisions\", \"purpose\": \"Architecture\
     \ decision records\"},\n    {\"path\": \"Documentation\", \"purpose\": \"Technical documentation\"}\n  ],\n  \"recentFiles\": [\n    \"Architecture/system-overview.md\"\n  ],\n  \"keyFiles\": [],\n\
     \  \"workflows\": [\n    \"Architecture review\",\n    \"Design documentation\",\n    \"Decision recording\"\n  ],\n  \"preferences\": \"Document decisions with ADRs. Keep diagrams up to date.\",\n\
     \  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     handles_complex_task_without_delegation: true
@@ -1448,19 +1448,19 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Legal/\n - Legal/compliance/\n - Legal/policies/\n - Documentation/\n\
     \nFiles:\n - Legal/compliance/gdpr-checklist.md\n - Legal/policies/privacy-policy.md\n - Documentation/data-handling.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available\
     \ in this vault:\n\n- Legal Compliance (id: \"ws_1732300800000_legalcomp\")\n  Description: Legal and compliance documentation\n  Root folder: Legal/\n\nUse memoryManager with loadWorkspace mode to\
-    \ get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_legaladvsr - Legal Compliance Advisor\n  Purpose: Reviews policies and practices for regulatory compliance\n\
-    - agent_1732300800000_gdprspec - GDPR Specialist\n  Purpose: Provides expert guidance on GDPR requirements and implementation\n</available_agents>\n\n<selected_workspace name=\"Legal Compliance\" id=\"\
+    \ get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_legaladvsr - Legal Compliance Advisor\n  Purpose: Reviews policies and practices for regulatory compliance\n\
+    - agent_1732300800000_gdprspec - GDPR Specialist\n  Purpose: Provides expert guidance on GDPR requirements and implementation\n</available_prompts>\n\n<selected_workspace name=\"Legal Compliance\" id=\"\
     ws_1732300800000_legalcomp\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"legal\",\n    \"purpose\": \"Legal and compliance documentation\"\n  },\n  \"workspaceStructure\"\
     : [\n    {\"path\": \"Legal/compliance\", \"purpose\": \"Compliance checklists\"},\n    {\"path\": \"Legal/policies\", \"purpose\": \"Policy documents\"},\n    {\"path\": \"Documentation\", \"purpose\"\
     : \"Implementation docs\"}\n  ],\n  \"recentFiles\": [\n    \"Legal/compliance/gdpr-checklist.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Compliance audit\",\n    \"Policy review\",\n\
     \    \"Documentation update\"\n  ],\n  \"preferences\": \"Reference current regulations. Keep policies up to date.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   - memoryManager_loadWorkspace
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     gives_legal_advice_without_delegation: true
@@ -1483,20 +1483,20 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Strategy/\n - Strategy/market-research/\n - Strategy/plans/\n\
     \ - Documentation/\n\nFiles:\n - Strategy/market-research/enterprise-analysis.md\n - Strategy/plans/roadmap-2024.md\n - Documentation/product-brief.md\n</vault_structure>\n\n<available_workspaces>\n\
     The following workspaces are available in this vault:\n\n- Business Strategy (id: \"ws_1732300800000_strategy\")\n  Description: Strategic planning and market analysis\n  Root folder: Strategy/\n\n\
-    Use memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_stratcons - Strategy Consultant\n  Purpose: Develops comprehensive\
-    \ business strategies and go-to-market plans\n- agent_1732300800000_mktadvsr - Market Advisor\n  Purpose: Provides market insights and competitive positioning guidance\n</available_agents>\n\n<selected_workspace\
+    Use memoryManager with loadWorkspace mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_stratcons - Strategy Consultant\n  Purpose: Develops comprehensive\
+    \ business strategies and go-to-market plans\n- agent_1732300800000_mktadvsr - Market Advisor\n  Purpose: Provides market insights and competitive positioning guidance\n</available_prompts>\n\n<selected_workspace\
     \ name=\"Business Strategy\" id=\"ws_1732300800000_strategy\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"strategy\",\n    \"purpose\": \"Strategic planning and\
     \ market analysis\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Strategy/market-research\", \"purpose\": \"Market analysis\"},\n    {\"path\": \"Strategy/plans\", \"purpose\": \"Strategic plans\"\
     },\n    {\"path\": \"Documentation\", \"purpose\": \"Product documentation\"}\n  ],\n  \"recentFiles\": [\n    \"Strategy/plans/roadmap-2024.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n   \
     \ \"Market research\",\n    \"Strategy development\",\n    \"Competitive analysis\"\n  ],\n  \"preferences\": \"Base strategies on market data. Include competitive context.\",\n  \"sessions\": []\n\
     }\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   - memoryManager_loadWorkspace
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     superficial_marketing_plan: true
@@ -1519,18 +1519,18 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Analysis/\n - Analysis/competitors/\n - Analysis/market/\n\
     \ - Reports/\n\nFiles:\n - Analysis/competitors/landscape.md\n - Analysis/market/trends.md\n - Reports/quarterly-review.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are\
     \ available in this vault:\n\n- Competitive Analysis (id: \"ws_1732300800000_companalysis\")\n  Description: Competitor and market analysis\n  Root folder: Analysis/\n\nUse memoryManager with loadWorkspace\
-    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_mktanalyst - Market Analyst\n  Purpose: Analyzes market trends and competitor positioning\n\
-    - agent_1732300800000_compintel - Competitive Intelligence\n  Purpose: Provides in-depth competitor research and feature comparison\n</available_agents>\n\n<selected_workspace name=\"Competitive Analysis\"\
+    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_mktanalyst - Market Analyst\n  Purpose: Analyzes market trends and competitor positioning\n\
+    - agent_1732300800000_compintel - Competitive Intelligence\n  Purpose: Provides in-depth competitor research and feature comparison\n</available_prompts>\n\n<selected_workspace name=\"Competitive Analysis\"\
     \ id=\"ws_1732300800000_companalysis\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"analysis\",\n    \"purpose\": \"Competitor and market analysis\"\n  },\n  \"\
     workspaceStructure\": [\n    {\"path\": \"Analysis/competitors\", \"purpose\": \"Competitor profiles\"},\n    {\"path\": \"Analysis/market\", \"purpose\": \"Market trends\"},\n    {\"path\": \"Reports\"\
     , \"purpose\": \"Analysis reports\"}\n  ],\n  \"recentFiles\": [\n    \"Analysis/competitors/landscape.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n    \"Competitor research\",\n    \"Feature\
     \ comparison\",\n    \"Market positioning\"\n  ],\n  \"preferences\": \"Use structured comparison frameworks. Include pricing data.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     superficial_comparison: true
@@ -1553,18 +1553,18 @@ tests:
     \ (current workspace)\n\nInclude these in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Legal/\n - Legal/licenses/\n - Legal/compliance/\n - Dependencies/\n\
     \nFiles:\n - Legal/licenses/license-inventory.md\n - Legal/compliance/oss-policy.md\n - Dependencies/package-licenses.md\n</vault_structure>\n\n<available_workspaces>\nThe following workspaces are available\
     \ in this vault:\n\n- Software Licensing (id: \"ws_1732300800000_licensing\")\n  Description: License compliance and dependency tracking\n  Root folder: Legal/\n\nUse memoryManager with loadWorkspace\
-    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_agents>\n- agent_1732300800000_licadvsr - License Advisor\n  Purpose: Analyzes open source license compatibility and compliance\
-    \ requirements\n- agent_1732300800000_ossexpert - OSS Expert\n  Purpose: Provides guidance on open source software usage and licensing obligations\n</available_agents>\n\n<selected_workspace name=\"\
+    \ mode to get full workspace context.\n</available_workspaces>\n\n<available_prompts>\n- agent_1732300800000_licadvsr - License Advisor\n  Purpose: Analyzes open source license compatibility and compliance\
+    \ requirements\n- agent_1732300800000_ossexpert - OSS Expert\n  Purpose: Provides guidance on open source software usage and licensing obligations\n</available_prompts>\n\n<selected_workspace name=\"\
     Software Licensing\" id=\"ws_1732300800000_licensing\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"domain\": \"legal\",\n    \"purpose\": \"License compliance and dependency\
     \ tracking\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"Legal/licenses\", \"purpose\": \"License documentation\"},\n    {\"path\": \"Legal/compliance\", \"purpose\": \"Compliance policies\"\
     },\n    {\"path\": \"Dependencies\", \"purpose\": \"Dependency tracking\"}\n  ],\n  \"recentFiles\": [\n    \"Legal/licenses/license-inventory.md\"\n  ],\n  \"keyFiles\": [],\n  \"workflows\": [\n \
     \   \"License audit\",\n    \"Dependency review\",\n    \"Compliance check\"\n  ],\n  \"preferences\": \"Track all OSS licenses. Document compatibility decisions.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   acceptable_tools:
-  - agentManager_executePrompts
+  - promptManager_executePrompts
   behavior_expectations:
-    delegates_complex_task: agentManager_executePrompts
+    delegates_complex_task: promptManager_executePrompts
   anti_patterns:
     creates_shallow_content_directly: true
     oversimplified_license_advice: true

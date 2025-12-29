@@ -1,0 +1,192 @@
+name: createState Transform
+description: Transforms minimal createState tool calls to include all required params by inferring from context
+scope: response
+pass_threshold: 0.9
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating a createState tool call to ensure it has all required parameters.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  # REQUIRED PARAMS FOR createState
+
+  The createState tool MUST have these params:
+  | param | type | description |
+  |-------|------|-------------|
+  | name | string | Name of the state (required) |
+  | conversationContext | string | Summary of conversation context leading to this state |
+  | activeTask | string | What the user is currently working on |
+  | activeFiles | array | List of files relevant to current work (can be empty []) |
+  | nextSteps | array | List of next actions to take |
+
+  Optional params: tags
+
+  # EVALUATION
+
+  Check if the createState call has ALL required params with meaningful values:
+  1. **name**: Must be present (string)
+  2. **conversationContext**: Must be present and describe the conversation context
+  3. **activeTask**: Must be present and describe current task
+  4. **activeFiles**: Must be present (array, can be empty)
+  5. **nextSteps**: Must be present (array with at least 1 item)
+
+  # SCORING
+  - **1.0** = All 5 required params present with meaningful values
+  - **0.8** = 4 of 5 required params present
+  - **0.6** = 3 of 5 required params present
+  - **0.4** = 2 of 5 required params present
+  - **0.2** = 1 required param present
+  - **0.0** = Only name present or missing createState call
+
+  # OUTPUT
+  Return JSON: `{{"createstate_transform_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are transforming a minimal createState tool call to include all required parameters.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # YOUR TASK
+
+  Transform the createState call to include ALL required parameters by inferring from context.
+
+  ## Required createState params:
+
+  | param | type | how to infer |
+  |-------|------|--------------|
+  | name | string | Keep the existing name or improve it to be descriptive |
+  | conversationContext | string | Summarize what the conversation is about (1-2 sentences) |
+  | activeTask | string | What is the user trying to accomplish? Use the goal from context or infer from user request |
+  | activeFiles | array | List files mentioned or relevant. If none, use empty array [] |
+  | nextSteps | array | What should happen next? 2-4 concrete action items |
+
+  ## INFERENCE GUIDELINES
+
+  - **conversationContext**: Look at context.memory and user_request to summarize the situation
+  - **activeTask**: Look at context.goal or infer from user_request
+  - **activeFiles**: Check vault_structure in system prompt, or use [] if no files mentioned
+  - **nextSteps**: Think about what logical next steps would be given the task
+
+  # OUTPUT FORMAT
+
+  Return a complete assistant message with the corrected tool call:
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  **IMPORTANT:**
+  - Keep the same context object (workspaceId, sessionId, memory, goal)
+  - Keep agent as "memoryManager" and tool as "createState"
+  - Add all missing required params with inferred values
+  - content MUST be null
+
+  # EXAMPLE TRANSFORMATION
+
+  Before (minimal):
+  ```json
+  {{"params": {{"name": "progress_tracking"}}}}
+  ```
+
+  After (complete):
+  ```json
+  {{
+    "params": {{
+      "name": "progress_tracking",
+      "conversationContext": "User is managing a multi-month project and needs to track progress across all phases.",
+      "activeTask": "Setting up comprehensive progress tracking for project phases",
+      "activeFiles": [],
+      "nextSteps": [
+        "Define project phases and milestones",
+        "Create tracking templates for each phase",
+        "Set up status update schedule"
+      ]
+    }}
+  }}
+  ```
+
+  # OUTPUT
+  Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    createstate_transform_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - createstate_transform_score
+
+output_format:
+  type: assistant_message
+
+validations:
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            memoryManager:
+              createState:
+                _required: [name, conversationContext, activeTask, activeFiles, nextSteps]
+                name: string
+                conversationContext: string
+                activeTask: string
+                activeFiles: array
+                nextSteps: array
+                tags: array
+    error: "createState validation failed: {details}"

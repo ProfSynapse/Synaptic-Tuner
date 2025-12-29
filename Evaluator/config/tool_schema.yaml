@@ -28,9 +28,9 @@ tool_format:
       - serial
       - parallel
 tools:
-  agentManager:
-  - name: createAgent
-    description: createAgent operation
+  promptManager:
+  - name: createPrompt
+    description: createPrompt operation
     params:
       required:
       - name
@@ -38,8 +38,8 @@ tools:
       - prompt
       optional:
       - isEnabled
-  - name: deleteAgent
-    description: deleteAgent operation
+  - name: archivePrompt
+    description: archivePrompt operation
     params:
       required:
       - id
@@ -65,15 +65,15 @@ tools:
       - imageSize
       - referenceImages
       - format
-  - name: getAgent
-    description: getAgent operation
+  - name: getPrompt
+    description: getPrompt operation
     params:
       required: []
       optional:
       - id
       - name
-  - name: listAgents
-    description: listAgents operation
+  - name: listPrompts
+    description: listPrompts operation
     params:
       required: []
       optional:
@@ -83,8 +83,8 @@ tools:
     params:
       required: []
       optional: []
-  - name: updateAgent
-    description: updateAgent operation
+  - name: updatePrompt
+    description: updatePrompt operation
     params:
       required:
       - id
@@ -93,99 +93,33 @@ tools:
       - description
       - prompt
       - isEnabled
-  commandManager:
-  - name: executeCommand
-    description: executeCommand operation
-    params:
-      required:
-      - commandId
-      optional: []
-  - name: listCommands
-    description: listCommands operation
-    params:
-      required: []
-      optional:
-      - filter
   contentManager:
-  - name: appendContent
-    description: appendContent operation
+  - name: read
+    description: read operation
     params:
       required:
-      - filePath
-      - content
-      optional: []
-  - name: createContent
-    description: createContent operation
-    params:
-      required:
-      - filePath
-      - content
-      optional: []
-  - name: deleteContent
-    description: deleteContent operation
-    params:
-      required:
-      - filePath
-      - content
-      optional:
-      - similarityThreshold
-  - name: findReplaceContent
-    description: findReplaceContent operation
-    params:
-      required:
-      - filePath
-      - findText
-      - replaceText
-      optional:
-      - replaceAll
-      - caseSensitive
-      - wholeWord
-  - name: prependContent
-    description: prependContent operation
-    params:
-      required:
-      - filePath
-      - content
-      optional: []
-  - name: readContent
-    description: readContent operation
-    params:
-      required:
-      - filePath
-      optional:
-      - limit
-      - offset
-      - includeLineNumbers
-  - name: replaceByLine
-    description: replaceByLine operation
-    params:
-      required:
-      - filePath
+      - path
       - startLine
+      optional:
       - endLine
-      - newContent
-      optional: []
-  - name: replaceContent
-    description: replaceContent operation
+  - name: write
+    description: write operation
     params:
       required:
-      - filePath
-      - oldContent
-      - newContent
+      - path
+      - content
       optional:
-      - similarityThreshold
-  memoryManager:
-  - name: createSession
-    description: createSession operation
+      - overwrite
+  - name: update
+    description: update operation
     params:
-      required: []
+      required:
+      - path
+      - content
+      - startLine
       optional:
-      - name
-      - description
-      - sessionGoal
-      - context
-      - previousSessionId
-      - newSessionId
+      - endLine
+  memoryManager:
   - name: createState
     description: createState operation
     params:
@@ -195,9 +129,7 @@ tools:
       - activeTask
       - activeFiles
       - nextSteps
-      - reasoning
       optional:
-      - description
       - tags
   - name: createWorkspace
     description: createWorkspace operation
@@ -212,13 +144,6 @@ tools:
       - keyFiles
       - preferences
       - dedicatedAgentId
-  - name: listSessions
-    description: listSessions operation
-    params:
-      required: []
-      optional:
-      - limit
-      - order
   - name: listStates
     description: listStates operation
     params:
@@ -231,12 +156,6 @@ tools:
       required: []
       optional:
       - limit
-  - name: loadSession
-    description: loadSession operation
-    params:
-      required:
-      - sessionId
-      optional: []
   - name: loadState
     description: loadState operation
     params:
@@ -249,24 +168,6 @@ tools:
       required:
       - workspaceId
       optional: []
-  - name: updateSession
-    description: updateSession operation
-    params:
-      required:
-      - sessionId
-      optional:
-      - name
-      - description
-      - sessionGoal
-  - name: updateState
-    description: updateState operation
-    params:
-      required:
-      - stateId
-      optional:
-      - name
-      - conversationContext
-      - activeTask
   - name: updateWorkspace
     description: updateWorkspace operation
     params:
@@ -277,7 +178,13 @@ tools:
       - purpose
       - currentGoal
       - workflows
-  vaultLibrarian:
+  - name: archiveWorkspace
+    description: archiveWorkspace operation
+    params:
+      required:
+      - workspaceId
+      optional: []
+  searchManager:
   - name: searchContent
     description: searchContent operation
     params:
@@ -315,28 +222,22 @@ tools:
       - limit
       - searchMethod
       - filterBySession
-  vaultManager:
+  storageManager:
   - name: createFolder
     description: createFolder operation
     params:
       required:
       - path
       optional: []
-  - name: deleteFolder
-    description: deleteFolder operation
+  - name: archive
+    description: archive operation
     params:
       required:
       - path
       optional:
       - recursive
-  - name: deleteNote
-    description: deleteNote operation
-    params:
-      required:
-      - path
-      optional: []
-  - name: duplicateNote
-    description: duplicateNote operation
+  - name: copy
+    description: copy operation
     params:
       required:
       - sourcePath
@@ -344,15 +245,8 @@ tools:
       optional:
       - overwrite
       - autoIncrement
-  - name: editFolder
-    description: editFolder operation
-    params:
-      required:
-      - path
-      - newPath
-      optional: []
-  - name: listDirectory
-    description: listDirectory operation
+  - name: list
+    description: list operation
     params:
       required:
       - path
@@ -360,24 +254,16 @@ tools:
       - filter
       - depth
       - includeFiles
-  - name: moveFolder
-    description: moveFolder operation
+  - name: move
+    description: move operation
     params:
       required:
       - path
       - newPath
       optional:
       - overwrite
-  - name: moveNote
-    description: moveNote operation
-    params:
-      required:
-      - path
-      - newPath
-      optional:
-      - overwrite
-  - name: openNote
-    description: openNote operation
+  - name: open
+    description: open operation
     params:
       required:
       - path

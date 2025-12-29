@@ -3,10 +3,10 @@
 
 scenarios:
   # VaultManager tools
-  vaultManager_createFolder:
+  storageManager_createFolder:
     type: tool
-    agent: vaultManager
-    tool: vaultManager_createFolder
+    agent: storageManager
+    tool: storageManager_createFolder
     system: true
 
     prompts:
@@ -15,7 +15,7 @@ scenarios:
         - <session_context> with workspace_id and path
         - <vault_structure> showing existing folders
         - <available_workspaces> with at least 2-3 workspaces
-        - <available_agents> listing vaultManager and others
+        - <available_prompts> listing storageManager and others
         - <selected_workspace> with name, path, and workflows
         Make the vault structure realistic with typical project folders.
 
@@ -30,15 +30,15 @@ scenarios:
       assistant: |
         Generate assistant response with:
         1. Optional <thinking> block showing reasoning about folder location
-        2. Tool call to vaultManager_createFolder with appropriate path
+        2. Tool call to storageManager_createFolder with appropriate path
         Use OpenAI-style tool_calls format. The thinking should consider:
         - Where the folder should be created based on context
         - What path makes sense given the user's vague request
 
-  vaultManager_deleteFolder:
+  storageManager_archive:
     type: tool
-    agent: vaultManager
-    tool: vaultManager_deleteFolder
+    agent: storageManager
+    tool: storageManager_archive
     system: true
     flags:
       destructive: true
@@ -66,10 +66,10 @@ scenarios:
         - Warns about irreversibility
         DO NOT generate a tool call - this should be a clarification response.
 
-  vaultManager_moveNote:
+  storageManager_move:
     type: tool
-    agent: vaultManager
-    tool: vaultManager_moveNote
+    agent: storageManager
+    tool: storageManager_move
     system: true
 
     prompts:
@@ -88,13 +88,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about source and destination
-        2. Tool call to vaultManager_moveNote
+        2. Tool call to storageManager_move
         Consider workspace context for paths.
 
-  vaultManager_listDirectory:
+  storageManager_list:
     type: tool
-    agent: vaultManager
-    tool: vaultManager_listDirectory
+    agent: storageManager
+    tool: storageManager_list
     system: true
 
     prompts:
@@ -112,7 +112,7 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about which folder to list
-        2. Tool call to vaultManager_listDirectory with path
+        2. Tool call to storageManager_list with path
 
   # ContentManager tools
   contentManager_createContent:
@@ -164,10 +164,10 @@ scenarios:
         Choose the appropriate method based on request.
 
   # AgentManager tools
-  agentManager_createAgent:
+  promptManager_createPrompt:
     type: tool
-    agent: agentManager
-    tool: agentManager_createAgent
+    agent: promptManager
+    tool: promptManager_createPrompt
     system: true
 
     prompts:
@@ -185,13 +185,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about agent purpose and configuration
-        2. Tool call to agentManager_createAgent
+        2. Tool call to promptManager_createPrompt
         Include name, description, model, and prompt.
 
-  agentManager_executePrompt:
+  promptManager_executePrompt:
     type: tool
-    agent: agentManager
-    tool: agentManager_executePrompt
+    agent: promptManager
+    tool: promptManager_executePrompt
     system: true
 
     prompts:
@@ -209,7 +209,7 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which agent and what prompt
-        2. Tool call to agentManager_executePrompt
+        2. Tool call to promptManager_executePrompt
         Include agent name and prompt text.
 
   # MemoryManager tools
@@ -238,10 +238,10 @@ scenarios:
         Include name, description, and workflows.
 
   # VaultLibrarian tools
-  vaultLibrarian_searchContent:
+  searchManager_searchContent:
     type: tool
-    agent: vaultLibrarian
-    tool: vaultLibrarian_searchContent
+    agent: searchManager
+    tool: searchManager_searchContent
     system: true
 
     prompts:
@@ -259,5 +259,5 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about search terms and scope
-        2. Tool call to vaultLibrarian_searchContent
+        2. Tool call to searchManager_searchContent
         Include search query and optional filters.

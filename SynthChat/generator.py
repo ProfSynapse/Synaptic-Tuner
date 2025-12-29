@@ -184,10 +184,11 @@ class SynthChatGenerator:
         """
         Generate a single example through stage-by-stage pipeline.
 
-        Pipeline:
-            1. Generate system prompt (if enabled) → validate/improve
-            2. Generate user request → validate/improve
-            3. Generate assistant response → validate/improve
+        Pipeline (all stages config-driven via scenario.rubrics):
+            1. Generate system prompt → validate with rubrics.system_prompt
+            2. Generate user request → validate with rubrics.user
+            3. Generate thinking (if rubrics.thinking specified) → validate
+            4. Generate assistant response → validate with rubrics.response
 
         Args:
             scenario_key: Scenario identifier
@@ -200,6 +201,8 @@ class SynthChatGenerator:
             GenerationResult with final example and metrics
         """
         prompts = scenario.get("prompts", {})
+        # Get all rubrics from scenario config - fully config-driven
+        scenario_rubrics = scenario.get("rubrics", {})
 
         # Build template variables from doc context
         template_vars = {}
@@ -242,12 +245,13 @@ class SynthChatGenerator:
                     "content": system_content
                 })
 
-                # Validate/improve system stage
-                if self.enable_stage_validation:
+                # Validate/improve system stage (config-driven)
+                system_rubrics = scenario_rubrics.get("system_prompt", [])
+                if self.enable_stage_validation and system_rubrics:
                     improved, iterations, passed = self._improve_stage(
                         example,
                         stage="system_prompt",
-                        rubrics=["system_prompt_format"],
+                        rubrics=system_rubrics,
                         max_iterations=max_iterations
                     )
                     example = improved
@@ -291,22 +295,58 @@ class SynthChatGenerator:
             "content": user_content
         })
 
-        # Validate/improve user stage (if rubrics exist)
-        if self.enable_stage_validation:
+        # Validate/improve user stage (config-driven)
+        user_rubrics = scenario_rubrics.get("user", [])
+        if self.enable_stage_validation and user_rubrics:
             improved, iterations, passed = self._improve_stage(
                 example,
                 stage="user",
-                rubrics=[],  # User rubrics if any
+                rubrics=user_rubrics,
                 max_iterations=max_iterations
             )
             example = improved
             total_iterations += iterations
-            if not passed and iterations > 0:  # Only mark failure if we tried
+            if not passed:
                 stage_failures.append("user")
 
-        # Stage 3: Assistant response
+        # Stage 3: Thinking (if rubrics.thinking specified)
+        thinking_rubrics = scenario_rubrics.get("thinking", [])
+        thinking_content = None
+
+        if thinking_rubrics:
+            # Generate thinking as separate stage
+            thinking_prompt = render_prompt(prompts.get("thinking", ""))
+            if thinking_prompt:
+                thinking_context = self._build_assistant_context(example, scenario)
+                thinking_content = self._call_llm(
+                    f"{thinking_context}\n\n{thinking_prompt}",
+                    randomize_params
+                )
+
+                # Temporarily add thinking to example for validation
+                # (will be combined with response later)
+                temp_example = {**example, "thinking": thinking_content}
+
+                if self.enable_stage_validation:
+                    improved, iterations, passed = self._improve_stage(
+                        temp_example,
+                        stage="thinking",
+                        rubrics=thinking_rubrics,
+                        max_iterations=max_iterations
+                    )
+                    thinking_content = improved.get("thinking", thinking_content)
+                    total_iterations += iterations
+                    if not passed:
+                        stage_failures.append("thinking")
+
+        # Stage 4: Assistant response (text or tool)
         assistant_prompt = render_prompt(prompts.get("assistant", ""))
         assistant_context = self._build_assistant_context(example, scenario)
+
+        # Include thinking in context if it was generated
+        if thinking_content:
+            assistant_context = f"{assistant_context}\n\nYour thinking:\n{thinking_content}"
+
         assistant_content = self._call_llm(
             f"{assistant_context}\n\n{assistant_prompt}",
             randomize_params
@@ -314,14 +354,21 @@ class SynthChatGenerator:
 
         # Parse assistant response for tool calls
         assistant_msg = self._parse_assistant_response(assistant_content, scenario)
+
+        # If thinking was generated separately, prepend it to content
+        if thinking_content and assistant_msg.get("tool_calls"):
+            # For tool calls, thinking goes in content field
+            assistant_msg["content"] = f"<thinking>{thinking_content}</thinking>"
+
         example["conversations"].append(assistant_msg)
 
-        # Validate/improve assistant stage
-        if self.enable_stage_validation:
+        # Validate/improve response stage (config-driven)
+        response_rubrics = scenario_rubrics.get("response", [])
+        if self.enable_stage_validation and response_rubrics:
             improved, iterations, passed = self._improve_stage(
                 example,
-                stage="response",  # or "thinking" if present
-                rubrics=["thinking_quality", "tool_alignment", "response_quality"],
+                stage="response",
+                rubrics=response_rubrics,
                 max_iterations=max_iterations
             )
             example = improved
@@ -425,26 +472,79 @@ class SynthChatGenerator:
                 context_parts.append(f"User request:\n{msg['content']}")
                 break
 
-        # Scenario hints
-        scenario_type = scenario.get("type", "")
-        if scenario_type == "tool":
-            tool = scenario.get("tool", "")
-            context_parts.append(f"Use tool: {tool}")
-
         return "\n\n".join(context_parts)
 
     def _parse_assistant_response(self, content: str, scenario: Dict) -> Dict:
         """
         Parse assistant response for tool calls and thinking.
 
-        Handles three cases:
-        1. Text-only: content is text, no tool_calls
-        2. Tool-only: content is null or empty, tool_calls present
-        3. Thinking+tool: content contains <thinking>...</thinking>, tool_calls present
+        Handles four cases:
+        1. Direct JSON: response is already {"content":..., "tool_calls":[...]}
+        2. Text-only: content is text, no tool_calls
+        3. Tool-only: content is null or empty, tool_calls present
+        4. Thinking+tool: content contains <thinking>...</thinking>, tool_calls present
 
         Returns:
             Assistant message dict with role, content, and optional tool_calls
         """
+        # Case 1: Check if response is already in final JSON format
+        # This handles scenarios that ask the LLM to output direct JSON
+        content_stripped = content.strip()
+
+        # Strip markdown code fences if present
+        if content_stripped.startswith('```'):
+            # Remove opening fence (```json or ```)
+            first_newline = content_stripped.find('\n')
+            if first_newline > 0:
+                content_stripped = content_stripped[first_newline + 1:]
+            # Remove closing fence
+            if content_stripped.rstrip().endswith('```'):
+                content_stripped = content_stripped.rstrip()[:-3].strip()
+
+        if content_stripped.startswith('{') and '"tool_calls"' in content_stripped:
+            try:
+                # First attempt: try parsing as-is
+                parsed = json.loads(content_stripped)
+            except json.JSONDecodeError:
+                # Second attempt: try to fix common JSON issues
+                # Replace literal newlines inside strings with \n
+                # This regex finds strings and escapes any literal newlines inside them
+                fixed = content_stripped
+                # Remove literal newlines between JSON tokens (keep only in string values)
+                fixed = re.sub(r'\n\s*', ' ', fixed)
+                try:
+                    parsed = json.loads(fixed)
+                except json.JSONDecodeError:
+                    parsed = None
+
+            if parsed and "tool_calls" in parsed and isinstance(parsed["tool_calls"], list):
+                    # Valid direct JSON format
+                    message = {"role": "assistant"}
+                    message["content"] = parsed.get("content")
+
+                    # Normalize tool_calls - ensure arguments is stringified
+                    tool_calls = []
+                    for tc in parsed["tool_calls"]:
+                        normalized_tc = {
+                            "id": tc.get("id", f"call_{len(tool_calls)+1:04d}"),
+                            "type": tc.get("type", "function"),
+                            "function": {}
+                        }
+                        fn = tc.get("function", {})
+                        normalized_tc["function"]["name"] = fn.get("name", "")
+
+                        # Handle arguments - stringify if it's an object
+                        args = fn.get("arguments", "{}")
+                        if isinstance(args, dict):
+                            normalized_tc["function"]["arguments"] = json.dumps(args)
+                        else:
+                            normalized_tc["function"]["arguments"] = args
+
+                        tool_calls.append(normalized_tc)
+
+                    message["tool_calls"] = tool_calls
+                    return message
+
         # Extract thinking block if present
         thinking_match = re.search(r'<thinking>(.*?)</thinking>', content, re.DOTALL)
         thinking_block = None

@@ -1,0 +1,255 @@
+name: storageManager Tools
+description: Validates storageManager tool calls use OpenAI format with useTools schema
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating tool calls for the storageManager agent. Tool calls must use OpenAI format with the useTools schema.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  # REQUIRED FORMAT
+
+  Tool calls MUST use OpenAI tool_calls format with name "useTools":
+  ```json
+  {{
+    "tool_calls": [
+      {{
+        "id": "unique_id",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{...}}, \"calls\": [{{...}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  The `arguments` JSON string must contain:
+  ```json
+  {{
+    "context": {{
+      "workspaceId": "string (from session_context or 'default')",
+      "sessionId": "string (from session_context)",
+      "memory": "string (1-3 sentences)",
+      "goal": "string (1-3 sentences)"
+    }},
+    "calls": [
+      {{
+        "agent": "storageManager",
+        "tool": "toolName",
+        "params": {{ ... tool-specific params ... }}
+      }}
+    ]
+  }}
+  ```
+
+  ## Valid Tools and Params:
+
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | list | path | filter |
+  | open | path | mode, focus |
+  | createFolder | path | - |
+  | move | path, newPath | overwrite |
+  | archive | path | - |
+  | copy | path, newPath | overwrite |
+
+  ## DESTRUCTIVE TOOLS: archive, move (overwrite)
+
+  # EVALUATION CRITERIA
+
+  1. **Function Name**: Must be exactly "useTools" (not "storageManager_move" etc.)
+  2. **Arguments Structure**: Must have `context` and `calls` at root
+  3. **Context Object**: Must have exactly 4 fields (workspaceId, sessionId, memory, goal)
+  4. **Calls Array**: Each call must have `agent`, `tool`, `params`
+  5. **Agent Value**: Must be exactly "storageManager"
+  6. **Tool Value**: Must be valid tool name (list, open, etc.)
+  7. **Params**: Must include all required params for the tool
+
+  # SCORING
+  - **1.0** = Correct format, valid params, proper useTools structure
+  - **0.7-0.9** = Minor param issues
+  - **0.4-0.6** = Wrong structure OR missing required params
+  - **0.0-0.3** = Wrong function name OR completely wrong format
+
+  # OUTPUT
+  Return JSON: `{{"storagemanagertools_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are converting tool calls to the correct OpenAI assistant message format.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # REQUIRED OUTPUT FORMAT
+
+  Output a complete assistant message with `content: null` and `tool_calls` array:
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<random_9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  **CRITICAL**: `content` MUST be `null` (not a string, not empty string).
+
+  The `arguments` value must be a JSON STRING containing:
+  ```json
+  {{
+    "context": {{
+      "workspaceId": "<from session_context or 'default'>",
+      "sessionId": "<from session_context>",
+      "memory": "<1-3 sentence summary>",
+      "goal": "<1-3 sentence objective>"
+    }},
+    "calls": [
+      {{
+        "agent": "storageManager",
+        "tool": "<toolName without prefix>",
+        "params": {{ <tool-specific parameters> }}
+      }}
+    ]
+  }}
+  ```
+
+  ## Valid Tools and Params:
+
+  | tool | required params | optional params |
+  |------|-----------------|-----------------|
+  | list | path | filter |
+  | open | path | mode, focus |
+  | createFolder | path | - |
+  | move | path, newPath | overwrite |
+  | archive | path | - |
+  | copy | path, newPath | overwrite |
+
+  # INSTRUCTIONS
+
+  1. **Extract IDs from system prompt's <session_context>**
+  2. **Set content to null** (tool-only response)
+  3. **Set function.name to "useTools"**
+  4. **Build arguments with context + calls array**
+
+  # EXAMPLE
+
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_m7k2p9x4q",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "{{\"context\": {{\"workspaceId\": \"default\", \"sessionId\": \"session_123\", \"memory\": \"User reorganizing vault.\", \"goal\": \"Move LightRay to archive.\"}}, \"calls\": [{{\"agent\": \"storageManager\", \"tool\": \"move\", \"params\": {{\"path\": \"Studios/Boards/LightRay\", \"newPath\": \"Studios/Archive/LightRay\"}}}}]}}"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  # OUTPUT
+  Return ONLY the JSON object with content and tool_calls. No markdown, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    storagemanagertools_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - storagemanagertools_score
+
+# Output format defines how improved content is applied to the example
+# assistant_message: Parse as JSON with {content: null|string, tool_calls: [...]}
+output_format:
+  type: assistant_message
+
+# Validation for OpenAI tool_calls with useTools format
+# Uses 'tools' validation type which checks tool_calls field directly
+validations:
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            storageManager:
+              list:
+                _required: [path]
+                path: string
+                filter: string
+              open:
+                _required: [path]
+                path: string
+                mode: string
+                focus: boolean
+              createFolder:
+                _required: [path]
+                path: string
+              move:
+                _required: [path, newPath]
+                path: string
+                newPath: string
+                overwrite: boolean
+              archive:
+                _required: [path]
+                path: string
+              copy:
+                _required: [path, newPath]
+                path: string
+                newPath: string
+                overwrite: boolean
+    error: "useTools validation failed: {details}"

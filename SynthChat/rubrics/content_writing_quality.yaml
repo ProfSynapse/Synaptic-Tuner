@@ -1,0 +1,237 @@
+name: Content Writing Quality
+description: Validates contentManager write tool calls have proper Obsidian frontmatter and substantial content
+scope: response
+pass_threshold: 0.85
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating a contentManager write tool call for content quality and proper Obsidian formatting.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  # EVALUATION CRITERIA
+
+  ## 1. FRONTMATTER (30 points)
+
+  The content field in params MUST start with raw YAML frontmatter (NO ```yaml code fence):
+  ---
+  title: "Required - descriptive title"
+  description: "Required - 1-2 sentence summary"
+  tags:
+    - tag1
+    - tag2
+  aliases:
+    - "Alternative Name"
+  category: "research|blog|creative|documentation|journal"
+  ---
+
+  Scoring:
+  - Has valid YAML frontmatter block (--- delimiters, NO code fence): 10 pts
+  - Has title field: 5 pts
+  - Has description field: 5 pts
+  - Has tags array with 2+ tags: 5 pts
+  - Has aliases field: 3 pts
+  - Has category field: 2 pts
+
+  ## 2. CONTENT STRUCTURE (30 points)
+
+  The content should be well-organized:
+  - Has clear section headings (## or ###): 10 pts
+  - Has 3+ distinct sections: 10 pts
+  - Uses appropriate markdown formatting: 5 pts
+  - Has logical flow/organization: 5 pts
+
+  ## 3. CONTENT SUBSTANCE (30 points)
+
+  The content should be substantive:
+  - Content length appropriate for request (300+ words for simple, 500+ for complex): 15 pts
+  - Contains specific, relevant information (not generic filler): 10 pts
+  - Matches the user's request topic: 5 pts
+
+  ## 4. OBSIDIAN FORMATTING (10 points)
+
+  Uses Obsidian-specific features:
+  - Uses [[wikilinks]] for related notes: 3 pts
+  - Uses callouts (> [!note], etc.) where appropriate: 3 pts
+  - Uses code blocks, tables, or lists appropriately: 2 pts
+  - Uses #inline-tags where relevant: 2 pts
+
+  # SCORING
+
+  Calculate total points (max 100) and convert to 0.0-1.0 scale:
+  - **0.9-1.0** = Excellent: Complete frontmatter, well-structured, substantive content
+  - **0.7-0.89** = Good: Has frontmatter and structure, minor issues
+  - **0.5-0.69** = Needs work: Missing frontmatter elements or thin content
+  - **0.3-0.49** = Poor: Missing frontmatter or very thin content
+  - **0.0-0.29** = Fail: No frontmatter or completely inadequate
+
+  # OUTPUT
+  Return JSON: `{{"content_writing_quality_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are improving a contentManager write tool call to include proper Obsidian frontmatter and richer content.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # YOUR TASK
+
+  Improve the content in the write tool call to include:
+
+  ## 1. YAML FRONTMATTER (Required)
+
+  Every piece of content MUST start with RAW frontmatter (NO ```yaml code fence):
+  ---
+  title: "Descriptive, specific title"
+  description: "1-2 sentence summary of the content"
+  tags:
+    - primary-category
+    - topic-specific
+    - format-type
+  aliases:
+    - "Short name"
+    - "Alternative reference"
+  category: "[research|blog|creative|documentation|journal]"
+  ---
+
+  IMPORTANT: Do NOT wrap frontmatter in ```yaml code fence. Start directly with ---
+
+  ## 2. CONTENT STRUCTURE
+
+  After frontmatter, include well-organized content:
+  - Start with a brief introduction
+  - Use ## headings for major sections
+  - Use ### for subsections
+  - Include 3-5 main sections
+  - End with conclusions/next steps
+
+  ## 3. OBSIDIAN FORMATTING
+
+  Include Obsidian-specific markdown:
+  - [[wikilinks]] to reference related notes
+  - #inline-tags for key concepts
+  - Callouts: `> [!note]`, `> [!tip]`, `> [!warning]`
+  - Code blocks with syntax highlighting
+  - Tables where data is structured
+  - Checkboxes `- [ ]` for action items
+
+  ## 4. SUBSTANTIVE CONTENT
+
+  Generate meaningful content:
+  - Minimum 400 words for simple requests
+  - 600-1500 words for complex requests
+  - Specific details, not generic filler
+  - Match the tone to the content type
+  - Include examples or illustrations
+
+  # OUTPUT FORMAT
+
+  Return a complete assistant message:
+  ```json
+  {{
+    "content": null,
+    "tool_calls": [
+      {{
+        "id": "call_<9chars>",
+        "type": "function",
+        "function": {{
+          "name": "useTools",
+          "arguments": "<JSON string with context and calls>"
+        }}
+      }}
+    ]
+  }}
+  ```
+
+  The write tool params should have:
+  - path: appropriate file path based on context
+  - content: the full content with frontmatter
+
+  # OUTPUT
+  Return ONLY the JSON object. No markdown wrapper, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    content_writing_quality_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - content_writing_quality_score
+
+output_format:
+  type: assistant_message
+
+validations:
+  # Tool structure validation (content quality checked by judge)
+  - tools:
+      useTools:
+        context:
+          workspaceId: string
+          sessionId: string
+          memory: string
+          goal: string
+        calls:
+          _item_schema:
+            agent: string
+            tool: string
+            params: object
+          _subtools:
+            contentManager:
+              write:
+                _required: [path, content]
+                path: string
+                content: string
+                overwrite: boolean
+    error: "useTools validation failed: {details}"
+
+  # Cross-scope validation: sessionId/workspaceId must match system prompt
+  - cross_scope:
+      from: response
+      to: system_prompt
+      extract:
+        fields:
+          - context.sessionId
+          - context.workspaceId
+        pattern: "(?:sessionId|workspaceId).*?[\"']([^\"']+)[\"']"
+      validate_in:
+        - session_context
+    error: "Context ID mismatch: '{value}' not found in session_context"
+
+# Enable context ID validation
+validation:
+  tool_calls:
+    enabled: true
+    check_context_ids: true  # Validate sessionId/workspaceId match system prompt
