@@ -122,7 +122,7 @@ class MainMenuHandler(BaseHandler):
             ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
             ("convert", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
             ("eval", f"{BOX['bullet']} Evaluate a model"),
-            ("generate", f"{BOX['bullet']} Synth Chat (SelfPlay data generation)"),
+            ("generate", f"{BOX['bullet']} Synth Chat"),
             ("improve", f"{BOX['bullet']} Improvement Engine (clean datasets)"),
             ("pipeline", f"{BOX['bullet']} Full pipeline (Train -> Upload -> Eval)"),
         ]

@@ -179,7 +179,8 @@ def resolve_model_path(
         FileNotFoundError: If model_path doesn't exist
         ValueError: If path is neither LoRA checkpoint nor merged model
     """
-    path = Path(model_path)
+    # Always use absolute paths (PEFT saves base_model_name_or_path as-is)
+    path = Path(model_path).resolve()
 
     if not path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")

@@ -207,7 +207,9 @@
       "Bash(Q5_K_M)",
       "Bash(git push:*)",
       "Bash(git remote set-url:*)",
-      "Bash(PYTHONPATH=. python3:*)"
+      "Bash(PYTHONPATH=. python3:*)",
+      "mcp__plugin_serena_serena__get_symbols_overview",
+      "mcp__plugin_serena_serena__list_dir"
     ],
     "deny": [],
     "ask": []

@@ -240,6 +240,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Load model + tokenizer/processor
     lora_path = model_cfg.get('lora_path')
     if lora_path:
+        # Convert to absolute path (PEFT saves base_model_name_or_path as-is)
+        lora_path = str(Path(lora_path).resolve())
         # Load from SFT checkpoint (merge LoRA first)
         model, tok_or_proc, is_vl = load_from_sft_checkpoint(
             base_model_name=model_cfg['model_name'],

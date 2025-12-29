@@ -4,23 +4,37 @@
 # Path to tool schema (source of truth for structure)
 tool_schema_path: ../../../Evaluator/config/tool_schema.yaml
 
-# Extraction paths (derived from tool_schema.yaml)
-# These define WHERE to find data in model output
-extraction:
-  # How to find the arguments JSON in tool call output
-  arguments_path: 'tool_calls[0].function.arguments'
+# Model output format: useTools wrapper
+# The model outputs a SINGLE tool call named "useTools" with structured arguments:
+#
+#   function.name: "useTools"
+#   function.arguments: {
+#     "context": {
+#       "workspaceId": "...",
+#       "sessionId": "...",
+#       "memory": "...",
+#       "goal": "..."
+#     },
+#     "calls": [
+#       {
+#         "agent": "vaultManager",
+#         "tool": "openNote",
+#         "params": {"path": "..."}
+#       }
+#     ]
+#   }
+#
+# Ground truth format (from dataset ground_truth_args_json) uses the SAME structure.
+# This means we can compare parsed_args directly against ground truth.
 
-  # Once we have arguments, where is context?
-  context_path: 'context'
-
-  # Where are the tool calls?
-  calls_path: 'calls'
-
-# Parsing hints
+# Parsing is handled by shared/validation/parsing/tool_call_parser.py
+# which auto-detects format (Qwen <tool_call>, Mistral [TOOL_CALLS], etc.)
 parsing:
   # Arguments may be JSON string (escaped) or dict
   arguments_format: json_string_or_dict
 
-  # Tool name construction pattern (from tool_schema.yaml)
-  # {agent}_{tool} -> e.g., "vaultManager_createFolder"
-  tool_name_pattern: '{agent}_{tool}'
+  # Auto-detect model format (qwen, mistral, openai)
+  auto_detect: true
+
+  # Expected tool name
+  expected_tool_name: useTools

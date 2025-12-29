@@ -1,8 +1,11 @@
 # Args Match Reward
-# Validates predicted args match ground truth (context, agent, tool, params)
+# Validates predicted useTools args match ground truth from dataset
+#
+# Model outputs useTools with: {"context": {...}, "calls": [...]}
+# Ground truth has same structure - direct comparison possible
 
 name: args_match
-description: Validates tool call args match ground truth from dataset
+description: Validates useTools arguments match ground truth from dataset
 
 inherit: _schema.yaml
 
@@ -13,32 +16,53 @@ ground_truth:
   field: ground_truth_args_json
   parse: json  # Parse JSON string before comparing
 
-# What to compare
+# What to compare - explicit field mappings
+# Since model output and ground truth have SAME structure (useTools format),
+# we compare matching paths directly.
 comparison:
-  # Context fields to match
-  context_fields:
-    - workspaceId
-    - sessionId
-    - memory
-    - goal
+  mappings:
+    # Context: sessionId
+    - pred_path: "context.sessionId"
+      gt_path: "context.sessionId"
+      weight: 0.1
+      strategy: equals
 
-  # Call fields to match
-  call_fields:
-    - agent
-    - tool
-    - params
+    # Context: workspaceId
+    - pred_path: "context.workspaceId"
+      gt_path: "context.workspaceId"
+      weight: 0.1
+      strategy: equals
+
+    # Context: memory (fuzzy match - contains key info)
+    - pred_path: "context.memory"
+      gt_path: "context.memory"
+      weight: 0.1
+      strategy: contains
+
+    # Context: goal
+    - pred_path: "context.goal"
+      gt_path: "context.goal"
+      weight: 0.1
+      strategy: contains
+
+    # Calls: agent name
+    - pred_path: "calls.0.agent"
+      gt_path: "calls.0.agent"
+      weight: 0.15
+      strategy: equals
+
+    # Calls: tool name
+    - pred_path: "calls.0.tool"
+      gt_path: "calls.0.tool"
+      weight: 0.15
+      strategy: equals
+
+    # Calls: params (key overlap)
+    - pred_path: "calls.0.params"
+      gt_path: "calls.0.params"
+      weight: 0.3
+      strategy: key_overlap
 
 # Scoring
 scoring:
   strategy: weighted
-
-  weights:
-    context_match: 0.4      # 40% for context fields
-    tool_match: 0.3         # 30% for correct agent_tool
-    params_match: 0.3       # 30% for params match
-
-  # Partial credit for context
-  context_partial: true     # Score = fields_matched / total_fields
-
-  # Params matching strategy
-  params_strategy: key_overlap  # Score based on key overlap

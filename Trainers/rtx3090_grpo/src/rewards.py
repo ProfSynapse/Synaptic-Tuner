@@ -4,8 +4,8 @@ GRPO/GSPO Reward Functions - YAML-Driven
 All reward logic is defined in configs/rewards/*.yaml rubrics.
 This module provides a thin execution layer that:
 1. Loads rubric YAMLs
-2. Uses shared/validation for extraction and validation
-3. Converts validation results to reward scores
+2. Extracts tool call data directly from model output (Qwen/Mistral format)
+3. Compares against ground truth using configurable field mappings
 
 No hardcoded field names or structures - everything from YAML.
 """
@@ -93,48 +93,60 @@ class RewardRubric:
             return self._score_binary(data, completion_text)
 
     def _extract_data(self, text: str) -> Dict:
-        """Extract structured data from completion text."""
-        # Find arguments JSON in tool call
-        args = self._parse_arguments(text)
-        if not args:
-            return {}
+        """
+        Extract structured data from completion text.
 
-        return {
-            "context": args.get("context", {}),
-            "calls": args.get("calls", []),
-            "raw_text": text,
-        }
+        Directly extracts from model's native format (e.g., Qwen's <tool_call> tags).
+        No unnecessary format conversion - just get the arguments and compare.
+        """
+        result = {"raw_text": text}
 
-    def _parse_arguments(self, text: str) -> Optional[Dict]:
-        """Parse arguments from tool call output."""
-        # Try escaped JSON string
-        match = re.search(r'"arguments"\s*:\s*"(\{.*?\})"', text, re.DOTALL)
-        if match:
+        # Try Qwen format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+        tool_call_match = re.search(
+            r'<tool_call>\s*([\s\S]*?)\s*</tool_call>',
+            text,
+            re.IGNORECASE
+        )
+
+        if tool_call_match:
+            json_content = tool_call_match.group(1).strip()
             try:
-                args_str = match.group(1)
-                args_str = args_str.replace('\\"', '"').replace('\\n', '\n')
-                return json.loads(args_str)
-            except (json.JSONDecodeError, ValueError):
+                tool_obj = json.loads(json_content)
+                if isinstance(tool_obj, dict):
+                    result["tool_name"] = tool_obj.get("name", "")
+                    args = tool_obj.get("arguments", {})
+                    # Arguments might be JSON string or dict
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    result["parsed_args"] = args if isinstance(args, dict) else {}
+                    return result
+            except json.JSONDecodeError:
                 pass
 
-        # Try unescaped JSON
-        match = re.search(r'"arguments"\s*:\s*(\{)', text)
-        if match:
-            start = match.start(1)
-            depth = 0
-            for i in range(start, len(text)):
-                if text[i] == '{':
-                    depth += 1
-                elif text[i] == '}':
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start:i + 1])
-                        except (json.JSONDecodeError, ValueError):
-                            pass
-                        break
+        # Fallback: Try Mistral format [TOOL_CALLS] [...]
+        if "[TOOL_CALLS]" in text:
+            match = re.search(r'\[TOOL_CALLS\]\s*(\[[\s\S]*?\])', text)
+            if match:
+                try:
+                    tool_calls = json.loads(match.group(1))
+                    if isinstance(tool_calls, list) and tool_calls:
+                        tc = tool_calls[0]
+                        result["tool_name"] = tc.get("name", "")
+                        args = tc.get("arguments", {})
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+                        result["parsed_args"] = args if isinstance(args, dict) else {}
+                        return result
+                except json.JSONDecodeError:
+                    pass
 
-        return None
+        return result
 
     def _score_binary(self, data: Dict, raw_text: str) -> float:
         """Binary scoring: 1.0 if all validations pass, 0.0 otherwise."""
@@ -232,8 +244,8 @@ class RewardRubric:
         """
         Weighted scoring: compare predicted args against ground truth.
 
-        Compares context fields, tool selection, and params based on
-        weights defined in the rubric's scoring.weights config.
+        Compares fields based on mappings defined in rubric's comparison config.
+        All paths and fields come from YAML - no hardcoding.
         """
         # Get ground truth config
         gt_field = self.ground_truth.get("field", "ground_truth_args_json")
@@ -252,99 +264,142 @@ class RewardRubric:
         except (json.JSONDecodeError, ValueError):
             return 0.0
 
-        # Get comparison config
+        # Get comparison config from rubric
         comparison = self.config.get("comparison", {})
-        context_fields = comparison.get("context_fields", ["workspaceId", "sessionId", "memory", "goal"])
-        call_fields = comparison.get("call_fields", ["agent", "tool", "params"])
+        mappings = comparison.get("mappings", [])
 
-        # Get weights
+        # If no explicit mappings, use legacy field-based comparison
+        if not mappings:
+            return self._score_weighted_legacy(data, gt_args, comparison, kwargs)
+
+        # Score based on explicit field mappings
+        total_score = 0.0
+        total_weight = 0.0
+        pred_args = data.get("parsed_args", {})
+
+        for mapping in mappings:
+            pred_path = mapping.get("pred_path", "")
+            gt_path = mapping.get("gt_path", "")
+            weight = float(mapping.get("weight", 1.0))
+            strategy = mapping.get("strategy", "equals")
+
+            # Special case: tool_name comparison uses different fields
+            if mapping.get("use_tool_name"):
+                pred_val = data.get("tool_name", "")
+                gt_val = kwargs.get("ground_truth_tool", "")
+            elif pred_path == "" and strategy == "key_overlap":
+                # Empty pred_path with key_overlap means compare all parsed args
+                pred_val = pred_args
+                gt_val = self._get_nested_value(gt_args, gt_path)
+            else:
+                # Extract values using paths
+                pred_val = self._get_nested_value(pred_args, pred_path)
+                gt_val = self._get_nested_value(gt_args, gt_path)
+
+            # Compare based on strategy
+            field_score = self._compare_values(pred_val, gt_val, strategy)
+            total_score += weight * field_score
+            total_weight += weight
+
+        # Normalize score
+        return total_score / total_weight if total_weight > 0 else 0.0
+
+    def _get_nested_value(self, obj: Any, path: str) -> Any:
+        """Get value from nested dict using dot notation path."""
+        if not path or not obj:
+            return None
+
+        parts = path.split(".")
+        current = obj
+
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part)
+            elif isinstance(current, list) and part.isdigit():
+                idx = int(part)
+                current = current[idx] if idx < len(current) else None
+            else:
+                return None
+
+            if current is None:
+                return None
+
+        return current
+
+    def _compare_values(self, pred: Any, gt: Any, strategy: str) -> float:
+        """Compare two values using the specified strategy."""
+        if pred is None or gt is None:
+            return 0.0
+
+        if strategy == "equals":
+            return 1.0 if str(pred) == str(gt) else 0.0
+
+        elif strategy == "contains":
+            return 1.0 if str(gt) in str(pred) else 0.0
+
+        elif strategy == "key_overlap":
+            if isinstance(pred, dict) and isinstance(gt, dict) and gt:
+                overlap = len(set(pred.keys()) & set(gt.keys()))
+                return overlap / len(gt)
+            return 0.0
+
+        elif strategy == "tool_name_match":
+            # Compare tool names (handle agent_tool format)
+            pred_str = str(pred)
+            gt_str = str(gt)
+            if pred_str == gt_str:
+                return 1.0
+            # Partial: same agent
+            if "_" in pred_str and "_" in gt_str:
+                if pred_str.split("_")[0] == gt_str.split("_")[0]:
+                    return 0.3
+            return 0.0
+
+        return 0.0
+
+    def _score_weighted_legacy(self, data: Dict, gt_args: Dict, comparison: Dict, kwargs: Dict) -> float:
+        """Legacy weighted scoring using field lists (backwards compatible)."""
+        context_fields = comparison.get("context_fields", [])
+        call_fields = comparison.get("call_fields", [])
+
         weights = self.scoring.get("weights", {})
         context_weight = weights.get("context_match", 0.4)
         tool_weight = weights.get("tool_match", 0.3)
         params_weight = weights.get("params_match", 0.3)
 
         total_score = 0.0
+        pred_args = data.get("parsed_args", {})
 
-        # --- 1. Context matching ---
-        pred_context = data.get("context", {})
-        gt_context = gt_args.get("context", {})
+        # Context field matching
+        if context_fields:
+            gt_context = gt_args.get("context", {}) if isinstance(gt_args, dict) else {}
+            if isinstance(gt_context, dict) and gt_context:
+                matches = sum(
+                    1 for f in context_fields
+                    if str(pred_args.get(f, "")) == str(gt_context.get(f, ""))
+                )
+                total_score += context_weight * (matches / len(context_fields))
 
-        # Defensive: ensure contexts are dicts (model may output string)
-        if not isinstance(pred_context, dict):
-            pred_context = {}
-        if not isinstance(gt_context, dict):
-            gt_context = {}
-
-        if context_fields and gt_context:
-            context_matches = 0
-            for field in context_fields:
-                pred_val = pred_context.get(field)
-                gt_val = gt_context.get(field)
-                if pred_val is not None and gt_val is not None:
-                    # For strings, check equality; for dicts, check key overlap
-                    if isinstance(gt_val, dict) and isinstance(pred_val, dict):
-                        # Key overlap scoring for nested objects
-                        if gt_val:
-                            overlap = len(set(pred_val.keys()) & set(gt_val.keys()))
-                            context_matches += overlap / len(gt_val)
-                    elif str(pred_val) == str(gt_val):
-                        context_matches += 1
-
-            context_score = context_matches / len(context_fields) if context_fields else 0.0
-            total_score += context_weight * context_score
-
-        # --- 2. Tool matching (agent + tool) ---
-        pred_calls = data.get("calls", [])
-        gt_calls = gt_args.get("calls", [])
-
-        if pred_calls and gt_calls:
-            pred_call = pred_calls[0]
-            gt_call = gt_calls[0]
-
-            pred_agent = pred_call.get("agent", "")
-            pred_tool = pred_call.get("tool", "")
-            gt_agent = gt_call.get("agent", "")
-            gt_tool = gt_call.get("tool", "")
-
-            # Exact match on agent + tool
-            if pred_agent == gt_agent and pred_tool == gt_tool:
+        # Tool name matching
+        pred_tool = data.get("tool_name", "")
+        gt_tool = kwargs.get("ground_truth_tool", "")
+        if pred_tool and gt_tool:
+            if pred_tool == gt_tool:
                 total_score += tool_weight * 1.0
-            elif pred_agent == gt_agent:
-                # Partial credit for correct agent
-                total_score += tool_weight * 0.3
+            elif "_" in pred_tool and "_" in gt_tool:
+                if pred_tool.split("_")[0] == gt_tool.split("_")[0]:
+                    total_score += tool_weight * 0.3
 
-        # --- 3. Params matching ---
-        if pred_calls and gt_calls:
-            pred_params = pred_calls[0].get("params", {})
-            gt_params = gt_calls[0].get("params", {})
-
-            params_strategy = self.scoring.get("params_strategy", "key_overlap")
-
-            if params_strategy == "key_overlap" and gt_params:
-                # Score based on key overlap
+        # Params matching (key overlap)
+        gt_calls = gt_args.get("calls", []) if isinstance(gt_args, dict) else []
+        if gt_calls and isinstance(gt_calls, list) and gt_calls:
+            gt_params = gt_calls[0].get("params", {}) if isinstance(gt_calls[0], dict) else {}
+            if isinstance(gt_params, dict) and gt_params:
                 gt_keys = set(gt_params.keys())
-                pred_keys = set(pred_params.keys())
-
+                pred_keys = set(k for k in pred_args.keys() if k not in ["sessionId", "workspaceId"])
                 if gt_keys:
                     overlap = len(gt_keys & pred_keys)
-                    params_score = overlap / len(gt_keys)
-
-                    # Bonus for value matches
-                    value_matches = 0
-                    for key in gt_keys & pred_keys:
-                        if str(pred_params.get(key)) == str(gt_params.get(key)):
-                            value_matches += 1
-
-                    if overlap > 0:
-                        value_bonus = (value_matches / overlap) * 0.5
-                        params_score = min(1.0, params_score + value_bonus)
-
-                    total_score += params_weight * params_score
-
-            elif params_strategy == "exact" and gt_params:
-                # Exact match required
-                if pred_params == gt_params:
-                    total_score += params_weight * 1.0
+                    total_score += params_weight * (overlap / len(gt_keys))
 
         return total_score
 
