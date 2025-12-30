@@ -34,6 +34,16 @@ try:
 except ImportError:
     pass  # dotenv not required
 
+# Suppress verbose logging from transformers BEFORE importing it
+# This prevents the metrics dict spam during training
+import logging
+logging.getLogger("transformers").setLevel(logging.WARNING)
+logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
+
+# Also suppress via transformers' own logging system
+import transformers
+transformers.logging.set_verbosity_warning()
+
 # ============================================================================
 # DISABLE TORCH.COMPILE - Required for VL models and WSL compatibility
 # Must be set BEFORE importing unsloth
@@ -95,7 +105,13 @@ from src.model_loader import (
     apply_lora_adapters,
     check_gpu_memory
 )
-from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback
+from src.training_callbacks import (
+    MetricsTableCallback,
+    CheckpointMonitorCallback,
+    LiveDashboardCallback,
+    suppress_training_logs,
+    DASHBOARD_AVAILABLE,
+)
 
 # Evolutionary training (optional)
 try:
@@ -372,6 +388,12 @@ def parse_args(argv=None):
     parser.add_argument("--hf-token", type=str,
                        help="HuggingFace API token (or set HF_TOKEN env var)")
 
+    # UI options
+    parser.add_argument("--no-dashboard", action="store_true",
+                       help="Disable live dashboard, use table output instead")
+    parser.add_argument("--quiet", action="store_true",
+                       help="Suppress verbose library logs")
+
     return parser.parse_args(argv)
 
 
@@ -622,6 +644,13 @@ def run(args: argparse.Namespace):
             )
         return formatted
 
+    # Initialize callbacks based on UI mode (need to know this before configuring trainer)
+    # Dashboard is the default if available, use --no-dashboard to disable
+    use_dashboard = DASHBOARD_AVAILABLE and not getattr(args, 'no_dashboard', False)
+    use_quiet_mode = use_dashboard or args.quiet
+
+    print(f"[UI] Dashboard available: {DASHBOARD_AVAILABLE}, using dashboard: {use_dashboard}")
+
     # Configure SFT training arguments
     sft_config_kwargs = {
         "output_dir": config.training.output_dir,
@@ -650,6 +679,10 @@ def run(args: argparse.Namespace):
         "run_name": config.wandb_run_name if config.use_wandb else None,
         "seed": config.seed,
         "dataset_kwargs": {"add_special_tokens": False},
+        # Disable tqdm when using dashboard (they conflict)
+        "disable_tqdm": use_dashboard,
+        # Suppress metrics dict logging (our callback handles display)
+        "log_level": "warning" if use_dashboard else "info",
     }
 
     # When packing is enabled, use preprocessed 'text' column
@@ -704,15 +737,39 @@ def run(args: argparse.Namespace):
     if args.resume_from_checkpoint:
         previous_log_entries = extract_previous_log_entries(args.resume_from_checkpoint)
 
-    # Initialize callbacks
-    callbacks = [
-        MetricsTableCallback(
-            log_every_n_steps=config.training.logging_steps,
-            output_dir=str(run_dir),  # Pass run_dir, callback adds /logs
-            previous_log_entries=previous_log_entries
-        ),
-        CheckpointMonitorCallback()
-    ]
+    # Setup callbacks based on UI mode (use_dashboard/use_quiet_mode set earlier)
+    if use_dashboard:
+        print("[OK] Using live dashboard mode")
+        callbacks = [
+            LiveDashboardCallback(
+                log_every_n_steps=config.training.logging_steps,
+                output_dir=str(run_dir),
+                training_type="sft",
+                previous_log_entries=previous_log_entries
+            ),
+        ]
+    else:
+        callbacks = [
+            MetricsTableCallback(
+                log_every_n_steps=config.training.logging_steps,
+                output_dir=str(run_dir),  # Pass run_dir, callback adds /logs
+                previous_log_entries=previous_log_entries
+            ),
+            CheckpointMonitorCallback()
+        ]
+
+    # Apply log suppression for trainer initialization if quiet mode
+    if use_quiet_mode:
+        # Suppress verbose output during trainer creation and training
+        import logging
+        for name in ['unsloth', 'transformers', 'transformers.trainer', 'trl', 'peft', 'accelerate']:
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+    # Extra suppression for dashboard mode - completely quiet the trainer's logging
+    if use_dashboard:
+        import logging
+        # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
+        logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 
     # Initialize SFT Trainer (NO ref_model needed!)
     print("Initializing SFT Trainer...")
@@ -731,6 +788,12 @@ def run(args: argparse.Namespace):
         trainer_kwargs["formatting_func"] = format_chat_template
 
     trainer = SFTTrainer(**trainer_kwargs)
+
+    # Remove PrinterCallback to stop the {'loss': ...} dict spam
+    # Our LiveDashboardCallback or MetricsTableCallback handles display instead
+    if use_dashboard:
+        from transformers.trainer_callback import PrinterCallback
+        trainer.remove_callback(PrinterCallback)
 
     print("[OK] SFT trainer initialized with metrics tracking")
 
@@ -762,6 +825,8 @@ def run(args: argparse.Namespace):
     print("STARTING TRAINING")
     if evo_wrapper:
         print("(Evolutionary gradient selection enabled)")
+    if use_dashboard:
+        print("(Live dashboard enabled)")
     print("=" * 60 + "\n")
 
     import time

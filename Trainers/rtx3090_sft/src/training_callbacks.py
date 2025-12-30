@@ -7,9 +7,22 @@ Provides real-time metrics tracking and pretty table output.
 from transformers import TrainerCallback, TrainerState, TrainerControl
 import torch
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
+import sys
+import logging
 from pathlib import Path
+
+# Add shared to path for UI components
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+# Try to import LiveDashboard
+try:
+    from shared.ui import LiveDashboard, suppress_logs, RICH_AVAILABLE
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    RICH_AVAILABLE = False
 
 
 class MetricsTableCallback(TrainerCallback):
@@ -299,3 +312,169 @@ class CheckpointMonitorCallback(TrainerCallback):
         print(f"  Keep last: {args.save_total_limit} checkpoints")
         print(f"  Output dir: {args.output_dir}")
         print()
+
+
+class LiveDashboardCallback(TrainerCallback):
+    """
+    Training callback that displays a live dashboard with real-time metrics.
+
+    Uses the shared.ui LiveDashboard for a rich, animated display.
+    Falls back to MetricsTableCallback if dashboard is not available.
+    """
+
+    def __init__(
+        self,
+        log_every_n_steps: int = 5,
+        output_dir: str = "./sft_output_rtx3090",
+        training_type: str = "sft",
+        previous_log_entries: list = None
+    ):
+        """
+        Args:
+            log_every_n_steps: Update dashboard every N training steps
+            output_dir: Directory to save detailed logs
+            training_type: 'sft' or 'kto' (affects displayed metrics)
+            previous_log_entries: Optional list of log entries from a previous run
+        """
+        self.log_every_n_steps = log_every_n_steps
+        self.output_dir = Path(output_dir)
+        self.logs_dir = self.output_dir / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.training_type = training_type
+
+        # Create timestamped log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = self.logs_dir / f"training_{timestamp}.jsonl"
+        self.latest_log = self.logs_dir / "training_latest.jsonl"
+
+        self.start_time = None
+        self.dashboard: Optional[LiveDashboard] = None
+        self.total_steps = 0
+        self.total_epochs = 1
+
+        # Prepopulate if resuming
+        if previous_log_entries:
+            self._prepopulate_log(previous_log_entries)
+
+    def _prepopulate_log(self, previous_entries: list):
+        """Prepopulate log file with entries from a previous run."""
+        with open(self.log_file, "w") as f:
+            for entry in previous_entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        """Start the live dashboard."""
+        self.start_time = datetime.now()
+        self.total_steps = state.max_steps if state.max_steps > 0 else 1000
+        self.total_epochs = args.num_train_epochs
+
+        # Create symlink to latest log
+        if self.latest_log.exists():
+            self.latest_log.unlink()
+        try:
+            self.latest_log.symlink_to(self.log_file.name)
+        except (OSError, NotImplementedError):
+            pass
+
+        # Start dashboard if available
+        if DASHBOARD_AVAILABLE and RICH_AVAILABLE:
+            self.dashboard = LiveDashboard(
+                title=f"{self.training_type.upper()} Training",
+                total_epochs=int(self.total_epochs),
+                total_steps=self.total_steps,
+                training_type=self.training_type,
+                show_sparklines=True,
+                log_lines=3,
+            )
+            self.dashboard.__enter__()
+        else:
+            # Fallback: print basic info
+            print(f"\n{'=' * 60}")
+            print(f"TRAINING STARTED - {self.training_type.upper()}")
+            print(f"{'=' * 60}")
+            print(f"Log file: {self.log_file}")
+
+    def on_log(self, args, state: TrainerState, control: TrainerControl, logs: Dict[str, Any] = None, **kwargs):
+        """Update the dashboard with new metrics."""
+        if logs is None:
+            return
+
+        # Only update at specified intervals
+        if state.global_step % self.log_every_n_steps != 0:
+            return
+
+        # Save to log file
+        log_entry = {
+            "step": state.global_step,
+            "timestamp": datetime.now().isoformat(),
+            "total_steps": self.total_steps,
+            "total_epochs": int(self.total_epochs),
+            **logs
+        }
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        # Update dashboard
+        if self.dashboard:
+            self.dashboard.update(
+                step=state.global_step,
+                epoch=int(logs.get('epoch', 0)),
+                loss=logs.get('loss'),
+                learning_rate=logs.get('learning_rate'),
+                kl=logs.get('kl'),
+                margin=logs.get('rewards/margins'),
+            )
+        else:
+            # Fallback: print step info
+            loss = logs.get('loss', 0)
+            lr = logs.get('learning_rate', 0)
+            print(f"  Step {state.global_step}/{self.total_steps} | Loss: {loss:.4f} | LR: {lr:.2e}")
+
+    def on_save(self, args, state, control, **kwargs):
+        """Log checkpoint save."""
+        if self.dashboard:
+            self.dashboard.update(log_message=f"Checkpoint saved at step {state.global_step}")
+        else:
+            print(f"  >> Checkpoint saved at step {state.global_step}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        """Stop the dashboard."""
+        if self.dashboard:
+            self.dashboard.__exit__(None, None, None)
+            self.dashboard = None
+
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        print(f"\n{'=' * 60}")
+        print("TRAINING COMPLETED")
+        print(f"{'=' * 60}")
+        print(f"Total time: {elapsed // 3600:.0f}h {(elapsed % 3600) // 60:.0f}m {elapsed % 60:.0f}s")
+        print(f"Total steps: {state.global_step:,}")
+        print(f"Log file: {self.log_file}")
+
+
+def suppress_training_logs():
+    """
+    Suppress verbose logs from training libraries.
+
+    Call this before importing unsloth/transformers to quiet the output.
+    Returns a context manager that can be used to restore logging.
+    """
+    # Suppress common noisy loggers
+    noisy_loggers = [
+        'unsloth',
+        'transformers',
+        'datasets',
+        'accelerate',
+        'trl',
+        'peft',
+        'bitsandbytes',
+        'torch',
+        'huggingface_hub',
+    ]
+
+    if DASHBOARD_AVAILABLE:
+        return suppress_logs(noisy_loggers, level=logging.WARNING)
+    else:
+        # Return a no-op context manager
+        from contextlib import nullcontext
+        return nullcontext()

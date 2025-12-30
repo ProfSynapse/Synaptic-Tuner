@@ -126,19 +126,9 @@ class RTXBackend(ITrainingBackend):
         Returns:
             Exit code (0 = success, non-zero = failure)
         """
-        import sys
-        import threading
-        import time
-        from tuner.ui import console, RICH_AVAILABLE
-
         cmd = [python_path, f"train_{config.method}.py"]
-        
-        if not RICH_AVAILABLE:
-            result = subprocess.run(cmd, cwd=str(config.trainer_dir))
-            return result.returncode
 
-        # Run directly without pipes to preserve tqdm progress bar updates
-        # Piping breaks carriage returns (\r) that tqdm uses for in-place updates
+        # Dashboard is now the default in train_sft.py, no flag needed
         try:
             process = subprocess.Popen(
                 cmd,

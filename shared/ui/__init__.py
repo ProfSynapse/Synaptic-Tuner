@@ -22,7 +22,23 @@ from .console import (
     prompt,
     animated_menu,
     RICH_AVAILABLE,
+    TERMINAL_MENU_AVAILABLE,
 )
+from .widgets import (
+    spinner,
+    progress_spinner,
+    file_picker,
+    fuzzy_menu,
+    multi_select_menu,
+    sparkline,
+    sparkline_with_labels,
+    info_panel,
+    comparison_table,
+    suppress_logs,
+    capture_output,
+    quiet_training,
+)
+from .dashboard import LiveDashboard, show_training_progress
 
 __all__ = [
     # Theme
@@ -48,4 +64,21 @@ __all__ = [
     "prompt",
     "animated_menu",
     "RICH_AVAILABLE",
+    "TERMINAL_MENU_AVAILABLE",
+    # Widgets
+    "spinner",
+    "progress_spinner",
+    "file_picker",
+    "fuzzy_menu",
+    "multi_select_menu",
+    "sparkline",
+    "sparkline_with_labels",
+    "info_panel",
+    "comparison_table",
+    "suppress_logs",
+    "capture_output",
+    "quiet_training",
+    # Dashboard
+    "LiveDashboard",
+    "show_training_progress",
 ]

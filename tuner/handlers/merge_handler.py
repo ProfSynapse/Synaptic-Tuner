@@ -34,10 +34,12 @@ from tuner.ui import (
     print_error,
     print_table,
     print_config,
+    print_menu,
     confirm,
     COLORS,
     BOX,
 )
+from shared.ui import spinner, info_panel
 
 
 class MergeHandler(BaseHandler):
@@ -136,22 +138,20 @@ class MergeHandler(BaseHandler):
         )
         print()
 
-        # Get user selection
-        try:
-            choice = input(f"Select checkpoint to merge [1-{len(checkpoints)}]: ").strip()
-            if not choice:
-                print_info("Cancelled")
-                return 0
+        # Build menu options from checkpoints
+        menu_options = []
+        for i, cp in enumerate(checkpoints):
+            status = " [merged]" if cp['merged'] else ""
+            label = f"{cp['run']} → {cp['checkpoint']} ({cp['type']}){status}"
+            menu_options.append((str(i), label))
 
-            idx = int(choice) - 1
-            if idx < 0 or idx >= len(checkpoints):
-                print_error("Invalid selection")
-                return 1
-        except ValueError:
-            print_error("Invalid input")
-            return 1
+        # Get user selection via arrow-key menu
+        selected_key = print_menu(menu_options, "Select checkpoint to merge")
+        if selected_key is None:
+            print_info("Cancelled")
+            return 0
 
-        selected = checkpoints[idx]
+        selected = checkpoints[int(selected_key)]
         lora_path = selected['path']
         run_path = lora_path.parent
         if run_path.name in ('checkpoints', 'final_model'):
@@ -181,9 +181,10 @@ class MergeHandler(BaseHandler):
             print_info("Cancelled")
             return 0
 
-        # Execute merge
+        # Execute merge with spinner
         print()
-        success = self._merge_lora(lora_path, output_dir)
+        with spinner("Merging LoRA adapters into base model..."):
+            success = self._merge_lora(lora_path, output_dir)
 
         if success:
             print()

@@ -1,6 +1,6 @@
 # Synaptic Tuner
 
-Synthetic data and training stack for teaching local LLMs to run the Obsidian Nexus toolset.
+Synthetic data generation and fine-tuning toolkit for training local LLMs on custom datasets.
 
 <div align="center">
   <img src="https://picoshare-production-7223.up.railway.app/-JRwnJvYt5S" alt="Synaptic Tuner Banner" width="800"/>
@@ -92,7 +92,7 @@ Open it in Colab via "Open Notebook" > GitHub tab, paste the repo URL, then sele
 
 Results always land in `Evaluator/results/` inside the repo workspace.
 
-This flow keeps contribution friction low—no separate scripts—while helping us converge on the strongest local model for the Obsidian Nexus plugin.
+This flow keeps contribution friction low—no separate scripts—while helping converge on the strongest local model for your use case.
 
 ## Bring your own data
 - The stack ships with our synthetic tool-calling and behavior datasets under `Datasets/`, but you can point the CLI to any JSONL that matches the expected format (set `local_file` in configs or pass the path when prompted).

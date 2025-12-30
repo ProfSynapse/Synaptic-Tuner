@@ -45,7 +45,9 @@ def extract_tools_from_json_schema(schemas: Dict[str, Any]) -> Dict[str, Dict[st
     """
     tools = {}
 
-    for tool_name, schema in schemas.items():
+    # Tools are nested under the "tools" key in the schema
+    tools_section = schemas.get("tools", {})
+    for tool_name, schema in tools_section.items():
         # Parse tool name: agentManager_createAgent -> (agentManager, createAgent)
         parts = tool_name.split("_", 1)
         if len(parts) != 2:
@@ -54,14 +56,10 @@ def extract_tools_from_json_schema(schemas: Dict[str, Any]) -> Dict[str, Dict[st
         agent, tool = parts
 
         # Extract params from the schema
-        # Path: properties.calls.items.properties.params.properties
+        # Each tool schema has properties and required at top level
         try:
-            calls_schema = schema.get("properties", {}).get("calls", {})
-            items_schema = calls_schema.get("items", {})
-            params_schema = items_schema.get("properties", {}).get("params", {})
-
-            properties = params_schema.get("properties", {})
-            required = params_schema.get("required", [])
+            properties = schema.get("properties", {})
+            required = schema.get("required", [])
 
             all_params = list(properties.keys())
             optional = [p for p in all_params if p not in required]

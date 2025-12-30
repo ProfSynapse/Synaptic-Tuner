@@ -16,6 +16,20 @@ from typing import Optional, List
 
 from .base import BaseHandler
 from tuner.discovery import CheckpointDiscovery
+from tuner.ui import (
+    print_header,
+    print_menu,
+    print_config,
+    print_success,
+    print_error,
+    print_info,
+    print_table,
+    print_checkpoint_table,
+    confirm,
+    prompt,
+    BOX,
+)
+from shared.ui import spinner
 
 
 class ConvertHandler(BaseHandler):
@@ -49,41 +63,20 @@ class ConvertHandler(BaseHandler):
             int: Exit code (0 = success, non-zero = error)
         """
         try:
-            from tuner.ui import console, RICH_AVAILABLE
             from tuner.discovery.training_runs import TrainingRunDiscovery
 
-            if RICH_AVAILABLE:
-                from rich.prompt import Prompt, Confirm
-                from rich.table import Table
-                from rich.panel import Panel
-            else:
-                Prompt = None
-                Confirm = None
-
-            # Header
-            print("\n" + "=" * 60)
-            print("MODEL CONVERSION")
-            print("=" * 60)
-            print("Convert trained models to deployment formats")
-            print()
+            print_header("MODEL CONVERSION", "Convert trained models to deployment formats")
 
             # Select output format
-            print("Available formats:")
-            print("  1. GGUF - llama.cpp/Ollama (local inference)")
-            print("  2. WebGPU - MLC-LLM/WebLLM (browser deployment)")
-            print()
+            format_choice = print_menu([
+                ("gguf", f"{BOX['star']} GGUF - llama.cpp/Ollama (local inference)"),
+                ("webgpu", f"{BOX['bullet']} WebGPU - MLC-LLM/WebLLM (browser deployment)"),
+            ], "Select output format:")
 
-            if RICH_AVAILABLE and Prompt:
-                format_choice = Prompt.ask(
-                    "Select output format",
-                    default="1",
-                    choices=["1", "2"]
-                )
-            else:
-                format_choice = input("Select output format [1]: ").strip() or "1"
+            if not format_choice:
+                return 0
 
-            output_format = "gguf" if format_choice == "1" else "webgpu"
-            print()
+            output_format = format_choice
 
             # Find training runs using discovery service
             discovery = TrainingRunDiscovery(repo_root=self.repo_root)
@@ -100,66 +93,40 @@ class ConvertHandler(BaseHandler):
             all_runs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
             if not all_runs:
-                print("No training runs found!")
-                print("Train a model first with: ./run.sh train")
+                print_error("No training runs found!")
+                print_info("Train a model first with: ./run.sh train")
                 return 1
 
-            # Display available runs
-            print("Available training runs:\n")
+            # Build table data
+            table_data = []
+            for i, run in enumerate(all_runs[:10], 1):
+                has_final = "✓" if (run['path'] / "final_model").exists() else "-"
+                checkpoints_dir = run['path'] / "checkpoints"
+                cp_count = len(list(checkpoints_dir.glob("checkpoint-*"))) if checkpoints_dir.exists() else 0
+                table_data.append([str(i), run['type'], run['path'].name, has_final, str(cp_count)])
 
-            if RICH_AVAILABLE:
-                table = Table(show_header=True)
-                table.add_column("#", style="cyan", width=3)
-                table.add_column("Type", style="magenta", width=5)
-                table.add_column("Run", style="green")
-                table.add_column("Final", style="yellow", width=5)
-                table.add_column("CPs", style="blue", width=4)
+            print_table(table_data, ["#", "Type", "Training Run", "Final", "CPs"],
+                       title="Available Training Runs")
 
-                for i, run in enumerate(all_runs[:10], 1):  # Show last 10
-                    has_final = "✓" if (run['path'] / "final_model").exists() else "-"
-                    # Count checkpoints
-                    checkpoints_dir = run['path'] / "checkpoints"
-                    cp_count = 0
-                    if checkpoints_dir.exists():
-                        cp_count = len(list(checkpoints_dir.glob("checkpoint-*")))
-                    table.add_row(
-                        str(i),
-                        run['type'],
-                        run['path'].name,
-                        has_final,
-                        str(cp_count)
-                    )
-                console.print(table)
-            else:
-                for i, run in enumerate(all_runs[:10], 1):
-                    has_final = "✓" if (run['path'] / "final_model").exists() else "-"
-                    checkpoints_dir = run['path'] / "checkpoints"
-                    cp_count = len(list(checkpoints_dir.glob("checkpoint-*"))) if checkpoints_dir.exists() else 0
-                    print(f"  {i}. [{run['type']}] {run['path'].name} (Final: {has_final}, CPs: {cp_count})")
+            # Build menu options for arrow-key selection
+            run_options = []
+            for i, run in enumerate(all_runs[:10]):
+                has_final = "✓" if (run['path'] / "final_model").exists() else "-"
+                checkpoints_dir = run['path'] / "checkpoints"
+                cp_count = len(list(checkpoints_dir.glob("checkpoint-*"))) if checkpoints_dir.exists() else 0
+                label = f"[{run['type']}] {run['path'].name} (final: {has_final}, checkpoints: {cp_count})"
+                run_options.append((str(i), label))
 
-            # Select run
-            print()
-            if RICH_AVAILABLE and Prompt:
-                selection = Prompt.ask(
-                    "Select training run",
-                    default="1",
-                    choices=[str(i) for i in range(1, min(len(all_runs) + 1, 11))]
-                )
-            else:
-                selection = input("Select training run [1]: ").strip() or "1"
-
-            try:
-                run_idx = int(selection) - 1
-                selected_run = all_runs[run_idx]
-            except (ValueError, IndexError):
-                print("Invalid selection")
-                return 1
+            selected_key = print_menu(run_options, "Select training run:")
+            if selected_key is None:
+                return 0
+            selected_run = all_runs[int(selected_key)]
 
             # Discover checkpoints with metrics
             checkpoints = CheckpointDiscovery.discover(selected_run['path'])
 
             if not checkpoints:
-                print(f"No checkpoints found in {selected_run['path']}")
+                print_error(f"No checkpoints found in {selected_run['path']}")
                 return 1
 
             # Determine training type for metric display
@@ -167,155 +134,102 @@ class ConvertHandler(BaseHandler):
 
             # If only one checkpoint (final_model), use it directly
             if len(checkpoints) == 1 and checkpoints[0].is_final:
-                print("\nUsing final_model")
+                print_info("Using final_model")
                 model_path = checkpoints[0].path
             else:
                 # Display checkpoint table with loss values
-                from tuner.ui import print_checkpoint_table
                 print()
                 print_checkpoint_table(checkpoints, training_type)
 
-                # Select checkpoint
-                if RICH_AVAILABLE and Prompt:
-                    cp_selection = Prompt.ask(
-                        "Select checkpoint",
-                        default="1",
-                        choices=[str(i) for i in range(1, len(checkpoints) + 1)]
-                    )
-                else:
-                    cp_selection = input(f"Select checkpoint [1-{len(checkpoints)}] (1): ").strip() or "1"
-
-                try:
-                    cp_idx = int(cp_selection) - 1
-                    if 0 <= cp_idx < len(checkpoints):
-                        model_path = checkpoints[cp_idx].path
+                # Build menu options for checkpoint selection
+                cp_options = []
+                for i, cp in enumerate(checkpoints):
+                    if cp.is_final:
+                        label = f"final_model (step {cp.step}, loss: {cp.loss:.4f})"
                     else:
-                        print("Invalid selection")
-                        return 1
-                except ValueError:
-                    print("Invalid selection")
-                    return 1
+                        label = f"{cp.path.name} (step {cp.step}, loss: {cp.loss:.4f})"
+                    cp_options.append((str(i), label))
 
-            print(f"\nSelected: {model_path}")
+                selected_cp = print_menu(cp_options, "Select checkpoint:")
+                if selected_cp is None:
+                    return 0
+                model_path = checkpoints[int(selected_cp)].path
+
+            print_info(f"Selected: {model_path}")
 
             # Get model name
-            print()
             default_name = selected_run['path'].name
             format_label = "GGUF" if output_format == "gguf" else "WebGPU"
-            if RICH_AVAILABLE and Prompt:
-                model_name = Prompt.ask(
-                    f"Model name for {format_label} files",
-                    default=default_name
-                )
-            else:
-                model_name = input(f"Model name for {format_label} files [{default_name}]: ").strip() or default_name
+            model_name = prompt(f"Model name for {format_label} files", default_name)
 
             # Select quantizations based on format
-            print()
             if output_format == "gguf":
-                print("Available quantizations (GGUF):")
-                print("  1. Standard (Q4_K_M, Q5_K_M, Q8_0) - Recommended")
-                print("  2. Minimal (Q4_K_M only) - Fastest")
-                print("  3. Full (Q4_K_M, Q5_K_M, Q6_K, Q8_0) - All common quants")
-                print("  4. Custom")
-                print()
+                quant_choice = print_menu([
+                    ("standard", f"{BOX['star']} Standard (Q4_K_M, Q5_K_M, Q8_0) - Recommended"),
+                    ("minimal", f"{BOX['bullet']} Minimal (Q4_K_M only) - Fastest"),
+                    ("full", f"{BOX['bullet']} Full (Q4_K_M, Q5_K_M, Q6_K, Q8_0) - All common"),
+                    ("custom", f"{BOX['bullet']} Custom"),
+                ], "Select quantization preset:")
 
-                if RICH_AVAILABLE and Prompt:
-                    quant_choice = Prompt.ask(
-                        "Select quantization preset",
-                        default="1",
-                        choices=["1", "2", "3", "4"]
-                    )
-                else:
-                    quant_choice = input("Select quantization preset [1]: ").strip() or "1"
+                if not quant_choice:
+                    return 0
 
                 quant_presets = {
-                    "1": ["Q4_K_M", "Q5_K_M", "Q8_0"],
-                    "2": ["Q4_K_M"],
-                    "3": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"],
+                    "standard": ["Q4_K_M", "Q5_K_M", "Q8_0"],
+                    "minimal": ["Q4_K_M"],
+                    "full": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"],
                 }
 
-                if quant_choice == "4":
-                    if RICH_AVAILABLE and Prompt:
-                        custom = Prompt.ask(
-                            "Enter quantizations (comma-separated)",
-                            default="Q4_K_M,Q5_K_M"
-                        )
-                    else:
-                        custom = input("Enter quantizations (comma-separated) [Q4_K_M,Q5_K_M]: ").strip() or "Q4_K_M,Q5_K_M"
+                if quant_choice == "custom":
+                    custom = prompt("Enter quantizations (comma-separated)", "Q4_K_M,Q5_K_M")
                     quantizations = [q.strip().upper() for q in custom.split(",")]
                 else:
-                    quantizations = quant_presets.get(quant_choice, quant_presets["1"])
+                    quantizations = quant_presets[quant_choice]
             else:
                 # WebGPU quantizations
-                print("Available quantizations (WebGPU/MLC):")
-                print("  1. q4f16_1 - 4-bit with float16 (recommended)")
-                print("  2. q4f32_1 - 4-bit with float32")
-                print("  3. q0f16 - No quantization, float16")
-                print("  4. Custom")
-                print()
+                quant_choice = print_menu([
+                    ("q4f16_1", f"{BOX['star']} q4f16_1 - 4-bit with float16 (recommended)"),
+                    ("q4f32_1", f"{BOX['bullet']} q4f32_1 - 4-bit with float32"),
+                    ("q0f16", f"{BOX['bullet']} q0f16 - No quantization, float16"),
+                    ("custom", f"{BOX['bullet']} Custom"),
+                ], "Select quantization:")
 
-                if RICH_AVAILABLE and Prompt:
-                    quant_choice = Prompt.ask(
-                        "Select quantization",
-                        default="1",
-                        choices=["1", "2", "3", "4"]
-                    )
-                else:
-                    quant_choice = input("Select quantization [1]: ").strip() or "1"
+                if not quant_choice:
+                    return 0
 
-                webgpu_quants = {
-                    "1": ["q4f16_1"],
-                    "2": ["q4f32_1"],
-                    "3": ["q0f16"],
-                }
-
-                if quant_choice == "4":
-                    if RICH_AVAILABLE and Prompt:
-                        custom = Prompt.ask(
-                            "Enter quantization",
-                            default="q4f16_1"
-                        )
-                    else:
-                        custom = input("Enter quantization [q4f16_1]: ").strip() or "q4f16_1"
+                if quant_choice == "custom":
+                    custom = prompt("Enter quantization", "q4f16_1")
                     quantizations = [custom.strip().lower()]
                 else:
-                    quantizations = webgpu_quants.get(quant_choice, webgpu_quants["1"])
+                    quantizations = [quant_choice]
 
             # Output directory
             output_dir = selected_run['path'] / model_name
 
-            # Confirm
-            print()
-            print("=" * 60)
-            print("CONVERSION SUMMARY")
-            print("=" * 60)
-            print(f"Format: {format_label}")
-            print(f"Source: {model_path}")
-            print(f"Output: {output_dir}")
-            print(f"Name: {model_name}")
-            print(f"Quantizations: {', '.join(quantizations)}")
-            print()
+            # Show configuration summary
+            print_config({
+                "Format": format_label,
+                "Source": str(model_path.relative_to(self.repo_root)),
+                "Output": str(output_dir.relative_to(self.repo_root)),
+                "Name": model_name,
+                "Quantizations": ", ".join(quantizations),
+            }, "Conversion Summary")
 
-            if RICH_AVAILABLE and Confirm:
-                proceed = Confirm.ask("Proceed with conversion?", default=True)
-            else:
-                response = input("Proceed with conversion? [Y/n]: ").strip().lower()
-                proceed = response in ('', 'y', 'yes')
-
-            if not proceed:
-                print("Conversion cancelled")
+            if not confirm("Proceed with conversion?"):
+                print_info("Conversion cancelled")
                 return 0
 
-            # Run conversion
+            # Run conversion with spinner
             print()
-            return self._run_conversion(model_path, output_dir, model_name, quantizations, output_format)
+            with spinner(f"Converting to {format_label}..."):
+                result = self._run_conversion(model_path, output_dir, model_name, quantizations, output_format)
+            return result
 
         except KeyboardInterrupt:
-            print("\nCancelled")
+            print_info("Cancelled")
             return 130
         except Exception as e:
-            print(f"Error: {e}")
+            print_error(f"Error: {e}")
             import traceback
             traceback.print_exc()
             return 1
@@ -357,18 +271,13 @@ class ConvertHandler(BaseHandler):
                 )
 
                 if output_files:
-                    print("\n" + "=" * 60)
-                    print("CONVERSION COMPLETE")
-                    print("=" * 60)
-                    print(f"Created {len(output_files)} GGUF files in:")
-                    print(f"  {output_dir / 'gguf'}")
-                    print()
-                    print("Next steps:")
-                    print("  1. Copy to Ollama: ollama create my-model -f Modelfile")
-                    print("  2. Or use with llama.cpp: ./llama-cli -m model.gguf")
+                    print_success(f"Created {len(output_files)} GGUF files in: {output_dir / 'gguf'}")
+                    print_info("Next steps:")
+                    print_info("  1. Copy to Ollama: ollama create my-model -f Modelfile")
+                    print_info("  2. Or use with llama.cpp: ./llama-cli -m model.gguf")
                     return 0
                 else:
-                    print("No GGUF files created")
+                    print_error("No GGUF files created")
                     return 1
 
             else:  # webgpu
@@ -383,20 +292,20 @@ class ConvertHandler(BaseHandler):
                 )
 
                 if output_files:
-                    # WebGPU converter prints its own summary
+                    print_success("WebGPU conversion complete")
                     return 0
                 else:
-                    print("No WebGPU files created")
+                    print_error("No WebGPU files created")
                     return 1
 
         except ImportError as e:
-            print(f"Import error: {e}")
-            print("Make sure you're in the correct conda environment")
+            print_error(f"Import error: {e}")
+            print_info("Make sure you're in the correct conda environment")
             if output_format == "webgpu":
-                print("For WebGPU, run: bash setup.sh --with-webgpu")
+                print_info("For WebGPU, run: bash setup.sh --with-webgpu")
             return 1
         except Exception as e:
-            print(f"Conversion failed: {e}")
+            print_error(f"Conversion failed: {e}")
             import traceback
             traceback.print_exc()
             return 1

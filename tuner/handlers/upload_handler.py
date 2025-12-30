@@ -27,6 +27,7 @@ from tuner.ui import (
     console,
     COLORS,
 )
+from shared.ui import spinner
 from tuner.utils.validation import validate_repo_id, load_env_file
 
 
@@ -123,16 +124,19 @@ class UploadHandler(BaseHandler):
         print_table(run_data, ["#", "Training Run", "Final", "Checkpoints"],
                    title=f"Available {model_type.upper()} Training Runs")
 
-        while True:
-            try:
-                sel = prompt(f"Select run (1-{len(runs)})")
-                idx = int(sel) - 1
-                if 0 <= idx < len(runs):
-                    selected_run = runs[idx]
-                    break
-            except ValueError:
-                pass
-            print_error("Invalid selection.")
+        # Build menu options for arrow-key selection
+        run_options = []
+        for i, run in enumerate(runs):
+            has_final = "✓" if (run / "final_model").exists() else "-"
+            checkpoints_dir = run / "checkpoints"
+            checkpoint_count = len(list(checkpoints_dir.glob("checkpoint-*"))) if checkpoints_dir.exists() else 0
+            label = f"{run.name} (final: {has_final}, checkpoints: {checkpoint_count})"
+            run_options.append((str(i), label))
+
+        selected_key = print_menu(run_options, "Select training run:")
+        if selected_key is None:
+            return 0
+        selected_run = runs[int(selected_key)]
 
         # Step 5: Display checkpoints and select
         checkpoint_path = self._select_checkpoint(selected_run, model_type)
@@ -198,6 +202,7 @@ class UploadHandler(BaseHandler):
         print()
 
         # Run from Trainers directory so 'shared' package is found
+        # Note: We don't use spinner here since upload shows its own progress
         exit_code = subprocess.run(cmd, cwd=str(trainers_dir)).returncode
 
         if exit_code == 0:
@@ -233,24 +238,20 @@ class UploadHandler(BaseHandler):
         # Display checkpoint table
         print_checkpoint_table(checkpoints, training_type)
 
-        # Build selection options
-        options = []
-        for cp in checkpoints:
+        # Build menu options for arrow-key selection
+        menu_options = []
+        for i, cp in enumerate(checkpoints):
             if cp.is_final:
-                options.append(("final", cp.path))
+                label = f"final_model (step {cp.step}, loss: {cp.loss:.4f})"
+                menu_options.append((str(i), label))
             else:
-                options.append((cp.path.name, cp.path))
+                label = f"{cp.path.name} (step {cp.step}, loss: {cp.loss:.4f})"
+                menu_options.append((str(i), label))
 
-        # Let user choose
-        while True:
-            try:
-                sel = prompt(f"Select checkpoint (1-{len(options)})", "1")
-                idx = int(sel) - 1
-                if 0 <= idx < len(options):
-                    return options[idx][1]
-            except ValueError:
-                pass
-            print_error("Invalid selection.")
+        selected_key = print_menu(menu_options, "Select checkpoint:")
+        if selected_key is None:
+            return None
+        return checkpoints[int(selected_key)].path
 
     def _handle_gguf_only(self, hf_token: str) -> int:
         """

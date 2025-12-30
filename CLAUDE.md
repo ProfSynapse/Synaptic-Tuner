@@ -10,7 +10,7 @@ Quick reference for Claude Code when working in this repository.
 
 ## Repository Purpose
 
-Synthetic dataset generation and LLM fine-tuning system for training models to use the Claudesidian-MCP toolset (Obsidian vault operations). Teacher models generate training data, which is then used for SFT/KTO fine-tuning.
+Synthetic dataset generation and LLM fine-tuning system. Teacher models generate training data, which is then used for SFT/KTO fine-tuning of smaller models.
 
 ## Quick Start
 

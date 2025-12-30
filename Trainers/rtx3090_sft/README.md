@@ -127,7 +127,7 @@ python train_sft.py --model-size 7b --max-steps 10
 ./train.sh --model-size 7b --local-file ../../Datasets/syngen_tools_sft_11.18.25.jsonl
 
 # Use HuggingFace dataset
-./train.sh --model-size 7b --dataset-name professorsynapse/claudesidian-synthetic-dataset --dataset-file syngen_tools_sft_11.18.25.jsonl
+./train.sh --model-size 7b --dataset-name your-username/your-dataset --dataset-file your_data.jsonl
 
 # Create train/val split
 ./train.sh --model-size 7b --split-dataset

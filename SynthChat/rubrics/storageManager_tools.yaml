@@ -63,7 +63,7 @@ judge_prompt: |
 
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | list | path | filter |
+  | list | - | path, filter |
   | open | path | mode, focus |
   | createFolder | path | - |
   | move | path, newPath | overwrite |
@@ -160,7 +160,7 @@ improver_prompt: |
 
   | tool | required params | optional params |
   |------|-----------------|-----------------|
-  | list | path | filter |
+  | list | - | path, filter |
   | open | path | mode, focus |
   | createFolder | path | - |
   | move | path, newPath | overwrite |
@@ -228,7 +228,7 @@ validations:
           _subtools:
             storageManager:
               list:
-                _required: [path]
+                _required: []
                 path: string
                 filter: string
               open:

@@ -30,11 +30,14 @@ from shared.ui import (
     print_config,
     print_info,
     print_error,
+    print_success,
     confirm,
     prompt,
     console,
     RICH_AVAILABLE,
     COLORS,
+    spinner,
+    BOX,
 )
 
 # Add SelfPlay to path
@@ -280,20 +283,20 @@ class GenerateHandler(BaseHandler):
             num_examples = sum(targets.values())
 
         # Display configuration
-        config_items = [
-            ("LM Studio", "Connected"),
-            ("Output file", str(output_path)),
-        ]
+        config_dict = {
+            "LM Studio": "Connected",
+            "Output file": str(output_path),
+        }
 
         if targets:
-            config_items.append(("Mode", "Targeted generation"))
-            config_items.append(("Categories", str(len(targets))))
-            config_items.append(("Total examples", str(num_examples)))
+            config_dict["Mode"] = "Targeted generation"
+            config_dict["Categories"] = str(len(targets))
+            config_dict["Total examples"] = str(num_examples)
         else:
-            config_items.append(("Mode", "Random generation"))
-            config_items.append(("Examples", str(num_examples)))
+            config_dict["Mode"] = "Random generation"
+            config_dict["Examples"] = str(num_examples)
 
-        print_config(config_items)
+        print_config(config_dict, "Generation Configuration")
 
         # Confirm
         if not confirm("\nProceed with generation?"):
@@ -304,7 +307,8 @@ class GenerateHandler(BaseHandler):
         try:
             from SelfPlay.generator import SelfPlayGenerator
 
-            print_header("GENERATING", f"{num_examples} examples")
+            print_info(f"Starting generation of {num_examples} examples...")
+            print()
 
             generator = SelfPlayGenerator(
                 model_client=client,
@@ -315,35 +319,35 @@ class GenerateHandler(BaseHandler):
             if output_path.exists():
                 output_path.unlink()
 
-            # Generate
+            # Generate with progress (generation may take a while)
             if targets:
-                results = generator.generate_targeted_batch(
-                    targets=targets,
-                    output_file=output_path,
-                    validate=True,
-                    save_invalid=False
-                )
+                with spinner(f"Generating {num_examples} targeted examples..."):
+                    results = generator.generate_targeted_batch(
+                        targets=targets,
+                        output_file=output_path,
+                        validate=True,
+                        save_invalid=False
+                    )
             else:
-                results = generator.generate_batch(
-                    num_examples=num_examples,
-                    output_file=output_path,
-                    validate=True,
-                    save_invalid=False
-                )
+                with spinner(f"Generating {num_examples} random examples..."):
+                    results = generator.generate_batch(
+                        num_examples=num_examples,
+                        output_file=output_path,
+                        validate=True,
+                        save_invalid=False
+                    )
 
             # Summary
             valid_count = len(results["valid"])
             invalid_count = len(results["invalid"])
             success_rate = (valid_count / num_examples * 100) if num_examples > 0 else 0
 
-            print("\n" + "=" * 70)
-            print_info("✓ GENERATION COMPLETE!")
-            print("=" * 70)
-            print(f"\n📊 Results:")
-            print(f"   Valid examples: {valid_count}")
-            print(f"   Invalid examples: {invalid_count}")
-            print(f"   Success rate: {success_rate:.1f}%")
-            print(f"\n💾 Output: {output_path}")
+            print()
+            print_success("Generation complete!")
+            print_info(f"Valid examples: {valid_count}")
+            print_info(f"Invalid examples: {invalid_count}")
+            print_info(f"Success rate: {success_rate:.1f}%")
+            print_info(f"Output: {output_path}")
 
             # Ask about splitting
             if targets and confirm("\nSplit into individual dataset files?"):
@@ -354,20 +358,18 @@ class GenerateHandler(BaseHandler):
 
                     datasets_dir = self.repo_root / "Datasets"
 
-                    print_info(f"Splitting into dataset folders...")
-
-                    result = subprocess.run([
-                        sys.executable,
-                        str(split_script),
-                        str(output_path),
-                        "--datasets-dir", str(datasets_dir)
-                    ], capture_output=True, text=True)
+                    with spinner("Splitting into dataset folders..."):
+                        result = subprocess.run([
+                            sys.executable,
+                            str(split_script),
+                            str(output_path),
+                            "--datasets-dir", str(datasets_dir)
+                        ], capture_output=True, text=True)
 
                     if result.returncode == 0:
-                        print_info("✓ Split complete!")
-                        print("\nFiles created in:")
-                        print(f"  Tools: {datasets_dir / 'tools_datasets'}")
-                        print(f"  Behaviors: {datasets_dir / 'behavior_datasets'}")
+                        print_success("Split complete!")
+                        print_info(f"Tools: {datasets_dir / 'tools_datasets'}")
+                        print_info(f"Behaviors: {datasets_dir / 'behavior_datasets'}")
                     else:
                         print_error(f"Split failed: {result.stderr}")
                 else:

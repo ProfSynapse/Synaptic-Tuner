@@ -86,9 +86,9 @@ defaults:
     storageManager_archive: 30
     storageManager_move: 30
     storageManager_list: 40
-    contentManager_createContent: 40
-    contentManager_updateContent: 30
-    promptManager_delegateTask: 25
+    contentManager_write: 40
+    contentManager_update: 30
+    promptManager_executePrompts: 25
 
     # Content writing scenarios (longer form content with frontmatter)
     contentManager_write_research: 50

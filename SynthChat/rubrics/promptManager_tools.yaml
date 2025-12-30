@@ -29,7 +29,7 @@ judge_prompt: |
   - context: workspaceId, sessionId, memory, goal
   - calls: array with agent="promptManager", tool, params
 
-  ## Valid Tools: listModels, createPrompt, listPrompts, getPrompt, updatePrompt, archivePrompt, generateImage, executePrompts
+  ## Valid Tools: listModels, createPrompt, listPrompts, getPrompt, updatePrompt, archivePrompt, generateImage, executePrompts, subagent
 
   # EVALUATION CRITERIA
 
@@ -57,7 +57,7 @@ judge_prompt: |
   - **0.0-0.3** = Wrong function name OR completely wrong format
 
   # OUTPUT
-  Return JSON: `{{"agentmanagertools_score": 0.0-1.0}}`
+  Return JSON: `{{"promptmanagertools_score": 0.0-1.0}}`
 
 improver_prompt: |
   # CONTEXT
@@ -170,12 +170,12 @@ improver_prompt: |
 output_schema:
   type: object
   properties:
-    agentmanagertools_score:
+    promptmanagertools_score:
       type: number
       min: 0.0
       max: 1.0
   required:
-    - agentmanagertools_score
+    - promptmanagertools_score
 
 # Output format defines how improved content is applied to the example
 output_format:
@@ -238,4 +238,12 @@ validations:
                 _required: [prompts]
                 prompts: array
                 mergeResponses: boolean
+              subagent:
+                _required: [task]
+                task: string
+                agent: string
+                tools: object
+                contextFiles: array
+                maxIterations: number
+                continueBranchId: string
     error: "useTools validation failed: {details}"

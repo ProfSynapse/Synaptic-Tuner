@@ -14,6 +14,19 @@ from typing import Optional, Dict, List, Tuple
 from .theme import COLORS, LOGO, LOGO_SMALL, TAGLINE, BOX, STYLES, get_animated_logo_frame, get_static_logo
 
 # =============================================================================
+# ARROW-KEY MENU SUPPORT (simple-term-menu)
+# =============================================================================
+
+TERMINAL_MENU_AVAILABLE = False
+try:
+    from simple_term_menu import TerminalMenu
+    # Also check if we have a TTY (required for arrow-key menus)
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        TERMINAL_MENU_AVAILABLE = True
+except ImportError:
+    pass
+
+# =============================================================================
 # RICH AVAILABILITY CHECK
 # =============================================================================
 
@@ -60,7 +73,7 @@ def print_logo(small: bool = False):
     else:
         print("\n" + "=" * 60)
         print("  SYNAPTIC TUNER")
-        print("  Fine-tuning for the Claudesidian MCP")
+        print("  Local LLM Fine-tuning Toolkit")
         print("=" * 60 + "\n")
 
 
@@ -106,6 +119,9 @@ def print_menu(options: List[Tuple[str, str]], title: str = "Select an option") 
     """
     Print a styled menu and get user selection.
 
+    Uses arrow-key navigation when simple-term-menu is available,
+    falls back to numbered menu otherwise.
+
     Args:
         options: List of (key, description) tuples
         title: Menu title/prompt
@@ -113,6 +129,34 @@ def print_menu(options: List[Tuple[str, str]], title: str = "Select an option") 
     Returns:
         Selected option key or None if cancelled
     """
+    # Try arrow-key menu first (best UX)
+    if TERMINAL_MENU_AVAILABLE:
+        # Build display labels
+        labels = [desc for _, desc in options]
+        labels.append("Exit")
+
+        # Create menu with styling
+        menu = TerminalMenu(
+            labels,
+            title=f"\n  {title}\n",
+            cursor_index=0,
+            menu_cursor=" → ",
+            menu_cursor_style=("fg_cyan", "bold"),
+            menu_highlight_style=("fg_cyan",),
+            cycle_cursor=True,
+            clear_screen=False,
+            show_search_hint=True,
+            search_key="/",
+            quit_keys=("escape", "q"),
+        )
+
+        selected_index = menu.show()
+
+        if selected_index is None or selected_index == len(options):
+            return None
+        return options[selected_index][0]
+
+    # Fallback to Rich numbered menu
     if RICH_AVAILABLE:
         # Build menu table
         table = Table(
@@ -148,6 +192,7 @@ def print_menu(options: List[Tuple[str, str]], title: str = "Select an option") 
                 pass
             console.print(f"  [{COLORS['orange']}]Invalid choice. Try again.[/{COLORS['orange']}]")
     else:
+        # Plain text fallback
         print(title)
         print()
         for i, (key, desc) in enumerate(options, 1):
@@ -239,21 +284,39 @@ def print_info(message: str):
 # USER INPUT
 # =============================================================================
 
-def confirm(message: str) -> bool:
+def confirm(message: str, use_arrows: bool = True) -> bool:
     """
     Ask for yes/no confirmation.
 
+    Uses arrow-key selection when available and use_arrows=True.
+
     Args:
         message: Confirmation prompt
+        use_arrows: Use arrow-key selection (default True)
 
     Returns:
         True if confirmed, False otherwise
     """
+    # Arrow-key confirmation
+    if use_arrows and TERMINAL_MENU_AVAILABLE:
+        menu = TerminalMenu(
+            ["Yes", "No"],
+            title=f"\n  {message}\n",
+            cursor_index=1,  # Default to "No" for safety
+            menu_cursor=" → ",
+            menu_cursor_style=("fg_cyan", "bold"),
+            quit_keys=("escape", "q"),
+        )
+        selected = menu.show()
+        return selected == 0  # 0 = Yes
+
+    # Rich text confirmation
     if RICH_AVAILABLE:
         return Confirm.ask(f"  [{COLORS['purple']}]{BOX['arrow']}[/{COLORS['purple']}] {message}")
-    else:
-        response = input(f"  {message} (y/N): ").strip().lower()
-        return response == "y"
+
+    # Plain text fallback
+    response = input(f"  {message} (y/N): ").strip().lower()
+    return response == "y"
 
 
 def prompt(message: str, default: str = "") -> str:
@@ -289,9 +352,9 @@ def animated_menu(
     status_info: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """
-    Display animated logo with bubbling test tube and menu.
+    Display animated logo with bubbling test tube, then show arrow-key menu.
 
-    Animation runs until user makes a selection.
+    Animation plays briefly, then presents menu for selection.
 
     Args:
         options: List of (key, description) tuples
@@ -310,95 +373,31 @@ def animated_menu(
         return print_menu(options, title)
 
     from rich.live import Live
-    from rich.layout import Layout
     from rich.text import Text
-    from rich.panel import Panel
+    from rich.console import Group
+    from rich.align import Align
 
-    # Shared state for animation
-    stop_animation = threading.Event()
-    user_choice = [None]  # Use list to allow modification in nested function
-    input_ready = threading.Event()
-
-    def build_display(frame_num: int) -> Text:
-        """Build the complete display for one frame."""
-        # Get animated logo
-        logo = get_animated_logo_frame(frame_num)
-
-        # Build status section
-        status_lines = []
-        if status_info:
-            for key, value in status_info.items():
-                status_lines.append(f"  [{COLORS['cello']}]{BOX['bullet']} {key}[/{COLORS['cello']}] {value}")
-
-        # Build menu
-        menu_lines = [
-            "",
-            f"  [bold]{title}[/bold]",
-            "",
-        ]
-        for i, (key, desc) in enumerate(options, 1):
-            menu_lines.append(f"    [{COLORS['orange']}][{i}][/{COLORS['orange']}]  {desc}")
-        menu_lines.append(f"    [{COLORS['cello']}][0][/{COLORS['cello']}]  [dim]Exit[/dim]")
-        menu_lines.append("")
-        menu_lines.append(f"  [{COLORS['orange']}]{BOX['arrow']}[/{COLORS['orange']}] Enter choice: ")
-
-        # Combine all sections
-        full_display = logo + "\n"
-        if status_lines:
-            full_display += "\n".join(status_lines) + "\n"
-        full_display += "\n".join(menu_lines)
-
-        return Text.from_markup(full_display)
-
-    def get_input():
-        """Get user input in separate thread."""
-        try:
-            choice = input().strip()
-            user_choice[0] = choice
-        except (EOFError, KeyboardInterrupt):
-            user_choice[0] = "0"
-        finally:
-            input_ready.set()
-            stop_animation.set()
-
-    # Clear screen and start animation
+    # Clear screen
     clear_screen()
 
-    # Start input thread
-    input_thread = threading.Thread(target=get_input, daemon=True)
-
-    frame = 0
+    # Play brief logo animation
     try:
-        with Live(build_display(frame), console=console, refresh_per_second=4, transient=True) as live:
-            input_thread.start()
-
-            while not stop_animation.is_set():
-                frame = (frame + 1) % 4
-                live.update(build_display(frame))
-                time.sleep(0.25)
-
-                # Check if input is ready
-                if input_ready.is_set():
-                    break
-
+        with Live(console=console, refresh_per_second=8, transient=False) as live:
+            for frame in range(8):  # ~1 second of animation
+                logo_text = Text.from_markup(get_animated_logo_frame(frame))
+                tagline = Align.center(TAGLINE)
+                live.update(Group(logo_text, tagline))
+                time.sleep(0.1)
     except KeyboardInterrupt:
         return None
 
-    # Wait for input thread to complete
-    input_ready.wait(timeout=1.0)
+    # Display status info
+    if status_info:
+        console.print()
+        for key, value in status_info.items():
+            console.print(f"  [{COLORS['cello']}]{BOX['bullet']} {key}[/{COLORS['cello']}] {value}")
 
-    # Process the choice
-    choice = user_choice[0]
-    if choice == "0" or choice is None:
-        return None
+    console.print()
 
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(options):
-            return options[idx][0]
-    except (ValueError, IndexError):
-        pass
-
-    # Invalid choice - show error and fall back to static menu
-    print_error("Invalid choice.")
+    # Show menu (uses arrow keys if available, numbered otherwise)
     return print_menu(options, title)

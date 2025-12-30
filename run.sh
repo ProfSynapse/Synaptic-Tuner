@@ -268,6 +268,9 @@ if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     if ! python3 -c "import transformers" 2>/dev/null; then
         MISSING_DEPS+=("transformers")
     fi
+    if ! python3 -c "import simple_term_menu" 2>/dev/null; then
+        MISSING_DEPS+=("simple-term-menu")
+    fi
 
     if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
         echo "🍎 Apple Silicon detected - installing dependencies..."
@@ -528,6 +531,12 @@ except Exception as e:
 else
     echo "✗ Conda not found"
     exit 1
+fi
+
+# Ensure simple-term-menu is installed for arrow-key menus
+if ! python -c "import simple_term_menu" 2>/dev/null; then
+    echo "Installing simple-term-menu for enhanced menus..."
+    pip install simple-term-menu -q
 fi
 
 # Run CLI

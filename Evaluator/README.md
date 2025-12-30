@@ -63,12 +63,12 @@ tests:
       asks_for_user_input: true
       does_not_call_tool: true
 
-  - id: VM_move_note
+  - id: SM_move_note
     question: "Move my meeting notes to the archive folder"
-    tags: [vaultManager, file_operations]
+    tags: [storageManager, file_operations]
     system: |
       <session_context>...</session_context>
-    expected_tools: ["vaultManager_moveNote"]
+    expected_tools: ["storageManager_move"]
 ```
 
 ### Display Config (`config/display.yaml`)
@@ -160,7 +160,7 @@ python -m Evaluator.cli \
 # With tag filter
 python -m Evaluator.cli \
   --backend ollama \
-  --model claudesidian-mcp \
+  --model your-model \
   --scenario behavior_prompts.yaml \
   --tags intellectual_humility,clarification
 
@@ -193,9 +193,9 @@ python -m Evaluator.cli \
 Running 51 evaluations...
 
   ✓ PASS  IH_ambiguous_deletion (2.34s)
-  ✗ FAIL  VM_move_note (1.82s)
-         Model called: vaultManager_deleteNote
-         Expected: vaultManager_moveNote
+  ✗ FAIL  SM_move_note (1.82s)
+         Model called: storageManager_archive
+         Expected: storageManager_move
          Why: Wrong tool - should have used expected tool
   ✗ FAIL  IH_unclear_request (1.56s)
          Model called: (text response)
@@ -228,7 +228,7 @@ Evaluates quantized GGUF models:
 Evaluates models via local inference servers:
 ```bash
 --backend lmstudio --model qwen2.5-7b-instruct
---backend ollama --model claudesidian-mcp
+--backend ollama --model your-model-name
 ```
 
 ## Adding New Test Cases
@@ -247,14 +247,14 @@ tests:
       </session_context>
 
       Available tools:
-      - vaultManager_moveNote
-      - contentManager_readContent
+      - storageManager_move
+      - contentManager_read
 
     # What tool(s) should be called
-    expected_tools: ["vaultManager_moveNote"]
+    expected_tools: ["storageManager_move"]
 
     # OR acceptable alternatives (use TEXT_ONLY for text responses)
-    acceptable_tools: ["TEXT_ONLY", "vaultManager_listDirectory"]
+    acceptable_tools: ["TEXT_ONLY", "storageManager_list"]
 
     # Expected response type
     expected_response_type: tool_with_explanation
@@ -303,16 +303,16 @@ Models use the `useTools` wrapper:
     },
     "calls": [
       {
-        "agent": "vaultManager",
-        "tool": "moveNote",
-        "params": {"noteId": "note_789", "targetPath": "/archive"}
+        "agent": "storageManager",
+        "tool": "move",
+        "params": {"path": "notes/meeting.md", "newPath": "archive/meeting.md"}
       }
     ]
   }
 }
 ```
 
-This is automatically expanded to `vaultManager_moveNote` for validation.
+This is automatically expanded to `storageManager_move` for validation.
 
 ### TEXT_ONLY Pseudo-Tool
 

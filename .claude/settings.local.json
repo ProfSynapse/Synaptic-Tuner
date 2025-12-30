@@ -211,7 +211,11 @@
       "Bash(for dir in agentManager contentManager memoryManager searchManager storageManager)",
       "Bash(do echo \"=== $dir ===\" ls -1 \"/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Datasets/tools_datasets/non_thinking/$dir/\"*.jsonl)",
       "Bash(timeout 300 python3:*)",
-      "Bash(pip3 install:*)"
+      "Bash(pip3 install:*)",
+      "Bash(sudo gpg:*)",
+      "Bash(sudo tee:*)",
+      "Bash(sudo apt update:*)",
+      "Bash(timeout 3 python3:*)"
     ],
     "deny": [],
     "ask": []

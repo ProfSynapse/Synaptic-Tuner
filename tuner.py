@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Synaptic Tuner - Fine-tuning CLI for the Claudesidian MCP
+Synaptic Tuner - Local LLM Fine-tuning CLI
 
 This is a thin wrapper that delegates to the tuner package.
 
