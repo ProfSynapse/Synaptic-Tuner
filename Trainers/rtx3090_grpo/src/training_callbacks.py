@@ -7,12 +7,24 @@ Saves training metrics as JSONL and prints a compact table periodically.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
 from transformers import TrainerCallback, TrainerControl, TrainerState
+
+# Add shared to path for UI components
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+# Try to import LiveDashboard
+try:
+    from shared.ui import LiveDashboard, RICH_AVAILABLE
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    RICH_AVAILABLE = False
 
 
 class MetricsTableCallback(TrainerCallback):
@@ -109,3 +121,129 @@ class MetricsTableCallback(TrainerCallback):
         print("\n" + "=" * 60)
         print("   Step     |   Loss  | Reward  |    LR     | GPU Mem")
         print("-" * 60)
+
+
+class LiveDashboardCallback(TrainerCallback):
+    """
+    Training callback that displays a live dashboard with real-time metrics.
+    Specialized for GRPO training - shows rewards, KL penalty, advantages.
+    """
+
+    def __init__(
+        self,
+        log_every_n_steps: int = 5,
+        output_dir: str = "./grpo_output_rtx3090",
+        previous_log_entries: list = None
+    ):
+        self.log_every_n_steps = log_every_n_steps
+        self.output_dir = Path(output_dir)
+        self.logs_dir = self.output_dir / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = self.logs_dir / f"training_{timestamp}.jsonl"
+        self.latest_log = self.logs_dir / "training_latest.jsonl"
+
+        self.start_time: Optional[datetime] = None
+        self.dashboard: Optional[LiveDashboard] = None
+        self.total_steps = 0
+        self.total_epochs = 1
+
+        if previous_log_entries:
+            self._prepopulate_log(previous_log_entries)
+
+    def _prepopulate_log(self, previous_entries: list):
+        with open(self.log_file, "w") as f:
+            for entry in previous_entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.start_time = datetime.now()
+        self.total_steps = state.max_steps if state.max_steps > 0 else 1000
+        self.total_epochs = args.num_train_epochs
+
+        if self.latest_log.exists():
+            try:
+                self.latest_log.unlink()
+            except Exception:
+                pass
+        try:
+            self.latest_log.symlink_to(self.log_file.name)
+        except Exception:
+            pass
+
+        if DASHBOARD_AVAILABLE and RICH_AVAILABLE:
+            self.dashboard = LiveDashboard(
+                title="GRPO Training",
+                total_epochs=int(self.total_epochs),
+                total_steps=self.total_steps,
+                training_type="grpo",  # This enables GRPO-specific display
+                show_sparklines=True,
+                log_lines=3,
+            )
+            self.dashboard.__enter__()
+        else:
+            print(f"\n{'=' * 60}")
+            print("GRPO TRAINING STARTED")
+            print(f"{'=' * 60}")
+            print(f"Log file: {self.log_file}")
+
+    def on_log(self, args, state: TrainerState, control: TrainerControl, logs: Dict[str, Any] = None, **kwargs):
+        if not logs:
+            return
+
+        if state.global_step % self.log_every_n_steps != 0:
+            return
+
+        # Save to log file
+        log_entry = {
+            "step": state.global_step,
+            "timestamp": datetime.now().isoformat(),
+            "total_steps": self.total_steps,
+            "total_epochs": int(self.total_epochs),
+            **logs
+        }
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        # Extract GRPO-specific metrics (handle various key names)
+        reward = logs.get("reward") or logs.get("rewards") or logs.get("rewards/mean") or logs.get("mean_reward") or 0
+        reward_std = logs.get("reward_std") or logs.get("rewards/std") or 0
+        kl_penalty = logs.get("kl") or logs.get("kl_penalty") or logs.get("kl_div") or 0
+        advantage = logs.get("advantage") or logs.get("advantages/mean") or 0
+
+        # Update dashboard with GRPO-specific metrics
+        if self.dashboard:
+            self.dashboard.update(
+                step=state.global_step,
+                epoch=int(logs.get('epoch', 0)),
+                loss=logs.get('loss'),
+                learning_rate=logs.get('learning_rate'),
+                # GRPO-specific metrics
+                reward=reward,
+                reward_std=reward_std,
+                kl_penalty=kl_penalty,
+                advantage=advantage,
+            )
+        else:
+            loss = logs.get('loss', 0)
+            print(f"  Step {state.global_step}/{self.total_steps} | Loss: {loss:.4f} | Reward: {reward:.4f}")
+
+    def on_save(self, args, state, control, **kwargs):
+        if self.dashboard:
+            self.dashboard.update(log_message=f"Checkpoint saved at step {state.global_step}")
+        else:
+            print(f"  >> Checkpoint saved at step {state.global_step}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.dashboard:
+            self.dashboard.__exit__(None, None, None)
+            self.dashboard = None
+
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        print(f"\n{'=' * 60}")
+        print("GRPO TRAINING COMPLETED")
+        print(f"{'=' * 60}")
+        print(f"Total time: {elapsed // 3600:.0f}h {(elapsed % 3600) // 60:.0f}m {elapsed % 60:.0f}s")
+        print(f"Total steps: {state.global_step:,}")
+        print(f"Log file: {self.log_file}")

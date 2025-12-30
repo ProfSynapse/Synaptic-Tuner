@@ -68,7 +68,15 @@ from src.model_loader import (  # noqa: E402
     check_gpu_memory,
 )
 from src.rewards import build_combined_reward_function  # noqa: E402
-from src.training_callbacks import MetricsTableCallback  # noqa: E402
+from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE  # noqa: E402
+
+# Suppress verbose logging - we have our custom dashboard
+import logging
+logging.getLogger("transformers").setLevel(logging.WARNING)
+logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
+logging.getLogger("transformers.trainer_callback").setLevel(logging.WARNING)
+import transformers
+transformers.logging.set_verbosity_warning()
 
 
 def load_config(config_path: str | None = None) -> dict:
@@ -323,12 +331,23 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         print("[OK] Dry run completed. Exiting without training.")
         return {"run_dir": str(run_dir), "dry_run": True}
 
-    callbacks = [
-        MetricsTableCallback(
-            log_every_n_steps=training_cfg['logging_steps'],
-            output_dir=str(run_dir),
-        )
-    ]
+    # Initialize callbacks - use LiveDashboard by default if available
+    use_dashboard = DASHBOARD_AVAILABLE and RICH_AVAILABLE
+
+    if use_dashboard:
+        callbacks = [
+            LiveDashboardCallback(
+                log_every_n_steps=training_cfg['logging_steps'],
+                output_dir=str(run_dir),
+            )
+        ]
+    else:
+        callbacks = [
+            MetricsTableCallback(
+                log_every_n_steps=training_cfg['logging_steps'],
+                output_dir=str(run_dir),
+            )
+        ]
 
     trainer = GRPOTrainer(
         model=model,
@@ -338,6 +357,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         train_dataset=formatted_dataset,
         callbacks=callbacks,
     )
+
+    # Remove PrinterCallback to prevent dict spam when using dashboard
+    if use_dashboard:
+        from transformers.trainer_callback import PrinterCallback
+        trainer.remove_callback(PrinterCallback)
+        print("✓ Using LiveDashboard for training progress")
 
     print("Starting training...\n")
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

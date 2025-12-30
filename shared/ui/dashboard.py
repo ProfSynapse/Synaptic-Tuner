@@ -25,13 +25,26 @@ class TrainingMetrics:
     total_steps: int = 1
     loss: float = 0.0
     learning_rate: float = 0.0
+
     # KTO-specific
     kl: float = 0.0
-    margin: float = 0.0
+    margin: float = 0.0  # rewards/margins
+
+    # GRPO-specific
+    reward: float = 0.0
+    reward_std: float = 0.0
+    kl_penalty: float = 0.0
+    advantage: float = 0.0
+
     # GPU memory (current usage only - can overflow to RAM with offloading)
     gpu_memory_gb: float = 0.0
-    # History for sparklines
+
+    # History for sparklines (training type determines which to show)
     loss_history: List[float] = field(default_factory=list)
+    kl_history: List[float] = field(default_factory=list)
+    margin_history: List[float] = field(default_factory=list)
+    reward_history: List[float] = field(default_factory=list)
+
     # Timing
     start_time: float = field(default_factory=time.time)
     steps_per_second: float = 0.0
@@ -129,14 +142,20 @@ class LiveDashboard:
         epoch: int = None,
         loss: float = None,
         learning_rate: float = None,
+        # KTO metrics
         kl: float = None,
         margin: float = None,
+        # GRPO metrics
+        reward: float = None,
+        reward_std: float = None,
+        kl_penalty: float = None,
+        advantage: float = None,
+        # Other
         gpu_memory_gb: float = None,
         log_message: str = None,
     ):
         """Update dashboard metrics."""
         if step is not None:
-            # Calculate steps per second
             elapsed = time.time() - self.metrics.start_time
             if elapsed > 0:
                 self.metrics.steps_per_second = step / elapsed
@@ -147,19 +166,33 @@ class LiveDashboard:
 
         if loss is not None:
             self.metrics.loss = loss
-            self.metrics.loss_history.append(loss)
-            # Keep last 100 values for sparkline
-            if len(self.metrics.loss_history) > 100:
-                self.metrics.loss_history = self.metrics.loss_history[-100:]
+            self._append_history(self.metrics.loss_history, loss)
 
         if learning_rate is not None:
             self.metrics.learning_rate = learning_rate
 
+        # KTO metrics
         if kl is not None:
             self.metrics.kl = kl
+            self._append_history(self.metrics.kl_history, kl)
 
         if margin is not None:
             self.metrics.margin = margin
+            self._append_history(self.metrics.margin_history, margin)
+
+        # GRPO metrics
+        if reward is not None:
+            self.metrics.reward = reward
+            self._append_history(self.metrics.reward_history, reward)
+
+        if reward_std is not None:
+            self.metrics.reward_std = reward_std
+
+        if kl_penalty is not None:
+            self.metrics.kl_penalty = kl_penalty
+
+        if advantage is not None:
+            self.metrics.advantage = advantage
 
         if gpu_memory_gb is not None:
             self.metrics.gpu_memory_gb = gpu_memory_gb
@@ -186,6 +219,57 @@ class LiveDashboard:
                 self._live.update(self._build_display())
                 self._last_update_time = now
 
+    def _append_history(self, history: List[float], value: float, max_len: int = 100):
+        """Append to history list, keeping max length."""
+        history.append(value)
+        if len(history) > max_len:
+            del history[:-max_len]
+
+    def _build_chart(self, title: str, history: List[float], width: int = 40, higher_is_better: bool = False) -> List:
+        """Build a chart panel for the right column."""
+        from rich.text import Text
+
+        lines = []
+        lines.append(Text(title, style=f"bold {COLORS['sky']}"))
+        lines.append(Text(""))
+
+        # Sparkline
+        spark = sparkline(history, width=width)
+        spark_text = Text()
+        spark_text.append(spark, style=COLORS['aqua'])
+        lines.append(spark_text)
+
+        # Range with delta
+        if len(history) >= 2:
+            start_val = history[0]
+            end_val = history[-1]
+            delta = end_val - start_val
+
+            range_text = Text()
+            range_text.append(f"\n{start_val:.4f}", style=COLORS['orange'])
+            range_text.append(" → ", style="dim")
+            range_text.append(f"{end_val:.4f}", style=COLORS['aqua'])
+
+            # Color delta based on whether higher or lower is better
+            if higher_is_better:
+                delta_style = COLORS['aqua'] if delta > 0 else COLORS['orange']
+            else:
+                delta_style = COLORS['aqua'] if delta < 0 else COLORS['orange']
+            range_text.append(f" ({delta:+.4f})", style=delta_style)
+            lines.append(range_text)
+
+        # Min/Max stats
+        stats_text = Text()
+        stats_text.append(f"\nMin: {min(history):.4f}", style="dim")
+        stats_text.append(f"  Max: {max(history):.4f}", style="dim")
+        if len(history) > 10:
+            # Show recent average
+            recent_avg = sum(history[-10:]) / 10
+            stats_text.append(f"  Avg(10): {recent_avg:.4f}", style="dim")
+        lines.append(stats_text)
+
+        return lines
+
     def _build_display(self):
         """Build the dashboard display."""
         if not RICH_AVAILABLE:
@@ -211,7 +295,7 @@ class LiveDashboard:
         filled = int(m.progress_pct / 100 * prog_width)
         progress_bar = f"[{COLORS['aqua']}]{'█' * filled}[/][{COLORS['cello']}]{'░' * (prog_width - filled)}[/] {m.progress_pct:.1f}%"
 
-        # LEFT COLUMN: Metrics table
+        # LEFT COLUMN: Metrics table (varies by training type)
         metrics_table = Table(
             show_header=False,
             box=None,
@@ -227,11 +311,21 @@ class LiveDashboard:
         metrics_table.add_row("Loss", f"[bold]{m.loss:.4f}[/] (best: {m.best_loss:.4f})")
 
         if self.training_type == "kto":
+            # KTO-specific metrics
             metrics_table.add_row("KL", f"{m.kl:.4f}")
             metrics_table.add_row("Margin", f"{m.margin:.4f}")
             if m.kl > 0:
                 score = m.margin / m.kl
-                metrics_table.add_row("Score", f"[bold {COLORS['aqua']}]{score:.2f}[/]")
+                score_style = COLORS['aqua'] if score > 1 else COLORS['orange']
+                metrics_table.add_row("Score", f"[bold {score_style}]{score:.2f}[/]")
+
+        elif self.training_type == "grpo":
+            # GRPO-specific metrics
+            reward_style = COLORS['aqua'] if m.reward > 0 else COLORS['orange']
+            metrics_table.add_row("Reward", f"[bold {reward_style}]{m.reward:.4f}[/] ±{m.reward_std:.3f}")
+            metrics_table.add_row("KL Pen", f"{m.kl_penalty:.4f}")
+            if m.advantage != 0:
+                metrics_table.add_row("Advntg", f"{m.advantage:.4f}")
 
         metrics_table.add_row("LR", f"{m.learning_rate:.2e}")
 
@@ -242,41 +336,36 @@ class LiveDashboard:
         metrics_table.add_row("ETA", m.eta_str)
         metrics_table.add_row("Speed", f"{m.steps_per_second:.1f} steps/s")
 
-        # RIGHT COLUMN: Big sparkline chart
+        # RIGHT COLUMN: Chart (varies by training type)
         chart_lines = []
-        if self.show_sparklines and m.loss_history:
-            # Build a bigger sparkline (multiple rows for height)
-            spark_width = 40
-            spark = sparkline(m.loss_history, width=spark_width)
+        spark_width = 40
 
-            chart_lines.append(Text("Loss Trend", style=f"bold {COLORS['sky']}"))
-            chart_lines.append(Text(""))
-
-            # Show the sparkline
-            spark_text = Text()
-            spark_text.append(spark, style=COLORS['aqua'])
-            chart_lines.append(spark_text)
-
-            # Show range
-            range_text = Text()
-            range_text.append(f"\n{m.loss_history[0]:.3f}", style=COLORS['orange'])
-            range_text.append(" → ", style="dim")
-            range_text.append(f"{m.loss_history[-1]:.3f}", style=COLORS['aqua'])
-            if len(m.loss_history) > 1:
-                delta = m.loss_history[-1] - m.loss_history[0]
-                delta_style = COLORS['aqua'] if delta < 0 else COLORS['orange']
-                range_text.append(f" ({delta:+.3f})", style=delta_style)
-            chart_lines.append(range_text)
-
-            # Show min/max
-            stats_text = Text()
-            stats_text.append(f"\nMin: {min(m.loss_history):.4f}", style="dim")
-            stats_text.append(f"  Max: {max(m.loss_history):.4f}", style="dim")
-            chart_lines.append(stats_text)
+        if self.training_type == "kto" and m.margin_history:
+            # KTO: Show margin trend (what we're optimizing)
+            chart_lines = self._build_chart(
+                title="Margin Trend",
+                history=m.margin_history,
+                width=spark_width,
+                higher_is_better=True,
+            )
+        elif self.training_type == "grpo" and m.reward_history:
+            # GRPO: Show reward trend
+            chart_lines = self._build_chart(
+                title="Reward Trend",
+                history=m.reward_history,
+                width=spark_width,
+                higher_is_better=True,
+            )
+        elif m.loss_history:
+            # SFT or fallback: Show loss trend
+            chart_lines = self._build_chart(
+                title="Loss Trend",
+                history=m.loss_history,
+                width=spark_width,
+                higher_is_better=False,
+            )
         else:
-            chart_lines.append(Text("Loss Trend", style=f"bold {COLORS['sky']}"))
-            chart_lines.append(Text(""))
-            chart_lines.append(Text("[dim]Waiting for data...[/dim]"))
+            chart_lines.append(Text("Waiting for data...", style="dim"))
 
         chart_content = Group(*chart_lines)
         chart_panel = Panel(

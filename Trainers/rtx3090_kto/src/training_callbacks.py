@@ -7,9 +7,21 @@ Provides real-time metrics tracking and pretty table output.
 from transformers import TrainerCallback, TrainerState, TrainerControl
 import torch
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
+import sys
 from pathlib import Path
+
+# Add shared to path for UI components
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+# Try to import LiveDashboard
+try:
+    from shared.ui import LiveDashboard, RICH_AVAILABLE
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    RICH_AVAILABLE = False
 
 
 class MetricsTableCallback(TrainerCallback):
@@ -306,3 +318,119 @@ class CheckpointMonitorCallback(TrainerCallback):
         print(f"  Keep last: {args.save_total_limit} checkpoints")
         print(f"  Output dir: {args.output_dir}")
         print()
+
+
+class LiveDashboardCallback(TrainerCallback):
+    """
+    Training callback that displays a live dashboard with real-time metrics.
+    Specialized for KTO training - shows margin, KL, and rewards.
+    """
+
+    def __init__(
+        self,
+        log_every_n_steps: int = 5,
+        output_dir: str = "./kto_output_rtx3090",
+        previous_log_entries: list = None
+    ):
+        self.log_every_n_steps = log_every_n_steps
+        self.output_dir = Path(output_dir)
+        self.logs_dir = self.output_dir / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = self.logs_dir / f"training_{timestamp}.jsonl"
+        self.latest_log = self.logs_dir / "training_latest.jsonl"
+
+        self.start_time = None
+        self.dashboard: Optional[LiveDashboard] = None
+        self.total_steps = 0
+        self.total_epochs = 1
+
+        if previous_log_entries:
+            self._prepopulate_log(previous_log_entries)
+
+    def _prepopulate_log(self, previous_entries: list):
+        with open(self.log_file, "w") as f:
+            for entry in previous_entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.start_time = datetime.now()
+        self.total_steps = state.max_steps if state.max_steps > 0 else 1000
+        self.total_epochs = args.num_train_epochs
+
+        if self.latest_log.exists():
+            self.latest_log.unlink()
+        try:
+            self.latest_log.symlink_to(self.log_file.name)
+        except (OSError, NotImplementedError):
+            pass
+
+        if DASHBOARD_AVAILABLE and RICH_AVAILABLE:
+            self.dashboard = LiveDashboard(
+                title="KTO Training",
+                total_epochs=int(self.total_epochs),
+                total_steps=self.total_steps,
+                training_type="kto",  # This enables KTO-specific display
+                show_sparklines=True,
+                log_lines=3,
+            )
+            self.dashboard.__enter__()
+        else:
+            print(f"\n{'=' * 60}")
+            print("KTO TRAINING STARTED")
+            print(f"{'=' * 60}")
+            print(f"Log file: {self.log_file}")
+
+    def on_log(self, args, state: TrainerState, control: TrainerControl, logs: Dict[str, Any] = None, **kwargs):
+        if logs is None:
+            return
+
+        if state.global_step % self.log_every_n_steps != 0:
+            return
+
+        # Save to log file
+        log_entry = {
+            "step": state.global_step,
+            "timestamp": datetime.now().isoformat(),
+            "total_steps": self.total_steps,
+            "total_epochs": int(self.total_epochs),
+            **logs
+        }
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        # Update dashboard with KTO-specific metrics
+        if self.dashboard:
+            self.dashboard.update(
+                step=state.global_step,
+                epoch=int(logs.get('epoch', 0)),
+                loss=logs.get('loss'),
+                learning_rate=logs.get('learning_rate'),
+                # KTO-specific metrics
+                kl=logs.get('kl', logs.get('logps/rejected', 0)),  # KL divergence
+                margin=logs.get('rewards/margins'),  # Margin between chosen/rejected
+            )
+        else:
+            loss = logs.get('loss', 0)
+            margin = logs.get('rewards/margins', 0)
+            print(f"  Step {state.global_step}/{self.total_steps} | Loss: {loss:.4f} | Margin: {margin:.4f}")
+
+    def on_save(self, args, state, control, **kwargs):
+        if self.dashboard:
+            self.dashboard.update(log_message=f"Checkpoint saved at step {state.global_step}")
+        else:
+            print(f"  >> Checkpoint saved at step {state.global_step}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.dashboard:
+            self.dashboard.__exit__(None, None, None)
+            self.dashboard = None
+
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        print(f"\n{'=' * 60}")
+        print("KTO TRAINING COMPLETED")
+        print(f"{'=' * 60}")
+        print(f"Total time: {elapsed // 3600:.0f}h {(elapsed % 3600) // 60:.0f}m {elapsed % 60:.0f}s")
+        print(f"Total steps: {state.global_step:,}")
+        print(f"Log file: {self.log_file}")

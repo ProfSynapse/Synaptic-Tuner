@@ -94,7 +94,7 @@ from src.model_loader import (
     create_reference_model,
     check_gpu_memory
 )
-from src.training_callbacks import MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback
+from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE
 from src.adaptive_memory import AdaptiveMemoryManager, get_adaptive_settings
 from src.debug_logger import TrainingDebugger
 
@@ -138,9 +138,13 @@ def setup_environment():
     # This can reduce memory usage by ~30% and prevent OOM errors
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Suppress verbose logging - we have our custom table
+    # Suppress verbose logging - we have our custom dashboard
     import logging
+    logging.getLogger("transformers").setLevel(logging.WARNING)
     logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
+    logging.getLogger("transformers.trainer_callback").setLevel(logging.WARNING)
+    import transformers
+    transformers.logging.set_verbosity_warning()
 
     print("=" * 60)
     print("RTX 3090 KTO TRAINING")
@@ -862,15 +866,27 @@ def main():
     if args.resume_from_checkpoint:
         previous_log_entries = extract_previous_log_entries(args.resume_from_checkpoint)
 
-    # Initialize callbacks
-    callbacks = [
-        MetricsTableCallback(
-            log_every_n_steps=5,
-            output_dir=str(run_dir),  # Pass run_dir, callback adds /logs
-            previous_log_entries=previous_log_entries
-        ),
-        CheckpointMonitorCallback()
-    ]
+    # Initialize callbacks - use LiveDashboard by default if available
+    use_dashboard = DASHBOARD_AVAILABLE and RICH_AVAILABLE
+
+    if use_dashboard:
+        callbacks = [
+            LiveDashboardCallback(
+                log_every_n_steps=5,
+                output_dir=str(run_dir),
+                previous_log_entries=previous_log_entries
+            ),
+        ]
+    else:
+        # Fallback to table-based output
+        callbacks = [
+            MetricsTableCallback(
+                log_every_n_steps=5,
+                output_dir=str(run_dir),
+                previous_log_entries=previous_log_entries
+            ),
+            CheckpointMonitorCallback()
+        ]
 
     # Add two-stage LR callback if enabled
     if config.training.use_two_stage_lr:
@@ -910,6 +926,12 @@ def main():
         )
 
     print("✓ KTO trainer initialized with metrics tracking")
+
+    # Remove PrinterCallback to prevent dict spam when using dashboard
+    if use_dashboard:
+        from transformers.trainer_callback import PrinterCallback
+        trainer.remove_callback(PrinterCallback)
+        print("✓ Using LiveDashboard for training progress")
 
     # Override sampler to use SequentialSampler - preserves interleaved T,F,T,F order
     from torch.utils.data import SequentialSampler
