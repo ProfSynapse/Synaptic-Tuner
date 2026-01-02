@@ -192,6 +192,11 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
                 print(f"\n  {record.case.case_id}")
                 if record.error:
                     print(f"    Error: {record.error}")
+                if record.response_text:
+                    response_str = str(record.response_text)
+                    if len(response_str) > 300:
+                        response_str = response_str[:300] + "..."
+                    print(f"    Response: {response_str}")
         return
 
     failed = [r for r in records if not r.passed]
@@ -253,6 +258,18 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
                         details.append(f"\n  [FAIL] ", style="red")
                         details.append(f"{issue.check}: ", style=COLORS['sky'])
                         details.append(issue.message, style="white")
+
+        # Show the actual LLM response (truncated)
+        if record.response_text:
+            details.append("\n\nLLM Response:", style=f"bold {COLORS['sky']}")
+            response_str = str(record.response_text)
+            # Truncate long responses but show enough context
+            max_response_len = 500
+            if len(response_str) > max_response_len:
+                truncated = response_str[:max_response_len] + f"... ({len(response_str) - max_response_len} more chars)"
+            else:
+                truncated = response_str
+            details.append(f"\n{truncated}", style="dim white")
 
         console.print(Panel(
             details,

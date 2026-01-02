@@ -40,6 +40,7 @@ from .widgets import (
 )
 from .dashboard import LiveDashboard, show_training_progress
 from .evaluation import LiveEvaluationDashboard, rich_evaluation_summary
+from .synthchat import LiveSynthChatDashboard, SynthChatMetrics
 from .animations import (
     animated_main_menu as asciimatics_menu,
     play_logo_animation,
@@ -93,6 +94,9 @@ __all__ = [
     # Evaluation
     "LiveEvaluationDashboard",
     "rich_evaluation_summary",
+    # SynthChat
+    "LiveSynthChatDashboard",
+    "SynthChatMetrics",
     # Animations
     "asciimatics_menu",
     "play_logo_animation",

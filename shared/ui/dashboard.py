@@ -453,7 +453,8 @@ class LiveDashboard:
                 console=console,
                 refresh_per_second=2,  # Reduced to minimize flicker
                 transient=False,
-                vertical_overflow="visible",
+                vertical_overflow="crop",
+                screen=True,  # Alternate screen buffer - much less flicker
             )
             self._live.__enter__()
         return self

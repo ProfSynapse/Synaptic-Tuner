@@ -2,7 +2,6 @@
 Custom Asciimatics Effects for Synaptic Tuner
 
 Contains visual effect classes:
-- BubblingFlask: Round-bottom flask with animated liquid
 - BrandBubbles: Full-screen chaotic bubbles using brand colors
 - SparkBurst: Burst of sparks for training start
 """
@@ -34,235 +33,7 @@ def _get_effect_classes():
         from asciimatics.screen import Screen
         from asciimatics.effects import Effect
     except ImportError:
-        return None, None, None
-
-    class BubblingFlask(Effect):
-        r"""
-        A large Florence flask (round-bottom) rendered with # characters.
-
-        Uses mathematically-generated circle shape compensating for terminal
-        character aspect ratio (chars are ~2x taller than wide).
-
-        Features:
-        - Cream/white # outline for glass
-        - Animated aqua/sky # interior for liquid with wave patterns
-        - Internal bubbles rising through liquid (sky blue)
-        - Bubbles escaping from neck
-        """
-
-        # Flask dimensions (Option B - radius 15 for full size)
-        RADIUS = 15
-        NECK_WIDTH = 5
-        NECK_ROWS = 2
-        LIP_WIDTH = 7
-        ASPECT_RATIO = 2.0
-
-        def __init__(self, screen, x, y, **kwargs):
-            super().__init__(screen, **kwargs)
-            self._x = x
-            self._y = y
-            self._escaped_bubbles = []
-            self._internal_bubbles = []
-            self._frame = 0
-
-            # Pre-generate flask shape (list of (left_edge, right_edge) tuples)
-            self._flask_rows = self._generate_flask_shape()
-            self._liquid_start_row = 5  # Row where liquid begins (0-indexed from flask top)
-            self._flask_height = len(self._flask_rows)
-
-        def _generate_flask_shape(self):
-            """
-            Generate flask shape using circle equation.
-            Returns list of (left_edge, right_edge) for each row, relative to center.
-            """
-            import math
-            rows = []
-            center_x = self.RADIUS
-
-            def make_row_data(left, right):
-                return (left, right)
-
-            def center_row_data(width):
-                left = center_x - width // 2
-                right = center_x + width // 2 - (1 if width % 2 == 0 else 0)
-                return make_row_data(left, right)
-
-            # 1. Lip
-            rows.append(center_row_data(self.LIP_WIDTH))
-
-            # 2. Neck
-            for _ in range(self.NECK_ROWS):
-                rows.append(center_row_data(self.NECK_WIDTH))
-
-            # 3. Circle body
-            num_rows = int(self.RADIUS / self.ASPECT_RATIO)
-            body_rows = []
-
-            for row in range(num_rows * 2 + 1):
-                y_normalized = (row - num_rows) / num_rows
-                if abs(y_normalized) <= 1:
-                    x_normalized = math.sqrt(1 - y_normalized ** 2)
-                    x_offset = int(x_normalized * self.RADIUS)
-                    left_edge = center_x - x_offset
-                    right_edge = center_x + x_offset
-                    width = right_edge - left_edge + 1
-                    body_rows.append((left_edge, right_edge, width))
-
-            # Filter tiny rows
-            if body_rows:
-                max_w = max(r[2] for r in body_rows)
-                min_acceptable = max(self.NECK_WIDTH, int(max_w * 0.4))
-
-                for left, right, width in body_rows:
-                    if width >= min_acceptable:
-                        rows.append((left, right))
-
-            return rows
-
-        def reset(self):
-            self._escaped_bubbles = []
-            self._internal_bubbles = []
-            self._frame = 0
-
-        def _get_liquid_color(self, row, col, frame):
-            """Get color for liquid cell with wave animation using brand colors."""
-            wave_offset = (frame // 2) % 8
-
-            # Wave pattern moves diagonally through liquid
-            heat = ((col + row * 2 + wave_offset) % 5)
-
-            # Use brand colors: Aqua (#00A99D) and Sky (#29ABE2)
-            if heat == 0:
-                return BRAND_AQUA, Screen.A_BOLD
-            elif heat == 1:
-                return BRAND_AQUA, Screen.A_NORMAL
-            elif heat == 2:
-                return BRAND_SKY, Screen.A_BOLD
-            elif heat == 3:
-                return BRAND_SKY, Screen.A_NORMAL
-            else:
-                return BRAND_CREAM, Screen.A_NORMAL
-
-        def _update(self, frame_no):
-            # Use brand cream color for glass outline
-            GLASS = BRAND_CREAM
-            x = self._x
-            y = self._y
-            frame = self._frame
-
-            # Track liquid region for bubble spawning
-            liquid_left = None
-            liquid_right = None
-            liquid_bottom_y = None
-
-            # =================================================================
-            # DRAW FLASK ROW BY ROW
-            # =================================================================
-            for row_idx, (left, right) in enumerate(self._flask_rows):
-                screen_y = y + row_idx
-                width = right - left + 1
-                is_liquid_row = row_idx >= self._liquid_start_row
-
-                # Draw each position in this row
-                for col in range(width):
-                    screen_x = x + left + col
-                    is_edge = (col == 0 or col == width - 1)
-
-                    if is_edge:
-                        # Glass outline - brand cream/white
-                        self._screen.print_at("#", screen_x, screen_y,
-                                              colour=GLASS, attr=Screen.A_BOLD)
-                    elif is_liquid_row and width > 2:
-                        # Interior liquid - animated aqua/sky brand colors
-                        color, attr = self._get_liquid_color(row_idx, col, frame)
-                        self._screen.print_at("#", screen_x, screen_y,
-                                              colour=color, attr=attr)
-                    # else: empty air inside (no character drawn)
-
-                # Track liquid boundaries for bubble spawning
-                if is_liquid_row and width > 2:
-                    if liquid_left is None:
-                        liquid_left = x + left + 1
-                        liquid_right = x + right - 1
-                    liquid_bottom_y = screen_y
-
-            # =================================================================
-            # INTERNAL BUBBLES (Rising through liquid)
-            # =================================================================
-            if liquid_left is not None and liquid_bottom_y is not None:
-                # Spawn bubbles at bottom of liquid
-                if frame % 4 == 0 and random.random() < 0.7:
-                    bx = random.randint(liquid_left + 2, liquid_right - 2)
-                    by = float(liquid_bottom_y)
-                    self._internal_bubbles.append([bx, by])
-
-            # Liquid surface Y (where bubbles escape)
-            liquid_surface_y = y + self._liquid_start_row
-
-            # Draw and update internal bubbles
-            new_internal = []
-            for bubble in self._internal_bubbles:
-                bx, by = bubble
-                screen_y = int(by)
-
-                # Draw as bright cream/white # (stands out against liquid)
-                if liquid_surface_y <= screen_y <= (liquid_bottom_y or screen_y):
-                    self._screen.print_at("#", int(bx), screen_y,
-                                          colour=BRAND_CREAM, attr=Screen.A_BOLD)
-
-                # Move up with wobble
-                bubble[1] -= 0.2
-                bubble[0] += random.choice([-0.15, 0, 0, 0.15])
-
-                # Transfer to escaped when reaching surface
-                if bubble[1] <= liquid_surface_y:
-                    # Start escaped bubble at neck position
-                    neck_x = x + self.RADIUS  # Center of neck
-                    self._escaped_bubbles.append([float(neck_x), float(y + 2), 0])
-                elif bubble[1] >= liquid_surface_y:
-                    new_internal.append(bubble)
-
-            self._internal_bubbles = new_internal
-
-            # =================================================================
-            # ESCAPED BUBBLES (Rising out of flask neck)
-            # =================================================================
-            new_escaped = []
-            for bubble in self._escaped_bubbles:
-                bx, by, age = bubble
-                screen_y = int(by)
-
-                # Draw bubble above flask - use sky blue brand color
-                if 0 <= screen_y < self._screen.height and screen_y < y:
-                    if age % 3 == 0:
-                        self._screen.print_at("#", int(bx), screen_y,
-                                              colour=BRAND_CREAM, attr=Screen.A_BOLD)
-                    elif age % 3 == 1:
-                        self._screen.print_at("#", int(bx), screen_y,
-                                              colour=BRAND_SKY, attr=Screen.A_BOLD)
-                    else:
-                        self._screen.print_at("#", int(bx), screen_y,
-                                              colour=BRAND_AQUA, attr=Screen.A_NORMAL)
-
-                # Move up with wobble
-                bubble[1] -= 0.3
-                bubble[0] += random.choice([-0.2, -0.1, 0, 0.1, 0.2])
-                bubble[2] += 1
-
-                # Keep bubbles that haven't risen too far
-                if bubble[1] > y - 8 and bubble[2] < 40:
-                    new_escaped.append(bubble)
-
-            self._escaped_bubbles = new_escaped
-            self._frame += 1
-
-        @property
-        def stop_frame(self):
-            return self._stop_frame
-
-        @property
-        def frame_update_count(self):
-            return 1
+        return None, None
 
     class BrandBubbles(Effect):
         """
@@ -459,8 +230,83 @@ def _get_effect_classes():
         def frame_update_count(self):
             return 1
 
-    return BubblingFlask, BrandBubbles, SparkBurst
+    class ProgressLoader(Effect):
+        """
+        Animated progress bar that fills over the scene duration.
+        Shows users the animation is progressing, not stuck.
+        """
+
+        def __init__(self, screen, y, duration, width=40, label="Loading", **kwargs):
+            super().__init__(screen, **kwargs)
+            self._y = y
+            self._duration = duration
+            self._width = width
+            self._label = label
+            self._x = (screen.width - width - len(label) - 5) // 2
+
+        def reset(self):
+            pass
+
+        def _update(self, frame_no):
+            # Calculate progress (0.0 to 1.0)
+            progress = min(1.0, frame_no / max(1, self._duration - 1))
+            filled = int(progress * self._width)
+            empty = self._width - filled
+
+            # Build the bar
+            bar = "█" * filled + "░" * empty
+            pct = int(progress * 100)
+
+            # Draw label
+            self._screen.print_at(
+                f"{self._label} ",
+                self._x,
+                self._y,
+                colour=BRAND_CELLO,
+            )
+
+            # Draw bar with brand colors
+            label_len = len(self._label) + 1
+            self._screen.print_at(
+                "[",
+                self._x + label_len,
+                self._y,
+                colour=BRAND_CELLO,
+            )
+            self._screen.print_at(
+                bar[:filled],
+                self._x + label_len + 1,
+                self._y,
+                colour=BRAND_AQUA,
+                attr=Screen.A_BOLD,
+            )
+            self._screen.print_at(
+                bar[filled:],
+                self._x + label_len + 1 + filled,
+                self._y,
+                colour=BRAND_CELLO,
+            )
+            self._screen.print_at(
+                f"] {pct:3d}%",
+                self._x + label_len + 1 + self._width,
+                self._y,
+                colour=BRAND_CELLO,
+            )
+
+        @property
+        def stop_frame(self):
+            return self._stop_frame
+
+        @property
+        def frame_update_count(self):
+            return 1
+
+    return BrandBubbles, SparkBurst, ProgressLoader
 
 
 # Export the classes (will be None if asciimatics not available)
-BubblingFlask, BrandBubbles, SparkBurst = _get_effect_classes() or (None, None, None)
+_classes = _get_effect_classes()
+if _classes:
+    BrandBubbles, SparkBurst, ProgressLoader = _classes
+else:
+    BrandBubbles, SparkBurst, ProgressLoader = None, None, None

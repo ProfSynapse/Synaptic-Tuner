@@ -105,7 +105,7 @@ def play_logo_animation(duration_frames: int = 80, on_complete: Optional[Callabl
     def play(screen):
         scene = create_logo_scene(screen, duration_frames)
         if scene:
-            screen.play([scene], stop_on_resize=True)
+            screen.play([scene], stop_on_resize=True, repeat=False)
 
     try:
         Screen.wrapper(play)
@@ -131,7 +131,7 @@ def play_training_start(duration_frames: int = 50):
     def play(screen):
         scene = create_training_start_scene(screen, duration_frames)
         if scene:
-            screen.play([scene], stop_on_resize=True)
+            screen.play([scene], stop_on_resize=True, repeat=False)
 
     try:
         Screen.wrapper(play)
@@ -158,7 +158,7 @@ def play_training_complete(simple: bool = True, duration_frames: int = 80):
         else:
             scene = create_celebration_scene(screen, duration_frames)
         if scene:
-            screen.play([scene], stop_on_resize=True)
+            screen.play([scene], stop_on_resize=True, repeat=False)
 
     try:
         Screen.wrapper(play)

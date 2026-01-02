@@ -115,7 +115,7 @@ class LiveEvaluationDashboard:
         self._stop_event = Event()
         self._live = None
         self._last_update_time = 0.0
-        self._min_update_interval = 0.1  # Fast updates for evaluation
+        self._min_update_interval = 0.5  # Match Live refresh_per_second=2
 
     def update(
         self,
@@ -356,13 +356,14 @@ class LiveEvaluationDashboard:
         """Start live display."""
         if RICH_AVAILABLE:
             from rich.live import Live
-            clear_screen()
+            # Don't clear_screen() - let Live handle it with screen=True
             self._live = Live(
                 self._build_display(),
                 console=console,
-                refresh_per_second=4,
+                refresh_per_second=2,  # Slower refresh reduces flicker
                 transient=False,
-                vertical_overflow="visible",
+                vertical_overflow="crop",
+                screen=True,  # Alternate screen buffer - much less flicker
             )
             self._live.__enter__()
         return self

@@ -40,10 +40,6 @@ import logging
 logging.getLogger("transformers").setLevel(logging.WARNING)
 logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
 
-# Also suppress via transformers' own logging system
-import transformers
-transformers.logging.set_verbosity_warning()
-
 # ============================================================================
 # DISABLE TORCH.COMPILE - Required for VL models and WSL compatibility
 # Must be set BEFORE importing unsloth
@@ -90,6 +86,11 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from unsloth import is_bfloat16_supported
+
+# Now that unsloth is imported, suppress transformers logging
+import transformers
+transformers.logging.set_verbosity_warning()
+
 from trl import SFTConfig, SFTTrainer
 
 from configs.config_loader import (

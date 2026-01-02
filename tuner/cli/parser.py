@@ -40,7 +40,7 @@ Commands:
   eval      Evaluation submenu
   run       Run model inference (chat with your model)
   merge     Merge LoRA into base model (for GRPO or upload)
-  generate  Generate synthetic data (SelfPlay)
+  generate  Generate synthetic data (SynthChat)
   improve   Improve dataset quality (LLM-based)
   pipeline  Full pipeline (train -> upload -> eval)
   gguf      Convert model to GGUF format

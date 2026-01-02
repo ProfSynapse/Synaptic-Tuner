@@ -763,7 +763,19 @@ class EvalHandler(BaseHandler):
 
         # Save results
         try:
-            payload = build_run_payload(records)
+            # Build metadata for the evaluation run
+            metadata = {
+                "backend": backend,
+                "model": settings.model,
+                "host": getattr(settings, 'host', 'localhost'),
+                "port": getattr(settings, 'port', 0),
+                "temperature": settings.temperature,
+                "max_tokens": settings.max_tokens,
+                "total_prompts": len(cases),
+                "selected_prompts": len(cases),
+                "scenario": scenario.path.name,
+            }
+            payload = build_run_payload(records, metadata=metadata)
             write_json(output_json, payload)
             output_md.write_text(
                 render_markdown(records, model, scenario.path.name),

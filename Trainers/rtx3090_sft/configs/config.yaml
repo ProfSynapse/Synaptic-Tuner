@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/nexus-synthetic-dataset"
-  dataset_file: "nonthinking_tools_sft_12.28.25.jsonl"  # 3,536 examples
+  dataset_file: "nonthinking_tools_sft_01.02.26.jsonl"  # 3,713 examples
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/nonthinking_tools_sft_12.28.25.jsonl"
+  local_file: "../../Datasets/nonthinking_tools_sft_01.02.26.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

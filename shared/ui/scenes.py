@@ -11,10 +11,45 @@ import random
 from typing import Optional
 
 from .effects import (
-    BRAND_AQUA, BRAND_PURPLE, BRAND_CELLO,
-    BrandBubbles, SparkBurst,
+    BRAND_AQUA, BRAND_PURPLE, BRAND_CELLO, BRAND_ORANGE,
+    BrandBubbles, SparkBurst, ProgressLoader,
 )
 from .menu import SYNAPTIC_LOGO, SYNAPTIC_WIDTH, TUNER_LOGO, TUNER_WIDTH
+
+
+# =============================================================================
+# TRAINING ASCII ART (same style as SYNAPTIC/TUNER)
+# =============================================================================
+
+IGNITING_LOGO = "\n".join([
+    "██╗ ██████╗ ███╗   ██╗██╗████████╗██╗███╗   ██╗ ██████╗ ",
+    "██║██╔════╝ ████╗  ██║██║╚══██╔══╝██║████╗  ██║██╔════╝ ",
+    "██║██║  ███╗██╔██╗ ██║██║   ██║   ██║██╔██╗ ██║██║  ███╗",
+    "██║██║   ██║██║╚██╗██║██║   ██║   ██║██║╚██╗██║██║   ██║",
+    "██║╚██████╔╝██║ ╚████║██║   ██║   ██║██║ ╚████║╚██████╔╝",
+    "╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝   ╚═╝╚═╝  ╚═══╝ ╚═════╝ ",
+])
+IGNITING_WIDTH = 56
+
+TRAINING_LOGO = "\n".join([
+    "████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗ ",
+    "╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝ ",
+    "   ██║   ██████╔╝███████║██║██╔██╗ ██║██║██╔██╗ ██║██║  ███╗",
+    "   ██║   ██╔══██╗██╔══██║██║██║╚██╗██║██║██║╚██╗██║██║   ██║",
+    "   ██║   ██║  ██║██║  ██║██║██║ ╚████║██║██║ ╚████║╚██████╔╝",
+    "   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ",
+])
+TRAINING_WIDTH = 61
+
+COMPLETE_LOGO = "\n".join([
+    " ██████╗ ██████╗ ███╗   ███╗██████╗ ██╗     ███████╗████████╗███████╗██╗",
+    "██╔════╝██╔═══██╗████╗ ████║██╔══██╗██║     ██╔════╝╚══██╔══╝██╔════╝██║",
+    "██║     ██║   ██║██╔████╔██║██████╔╝██║     █████╗     ██║   █████╗  ██║",
+    "██║     ██║   ██║██║╚██╔╝██║██╔═══╝ ██║     ██╔══╝     ██║   ██╔══╝  ╚═╝",
+    "╚██████╗╚██████╔╝██║ ╚═╝ ██║██║     ███████╗███████╗   ██║   ███████╗██╗",
+    " ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝     ╚══════╝╚══════╝   ╚═╝   ╚══════╝╚═╝",
+])
+COMPLETE_WIDTH = 71
 
 # Check for asciimatics availability
 ASCIIMATICS_AVAILABLE = False
@@ -84,48 +119,61 @@ def create_logo_scene(screen, duration: int = 80):
 
 
 def create_training_start_scene(screen, duration: int = 60):
-    """Create the training start splash with fire and sparks."""
+    """Create the training start splash with fireworks and brand-styled text."""
     if not ASCIIMATICS_AVAILABLE:
         return None
 
     effects = []
 
-    # Fire at the bottom
-    effects.append(Print(
-        screen,
-        Fire(screen.height, screen.width, "*" * (screen.width // 2), 0.6, 40, screen.colours),
-        x=screen.width // 4,
-        y=screen.height - 8,
-        speed=1,
-        transparent=False,
-    ))
+    # Starfield background
+    effects.append(Stars(screen, screen.width))
 
-    # Multiple spark bursts
-    for _ in range(3):
-        effects.append(SparkBurst(
+    # Fireworks scattered around - start early so they're visible
+    firework_types = [StarFirework, RingFirework, PalmFirework]
+    for i in range(8):
+        firework_class = random.choice(firework_types)
+        effects.append(firework_class(
             screen,
-            x=random.randint(screen.width // 4, 3 * screen.width // 4),
-            y=screen.height // 2,
-            count=20
+            x=random.randint(5, screen.width - 5),
+            y=random.randint(3, screen.height - 3),
+            life_time=20,  # Fixed shorter lifetime
+            start_frame=i * 3,  # Stagger them: 0, 3, 6, 9, 12, 15, 18, 21
         ))
 
-    # Title
+    # IGNITING text (orange, brand style) - appears immediately
+    igniting_x = (screen.width - IGNITING_WIDTH) // 2
+    igniting_y = screen.height // 3 - 3
     effects.append(Print(
         screen,
-        FigletText("IGNITING", font='banner'),
-        x=(screen.width - 50) // 2,
-        y=screen.height // 3,
-        colour=Screen.COLOUR_YELLOW,
+        StaticRenderer([IGNITING_LOGO]),
+        x=igniting_x,
+        y=igniting_y,
+        colour=BRAND_ORANGE,
         attr=Screen.A_BOLD,
+        start_frame=0,
     ))
 
+    # TRAINING text (purple, brand style) - appears immediately
+    training_x = (screen.width - TRAINING_WIDTH) // 2
+    training_y = igniting_y + 8
     effects.append(Print(
         screen,
-        FigletText("TRAINING", font='banner'),
-        x=(screen.width - 50) // 2,
-        y=screen.height // 3 + 5,
-        colour=Screen.COLOUR_RED,
+        StaticRenderer([TRAINING_LOGO]),
+        x=training_x,
+        y=training_y,
+        colour=BRAND_PURPLE,
         attr=Screen.A_BOLD,
+        start_frame=0,
+    ))
+
+    # Progress loader at bottom - shows it's not stuck
+    loader_y = training_y + 9
+    effects.append(ProgressLoader(
+        screen,
+        y=loader_y,
+        duration=duration,
+        width=40,
+        label="Initializing",
     ))
 
     return Scene(effects, duration)
@@ -142,15 +190,10 @@ def create_celebration_scene(screen, duration: int = 120):
     effects.append(Stars(screen, screen.width))
 
     # Multiple fireworks
-    firework_types = [
-        (PalmFirework, Screen.COLOUR_GREEN),
-        (StarFirework, Screen.COLOUR_CYAN),
-        (RingFirework, Screen.COLOUR_MAGENTA),
-        (SerpentFirework, Screen.COLOUR_YELLOW),
-    ]
+    firework_types = [PalmFirework, StarFirework, RingFirework, SerpentFirework]
 
     for i in range(15):
-        firework_class, _ = random.choice(firework_types)
+        firework_class = random.choice(firework_types)
         effects.append(firework_class(
             screen,
             x=random.randint(3, screen.width - 4),
@@ -159,22 +202,27 @@ def create_celebration_scene(screen, duration: int = 120):
             start_frame=random.randint(0, 80),
         ))
 
-    # Rainbow congratulations text
+    # COMPLETE! text (aqua, brand style)
+    complete_x = (screen.width - COMPLETE_WIDTH) // 2
+    complete_y = screen.height // 3
     effects.append(Print(
         screen,
-        Rainbow(screen, FigletText("COMPLETE!", font='banner')),
-        x=(screen.width - 55) // 2,
-        y=screen.height // 3,
-        speed=1,
+        StaticRenderer([COMPLETE_LOGO]),
+        x=complete_x,
+        y=complete_y,
+        colour=BRAND_AQUA,
+        attr=Screen.A_BOLD,
         start_frame=20,
     ))
 
+    # Subtitle
+    subtitle = "Training finished successfully!"
     effects.append(Print(
         screen,
-        StaticRenderer(["Training finished successfully!"]),
-        x=(screen.width - 32) // 2,
-        y=screen.height // 3 + 8,
-        colour=Screen.COLOUR_WHITE,
+        StaticRenderer([subtitle]),
+        x=(screen.width - len(subtitle)) // 2,
+        y=complete_y + 8,
+        colour=BRAND_CELLO,
         start_frame=40,
     ))
 
@@ -188,29 +236,28 @@ def create_simple_celebration_scene(screen, duration: int = 80):
 
     effects = []
 
-    # Central explosion burst
-    centre_x = screen.width // 2
-    centre_y = screen.height // 2
-
-    effects.append(SparkBurst(screen, centre_x, centre_y, count=50))
+    # Starfield background
+    effects.append(Stars(screen, screen.width))
 
     # A few fireworks
-    for i in range(5):
+    for i in range(8):
         effects.append(StarFirework(
             screen,
             x=random.randint(10, screen.width - 10),
             y=random.randint(5, screen.height - 5),
             life_time=25,
-            start_frame=i * 10,
+            start_frame=i * 5,
         ))
 
-    # Text
+    # COMPLETE! text (aqua, brand style)
+    complete_x = (screen.width - COMPLETE_WIDTH) // 2
+    complete_y = screen.height // 2 - 3
     effects.append(Print(
         screen,
-        FigletText("DONE!", font='banner'),
-        x=(screen.width - 30) // 2,
-        y=screen.height // 2 - 3,
-        colour=Screen.COLOUR_GREEN,
+        StaticRenderer([COMPLETE_LOGO]),
+        x=complete_x,
+        y=complete_y,
+        colour=BRAND_AQUA,
         attr=Screen.A_BOLD,
         start_frame=10,
     ))

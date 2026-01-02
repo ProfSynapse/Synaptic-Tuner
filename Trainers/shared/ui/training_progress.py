@@ -109,8 +109,10 @@ class TrainingProgressDisplay:
         self.live = Live(
             self._render(),
             console=self.console,
-            refresh_per_second=4,
-            transient=False
+            refresh_per_second=2,  # Slower refresh reduces flicker
+            transient=False,
+            vertical_overflow="crop",
+            screen=True,  # Alternate screen buffer - much less flicker
         )
         self.live.__enter__()
         return self
