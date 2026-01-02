@@ -343,7 +343,7 @@ def prompt(message: str, default: str = "") -> str:
 
 
 # =============================================================================
-# ANIMATED MENU (Main menu with bubbling test tube)
+# ANIMATED MENU (Main menu with bubbling beaker - asciimatics powered)
 # =============================================================================
 
 def animated_menu(
@@ -352,52 +352,32 @@ def animated_menu(
     status_info: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """
-    Display animated logo with bubbling test tube, then show arrow-key menu.
+    Display animated logo with interactive menu overlay using asciimatics.
 
-    Animation plays briefly, then presents menu for selection.
+    The animation loops continuously until user makes a selection.
+    Menu is displayed at the bottom with arrow-key navigation.
 
     Args:
         options: List of (key, description) tuples
         title: Menu title/prompt
-        status_info: Optional dict of status info to display
+        status_info: Optional dict of status info (currently not displayed in animation)
 
     Returns:
         Selected option key or None if cancelled
     """
-    if not RICH_AVAILABLE:
-        # Fallback to static display
+    # Import animations module (auto-installs asciimatics if needed)
+    from .animations import animated_main_menu, ASCIIMATICS_AVAILABLE
+
+    if not ASCIIMATICS_AVAILABLE:
+        # If asciimatics still not available after auto-install attempt,
+        # use simple arrow-key or numbered menu
+        clear_screen()
         print_logo()
         if status_info:
             for key, value in status_info.items():
                 print(f"  {key}: {value}")
+            print()
         return print_menu(options, title)
 
-    from rich.live import Live
-    from rich.text import Text
-    from rich.console import Group
-    from rich.align import Align
-
-    # Clear screen
-    clear_screen()
-
-    # Play brief logo animation
-    try:
-        with Live(console=console, refresh_per_second=8, transient=False) as live:
-            for frame in range(8):  # ~1 second of animation
-                logo_text = Text.from_markup(get_animated_logo_frame(frame))
-                tagline = Align.center(TAGLINE)
-                live.update(Group(logo_text, tagline))
-                time.sleep(0.1)
-    except KeyboardInterrupt:
-        return None
-
-    # Display status info
-    if status_info:
-        console.print()
-        for key, value in status_info.items():
-            console.print(f"  [{COLORS['cello']}]{BOX['bullet']} {key}[/{COLORS['cello']}] {value}")
-
-    console.print()
-
-    # Show menu (uses arrow keys if available, numbered otherwise)
-    return print_menu(options, title)
+    # Use asciimatics animated menu with looping animation
+    return animated_main_menu(options, title)

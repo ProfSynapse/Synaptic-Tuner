@@ -33,6 +33,17 @@ except ImportError:
     _console = None
     _RICH_AVAILABLE = False
 
+# Import live dashboard and UI components
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent))
+    from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
+    from .ui import rich_summary, rich_failure_details, print_evaluation_header
+    _DASHBOARD_AVAILABLE = True
+except ImportError:
+    _DASHBOARD_AVAILABLE = False
+    _SHARED_RICH = False
+
 from .cli_utils import (
     build_metadata,
     build_settings_kwargs,
@@ -163,6 +174,11 @@ Backend Configuration:
         action="store_true",
         help="Update the model's README.md with evaluation results (requires --upload-to-hf)",
     )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Disable live dashboard, use simple text output",
+    )
     return parser.parse_args(argv)
 
 
@@ -275,151 +291,122 @@ def main(argv: List[str] | None = None) -> int:
         retries=config.retries,
     )
 
-    # Live output callback (uses display_config from outer scope)
-    def on_record(record):
+    # Determine if we should use the live dashboard
+    use_dashboard = (
+        _DASHBOARD_AVAILABLE
+        and _SHARED_RICH
+        and not args.no_dashboard
+        and not args.dry_run  # Don't use dashboard for dry runs
+    )
+
+    # Dashboard-based callback for live updates
+    dashboard = None
+    if use_dashboard:
+        dashboard = LiveEvaluationDashboard(
+            title="Model Evaluation",
+            total_tests=len(selected_cases),
+            log_lines=5,
+        )
+
+    def on_record_dashboard(record):
+        """Update dashboard with evaluation result."""
+        name = record.case.case_id or "unnamed"
+        latency = record.latency_s or 0.0
+
+        # Get brief failure reason for log display
+        reason = None
+        if record.status in ("fail", "warn"):
+            if record.error:
+                reason = f"Error: {record.error[:40]}..."
+            elif record.validator and record.validator.issues:
+                for issue in record.validator.issues:
+                    msg = simplify_issue_message(issue.message, display_config)
+                    if msg:
+                        reason = msg[:50] + "..." if len(msg) > 50 else msg
+                        break
+            elif record.behavior and not record.behavior.passed:
+                for issue in record.behavior.issues:
+                    msg = simplify_issue_message(issue.message, display_config)
+                    if msg:
+                        reason = msg[:50] + "..." if len(msg) > 50 else msg
+                        break
+
+        # Check behavior results
+        behavior_tested = record.behavior is not None
+        behavior_passed = behavior_tested and record.behavior.passed
+
+        dashboard.update(
+            status=record.status,
+            name=name,
+            latency=latency,
+            reason=reason,
+            behavior_tested=behavior_tested,
+            behavior_passed=behavior_passed,
+        )
+
+    # Fallback text-based callback (original implementation)
+    def on_record_text(record):
+        """Simple text output for each record."""
         name = record.case.case_id or "unnamed"
         latency = f"{record.latency_s:.2f}s" if record.latency_s else "-"
 
         # Get labels from config with defaults
         lbl_called = labels.get("model_called", "Model called")
-        lbl_said = labels.get("model_said", "Model said")
         lbl_expected = labels.get("expected", "Expected")
         lbl_why = labels.get("why", "Why")
         lbl_no_tool = labels.get("no_tool_call", "(text response)")
-        lbl_text_hint = labels.get("text_only_hint", "(ask/clarify)")
 
-        # Get colors from config with defaults
-        clr_called = colors.get("model_called", "cyan")
-        clr_expected = colors.get("expected", "green")
-        clr_why = colors.get("why", "yellow")
-
-        # Text response settings
-        text_config = display_config.get("text_response", {})
-        show_text = text_config.get("show", True)
-        text_max_len = text_config.get("max_length", 120)
-        clr_text = text_config.get("color", "#33475B")
-
-        if _RICH_AVAILABLE:
-            line = Text()
-            line.append("  ")
-            status = record.status
-            if status == "pass":
-                line.append("✓ PASS", style="bold green")
-            elif status == "warn":
-                line.append("⚠ WARN", style="bold yellow")
-            else:
-                line.append("✗ FAIL", style="bold red")
-            line.append(f"  {name} ", style="white")
-            line.append(f"({latency})", style="dim")
-            _console.print(line)
-
-            # Show details for FAIL and WARN
-            if status in ("fail", "warn"):
-                if record.error:
-                    _console.print(f"         [yellow]Error:[/yellow] {record.error}")
-                elif record.validator:
-                    # Show what tool(s) the model actually called
-                    if record.validator.tool_calls:
-                        called = [tc.name for tc in record.validator.tool_calls]
-                        _console.print(f"         [{clr_called}]{lbl_called}:[/{clr_called}] {', '.join(called)}")
-                    else:
-                        _console.print(f"         [{clr_called}]{lbl_called}:[/{clr_called}] [dim]{lbl_no_tool}[/dim]")
-                        # Show the actual text response
-                        if show_text and record.response_text:
-                            text = str(record.response_text).replace('\n', ' ').strip()
-                            if len(text) > text_max_len:
-                                text = text[:text_max_len] + "..."
-                            _console.print(f"         [{clr_text}]{lbl_said}:[/{clr_text}] \"{text}\"")
-
-                    # Show expected tools (only for failures, not warns since tool was correct)
-                    if status == "fail":
-                        expected = record.case.expected_tools or record.case.acceptable_tools
-                        if expected:
-                            exp_str = ', '.join(expected)
-                            if "TEXT_ONLY" in expected:
-                                exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
-                            _console.print(f"         [{clr_expected}]{lbl_expected}:[/{clr_expected}] {exp_str}")
-
-                    # Show concise reason using config-driven simplification
-                    shown_why = False
-                    if record.validator.issues:
-                        for issue in record.validator.issues:
-                            msg = simplify_issue_message(issue.message, display_config)
-                            if msg is None:
-                                continue
-                            _console.print(f"         [{clr_why}]{lbl_why}:[/{clr_why}] {msg}")
-                            shown_why = True
-                            break
-
-                    # Also show behavior validation issues (for warns or if no schema issues)
-                    if not shown_why and record.behavior and not record.behavior.passed:
-                        for issue in record.behavior.issues:
-                            msg = simplify_issue_message(issue.message, display_config)
-                            if msg is None:
-                                continue
-                            _console.print(f"         [{clr_why}]{lbl_why}:[/{clr_why}] {msg}")
-                            break
+        status = record.status
+        if status == "pass":
+            status_str = "✓ PASS"
+        elif status == "warn":
+            status_str = "⚠ WARN"
         else:
-            status = record.status
-            if status == "pass":
-                status_str = "✓ PASS"
-            elif status == "warn":
-                status_str = "⚠ WARN"
-            else:
-                status_str = "✗ FAIL"
-            print(f"  {status_str}  {name} ({latency})")
-            if status in ("fail", "warn"):
-                if record.error:
-                    print(f"         Error: {record.error}")
-                elif record.validator:
-                    if record.validator.tool_calls:
-                        called = [tc.name for tc in record.validator.tool_calls]
-                        print(f"         {lbl_called}: {', '.join(called)}")
-                    else:
-                        print(f"         {lbl_called}: {lbl_no_tool}")
-                        # Show the actual text response
-                        if show_text and record.response_text:
-                            text = str(record.response_text).replace('\n', ' ').strip()
-                            if len(text) > text_max_len:
-                                text = text[:text_max_len] + "..."
-                            print(f"         {lbl_said}: \"{text}\"")
-                    # Show expected tools (only for failures, not warns since tool was correct)
-                    if status == "fail":
-                        expected = record.case.expected_tools or record.case.acceptable_tools
-                        if expected:
-                            exp_str = ', '.join(expected)
-                            if "TEXT_ONLY" in expected:
-                                exp_str = exp_str.replace("TEXT_ONLY", f"TEXT_ONLY {lbl_text_hint}")
-                            print(f"         {lbl_expected}: {exp_str}")
-                    shown_why = False
-                    if record.validator.issues:
-                        for issue in record.validator.issues:
-                            msg = simplify_issue_message(issue.message, display_config)
-                            if msg is None:
-                                continue
-                            print(f"         {lbl_why}: {msg}")
-                            shown_why = True
-                            break
+            status_str = "✗ FAIL"
 
-                    # Also show behavior validation issues if schema passed but behavior failed
-                    if not shown_why and record.behavior and not record.behavior.passed:
-                        for issue in record.behavior.issues:
-                            msg = simplify_issue_message(issue.message, display_config)
-                            if msg is None:
-                                continue
+        print(f"  {status_str}  {name} ({latency})")
+
+        if status in ("fail", "warn"):
+            if record.error:
+                print(f"         Error: {record.error}")
+            elif record.validator:
+                if record.validator.tool_calls:
+                    called = [tc.name for tc in record.validator.tool_calls]
+                    print(f"         {lbl_called}: {', '.join(called)}")
+                else:
+                    print(f"         {lbl_called}: {lbl_no_tool}")
+
+                if status == "fail":
+                    expected = record.case.expected_tools or record.case.acceptable_tools
+                    if expected:
+                        print(f"         {lbl_expected}: {', '.join(expected)}")
+
+                if record.validator.issues:
+                    for issue in record.validator.issues:
+                        msg = simplify_issue_message(issue.message, display_config)
+                        if msg:
                             print(f"         {lbl_why}: {msg}")
                             break
 
-    print(f"\nRunning {len(selected_cases)} evaluations...\n")
-
-    # Run evaluation with live output
-    records = evaluate_cases(
-        selected_cases,
-        client=client,
-        dry_run=config.dry_run,
-        validate_context=args.validate_context,
-        on_record=on_record,
-    )
+    # Run evaluation with appropriate callback
+    if use_dashboard:
+        with dashboard:
+            records = evaluate_cases(
+                selected_cases,
+                client=client,
+                dry_run=config.dry_run,
+                validate_context=args.validate_context,
+                on_record=on_record_dashboard,
+            )
+    else:
+        print(f"\nRunning {len(selected_cases)} evaluations...\n")
+        records = evaluate_cases(
+            selected_cases,
+            client=client,
+            dry_run=config.dry_run,
+            validate_context=args.validate_context,
+            on_record=on_record_text,
+        )
 
     print()  # Blank line before summary
 
@@ -430,7 +417,16 @@ def main(argv: List[str] | None = None) -> int:
     print(f"Results saved to {config.output_path}")
     if markdown_path:
         print(f"Markdown summary saved to {markdown_path}")
-    print(console_summary(records))
+
+    # Display summary using rich UI if available
+    if _DASHBOARD_AVAILABLE and _SHARED_RICH:
+        rich_summary(records)
+        # Show detailed failure info
+        failed_count = sum(1 for r in records if not r.passed)
+        if failed_count > 0:
+            rich_failure_details(records, max_display=10)
+    else:
+        print(console_summary(records))
 
     if markdown_path:
         markdown_path.write_text(render_markdown(records, args.model, str(prompt_path.name)), encoding="utf-8")

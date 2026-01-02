@@ -12,10 +12,10 @@ This handler implements the evaluation workflow:
 4. List available prompt sets
 5. Select prompt set
 6. Display configuration
-7. Execute evaluation via Evaluator.cli
+7. Execute evaluation with live dashboard
 """
 
-import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
@@ -37,6 +37,24 @@ from shared.ui import (
     COLORS,
     BOX,
 )
+
+# Import evaluation dashboard and UI
+try:
+    from shared.ui import LiveEvaluationDashboard
+    from Evaluator.ui import rich_summary, rich_failure_details, print_evaluation_header
+    _DASHBOARD_AVAILABLE = True
+except ImportError:
+    _DASHBOARD_AVAILABLE = False
+
+# Import evaluation core components
+try:
+    from Evaluator.config_loader import load_yaml_scenarios
+    from Evaluator.client_factory import create_client, create_settings
+    from Evaluator.runner import evaluate_cases
+    from Evaluator.reporting import build_run_payload, write_json, render_markdown, console_summary
+    _EVALUATOR_AVAILABLE = True
+except ImportError:
+    _EVALUATOR_AVAILABLE = False
 
 
 class EvalHandler(BaseHandler):
@@ -613,10 +631,172 @@ class EvalHandler(BaseHandler):
             # MLC uses browser-based WebLLM evaluation
             return self._run_mlc_evaluation(model, selected)
 
+        # Run inline with dashboard if available
+        if _EVALUATOR_AVAILABLE and _DASHBOARD_AVAILABLE and RICH_AVAILABLE:
+            return self._run_inline_evaluation(backend_choice, model, selected)
+
+        # Fallback to subprocess for missing dependencies
+        return self._run_subprocess_evaluation(backend_choice, model, selected)
+
+    def _run_inline_evaluation(self, backend: str, model: str, scenario) -> int:
+        """
+        Run evaluation inline with live dashboard.
+
+        Args:
+            backend: Backend name (ollama, lmstudio, llamacpp, unsloth)
+            model: Model name or path
+            scenario: PromptSetInfo object with path and count
+
+        Returns:
+            Exit code (0 = success)
+        """
+        config_dir = self.repo_root / "Evaluator" / "config"
+
+        # Generate timestamped output paths
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = self.repo_root / "Evaluator" / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        output_json = results_dir / f"run_{timestamp}.json"
+        output_md = results_dir / f"run_{timestamp}.md"
+
+        # Load test cases from scenario
+        try:
+            cases = load_yaml_scenarios(
+                config_dir=config_dir,
+                scenario_files=[scenario.path.name],
+            )
+        except Exception as e:
+            print_error(f"Failed to load scenario: {e}")
+            return 1
+
+        if not cases:
+            print_error("No test cases found in scenario.")
+            return 1
+
+        # Create settings and client
+        try:
+            settings = create_settings(
+                backend=backend,
+                model=model,
+                temperature=0.7,
+                max_tokens=4096,
+            )
+            client = create_client(
+                backend=backend,
+                settings=settings,
+                timeout=60.0,
+                retries=2,
+            )
+        except Exception as e:
+            print_error(f"Failed to create client: {e}")
+            return 1
+
+        # Print evaluation header
+        print_evaluation_header(
+            model_name=model,
+            backend=backend,
+            total_tests=len(cases),
+            scenario_file=scenario.path.name,
+        )
+
+        # Create dashboard
+        dashboard = LiveEvaluationDashboard(
+            title="Model Evaluation",
+            total_tests=len(cases),
+            log_lines=5,
+        )
+
+        def on_record_dashboard(record):
+            """Update dashboard with evaluation result."""
+            name = record.case.case_id or "unnamed"
+            latency = record.latency_s or 0.0
+
+            # Get brief failure reason for log display
+            reason = None
+            if record.status in ("fail", "warn"):
+                if record.error:
+                    reason = f"Error: {record.error[:40]}..."
+                elif record.validator and record.validator.issues:
+                    for issue in record.validator.issues:
+                        reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
+                        break
+                elif record.behavior and not record.behavior.passed:
+                    for issue in record.behavior.issues:
+                        if hasattr(issue, 'message'):
+                            reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
+                            break
+
+            # Check behavior results
+            behavior_tested = record.behavior is not None
+            behavior_passed = behavior_tested and record.behavior.passed
+
+            dashboard.update(
+                status=record.status,
+                name=name,
+                latency=latency,
+                reason=reason,
+                behavior_tested=behavior_tested,
+                behavior_passed=behavior_passed,
+            )
+
+        # Run evaluation with dashboard
+        try:
+            with dashboard:
+                records = evaluate_cases(
+                    cases,
+                    client=client,
+                    on_record=on_record_dashboard,
+                )
+        except Exception as e:
+            print_error(f"Evaluation failed: {e}")
+            return 1
+
+        print()  # Blank line before summary
+
+        # Display rich summary
+        rich_summary(records)
+
+        # Show failure details
+        failed_count = sum(1 for r in records if not r.passed)
+        if failed_count > 0:
+            rich_failure_details(records, max_display=10)
+
+        # Save results
+        try:
+            payload = build_run_payload(records)
+            write_json(output_json, payload)
+            output_md.write_text(
+                render_markdown(records, model, scenario.path.name),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print_error(f"Failed to save results: {e}")
+            return 1
+
+        print_info(f"Results saved to: {output_json.relative_to(self.repo_root)}")
+        print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
+
+        # Return appropriate exit code
+        passed = sum(1 for r in records if r.passed)
+        return 0 if passed == len(records) else 1
+
+    def _run_subprocess_evaluation(self, backend: str, model: str, scenario) -> int:
+        """
+        Fallback: Run evaluation via subprocess.
+
+        Args:
+            backend: Backend name
+            model: Model name or path
+            scenario: PromptSetInfo object
+
+        Returns:
+            Exit code from subprocess
+        """
+        import subprocess
+
         python = self.get_conda_python()
 
         # Generate timestamped output paths
-        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_dir = self.repo_root / "Evaluator" / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
@@ -626,9 +806,9 @@ class EvalHandler(BaseHandler):
 
         cmd = [
             python, "-m", "Evaluator.cli",
-            "--backend", backend_choice,
+            "--backend", backend,
             "--model", model,
-            "--scenario", selected.path.name,
+            "--scenario", scenario.path.name,
             "--output", str(output_json),
             "--markdown", str(output_md)
         ]

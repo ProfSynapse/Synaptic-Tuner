@@ -34,6 +34,16 @@ from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
 
+# Import live dashboard and UI components
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
+    from .ui import rich_summary, rich_failure_details
+    _DASHBOARD_AVAILABLE = True
+except ImportError:
+    _DASHBOARD_AVAILABLE = False
+    _SHARED_RICH = False
+
 # Default paths
 DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "tool_prompts.json"
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -592,13 +602,65 @@ def _run_evaluation_loop(
             md_path.parent.mkdir(parents=True, exist_ok=True)
 
             print(color(f"--- Run {idx + 1}/{run_count} ---", "magenta"))
-            records = evaluate_cases(
-                cases,
-                client=client,
-                dry_run=config.dry_run,
-                on_record=print_record_progress,
-                validate_context=args.validate_context,
-            )
+
+            # Use dashboard if available
+            use_dashboard = _DASHBOARD_AVAILABLE and _SHARED_RICH and not config.dry_run
+
+            if use_dashboard:
+                dashboard = LiveEvaluationDashboard(
+                    title=f"Evaluating {model_name}",
+                    total_tests=len(cases),
+                    log_lines=5,
+                )
+
+                def on_record_dashboard(record):
+                    """Update dashboard with evaluation result."""
+                    name = record.case.case_id or "unnamed"
+                    latency = record.latency_s or 0.0
+
+                    # Get brief failure reason
+                    reason = None
+                    if record.status in ("fail", "warn"):
+                        if record.error:
+                            reason = f"Error: {record.error[:40]}..."
+                        elif record.validator and record.validator.issues:
+                            for issue in record.validator.issues:
+                                reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
+                                break
+                        elif record.behavior and not record.behavior.passed:
+                            for issue in record.behavior.issues:
+                                reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
+                                break
+
+                    behavior_tested = record.behavior is not None
+                    behavior_passed = behavior_tested and record.behavior.passed
+
+                    dashboard.update(
+                        status=record.status,
+                        name=name,
+                        latency=latency,
+                        reason=reason,
+                        behavior_tested=behavior_tested,
+                        behavior_passed=behavior_passed,
+                    )
+
+                with dashboard:
+                    records = evaluate_cases(
+                        cases,
+                        client=client,
+                        dry_run=config.dry_run,
+                        on_record=on_record_dashboard,
+                        validate_context=args.validate_context,
+                    )
+            else:
+                records = evaluate_cases(
+                    cases,
+                    client=client,
+                    dry_run=config.dry_run,
+                    on_record=print_record_progress,
+                    validate_context=args.validate_context,
+                )
+
             all_records.extend(records)
 
             metadata = build_metadata(config, settings, len(cases), len(cases), backend=backend_name)
@@ -606,7 +668,15 @@ def _run_evaluation_loop(
             write_json(config.output_path, payload)
             md_path.write_text(render_markdown(records), encoding="utf-8")
 
-            print(color(console_summary(records), passfail_color(records)))
+            # Display summary
+            if use_dashboard:
+                rich_summary(records)
+                failed_count = sum(1 for r in records if not r.passed)
+                if failed_count > 0:
+                    rich_failure_details(records, max_display=5)
+            else:
+                print(color(console_summary(records), passfail_color(records)))
+
             print(color(f"JSON: {json_path}", "yellow"))
             print(color(f"Markdown: {md_path}\n", "yellow"))
 

@@ -20,6 +20,18 @@ from tuner.ui import (
     BOX,
 )
 
+# Try to import animations (optional, graceful fallback)
+try:
+    from shared.ui.animations import (
+        play_training_start,
+        play_training_complete,
+        ASCIIMATICS_AVAILABLE,
+    )
+except ImportError:
+    ASCIIMATICS_AVAILABLE = False
+    play_training_start = lambda: None
+    play_training_complete = lambda **kwargs: None
+
 
 def detect_platform() -> str | None:
     """
@@ -166,9 +178,16 @@ class TrainHandler(BaseHandler):
         print_info(f"Executing training with: {python}")
         print()
 
+        # Play training start animation (if available)
+        if ASCIIMATICS_AVAILABLE:
+            play_training_start(duration_frames=40)
+
         exit_code = backend.execute(config, python)
 
         if exit_code == 0:
+            # Play celebration animation on success
+            if ASCIIMATICS_AVAILABLE:
+                play_training_complete(simple=True, duration_frames=60)
             print_info("Training completed successfully.")
         else:
             print_error(f"Training failed with exit code: {exit_code}")

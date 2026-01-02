@@ -39,6 +39,15 @@ from .widgets import (
     quiet_training,
 )
 from .dashboard import LiveDashboard, show_training_progress
+from .evaluation import LiveEvaluationDashboard, rich_evaluation_summary
+from .animations import (
+    animated_main_menu as asciimatics_menu,
+    play_logo_animation,
+    play_training_start,
+    play_training_complete,
+    is_available as animations_available,
+    ASCIIMATICS_AVAILABLE,
+)
 
 __all__ = [
     # Theme
@@ -81,4 +90,14 @@ __all__ = [
     # Dashboard
     "LiveDashboard",
     "show_training_progress",
+    # Evaluation
+    "LiveEvaluationDashboard",
+    "rich_evaluation_summary",
+    # Animations
+    "asciimatics_menu",
+    "play_logo_animation",
+    "play_training_start",
+    "play_training_complete",
+    "animations_available",
+    "ASCIIMATICS_AVAILABLE",
 ]
