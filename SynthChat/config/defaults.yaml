@@ -1,0 +1,65 @@
+# SynthChat Defaults Configuration
+# Edit this file to customize default settings
+
+# ─────────────────────────────────────────────────────────────
+# GENERATE NEW DATA
+# ─────────────────────────────────────────────────────────────
+generate:
+  # LLM Backend
+  backend: lmstudio          # lmstudio | ollama | openrouter
+  model: null                # null = first available from backend
+  temperature: 0.7
+  max_tokens: 4096
+
+  # Scenarios to generate from
+  scenarios:
+    - behaviors
+    - tools
+
+  # Validation rubrics
+  rubrics:
+    - context_alignment
+    - response_quality
+
+  # Generation settings
+  examples_per_scenario: 10
+  max_iterations: 3
+
+  # Output
+  output_dir: SynthChat/output
+  filename_pattern: "generated_{date}.jsonl"
+
+# ─────────────────────────────────────────────────────────────
+# IMPROVE EXISTING DATA
+# ─────────────────────────────────────────────────────────────
+improve:
+  # LLM Backend
+  backend: lmstudio
+  model: null
+  temperature: 0.3
+  max_tokens: 4096
+
+  # Rubric selection: auto | manual | all
+  rubric_mode: auto
+
+  # Fallback rubrics when auto-detect fails
+  fallback_rubrics:
+    - response_quality
+    - context_alignment
+
+  # Processing settings
+  max_iterations: 3
+  batch_size: 1
+
+  # Range (null = all)
+  start_line: null
+  end_line: null
+
+# ─────────────────────────────────────────────────────────────
+# SHARED SETTINGS
+# ─────────────────────────────────────────────────────────────
+shared:
+  auto_version: true
+  log_interactions: true
+  interactions_dir: SynthChat/interactions
+  dry_run_default: false

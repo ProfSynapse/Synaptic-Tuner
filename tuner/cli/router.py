@@ -4,6 +4,13 @@ Command router.
 Location: tuner/cli/router.py
 Purpose: Route CLI commands to appropriate handlers
 Used by: Main entry point (cli/main.py)
+
+Routes top-level commands to their handlers:
+  - train: TrainHandler (SFT, KTO, GRPO workflows)
+  - eval: EvalHandler (model evaluation)
+  - synthchat: SynthChatHandler (data generation and improvement)
+  - modelops: ModelOpsHandler (run, merge, convert, upload)
+  - (none): MainMenuHandler (interactive menu)
 """
 
 from argparse import Namespace
@@ -23,13 +30,11 @@ def route_command(args: Namespace) -> int:
         int: Exit code (0 = success, non-zero = error)
 
     Command Mapping:
-        train    -> TrainHandler
-        upload   -> UploadHandler
-        eval     -> EvalHandler
-        generate -> GenerateHandler
-        pipeline -> PipelineHandler
-        convert  -> ConvertHandler
-        (none)   -> MainMenuHandler
+        train     -> TrainHandler (SFT, KTO, GRPO training)
+        eval      -> EvalHandler (model evaluation)
+        synthchat -> SynthChatHandler (data generation/improvement)
+        modelops  -> ModelOpsHandler (run, merge, convert, upload)
+        (none)    -> MainMenuHandler (interactive menu)
 
     Example:
         >>> args = parser.parse_args(['train'])
@@ -39,16 +44,10 @@ def route_command(args: Namespace) -> int:
     # Import handlers (deferred to avoid circular imports)
     try:
         from tuner.handlers.train_handler import TrainHandler
-        from tuner.handlers.upload_handler import UploadHandler
         from tuner.handlers.eval_handler import EvalHandler
-        from tuner.handlers.generate_handler import GenerateHandler
-        from tuner.handlers.pipeline_handler import PipelineHandler
+        from tuner.handlers.synthchat_handler import SynthChatHandler
+        from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
-        from tuner.handlers.convert_handler import ConvertHandler
-        from tuner.handlers.merge_handler import MergeHandler
-        from tuner.handlers.improve_handler import handle_improve
-        from tuner.handlers.inference_handler import InferenceHandler
-        from tuner.handlers.webllm_handler import WebLLMHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         print(f"Error: Handlers not yet implemented: {e}")
@@ -61,29 +60,16 @@ def route_command(args: Namespace) -> int:
     # Map commands to handlers
     handlers = {
         'train': TrainHandler,
-        'upload': UploadHandler,
         'eval': EvalHandler,
-        'generate': GenerateHandler,
-        'improve': handle_improve,  # Function-based handler
-        'pipeline': PipelineHandler,
-        'convert': ConvertHandler,
-        'merge': MergeHandler,
-        'run': InferenceHandler,
-        'webllm': WebLLMHandler,
+        'synthchat': SynthChatHandler,
+        'modelops': ModelOpsHandler,
     }
 
     # Execute handler
     if command and command in handlers:
-        handler_or_func = handlers[command]
-        # Check if it's a function or a class
-        if callable(handler_or_func) and not hasattr(handler_or_func, 'handle'):
-            # It's a function, call it directly
-            handler_or_func()
-            return 0
-        else:
-            # It's a class, instantiate and call handle()
-            handler = handler_or_func()
-            return handler.handle()
+        handler_class = handlers[command]
+        handler = handler_class()
+        return handler.handle()
     else:
         # No command = interactive menu
         handler = MainMenuHandler()

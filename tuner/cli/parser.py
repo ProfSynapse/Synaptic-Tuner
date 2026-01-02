@@ -2,8 +2,14 @@
 CLI argument parser.
 
 Location: tuner/cli/parser.py
-Purpose: Parse command-line arguments
+Purpose: Parse command-line arguments for the Synaptic Tuner CLI
 Used by: Main entry point (cli/main.py)
+
+The parser defines the top-level command structure:
+  - train: Training workflows (SFT, KTO, GRPO)
+  - eval: Model evaluation
+  - synthchat: Synthetic data generation and improvement
+  - modelops: Model operations (run, merge, convert, upload)
 """
 
 import argparse
@@ -17,11 +23,11 @@ def create_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: Configured parser
 
     Commands:
-        (none)    Interactive menu
-        train     Training submenu
-        upload    Upload submenu
-        eval      Evaluation submenu
-        pipeline  Full pipeline (train -> upload -> eval)
+        (none)      Interactive menu
+        train       Training workflow (SFT, KTO, GRPO)
+        eval        Evaluate a model
+        synthchat   Synthetic data generation and improvement
+        modelops    Model operations (run, merge, convert, upload)
 
     Example:
         >>> parser = create_parser()
@@ -34,37 +40,25 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
-  (none)    Interactive menu
-  train     Training submenu
-  upload    Upload submenu
-  eval      Evaluation submenu
-  run       Run model inference (chat with your model)
-  merge     Merge LoRA into base model (for GRPO or upload)
-  generate  Generate synthetic data (SynthChat)
-  improve   Improve dataset quality (LLM-based)
-  pipeline  Full pipeline (train -> upload -> eval)
-  gguf      Convert model to GGUF format
-  webllm    Convert model for WebLLM/browser deployment
+  (none)      Interactive menu
+  train       Training workflow (SFT, KTO, GRPO)
+  eval        Evaluate a model
+  synthchat   Synthetic data generation and improvement
+  modelops    Model operations (run, merge, convert, upload)
 
 Examples:
   python tuner.py           # Interactive mode
   python tuner.py train     # Go directly to training
-  python tuner.py upload    # Go directly to upload
   python tuner.py eval      # Go directly to evaluation
-  python tuner.py run       # Run/chat with a trained model
-  python tuner.py merge     # Merge LoRA adapters
-  python tuner.py generate  # Generate synthetic data
-  python tuner.py improve   # Improve dataset quality
-  python tuner.py pipeline  # Run full pipeline
-  python tuner.py gguf      # Convert to GGUF format
-  python tuner.py webllm    # Convert for WebLLM/MLC
+  python tuner.py synthchat # Generate or improve data
+  python tuner.py modelops  # Model operations submenu
 """
     )
 
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "upload", "eval", "run", "merge", "generate", "improve", "pipeline", "gguf", "webllm"],
+        choices=["train", "eval", "synthchat", "modelops"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 

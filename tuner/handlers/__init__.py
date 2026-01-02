@@ -7,6 +7,7 @@ This package contains handler implementations for different CLI commands:
 - EvalHandler: Evaluation workflow
 - PipelineHandler: Full pipeline (train -> upload -> eval)
 - MainMenuHandler: Interactive main menu
+- SynthChatHandler: Synthetic data generation and improvement
 
 Each handler implements the IHandler interface and can be registered
 with the router for command dispatching.
@@ -17,6 +18,7 @@ from tuner.handlers.upload_handler import UploadHandler
 from tuner.handlers.eval_handler import EvalHandler
 from tuner.handlers.pipeline_handler import PipelineHandler
 from tuner.handlers.main_menu_handler import MainMenuHandler
+from tuner.handlers.synthchat_handler import SynthChatHandler
 
 __all__ = [
     "TrainHandler",
@@ -24,4 +26,5 @@ __all__ = [
     "EvalHandler",
     "PipelineHandler",
     "MainMenuHandler",
+    "SynthChatHandler",
 ]

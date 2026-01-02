@@ -9,7 +9,7 @@ This handler implements the main menu workflow:
 1. Detect environment and load .env file
 2. Build status info (environment, repo, config)
 3. Show animated logo menu on first run
-4. Display menu options (train, upload, eval, pipeline)
+4. Display menu options (train, eval, synthchat, modelops)
 5. Loop: show menu, dispatch to handler, repeat
 6. Exit gracefully when user selects exit/back
 """
@@ -98,14 +98,9 @@ class MainMenuHandler(BaseHandler):
         """
         # Import handlers here to avoid circular imports
         from tuner.handlers.train_handler import TrainHandler
-        from tuner.handlers.upload_handler import UploadHandler
         from tuner.handlers.eval_handler import EvalHandler
-        from tuner.handlers.generate_handler import GenerateHandler
-        from tuner.handlers.pipeline_handler import PipelineHandler
-        from tuner.handlers.convert_handler import ConvertHandler
-        from tuner.handlers.merge_handler import MergeHandler
-        from tuner.handlers.improve_handler import handle_improve
-        from tuner.handlers.inference_handler import InferenceHandler
+        from tuner.handlers.synthchat_handler import SynthChatHandler
+        from tuner.handlers.modelops_handler import ModelOpsHandler
 
         # Step 1: Detect environment and load .env
         env = detect_environment()
@@ -114,30 +109,20 @@ class MainMenuHandler(BaseHandler):
         # Step 2: Build status info
         status_info = self._build_status_info(env, env_loaded)
 
-        # Step 3: Define menu options
+        # Step 3: Define menu options (4 top-level categories)
         menu_options = [
-            ("train", f"{BOX['star']} Train a model (SFT, KTO, GRPO)"),
-            ("run", f"{BOX['star']} Run model (chat with your trained model)"),
-            ("merge", f"{BOX['bullet']} Merge LoRA (prepare for GRPO or upload)"),
-            ("upload", f"{BOX['bullet']} Upload model to HuggingFace"),
-            ("convert", f"{BOX['bullet']} Convert model (GGUF/WebGPU)"),
-            ("eval", f"{BOX['bullet']} Evaluate a model"),
-            ("generate", f"{BOX['bullet']} Synth Chat"),
-            ("improve", f"{BOX['bullet']} Improvement Engine (clean datasets)"),
-            ("pipeline", f"{BOX['bullet']} Full pipeline (Train -> Upload -> Eval)"),
+            ("train", f"{BOX['star']} Training - Train models (SFT, KTO, GRPO)"),
+            ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
+            ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
+            ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
         ]
 
         # Step 4: Create handler instances
         handlers = {
             "train": TrainHandler(),
-            "run": InferenceHandler(),
-            "merge": MergeHandler(),
-            "upload": UploadHandler(),
-            "convert": ConvertHandler(),
             "eval": EvalHandler(),
-            "generate": GenerateHandler(),
-            "improve": handle_improve,
-            "pipeline": PipelineHandler(),
+            "synthchat": SynthChatHandler(),
+            "modelops": ModelOpsHandler(),
         }
 
         # Step 5: Main menu loop
@@ -166,12 +151,7 @@ class MainMenuHandler(BaseHandler):
             # Dispatch to appropriate handler
             handler = handlers.get(choice)
             if handler:
-                # Support both class-based handlers with handle() and function handlers
-                if callable(handler) and not hasattr(handler, "handle"):
-                    handler()
-                    exit_code = 0
-                else:
-                    exit_code = handler.handle()
+                exit_code = handler.handle()
                 # Continue to next iteration regardless of exit code
                 # This allows user to try again after errors
             else:
