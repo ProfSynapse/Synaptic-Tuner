@@ -4,10 +4,17 @@ Training workflow handler.
 Location: /mnt/f/Code/Toolset-Training/tuner/handlers/train_handler.py
 Purpose: Orchestrate the training workflow (platform selection, config loading, execution)
 Used by: Router when 'train' command is invoked
+
+Supports --json flag for AI-parseable output. In JSON mode:
+- Returns structured training status without interactive menus
+- All output is JSON formatted for programmatic parsing
 """
 
 import subprocess
+from argparse import Namespace
 from pathlib import Path
+from typing import Optional
+
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -79,10 +86,22 @@ class TrainHandler(BaseHandler):
     4. User confirmation
     5. Training execution
 
+    JSON Mode (--json flag):
+        In JSON mode, returns structured status about available platforms,
+        methods, and configurations. Does not execute interactive menus.
+
     Example:
         handler = TrainHandler()
         exit_code = handler.handle()
+
+        # With JSON mode
+        handler = TrainHandler(args=args)  # args.json = True
+        exit_code = handler.handle()  # Returns JSON status
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -93,13 +112,64 @@ class TrainHandler(BaseHandler):
         """Can be invoked as 'python -m tuner train'."""
         return True
 
+    def _get_training_status(self) -> dict:
+        """
+        Get training status for JSON output.
+
+        Returns dict with available platforms, methods, and configurations.
+        """
+        # Detect available platforms
+        has_cuda = False
+        has_mlx = False
+
+        try:
+            import torch
+            has_cuda = torch.cuda.is_available()
+        except ImportError:
+            pass
+
+        try:
+            import mlx.core as mx
+            has_mlx = mx.metal.is_available()
+        except ImportError:
+            pass
+
+        platforms = []
+        if has_cuda:
+            platforms.append({
+                "id": "rtx",
+                "name": "NVIDIA GPU (CUDA)",
+                "methods": ["sft", "kto", "grpo"]
+            })
+        if has_mlx:
+            platforms.append({
+                "id": "mac",
+                "name": "Apple Silicon (MLX)",
+                "methods": ["mlx"]
+            })
+
+        return {
+            "command": "train",
+            "status": "ready" if platforms else "no_platforms",
+            "platforms": platforms,
+            "detected_platform": detect_platform(),
+        }
+
     def handle(self) -> int:
         """
         Execute training workflow.
 
+        In JSON mode, returns training status without interactive prompts.
+
         Returns:
             int: Exit code (0 = success, non-zero = failure)
         """
+        # JSON mode: return status information
+        if self.json_mode:
+            status = self._get_training_status()
+            self.output(status)
+            return 0
+
         print_header("TRAINING", "Select your platform and training method")
 
         # Step 1: Auto-detect or select platform

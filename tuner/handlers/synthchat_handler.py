@@ -11,9 +11,14 @@ This handler provides a unified entry point for SynthChat operations:
 
 It loads defaults from SynthChat/config/defaults.yaml and allows users
 to either use defaults or customize settings before proceeding.
+
+Supports --json flag for AI-parseable output. In JSON mode:
+- Returns available scenarios, rubrics, and configuration
+- All output is JSON formatted for programmatic parsing
 """
 
 import os
+from argparse import Namespace
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -43,7 +48,15 @@ class SynthChatHandler(BaseHandler):
 
     Provides a unified interface for synthetic data operations with
     sensible defaults loaded from configuration files.
+
+    JSON Mode (--json flag):
+        In JSON mode, returns available scenarios, rubrics, and configuration.
+        Does not execute interactive menus.
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -53,6 +66,29 @@ class SynthChatHandler(BaseHandler):
     def can_handle_direct_mode(self) -> bool:
         """This handler supports direct CLI invocation."""
         return True
+
+    def _get_synthchat_status(self) -> dict:
+        """
+        Get SynthChat status for JSON output.
+
+        Returns dict with scenarios, rubrics, and configuration.
+        """
+        config = self._load_defaults()
+
+        return {
+            "command": "synthchat",
+            "status": "ready",
+            "operations": [
+                {"id": "generate", "name": "Generate New", "description": "Create examples from scenarios"},
+                {"id": "improve", "name": "Improve Existing", "description": "Refine datasets with rubrics"},
+            ],
+            "scenarios": self._list_scenarios(),
+            "rubrics": self._list_rubrics(),
+            "config": {
+                "generate": config.get("generate", {}),
+                "improve": config.get("improve", {}),
+            },
+        }
 
     def _load_defaults(self) -> Dict[str, Any]:
         """
@@ -595,7 +631,17 @@ class SynthChatHandler(BaseHandler):
         )
 
     def handle(self) -> int:
-        """Main submenu loop."""
+        """
+        Main submenu loop.
+
+        In JSON mode, returns SynthChat status without interactive prompts.
+        """
+        # JSON mode: return status information
+        if self.json_mode:
+            status = self._get_synthchat_status()
+            self.output(status)
+            return 0
+
         config = self._load_defaults()
 
         while True:

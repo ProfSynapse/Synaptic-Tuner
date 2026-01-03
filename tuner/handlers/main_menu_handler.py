@@ -12,9 +12,14 @@ This handler implements the main menu workflow:
 4. Display menu options (train, eval, synthchat, modelops)
 5. Loop: show menu, dispatch to handler, repeat
 6. Exit gracefully when user selects exit/back
+
+Note: This handler does NOT support JSON mode - interactive menus require
+user input. If --json flag is passed with no command, the router will
+return an error.
 """
 
-from typing import Dict
+from argparse import Namespace
+from typing import Dict, Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.utils import detect_environment, load_env_file
@@ -41,12 +46,20 @@ class MainMenuHandler(BaseHandler):
     This handler does NOT support direct CLI invocation - it's only used
     in interactive mode when no command is specified.
 
+    Note: This handler does NOT support JSON mode - interactive menus
+    require user input. The router handles this by returning an error
+    if --json is passed without a command.
+
     Example:
         handler = MainMenuHandler()
         exit_code = handler.handle()
         # Shows menu, user selects option, dispatches to handler, repeats
         # Returns 0 when user exits gracefully
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -117,12 +130,12 @@ class MainMenuHandler(BaseHandler):
             ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
         ]
 
-        # Step 4: Create handler instances
+        # Step 4: Create handler instances (pass args for consistency)
         handlers = {
-            "train": TrainHandler(),
-            "eval": EvalHandler(),
-            "synthchat": SynthChatHandler(),
-            "modelops": ModelOpsHandler(),
+            "train": TrainHandler(args=self.args),
+            "eval": EvalHandler(args=self.args),
+            "synthchat": SynthChatHandler(args=self.args),
+            "modelops": ModelOpsHandler(args=self.args),
         }
 
         # Step 5: Main menu loop

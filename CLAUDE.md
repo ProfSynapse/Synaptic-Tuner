@@ -2,6 +2,34 @@
 
 Quick reference for Claude Code when working in this repository.
 
+---
+
+## AI Assistant Quick Reference
+
+**Before starting any task:**
+1. Check system state: `./run.sh status` (or `python tuner.py status`)
+2. If issues detected: `./run.sh doctor` for full diagnostics
+3. Discover resources: `./run.sh list [datasets|models|runs|rubrics]`
+
+**Key Commands:**
+| Command | Description |
+|---------|-------------|
+| `./run.sh` | Interactive menu (recommended entry point) |
+| `./run.sh status` | Quick system health check |
+| `./run.sh doctor` | Full diagnostics with fix suggestions |
+| `./run.sh doctor --fix` | Auto-fix common issues |
+| `./run.sh list datasets` | Show available training datasets |
+| `./run.sh list runs` | Show completed training runs |
+| `./run.sh list rubrics` | Show available improvement rubrics |
+
+**Pre-flight Checklist:**
+- [ ] Environment ready? (`./run.sh status`)
+- [ ] Required tokens set? (HF_TOKEN, OPENROUTER_API_KEY)
+- [ ] GPU available? (`nvidia-smi`)
+- [ ] LLM backend running? (LM Studio, Ollama, or OpenRouter)
+
+---
+
 ## Important Rules
 
 - **Never save output files to /tmp** - Keep all generated files within the repository (e.g., `docs/`, `Datasets/`, or create a `scratch/` folder)
@@ -210,6 +238,156 @@ python -m Evaluator.cli \
   --prompt-set Evaluator/prompts/tool_prompts.json
 ```
 
+---
+
+## Decision Trees
+
+Use these decision trees to guide task execution and avoid common pitfalls.
+
+### Training a Model
+
+```
+START: User wants to train a model
+  |
+  v
+[1] Check environment ready?
+    Run: ./run.sh status
+    |
+    +-- NOT READY --> Run: ./run.sh doctor --fix --> Retry status
+    |
+    +-- READY --> Continue
+          |
+          v
+[2] What datasets are available?
+    Run: ./run.sh list datasets
+    |
+    v
+[3] Determine training type needed:
+    |
+    +-- NEW MODEL (learning from scratch)
+    |     |
+    |     v
+    |   USE SFT:
+    |   - Needs positive-only examples (label: true)
+    |   - Higher learning rate: 2e-4
+    |   - Epochs: 2-3 typical
+    |   - Command: python Trainers/rtx3090_sft/train_sft.py
+    |
+    +-- REFINING EXISTING MODEL
+          |
+          v
+        USE KTO:
+        - Needs interleaved true/false examples
+        - Lower learning rate: 1e-6 to 2e-7
+        - Epochs: 1 typical
+        - Command: python Trainers/rtx3090_kto/train_kto.py
+          |
+          v
+[4] ALWAYS run with --dry-run first to validate configuration
+    |
+    v
+[5] If dry-run passes, run actual training
+```
+
+### Evaluating a Model
+
+```
+START: User wants to evaluate a model
+  |
+  v
+[1] Is LLM backend running?
+    |
+    +-- LM Studio: Check http://localhost:1234/v1/models
+    +-- Ollama: Check http://localhost:11434/api/tags
+    +-- OpenRouter: Check OPENROUTER_API_KEY is set
+    |
+    +-- NOT RUNNING --> Start backend or set API key
+    |
+    +-- RUNNING --> Continue
+          |
+          v
+[2] Find the model to evaluate:
+    Run: ./run.sh list runs
+    |
+    v
+[3] Choose scenario set:
+    |
+    +-- behavior_prompts: Test general behavior/reasoning
+    +-- tool_prompts: Test tool-calling capability
+    |
+    v
+[4] Run evaluation:
+    python -m Evaluator.cli --model <model> --prompt-set <scenarios>
+```
+
+### Improving Dataset Quality
+
+```
+START: User wants to improve dataset quality
+  |
+  v
+[1] Is LLM backend available?
+    Check LM Studio, Ollama, or OpenRouter
+    |
+    +-- NOT AVAILABLE --> Start backend or configure API
+    |
+    +-- AVAILABLE --> Continue
+          |
+          v
+[2] List available rubrics:
+    Run: python -m improvement_engine.services.rubric_runner --list
+    |
+    v
+[3] Validate dataset first:
+    Run: python Tools/validate_syngen.py <dataset_file>
+    |
+    +-- VALIDATION FAILED --> Fix JSON/format errors first
+    |
+    +-- VALIDATION PASSED --> Continue
+          |
+          v
+[4] Test with small batch first:
+    python -m improvement_engine.services.rubric_runner \
+      --file <input> --output <output> \
+      --rubrics <rubric_names> \
+      --start-line 1 --end-line 5
+    |
+    v
+[5] If test passes, run on full dataset
+```
+
+### Generating Synthetic Data
+
+```
+START: User wants to generate synthetic training data
+  |
+  v
+[1] Check SynthChat configuration:
+    Review: synth_chat/config/config.yaml
+    |
+    v
+[2] Is teacher model backend running?
+    (Usually needs high-quality model like GPT-4, Claude, etc.)
+    |
+    +-- NOT AVAILABLE --> Configure OpenRouter or local model
+    |
+    +-- AVAILABLE --> Continue
+          |
+          v
+[3] Quick test first:
+    ./Tools/run_synth_chat.sh --quick
+    |
+    +-- ERRORS --> Check config and backend connectivity
+    |
+    +-- SUCCESS --> Continue
+          |
+          v
+[4] Run full generation:
+    ./Tools/run_synth_chat.sh
+```
+
+---
+
 ## Key Bash Scripts
 
 **Root Level:**
@@ -320,22 +498,292 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 - Some multiprocessing limitations
 - Prefer WSL2 if possible
 
-## Troubleshooting
+## Diagnostics Guide
 
-**CUDA OOM:**
+### Quick Health Check
+
 ```bash
-# Reduce batch size
+# Full system diagnostics
+./run.sh doctor
+
+# Auto-fix common issues
+./run.sh doctor --fix
+```
+
+### Common Issues and Fixes
+
+#### CUDA / GPU Issues
+
+**"CUDA not available"**
+```bash
+# Check NVIDIA driver
+nvidia-smi
+
+# Check PyTorch CUDA version
+python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+
+# Fix: Reinstall PyTorch with correct CUDA version
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+**"CUDA out of memory" (OOM)**
+```bash
+# Option 1: Reduce batch size
 python train_sft.py --model-size 7b --batch-size 4
+
+# Option 2: Use smaller model
+python train_sft.py --model-size 3b
+
+# Option 3: Enable gradient checkpointing (in config)
+# Option 4: Clear GPU memory
+nvidia-smi --gpu-reset
 ```
 
-**Missing dependencies:**
+#### LLM Backend Issues
+
+**"LM Studio not reachable"**
 ```bash
-./setup_env.sh  # Auto-installs everything
+# Check if LM Studio is running
+curl http://localhost:1234/v1/models
+
+# WSL users: Use Windows host IP instead of localhost
+# Find Windows IP: cat /etc/resolv.conf | grep nameserver
+# Update .env: LMSTUDIO_HOST=<windows_ip>
+
+# Ensure "Serve on Local Network" is enabled in LM Studio settings
 ```
 
-**Training logs not appearing:**
-- Check `logs/training_latest.jsonl` exists
-- Verify `run_dir` path in callbacks
+**"Ollama connection refused"**
+```bash
+# Check if Ollama is running
+curl http://localhost:11434/api/tags
+
+# Start Ollama service
+ollama serve
+
+# Check available models
+ollama list
+```
+
+**"OpenRouter API error"**
+```bash
+# Verify API key is set
+echo $OPENROUTER_API_KEY
+
+# Test API connectivity
+curl https://openrouter.ai/api/v1/models \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY"
+```
+
+#### Dataset Issues
+
+**"Dataset validation failed"**
+```bash
+# Run validation to see specific errors
+python Tools/validate_syngen.py <file>
+
+# Common fixes:
+# - Check JSON syntax (missing commas, quotes)
+# - Ensure "conversations" array exists
+# - Verify role is "user" or "assistant"
+# - Check "label" field for KTO datasets
+```
+
+**"No examples found in dataset"**
+```bash
+# Check file is not empty
+wc -l <dataset_file>
+
+# Check file format (should be JSONL)
+head -1 <dataset_file> | python -m json.tool
+```
+
+#### Training Issues
+
+**"Training logs not appearing"**
+- Check `logs/training_latest.jsonl` exists in run directory
+- Verify `run_dir` path in callbacks configuration
+- Check disk space: `df -h`
+
+**"Loss is NaN"**
+- Learning rate too high - reduce by 10x
+- Data contains invalid values - run validation
+- Gradient explosion - enable gradient clipping
+
+**"Training stuck / no progress"**
+- Check GPU utilization: `watch nvidia-smi`
+- Verify data loader is working
+- Check for deadlocks in multi-GPU setup
+
+#### Environment Issues
+
+**"Missing dependencies"**
+```bash
+# Full environment setup
+./setup_env.sh
+
+# Or with auto-fix
+./run.sh doctor --fix
+
+# Manual pip install
+pip install -r requirements.txt
+```
+
+**"Module not found"**
+```bash
+# Ensure conda environment is active
+conda activate toolset
+
+# Check PYTHONPATH includes repo root
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+```
+
+---
+
+## Capability Matrix
+
+What can be fully automated vs. what needs user input:
+
+| Task | Fully Auto | Needs User Input | Notes |
+|------|:----------:|:----------------:|-------|
+| Environment setup | X | | `./setup_env.sh` |
+| Dependency install | X | | `./run.sh doctor --fix` |
+| List resources | X | | `./run.sh list *` |
+| Dataset validation | X | | `python Tools/validate_syngen.py` |
+| System diagnostics | X | | `./run.sh doctor` |
+| Training (SFT/KTO) | | X | Needs dataset choice, model size |
+| Evaluation | | X | Needs model path, scenario set |
+| Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
+| Dataset improvement | | X | Needs rubrics, line range |
+| Synthetic data gen | | X | Needs config, teacher model |
+
+**Legend:** X = Supported
+
+---
+
+## Recovery Procedures
+
+### Training Crashed Mid-Run
+
+```bash
+# 1. Find the last checkpoint
+ls -la Trainers/rtx3090_sft/sft_output_rtx3090/<run_id>/checkpoints/
+
+# 2. Check checkpoint integrity
+python -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('<checkpoint_path>')"
+
+# 3. Resume from checkpoint (if trainer supports it)
+python train_sft.py --resume-from-checkpoint <checkpoint_path>
+
+# 4. Or restart fresh with same config
+python train_sft.py --config <original_config>
+```
+
+### Out of GPU Memory During Training
+
+```bash
+# Immediate fix: Kill process and clear memory
+pkill -f train_sft
+nvidia-smi --gpu-reset  # If needed
+
+# Config fixes (in order of impact):
+# 1. Reduce batch size (most effective)
+# 2. Use gradient accumulation instead of large batch
+# 3. Enable gradient checkpointing
+# 4. Use smaller model variant (7B -> 3B)
+# 5. Use 4-bit quantization for base model
+```
+
+### Evaluation Giving Weird Results
+
+```bash
+# 1. Verify model is fully loaded
+python -c "from transformers import AutoModelForCausalLM; m = AutoModelForCausalLM.from_pretrained('<model_path>'); print(m)"
+
+# 2. Check prompt format matches training format
+# Compare: Evaluator/prompts/*.json with training data format
+
+# 3. Verify sampling settings
+# - Temperature: 0.0-0.3 for deterministic, 0.7-1.0 for creative
+# - top_p: 0.9 typical
+# - max_tokens: ensure sufficient for response
+
+# 4. Test with a simple known-good prompt
+python -c "
+from transformers import pipeline
+pipe = pipeline('text-generation', model='<model_path>')
+print(pipe('Hello, how are you?', max_new_tokens=50))
+"
+```
+
+### Dataset Improvement Not Working
+
+```bash
+# 1. Verify LLM backend is responding
+curl http://localhost:1234/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"test"}],"max_tokens":10}'
+
+# 2. Check rubric exists
+python -m improvement_engine.services.rubric_runner --list
+
+# 3. Validate input file format
+python Tools/validate_syngen.py <input_file>
+
+# 4. Run with verbose logging
+python -m improvement_engine.services.rubric_runner \
+  --file <input> --output <output> \
+  --rubrics <rubric> --start-line 1 --end-line 1 \
+  --verbose
+```
+
+### Upload to HuggingFace Failed
+
+```bash
+# 1. Verify HF_TOKEN is set and valid
+python -c "from huggingface_hub import HfApi; HfApi().whoami()"
+
+# 2. Check disk space for merge operation
+df -h
+
+# 3. Verify model path exists and is complete
+ls -la <model_path>/
+
+# 4. Try upload with smaller chunks
+python src/upload_to_hf.py <model_path> <repo_name> \
+  --save-method lora  # Upload just LoRA adapters first
+```
+
+### Synthetic Data Generation Errors
+
+```bash
+# 1. Check config is valid YAML
+python -c "import yaml; yaml.safe_load(open('synth_chat/config/config.yaml'))"
+
+# 2. Verify teacher model is accessible
+# (depends on backend - LM Studio, OpenRouter, etc.)
+
+# 3. Run with minimal config for testing
+./Tools/run_synth_chat.sh --quick --dry-run
+
+# 4. Check output directory is writable
+touch Datasets/test_write && rm Datasets/test_write
+```
+
+---
+
+## Troubleshooting Quick Reference
+
+| Symptom | Likely Cause | Quick Fix |
+|---------|--------------|-----------|
+| "CUDA not available" | PyTorch/CUDA mismatch | Reinstall PyTorch |
+| "Connection refused" | Backend not running | Start LM Studio/Ollama |
+| "Module not found" | Wrong environment | `conda activate toolset` |
+| "Permission denied" | File permissions | `chmod +x script.sh` |
+| "Out of memory" | Batch too large | Reduce `--batch-size` |
+| "Loss is NaN" | Learning rate too high | Reduce LR by 10x |
+| "No examples found" | Wrong file format | Check JSONL format |
+| "API key invalid" | Token expired/wrong | Update `.env` file |
 
 ## Key Documentation
 

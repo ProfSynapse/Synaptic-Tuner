@@ -11,12 +11,18 @@ systems to enumerate available resources:
 - CheckpointDiscovery: Find and analyze checkpoints with metrics
 - ModelDiscovery: List available models from evaluation backends
 - PromptSetDiscovery: Find and parse prompt sets
+- DatasetDiscovery: Find and analyze JSONL datasets
+- RubricDiscovery: Find rubric YAML files
+- BaseModelDiscovery: Find base and fine-tuned models
 """
 
 from tuner.discovery.training_runs import TrainingRunDiscovery
 from tuner.discovery.checkpoints import CheckpointDiscovery
 from tuner.discovery.models import ModelDiscovery
 from tuner.discovery.prompt_sets import PromptSetDiscovery, PromptSetInfo
+from tuner.discovery.datasets import DatasetDiscovery, DatasetInfo
+from tuner.discovery.rubrics import RubricDiscovery, RubricInfo
+from tuner.discovery.base_models import BaseModelDiscovery, ModelInfo
 
 __all__ = [
     "TrainingRunDiscovery",
@@ -24,4 +30,10 @@ __all__ = [
     "ModelDiscovery",
     "PromptSetDiscovery",
     "PromptSetInfo",
+    "DatasetDiscovery",
+    "DatasetInfo",
+    "RubricDiscovery",
+    "RubricInfo",
+    "BaseModelDiscovery",
+    "ModelInfo",
 ]

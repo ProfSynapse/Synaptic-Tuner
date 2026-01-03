@@ -4,11 +4,18 @@ Upload workflow handler.
 Location: /mnt/f/Code/Toolset-Training/tuner/handlers/upload_handler.py
 Purpose: Orchestrate the upload workflow (run selection, checkpoint selection, upload config, execution)
 Used by: Router when 'upload' command is invoked
+
+Supports --json flag for AI-parseable output. In JSON mode:
+- Returns available training runs and HF token status
+- All output is JSON formatted for programmatic parsing
 """
 
 import os
 import subprocess
+from argparse import Namespace
 from pathlib import Path
+from typing import Optional
+
 from tuner.handlers.base import BaseHandler
 from tuner.discovery import TrainingRunDiscovery, CheckpointDiscovery
 from tuner.ui import (
@@ -44,10 +51,22 @@ class UploadHandler(BaseHandler):
     6. Configure upload (repo ID, save method, GGUF)
     7. Execute upload via shared upload CLI
 
+    JSON Mode (--json flag):
+        In JSON mode, returns HF token status and available training runs.
+        Does not execute interactive menus.
+
     Example:
         handler = UploadHandler()
         exit_code = handler.handle()
+
+        # With JSON mode
+        handler = UploadHandler(args=args)  # args.json = True
+        exit_code = handler.handle()  # Returns JSON status
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -58,13 +77,88 @@ class UploadHandler(BaseHandler):
         """Can be invoked as 'python -m tuner upload'."""
         return True
 
+    def _get_upload_status(self) -> dict:
+        """
+        Get upload status for JSON output.
+
+        Returns dict with HF token status and available training runs.
+        """
+        # Load env and check token
+        env_file = self.repo_root / ".env"
+        load_env_file(env_file)
+
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+        hf_username = os.environ.get("HF_USERNAME", "")
+
+        # Count training runs
+        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+
+        sft_runs = discovery.discover("sft", limit=100)
+        kto_runs = discovery.discover("kto", limit=100)
+        grpo_runs = discovery.discover("grpo", limit=100)
+
+        return {
+            "command": "upload",
+            "status": "ready" if hf_token else "no_token",
+            "hf_token_set": bool(hf_token),
+            "hf_username": hf_username if hf_username else None,
+            "training_runs": {
+                "sft": {
+                    "count": len(sft_runs),
+                    "runs": [
+                        {
+                            "name": r.name,
+                            "has_final": (r / "final_model").exists(),
+                            "path": str(r),
+                        }
+                        for r in sft_runs[:10]
+                    ]
+                },
+                "kto": {
+                    "count": len(kto_runs),
+                    "runs": [
+                        {
+                            "name": r.name,
+                            "has_final": (r / "final_model").exists(),
+                            "path": str(r),
+                        }
+                        for r in kto_runs[:10]
+                    ]
+                },
+                "grpo": {
+                    "count": len(grpo_runs),
+                    "runs": [
+                        {
+                            "name": r.name,
+                            "has_final": (r / "final_model").exists(),
+                            "path": str(r),
+                        }
+                        for r in grpo_runs[:10]
+                    ]
+                },
+            },
+            "save_methods": [
+                {"id": "merged_16bit", "name": "Merged 16-bit", "size": "~14GB"},
+                {"id": "merged_4bit", "name": "Merged 4-bit", "size": "~3.5GB"},
+                {"id": "lora", "name": "LoRA adapters only", "size": "~320MB"},
+            ],
+        }
+
     def handle(self) -> int:
         """
         Execute upload workflow.
 
+        In JSON mode, returns upload status without interactive prompts.
+
         Returns:
             int: Exit code (0 = success, non-zero = failure)
         """
+        # JSON mode: return status information
+        if self.json_mode:
+            status = self._get_upload_status()
+            self.output(status)
+            return 0
+
         print_header("UPLOAD", "Push your model to HuggingFace")
 
         # Step 1: Check HF_TOKEN

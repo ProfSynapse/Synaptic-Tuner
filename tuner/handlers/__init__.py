@@ -8,6 +8,8 @@ This package contains handler implementations for different CLI commands:
 - PipelineHandler: Full pipeline (train -> upload -> eval)
 - MainMenuHandler: Interactive main menu
 - SynthChatHandler: Synthetic data generation and improvement
+- StatusHandler: System status overview for AI assistants
+- DoctorHandler: System diagnostics with recommendations and auto-fix
 
 Each handler implements the IHandler interface and can be registered
 with the router for command dispatching.
@@ -19,6 +21,8 @@ from tuner.handlers.eval_handler import EvalHandler
 from tuner.handlers.pipeline_handler import PipelineHandler
 from tuner.handlers.main_menu_handler import MainMenuHandler
 from tuner.handlers.synthchat_handler import SynthChatHandler
+from tuner.handlers.status_handler import StatusHandler
+from tuner.handlers.doctor_handler import DoctorHandler
 
 __all__ = [
     "TrainHandler",
@@ -27,4 +31,6 @@ __all__ = [
     "PipelineHandler",
     "MainMenuHandler",
     "SynthChatHandler",
+    "StatusHandler",
+    "DoctorHandler",
 ]

@@ -13,11 +13,16 @@ This handler implements the evaluation workflow:
 5. Select prompt set
 6. Display configuration
 7. Execute evaluation with live dashboard
+
+Supports --json flag for AI-parseable output. In JSON mode:
+- Returns available backends, models, and scenarios
+- All output is JSON formatted for programmatic parsing
 """
 
+from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import EvaluationBackendRegistry
@@ -64,12 +69,24 @@ class EvalHandler(BaseHandler):
     Coordinates backend selection, model discovery, prompt set selection,
     and execution of the Evaluator CLI to test model performance.
 
+    JSON Mode (--json flag):
+        In JSON mode, returns structured status about available backends,
+        models, and test scenarios. Does not execute interactive menus.
+
     Example:
         handler = EvalHandler()
         exit_code = handler.handle()
         # User interacts with menus, selects backend/model/prompts
         # Returns 0 on success, non-zero on failure
+
+        # With JSON mode
+        handler = EvalHandler(args=args)  # args.json = True
+        exit_code = handler.handle()  # Returns JSON status
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -79,6 +96,72 @@ class EvalHandler(BaseHandler):
     def can_handle_direct_mode(self) -> bool:
         """This handler supports direct CLI invocation."""
         return True
+
+    def _get_eval_status(self) -> dict:
+        """
+        Get evaluation status for JSON output.
+
+        Returns dict with available backends, models, and scenarios.
+        """
+        # List available backends
+        backends = []
+
+        # Check each backend
+        backend_configs = [
+            ("unsloth", "Unsloth (LoRA - direct)"),
+            ("llamacpp", "llama.cpp (GGUF)"),
+            ("mlc", "MLC/WebLLM (WebGPU)"),
+            ("ollama", "Ollama (local server)"),
+            ("lmstudio", "LM Studio (local server)"),
+        ]
+
+        for backend_id, backend_name in backend_configs:
+            backend_info = {
+                "id": backend_id,
+                "name": backend_name,
+                "available": False,
+                "models": [],
+            }
+
+            try:
+                if backend_id in ("llamacpp", "mlc", "unsloth"):
+                    backend = EvaluationBackendRegistry.get(backend_id, repo_root=self.repo_root)
+                else:
+                    backend = EvaluationBackendRegistry.get(backend_id)
+
+                is_connected, _ = backend.validate_connection()
+                backend_info["available"] = is_connected
+
+                if is_connected:
+                    models = backend.list_models()
+                    backend_info["models"] = models[:20] if models else []  # Limit for brevity
+                    backend_info["model_count"] = len(models) if models else 0
+
+            except (ValueError, Exception):
+                pass
+
+            backends.append(backend_info)
+
+        # List available scenarios
+        scenarios = []
+        try:
+            scenario_infos = self._list_scenarios()
+            for info in scenario_infos:
+                scenarios.append({
+                    "name": info.name,
+                    "description": info.description,
+                    "test_count": info.count,
+                    "path": str(info.path),
+                })
+        except Exception:
+            pass
+
+        return {
+            "command": "eval",
+            "status": "ready",
+            "backends": backends,
+            "scenarios": scenarios,
+        }
 
     def _list_scenarios(self):
         """
@@ -496,9 +579,17 @@ class EvalHandler(BaseHandler):
         """
         Execute evaluation workflow.
 
+        In JSON mode, returns evaluation status without interactive prompts.
+
         Returns:
             Exit code (0 = success, non-zero = failure)
         """
+        # JSON mode: return status information
+        if self.json_mode:
+            status = self._get_eval_status()
+            self.output(status)
+            return 0
+
         print_header("EVALUATION", "Test your model's performance")
 
         # Step 1: Select backend

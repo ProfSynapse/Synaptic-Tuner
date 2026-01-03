@@ -14,7 +14,14 @@ This handler provides a consolidated submenu for all model-related operations:
 
 The submenu loops until the user selects Back, allowing multiple operations
 to be performed in sequence without returning to the main menu.
+
+Supports --json flag for AI-parseable output. In JSON mode:
+- Returns available operations and model status
+- All output is JSON formatted for programmatic parsing
 """
+
+from argparse import Namespace
+from typing import Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.ui import (
@@ -43,12 +50,24 @@ class ModelOpsHandler(BaseHandler):
         - Convert WebLLM: Prepare for browser deployment
         - Upload to HF: Push models to HuggingFace Hub
 
+    JSON Mode (--json flag):
+        In JSON mode, returns available operations and training run status.
+        Does not execute interactive menus.
+
     Example:
         handler = ModelOpsHandler()
         exit_code = handler.handle()
         # Shows submenu, user selects operation, dispatches to handler
         # Returns 0 when user selects Back
+
+        # With JSON mode
+        handler = ModelOpsHandler(args=args)  # args.json = True
+        exit_code = handler.handle()  # Returns JSON status
     """
+
+    def __init__(self, args: Optional[Namespace] = None):
+        """Initialize handler with optional args."""
+        super().__init__(args=args)
 
     @property
     def name(self) -> str:
@@ -67,6 +86,75 @@ class ModelOpsHandler(BaseHandler):
         """
         return True
 
+    def _get_modelops_status(self) -> dict:
+        """
+        Get model operations status for JSON output.
+
+        Returns dict with available operations and training run counts.
+        """
+        from tuner.discovery import TrainingRunDiscovery
+
+        # Count available training runs
+        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+
+        sft_runs = discovery.discover("sft", limit=100)
+        kto_runs = discovery.discover("kto", limit=100)
+        grpo_runs = discovery.discover("grpo", limit=100)
+
+        # Collect training run info
+        training_runs = {
+            "sft": {
+                "count": len(sft_runs),
+                "runs": [
+                    {
+                        "name": r.name,
+                        "has_final": (r / "final_model").exists(),
+                        "path": str(r),
+                    }
+                    for r in sft_runs[:10]  # Limit for brevity
+                ]
+            },
+            "kto": {
+                "count": len(kto_runs),
+                "runs": [
+                    {
+                        "name": r.name,
+                        "has_final": (r / "final_model").exists(),
+                        "path": str(r),
+                    }
+                    for r in kto_runs[:10]
+                ]
+            },
+            "grpo": {
+                "count": len(grpo_runs),
+                "runs": [
+                    {
+                        "name": r.name,
+                        "has_final": (r / "final_model").exists(),
+                        "path": str(r),
+                    }
+                    for r in grpo_runs[:10]
+                ]
+            },
+        }
+
+        # Available operations
+        operations = [
+            {"id": "run", "name": "Run Model", "description": "Chat with trained model"},
+            {"id": "merge", "name": "Merge LoRA", "description": "Combine adapters with base model"},
+            {"id": "gguf", "name": "Convert GGUF", "description": "Quantize to GGUF format"},
+            {"id": "webllm", "name": "Convert WebLLM", "description": "Prepare for browser"},
+            {"id": "upload", "name": "Upload to HF", "description": "Push to HuggingFace"},
+        ]
+
+        return {
+            "command": "modelops",
+            "status": "ready",
+            "operations": operations,
+            "training_runs": training_runs,
+            "total_runs": len(sft_runs) + len(kto_runs) + len(grpo_runs),
+        }
+
     def _print_return_message(self) -> None:
         """Print message when returning to main menu."""
         if RICH_AVAILABLE:
@@ -80,6 +168,8 @@ class ModelOpsHandler(BaseHandler):
         """
         Execute model operations submenu workflow.
 
+        In JSON mode, returns operations and training run status.
+
         Displays a submenu of model operations and dispatches to the
         appropriate handler based on user selection. Loops until user
         selects Back.
@@ -87,6 +177,12 @@ class ModelOpsHandler(BaseHandler):
         Returns:
             int: Exit code (0 = success, always returns 0 for graceful exit)
         """
+        # JSON mode: return status information
+        if self.json_mode:
+            status = self._get_modelops_status()
+            self.output(status)
+            return 0
+
         # Import handlers here to avoid circular imports
         from tuner.handlers.inference_handler import InferenceHandler
         from tuner.handlers.merge_handler import MergeHandler
