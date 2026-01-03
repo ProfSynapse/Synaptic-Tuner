@@ -76,13 +76,11 @@ Toolset-Training/
 │   │
 │   └── shared/                # Shared code (upload, model loading, utilities)
 │
-├── improvement_engine/        # Dataset quality improvement
-│   ├── batch_improve.py       # Batch improvement script
-│   ├── parallel_batch.py      # Parallel batch processing
-│   └── services/              # LLM service, validators
-│
-├── synth_chat/                # Synthetic chat generation
+├── SynthChat/                 # Synthetic chat generation & dataset improvement
 │   ├── run_generation.py      # Main generator
+│   ├── services/              # Rubric runner, validators, improvement
+│   │   └── rubric_runner.py   # Dataset quality improvement
+│   ├── rubrics/               # Quality rubrics (YAML)
 │   └── configs/               # Generation configs
 │
 ├── Evaluator/                 # Model testing harness
@@ -163,7 +161,7 @@ python src/upload_to_hf.py \
 
 **Direct Command:**
 ```bash
-python -m improvement_engine.services.rubric_runner \
+python -m SynthChat.services.rubric_runner \
   --file Datasets/tools_datasets/thinking/agentManager/tools_v1.7.jsonl \
   --output Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl \
   --rubrics system_prompt_format \
@@ -186,7 +184,7 @@ python -m improvement_engine.services.rubric_runner \
 
 **List available rubrics:**
 ```bash
-python -m improvement_engine.services.rubric_runner --list
+python -m SynthChat.services.rubric_runner --list
 ```
 
 **Interactive Menu (Alternative):**
@@ -201,15 +199,15 @@ python -m improvement_engine.services.rubric_runner --list
 3. Passes validation results TO judge prompt
 4. Judge sees errors and gives targeted feedback
 5. Improver fixes based on feedback
-6. Logs interaction to `improvement_engine/interactions/` for KTO training
+6. Logs interaction to `SynthChat/interactions/` for KTO training
 
 **Checking Interactions:**
 ```bash
 # View latest interactions file
-ls -lt improvement_engine/interactions/ | head -5
+ls -lt SynthChat/interactions/ | head -5
 
 # Inspect judge prompt (shows schema validation results)
-cat improvement_engine/interactions/interactions_LATEST.jsonl | head -1 | jq '.conversations[1].content'
+cat SynthChat/interactions/interactions_LATEST.jsonl | head -1 | jq '.conversations[1].content'
 ```
 
 **What Judge Sees:**
@@ -335,7 +333,7 @@ START: User wants to improve dataset quality
           |
           v
 [2] List available rubrics:
-    Run: python -m improvement_engine.services.rubric_runner --list
+    Run: python -m SynthChat.services.rubric_runner --list
     |
     v
 [3] Validate dataset first:
@@ -347,7 +345,7 @@ START: User wants to improve dataset quality
           |
           v
 [4] Test with small batch first:
-    python -m improvement_engine.services.rubric_runner \
+    python -m SynthChat.services.rubric_runner \
       --file <input> --output <output> \
       --rubrics <rubric_names> \
       --start-line 1 --end-line 5
@@ -414,9 +412,9 @@ START: User wants to generate synthetic training data
 - SFT: `Datasets/syngen_tools_sft_11.18.25.jsonl` (2,676 positive examples)
 - KTO: `Datasets/syngen_tools_11.18.25.jsonl` (4,649 interleaved examples)
 
-**Improvement Engine:**
-- `improvement_engine/config/config.yaml` - Main config
-- `improvement_engine/rubrics/*.yaml` - Quality rubrics
+**SynthChat (Dataset Improvement):**
+- `SynthChat/config/config.yaml` - Main config
+- `SynthChat/rubrics/*.yaml` - Quality rubrics
 
 **Synth Chat:**
 - `synth_chat/config/config.yaml` - Generation config
@@ -725,13 +723,13 @@ curl http://localhost:1234/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"test"}],"max_tokens":10}'
 
 # 2. Check rubric exists
-python -m improvement_engine.services.rubric_runner --list
+python -m SynthChat.services.rubric_runner --list
 
 # 3. Validate input file format
 python Tools/validate_syngen.py <input_file>
 
 # 4. Run with verbose logging
-python -m improvement_engine.services.rubric_runner \
+python -m SynthChat.services.rubric_runner \
   --file <input> --output <output> \
   --rubrics <rubric> --start-line 1 --end-line 1 \
   --verbose
@@ -790,7 +788,7 @@ touch Datasets/test_write && rm Datasets/test_write
 - `README.md` - Project overview
 - `Trainers/rtx3090_sft/README.md` - SFT training guide
 - `Trainers/rtx3090_kto/README.md` - KTO training guide
-- `improvement_engine/README.md` - Dataset improvement guide
+- `SynthChat/README.md` - Dataset improvement guide
 - `KTO_TRAINING_REFERENCE.md` - KTO interleaving requirement
 - `docs/EVOLUTIONARY_FINETUNING.md` - Unified validation & evolutionary training design
 - `shared/validation/README.md` - Shared validation module guide
