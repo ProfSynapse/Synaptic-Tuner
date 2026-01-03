@@ -1,28 +1,22 @@
 """
 Menu rendering for Synaptic Tuner.
 
-This module provides menu display functions, delegating to Trainers/shared/ui/
+This module provides menu display functions, delegating to shared/ui/
 when available and providing text-based fallbacks otherwise.
 
 Location: /mnt/f/Code/Toolset-Training/tuner/ui/menu.py
 Used by: All handlers for interactive menu navigation
 """
 
-import sys
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 # Try importing from shared UI first
 SHARED_UI_AVAILABLE = False
 try:
-    # Add Trainers/shared to path if not already there
-    shared_path = Path(__file__).parent.parent.parent / "Trainers" / "shared"
-    if shared_path.exists() and str(shared_path) not in sys.path:
-        sys.path.insert(0, str(shared_path))
-
-    from ui import print_menu as shared_print_menu
-    from ui import animated_menu as shared_animated_menu
-    from ui import BOX
+    from shared.ui import print_menu as shared_print_menu
+    from shared.ui import animated_menu as shared_animated_menu
+    from shared.ui import BOX
     SHARED_UI_AVAILABLE = True
 except ImportError:
     # Fallback BOX characters
@@ -40,7 +34,7 @@ def print_menu(options: List[Tuple[str, str]], title: str = "Select an option") 
     """
     Display numbered menu and get user selection.
 
-    Delegates to Trainers/shared/ui/ if available, otherwise uses text fallback.
+    Delegates to shared/ui/ if available, otherwise uses text fallback.
 
     Args:
         options: List of (key, description) tuples
@@ -89,7 +83,7 @@ def animated_menu(
     """
     Show animated logo then menu (if rich available), otherwise static menu.
 
-    Delegates to Trainers/shared/ui/ if available, otherwise uses text fallback.
+    Delegates to shared/ui/ if available, otherwise uses text fallback.
 
     Args:
         options: List of (key, description) tuples
