@@ -316,6 +316,8 @@ tests:
   expected_tools:
   - memoryManager_createWorkspace
   acceptable_tools:
+  - storageManager_list
+  - searchManager_searchDirectory
   - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
@@ -325,7 +327,7 @@ tests:
     workspace_ids:
     - ws_1732300800000_atlasroll
     agent_ids: []
-  notes: Tests context continuity in workspace setup
+  notes: Tests context continuity in workspace setup - can search/list to understand structure before creating
 - id: ERA_file_not_found_recovery
   question: Open the meeting notes from yesterday's standup
   tags:
@@ -347,6 +349,9 @@ tests:
   expected_tools:
   - searchManager_searchContent
   acceptable_tools:
+  - storageManager_list
+  - searchManager_searchDirectory
+  - searchManager_searchContent
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -354,7 +359,7 @@ tests:
     workspace_ids:
     - ws_1732300800000_atlasroll
     agent_ids: []
-  notes: Tests if model searches when exact path is uncertain
+  notes: Tests if model searches/lists when exact path is uncertain
 - id: ERA_replace_content_mismatch
   question: Change the API version from 'v2' to 'v3' in the config file
   tags:
@@ -680,6 +685,8 @@ tests:
   expected_tools:
   - memoryManager_createState
   acceptable_tools:
+  - storageManager_list
+  - memoryManager_createState
   - TEXT_ONLY
   behavior_expectations:
     sessionMemory_min_chars: 80
@@ -689,7 +696,7 @@ tests:
     workspace_ids:
     - ws_1732300800000_atlasroll
     agent_ids: []
-  notes: Tests if sessionMemory properly captures what state is being saved
+  notes: Tests if sessionMemory properly captures what state is being saved - can list checkpoints or create directly
 - id: ERA_search_scope_adaptation
   question: Find the Q4 retrospective document
   tags:
@@ -865,6 +872,8 @@ tests:
   expected_tools:
   - searchManager_searchContent
   acceptable_tools:
+  - searchManager_searchContent
+  - storageManager_list
   - TEXT_ONLY
   expected_context:
     session_id: session_1732300800000_eval01234
@@ -872,7 +881,7 @@ tests:
     workspace_ids:
     - ws_1732300800000_techspecs
     agent_ids: []
-  notes: Tests if model searches for documents with good context
+  notes: Tests if model searches for documents - Phoenix specs don't exist so should search or inform user
 - id: VBA_recursive_delete_verification
   question: Delete the old prototypes folder and everything in it
   tags:

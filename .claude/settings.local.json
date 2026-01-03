@@ -222,7 +222,10 @@
       "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/memoryManager/tools_v2.3.jsonl )",
       "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/promptManager/tools_v2.5.jsonl )",
       "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/searchManager/tools_v2.1.jsonl )",
-      "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/storageManager/tools_v2.1.jsonl )"
+      "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/storageManager/tools_v2.1.jsonl )",
+      "mcp__plugin_serena_serena__activate_project",
+      "mcp__plugin_serena_serena__get_symbols_overview",
+      "Bash(git -C /mnt/f/Code/Toolset-Training log --oneline --max-count=20)"
     ],
     "deny": [],
     "ask": []
