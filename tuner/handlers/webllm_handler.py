@@ -486,12 +486,17 @@ main(["{model_path}", "--quantization", "{quant}", "--conv-template", "chatml",
             hidden_size = config.get("hidden_size", 0)
             model_type = config.get("model_type", "")
 
-            # Match to known WASM
+            # Match to known WASM based on hidden_size
+            # Qwen3 sizes: 0.6B=1024, 1.7B=2048, 4B=2560, 8B=4096
             if "qwen3" in model_type.lower():
-                if hidden_size == 2560:  # 4B
+                if hidden_size == 4096:  # 8B
+                    wasm_url = WASM_SOURCES.get("qwen3-8b", WASM_SOURCES["qwen3-4b"])
+                elif hidden_size == 2560:  # 4B
                     wasm_url = WASM_SOURCES["qwen3-4b"]
-                elif hidden_size == 1536:  # 1.7B
+                elif hidden_size == 2048:  # 1.7B
                     wasm_url = WASM_SOURCES["qwen3-1.7b"]
+                elif hidden_size == 1024:  # 0.6B
+                    wasm_url = WASM_SOURCES.get("qwen3-0.6b", WASM_SOURCES["qwen3-1.7b"])
                 else:
                     print_info(f"No prebuilt WASM for hidden_size={hidden_size}")
                     return False

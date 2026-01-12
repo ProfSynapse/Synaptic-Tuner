@@ -225,7 +225,9 @@
       "Bash(/mnt/f/Code/Toolset-Training/Datasets/tools_datasets/non_thinking/storageManager/tools_v2.1.jsonl )",
       "mcp__plugin_serena_serena__activate_project",
       "mcp__plugin_serena_serena__get_symbols_overview",
-      "Bash(git -C /mnt/f/Code/Toolset-Training log --oneline --max-count=20)"
+      "Bash(git -C /mnt/f/Code/Toolset-Training log --oneline --max-count=20)",
+      "Bash(git -C /mnt/f/Code/Toolset-Training log --oneline --all -- Evaluator/response_parser.py)",
+      "Bash(git -C /mnt/f/Code/Toolset-Training show 8ed8c53 --stat)"
     ],
     "deny": [],
     "ask": []

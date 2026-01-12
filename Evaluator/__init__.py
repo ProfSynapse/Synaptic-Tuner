@@ -59,8 +59,8 @@ from .rubric_validator import (
     validate_response,
 )
 
-# Response parsing
-from .response_parser import (
+# Response parsing (from shared validation module)
+from shared.validation.parsing.response_parser import (
     ParsedResponse,
     ParsedToolCall,
     parse_response,

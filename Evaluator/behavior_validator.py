@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 from .enums import ResponseType
-from .response_parser import (
+from shared.validation.parsing.response_parser import (
     ParsedResponse,
     parse_response,
     get_text_content,
