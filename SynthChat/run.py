@@ -149,8 +149,53 @@ def generate_mode(args):
     num_workers = args.workers or 1
     results = []
 
-    if docs:
-        # Docs-based generation: loop through each doc
+    if docs and num_workers > 1:
+        # Parallel docs-based generation with multiple workers
+        print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
+
+        # Build work items: one per (doc, repetition, scenario, count) combination
+        work_items = []
+        worker_id = 0
+        for doc in docs:
+            for rep in range(args.per_doc):
+                for scenario_key, count in targets.items():
+                    scenario = generator.scenario_loader.get_scenario(scenario_key)
+                    if not scenario:
+                        print(f"Warning: Scenario not found: {scenario_key}")
+                        continue
+                    for _ in range(count):
+                        work_items.append((
+                            scenario_key, scenario, max_iterations,
+                            config_dir, scenarios_dir, rubrics_dir,
+                            settings, args.provider, args.model, doc, worker_id
+                        ))
+                        worker_id += 1
+
+        total = len(work_items)
+        completed = 0
+        lock = threading.Lock()
+
+        def update_progress():
+            nonlocal completed
+            with lock:
+                completed += 1
+                print(f"\rProgress: {completed}/{total} ({completed/total*100:.1f}%)", end="", flush=True)
+
+        # Execute in parallel
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(_generate_single_example, item): item for item in work_items}
+
+            for future in as_completed(futures):
+                result, error = future.result()
+                if error:
+                    print(f"\n{error}")
+                if result:
+                    results.append(result)
+                update_progress()
+
+        print()  # Newline after progress
+    elif docs:
+        # Sequential docs-based generation (single worker)
         total_docs = len(docs)
         for doc_idx, doc in enumerate(docs, 1):
             print(f"\n--- Document {doc_idx}/{total_docs}: {doc.path} ---")
