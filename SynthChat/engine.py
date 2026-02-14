@@ -1,5 +1,10 @@
 """Improvement engine - main orchestrator for judge → improve loop.
 
+Location: SynthChat/engine.py
+Purpose: Orchestrate the judge-improve loop with retry and provider fallback.
+Used by: SynthChat/services/rubric_runner.py (the CLI entry point for dataset
+         improvement). Also invoked from SynthChat/run.py during generation.
+
 Single Responsibility: Orchestrate the improvement loop ONLY.
 Delegates all actual work to focused services.
 """
@@ -24,9 +29,14 @@ from .services.interaction_logger import InteractionLogger
 from .utils.logger import ImproveLogger
 
 # Retry configuration
-MAX_RETRIES = 3
+MAX_RETRIES = 6
 INITIAL_BACKOFF_SECONDS = 2.0
 BACKOFF_MULTIPLIER = 2.0
+
+# Fallback provider chain: when the primary provider fails after all retries,
+# try these providers in order. Each entry is a provider name recognized by
+# shared.llm.create_client(). The current provider is automatically skipped.
+FALLBACK_PROVIDERS = ["lmstudio", "ollama"]
 
 
 @dataclass
@@ -310,39 +320,93 @@ class ImprovementEngine:
 
     def _call_with_retry(self, func, operation_name: str):
         """
-        Call a function with exponential backoff retry.
+        Call a function with exponential backoff retry and provider fallback.
+
+        First retries MAX_RETRIES times with the current provider using
+        exponential backoff. If all retries fail, attempts to fall back to
+        the next provider in FALLBACK_PROVIDERS (skipping the current one)
+        and retries MAX_RETRIES times with each fallback provider.
 
         Args:
-            func: Callable to execute
+            func: Callable to execute (will use whatever self.llm_client
+                  is set to at call time)
             operation_name: Name for logging
 
         Returns:
             Result of the function call
 
         Raises:
-            Last exception if all retries fail
+            Last exception if all retries and all fallbacks fail
         """
         last_exception = None
-        backoff = INITIAL_BACKOFF_SECONDS
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                return func()
-            except Exception as e:
-                last_exception = e
-                if attempt < MAX_RETRIES - 1:
-                    self.logger.warning(
-                        f"  {operation_name} failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}"
-                    )
-                    self.logger.info(f"  Retrying in {backoff:.1f}s...")
-                    time.sleep(backoff)
-                    backoff *= BACKOFF_MULTIPLIER
-                else:
-                    self.logger.error(
-                        f"  {operation_name} failed after {MAX_RETRIES} attempts: {e}"
-                    )
+        # Build provider attempt order: current provider first, then fallbacks
+        current_provider = self.llm_client.provider_name
+        providers_to_try = [current_provider]
+        for fb in FALLBACK_PROVIDERS:
+            if fb != current_provider and fb not in providers_to_try:
+                providers_to_try.append(fb)
+
+        for provider_idx, provider in enumerate(providers_to_try):
+            # Switch to fallback provider if not the first (original) one
+            if provider_idx > 0:
+                if not self._switch_to_fallback_provider(provider):
+                    continue  # Skip this provider if we can't create a client
+
+            backoff = INITIAL_BACKOFF_SECONDS
+            for attempt in range(MAX_RETRIES):
+                try:
+                    return func()
+                except Exception as e:
+                    last_exception = e
+                    if attempt < MAX_RETRIES - 1:
+                        self.logger.warning(
+                            f"  {operation_name} failed on {provider} "
+                            f"(attempt {attempt + 1}/{MAX_RETRIES}): {e}"
+                        )
+                        self.logger.info(f"  Retrying in {backoff:.1f}s...")
+                        time.sleep(backoff)
+                        backoff *= BACKOFF_MULTIPLIER
+                    else:
+                        self.logger.error(
+                            f"  {operation_name} failed on {provider} "
+                            f"after {MAX_RETRIES} attempts: {e}"
+                        )
 
         raise last_exception
+
+    def _switch_to_fallback_provider(self, provider: str) -> bool:
+        """
+        Attempt to create a new LLM client for the given provider and swap it
+        into this engine and its services.
+
+        Args:
+            provider: Provider name ('openrouter', 'lmstudio', 'ollama')
+
+        Returns:
+            True if the switch succeeded, False if the provider is unavailable
+        """
+        from shared.llm import create_client
+
+        self.logger.warning(
+            f"  Falling back to provider: {provider}"
+        )
+        try:
+            fallback_client = create_client(provider=provider)
+            # Swap the client into the engine and all services
+            self.llm_client = fallback_client
+            self.judge_service.llm_client = fallback_client
+            self.improvement_service.llm_client = fallback_client
+            self.logger.info(
+                f"  Switched to {provider} "
+                f"(model: {fallback_client.model_name})"
+            )
+            return True
+        except Exception as e:
+            self.logger.warning(
+                f"  Could not create {provider} client: {e}"
+            )
+            return False
 
     def _build_judge_prompt(
         self,
