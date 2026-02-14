@@ -30,7 +30,7 @@ class DocsLoader:
     """
 
     SUPPORTED_EXTENSIONS = {'.md', '.txt', '.html', '.htm'}
-    DEFAULT_MAX_CHARS = 50_000  # Truncate very large docs
+    DEFAULT_MAX_CHARS = 200_000  # Truncate very large docs
 
     def __init__(self, max_chars: Optional[int] = None):
         """

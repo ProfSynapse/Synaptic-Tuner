@@ -10,8 +10,8 @@ cd /path/to/Synthetic-Conversations
 
 # Generate examples (uses settings.yaml defaults)
 PYTHONPATH=. python3 -m SynthChat.run generate \
-  --targets-file docs/test_content_targets.json \
-  --output docs/output.jsonl
+  --targets-file scratch/fixtures/synthchat/test_content_targets.json \
+  --output scratch/fixtures/synthchat/output.jsonl
 
 # Improve existing dataset
 PYTHONPATH=. python3 -m SynthChat.run improve \

@@ -1,0 +1,128 @@
+# Essay Outline Extraction (Stage 1)
+# Uses docs-based generation to extract structured outlines from existing essays.
+#
+# Pipeline: For each essay loaded via --docs mode, generates a 2-turn conversation:
+#   user = messy brainstorm/thoughts simulating author's pre-writing process
+#   assistant = structured detailed outline
+#
+# No system message in output (system: false).
+# Rubrics: essay_brainstorm_quality (user), essay_outline_quality (response).
+#
+# Run:
+#   python -m SynthChat.run generate \
+#     --docs "Meditations on Alignment/_flat_essays/" \
+#     --scenarios essay_outline \
+#     --per-doc 1
+
+scenarios:
+  essay_outline:
+    type: docs_based
+    system: false
+
+    rubrics:
+      user: [essay_brainstorm_quality]
+      response: [essay_outline_quality]
+
+    prompts:
+      # Persona guidance for the user-turn LLM. Includes {doc_content} so
+      # the LLM reads the essay and can reverse-engineer the author's thought
+      # process. This is NOT included in the final output.
+      user_system: |
+        You are simulating the internal brainstorming process of an essay author.
+        You have access to the finished essay below. Your job is to imagine what
+        the author's messy, unstructured thoughts looked like BEFORE they sat down
+        to write. Think of this as the napkin scrawl, the voice memo, the 2am
+        notes-to-self.
+
+        <finished_essay>
+        {doc_content}
+        </finished_essay>
+
+        Guidelines for your brainstorm output:
+        - Keep it SHORT — this is a napkin, not a notebook (75-200 words)
+        - Stream-of-consciousness, not organized
+        - Reference specific ideas and analogies from the essay
+        - Use sentence fragments, half-formed connections, questions to self
+        - Show intellectual excitement and uncertainty
+        - Do NOT write a clean outline or organized summary
+        - Do NOT use headers, bullet points, or any structured format
+
+      # Instruction for the user-turn LLM. The user_system context above
+      # is prepended automatically by the generator.
+      user: |
+        Generate the messy brainstorm thoughts this author would have had before
+        writing the essay. Channel a writer scribbling quick notes — excited,
+        scattered, fragmentary. Keep it short and raw, like jotting on a napkin
+        between conversations. Reference specific essay content but as
+        ideas-in-progress, not finished thoughts.
+
+        Output ONLY the brainstorm text. No preamble, no meta-commentary.
+
+      # Instruction for the assistant-turn LLM. Includes {doc_content} so it
+      # can see the essay and produce an accurate outline.
+      assistant: |
+        You are a writing coach who helps authors turn messy ideas into structured
+        writing plans. The author has shared their brainstorm thoughts with you.
+        You also have access to a reference essay that represents the kind of work
+        the author produces:
+
+        <reference_essay>
+        {doc_content}
+        </reference_essay>
+
+        Your response should flow naturally in three parts (opening reflection,
+        draft outline, next steps) WITHOUT any "PART" labels or section dividers
+        between them. Just write conversationally.
+
+        OPENING REFLECTION (2 short paragraphs)
+        Challenge the brainstorm dialectically. What tensions or contradictions exist
+        in the ideas? What assumptions need questioning? What's the strongest
+        counter-argument to the core thesis? Where are the gaps or blind spots?
+        Do NOT affirm, praise, or agree with the brainstorm. Instead, pressure-test
+        the ideas like a sharp critic: identify weak spots, missing perspectives,
+        and logical tensions. Write two short paragraphs that push the author's
+        thinking further by questioning it.
+
+        DRAFT OUTLINE (the structured part)
+        Extract and mirror the essay's actual structure. Use the same section
+        headings that appear in the essay (or close paraphrases). Do NOT impose
+        a generic template — the outline should reflect how THIS essay is
+        actually organized.
+
+        Follow this format:
+
+        # [Essay Title]
+
+        ## Overview
+        [2 paragraph summary of the essay's thesis and approach]
+
+        ## [Actual Section Heading from Essay]
+        [2-4 sentence prose summary: what this section covers, its key arguments
+        or moves, and how it advances the essay's overall arc. Name specific
+        references, analogies, or rhetorical techniques used.]
+
+        ## [Actual Section Heading from Essay]
+        [... repeat for each major section, matching the essay's real structure]
+
+        ## Tone & Voice
+        [Description of the writing voice — register, humor, posture]
+
+        ## Key Themes
+        - **[Theme]:** [how it manifests]
+        - **[Theme]:** [how it manifests]
+
+        NEXT STEPS
+        After the outline, write a brief reflective transition sentence (e.g.,
+        "A few directions worth exploring as you move forward:") followed by 2-4
+        specific follow-up suggestions as bullet points: angles to explore,
+        sections that could be stronger, alternative framings, or readiness check.
+        Must be specific to THIS essay, not generic writing advice.
+
+        IMPORTANT CONSTRAINTS:
+        - Do NOT include "PART 1", "PART 2", "PART 3" or any similar labels in your output. The response should flow naturally without section dividers between the three parts.
+        - Address the author directly using second person (you/your). Say "your essay argues" not "the essay argues". Say "your brainstorm" not "the brainstorm".
+        - Match the actual essay's section count — typically 4-6 major sections, NOT 10+
+        - Do NOT number the section names. Use descriptive names only (no "1. Hook")
+        - Keep each bullet to 1-2 lines, not paragraphs
+        - The outline should fit on one page. Be concise.
+        - Output all three parts. No other preamble or meta-commentary.

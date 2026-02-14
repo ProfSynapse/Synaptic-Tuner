@@ -1,0 +1,52 @@
+{
+  "created": "2025-11-26T13:30:33.999998",
+  "version": "1.2",
+  "source_files": [
+    "agentManager/tools_v1.2.jsonl",
+    "contentManager/tools_v1.2.jsonl",
+    "memoryManager/tools_v1.2.jsonl",
+    "vaultLibrarian/tools_v1.2.jsonl",
+    "vaultManager/tools_v1.2.jsonl"
+  ],
+  "total_examples": 5651,
+  "tool_call_examples": 5286,
+  "text_only_examples": 365,
+  "text_only_ratio": "6.5%",
+  "per_manager": {
+    "agentManager": {
+      "total": 845,
+      "tool_calls": 769,
+      "text_only": 76
+    },
+    "contentManager": {
+      "total": 1251,
+      "tool_calls": 1193,
+      "text_only": 58
+    },
+    "memoryManager": {
+      "total": 1421,
+      "tool_calls": 1341,
+      "text_only": 80
+    },
+    "vaultLibrarian": {
+      "total": 915,
+      "tool_calls": 844,
+      "text_only": 71
+    },
+    "vaultManager": {
+      "total": 1219,
+      "tool_calls": 1139,
+      "text_only": 80
+    }
+  },
+  "features": [
+    "System prompts with <session_context>",
+    "System prompts with <available_workspaces>",
+    "System prompts with <available_agents> (where applicable)",
+    "IDs in tool calls match system prompt context",
+    "NEW: Text-only clarification examples (ask before acting)",
+    "NEW: Text-only summary examples (summarize results)"
+  ],
+  "format": "OpenAI tool_calls format with system message",
+  "notes": "v1.2 adds ~365 handcrafted text-only examples for clarification and summary responses"
+}

@@ -1,0 +1,117 @@
+{
+  "created": "2025-11-28T13:50:59.528448",
+  "source": "behavior_datasets merge 11.28.25 (v1.3 with text-only response examples)",
+  "behaviors_v1_3": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "workspace_awareness"
+  ],
+  "response_patterns": [
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text"
+  ],
+  "ask_first": [
+    "ask_first"
+  ],
+  "all_datasets": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "workspace_awareness",
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text",
+    "ask_first"
+  ],
+  "behavior_stats": {
+    "context_continuity": {
+      "total": 502,
+      "positive": 251,
+      "negative": 251,
+      "version": "v1.3"
+    },
+    "context_efficiency": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133,
+      "version": "v1.3"
+    },
+    "error_recovery": {
+      "total": 497,
+      "positive": 296,
+      "negative": 201,
+      "version": "v1.3"
+    },
+    "execute_prompt_usage": {
+      "total": 266,
+      "positive": 153,
+      "negative": 113,
+      "version": "v1.3"
+    },
+    "intellectual_humility": {
+      "total": 608,
+      "positive": 325,
+      "negative": 283,
+      "version": "v1.3"
+    },
+    "strategic_tool_selection": {
+      "total": 493,
+      "positive": 267,
+      "negative": 226,
+      "version": "v1.3"
+    },
+    "verification_before_action": {
+      "total": 592,
+      "positive": 314,
+      "negative": 278,
+      "version": "v1.3"
+    },
+    "workspace_awareness": {
+      "total": 494,
+      "positive": 272,
+      "negative": 222,
+      "version": "v1.3"
+    },
+    "response_patterns/text_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.2"
+    },
+    "response_patterns/tool_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "response_patterns/tool_text": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "ask_first": {
+      "total": 100,
+      "positive": 50,
+      "negative": 50,
+      "version": "v1.0"
+    }
+  },
+  "total_examples": 4268,
+  "positive_examples": 2286,
+  "negative_examples": 1982,
+  "interleaved": true,
+  "consecutive_same_labels": 303,
+  "format": "KTO-compatible ChatML with interleaved labels",
+  "notes": "v1.3 includes ~30% text-only response examples teaching when NOT to use tools"
+}

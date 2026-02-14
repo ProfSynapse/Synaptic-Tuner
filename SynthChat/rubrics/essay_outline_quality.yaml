@@ -1,0 +1,238 @@
+# SynthChat/rubrics/essay_outline_quality.yaml
+# Evaluates the writing coach response for essay_outline scenario (response turn).
+# Response has 3 parts: opening reflection, structured outline, and next steps.
+# The outline should have all required sections, reflect the actual essay's structure,
+# and contain specific (not generic) content.
+# Used by: SynthChat/scenarios/essay_outline.yaml (response scope)
+
+name: Essay Outline Quality
+description: Evaluates coach response quality including reflection, outline structure, and next steps
+scope: response
+pass_threshold: 0.7
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating a writing coach's response to an author's brainstorm.
+  The response should have three parts: an opening reflection, a structured
+  outline, and next steps. The outline content should accurately reflect
+  the source essay's structure, arguments, and voice.
+
+  **Coach Response:**
+  ```
+  {current_content}
+  ```
+
+  **Brainstorm (shows author's raw ideas):**
+  ```
+  {user_request}
+  ```
+
+  # AUTO-FAIL CHECKS (evaluate these FIRST, before scoring)
+  #
+  # 1. Count the ## section headers between ## Overview and ## Tone & Voice.
+  #    These are the essay's content sections. If MORE THAN 8: cap score at 0.4.
+  # 2. Check if ANY section header has a numbered prefix (e.g., "## 1. Hook",
+  #    "## 2. Setup"). If YES: cap score at 0.4.
+  #
+  # If either auto-fail triggers, set the score to at most 0.4 regardless of
+  # other criteria. Both conditions mean the outline ignored format constraints.
+
+  # EVALUATION CRITERIA
+
+  ## 1. OPENING REFLECTION (10 points)
+
+  The response should begin with 2 short paragraphs that dialectically challenge the brainstorm.
+  The reflection should flow naturally without any "PART" labels or section dividers.
+
+  - Identifies tensions, contradictions, or gaps in the brainstorm's ideas: 4 pts
+  - Questions assumptions or raises counter-arguments the author hasn't considered: 3 pts
+  - Uses second person (you/your), not third person ("the essay", "the author"): 3 pts
+
+  DO SAY: "You're treating X and Y as compatible, but they pull in opposite directions..."
+  DO SAY: "The gap in your brainstorm is... What happens when..."
+  DO SAY: "Your strongest idea is X, but it undermines your claim about Y..."
+  DO NOT SAY: "Your brainstorm reveals a rich tapestry..." / "The connection between X and Y is compelling..."
+  DO NOT SAY: "You expose a productive tension..." / "strong thread" / "already have a scaffold"
+
+  **Deduct 5 pts if the reflection uses affirming language ("compelling", "rich", "strong",
+  "productive", "already have", "neatly weaves", "correctly identifies", "exposes a tension").**
+  **Score 0 if opening is sycophantic, entirely affirming, or generic.**
+  **Deduct 3 pts if "PART 1", "PART 2", "PART 3", or similar labels appear anywhere in the response.**
+
+  ## 2. REQUIRED OUTLINE SECTIONS (20 points)
+
+  The outline MUST contain these sections with proper markdown headers:
+
+  - `# [Title]` present with a specific essay title (no "Writing Assignment:" prefix): 4 pts
+  - `## Overview` present with 2-paragraph thesis summary: 4 pts
+  - At least 3 essay-specific `## [Section Heading]` sections between Overview and Tone & Voice, using headings that match the actual essay's structure: 6 pts
+  - `## Tone & Voice` present with voice description: 3 pts
+  - `## Key Themes` present with themed entries: 3 pts
+
+  ## 3. OVERVIEW QUALITY (15 points)
+
+  The Overview section should capture the essay's central argument.
+
+  - States a clear thesis or central argument (not vague): 8 pts
+  - Describes the essay's approach or angle: 4 pts
+  - Specific enough that you could distinguish this essay from others: 3 pts
+
+  **Score 0 if Overview is generic (e.g., "This essay explores important ideas about...")**
+
+  ## 4. SECTION ACCURACY (25 points)
+
+  The outline's ## sections should mirror the actual essay's progression.
+
+  - Section headings match or closely paraphrase the essay's real section headings (not generic placeholders like "Introduction", "Body", "Conclusion"): 8 pts
+  - Section count matches the essay's natural structure (typically 4-6, NOT 10+): 4 pts
+  - Section headings are descriptive only -- NO numbered prefixes ("1. Hook", "2. Setup"): 4 pts
+  - Each section's prose summary is specific to the essay content (names key arguments, references, analogies, or rhetorical techniques actually used): 5 pts
+  - Sections follow the essay's actual order and progression: 4 pts
+
+  **Deduct 10 pts if more than 8 content sections are present (over-segmentation).**
+  **Deduct 5 pts if any section heading has a numbered prefix (e.g., "## 1. Hook").**
+
+  ## 5. TONE & VOICE SPECIFICITY (15 points)
+
+  The Tone & Voice section should describe the actual writing voice.
+
+  - Describes the specific conversational register (formal, casual, academic, etc.): 4 pts
+  - Captures humor style if present (dry, sardonic, playful, etc.): 4 pts
+  - Describes intellectual posture (exploratory, authoritative, questioning, etc.): 4 pts
+  - Specific enough to distinguish this author's voice from generic writing: 3 pts
+
+  **Score 0 if tone description is generic advice (e.g., "Write clearly and engagingly")**
+
+  ## 6. NEXT STEPS (15 points)
+
+  The response should end with a brief reflective transition sentence followed by
+  a bulleted list of 2-4 specific follow-up suggestions.
+
+  - Opens with a natural transition sentence connecting the outline to next steps (e.g., "A few directions worth exploring:" or similar): 3 pts
+  - Suggests specific next actions relevant to THIS essay: 4 pts
+  - Actionable and concrete (not generic "keep writing"): 4 pts
+  - Shows coaching awareness (angles to explore, sections to strengthen, alternative framings, readiness check): 4 pts
+
+  **Score 0 if next steps are entirely generic writing advice.**
+
+  # SCORING
+
+  1. First, check auto-fail conditions:
+     - Count ## content sections (between ## Overview and ## Tone & Voice). If > 8: cap at 0.4
+     - Check for numbered prefixes (## 1. ..., ## 2. ...). If found: cap at 0.4
+  2. Then calculate total points (max 100) and convert to 0.0-1.0 scale
+  3. Final score = min(calculated score, auto-fail cap if triggered)
+
+  Score guide:
+  - **0.9-1.0**: All three parts present, content is specific and accurate to the essay
+  - **0.7-0.89**: All parts present but some content is generic
+  - **0.5-0.69**: Missing parts or content doesn't reflect the actual essay
+  - **0.3-0.49**: Multiple missing parts, largely generic, OR auto-fail triggered
+  - **0.0-0.29**: Missing most structure or response is not usable
+
+  # OUTPUT
+  Return JSON: `{{"essay_outline_quality_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are improving a writing coach's response to an author's brainstorm.
+  The response must have three parts: opening reflection, structured outline,
+  and next steps.
+
+  **Current Response:**
+  ```
+  {current_content}
+  ```
+
+  **Brainstorm (shows author's raw ideas):**
+  ```
+  {user_request}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # MISSION
+  Improve the response to have all three parts with specific, essay-accurate content.
+
+  # REQUIRED FORMAT
+
+  The response MUST flow naturally without any "PART" labels or section dividers.
+  Follow this exact structure:
+
+  ```
+  [Two short paragraphs that dialectically challenge the brainstorm. Identify
+  tensions, contradictions, gaps, and untested assumptions. Question the ideas
+  rather than affirming them. Push the author's thinking by raising counter-arguments
+  or missing perspectives. Do NOT include "PART 1" or similar labels.]
+
+  # [Essay Title]
+
+  ## Overview
+  [2 paragraphs capturing the essay's central argument and approach.
+  Must be specific enough to distinguish this essay from any other.]
+
+  ## [Actual Section Heading from Essay]
+  [2-4 sentence prose summary: what this section covers, its key arguments
+  or moves, and how it advances the essay's overall arc. Name specific
+  references, analogies, or rhetorical techniques used.]
+
+  ## [Actual Section Heading from Essay]
+  [... repeat for each major section, matching the essay's real structure]
+
+  ## Tone & Voice
+  [Describe the actual writing voice: conversational register, humor style,
+  intellectual posture. Must be specific to this author, not generic advice.]
+
+  ## Key Themes
+  - **[Theme]:** [how it specifically manifests in this essay]
+  - **[Theme]:** [how it specifically manifests in this essay]
+
+  [A brief reflective transition sentence, e.g., "A few directions worth exploring as you move forward:"]
+  - [Specific follow-up: angle to explore, section to strengthen, or alternative framing]
+  - [Another specific suggestion for THIS essay]
+  - [Optional: readiness check or next action]
+  ```
+  
+  # GUIDELINES
+  - Do NOT include "PART 1", "PART 2", "PART 3" or any similar labels. The response should flow naturally.
+  - Use second person throughout (you/your): "your essay argues" not "the essay argues", "your brainstorm" not "the brainstorm"
+  - Opening reflection: 2 short paragraphs that CHALLENGE the brainstorm. If the reflection agrees with, praises, or affirms the brainstorm, rewrite it to question and challenge instead. Replace affirming language ("compelling", "rich", "strong thread", "productive tension") with critical language ("tension between", "gap in", "assumes that", "but what about").
+  - Section headings should match or closely paraphrase the actual essay's headings
+  - Each section summary should be 2-4 sentences of prose (not bullets) covering key arguments, references, and rhetorical techniques
+  - Keep section summaries concise -- not exhaustive
+  - Next steps: begin with a reflective transition sentence, then actionable bullets specific to THIS essay
+  - Output ONLY the improved response (all three parts)
+
+  # OUTPUT
+  Return ONLY the full response text. No JSON, no markdown wrapper, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    essay_outline_quality_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - essay_outline_quality_score
+
+validations:
+  # Required section headers
+  - match: "\\n# [^#]"
+    type: regex
+    error: "Missing required level-1 header '# [Title]'"
+
+  - match: "## Overview"
+    type: regex
+    error: "Missing required '## Overview' section"
+
+  - match: "## Tone (& |&amp; )Voice"
+    type: regex
+    error: "Missing required '## Tone & Voice' section"
+
+  - match: "## Key Themes"
+    type: regex
+    error: "Missing required '## Key Themes' section"
