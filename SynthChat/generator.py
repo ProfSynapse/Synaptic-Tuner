@@ -162,7 +162,7 @@ class SynthChatGenerator:
                     self.logger.info(f"Generating {current}/{total}: {scenario_key}")
 
                 # Generate single example
-                result = self._generate_single(
+                result = self.generate_single(
                     scenario_key,
                     scenario,
                     max_iterations,
@@ -173,7 +173,7 @@ class SynthChatGenerator:
 
         return results
 
-    def _generate_single(
+    def generate_single(
         self,
         scenario_key: str,
         scenario: Dict,
