@@ -222,15 +222,17 @@ def animated_main_menu(
 
     def run_menu(screen):
         nonlocal selected_key
-        scene, menu_frame = _create_menu_scene(screen, options, title)
-        # screen.play() catches StopApplication internally and returns normally,
-        # so we capture selected_key after play returns, not in an except block
-        screen.play([scene], stop_on_resize=True)
-        selected_key = menu_frame.selected_key
+        while True:
+            try:
+                scene, menu_frame = _create_menu_scene(screen, options, title)
+                # screen.play() catches StopApplication internally and returns normally,
+                # so we capture selected_key after play returns, not in an except block
+                screen.play([scene], stop_on_resize=True)
+                selected_key = menu_frame.selected_key
+                break  # Normal completion (user made selection)
+            except ResizeScreenError:
+                pass  # Resize detected - loop back and recreate scene
 
-    try:
-        Screen.wrapper(run_menu)
-    except ResizeScreenError:
-        pass
+    Screen.wrapper(run_menu)
 
     return selected_key

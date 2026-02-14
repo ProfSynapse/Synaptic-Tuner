@@ -103,13 +103,18 @@ def play_logo_animation(duration_frames: int = 80, on_complete: Optional[Callabl
     from .scenes import create_logo_scene
 
     def play(screen):
-        scene = create_logo_scene(screen, duration_frames)
-        if scene:
-            screen.play([scene], stop_on_resize=True, repeat=False)
+        while True:
+            try:
+                scene = create_logo_scene(screen, duration_frames)
+                if scene:
+                    screen.play([scene], stop_on_resize=True, repeat=False)
+                break  # Normal completion
+            except ResizeScreenError:
+                pass  # Resize detected - loop back and recreate scene
 
     try:
         Screen.wrapper(play)
-    except (ResizeScreenError, StopApplication):
+    except StopApplication:
         pass
 
     if on_complete:
@@ -129,13 +134,18 @@ def play_training_start(duration_frames: int = 50):
     from .scenes import create_training_start_scene
 
     def play(screen):
-        scene = create_training_start_scene(screen, duration_frames)
-        if scene:
-            screen.play([scene], stop_on_resize=True, repeat=False)
+        while True:
+            try:
+                scene = create_training_start_scene(screen, duration_frames)
+                if scene:
+                    screen.play([scene], stop_on_resize=True, repeat=False)
+                break  # Normal completion
+            except ResizeScreenError:
+                pass  # Resize detected - loop back and recreate scene
 
     try:
         Screen.wrapper(play)
-    except (ResizeScreenError, StopApplication):
+    except StopApplication:
         pass
 
 
@@ -153,16 +163,21 @@ def play_training_complete(simple: bool = True, duration_frames: int = 80):
     from .scenes import create_simple_celebration_scene, create_celebration_scene
 
     def play(screen):
-        if simple:
-            scene = create_simple_celebration_scene(screen, duration_frames)
-        else:
-            scene = create_celebration_scene(screen, duration_frames)
-        if scene:
-            screen.play([scene], stop_on_resize=True, repeat=False)
+        while True:
+            try:
+                if simple:
+                    scene = create_simple_celebration_scene(screen, duration_frames)
+                else:
+                    scene = create_celebration_scene(screen, duration_frames)
+                if scene:
+                    screen.play([scene], stop_on_resize=True, repeat=False)
+                break  # Normal completion
+            except ResizeScreenError:
+                pass  # Resize detected - loop back and recreate scene
 
     try:
         Screen.wrapper(play)
-    except (ResizeScreenError, StopApplication):
+    except StopApplication:
         pass
 
 

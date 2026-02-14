@@ -146,11 +146,35 @@ def generate_mode(args):
 
     # Generate
     max_iterations = args.max_iterations or settings["improvement"]["max_iterations"]
-    num_workers = args.workers or 1
+    args.workers = max(1, args.workers)
+    num_workers = args.workers
     results = []
 
-    if docs:
-        # Docs-based generation: loop through each doc
+    if docs and num_workers > 1:
+        # Parallel docs-based generation with multiple workers
+        print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
+
+        # Build work items: one per (doc, repetition, scenario, count) combination
+        work_items = []
+        task_id = 0
+        for doc in docs:
+            for rep in range(args.per_doc):
+                for scenario_key, count in targets.items():
+                    scenario = generator.scenario_loader.get_scenario(scenario_key)
+                    if not scenario:
+                        print(f"Warning: Scenario not found: {scenario_key}")
+                        continue
+                    for _ in range(count):
+                        work_items.append((
+                            scenario_key, scenario, max_iterations,
+                            config_dir, scenarios_dir, rubrics_dir,
+                            settings, args.provider, args.model, doc, task_id
+                        ))
+                        task_id += 1
+
+        results.extend(_run_parallel_generation(work_items, num_workers))
+    elif docs:
+        # Sequential docs-based generation (single worker)
         total_docs = len(docs)
         for doc_idx, doc in enumerate(docs, 1):
             print(f"\n--- Document {doc_idx}/{total_docs}: {doc.path} ---")
@@ -170,7 +194,7 @@ def generate_mode(args):
 
         # Build work items
         work_items = []
-        worker_id = 0
+        task_id = 0
         for scenario_key, count in targets.items():
             scenario = generator.scenario_loader.get_scenario(scenario_key)
             if not scenario:
@@ -180,33 +204,11 @@ def generate_mode(args):
                 work_items.append((
                     scenario_key, scenario, max_iterations,
                     config_dir, scenarios_dir, rubrics_dir,
-                    settings, args.provider, args.model, None, worker_id
+                    settings, args.provider, args.model, None, task_id
                 ))
-                worker_id += 1
+                task_id += 1
 
-        total = len(work_items)
-        completed = 0
-        lock = threading.Lock()
-
-        def update_progress():
-            nonlocal completed
-            with lock:
-                completed += 1
-                print(f"\rProgress: {completed}/{total} ({completed/total*100:.1f}%)", end="", flush=True)
-
-        # Execute in parallel
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = {executor.submit(_generate_single_example, item): item for item in work_items}
-
-            for future in as_completed(futures):
-                result, error = future.result()
-                if error:
-                    print(f"\n{error}")
-                if result:
-                    results.append(result)
-                update_progress()
-
-        print()  # Newline after progress
+        results.extend(_run_parallel_generation(work_items, num_workers))
     else:
         # Standard sequential generation (no docs)
         results = generator.generate_batch(
@@ -453,6 +455,59 @@ def validate_mode(args):
         print(f"  python -m SynthChat.run improve --input {input_path} --rubrics {','.join(rubrics)}")
 
 
+def _run_parallel_generation(work_items: List, num_workers: int) -> List:
+    """
+    Execute work items in parallel using a thread pool.
+
+    Shared execution logic for both docs-based and non-docs parallel generation.
+    Handles progress tracking, error reporting, and graceful shutdown on interrupts.
+
+    Args:
+        work_items: List of tuples to pass to _generate_single_example
+        num_workers: Number of parallel worker threads
+
+    Returns:
+        List of GenerationResult objects (successful results only)
+    """
+    if not work_items:
+        print("No work items to process (check scenario names)")
+        return []
+
+    total = len(work_items)
+    completed = 0
+    lock = threading.Lock()
+    indexed_results = []  # List of (task_id, result) for ordering
+
+    def update_progress():
+        nonlocal completed
+        with lock:
+            completed += 1
+            pct = (completed / total * 100) if total > 0 else 0
+            print(f"\rProgress: {completed}/{total} ({pct:.1f}%)", end="", flush=True)
+
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(_generate_single_example, item): item for item in work_items}
+
+        try:
+            for future in as_completed(futures):
+                result, error, task_id = future.result()
+                if error:
+                    print(f"\n{error}")
+                if result:
+                    indexed_results.append((task_id, result))
+                update_progress()
+        except BaseException as e:
+            print(f"\nInterrupted: {e}. Shutting down workers...")
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+
+    print()  # Newline after progress
+
+    # Sort by task_id to preserve input document order
+    indexed_results.sort(key=lambda x: x[0])
+    return [result for _, result in indexed_results]
+
+
 def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir: Path,
                               settings: Dict, provider: str = None, model: str = None):
     """Create a new generator instance for a worker thread."""
@@ -481,9 +536,13 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
 
 
 def _generate_single_example(args_tuple):
-    """Worker function to generate a single example."""
+    """Worker function to generate a single example.
+
+    Returns:
+        Tuple of (result, error, task_id) where task_id preserves input ordering.
+    """
     (scenario_key, scenario, max_iterations, config_dir, scenarios_dir,
-     rubrics_dir, settings, provider, model, doc_context, worker_id) = args_tuple
+     rubrics_dir, settings, provider, model, doc_context, task_id) = args_tuple
 
     try:
         # Each worker creates its own generator (thread-safe LLM clients)
@@ -491,12 +550,12 @@ def _generate_single_example(args_tuple):
             config_dir, scenarios_dir, rubrics_dir, settings, provider, model
         )
 
-        result = generator._generate_single(
+        result = generator.generate_single(
             scenario_key, scenario, max_iterations, True, doc_context
         )
-        return result, None
+        return result, None, task_id
     except Exception as e:
-        return None, f"Worker {worker_id} error for {scenario_key}: {e}"
+        return None, f"Task {task_id} error for {scenario_key}: {e}", task_id
 
 
 def _generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> Path:
