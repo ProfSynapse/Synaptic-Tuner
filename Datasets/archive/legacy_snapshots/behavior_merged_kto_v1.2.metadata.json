@@ -1,0 +1,95 @@
+{
+  "created": "2025-11-25T12:56:51.261803",
+  "source": "behavior_datasets merge (includes response_patterns)",
+  "behaviors": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "workspace_awareness"
+  ],
+  "response_patterns": [
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text"
+  ],
+  "all_datasets": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "workspace_awareness",
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text"
+  ],
+  "behavior_stats": {
+    "context_continuity": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133
+    },
+    "context_efficiency": {
+      "total": 140,
+      "positive": 70,
+      "negative": 70
+    },
+    "error_recovery": {
+      "total": 261,
+      "positive": 178,
+      "negative": 83
+    },
+    "execute_prompt_usage": {
+      "total": 140,
+      "positive": 90,
+      "negative": 50
+    },
+    "intellectual_humility": {
+      "total": 258,
+      "positive": 150,
+      "negative": 108
+    },
+    "strategic_tool_selection": {
+      "total": 259,
+      "positive": 150,
+      "negative": 109
+    },
+    "verification_before_action": {
+      "total": 254,
+      "positive": 145,
+      "negative": 109
+    },
+    "workspace_awareness": {
+      "total": 260,
+      "positive": 155,
+      "negative": 105
+    },
+    "response_patterns/text_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75
+    },
+    "response_patterns/tool_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75
+    },
+    "response_patterns/tool_text": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75
+    }
+  },
+  "total_examples": 2288,
+  "positive_examples": 1296,
+  "negative_examples": 992,
+  "interleaved": true,
+  "consecutive_same_labels": 303,
+  "format": "KTO-compatible ChatML with interleaved labels"
+}

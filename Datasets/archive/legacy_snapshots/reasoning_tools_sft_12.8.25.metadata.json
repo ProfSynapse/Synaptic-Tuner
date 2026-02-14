@@ -1,0 +1,50 @@
+{
+  "created": "2025-12-08T14:50:00.593397",
+  "version": "1.5",
+  "source_files": [
+    "thinking/agentManager/tools_v1.5.jsonl",
+    "thinking/contentManager/tools_v1.5.jsonl",
+    "thinking/memoryManager/tools_v1.5.1.jsonl",
+    "thinking/vaultLibrarian/tools_v1.5.jsonl",
+    "thinking/vaultManager/tools_v1.5.jsonl"
+  ],
+  "total_examples": 4993,
+  "tool_call_examples": 4993,
+  "text_only_examples": 0,
+  "text_only_ratio": "0.0%",
+  "per_manager": {
+    "agentManager": {
+      "total": 710,
+      "tool_calls": 710,
+      "text_only": 0
+    },
+    "contentManager": {
+      "total": 1138,
+      "tool_calls": 1138,
+      "text_only": 0
+    },
+    "memoryManager": {
+      "total": 1223,
+      "tool_calls": 1223,
+      "text_only": 0
+    },
+    "vaultLibrarian": {
+      "total": 791,
+      "tool_calls": 791,
+      "text_only": 0
+    },
+    "vaultManager": {
+      "total": 1131,
+      "tool_calls": 1131,
+      "text_only": 0
+    }
+  },
+  "features": [
+    "Flattened tool call arguments (no nested context)",
+    "Thinking blocks in assistant messages",
+    "System prompts with <session_context>",
+    "System prompts with <available_workspaces>"
+  ],
+  "format": "OpenAI tool_calls format with system message and thinking blocks",
+  "notes": "Combined from thinking/ subdirectories"
+}

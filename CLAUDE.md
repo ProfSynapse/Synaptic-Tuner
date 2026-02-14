@@ -414,7 +414,7 @@ Quick reference for Claude Code when working in this repository.
 ## Important Rules
 
 - **Never save output files to /tmp** - Keep all generated files within the repository (e.g., `docs/`, `Datasets/`, or create a `scratch/` folder)
-- Test outputs should go to `docs/test_*.jsonl` or similar
+- Test outputs should go to `scratch/fixtures/synthchat/` (or another `scratch/` subfolder)
 - **Be greedy to stop on errors** - When testing, monitor output and kill immediately if something looks wrong. Fix and retest quickly rather than waiting for long runs to complete. Early exit = faster iteration.
 
 ## Repository Purpose

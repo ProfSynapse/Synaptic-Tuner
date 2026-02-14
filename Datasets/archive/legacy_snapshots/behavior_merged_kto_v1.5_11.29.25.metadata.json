@@ -1,0 +1,119 @@
+{
+  "created": "2025-11-29T09:15:44.117211",
+  "source": "behavior_datasets merge v1.5 11.29.25",
+  "behaviors_v1_4": [
+    "error_recovery",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action"
+  ],
+  "behaviors_v1_3": [
+    "context_continuity",
+    "context_efficiency",
+    "execute_prompt_usage",
+    "workspace_awareness"
+  ],
+  "response_patterns": [
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text"
+  ],
+  "ask_first": [
+    "ask_first"
+  ],
+  "all_datasets": [
+    "error_recovery",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "context_continuity",
+    "context_efficiency",
+    "execute_prompt_usage",
+    "workspace_awareness",
+    "response_patterns/text_only",
+    "response_patterns/tool_only",
+    "response_patterns/tool_text",
+    "ask_first"
+  ],
+  "behavior_stats": {
+    "error_recovery": {
+      "total": 497,
+      "positive": 296,
+      "negative": 201,
+      "version": "v1.4"
+    },
+    "intellectual_humility": {
+      "total": 608,
+      "positive": 325,
+      "negative": 283,
+      "version": "v1.4"
+    },
+    "strategic_tool_selection": {
+      "total": 493,
+      "positive": 267,
+      "negative": 226,
+      "version": "v1.4"
+    },
+    "verification_before_action": {
+      "total": 592,
+      "positive": 314,
+      "negative": 278,
+      "version": "v1.4"
+    },
+    "context_continuity": {
+      "total": 502,
+      "positive": 251,
+      "negative": 251,
+      "version": "v1.3"
+    },
+    "context_efficiency": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133,
+      "version": "v1.3"
+    },
+    "execute_prompt_usage": {
+      "total": 266,
+      "positive": 153,
+      "negative": 113,
+      "version": "v1.3"
+    },
+    "workspace_awareness": {
+      "total": 494,
+      "positive": 272,
+      "negative": 222,
+      "version": "v1.3"
+    },
+    "response_patterns/text_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.2"
+    },
+    "response_patterns/tool_only": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "response_patterns/tool_text": {
+      "total": 150,
+      "positive": 75,
+      "negative": 75,
+      "version": "v1.1"
+    },
+    "ask_first": {
+      "total": 100,
+      "positive": 50,
+      "negative": 50,
+      "version": "v1.0"
+    }
+  },
+  "total_examples": 4268,
+  "positive_examples": 2286,
+  "negative_examples": 1982,
+  "interleaved": true,
+  "consecutive_same_labels": 303,
+  "format": "KTO-compatible ChatML with interleaved labels",
+  "notes": "v1.4 fixes: destructive+ambiguous requests now use TEXT clarification instead of TOOL"
+}
