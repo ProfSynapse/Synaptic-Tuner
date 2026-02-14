@@ -1,0 +1,62 @@
+{
+  "created": "2025-11-24T08:34:25.761313",
+  "source": "behavior_datasets merge",
+  "behaviors": [
+    "context_continuity",
+    "context_efficiency",
+    "error_recovery",
+    "execute_prompt_usage",
+    "intellectual_humility",
+    "strategic_tool_selection",
+    "verification_before_action",
+    "workspace_awareness"
+  ],
+  "behavior_stats": {
+    "context_continuity": {
+      "total": 266,
+      "positive": 133,
+      "negative": 133
+    },
+    "context_efficiency": {
+      "total": 140,
+      "positive": 70,
+      "negative": 70
+    },
+    "error_recovery": {
+      "total": 262,
+      "positive": 179,
+      "negative": 83
+    },
+    "execute_prompt_usage": {
+      "total": 140,
+      "positive": 90,
+      "negative": 50
+    },
+    "intellectual_humility": {
+      "total": 260,
+      "positive": 152,
+      "negative": 108
+    },
+    "strategic_tool_selection": {
+      "total": 262,
+      "positive": 153,
+      "negative": 109
+    },
+    "verification_before_action": {
+      "total": 262,
+      "positive": 153,
+      "negative": 109
+    },
+    "workspace_awareness": {
+      "total": 260,
+      "positive": 155,
+      "negative": 105
+    }
+  },
+  "total_examples": 1852,
+  "positive_examples": 1085,
+  "negative_examples": 767,
+  "interleaved": true,
+  "consecutive_same_labels": 317,
+  "format": "KTO-compatible ChatML with interleaved labels"
+}

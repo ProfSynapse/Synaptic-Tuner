@@ -74,7 +74,7 @@ unsloth_compiled_cache/
 
 # Claude export data (large files)
 data-*/
-!tool_schemas.json
+!tool-schemas.json
 !package.json
 
 # Generated analysis files
@@ -97,7 +97,7 @@ Datasets/quality_review/batch_*_summary.md
 Datasets/quality_review/score_batch*.py
 
 # Archive directory (legacy files, not actively maintained)
-archive/
+/archive/
 
 # Backup files
 *.backup
@@ -107,8 +107,23 @@ nexus-tools-sft14-kto3
 nexus-tools_v0.1.10
 llama.cpp/
 **/llama.cpp/
-docs/
-interactions/
+
+# SynthChat generated artifacts
+SynthChat/interactions/
+SynthChat/output/
+
+# Local training outputs
 webllm_output/
 sft_output_mac/
-grpo_output_rtx3090/
+grpo_output_rtx3090/.worktrees/
+
+# Local scratch workspace
+scratch/
+
+# Local git worktree metadata
+/.worktrees/
+
+Meditations on Alignment/
+
+Datasets/synthchat/
+Datasets/essay_datasets/

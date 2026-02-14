@@ -1,0 +1,139 @@
+# SynthChat/rubrics/essay_brainstorm_quality.yaml
+# Evaluates brainstorm/thoughts quality for essay_outline scenario (user turn).
+# The brainstorm should read like authentic pre-writing notes: messy, specific
+# to the source essay, and full of half-formed connections.
+# Used by: SynthChat/scenarios/essay_outline.yaml (user scope)
+
+name: Essay Brainstorm Quality
+description: Evaluates authenticity and specificity of brainstorm output for essay outline generation
+scope: user
+pass_threshold: 0.7
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating a brainstorm text that simulates an essay author's pre-writing
+  thought process. This brainstorm was generated from a source essay and should feel
+  like authentic napkin scrawls, voice memos, or 2am notes-to-self.
+
+  **Brainstorm Text:**
+  ```
+  {current_content}
+  ```
+
+  **Structured Outline (for reference -- shows what the essay covers):**
+  ```
+  {assistant_response}
+  ```
+
+  # EVALUATION CRITERIA
+
+  ## 1. FORMAT: Stream-of-Consciousness (35 points)
+
+  The brainstorm must NOT look organized. It should read like messy thinking.
+
+  - No headers (# or ##) or section labels: 10 pts
+  - No bullet points or numbered lists: 10 pts
+  - No structured formatting (tables, bold section titles, etc.): 5 pts
+  - Uses sentence fragments, run-ons, or incomplete thoughts: 5 pts
+  - Reads like spoken thought or scribbled notes, not polished prose: 5 pts
+
+  **Automatic cap at 0.5 if any headers, bullet lists, or numbered lists are present.**
+
+  ## 2. SPECIFICITY: Essay Content References (35 points)
+
+  The brainstorm should reference specific content from the source essay, not
+  generic brainstorming language. Even a short brainstorm must be grounded.
+
+  - References at least 1-2 specific ideas, arguments, or claims from the essay: 15 pts
+  - Mentions at least one specific analogy, anecdote, person, or concept from the essay: 10 pts
+  - Ideas are framed as discoveries, not summaries ("wait, this connects to...", "what if..."): 10 pts
+
+  **Score 0.0 if brainstorm is entirely generic and could apply to any essay.**
+
+  ## 3. AUTHENTICITY: Thinking-in-Progress (30 points)
+
+  The brainstorm should show genuine intellectual messiness. Short is fine --
+  a few vivid fragments beat long polished paragraphs.
+
+  - Has half-formed connections or questions to self: 10 pts
+  - Shows intellectual excitement or uncertainty (not neutral tone): 10 pts
+  - Contains at least one false start, tangent, or abandoned direction: 10 pts
+
+  # SCORING
+
+  Calculate total points (max 100) and convert to 0.0-1.0 scale:
+  - **0.9-1.0**: Genuinely messy, specific to the essay, reads like authentic pre-writing
+  - **0.7-0.89**: Mostly good but slightly too polished or generic in places
+  - **0.5-0.69**: Too structured, or references are generic rather than essay-specific
+  - **0.3-0.49**: Organized like an outline, or completely generic brainstorming
+  - **0.0-0.29**: Structured format (headers/bullets) or no connection to essay content
+
+  # OUTPUT
+  Return JSON: `{{"essay_brainstorm_quality_score": 0.0-1.0}}`
+
+improver_prompt: |
+  # CONTEXT
+  You are improving a brainstorm text to make it feel like authentic pre-writing notes.
+
+  **Current Brainstorm:**
+  ```
+  {current_content}
+  ```
+
+  **Structured Outline (shows what the essay covers):**
+  ```
+  {assistant_response}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # MISSION
+  Rewrite the brainstorm so it reads like genuine napkin scrawls or voice memo
+  transcription. The result should feel like a writer dumping ideas before sitting
+  down to write.
+
+  # INSTRUCTIONS
+
+  1. **REMOVE ALL STRUCTURE**
+     - Strip headers, bullet points, numbered lists, bold labels
+     - Convert organized sections into stream-of-consciousness flow
+     - Use paragraph breaks only where a writer would naturally pause
+
+  2. **ADD SPECIFICITY**
+     - Reference concrete ideas, arguments, and examples from the outline
+     - Name specific people, concepts, works, or events
+     - Frame ideas as discoveries, not summaries ("oh wait, this is like..." not "the essay discusses...")
+
+  3. **ADD MESSINESS**
+     - Include at least one false start ("no wait, that's not quite right...")
+     - Add half-formed connections ("this reminds me of... hmm")
+     - Throw in questions to self ("why does that matter though?")
+     - Include at least one tangent or unexpected association
+     - Use sentence fragments, ellipses, dashes for interrupted thoughts
+
+  4. **MAINTAIN AUTHENTICITY**
+     - Write like someone excited about ideas, not someone summarizing
+     - Show uncertainty alongside conviction
+     - Vary sentence length wildly (3 words to 40 words)
+     - Let thoughts interrupt other thoughts
+
+  # GUIDELINES
+  - The brainstorm should be 75-200 words — short and fragmentary, like a napkin scrawl
+  - NO preamble, NO meta-commentary
+  - Output ONLY the improved brainstorm text
+
+  # OUTPUT
+  Return ONLY the brainstorm text. No JSON, no markdown wrapper, no explanation.
+
+output_schema:
+  type: object
+  properties:
+    essay_brainstorm_quality_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - essay_brainstorm_quality_score
