@@ -1184,3 +1184,12 @@ touch Datasets/test_write && rm Datasets/test_write
 ---
 
 **Key Principle:** Use the bash scripts (`./run.sh`, `setup.sh`, etc.) rather than direct Python when possible - they handle environment setup, dependency checks, and provide better UX.
+
+### [2026-02-14] SynthChat Parallel Docs Workers (PR #55)
+**Feature**: `--workers N` now parallelizes docs-based generation (previously only worked for non-docs scenarios).
+**Architecture**: Extracted `_run_parallel_generation()` helper - eliminates ~60 lines of duplication between docs/non-docs paths. Each worker gets instance isolation (fresh generator/engine/LLM clients). Results sorted by `task_id` to preserve document order.
+**API Change**: `SynthChatGenerator.generate_single()` is now public (was `_generate_single()`).
+**Gotcha**: Input validation clamps `args.workers = max(1, args.workers)` to prevent ValueError from `--workers 0`.
+**Files**: `SynthChat/run.py`, `SynthChat/generator.py`
+
+---
