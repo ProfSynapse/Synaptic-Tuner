@@ -179,21 +179,25 @@ def generate_mode(args):
             nonlocal completed
             with lock:
                 completed += 1
-                print(f"\rProgress: {completed}/{total} ({completed/total*100:.1f}%)", end="", flush=True)
+                pct = (completed / total * 100) if total > 0 else 0
+                print(f"\rProgress: {completed}/{total} ({pct:.1f}%)", end="", flush=True)
 
         # Execute in parallel
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = {executor.submit(_generate_single_example, item): item for item in work_items}
+        if total > 0:
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = {executor.submit(_generate_single_example, item): item for item in work_items}
 
-            for future in as_completed(futures):
-                result, error = future.result()
-                if error:
-                    print(f"\n{error}")
-                if result:
-                    results.append(result)
-                update_progress()
+                for future in as_completed(futures):
+                    result, error = future.result()
+                    if error:
+                        print(f"\n{error}")
+                    if result:
+                        results.append(result)
+                    update_progress()
 
-        print()  # Newline after progress
+            print()  # Newline after progress
+        else:
+            print("No work items to process (check scenario names)")
     elif docs:
         # Sequential docs-based generation (single worker)
         total_docs = len(docs)
@@ -237,21 +241,25 @@ def generate_mode(args):
             nonlocal completed
             with lock:
                 completed += 1
-                print(f"\rProgress: {completed}/{total} ({completed/total*100:.1f}%)", end="", flush=True)
+                pct = (completed / total * 100) if total > 0 else 0
+                print(f"\rProgress: {completed}/{total} ({pct:.1f}%)", end="", flush=True)
 
         # Execute in parallel
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = {executor.submit(_generate_single_example, item): item for item in work_items}
+        if total > 0:
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = {executor.submit(_generate_single_example, item): item for item in work_items}
 
-            for future in as_completed(futures):
-                result, error = future.result()
-                if error:
-                    print(f"\n{error}")
-                if result:
-                    results.append(result)
-                update_progress()
+                for future in as_completed(futures):
+                    result, error = future.result()
+                    if error:
+                        print(f"\n{error}")
+                    if result:
+                        results.append(result)
+                    update_progress()
 
-        print()  # Newline after progress
+            print()  # Newline after progress
+        else:
+            print("No work items to process (check scenario names)")
     else:
         # Standard sequential generation (no docs)
         results = generator.generate_batch(
