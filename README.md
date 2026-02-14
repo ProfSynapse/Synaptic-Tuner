@@ -27,15 +27,15 @@ Fine-tuning a local LLM is a multi-step pipeline that most people never finish. 
 
 ## The Solution
 
-Synaptic Tuner handles the full pipeline in one repo, and it's designed to be **operated by AI agents**. Instead of memorizing CLI flags and YAML schemas, you tell [Claude Code](https://docs.anthropic.com/en/docs/claude-code) what you want in plain English. Built-in skills give Claude deep knowledge of every component — it generates data, trains models, runs evaluations, and deploys, enforcing best practices at each step.
+Synaptic Tuner handles the full pipeline in one repo, and it's designed to be **operated by AI coding agents**. Instead of memorizing CLI flags and YAML schemas, you describe what you want in plain English. Built-in skills give your agent deep knowledge of every component — it generates data, trains models, runs evaluations, and deploys, enforcing best practices at each step.
 
 **Agentic-first means:**
-- The repo ships with 4 Claude Code skills covering the entire workflow
-- Skills use progressive disclosure — Claude loads only what it needs, when it needs it
+- The repo ships with 4 agent skills covering the entire workflow
+- Skills use progressive disclosure — your agent loads only what it needs, when it needs it
 - Best practices are encoded as protocols (dry-run before generation, interleave KTO datasets, etc.)
-- You describe intent, Claude handles execution — *"train a 7B model on my dataset"* just works
+- You describe intent, your agent handles execution — *"train a 7B model on my dataset"* just works
 
-You don't need Claude Code to use this — there's a full interactive CLI and Colab notebooks too. But the agentic workflow is where it shines.
+Skills are written as Markdown — they work with any AI coding tool that supports project-level instructions. Claude Code is the reference integration, but the knowledge transfers to Cursor, Windsurf, Cline, Roo Code, and others. There's also a full interactive CLI and Colab notebooks if you prefer working without an agent.
 
 ## Quick Start
 
@@ -63,6 +63,39 @@ This repo is built to be operated by Claude Code. It has skills covering the ent
 | Full pipeline | *"Train, evaluate, and upload if it looks good"* | All skills |
 
 Skills use progressive disclosure — lean SKILL.md files auto-load, detailed reference docs in `reference/` load on demand. Best practices are enforced automatically (dry-run before generation, interleave KTO datasets, use merged_16bit for GGUF, etc.).
+
+## Using with Other AI Coding Tools
+
+The skills in `.claude/skills/` are plain Markdown — any AI coding tool that supports project-level instructions can use them. Copy the skill files to your platform's rules directory:
+
+| Platform | Copy skills to | Format |
+|----------|---------------|--------|
+| **Cursor** | `.cursor/rules/` | Rename `.md` → `.mdc` |
+| **Windsurf** | `.windsurf/rules/` | Markdown as-is |
+| **Cline** | `.clinerules/` | Markdown as-is |
+| **Roo Code** | `.roo/rules/` | Markdown as-is |
+| **Amazon Q** | `.amazonq/rules/` | Markdown as-is |
+| **JetBrains AI** | `.aiassistant/rules/` | Markdown as-is |
+| **Augment** | `.augment/rules/` | Markdown as-is |
+| **Kilo Code** | `.kilocode/rules/` | Markdown as-is |
+| **Tabnine** | `.tabnine/guidelines/` | Markdown as-is |
+| **Zed** | `.rules` or project root | Markdown as-is |
+| **GitHub Copilot** | `.github/copilot-instructions.md` | Merge into single file |
+| **Aider** | `CONVENTIONS.md` | Merge into single file |
+
+**Quick setup:**
+```bash
+# Example: Cursor
+cp -r .claude/skills/ .cursor/rules/
+
+# Example: Windsurf
+cp -r .claude/skills/ .windsurf/rules/
+
+# Example: Roo Code
+cp -r .claude/skills/ .roo/rules/
+```
+
+Most platforms will auto-discover Markdown files in their rules directory. For single-file platforms (Copilot, Aider), concatenate the SKILL.md files into one document.
 
 ## The Pipeline
 
@@ -112,7 +145,7 @@ Synaptic-Tuner/
 ├── Datasets/               # Training data (JSONL)
 ├── shared/                 # Shared infra (LLM client, upload, validation, UI)
 ├── tuner/                  # Unified CLI (used by run.sh)
-├── .claude/skills/         # Claude Code skills (4 skills, 22 reference docs)
+├── .claude/skills/         # Agent skills (4 skills, 22 reference docs — works with any AI coding tool)
 └── CLAUDE.md               # Project-wide dev guide
 ```
 
