@@ -66,36 +66,22 @@ Skills use progressive disclosure — lean SKILL.md files auto-load, detailed re
 
 ## Using with Other AI Coding Tools
 
-The skills in `.claude/skills/` are plain Markdown — any AI coding tool that supports project-level instructions can use them. Copy the skill files to your platform's rules directory:
+The skills in `.claude/skills/` are plain Markdown — they work with any AI coding tool. Most platforms use `AGENTS.md` as their entrypoint (Claude Code uses `CLAUDE.md`). Copy the skill files to your platform's rules directory, or use the universal `.skills/` folder at your project root:
 
-| Platform | Copy skills to | Format |
-|----------|---------------|--------|
-| **Cursor** | `.cursor/rules/` | Rename `.md` → `.mdc` |
-| **Windsurf** | `.windsurf/rules/` | Markdown as-is |
-| **Cline** | `.clinerules/` | Markdown as-is |
-| **Roo Code** | `.roo/rules/` | Markdown as-is |
-| **Amazon Q** | `.amazonq/rules/` | Markdown as-is |
-| **JetBrains AI** | `.aiassistant/rules/` | Markdown as-is |
-| **Augment** | `.augment/rules/` | Markdown as-is |
-| **Kilo Code** | `.kilocode/rules/` | Markdown as-is |
-| **Tabnine** | `.tabnine/guidelines/` | Markdown as-is |
-| **Zed** | `.rules` or project root | Markdown as-is |
-| **GitHub Copilot** | `.github/copilot-instructions.md` | Merge into single file |
-| **Aider** | `CONVENTIONS.md` | Merge into single file |
+| Platform | Where to put skills |
+|----------|-------------------|
+| **Cursor** | `.cursor/rules/` (rename `.md` → `.mdc`) |
+| **Windsurf** | `.windsurf/rules/` |
+| **Cline** | `.clinerules/` |
+| **Roo Code** | `.roo/rules/` |
+| **Amazon Q** | `.amazonq/rules/` |
+| **JetBrains AI** | `.aiassistant/rules/` |
+| **Augment** | `.augment/rules/` |
+| **Kilo Code** | `.kilocode/rules/` |
+| **Tabnine** | `.tabnine/guidelines/` |
+| **Zed, Aider, GitHub Copilot, others** | `.skills/` at project root |
 
-**Quick setup:**
-```bash
-# Example: Cursor
-cp -r .claude/skills/ .cursor/rules/
-
-# Example: Windsurf
-cp -r .claude/skills/ .windsurf/rules/
-
-# Example: Roo Code
-cp -r .claude/skills/ .roo/rules/
-```
-
-Most platforms will auto-discover Markdown files in their rules directory. For single-file platforms (Copilot, Aider), concatenate the SKILL.md files into one document.
+Most platforms auto-discover Markdown in their rules directory. For tools that use `AGENTS.md`, point it at the skills folder or reference the skill files directly.
 
 ## The Pipeline
 
