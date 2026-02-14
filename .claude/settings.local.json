@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(wc:*)",
       "Skill(PACT:comPACT)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git rm:*)"
     ]
   }
 }
