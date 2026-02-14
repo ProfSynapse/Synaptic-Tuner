@@ -14,7 +14,7 @@ import argparse
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -24,6 +24,76 @@ from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocsLoader, DocFile
 from .engine import ImprovementEngine
 from .generator import SynthChatGenerator, ScenarioLoader
+
+
+class StreamingResultWriter:
+    """Writes generation results to JSONL incrementally as they complete.
+
+    Location: SynthChat/run.py
+    Purpose: Prevents data loss during long generation runs by streaming each
+    result to disk immediately instead of accumulating in memory.
+    Thread-safe for use with parallel workers via threading.Lock.
+
+    Usage:
+        with StreamingResultWriter(output_file, settings) as writer:
+            writer.write(result)  # Called after each example completes
+    """
+
+    def __init__(self, output_file: Path, settings: Dict):
+        self._output_file = output_file
+        self._settings = settings
+        self._lock = threading.Lock()
+        self._file = None
+        self._count = 0
+
+    def __enter__(self):
+        self._output_file.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self._output_file, "w")
+
+        # Write metadata header as placeholder (will be updated at close)
+        if self._settings["output"]["include_metadata"]:
+            metadata = {
+                "_meta": {
+                    "synthchat_version": "1.0.0",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "streaming": True
+                }
+            }
+            self._file.write(json.dumps(metadata) + "\n")
+            self._file.flush()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._file and not self._file.closed:
+            self._file.flush()
+            self._file.close()
+        return False
+
+    def write(self, result) -> bool:
+        """Write a single GenerationResult to the output file.
+
+        Args:
+            result: GenerationResult with .example dict to serialize.
+
+        Returns:
+            True if write succeeded, False on I/O error.
+        """
+        try:
+            line = json.dumps(result.example) + "\n"
+            with self._lock:
+                self._file.write(line)
+                self._file.flush()
+                self._count += 1
+            return True
+        except (IOError, OSError) as e:
+            print(f"\nError writing result to {self._output_file}: {e}")
+            return False
+
+    @property
+    def count(self) -> int:
+        """Number of results successfully written."""
+        return self._count
 
 
 def load_settings(config_dir: Path) -> Dict:
@@ -150,76 +220,83 @@ def generate_mode(args):
     num_workers = args.workers
     results = []
 
-    if docs and num_workers > 1:
-        # Parallel docs-based generation with multiple workers
-        print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
-
-        # Build work items: one per (doc, repetition, scenario, count) combination
-        work_items = []
-        task_id = 0
-        for doc in docs:
-            for rep in range(args.per_doc):
-                for scenario_key, count in targets.items():
-                    scenario = generator.scenario_loader.get_scenario(scenario_key)
-                    if not scenario:
-                        print(f"Warning: Scenario not found: {scenario_key}")
-                        continue
-                    for _ in range(count):
-                        work_items.append((
-                            scenario_key, scenario, max_iterations,
-                            config_dir, scenarios_dir, rubrics_dir,
-                            settings, args.provider, args.model, doc, task_id
-                        ))
-                        task_id += 1
-
-        results.extend(_run_parallel_generation(work_items, num_workers))
-    elif docs:
-        # Sequential docs-based generation (single worker)
-        total_docs = len(docs)
-        for doc_idx, doc in enumerate(docs, 1):
-            print(f"\n--- Document {doc_idx}/{total_docs}: {doc.path} ---")
-            for rep in range(args.per_doc):
-                if args.per_doc > 1:
-                    print(f"  Repetition {rep + 1}/{args.per_doc}")
-                batch_results = generator.generate_batch(
-                    targets=targets,
-                    max_iterations=max_iterations,
-                    randomize_params=True,
-                    doc_context=doc
-                )
-                results.extend(batch_results)
-    elif num_workers > 1:
-        # Parallel generation with multiple workers
-        print(f"Using {num_workers} parallel workers\n")
-
-        # Build work items
-        work_items = []
-        task_id = 0
-        for scenario_key, count in targets.items():
-            scenario = generator.scenario_loader.get_scenario(scenario_key)
-            if not scenario:
-                print(f"Warning: Scenario not found: {scenario_key}")
-                continue
-            for _ in range(count):
-                work_items.append((
-                    scenario_key, scenario, max_iterations,
-                    config_dir, scenarios_dir, rubrics_dir,
-                    settings, args.provider, args.model, None, task_id
-                ))
-                task_id += 1
-
-        results.extend(_run_parallel_generation(work_items, num_workers))
-    else:
-        # Standard sequential generation (no docs)
-        results = generator.generate_batch(
-            targets=targets,
-            max_iterations=max_iterations,
-            randomize_params=True
-        )
-
-    # Save results
+    # Determine output path early so we can stream results to disk
     output_file = Path(args.output) if args.output else _generate_output_path(settings)
-    _save_results(results, output_file, settings)
+
+    with StreamingResultWriter(output_file, settings) as writer:
+        if docs and num_workers > 1:
+            # Parallel docs-based generation with multiple workers
+            print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
+
+            # Build work items: one per (doc, repetition, scenario, count) combination
+            work_items = []
+            task_id = 0
+            for doc in docs:
+                for rep in range(args.per_doc):
+                    for scenario_key, count in targets.items():
+                        scenario = generator.scenario_loader.get_scenario(scenario_key)
+                        if not scenario:
+                            print(f"Warning: Scenario not found: {scenario_key}")
+                            continue
+                        for _ in range(count):
+                            work_items.append((
+                                scenario_key, scenario, max_iterations,
+                                config_dir, scenarios_dir, rubrics_dir,
+                                settings, args.provider, args.model, doc, task_id
+                            ))
+                            task_id += 1
+
+            results.extend(_run_parallel_generation(work_items, num_workers, writer))
+        elif docs:
+            # Sequential docs-based generation (single worker)
+            total_docs = len(docs)
+            for doc_idx, doc in enumerate(docs, 1):
+                print(f"\n--- Document {doc_idx}/{total_docs}: {doc.path} ---")
+                for rep in range(args.per_doc):
+                    if args.per_doc > 1:
+                        print(f"  Repetition {rep + 1}/{args.per_doc}")
+                    batch_results = generator.generate_batch(
+                        targets=targets,
+                        max_iterations=max_iterations,
+                        randomize_params=True,
+                        doc_context=doc
+                    )
+                    for result in batch_results:
+                        writer.write(result)
+                    results.extend(batch_results)
+        elif num_workers > 1:
+            # Parallel generation with multiple workers (no docs)
+            print(f"Using {num_workers} parallel workers\n")
+
+            # Build work items
+            work_items = []
+            task_id = 0
+            for scenario_key, count in targets.items():
+                scenario = generator.scenario_loader.get_scenario(scenario_key)
+                if not scenario:
+                    print(f"Warning: Scenario not found: {scenario_key}")
+                    continue
+                for _ in range(count):
+                    work_items.append((
+                        scenario_key, scenario, max_iterations,
+                        config_dir, scenarios_dir, rubrics_dir,
+                        settings, args.provider, args.model, None, task_id
+                    ))
+                    task_id += 1
+
+            results.extend(_run_parallel_generation(work_items, num_workers, writer))
+        else:
+            # Standard sequential generation (no docs)
+            results = generator.generate_batch(
+                targets=targets,
+                max_iterations=max_iterations,
+                randomize_params=True
+            )
+            # Stream sequential results that were accumulated by generate_batch
+            for result in results:
+                writer.write(result)
+
+        print(f"\nStreamed {writer.count} examples to {output_file}")
 
     # Print summary
     _print_summary(results, output_file)
@@ -455,19 +532,23 @@ def validate_mode(args):
         print(f"  python -m SynthChat.run improve --input {input_path} --rubrics {','.join(rubrics)}")
 
 
-def _run_parallel_generation(work_items: List, num_workers: int) -> List:
+def _run_parallel_generation(work_items: List, num_workers: int,
+                             writer=None) -> List:
     """
     Execute work items in parallel using a thread pool.
 
     Shared execution logic for both docs-based and non-docs parallel generation.
-    Handles progress tracking, error reporting, and graceful shutdown on interrupts.
+    Handles progress tracking, error reporting, streaming to disk, and graceful
+    shutdown on interrupts.
 
     Args:
         work_items: List of tuples to pass to _generate_single_example
         num_workers: Number of parallel worker threads
+        writer: Optional StreamingResultWriter to stream results as they complete
 
     Returns:
-        List of GenerationResult objects (successful results only)
+        List of GenerationResult objects (successful results only),
+        sorted by task_id to preserve input ordering.
     """
     if not work_items:
         print("No work items to process (check scenario names)")
@@ -494,6 +575,8 @@ def _run_parallel_generation(work_items: List, num_workers: int) -> List:
                 if error:
                     print(f"\n{error}")
                 if result:
+                    if writer:
+                        writer.write(result)
                     indexed_results.append((task_id, result))
                 update_progress()
         except BaseException as e:
