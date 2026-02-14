@@ -64,6 +64,20 @@ tests:
     expected_context:
       session_id: session_abc123
       workspace_id: ws_xyz789
+
+    # Environment runtime validation (optional, used with --env-backend)
+    environment:
+      allowed_tools: ["storageManager_move"]   # Optional allowlist
+      max_steps: 3                             # Optional max executed tool calls
+      require_expected_tools: true             # Optional: require expected_tools in runtime
+      execution:                               # Optional per-test execution overrides
+        strict_schema: true
+        default_action: simulate
+        tool_action_hints:
+          storageManager_move: move
+      assertions:
+        - type: path_exists
+          path: "Projects/Atlas/meeting-notes.md"
 ```
 
 ---
@@ -121,6 +135,22 @@ tests:
 | `workspace_id` | Expected workspaceId in tool calls |
 
 Use with `--validate-context` flag to verify IDs match.
+
+### Environment Runtime Validation
+
+Use with `--env-backend local` or `--env-backend e2b`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `allowed_tools` | list | Runtime allowlist for tool names |
+| `max_steps` | int | Max number of executed tool calls |
+| `require_expected_tools` | bool | Require `expected_tools` to execute in runtime |
+| `assertions` | list | Post-execution checks (`path_exists`, `path_not_exists`, `file_contains`, `file_not_contains`, `dir_contains`) |
+| `execution.strict_schema` | bool | Fail if tool not present in configured tool schema |
+| `execution.default_action` | string | Fallback action (`simulate`, `read`, `write`, etc.) |
+| `execution.tool_action_hints` | map | Explicit tool→action mapping for your tool names |
+| `execution.key_hints` | map | Per-test argument-key aliases |
+| `execution.verb_rules` | map | Per-test verb token→action rules |
 
 ---
 
@@ -231,3 +261,4 @@ Tests whether the model calls the correct tool:
 - Tag tests consistently — enables targeted evaluation runs
 - Write both PASS and intentional FAIL scenarios for coverage
 - Use `--validate-context` during development to catch ID mismatches
+- For custom toolsets, pair scenario `environment.execution.*` with `--env-tool-schema` and `--env-exec-config`

@@ -1,0 +1,82 @@
+# Environment execution rules for runtime-backed validation.
+#
+# This file controls how tool calls are interpreted inside environment runtimes.
+# Keep this config-driven and extend here instead of hardcoding logic in Python.
+#
+# - strict_schema: fail execution when tool name is not defined in tool_schema.yaml
+# - default_action: fallback behavior when no rule matches (simulate | read | write ...)
+# - key_hints: argument-key aliases for path/query/content extraction
+# - verb_rules: map tool-name verb patterns -> primitive runtime actions
+# - tool_action_hints: explicit per-tool overrides when inference is ambiguous
+
+environment_execution:
+  strict_schema: false
+  default_action: simulate
+
+  key_hints:
+    source_path:
+      - path
+      - filePath
+      - sourcePath
+      - targetPath
+      - notePath
+    destination_path:
+      - newPath
+      - destinationPath
+      - destPath
+      - to
+      - outputPath
+    content:
+      - content
+      - text
+      - body
+      - value
+    query:
+      - query
+      - search
+      - term
+      - text
+
+  verb_rules:
+    mkdir:
+      - createfolder
+      - mkdir
+      - makefolder
+      - create_dir
+    append:
+      - append
+    write:
+      - write
+      - update
+      - replace
+      - createcontent
+    read:
+      - read
+      - open
+      - get
+    list:
+      - list
+      - ls
+    move:
+      - move
+      - rename
+      - edit
+    copy:
+      - copy
+      - duplicate
+    delete:
+      - delete
+      - remove
+      - archive
+    search:
+      - search
+      - find
+
+  # Optional explicit overrides:
+  # tool_action_hints:
+  #   yourAgent_readFile: read
+  #   yourAgent_writeFile: write
+  #   yourAgent_moveFile: move
+  #   yourAgent_searchFiles: search
+  #   yourAgent_nonFilesystemAction: simulate
+  tool_action_hints: {}

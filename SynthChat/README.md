@@ -96,6 +96,14 @@ PYTHONPATH=. python3 -m SynthChat.run generate [options]
 | `--model` | Model name | From settings.yaml |
 | `--docs` | Seed docs for generation | None |
 | `--per-doc` | Examples per doc | 1 |
+| `--env-backend` | Environment execution backend (`none`, `local`, `e2b`) | settings.yaml / disabled |
+| `--env-template` | E2B template ID (when backend is `e2b`) | None |
+| `--env-tool-schema` | Path to custom tool schema YAML | settings.yaml / default |
+| `--env-exec-config` | Path to custom execution-rules YAML | settings.yaml / default |
+
+Environment execution behavior (tool-action hints, inference rules) is config-driven via:
+`Evaluator/config/environment_execution.yaml`
+and can be replaced per run with `--env-tool-schema` / `--env-exec-config`.
 
 **Example: Generate 5 content writing examples**
 
@@ -220,6 +228,9 @@ OPENROUTER_API_KEY=sk-or-...
 # Optional for LM Studio (if using local)
 LMSTUDIO_HOST=localhost
 LMSTUDIO_PORT=1234
+
+# Optional for E2B-backed environment execution
+E2B_API_KEY=e2b_...
 ```
 
 ## Output Format

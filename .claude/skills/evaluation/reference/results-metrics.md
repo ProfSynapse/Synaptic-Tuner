@@ -40,8 +40,12 @@ Running 51 evaluations...
     "behavior_tested": 51,
     "behavior_passed": 45,
     "behavior_pass_rate": 0.88,
+    "environment_tested": 40,
+    "environment_passed": 37,
+    "environment_pass_rate": 0.925,
     "by_tag": { ... },
-    "top_failure_reasons": [ ... ]
+    "top_failure_reasons": [ ... ],
+    "top_environment_failures": [ ... ]
   },
   "records": [ ... ]
 }
@@ -76,6 +80,7 @@ Auto-generated summary with tables:
 | `pass_rate` | Percentage of tests fully passed (PASS / total) |
 | `schema_pass_rate` | Correct tool selection rate |
 | `behavior_pass_rate` | Behavioral expectations met rate |
+| `environment_pass_rate` | Runtime execution + assertion pass rate |
 | `total` | Number of tests run |
 | `passed` / `warned` / `failed` | Count per status |
 
@@ -87,10 +92,12 @@ Auto-generated summary with tables:
 | `passed` | Overall pass (schema + behavior) |
 | `schema_passed` | Correct tool called? |
 | `behavior_passed` | Behavioral expectations met? |
+| `environment_passed` | Runtime validation passed? |
 | `latency_s` | Response time in seconds |
 | `response_text` | Full model response |
 | `validator` | Schema validation details |
 | `behavior` | Behavior validation details |
+| `environment` | Runtime execution trace + assertion issues |
 
 ### Per-Tag Breakdown
 
@@ -112,7 +119,7 @@ Use this to identify which capabilities need improvement.
 |--------|--------|----------|----------------|
 | **PASS** | Correct | Met | Model is working correctly |
 | **WARN** | Correct | Not met | Right tool but suboptimal behavior |
-| **FAIL** | Wrong | N/A | Wrong or missing tool call |
+| **FAIL** | Wrong or runtime fail | N/A | Wrong/missing tool call or environment assertions failed |
 
 **WARN is valuable** — it means the model's tool selection is correct but its behavior (explaining, asking, reasoning) needs refinement. This is exactly what KTO training addresses.
 

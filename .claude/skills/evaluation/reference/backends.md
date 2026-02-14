@@ -157,3 +157,19 @@ python -m Evaluator.cli --backend llamacpp --model path/to/model-Q4_K_M.gguf \
 ```
 
 Then compare `pass_rate` across the JSON results.
+
+---
+
+## Environment Runtime Backends (Optional)
+
+Separate from model inference backend, evaluator can execute tool calls in a runtime:
+
+```bash
+# Local temp-dir runtime
+python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local
+
+# E2B sandbox runtime
+python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend e2b --env-template YOUR_TEMPLATE
+```
+
+Use `--env-tool-schema` and `--env-exec-config` to support custom tool names and rules.

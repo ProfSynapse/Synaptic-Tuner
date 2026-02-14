@@ -72,6 +72,17 @@ generation:
   random_seed: null  # Set for reproducibility, null for random
   stage_validation: true  # Validate each stage before proceeding
 
+# Optional environment-backed tool execution checks.
+# This runs generated tool calls against an isolated runtime and stores traces
+# in example metadata to support downstream filtering/evaluation.
+environment:
+  enabled: false
+  backend: local   # local | e2b
+  template: null   # E2B template id (only used when backend=e2b)
+  timeout_seconds: 120.0
+  tool_schema_path: null       # Optional custom tool schema YAML path
+  execution_config_path: null  # Optional custom environment execution config path
+
 # Cost tracking (OpenRouter)
 cost_tracking:
   enabled: true

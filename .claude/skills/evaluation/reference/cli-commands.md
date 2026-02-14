@@ -47,6 +47,16 @@ python -m Evaluator.cli [options]
 | `--validate-context` | Validate sessionId/workspaceId match prompt |
 | `--dry-run` | Skip actual model calls (test config) |
 
+### Environment Runtime Validation
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--env-backend` | Environment runtime backend | `none`, `local`, `e2b` |
+| `--env-template` | E2B template ID (when using `--env-backend e2b`) | `tmpl_abc123` |
+| `--env-timeout` | Runtime command timeout (seconds) | `120` |
+| `--env-api-key` | E2B API key override | `e2b_...` |
+| `--env-tool-schema` | Path to tool schema YAML (bring your own tools) | `path/to/tool_schema.yaml` |
+| `--env-exec-config` | Path to execution-rules YAML | `path/to/environment_execution.yaml` |
+
 ---
 
 ## Examples
@@ -106,6 +116,26 @@ python -m Evaluator.cli \
   --model MODEL \
   --scenario behavior_prompts.yaml \
   --limit 10
+```
+
+**Enable environment checks in local runtime:**
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model MODEL \
+  --scenario tool_prompts.yaml \
+  --env-backend local
+```
+
+**Use custom tool schema + runtime rules (config-driven):**
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model MODEL \
+  --scenario tool_prompts.yaml \
+  --env-backend local \
+  --env-tool-schema ./my_config/tool_schema.yaml \
+  --env-exec-config ./my_config/environment_execution.yaml
 ```
 
 ---

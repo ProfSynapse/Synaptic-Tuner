@@ -184,6 +184,10 @@ python -m Evaluator.cli \
 | `--output` | JSON results path |
 | `--markdown` | Markdown report path |
 | `--dry-run` | Skip actual model calls |
+| `--env-backend` | `none`, `local`, or `e2b` runtime validation |
+| `--env-template` | E2B template ID when using `--env-backend e2b` |
+| `--env-tool-schema` | Path to custom tool schema YAML |
+| `--env-exec-config` | Path to custom execution-rules YAML |
 
 ## Output Format
 
@@ -209,6 +213,45 @@ Running 51 evaluations...
 Results are saved to `Evaluator/results/`:
 - `run_YYYYMMDD_HHMMSS.json` - Full results with all details
 - `run_YYYYMMDD_HHMMSS.md` - Human-readable markdown summary
+
+## Environment Validation (Optional)
+
+You can execute model tool calls in an isolated workspace runtime during evaluation:
+
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model your-model \
+  --scenario tool_prompts.yaml \
+  --env-backend local
+```
+
+Use `--env-backend e2b` to run the same checks in E2B sandboxes (requires `E2B_API_KEY`).
+Scenarios can include an optional `environment` block with `allowed_tools`, `max_steps`,
+and `assertions` (e.g., `path_exists`, `path_not_exists`, `file_contains`).
+Global execution inference rules live in `Evaluator/config/environment_execution.yaml`
+(tool action hints, verb rules, key aliases, strict schema mode).
+The file is intentionally generic; add your own tool names in `tool_action_hints`
+and/or `verb_rules` for your schema.
+Use `--env-tool-schema` and `--env-exec-config` to point to alternate YAML files.
+
+Example per-test override:
+
+```yaml
+tests:
+  - id: example_env_rule
+    question: "Update docs file"
+    expected_tools: ["contentManager_update"]
+    environment:
+      allowed_tools: ["contentManager_update"]
+      execution:
+        strict_schema: true
+        tool_action_hints:
+          contentManager_update: write
+      assertions:
+        - type: path_exists
+          path: "Projects/docs.md"
+```
 
 ## Backends
 

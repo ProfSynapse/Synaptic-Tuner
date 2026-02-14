@@ -13,6 +13,12 @@ from .prompt_sets import PromptCase
 from .protocols import BackendClient
 from .schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
 
+try:
+    from shared.environments import EnvironmentValidationResult, EnvironmentValidator
+except ImportError:
+    EnvironmentValidationResult = None
+    EnvironmentValidator = None
+
 
 @dataclass
 class EvaluationRecord:
@@ -26,6 +32,7 @@ class EvaluationRecord:
         raw_response: Complete API response
         error: Error message if request/validation failed
         behavior: Behavior validation result (if expectations defined)
+        environment: Environment validation result (if enabled)
     """
 
     case: PromptCase
@@ -35,6 +42,7 @@ class EvaluationRecord:
     raw_response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     behavior: Optional[BehaviorValidationResult] = None
+    environment: Optional["EnvironmentValidationResult"] = None
 
     @property
     def status(self) -> str:
@@ -47,6 +55,9 @@ class EvaluationRecord:
         if self.error is not None:
             return "fail"
         if self.validator is None or not self.validator.passed:
+            return "fail"
+        # Schema passed - check environment execution if enabled
+        if self.environment is not None and not self.environment.passed:
             return "fail"
         # Schema passed - check behavior
         if self.behavior is not None and not self.behavior.passed:
@@ -85,6 +96,7 @@ def evaluate_cases(
     dry_run: bool = False,
     on_record: Callable[[EvaluationRecord], None] | None = None,
     validate_context: bool = False,
+    environment_validator: "EnvironmentValidator" | None = None,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -95,6 +107,8 @@ def evaluate_cases(
         on_record: Optional callback for each completed record
         validate_context: If True, validate that model uses IDs from
                          expected_context in prompt metadata
+        environment_validator: Optional environment validator for
+                              runtime-backed tool execution checks
 
     Returns:
         List of evaluation records
@@ -102,7 +116,13 @@ def evaluate_cases(
     records: List[EvaluationRecord] = []
 
     for case in cases:
-        record = _evaluate_single_case(case, client, dry_run, validate_context)
+        record = _evaluate_single_case(
+            case,
+            client,
+            dry_run,
+            validate_context,
+            environment_validator=environment_validator,
+        )
         records.append(record)
         if on_record:
             on_record(record)
@@ -115,6 +135,7 @@ def _evaluate_single_case(
     client: BackendClient,
     dry_run: bool,
     validate_context: bool = False,
+    environment_validator: "EnvironmentValidator" | None = None,
 ) -> EvaluationRecord:
     """Evaluate a single prompt case.
 
@@ -178,6 +199,38 @@ def _evaluate_single_case(
     extracted_tool_names = [tc.name for tc in validator_result.tool_calls]
     behavior_result = _run_behavior_validation(case, response.message, extracted_tool_names)
 
+    environment_result = None
+    if environment_validator is not None:
+        try:
+            system_prompt = case.metadata.get("system", "")
+            environment_config = case.metadata.get("environment") or {}
+            expected_for_env = case.expected_tools if environment_config.get("require_expected_tools") else None
+            environment_result = environment_validator.validate_response(
+                system_prompt=system_prompt,
+                response=response.message,
+                environment_config=environment_config,
+                expected_tools=expected_for_env,
+            )
+        except Exception as exc:
+            # Environment validation should fail this case, but we keep schema/behavior data.
+            if EnvironmentValidationResult is not None:
+                from shared.environments import EnvironmentIssue
+
+                environment_result = EnvironmentValidationResult(
+                    passed=False,
+                    issues=[EnvironmentIssue(level="error", message=f"Environment validation error: {exc}")],
+                )
+            else:
+                return EvaluationRecord(
+                    case=case,
+                    response_text=response.message,
+                    validator=validator_result,
+                    latency_s=response.latency_s,
+                    raw_response=response.raw,
+                    error=f"Environment validation error: {exc}",
+                    behavior=behavior_result,
+                )
+
     return EvaluationRecord(
         case=case,
         response_text=response.message,
@@ -186,6 +239,7 @@ def _evaluate_single_case(
         raw_response=response.raw,
         error=None,
         behavior=behavior_result,
+        environment=environment_result,
     )
 
 

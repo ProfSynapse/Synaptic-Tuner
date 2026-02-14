@@ -4,6 +4,9 @@
 # HTTP client for backend communication
 requests>=2.31.0
 
+# Optional: environment-backed execution in E2B sandboxes
+# e2b>=1.0.0
+
 # Note: The evaluator also requires one of these backends to be running:
 # - Ollama (https://ollama.com/) - for local model serving
 # - LM Studio (https://lmstudio.ai/) - for local model serving

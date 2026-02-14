@@ -154,6 +154,34 @@ Backend Configuration:
         action="store_true",
         help="Validate that model uses IDs from system prompt (requires prompts with expected_context)",
     )
+    parser.add_argument(
+        "--env-backend",
+        choices=["none", "local", "e2b"],
+        default="none",
+        help="Enable environment-backed tool execution checks (default: none)",
+    )
+    parser.add_argument(
+        "--env-template",
+        help="E2B template ID when using --env-backend e2b",
+    )
+    parser.add_argument(
+        "--env-timeout",
+        type=float,
+        default=120.0,
+        help="Environment command timeout in seconds (default: 120)",
+    )
+    parser.add_argument(
+        "--env-api-key",
+        help="E2B API key override (default: E2B_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--env-tool-schema",
+        help="Path to tool schema YAML for environment execution (default: Evaluator/config/tool_schema.yaml)",
+    )
+    parser.add_argument(
+        "--env-exec-config",
+        help="Path to environment execution rules YAML (default: Evaluator/config/environment_execution.yaml)",
+    )
 
     # Lineage and HuggingFace options
     parser.add_argument(
@@ -308,6 +336,23 @@ def main(argv: List[str] | None = None) -> int:
             log_lines=5,
         )
 
+    environment_validator = None
+    if args.env_backend != "none":
+        try:
+            from shared.environments import EnvironmentValidator
+        except ImportError as exc:
+            print(f"Environment validation is unavailable: {exc}", file=sys.stderr)
+            return 1
+
+        environment_validator = EnvironmentValidator(
+            backend=args.env_backend,
+            e2b_template=args.env_template,
+            e2b_api_key=args.env_api_key,
+            timeout_seconds=args.env_timeout,
+            tool_schema_path=args.env_tool_schema,
+            execution_config_path=args.env_exec_config,
+        )
+
     def on_record_dashboard(record):
         """Update dashboard with evaluation result."""
         name = record.case.case_id or "unnamed"
@@ -320,6 +365,12 @@ def main(argv: List[str] | None = None) -> int:
                 reason = f"Error: {record.error[:40]}..."
             elif record.validator and record.validator.issues:
                 for issue in record.validator.issues:
+                    msg = simplify_issue_message(issue.message, display_config)
+                    if msg:
+                        reason = msg[:50] + "..." if len(msg) > 50 else msg
+                        break
+            elif record.environment and record.environment.issues:
+                for issue in record.environment.issues:
                     msg = simplify_issue_message(issue.message, display_config)
                     if msg:
                         reason = msg[:50] + "..." if len(msg) > 50 else msg
@@ -387,6 +438,12 @@ def main(argv: List[str] | None = None) -> int:
                         if msg:
                             print(f"         {lbl_why}: {msg}")
                             break
+                elif record.environment and record.environment.issues:
+                    for issue in record.environment.issues:
+                        msg = simplify_issue_message(issue.message, display_config)
+                        if msg:
+                            print(f"         {lbl_why}: {msg}")
+                            break
 
     # Run evaluation with appropriate callback
     if use_dashboard:
@@ -396,6 +453,7 @@ def main(argv: List[str] | None = None) -> int:
                 client=client,
                 dry_run=config.dry_run,
                 validate_context=args.validate_context,
+                environment_validator=environment_validator,
                 on_record=on_record_dashboard,
             )
     else:
@@ -405,6 +463,7 @@ def main(argv: List[str] | None = None) -> int:
             client=client,
             dry_run=config.dry_run,
             validate_context=args.validate_context,
+            environment_validator=environment_validator,
             on_record=on_record_text,
         )
 
@@ -412,6 +471,14 @@ def main(argv: List[str] | None = None) -> int:
 
     # Build and save results
     metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
+    if environment_validator is not None:
+        metadata["environment"] = {
+            "backend": args.env_backend,
+            "template": args.env_template,
+            "timeout_seconds": args.env_timeout,
+            "tool_schema_path": args.env_tool_schema,
+            "execution_config_path": args.env_exec_config,
+        }
     payload = build_run_payload(records, metadata=metadata)
     write_json(config.output_path, payload)
     print(f"Results saved to {config.output_path}")

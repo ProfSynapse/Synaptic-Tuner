@@ -48,6 +48,18 @@ scenarios:
       system_prompt: [rubric_key1]
       response: [rubric_key1, rubric_key2]
 
+    # Optional environment runtime validation for generated assistant output
+    environment:
+      allowed_tools: [myAgent_myTool]
+      max_steps: 3
+      execution:
+        strict_schema: true
+        tool_action_hints:
+          myAgent_myTool: write
+      assertions:
+        - type: path_exists
+          path: "Projects/output.md"
+
     # Prompt templates
     prompts:
       system: |
@@ -201,6 +213,23 @@ python -m SynthChat.run generate \
   --scenarios my_docs_scenario \
   --per-doc 1
 ```
+
+---
+
+## Environment Block (Optional)
+
+If generation runs with environment validation enabled (`--env-backend ...` or `settings.yaml`),
+scenario-level `environment` config is passed into runtime execution checks.
+
+Common fields:
+- `allowed_tools`
+- `max_steps`
+- `assertions`
+- `execution.strict_schema`
+- `execution.default_action`
+- `execution.tool_action_hints`
+- `execution.key_hints`
+- `execution.verb_rules`
 
 ---
 

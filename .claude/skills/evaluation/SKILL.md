@@ -15,6 +15,8 @@ Config-driven evaluation framework for testing tool-calling models against YAML-
 | Interactive menu | `./run.sh` → Evaluate |
 | Full evaluation | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario behavior_prompts.yaml` |
 | Quick smoke test | `python -m Evaluator.cli --backend lmstudio --model MODEL --preset quick` |
+| Eval with environment runtime | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local` |
+| Eval with custom tool schema/rules | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local --env-tool-schema path/to/tool_schema.yaml --env-exec-config path/to/environment_execution.yaml` |
 | Tag filter | `python -m Evaluator.cli --backend lmstudio --model MODEL --tags intellectual_humility` |
 | Dry run (no model calls) | `python -m Evaluator.cli --backend lmstudio --model MODEL --dry-run` |
 | Eval + upload to HF | `python -m Evaluator.cli --backend unsloth --model PATH --upload-to-hf user/model` |
@@ -31,7 +33,7 @@ Config-driven evaluation framework for testing tool-calling models against YAML-
 
 - `Evaluator/` — Core evaluation code
 - `Evaluator/config/scenarios/` — Test scenario YAMLs (behavior + tool)
-- `Evaluator/config/` — Run config, display config, tool schema, response types
+- `Evaluator/config/` — Run config, display config, tool schema, response types, environment execution rules
 - `Evaluator/results/` — Evaluation output (JSON + Markdown)
 
 ## Progressive Reference
@@ -100,6 +102,8 @@ HF_TOKEN=hf_...                       # HuggingFace (for uploads)
 - Behavior tests (WARN) catch "correct but suboptimal" — useful for KTO training signals
 - Failed behavior tests make great KTO negative examples
 - Use `--validate-context` to check sessionId/workspaceId consistency
+- Use `--env-backend local` for synthetic runtime checks, `--env-backend e2b` for sandboxed checks
+- Bring your own toolset with `--env-tool-schema` and `--env-exec-config`
 - Results JSON has `by_tag` breakdown — find weak areas fast
 - `--lineage` creates structured provenance for model cards
 - All test logic lives in YAML — add tests by editing YAML, not Python

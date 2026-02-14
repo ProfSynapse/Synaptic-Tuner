@@ -33,6 +33,12 @@ python -m SynthChat.run generate [options]
 | `--workers, -w N` | Parallel worker threads | `1` |
 | `--docs PATH` | Doc file or folder for docs-based generation | None |
 | `--per-doc N` | Examples to generate per doc | `1` |
+| `--env-backend` | Runtime validation backend (`none`, `local`, `e2b`) | From settings / `none` |
+| `--env-template` | E2B template ID (for `--env-backend e2b`) | None |
+| `--env-timeout` | Runtime timeout in seconds | From settings / `120` |
+| `--env-api-key` | E2B API key override | `E2B_API_KEY` env var |
+| `--env-tool-schema` | Path to custom tool schema YAML | From settings / default |
+| `--env-exec-config` | Path to custom execution-rules YAML | From settings / default |
 
 **Examples:**
 
@@ -51,6 +57,15 @@ python -m SynthChat.run generate --docs "essays/" --scenarios essay_outline --pe
 
 # Custom targets file, limited iterations
 python -m SynthChat.run generate --targets-file my_targets.json --max-iterations 3 -o test_run.jsonl
+
+# Enable local environment validation
+python -m SynthChat.run generate --env-backend local
+
+# Bring your own tool schema and execution rules
+python -m SynthChat.run generate \
+  --env-backend local \
+  --env-tool-schema ./my_config/tool_schema.yaml \
+  --env-exec-config ./my_config/environment_execution.yaml
 ```
 
 ---
@@ -148,6 +163,12 @@ python -m Evaluator.cli [options]
 | `--dry-run` | Skip backend calls | `false` |
 | `--validate-context` | Validate IDs from system prompt | `false` |
 | `--no-browser` | Don't auto-open | `false` |
+| `--env-backend` | Runtime validation backend (`none`, `local`, `e2b`) | `none` |
+| `--env-template` | E2B template ID | — |
+| `--env-timeout` | Runtime timeout in seconds | `120` |
+| `--env-api-key` | E2B API key override | env var |
+| `--env-tool-schema` | Custom tool schema YAML path | default config |
+| `--env-exec-config` | Custom execution-rules YAML path | default config |
 
 **Examples:**
 
@@ -160,6 +181,13 @@ python -m Evaluator.cli --model my-model --backend lmstudio --tags single-tool -
 
 # Dry run
 python -m Evaluator.cli --model test --dry-run --validate-context
+
+# Runtime validation with custom toolset
+python -m Evaluator.cli --model my-model --backend lmstudio \
+  --scenario tool_prompts.yaml \
+  --env-backend local \
+  --env-tool-schema ./my_config/tool_schema.yaml \
+  --env-exec-config ./my_config/environment_execution.yaml
 ```
 
 ---

@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 from shared.llm import create_client
+from shared.environments import EnvironmentValidator
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocsLoader, DocFile
 from .engine import ImprovementEngine
@@ -143,6 +144,45 @@ def create_llm_client(config: Dict, mode: str = "generation",
     return client
 
 
+def create_environment_validator(settings: Dict, args) -> Optional[EnvironmentValidator]:
+    """Create optional environment validator from settings and CLI overrides."""
+    env_settings = settings.get("environment", {})
+    env_enabled = env_settings.get("enabled", False)
+
+    backend = args.env_backend
+    if backend is None:
+        backend = env_settings.get("backend", "local" if env_enabled else "none")
+    backend = backend.lower()
+
+    if backend == "none":
+        return None
+
+    template = args.env_template if args.env_template is not None else env_settings.get("template")
+    timeout_seconds = (
+        args.env_timeout if args.env_timeout is not None else env_settings.get("timeout_seconds", 120.0)
+    )
+    api_key = args.env_api_key
+    tool_schema_path = (
+        args.env_tool_schema
+        if args.env_tool_schema is not None
+        else env_settings.get("tool_schema_path")
+    )
+    execution_config_path = (
+        args.env_exec_config
+        if args.env_exec_config is not None
+        else env_settings.get("execution_config_path")
+    )
+
+    return EnvironmentValidator(
+        backend=backend,
+        e2b_template=template,
+        e2b_api_key=api_key,
+        timeout_seconds=float(timeout_seconds),
+        tool_schema_path=tool_schema_path,
+        execution_config_path=execution_config_path,
+    )
+
+
 def generate_mode(args):
     """
     Generate new dataset from scenarios.
@@ -169,6 +209,9 @@ def generate_mode(args):
                                    provider_override=args.provider, model_override=args.model)
     improve_client = create_llm_client(settings, mode="improvement",
                                        provider_override=args.provider, model_override=args.model)
+    environment_validator = create_environment_validator(settings, args)
+    if environment_validator is not None:
+        print(f"Environment validation enabled (backend={environment_validator.backend})")
 
     # Create improvement engine
     validation_config = config_dir / "validation.yaml"
@@ -186,6 +229,7 @@ def generate_mode(args):
         rubrics_dir=rubrics_dir,
         llm_client=gen_client,
         engine=engine,
+        environment_validator=environment_validator,
         enable_stage_validation=settings["generation"]["stage_validation"]
     )
 
@@ -242,7 +286,8 @@ def generate_mode(args):
                             work_items.append((
                                 scenario_key, scenario, max_iterations,
                                 config_dir, scenarios_dir, rubrics_dir,
-                                settings, args.provider, args.model, doc, task_id
+                                settings, args.provider, args.model, doc, task_id,
+                                _serialize_environment_options(environment_validator)
                             ))
                             task_id += 1
 
@@ -280,7 +325,8 @@ def generate_mode(args):
                     work_items.append((
                         scenario_key, scenario, max_iterations,
                         config_dir, scenarios_dir, rubrics_dir,
-                        settings, args.provider, args.model, None, task_id
+                        settings, args.provider, args.model, None, task_id,
+                        _serialize_environment_options(environment_validator)
                     ))
                     task_id += 1
 
@@ -591,8 +637,38 @@ def _run_parallel_generation(work_items: List, num_workers: int,
     return [result for _, result in indexed_results]
 
 
+def _serialize_environment_options(environment_validator: Optional[EnvironmentValidator]) -> Dict:
+    """Serialize environment validator configuration for worker fan-out."""
+    if environment_validator is None:
+        return {"backend": "none"}
+    return {
+        "backend": environment_validator.backend,
+        "template": environment_validator.e2b_template,
+        "api_key": environment_validator.e2b_api_key,
+        "timeout_seconds": environment_validator.timeout_seconds,
+        "tool_schema_path": str(environment_validator.tool_schema_path),
+        "execution_config_path": str(environment_validator.execution_config_path),
+    }
+
+
+def _create_environment_validator_from_options(options: Dict) -> Optional[EnvironmentValidator]:
+    """Recreate environment validator from serialized options."""
+    backend = (options or {}).get("backend", "none")
+    if backend == "none":
+        return None
+    return EnvironmentValidator(
+        backend=backend,
+        e2b_template=(options or {}).get("template"),
+        e2b_api_key=(options or {}).get("api_key"),
+        timeout_seconds=float((options or {}).get("timeout_seconds", 120.0)),
+        tool_schema_path=(options or {}).get("tool_schema_path"),
+        execution_config_path=(options or {}).get("execution_config_path"),
+    )
+
+
 def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir: Path,
-                              settings: Dict, provider: str = None, model: str = None):
+                              settings: Dict, provider: str = None, model: str = None,
+                              environment_options: Optional[Dict] = None):
     """Create a new generator instance for a worker thread."""
     gen_client = create_llm_client(settings, mode="generation",
                                    provider_override=provider, model_override=model)
@@ -613,6 +689,7 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
         rubrics_dir=rubrics_dir,
         llm_client=gen_client,
         engine=engine,
+        environment_validator=_create_environment_validator_from_options(environment_options or {}),
         enable_stage_validation=settings["generation"]["stage_validation"]
     )
     return generator
@@ -625,12 +702,14 @@ def _generate_single_example(args_tuple):
         Tuple of (result, error, task_id) where task_id preserves input ordering.
     """
     (scenario_key, scenario, max_iterations, config_dir, scenarios_dir,
-     rubrics_dir, settings, provider, model, doc_context, task_id) = args_tuple
+     rubrics_dir, settings, provider, model, doc_context, task_id,
+     environment_options) = args_tuple
 
     try:
         # Each worker creates its own generator (thread-safe LLM clients)
         generator = _create_worker_generator(
-            config_dir, scenarios_dir, rubrics_dir, settings, provider, model
+            config_dir, scenarios_dir, rubrics_dir, settings, provider, model,
+            environment_options=environment_options
         )
 
         result = generator.generate_single(
@@ -730,6 +809,36 @@ def main():
     generate_parser.add_argument("--docs", help="Path to doc file or folder (seed data for generation)")
     generate_parser.add_argument("--per-doc", type=int, default=1, help="Examples to generate per doc (default: 1)")
     generate_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
+    generate_parser.add_argument(
+        "--env-backend",
+        choices=["none", "local", "e2b"],
+        default=None,
+        help="Environment execution backend (default: settings.yaml or disabled)",
+    )
+    generate_parser.add_argument(
+        "--env-template",
+        help="E2B template ID (for --env-backend e2b)",
+    )
+    generate_parser.add_argument(
+        "--env-timeout",
+        type=float,
+        default=None,
+        help="Environment command timeout in seconds",
+    )
+    generate_parser.add_argument(
+        "--env-api-key",
+        help="E2B API key override (default: E2B_API_KEY env var)",
+    )
+    generate_parser.add_argument(
+        "--env-tool-schema",
+        default=None,
+        help="Path to tool schema YAML for environment execution",
+    )
+    generate_parser.add_argument(
+        "--env-exec-config",
+        default=None,
+        help="Path to environment execution rules YAML",
+    )
 
     # Improve command
     improve_parser = subparsers.add_parser("improve", help="Improve existing dataset")

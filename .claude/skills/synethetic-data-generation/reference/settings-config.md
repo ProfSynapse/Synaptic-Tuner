@@ -112,6 +112,26 @@ cost_tracking:
 
 ---
 
+## Environment Runtime Validation (Optional)
+
+Enable runtime-backed execution checks during generation.
+
+```yaml
+environment:
+  enabled: false                  # true to enable by default
+  backend: local                  # local | e2b
+  template: null                  # E2B template id if backend=e2b
+  timeout_seconds: 120.0
+  tool_schema_path: null          # Optional custom tool schema YAML
+  execution_config_path: null     # Optional custom runtime rules YAML
+```
+
+Runtime rules are config-driven through `Evaluator/config/environment_execution.yaml`
+(or a custom file via `execution_config_path` / `--env-exec-config`).
+This lets any project map its own tool names and argument keys without code changes.
+
+---
+
 ## Default Generation Targets
 
 Defines how many examples to generate per scenario when no `--targets-file` is given.

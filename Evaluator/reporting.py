@@ -24,8 +24,22 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     schema_passed = sum(1 for record in records if record.schema_passed)
     behavior_tested = sum(1 for record in records if record.behavior is not None)
     behavior_passed = sum(1 for record in records if record.behavior_passed and record.behavior is not None)
+    environment_tested = sum(1 for record in records if record.environment is not None)
+    environment_passed = sum(1 for record in records if record.environment is not None and record.environment.passed)
 
-    by_tag = defaultdict(lambda: {"total": 0, "passed": 0, "warned": 0, "failed": 0, "schema_passed": 0, "behavior_passed": 0, "behavior_tested": 0})
+    by_tag = defaultdict(
+        lambda: {
+            "total": 0,
+            "passed": 0,
+            "warned": 0,
+            "failed": 0,
+            "schema_passed": 0,
+            "behavior_passed": 0,
+            "behavior_tested": 0,
+            "environment_passed": 0,
+            "environment_tested": 0,
+        }
+    )
     for record in records:
         tags = record.case.tags or ["__untagged__"]
         for tag in tags:
@@ -44,9 +58,14 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 bucket["behavior_tested"] += 1
                 if record.behavior_passed:
                     bucket["behavior_passed"] += 1
+            if record.environment is not None:
+                bucket["environment_tested"] += 1
+                if record.environment.passed:
+                    bucket["environment_passed"] += 1
 
     failure_reasons = Counter()
     behavior_failures = Counter()
+    environment_failures = Counter()
     for record in records:
         if record.error:
             # Truncate long error messages to avoid dumping prompts
@@ -63,6 +82,11 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             for issue in record.behavior.issues:
                 if not issue.passed:
                     behavior_failures[f"{issue.check}: {issue.message}"] += 1
+        # Track environment failures separately
+        if record.environment and not record.environment.passed:
+            for issue in record.environment.issues:
+                if issue.level.lower() == "error":
+                    environment_failures[issue.message] += 1
 
     return {
         "total": total,
@@ -77,6 +101,9 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         "behavior_tested": behavior_tested,
         "behavior_passed": behavior_passed,
         "behavior_pass_rate": (behavior_passed / behavior_tested) if behavior_tested else 0,
+        "environment_tested": environment_tested,
+        "environment_passed": environment_passed,
+        "environment_pass_rate": (environment_passed / environment_tested) if environment_tested else 0,
         "by_tag": {
             tag: {
                 "total": bucket["total"],
@@ -88,11 +115,19 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 "behavior_tested": bucket["behavior_tested"],
                 "behavior_passed": bucket["behavior_passed"],
                 "behavior_pass_rate": (bucket["behavior_passed"] / bucket["behavior_tested"]) if bucket["behavior_tested"] else 0,
+                "environment_tested": bucket["environment_tested"],
+                "environment_passed": bucket["environment_passed"],
+                "environment_pass_rate": (
+                    (bucket["environment_passed"] / bucket["environment_tested"])
+                    if bucket["environment_tested"]
+                    else 0
+                ),
             }
             for tag, bucket in sorted(by_tag.items())
         },
         "top_failure_reasons": failure_reasons.most_common(10),
         "top_behavior_failures": behavior_failures.most_common(10),
+        "top_environment_failures": environment_failures.most_common(10),
     }
 
 
@@ -110,6 +145,10 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
     ]
     if stats['behavior_tested'] > 0:
         lines.append(f"  Behavior validation: {stats['behavior_passed']}/{stats['behavior_tested']} ({stats['behavior_pass_rate']*100:.1f}%)")
+    if stats['environment_tested'] > 0:
+        lines.append(
+            f"  Environment validation: {stats['environment_passed']}/{stats['environment_tested']} ({stats['environment_pass_rate']*100:.1f}%)"
+        )
     lines.append(f"Request errors: {stats['request_errors']}")
     lines.append("Results by tag:")
     for tag, bucket in stats["by_tag"].items():
@@ -122,6 +161,9 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
         if bucket["behavior_tested"] > 0:
             beh_pct = bucket["behavior_pass_rate"] * 100
             line += f" [behavior: {bucket['behavior_passed']}/{bucket['behavior_tested']} ({beh_pct:.1f}%)]"
+        if bucket["environment_tested"] > 0:
+            env_pct = bucket["environment_pass_rate"] * 100
+            line += f" [environment: {bucket['environment_passed']}/{bucket['environment_tested']} ({env_pct:.1f}%)]"
         lines.append(line)
     if stats["top_failure_reasons"]:
         lines.append("Top schema failure reasons:")
@@ -130,6 +172,10 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
     if stats["top_behavior_failures"]:
         lines.append("Top behavior failure reasons:")
         for reason, count in stats["top_behavior_failures"]:
+            lines.append(f"  - {count}× {reason}")
+    if stats["top_environment_failures"]:
+        lines.append("Top environment failure reasons:")
+        for reason, count in stats["top_environment_failures"]:
             lines.append(f"  - {count}× {reason}")
     return "\n".join(lines)
 
@@ -151,6 +197,7 @@ def build_run_payload(
 def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
     validator = record.validator.to_dict() if record.validator else None
     behavior = record.behavior.to_dict() if record.behavior else None
+    environment = record.environment.to_dict() if record.environment else None
     return {
         "case_id": record.case.case_id,
         "question": record.case.question,
@@ -162,9 +209,11 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
         "passed": record.passed,
         "schema_passed": record.schema_passed,
         "behavior_passed": record.behavior_passed,
+        "environment_passed": record.environment.passed if record.environment else None,
         "error": record.error,
         "validator": validator,
         "behavior": behavior,
+        "environment": environment,
         "raw_response": record.raw_response,
     }
 
@@ -203,6 +252,8 @@ def render_markdown(records: Sequence[EvaluationRecord], model_name: str = None,
     # Add behavior stats if tested
     if stats['behavior_tested'] > 0:
         lines.append(f"- **Behavior tests:** {stats['behavior_passed']}/{stats['behavior_tested']} ({stats['behavior_pass_rate']*100:.1f}%)")
+    if stats['environment_tested'] > 0:
+        lines.append(f"- **Environment tests:** {stats['environment_passed']}/{stats['environment_tested']} ({stats['environment_pass_rate']*100:.1f}%)")
 
     lines.extend(["", "## Results by Category", ""])
 
@@ -220,6 +271,10 @@ def render_markdown(records: Sequence[EvaluationRecord], model_name: str = None,
     if stats["top_behavior_failures"]:
         lines.extend(["", "## Top Behavior Failures", ""])
         for reason, count in stats["top_behavior_failures"]:
+            lines.append(f"- {count}× {reason}")
+    if stats["top_environment_failures"]:
+        lines.extend(["", "## Top Environment Failures", ""])
+        for reason, count in stats["top_environment_failures"]:
             lines.append(f"- {count}× {reason}")
 
     return "\n".join(lines)
@@ -321,6 +376,11 @@ def build_evaluation_lineage(
             "passed": stats["behavior_passed"],
             "pass_rate": round(stats["behavior_pass_rate"] * 100, 1),
         }} if stats["behavior_tested"] > 0 else {}),
+        **({"environment_results": {
+            "tested": stats["environment_tested"],
+            "passed": stats["environment_passed"],
+            "pass_rate": round(stats["environment_pass_rate"] * 100, 1),
+        }} if stats["environment_tested"] > 0 else {}),
 
         # Performance metrics
         "performance": {

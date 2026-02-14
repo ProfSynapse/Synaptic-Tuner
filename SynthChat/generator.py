@@ -23,6 +23,11 @@ from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocFile
 from .engine import ImprovementEngine
 
+try:
+    from shared.environments import EnvironmentValidator
+except ImportError:
+    EnvironmentValidator = None
+
 
 @dataclass
 class GenerationResult:
@@ -87,6 +92,7 @@ class SynthChatGenerator:
         rubrics_dir: Path,
         llm_client,  # Generation LLM from shared.llm
         engine: Optional[ImprovementEngine] = None,
+        environment_validator: Optional["EnvironmentValidator"] = None,
         enable_stage_validation: bool = True,
         logger=None
     ):
@@ -99,6 +105,8 @@ class SynthChatGenerator:
             rubrics_dir: Path to rubrics directory
             llm_client: LLM client for generation (from shared.llm.create_client)
             engine: Improvement engine (optional, will create if None)
+            environment_validator: Optional environment validator for runtime-backed
+                tool execution checks.
             enable_stage_validation: Whether to validate each stage (default: True)
             logger: Logger instance (optional)
         """
@@ -106,6 +114,7 @@ class SynthChatGenerator:
         self.llm_client = llm_client
         self.logger = logger
         self.enable_stage_validation = enable_stage_validation
+        self.environment_validator = environment_validator
 
         # Load scenario configurations
         self.scenario_loader = ScenarioLoader(scenarios_dir)
@@ -377,11 +386,39 @@ class SynthChatGenerator:
                 stage_failures.append("response")
 
         # Add metadata
+        environment_trace = None
+        if self.environment_validator is not None:
+            try:
+                system_prompt_text = ""
+                for msg in example["conversations"]:
+                    if msg.get("role") == "system":
+                        system_prompt_text = msg.get("content") or ""
+                        break
+                environment_config = scenario.get("environment")
+                env_result = self.environment_validator.validate_response(
+                    system_prompt=system_prompt_text,
+                    response=assistant_msg,
+                    environment_config=environment_config,
+                    expected_tools=[scenario.get("tool")] if scenario.get("tool") else None,
+                )
+                environment_trace = env_result.to_dict()
+                if not env_result.passed:
+                    stage_failures.append("environment")
+            except Exception as exc:
+                stage_failures.append("environment")
+                environment_trace = {
+                    "passed": False,
+                    "issues": [{"level": "error", "message": f"Environment validation failed: {exc}"}],
+                    "executed_tools": [],
+                }
+
         example["metadata"] = {
             "category": scenario_key,
             "type": scenario.get("type", "unknown"),
             "generated_at": datetime.utcnow().isoformat()
         }
+        if environment_trace is not None:
+            example["metadata"]["environment"] = environment_trace
         if doc_context:
             example["metadata"]["source_doc"] = doc_context.path
 

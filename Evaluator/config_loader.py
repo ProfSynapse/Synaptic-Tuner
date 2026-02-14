@@ -280,6 +280,12 @@ class ConfigLoader:
         if test.get("expected_context"):
             metadata["expected_context"] = test["expected_context"]
 
+        # Optional environment execution config
+        # Allows runtime-backed validation in evaluator when enabled via CLI.
+        environment_cfg = test.get("environment") or defaults.get("environment")
+        if environment_cfg:
+            metadata["environment"] = environment_cfg
+
         # Add params expectations for validation
         if "params_include" in expect:
             metadata["expected_params"] = expect["params_include"]

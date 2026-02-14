@@ -13,6 +13,8 @@ Generate, improve, validate, and evaluate synthetic training datasets via CLI an
 | Task | Command |
 |------|---------|
 | Generate dataset | `python -m SynthChat.run generate [options]` |
+| Generate with environment runtime checks | `python -m SynthChat.run generate --env-backend local [options]` |
+| Generate with custom tool schema/rules | `python -m SynthChat.run generate --env-backend local --env-tool-schema path/to/tool_schema.yaml --env-exec-config path/to/environment_execution.yaml [options]` |
 | Improve dataset | `python -m SynthChat.run improve -i FILE [options]` |
 | Validate dataset | `python -m SynthChat.run validate -i FILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
@@ -26,6 +28,7 @@ Generate, improve, validate, and evaluate synthetic training datasets via CLI an
 - `SynthChat/scenarios/` — Generation templates (6 files, ~30 scenarios)
 - `SynthChat/rubrics/` — Quality rubrics (17 files)
 - `SynthChat/config/` — `settings.yaml`, `validation.yaml`
+- `Evaluator/config/environment_execution.yaml` — Runtime action inference rules (config-driven)
 - `Datasets/synthchat/` — Generated datasets go here (dry-runs and full runs)
 - `SynthChat/interactions/` — Judge/improve logs
 
@@ -104,3 +107,5 @@ HF_TOKEN=hf_...                       # HuggingFace uploads
 - Interactions log in `SynthChat/interactions/` shows judge/improve exchanges
 - Progress checkpoints save to `.synthchat_checkpoint.json` on interruption
 - Be greedy to stop on errors — kill early, fix, retest
+- Environment traces are stored under `example.metadata.environment` when enabled
+- For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
