@@ -60,7 +60,7 @@ training:
   bf16: true  # RTX 3090 supports BF16 (Ampere)
 
   # Training schedule - Multi-epoch for better learning
-  num_train_epochs: 2  # vs KTO's 1 (more epochs to internalize patterns)
+  num_train_epochs: 3  # vs KTO's 1 (more epochs to internalize patterns)
   warmup_ratio: 0.1  # 10% warmup
 
   # Logging and saving
@@ -81,10 +81,10 @@ training:
 dataset:
   # Dataset source
   dataset_name: "professorsynapse/nexus-synthetic-dataset"
-  dataset_file: "nonthinking_tools_sft_01.02.26.jsonl"  # 3,713 examples
+  dataset_file: "brainstorm_outline_96essays_test_20260214_110012_train.jsonl"
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/nonthinking_tools_sft_01.02.26.jsonl"
+  local_file: "../../Datasets/essay_datasets/brainstorm_outline_96essays_test_20260214_110012_train.jsonl"
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

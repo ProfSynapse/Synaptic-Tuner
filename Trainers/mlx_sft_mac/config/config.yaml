@@ -5,9 +5,8 @@
 
 # Model Configuration
 model:
-  # Qwen3-0.6B is ideal for M4 24GB - small enough for fast iteration
   # Use mlx-community converted models for native MLX support
-  name: "mlx-community/Qwen3-0.6B-4bit"  # Qwen3 0.6B 4-bit quantized
+  name: "mlx-community/Qwen3-1.7B-4bit"  # Qwen3 1.7B 4-bit quantized
 
   # Alternative models (uncomment to use):
   # name: "mlx-community/Qwen3-1.7B-4bit"    # Larger, still fits M4 24GB
@@ -34,7 +33,7 @@ lora:
 # SFT Training Configuration
 training:
   # Training schedule
-  num_epochs: 1                    # SFT typically needs 2-3 epochs
+  num_epochs: 3                    # SFT typically needs 2-3 epochs
   per_device_batch_size: 2         # Batch size (M4 can handle 4-8)
   gradient_accumulation_steps: 2   # Effective batch = 8
 
@@ -57,7 +56,7 @@ training:
 # Dataset Configuration
 data:
   # Path relative to mlx_sft_mac directory (train_sft.py location)
-  dataset_path: "../../Datasets/nonthinking_tools_sft_12.28.25.jsonl"
+  dataset_path: "../../Datasets/essay_datasets/brainstorm_outline_96essays_test_20260214_110012_train.jsonl"
 
   train_split: 0.9                 # 90% train, 10% validation
   shuffle: true
