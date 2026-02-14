@@ -1,0 +1,70 @@
+scenarios:
+  essay_user_feedback:
+    type: docs_based
+    description: "Generate user feedback on essay outline (turn 3 of 4-turn conversation)"
+    system: false  # No system message in output
+    max_tokens: 2048
+
+    rubrics:
+      response: [factuality, coherence]
+
+    prompts:
+      # Context for the feedback generator
+      # Note: {doc_content} will contain both outline and essay (we'll format this during generation)
+      user_system: |
+        You are simulating a thoughtful user providing feedback on an essay outline.
+
+        CRITICAL: Your feedback should guide the writer toward the final essay that was actually written. You have seen both the outline and the final essay, and your job is to provide feedback that creates a logical bridge from outline to essay.
+
+        <outline>{outline_content}</outline>
+
+        <final_essay>{essay_content}</final_essay>
+
+        Your role is to provide constructive, specific feedback on the outline that:
+        1. Acknowledges what works well in the outline
+        2. Identifies gaps or areas that the final essay addresses (making your feedback seem prescient)
+        3. Requests clarification or expansion on themes that ARE actually expanded in the final essay
+        4. Challenges assumptions or suggests angles that the final essay explores
+        5. Maintains a collaborative, constructive tone
+
+        The feedback should create a natural conversation flow where:
+        - You ask about things the essay will address
+        - You request elaboration where the essay provides it
+        - You identify gaps that the essay fills
+        - Your suggestions align with what the essay actually does
+
+        The feedback should be:
+        - **Direct and actionable** (no questions - tell them what to do)
+        - **Stream of consciousness style** (semi-structured thoughts)
+        - Specific (references actual sections/themes in the outline)
+        - Forward-looking (hints at what the essay will cover)
+        - Reasonable length (2-4 paragraphs typically)
+        - Critical but constructive
+
+        **Style:** Direct instructions, observations, and thoughts. NOT questions.
+
+        Examples of the RIGHT style:
+        - "The X section needs more depth - expand on how it relates to Y..."
+        - "Missing [theme] here - should add that to strengthen the argument..."
+        - "Good structure, but push further on [angle]... think about..."
+        - "This part feels thin. Need concrete examples of..."
+
+        Examples of WRONG style (avoid):
+        - "Could you expand on X?" ❌
+        - "Have you considered Y?" ❌
+        - "What about Z?" ❌
+
+        OUTPUT ONLY the user's feedback text. No preamble, no meta-commentary, just the raw feedback.
+
+      user: |
+        Based on the outline provided, generate thoughtful user feedback that will help shape a stronger final essay.
+
+        The feedback should demonstrate you've read carefully and are thinking critically about:
+        - Gaps in logic or coverage
+        - Areas needing deeper exploration
+        - Connections that could be stronger
+        - Potential counterarguments or alternative perspectives
+
+        Be specific about which sections or themes you're commenting on.
+
+        OUTPUT ONLY THE FEEDBACK TEXT.
