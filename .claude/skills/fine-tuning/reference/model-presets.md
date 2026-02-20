@@ -48,6 +48,8 @@ Use `--model-size` for quick selection:
 
 ## LoRA Settings by Size
 
+> ⚠️ These defaults apply to **standard Transformer architectures** (Llama, Qwen, Mistral, Gemma). Hybrid/SSM models require different target modules — see [Architecture-Specific Models](#architecture-specific-models) below.
+
 | Size | Rank (r) | Alpha | Dropout | Target Modules |
 |------|----------|-------|---------|----------------|
 | 3B | 32 | 64 | 0.05 | q,k,v,o,gate,up,down |
@@ -116,3 +118,48 @@ model:
 | Maximum quality | 13-14B | Higher quality, slower |
 | Reasoning tasks | DeepSeek-R1 | Distilled reasoning |
 | Multimodal | Qwen-VL | Vision + Language |
+
+---
+
+## Architecture-Specific Models
+
+These models have non-standard architectures and **require config overrides** — the defaults above will cause crashes.
+
+### LiquidAI LFM2.5 (Hybrid SSM)
+
+**Models:** `LiquidAI/LFM2.5-1.2B-Instruct`, `LiquidAI/LFM2.5-3B-Instruct`
+
+LFM2.5 is a hybrid architecture combining LIV (Liquid Intelligent Vector) convolution blocks with GQA (Grouped Query Attention). It is **not a standard Transformer**. Using default config causes a SIGABRT crash at ~step 5.
+
+**Required overrides in `config.yaml`:**
+
+```yaml
+model:
+  load_in_4bit: false        # CRITICAL — LIV conv blocks break bnb-4bit
+  max_seq_length: 4096
+
+lora:
+  r: 16
+  lora_alpha: 16
+  lora_dropout: 0
+  target_modules:            # LFM2.5-specific — NOT standard Transformer names
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "out_proj"             # ← NOT "o_proj"
+    - "in_proj"              # ← LFM2.5-specific, no Transformer equivalent
+    - "w1"                   # ← NOT "gate_proj"
+    - "w2"                   # ← NOT "up_proj"
+    - "w3"                   # ← NOT "down_proj"
+
+training:
+  per_device_train_batch_size: 2
+  lr_scheduler_type: "linear"
+  warmup_ratio: 0.02
+```
+
+**VRAM note:** Without 4-bit, the 1.2B model in BF16 uses ~2.4 GB for weights. With LoRA + optimizer + activations, expect ~6-8 GB total — well within RTX 3090 capacity.
+
+**Chat template:** Falls through to `chatml` default (correct for LFM2.5).
+
+**Source:** Official Unsloth LFM2.5 tutorial (August 2025 release)

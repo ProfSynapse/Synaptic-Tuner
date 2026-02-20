@@ -187,7 +187,55 @@ dataset:
 | Setting | Value | Why |
 |---------|-------|-----|
 | `dataloader_num_workers` | 0 | WSL2 crashes with >0 |
-| `load_in_4bit` | true | Required for 24GB VRAM |
+| `load_in_4bit` | true* | Required for 24GB VRAM with standard Transformers |
 | `optim` | adamw_8bit | OOM without it |
 | `use_gradient_checkpointing` | "unsloth" | Must use Unsloth variant |
 | `num_proc` (dataset) | 1 | Windows/WSL compatibility |
+
+> **\* Exception — Hybrid/SSM architectures:** `load_in_4bit` must be `false` for models like LFM2.5 that use non-standard layers (LIV convolution blocks) incompatible with bnb-4bit quantization. See [Architecture-Specific Overrides](#architecture-specific-config-overrides) below.
+
+---
+
+## Architecture-Specific Config Overrides
+
+Standard config defaults work for Llama, Qwen, Mistral, Gemma, and most Transformer models. These architectures require different settings:
+
+### LiquidAI LFM2.5 (Hybrid SSM — LIV + GQA)
+
+> ⚠️ **Using standard defaults with LFM2.5 causes SIGABRT (exit code -6) crash at ~step 5.** The crash is caused by bnb-4bit quantization being applied to LIV convolution blocks. It presents as a cryptic PyTorch teardown error but is a config issue.
+
+```yaml
+model:
+  model_name: "LiquidAI/LFM2.5-1.2B-Instruct"
+  max_seq_length: 4096
+  dtype: null
+  load_in_4bit: false        # REQUIRED — LIV blocks incompatible with bnb-4bit
+
+lora:
+  r: 16
+  lora_alpha: 16
+  lora_dropout: 0            # Use 0, not 0.05
+  bias: "none"
+  target_modules:            # LFM2.5 uses different layer names than standard Transformers
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "out_proj"             # NOT "o_proj"
+    - "in_proj"              # No equivalent in standard Transformers
+    - "w1"                   # NOT "gate_proj"
+    - "w2"                   # NOT "up_proj"
+    - "w3"                   # NOT "down_proj"
+  use_gradient_checkpointing: "unsloth"
+
+training:
+  per_device_train_batch_size: 2    # Use 2, not 4
+  lr_scheduler_type: "linear"       # NOT "cosine"
+  warmup_ratio: 0.02                # ~5 warmup steps out of ~233
+  # All other training settings remain the same
+```
+
+**Quick checklist before training LFM2.5:**
+- [ ] `load_in_4bit: false`
+- [ ] `target_modules` uses `out_proj`, `in_proj`, `w1`, `w2`, `w3`
+- [ ] `r: 16`, `lora_alpha: 16`, `lora_dropout: 0`
+- [ ] `max_seq_length: 4096`

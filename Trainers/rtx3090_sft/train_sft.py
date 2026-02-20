@@ -146,6 +146,100 @@ def convert_to_evo_config(config_evo) -> "EvoConfig":
     )
 
 
+# ============================================================================
+# Model Compatibility Rules
+# Extensible registry of model-family-specific configuration constraints.
+# Each entry maps a detection function to a list of validation checks.
+# Add new model families here as needed.
+# ============================================================================
+
+def _is_lfm2_family(model_name: str) -> bool:
+    """Detect LiquidAI LFM2-family models (LFM2, LFM2.5, etc.)."""
+    name_lower = model_name.lower()
+    return "lfm" in name_lower or "liquidai" in name_lower
+
+
+def _check_lfm2_4bit(config) -> Optional[str]:
+    """Check if LFM2-family model is configured with incompatible 4-bit quantization."""
+    if config.model.load_in_4bit:
+        return (
+            "LFM2.5 uses LIV convolution blocks incompatible with 4-bit quantization. "
+            "Set load_in_4bit: false to avoid SIGABRT crash."
+        )
+    return None
+
+
+# Known incompatible LoRA modules for LFM2-family models.
+# These are standard transformer projection names that do not exist in LFM2's architecture.
+_LFM2_INCOMPATIBLE_MODULES = {"o_proj", "gate_proj", "up_proj", "down_proj"}
+_LFM2_CORRECT_MODULES = ["q_proj", "k_proj", "v_proj", "out_proj", "in_proj", "w1", "w2", "w3"]
+
+
+def _check_lfm2_lora_targets(config) -> Optional[str]:
+    """Check if LFM2-family model has incompatible LoRA target modules."""
+    configured = set(config.lora.target_modules)
+    bad_modules = configured & _LFM2_INCOMPATIBLE_MODULES
+    if bad_modules:
+        return (
+            f"LoRA target_modules contain modules incompatible with LFM2.5 architecture: "
+            f"{sorted(bad_modules)}. "
+            f"Use these instead: {_LFM2_CORRECT_MODULES}"
+        )
+    return None
+
+
+# Registry: list of (detector_fn, [check_fn, ...]) tuples.
+# To add a new model family, append a tuple with a detector and its checks.
+MODEL_COMPATIBILITY_RULES = [
+    (_is_lfm2_family, [_check_lfm2_4bit, _check_lfm2_lora_targets]),
+]
+
+
+def validate_model_compatibility(config) -> None:
+    """Validate configuration against known model-family compatibility rules.
+
+    Prints prominent warnings for any incompatible settings but does NOT raise
+    exceptions, allowing the user to decide whether to proceed.
+
+    Called in run() after config is loaded but before load_model_and_tokenizer().
+
+    Args:
+        config: The Config dataclass loaded from YAML / CLI.
+    """
+    model_name = config.model.model_name
+    warnings_found = []
+
+    for detector, checks in MODEL_COMPATIBILITY_RULES:
+        if not detector(model_name):
+            continue
+        for check_fn in checks:
+            warning = check_fn(config)
+            if warning:
+                warnings_found.append(warning)
+
+    if not warnings_found:
+        return
+
+    # Print a box that is impossible to miss
+    border = "!" * 72
+    print(f"\n{border}")
+    print("!!  MODEL COMPATIBILITY WARNING" + " " * 37 + "!!")
+    print(border)
+    for warning in warnings_found:
+        # Wrap long warnings at ~66 chars to fit inside the box
+        words = warning.split()
+        line = "  "
+        for word in words:
+            if len(line) + len(word) + 1 > 68:
+                print(f"!!{line}")
+                line = "  "
+            line += word + " "
+        if line.strip():
+            print(f"!!{line}")
+        print("!!")
+    print(border + "\n")
+
+
 def setup_wandb():
     """Auto-setup W&B if API key is in environment."""
     wandb_key = os.environ.get("WANDB_API_KEY")
@@ -466,6 +560,9 @@ def run(args: argparse.Namespace):
     # HuggingFace token
     if not args.hf_token:
         args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+
+    # Validate model compatibility BEFORE loading model
+    validate_model_compatibility(config)
 
     # Create timestamped run directory (following KTO pattern)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

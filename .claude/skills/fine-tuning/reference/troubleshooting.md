@@ -4,6 +4,26 @@ Common issues and fixes for training.
 
 ---
 
+## SIGABRT / Exit Code -6 (Hybrid/SSM Models)
+
+**Symptoms:** Training crashes with `exit code: -6`, stack trace in `libtorch` during `Py_FinalizeEx` / `_PyModule_ClearDict`, only a few steps logged (e.g., step 5/233)
+
+**Misleading nature:** The error looks like a benign Python teardown issue but is actually caused by training crashing early. The CUDA context cleanup failure is a symptom, not the cause.
+
+**Root cause:** Using `load_in_4bit: true` with a hybrid SSM model (e.g., LiquidAI LFM2.5) that has non-standard layer types (LIV convolution blocks) incompatible with bnb-4bit quantization.
+
+**Fix:**
+```yaml
+model:
+  load_in_4bit: false    # Required for LFM2.5 and other hybrid SSM models
+```
+
+Also verify LoRA `target_modules` match the model's actual layer names — see [Architecture-Specific Config Overrides](training-config.md#architecture-specific-config-overrides).
+
+**Diagnosis:** Check the training log (`logs/training_latest.jsonl`) — if only 1–5 steps logged and no checkpoints saved, it's a config crash, not teardown noise.
+
+---
+
 ## CUDA Out of Memory (OOM)
 
 **Symptoms:** `CUDA error: out of memory`, training crashes
