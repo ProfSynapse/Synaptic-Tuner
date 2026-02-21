@@ -146,13 +146,28 @@ def poll_until_done(
         result = poll_until_done(check_job, interval=30, timeout_seconds=7200)
     """
     elapsed = 0
+    consecutive_errors = 0
+    max_consecutive = 3
+
     while elapsed < timeout_seconds:
         try:
             status = check_fn()
+            consecutive_errors = 0  # Reset on success
             if status is not None:
                 return status
         except Exception as e:
-            logger.warning("Poll check failed (will retry): %s", e)
+            consecutive_errors += 1
+            # Persistent errors should not be retried
+            error_lower = str(e).lower()
+            if any(term in error_lower for term in ("unauthorized", "not found", "forbidden", "invalid")):
+                raise
+            # Too many consecutive transient errors -- give up
+            if consecutive_errors >= max_consecutive:
+                raise
+            logger.warning(
+                "Poll check failed (%d/%d, will retry): %s",
+                consecutive_errors, max_consecutive, e,
+            )
 
         time.sleep(interval)
         elapsed += interval

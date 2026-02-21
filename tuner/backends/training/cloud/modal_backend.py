@@ -268,7 +268,14 @@ class ModalBackend(ITrainingBackend):
 
         try:
             process = subprocess.Popen(cmd, cwd=str(self.repo_root))
-            return process.wait()
+            timeout_secs = int(timeout_hours * 3600)
+            return process.wait(timeout=timeout_secs)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise BackendError(
+                f"Modal job timed out after {timeout_hours}h. "
+                f"Process killed. Check Modal dashboard for job status."
+            )
         except KeyboardInterrupt:
             print("\nTraining interrupted by user.")
             if process is not None:
