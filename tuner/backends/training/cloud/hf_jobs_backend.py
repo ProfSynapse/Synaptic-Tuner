@@ -5,10 +5,10 @@ Location: tuner/backends/training/cloud/hf_jobs_backend.py
 Purpose: Submit and monitor training jobs via HuggingFace Jobs API
 Used by: CloudTrainHandler when user selects HF Jobs provider
 
-Implements ITrainingBackend for HuggingFace Jobs. Training scripts are
-submitted as UV scripts with PEP 723 inline dependency declarations.
-The HF Jobs infrastructure handles provisioning GPU hardware, installing
-dependencies, and running the training script.
+Implements ITrainingBackend for HuggingFace Jobs. Training jobs are
+submitted via huggingface_hub.run_job(image, command, flavor) which
+provisions GPU hardware and runs a Docker container with the specified
+command. The command clones the repo and runs the training script.
 
 Requirements:
 - HF_TOKEN environment variable set (requires HF Pro subscription)
@@ -17,7 +17,6 @@ Requirements:
 
 import logging
 import os
-import textwrap
 import time
 import yaml
 from pathlib import Path
@@ -42,12 +41,12 @@ class HFJobsBackend(ITrainingBackend):
     HuggingFace Jobs training backend.
 
     Submits training jobs to HuggingFace's managed GPU infrastructure using
-    the huggingface_hub library. Training scripts are wrapped in UV script
-    format with PEP 723 inline dependency declarations.
+    huggingface_hub.run_job(image, command, flavor). The job runs a Docker
+    container that clones the repo and executes the training script.
 
     The execute() flow:
-    1. Build a UV script wrapper with inline deps
-    2. Submit via huggingface_hub.run_job()
+    1. Build a shell command that installs deps, clones repo, runs training
+    2. Submit via huggingface_hub.run_job(image=..., command=["bash", "-c", ...])
     3. Poll inspect_job() and stream fetch_job_logs() until completion
     4. Return exit code (0 = success, 1 = failure)
 
@@ -204,9 +203,9 @@ class HFJobsBackend(ITrainingBackend):
         """
         Submit training job to HuggingFace Jobs and poll until completion.
 
-        Builds a UV script wrapper with PEP 723 inline dependencies,
-        submits it via huggingface_hub.run_job(), then polls for
-        completion while streaming logs.
+        Uses huggingface_hub.run_job(image, command, flavor) to submit a
+        Docker-based job that clones the repo and runs the training script.
+        Polls inspect_job() for status and streams fetch_job_logs() output.
 
         Args:
             config: Training configuration (should be CloudTrainingConfig)
@@ -223,29 +222,34 @@ class HFJobsBackend(ITrainingBackend):
                 "Install with: pip install -r requirements-cloud.txt"
             )
 
-        # Cast to CloudTrainingConfig if needed
         if not isinstance(config, CloudTrainingConfig):
             raise CloudProviderError(
                 "HF Jobs backend requires CloudTrainingConfig, "
                 f"got {type(config).__name__}"
             )
 
-        # Build the UV script content
-        script_content = self._build_uv_script(config)
+        # Build the training command
+        training_command = self._build_training_command(config)
+        image = config.cloud_image or DEFAULT_IMAGE
+        flavor = config.hf_flavor or config.gpu_type
 
         logger.info("Submitting job to HuggingFace Jobs...")
-        logger.info("Flavor: %s", config.hf_flavor or config.gpu_type)
+        logger.info("Image: %s", image)
+        logger.info("Flavor: %s", flavor)
         logger.info("Timeout: %.1f hours", config.timeout_hours)
 
         try:
-            # Submit the job
             job = huggingface_hub.run_job(
-                script_content,
-                flavor=config.hf_flavor or config.gpu_type,
-                secrets={"HF_TOKEN": os.environ["HF_TOKEN"]},
+                image=image,
+                command=["bash", "-c", training_command],
+                flavor=flavor,
             )
-            job_id = job.job_id if hasattr(job, "job_id") else str(job)
+            # JobInfo has .id and .url attributes
+            job_id = job.id if hasattr(job, "id") else str(job)
+            job_url = getattr(job, "url", None)
             print(f"  Job submitted: {job_id}")
+            if job_url:
+                print(f"  Monitor at: {job_url}")
             print(f"  Polling for completion (every 30s, timeout: {config.timeout_hours}h)...")
             print()
 
@@ -264,9 +268,14 @@ class HFJobsBackend(ITrainingBackend):
             nonlocal last_log_offset
             try:
                 job_info = huggingface_hub.inspect_job(job_id)
-                status = job_info.status if hasattr(job_info, "status") else str(job_info)
+                # JobInfo.status is a JobStatus with .stage attribute
+                status_obj = getattr(job_info, "status", None)
+                if status_obj and hasattr(status_obj, "stage"):
+                    status = status_obj.stage
+                else:
+                    status = str(status_obj) if status_obj else "UNKNOWN"
 
-                # Stream logs
+                # Stream logs (best-effort)
                 try:
                     logs = huggingface_hub.fetch_job_logs(job_id)
                     if logs and len(logs) > last_log_offset:
@@ -274,7 +283,7 @@ class HFJobsBackend(ITrainingBackend):
                         print(new_logs, end="", flush=True)
                         last_log_offset = len(logs)
                 except Exception:
-                    pass  # Log streaming is best-effort
+                    pass
 
                 if status in ("completed", "COMPLETED"):
                     return "COMPLETED"
@@ -305,74 +314,43 @@ class HFJobsBackend(ITrainingBackend):
             print(f"  Job {job_id} failed: {error_detail}")
             return 1
 
-    def _build_uv_script(self, config: CloudTrainingConfig) -> str:
+    def _build_training_command(self, config: CloudTrainingConfig) -> str:
         """
-        Build a UV script with PEP 723 inline dependency declarations.
+        Build a shell command string for the HF Jobs container.
 
-        The script clones the repo and runs the training script within
-        the cloud environment. Dependencies are declared inline using
-        the PEP 723 format so that uv can install them automatically.
+        The command installs training dependencies, clones the repo,
+        and runs the training script. HF_TOKEN is available in the
+        container environment automatically (HF Jobs injects it).
 
         Args:
             config: Cloud training configuration
 
         Returns:
-            Complete UV script content as a string
+            Shell command string to pass as ["bash", "-c", command]
         """
         try:
             repo_url = resolve_repo_url()
         except CloudProviderError:
-            repo_url = "https://github.com/USER/Toolset-Training.git"
-            logger.warning(
-                "Could not resolve repo URL. Using placeholder: %s. "
-                "Set CLOUD_REPO_URL environment variable.",
-                repo_url,
+            raise CloudProviderError(
+                "Cannot determine repo URL for HF Jobs code sync. "
+                "Set CLOUD_REPO_URL environment variable or ensure "
+                "git remote 'origin' is configured."
             )
 
-        script = textwrap.dedent(f"""\
-            # /// script
-            # dependencies = [
-            #   "unsloth",
-            #   "trl>=0.15",
-            #   "transformers",
-            #   "datasets",
-            #   "peft",
-            #   "torch",
-            #   "pyyaml",
-            #   "wandb",
-            #   "hf_transfer",
-            # ]
-            # ///
-
-            import subprocess
-            import sys
-            import os
-
+        parts = [
+            # Install training dependencies
+            "pip install unsloth trl>=0.15 transformers datasets peft "
+            "pyyaml wandb hf_transfer python-dotenv",
             # Enable fast HF transfers
-            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+            "export HF_HUB_ENABLE_HF_TRANSFER=1",
+            # Clone repo
+            f"git clone --depth 1 {repo_url} /workspace/repo",
+            # Run training
+            f"cd /workspace/repo/Trainers/rtx3090_{config.method}",
+            f"python train_{config.method}.py",
+        ]
 
-            # Clone repo and run training
-            repo_url = "{repo_url}"
-            method = "{config.method}"
-
-            print(f"Cloning {{repo_url}}...")
-            subprocess.run(
-                ["git", "clone", "--depth", "1", repo_url, "/workspace/repo"],
-                check=True,
-            )
-
-            trainer_dir = f"/workspace/repo/Trainers/rtx3090_{{method}}"
-            script_name = f"train_{{method}}.py"
-
-            print(f"Starting {{method.upper()}} training...")
-            result = subprocess.run(
-                [sys.executable, script_name],
-                cwd=trainer_dir,
-            )
-
-            sys.exit(result.returncode)
-        """)
-        return script
+        return " && ".join(parts)
 
 
 def _parse_timeout(timeout_str: str) -> float:

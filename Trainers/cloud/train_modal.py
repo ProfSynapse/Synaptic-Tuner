@@ -399,7 +399,7 @@ def main(
 
     # Override the GPU and timeout for this specific invocation.
     # Modal's `with_options` allows runtime overrides of function config.
-    training_fn = run_training.options(
+    training_fn = run_training.with_options(
         gpu=gpu,
         timeout=timeout_hours * HOURS,
     )

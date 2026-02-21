@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from tuner.backends.training.base import ITrainingBackend
-from tuner.core.config import TrainingConfig
+from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
@@ -116,7 +116,7 @@ class RunPodBackend(ITrainingBackend):
         """
         return self._get_cloud_config().get("runpod", {})
 
-    def load_config(self, method: str) -> TrainingConfig:
+    def load_config(self, method: str) -> CloudTrainingConfig:
         """
         Load training configuration for the specified method.
 
@@ -127,7 +127,7 @@ class RunPodBackend(ITrainingBackend):
             method: Training method ('sft' or 'kto').
 
         Returns:
-            Parsed training configuration.
+            CloudTrainingConfig with RunPod-specific fields populated.
 
         Raises:
             ConfigurationError: If config files are missing or invalid.
@@ -155,7 +155,11 @@ class RunPodBackend(ITrainingBackend):
         dataset_config = training_yaml.get("dataset", {})
         training_config = training_yaml.get("training", {})
 
-        return TrainingConfig(
+        # Load cloud-specific RunPod settings
+        cloud_config = self._get_cloud_config()
+        runpod_config = cloud_config.get("runpod", {})
+
+        return CloudTrainingConfig(
             method=method,
             platform="runpod",
             config_path=config_path,
@@ -165,6 +169,13 @@ class RunPodBackend(ITrainingBackend):
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
+            provider="runpod",
+            gpu_type=runpod_config.get("gpu_type_id", "NVIDIA A100 SXM"),
+            timeout_hours=runpod_config.get("default_timeout", 7200) / 3600,
+            cloud_image=runpod_config.get("default_image", ""),
+            push_to_hub=cloud_config.get("push_to_hub", True),
+            hub_repo=cloud_config.get("hub_repo"),
+            runpod_volume_gb=runpod_config.get("volume_in_gb", 50),
         )
 
     def validate_environment(self) -> Tuple[bool, str]:
@@ -389,10 +400,12 @@ class RunPodBackend(ITrainingBackend):
             )
             return " && ".join(parts)
 
-        # Build clone command, injecting GH_TOKEN for private repos
-        gh_token = os.environ.get("GH_TOKEN")
-        if gh_token and repo_url.startswith("https://"):
-            clone_url = repo_url.replace("https://", f"https://{gh_token}@")
+        # Build clone command using $GH_TOKEN shell variable for private repos.
+        # The token is passed securely via _build_pod_env() as a pod env var,
+        # so we reference it via shell expansion rather than embedding the value
+        # in the command string (which would leak in RunPod logs).
+        if repo_url.startswith("https://"):
+            clone_url = repo_url.replace("https://", "https://$GH_TOKEN@")
         else:
             clone_url = repo_url
 

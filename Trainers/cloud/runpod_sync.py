@@ -92,14 +92,16 @@ def _build_clone_command(repo_url: str, target_dir: str) -> str:
     Returns:
         Shell command string for cloning.
     """
-    gh_token = os.environ.get("GH_TOKEN")
-    if gh_token and repo_url.startswith("https://"):
-        authenticated_url = repo_url.replace(
-            "https://", f"https://{gh_token}@"
-        )
-        return f"git clone --depth 1 {authenticated_url} {target_dir}"
+    # Use $GH_TOKEN shell variable expansion for private repos.
+    # The token is passed securely as a pod env var by _build_pod_env(),
+    # so we reference it via shell expansion rather than embedding the
+    # value in the command string (which would leak in RunPod logs).
+    if repo_url.startswith("https://"):
+        clone_url = repo_url.replace("https://", "https://$GH_TOKEN@")
+    else:
+        clone_url = repo_url
 
-    return f"git clone --depth 1 {repo_url} {target_dir}"
+    return f"git clone --depth 1 {clone_url} {target_dir}"
 
 
 def wait_for_pod_ready(pod_id: str, timeout: int = 300, interval: int = 10) -> bool:

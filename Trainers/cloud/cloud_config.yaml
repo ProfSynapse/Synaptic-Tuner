@@ -52,7 +52,7 @@ cloud:
     gpu_count: 1
     volume_in_gb: 50
     container_disk_in_gb: 50
-    cloud_type: "COMMUNITY"
+    cloud_type: "SECURE"  # Use SECURE for training to avoid preemption risk
     default_image: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
     result_path: "/workspace/outputs"
     setup_commands:

@@ -35,8 +35,10 @@ from pathlib import Path
 from typing import List, Tuple
 
 from tuner.backends.training.base import ITrainingBackend
-from tuner.core.config import TrainingConfig
+from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import BackendError, ConfigurationError
+
+from .base_cloud import load_cloud_config
 
 logger = logging.getLogger(__name__)
 
@@ -141,18 +143,18 @@ class ModalBackend(ITrainingBackend):
             "     Get tokens from: https://modal.com/settings"
         )
 
-    def load_config(self, method: str) -> TrainingConfig:
+    def load_config(self, method: str) -> CloudTrainingConfig:
         """Load training configuration for the specified method.
 
         Loads the standard training config from the trainer's config.yaml
         and merges cloud-specific settings from Trainers/cloud/cloud_config.yaml
-        if it exists.
+        using the shared load_cloud_config() utility.
 
         Args:
             method: Training method ("sft" or "kto")
 
         Returns:
-            TrainingConfig with merged cloud settings
+            CloudTrainingConfig with merged cloud settings
 
         Raises:
             ConfigurationError: If config files are missing or invalid
@@ -176,26 +178,21 @@ class ModalBackend(ITrainingBackend):
         except Exception as e:
             raise ConfigurationError(f"Failed to parse training config: {e}")
 
-        # Load cloud config overlay if available
+        # Load cloud config overlay using shared utility
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
-        cloud_settings = {}
-        if cloud_config_path.exists():
-            try:
-                with open(cloud_config_path) as f:
-                    cloud_config = yaml.safe_load(f)
-                cloud_settings = (cloud_config or {}).get("cloud", {}).get("modal", {})
-            except Exception as e:
-                logger.warning("Failed to parse cloud config: %s", e)
+        cloud_config = load_cloud_config(cloud_config_path)
+        modal_config = cloud_config.get("modal", {})
 
         # Extract relevant fields
         model_config = config.get("model", {})
         dataset_config = config.get("dataset", {})
         training_config = config.get("training", {})
 
-        # Determine GPU type from cloud config or default
-        gpu_type = cloud_settings.get("gpu", DEFAULT_GPU)
+        # Determine GPU and timeout from cloud config or defaults
+        gpu_type = modal_config.get("gpu", DEFAULT_GPU)
+        timeout_hours = modal_config.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
 
-        return TrainingConfig(
+        return CloudTrainingConfig(
             method=method,
             platform="modal",
             config_path=config_path,
@@ -205,6 +202,11 @@ class ModalBackend(ITrainingBackend):
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
+            provider="modal",
+            gpu_type=gpu_type,
+            timeout_hours=timeout_hours,
+            push_to_hub=cloud_config.get("push_to_hub", True),
+            hub_repo=cloud_config.get("hub_repo"),
         )
 
     def execute(self, config: TrainingConfig, python_path: str) -> int:
@@ -234,20 +236,12 @@ class ModalBackend(ITrainingBackend):
                 "Ensure Trainers/cloud/train_modal.py exists."
             )
 
-        # Resolve GPU type from cloud config
+        # Resolve GPU type and timeout from cloud config using shared utility
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
-        gpu_type = DEFAULT_GPU
-        timeout_hours = DEFAULT_TIMEOUT_HOURS
-
-        if cloud_config_path.exists():
-            try:
-                with open(cloud_config_path) as f:
-                    cloud_config = yaml.safe_load(f)
-                modal_settings = (cloud_config or {}).get("cloud", {}).get("modal", {})
-                gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
-                timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
-            except Exception:
-                logger.warning("Could not read cloud config, using defaults")
+        cloud_config = load_cloud_config(cloud_config_path)
+        modal_settings = cloud_config.get("modal", {})
+        gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
+        timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
 
         # Resolve repo URL for code sync
         repo_url = self._resolve_repo_url()
