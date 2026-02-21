@@ -501,13 +501,13 @@ class RunPodBackend(ITrainingBackend):
             runtime = pod.get("runtime")
 
             # Pod exited -- training finished (success or failure)
-            if status in ("EXITED", "TERMINATED"):
+            if status in ("EXITED", "TERMINATED", "ERROR", "FAILED"):
                 print(f"\nPod {pod_id} has stopped (status: {status})")
                 if status == "EXITED":
                     print("Training completed successfully.")
                     return 0
                 else:
-                    print("Pod was terminated unexpectedly.")
+                    print(f"Pod entered terminal state: {status}")
                     return 1
 
             # Pod still running -- report GPU utilization
@@ -535,28 +535,41 @@ class RunPodBackend(ITrainingBackend):
 
     def _terminate_pod(self, runpod_module, pod_id: str) -> None:
         """
-        Terminate a RunPod pod. Always called in finally blocks.
+        Terminate a RunPod pod with retry. Always called in finally blocks.
 
         This is the most critical safety function -- it prevents billing
-        overruns by ensuring pods are always cleaned up.
+        overruns by ensuring pods are always cleaned up. Retries up to 3
+        times with exponential backoff on transient failures.
 
         Args:
             runpod_module: The imported runpod module.
             pod_id: Pod identifier.
         """
-        try:
-            print(f"\nTerminating pod {pod_id}...")
-            runpod_module.terminate_pod(pod_id)
-            print(f"Pod {pod_id} terminated successfully.")
-            logger.info("Pod %s terminated", pod_id)
-        except Exception as e:
-            # Log but don't raise -- we are in a finally block
-            print(
-                f"\nWARNING: Failed to terminate pod {pod_id}: {e}\n"
-                f"IMPORTANT: Manually terminate this pod at "
-                f"https://www.runpod.io/console/pods to avoid charges!"
-            )
-            logger.error(
-                "CRITICAL: Failed to terminate pod %s: %s. "
-                "Manual termination required!", pod_id, e
-            )
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                print(f"\nTerminating pod {pod_id}...")
+                runpod_module.terminate_pod(pod_id)
+                print(f"Pod {pod_id} terminated successfully.")
+                logger.info("Pod %s terminated", pod_id)
+                return
+            except Exception as e:
+                if attempt < max_attempts - 1:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "Terminate attempt %d/%d failed for pod %s: %s. Retrying in %ds...",
+                        attempt + 1, max_attempts, pod_id, e, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    # Final attempt failed -- log but don't raise (finally block)
+                    print(
+                        f"\nWARNING: Failed to terminate pod {pod_id} after "
+                        f"{max_attempts} attempts: {e}\n"
+                        f"IMPORTANT: Manually terminate this pod at "
+                        f"https://www.runpod.io/console/pods to avoid charges!"
+                    )
+                    logger.error(
+                        "CRITICAL: Failed to terminate pod %s after %d attempts: %s. "
+                        "Manual termination required!", pod_id, max_attempts, e
+                    )

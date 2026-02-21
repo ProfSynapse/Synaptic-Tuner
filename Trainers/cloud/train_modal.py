@@ -32,6 +32,7 @@ Dependencies:
 """
 
 import os
+import re
 import subprocess
 import sys
 
@@ -172,8 +173,10 @@ def run_training(
             text=True,
         )
         if clone_result.returncode != 0:
-            print(f"[Modal] Git clone failed: {clone_result.stderr}")
-            raise RuntimeError(f"Failed to clone repo: {clone_result.stderr}")
+            # Scrub any credentials from stderr before logging/raising
+            safe_stderr = re.sub(r'https?://[^@\s]+@', 'https://[REDACTED]@', clone_result.stderr)
+            print(f"[Modal] Git clone failed: {safe_stderr}")
+            raise RuntimeError(f"Failed to clone repo: {safe_stderr}")
     else:
         print("[Modal] No repo_url provided, skipping clone.")
         print("[Modal] Ensure training code is available in the container.")
