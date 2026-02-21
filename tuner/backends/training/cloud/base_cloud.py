@@ -18,7 +18,7 @@ import subprocess
 import time
 import yaml
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
 from tuner.core.exceptions import CloudProviderError
 
@@ -38,7 +38,7 @@ GPU_PRICING = {
         "L4": {"name": "L4 (24GB)", "price": 0.73},
         "A10G": {"name": "A10G (24GB)", "price": 1.10},
         "L40S": {"name": "L40S (48GB)", "price": 1.40},
-        "A100-40GB": {"name": "A100 (40GB)", "price": 2.78},
+        "A100": {"name": "A100 (40GB)", "price": 2.78},
         "A100-80GB": {"name": "A100 (80GB)", "price": 3.72},
         "H100": {"name": "H100 (80GB)", "price": 4.89},
     },
@@ -48,6 +48,87 @@ GPU_PRICING = {
         "NVIDIA H100 80GB HBM3": {"name": "H100 (80GB)", "price": 3.89},
     },
 }
+
+
+# Supported training methods across all cloud backends
+SUPPORTED_METHODS = ("sft", "kto")
+
+
+def validate_training_method(method: str, backend_name: str) -> None:
+    """
+    Validate that a training method is supported.
+
+    Args:
+        method: Training method to validate
+        backend_name: Name of the backend (for error messages)
+
+    Raises:
+        CloudProviderError: If the method is not supported
+    """
+    if method not in SUPPORTED_METHODS:
+        raise CloudProviderError(
+            f"Unknown training method '{method}' for {backend_name} backend. "
+            f"Supported methods: {', '.join(SUPPORTED_METHODS)}"
+        )
+
+
+def load_gpu_tiers(cloud_config_path: Path) -> dict:
+    """
+    Load GPU tier definitions from cloud_config.yaml.
+
+    GPU tiers map logical tier names (budget, standard, performance) to
+    provider-specific GPU identifiers, enabling provider-agnostic GPU
+    selection in the CLI.
+
+    Args:
+        cloud_config_path: Path to cloud_config.yaml file
+
+    Returns:
+        Dictionary of tier definitions. Returns empty dict if file
+        doesn't exist or has no gpu_tiers section.
+
+    Example:
+        tiers = load_gpu_tiers(repo_root / "Trainers" / "cloud" / "cloud_config.yaml")
+        modal_gpu = tiers["standard"]["modal"]  # "L40S"
+    """
+    if not cloud_config_path.exists():
+        return {}
+    try:
+        with open(cloud_config_path) as f:
+            config = yaml.safe_load(f)
+        return config.get("gpu_tiers", {})
+    except Exception as e:
+        logger.warning("Failed to load GPU tiers from %s: %s", cloud_config_path, e)
+        return {}
+
+
+def resolve_gpu_for_tier(
+    cloud_config_path: Path, provider: str, tier: str
+) -> Optional[str]:
+    """
+    Resolve a GPU tier name to a provider-specific GPU identifier.
+
+    Looks up the gpu_tiers section in cloud_config.yaml and returns the
+    GPU identifier for the given provider and tier.
+
+    Args:
+        cloud_config_path: Path to cloud_config.yaml file
+        provider: Provider name ('hf_jobs', 'modal', 'runpod')
+        tier: Tier name ('budget', 'standard', 'performance')
+
+    Returns:
+        Provider-specific GPU identifier string, or None if tier/provider
+        not found.
+
+    Example:
+        gpu = resolve_gpu_for_tier(config_path, "modal", "standard")
+        # Returns "L40S"
+    """
+    tiers = load_gpu_tiers(cloud_config_path)
+    tier_config = tiers.get(tier)
+    if not tier_config:
+        return None
+    return tier_config.get(provider)
 
 
 def load_cloud_config(cloud_config_path: Path) -> dict:

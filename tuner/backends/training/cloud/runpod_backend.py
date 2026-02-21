@@ -206,9 +206,18 @@ class RunPodBackend(ITrainingBackend):
                 "and add it to your .env file."
             )
 
-        if len(api_key) < 10:
+        # RunPod API keys are alphanumeric strings, typically 20+ characters
+        stripped = api_key.strip()
+        if len(stripped) < 20:
             return False, (
-                "RUNPOD_API_KEY appears invalid (too short). "
+                "RUNPOD_API_KEY appears invalid (too short, expected 20+ characters). "
+                "Check your .env file for the correct key."
+            )
+
+        if not stripped.isalnum():
+            return False, (
+                "RUNPOD_API_KEY appears invalid (unexpected characters). "
+                "API keys should be alphanumeric. "
                 "Check your .env file for the correct key."
             )
 
@@ -400,14 +409,13 @@ class RunPodBackend(ITrainingBackend):
             )
             return " && ".join(parts)
 
-        # Build clone command using $GH_TOKEN shell variable for private repos.
-        # The token is passed securely via _build_pod_env() as a pod env var,
-        # so we reference it via shell expansion rather than embedding the value
-        # in the command string (which would leak in RunPod logs).
-        if repo_url.startswith("https://"):
+        # Build clone command. Only inject $GH_TOKEN for authenticated cloning
+        # when the token is actually set (passed via _build_pod_env() as a pod
+        # env var). For public repos or when GH_TOKEN is not configured,
+        # clone without authentication to avoid errors from empty token expansion.
+        clone_url = repo_url
+        if repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
             clone_url = repo_url.replace("https://", "https://$GH_TOKEN@")
-        else:
-            clone_url = repo_url
 
         parts = list(setup_commands)
         parts.append(f"git clone --depth 1 {clone_url} {target_dir}")

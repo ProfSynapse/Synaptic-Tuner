@@ -38,20 +38,15 @@ from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import BackendError, ConfigurationError
 
-from .base_cloud import load_cloud_config
+from .base_cloud import (
+    GPU_PRICING,
+    estimate_cost,
+    get_gpu_display_name,
+    load_cloud_config,
+    resolve_repo_url,
+)
 
 logger = logging.getLogger(__name__)
-
-# GPU options available on Modal, with approximate hourly cost (USD)
-MODAL_GPU_OPTIONS = {
-    "T4": {"vram_gb": 16, "cost_per_hour": 0.54},
-    "L4": {"vram_gb": 24, "cost_per_hour": 0.80},
-    "A10G": {"vram_gb": 24, "cost_per_hour": 1.10},
-    "L40S": {"vram_gb": 48, "cost_per_hour": 1.95},
-    "A100": {"vram_gb": 40, "cost_per_hour": 3.07},
-    "A100-80GB": {"vram_gb": 80, "cost_per_hour": 3.50},
-    "H100": {"vram_gb": 80, "cost_per_hour": 3.98},
-}
 
 DEFAULT_GPU = "L40S"
 DEFAULT_TIMEOUT_HOURS = 6
@@ -244,7 +239,13 @@ class ModalBackend(ITrainingBackend):
         timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
 
         # Resolve repo URL for code sync
-        repo_url = self._resolve_repo_url()
+        try:
+            repo_url = resolve_repo_url()
+        except Exception:
+            raise BackendError(
+                "Cannot determine repo URL for Modal code sync.\n"
+                "Set CLOUD_REPO_URL env var or ensure a git remote 'origin' is configured."
+            )
 
         # Build the modal run command
         cmd = [
@@ -257,13 +258,12 @@ class ModalBackend(ITrainingBackend):
         ]
 
         # Display cost estimate before starting
-        gpu_info = MODAL_GPU_OPTIONS.get(gpu_type, {})
-        cost_estimate = gpu_info.get("cost_per_hour", 0) * timeout_hours
-        vram = gpu_info.get("vram_gb", "?")
+        gpu_display = get_gpu_display_name("modal", gpu_type)
+        cost_str = estimate_cost("modal", gpu_type, timeout_hours) or "unknown"
 
         logger.info(
-            "Submitting Modal training job: method=%s gpu=%s (%sGB) timeout=%dh est_cost=$%.2f",
-            config.method, gpu_type, vram, timeout_hours, cost_estimate,
+            "Submitting Modal training job: method=%s gpu=%s timeout=%dh est_cost=%s",
+            config.method, gpu_display, timeout_hours, cost_str,
         )
 
         try:
@@ -288,47 +288,10 @@ class ModalBackend(ITrainingBackend):
         except Exception as e:
             raise BackendError(f"Modal execution failed: {e}")
 
-    def _resolve_repo_url(self) -> str:
-        """Resolve the git repo URL for cloning in the Modal container.
-
-        Checks in order:
-        1. CLOUD_REPO_URL environment variable
-        2. Git remote 'origin' URL from local repo
-
-        Returns:
-            Git clone URL
-
-        Raises:
-            BackendError: If no repo URL can be determined
-        """
-        # Check env var first
-        repo_url = os.environ.get("CLOUD_REPO_URL", "")
-        if repo_url:
-            return repo_url
-
-        # Try git remote
-        try:
-            result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                capture_output=True,
-                text=True,
-                cwd=str(self.repo_root),
-                timeout=5,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-
-        raise BackendError(
-            "Cannot determine repo URL for Modal code sync.\n"
-            "Set CLOUD_REPO_URL env var or ensure a git remote 'origin' is configured."
-        )
-
     def get_gpu_options(self) -> dict:
         """Get available GPU options with pricing info.
 
         Returns:
-            Dict mapping GPU type names to their specs (vram_gb, cost_per_hour)
+            Dict mapping GPU type names to their specs (name, price)
         """
-        return MODAL_GPU_OPTIONS.copy()
+        return GPU_PRICING.get("modal", {}).copy()

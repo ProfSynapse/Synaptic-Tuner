@@ -52,6 +52,8 @@ def _resolve_repo_url() -> str:
     Get the git remote origin URL for code sync.
 
     Checks CLOUD_REPO_URL env var first, then falls back to git remote.
+    Note: Mirrors tuner/backends/training/cloud/base_cloud.resolve_repo_url()
+    but kept separate because this standalone script cannot import from tuner.*.
 
     Returns:
         The repository URL as a string.
@@ -92,14 +94,13 @@ def _build_clone_command(repo_url: str, target_dir: str) -> str:
     Returns:
         Shell command string for cloning.
     """
-    # Use $GH_TOKEN shell variable expansion for private repos.
-    # The token is passed securely as a pod env var by _build_pod_env(),
-    # so we reference it via shell expansion rather than embedding the
-    # value in the command string (which would leak in RunPod logs).
-    if repo_url.startswith("https://"):
+    # Only inject $GH_TOKEN for authenticated cloning when the token is
+    # actually set (passed as a pod env var by _build_pod_env()). For public
+    # repos or when GH_TOKEN is not configured, clone without authentication
+    # to avoid errors from empty token expansion.
+    clone_url = repo_url
+    if repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
         clone_url = repo_url.replace("https://", "https://$GH_TOKEN@")
-    else:
-        clone_url = repo_url
 
     return f"git clone --depth 1 {clone_url} {target_dir}"
 

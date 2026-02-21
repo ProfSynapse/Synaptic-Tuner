@@ -45,7 +45,6 @@ cloud:
     gpu: L40S
     timeout_hours: 6
     cache_volume_name: "toolset-model-cache"
-    default_timeout: 7200
 
   runpod:
     gpu_type_id: "NVIDIA A100 SXM"

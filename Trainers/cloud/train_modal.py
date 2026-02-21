@@ -93,18 +93,21 @@ app = modal.App("toolset-training", image=training_image)
 
 
 # ---------------------------------------------------------------------------
-# GPU Pricing Reference (for cost estimation)
+# GPU Pricing Reference (display-only cost estimation for local entrypoint)
 # ---------------------------------------------------------------------------
-# These are approximate Modal GPU prices per hour as of early 2026.
-# Actual prices may vary; check https://modal.com/pricing for current rates.
+# Approximate Modal GPU prices per hour as of early 2026.
+# Canonical pricing data is in tuner/backends/training/cloud/base_cloud.py
+# GPU_PRICING["modal"]. This standalone script cannot import from tuner.*
+# (runs via `modal run`), so a display-only copy is kept here.
+# Check https://modal.com/pricing for current rates.
 GPU_PRICING = {
-    "T4": 0.54,
-    "L4": 0.80,
+    "T4": 0.59,
+    "L4": 0.73,
     "A10G": 1.10,
-    "L40S": 1.95,
-    "A100": 3.07,      # A100-40GB
-    "A100-80GB": 3.50,
-    "H100": 3.98,
+    "L40S": 1.40,
+    "A100": 2.78,       # A100-40GB
+    "A100-80GB": 3.72,
+    "H100": 4.89,
 }
 
 # Valid GPU types that can be passed to Modal
@@ -124,7 +127,12 @@ DEFAULT_GPU = "L40S"
         "/cache/huggingface": model_cache,
         "/cache/checkpoints": checkpoint_cache,
     },
-    secrets=[modal.Secret.from_dotenv()],
+    # Scope secrets to only the env vars needed for training, rather than
+    # exposing the entire .env file via Secret.from_dotenv().
+    secrets=[modal.Secret.from_dict({
+        "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
+        "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
+    })],
 )
 def run_training(
     trainer_type: str = "sft",
@@ -342,7 +350,9 @@ def main(
         print(f"Valid options: {', '.join(VALID_GPU_TYPES)}")
         sys.exit(1)
 
-    # Auto-detect repo URL from local git remote if not provided
+    # Auto-detect repo URL from local git remote if not provided.
+    # Mirrors tuner/backends/training/cloud/base_cloud.resolve_repo_url()
+    # but kept inline because this standalone script cannot import from tuner.*.
     if not repo_url:
         try:
             result = subprocess.run(
