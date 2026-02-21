@@ -18,10 +18,10 @@ import pytest
 import yaml
 
 from tuner.backends.training.cloud.base_cloud import (
-    GPU_PRICING,
     estimate_cost,
     get_gpu_display_name,
     load_cloud_config,
+    load_gpu_pricing,
     poll_until_done,
     resolve_repo_url,
 )
@@ -230,7 +230,8 @@ class TestEstimateCost:
 
     def test_modal_gpu_pricing(self):
         result = estimate_cost("modal", "H100", 2.0)
-        expected = GPU_PRICING["modal"]["H100"]["price"] * 2.0
+        pricing = load_gpu_pricing()
+        expected = pricing["modal"]["H100"]["price"] * 2.0
         assert result == f"~${expected:.2f}"
 
     def test_runpod_gpu_pricing(self):

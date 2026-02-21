@@ -19,15 +19,23 @@ Usage:
 
 Dependencies:
     - runpod (optional, guarded import)
-    - subprocess (for git remote detection)
+    - tuner.backends.training.cloud.base_cloud (resolve_repo_url)
 """
 
 import logging
 import os
-import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
+
+# Allow importing from the repo root (tuner.*) when this script is invoked
+# from inside the repository tree (either directly or via RunPodBackend).
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from tuner.backends.training.cloud.base_cloud import resolve_repo_url  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -45,42 +53,6 @@ def _get_runpod():
     if api_key:
         runpod.api_key = api_key
     return runpod
-
-
-def _resolve_repo_url() -> str:
-    """
-    Get the git remote origin URL for code sync.
-
-    Checks CLOUD_REPO_URL env var first, then falls back to git remote.
-    Note: Mirrors tuner/backends/training/cloud/base_cloud.resolve_repo_url()
-    but kept separate because this standalone script cannot import from tuner.*.
-
-    Returns:
-        The repository URL as a string.
-
-    Raises:
-        ValueError: If no repo URL can be determined.
-    """
-    url = os.environ.get("CLOUD_REPO_URL")
-    if url:
-        return url
-
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    raise ValueError(
-        "Cannot determine repo URL for code sync. "
-        "Set CLOUD_REPO_URL or ensure a git remote 'origin' is configured."
-    )
 
 
 def _build_clone_command(repo_url: str, target_dir: str) -> str:
@@ -189,6 +161,9 @@ def sync_results_from_pod(
     return False
 
 
+VALID_METHODS = {"sft", "kto"}
+
+
 def build_training_startup_command(
     method: str,
     setup_commands: Optional[list] = None,
@@ -211,9 +186,15 @@ def build_training_startup_command(
         Combined shell command string.
 
     Raises:
-        ValueError: If repo URL cannot be determined.
+        ValueError: If method is not supported or repo URL cannot be determined.
     """
-    url = repo_url or _resolve_repo_url()
+    if method not in VALID_METHODS:
+        raise ValueError(
+            f"Invalid training method '{method}'. "
+            f"Must be one of: {VALID_METHODS}"
+        )
+
+    url = repo_url or resolve_repo_url()
     clone_cmd = _build_clone_command(url, target_dir)
 
     parts = []

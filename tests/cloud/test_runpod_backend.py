@@ -65,7 +65,7 @@ class TestRunPodValidateEnvironment:
         assert "invalid" in error.lower()
 
     def test_succeeds_with_valid_setup(self, repo_root, clean_env):
-        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234")
+        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
         backend = RunPodBackend(repo_root)
         mock_runpod = MagicMock()
         with patch.dict("sys.modules", {"runpod": mock_runpod}):
@@ -418,7 +418,7 @@ class TestBuildStartupCommand:
 
 class TestExecuteLifecycle:
     def test_terminates_pod_on_success(self, repo_root, clean_env):
-        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234")
+        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
         clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
         config = CloudTrainingConfig(
@@ -444,7 +444,7 @@ class TestExecuteLifecycle:
         mock_rp.terminate_pod.assert_called_once_with("pod-abc")
 
     def test_terminates_pod_on_failure(self, repo_root, clean_env):
-        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234")
+        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
         clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
         config = CloudTrainingConfig(
@@ -469,7 +469,7 @@ class TestExecuteLifecycle:
         mock_rp.terminate_pod.assert_called_once_with("pod-def")
 
     def test_terminates_pod_on_keyboard_interrupt(self, repo_root, clean_env):
-        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234")
+        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
         clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
         config = CloudTrainingConfig(
@@ -494,7 +494,7 @@ class TestExecuteLifecycle:
         mock_rp.terminate_pod.assert_called_once_with("pod-int")
 
     def test_raises_when_no_pod_id_returned(self, repo_root, clean_env):
-        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234")
+        clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
         clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
         config = CloudTrainingConfig(

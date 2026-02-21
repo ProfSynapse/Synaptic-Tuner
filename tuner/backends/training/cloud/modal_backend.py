@@ -39,10 +39,10 @@ from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import BackendError, ConfigurationError
 
 from .base_cloud import (
-    GPU_PRICING,
     estimate_cost,
     get_gpu_display_name,
     load_cloud_config,
+    load_gpu_pricing,
     resolve_repo_url,
 )
 
@@ -294,4 +294,5 @@ class ModalBackend(ITrainingBackend):
         Returns:
             Dict mapping GPU type names to their specs (name, price)
         """
-        return GPU_PRICING.get("modal", {}).copy()
+        pricing = load_gpu_pricing()
+        return pricing.get("modal", {}).copy()

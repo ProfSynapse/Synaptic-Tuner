@@ -230,10 +230,7 @@ class CloudTrainHandler(BaseHandler):
 
         # Step 5: Select training method
         methods = backend.get_available_methods()
-        method_labels = {
-            "sft": "SFT - Supervised Fine-Tuning",
-            "kto": "KTO - Preference Learning",
-        }
+        method_labels = self._load_method_labels()
         method_options = [
             (m, f"{BOX['bullet']} {method_labels.get(m, m.upper())}") for m in methods
         ]
@@ -279,6 +276,34 @@ class CloudTrainHandler(BaseHandler):
             print_error(f"Cloud training failed with exit code: {exit_code}")
 
         return exit_code
+
+    def _load_method_labels(self) -> Dict[str, str]:
+        """
+        Load training method display labels.
+
+        Returns:
+            Dict mapping method codes to human-readable labels.
+        """
+        return {
+            "sft": "SFT - Supervised Fine-Tuning",
+            "kto": "KTO - Preference Learning",
+        }
+
+    def _load_gpu_tiers(self) -> Dict[str, Dict]:
+        """
+        Load GPU tier definitions from cloud_config.yaml.
+
+        Reads the gpu_tiers section so that adding or changing tiers
+        only requires a YAML edit, not a code change.
+
+        Returns:
+            Dict mapping tier names to their config (description,
+            provider GPU identifiers, approximate cost).
+        """
+        from tuner.backends.training.cloud.base_cloud import load_gpu_tiers
+
+        config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        return load_gpu_tiers(config_path)
 
     def _build_config_display(
         self, config, provider_info: Dict

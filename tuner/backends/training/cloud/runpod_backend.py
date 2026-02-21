@@ -206,18 +206,19 @@ class RunPodBackend(ITrainingBackend):
                 "and add it to your .env file."
             )
 
-        # RunPod API keys are alphanumeric strings, typically 20+ characters
+        # RunPod API keys are typically 32+ hex characters
         stripped = api_key.strip()
-        if len(stripped) < 20:
+        if len(stripped) < 32:
             return False, (
-                "RUNPOD_API_KEY appears invalid (too short, expected 20+ characters). "
+                "RUNPOD_API_KEY appears invalid (too short, expected 32+ characters). "
                 "Check your .env file for the correct key."
             )
 
-        if not stripped.isalnum():
+        # API keys should contain at least some alphabetic characters
+        # (pure numeric strings are likely not valid API keys)
+        if not any(c.isalpha() for c in stripped):
             return False, (
-                "RUNPOD_API_KEY appears invalid (unexpected characters). "
-                "API keys should be alphanumeric. "
+                "RUNPOD_API_KEY appears invalid (no alphabetic characters). "
                 "Check your .env file for the correct key."
             )
 

@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, PropertyMock, patch, call
 
 import pytest
 
-from tuner.backends.training.cloud.base_cloud import GPU_PRICING
+from tuner.backends.training.cloud.base_cloud import load_gpu_pricing
 from tuner.backends.training.cloud.modal_backend import (
     DEFAULT_GPU,
     DEFAULT_TIMEOUT_HOURS,
@@ -41,7 +41,8 @@ class TestModalBackendProperties:
     def test_get_gpu_options_returns_copy(self, repo_root):
         backend = ModalBackend(repo_root)
         options = backend.get_gpu_options()
-        assert options == GPU_PRICING["modal"]
+        pricing = load_gpu_pricing()
+        assert options == pricing["modal"]
         # Must be a copy, not the original
         options["NEW_GPU"] = {"vram_gb": 999}
         assert "NEW_GPU" not in backend.get_gpu_options()

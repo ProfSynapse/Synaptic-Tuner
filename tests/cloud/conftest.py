@@ -2,10 +2,11 @@
 Shared fixtures for cloud backend tests.
 
 Provides:
-- Temporary repo root with config files
+- Temporary repo root with config files (including pricing)
 - Cloud config YAML fixtures
 - Training config YAML fixtures
 - Environment variable isolation
+- GPU pricing cache reset between tests
 """
 
 import os
@@ -15,6 +16,21 @@ from unittest.mock import MagicMock
 
 import pytest
 import yaml
+
+import tuner.backends.training.cloud.base_cloud as base_cloud_module
+
+
+@pytest.fixture(autouse=True)
+def reset_pricing_cache():
+    """Reset the GPU pricing cache before each test.
+
+    The pricing cache is module-level in base_cloud. Without resetting it,
+    test fixtures that create custom cloud_config.yaml files would read
+    stale pricing data from a previous test's config file.
+    """
+    base_cloud_module._GPU_PRICING_CACHE = None
+    yield
+    base_cloud_module._GPU_PRICING_CACHE = None
 
 
 @pytest.fixture
@@ -42,6 +58,29 @@ def repo_root(tmp_path):
     cloud_dir.mkdir(parents=True)
 
     cloud_config = {
+        "pricing": {
+            "hf_jobs": {
+                "t4-small": {"name": "T4 (16GB)", "price": 0.40},
+                "t4-medium": {"name": "T4 x2 (32GB)", "price": 0.80},
+                "a10g-small": {"name": "A10G (24GB)", "price": 1.10},
+                "a10g-large": {"name": "A10G x4 (96GB)", "price": 4.40},
+                "a100-large": {"name": "A100 (80GB)", "price": 2.50},
+            },
+            "modal": {
+                "T4": {"name": "T4 (16GB)", "price": 0.59},
+                "L4": {"name": "L4 (24GB)", "price": 0.73},
+                "A10G": {"name": "A10G (24GB)", "price": 1.10},
+                "L40S": {"name": "L40S (48GB)", "price": 1.40},
+                "A100": {"name": "A100 (40GB)", "price": 2.78},
+                "A100-80GB": {"name": "A100 (80GB)", "price": 3.72},
+                "H100": {"name": "H100 (80GB)", "price": 4.89},
+            },
+            "runpod": {
+                "NVIDIA RTX A6000": {"name": "RTX A6000 (48GB)", "price": 0.79},
+                "NVIDIA A100 80GB PCIe": {"name": "A100 (80GB)", "price": 1.64},
+                "NVIDIA H100 80GB HBM3": {"name": "H100 (80GB)", "price": 3.89},
+            },
+        },
         "cloud": {
             "default_provider": "hf_jobs",
             "hf_jobs": {
@@ -64,7 +103,7 @@ def repo_root(tmp_path):
             },
             "push_to_hub": True,
             "hub_repo": None,
-        }
+        },
     }
     with open(cloud_dir / "cloud_config.yaml", "w") as f:
         yaml.dump(cloud_config, f)

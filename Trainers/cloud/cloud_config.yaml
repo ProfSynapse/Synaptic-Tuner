@@ -31,6 +31,29 @@ gpu_tiers:
     runpod: "NVIDIA H100 SXM"
     approx_cost_per_hour: 3.00
 
+# GPU pricing reference (approximate $/hr as of 2026-02).
+# Used by base_cloud.estimate_cost() and get_gpu_display_name().
+# Keys are provider-specific GPU identifiers matching the provider configs below.
+pricing:
+  hf_jobs:
+    t4-small:      { name: "T4 (16GB)",       price: 0.40 }
+    t4-medium:     { name: "T4 x2 (32GB)",    price: 0.80 }
+    a10g-small:    { name: "A10G (24GB)",      price: 1.10 }
+    a10g-large:    { name: "A10G x4 (96GB)",   price: 4.40 }
+    a100-large:    { name: "A100 (80GB)",      price: 2.50 }
+  modal:
+    T4:            { name: "T4 (16GB)",        price: 0.59 }
+    L4:            { name: "L4 (24GB)",        price: 0.73 }
+    A10G:          { name: "A10G (24GB)",      price: 1.10 }
+    L40S:          { name: "L40S (48GB)",      price: 1.40 }
+    A100:          { name: "A100 (40GB)",      price: 2.78 }
+    A100-80GB:     { name: "A100 (80GB)",      price: 3.72 }
+    H100:          { name: "H100 (80GB)",      price: 4.89 }
+  runpod:
+    "NVIDIA RTX A6000":      { name: "RTX A6000 (48GB)", price: 0.79 }
+    "NVIDIA A100 80GB PCIe": { name: "A100 (80GB)",      price: 1.64 }
+    "NVIDIA H100 80GB HBM3": { name: "H100 (80GB)",      price: 3.89 }
+
 # Provider-specific defaults
 cloud:
   default_provider: hf_jobs

@@ -24,30 +24,65 @@ from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
 
-# GPU pricing reference (approximate $/hr as of 2026-02)
-GPU_PRICING = {
-    "hf_jobs": {
-        "t4-small": {"name": "T4 (16GB)", "price": 0.40},
-        "t4-medium": {"name": "T4 x2 (32GB)", "price": 0.80},
-        "a10g-small": {"name": "A10G (24GB)", "price": 1.10},
-        "a10g-large": {"name": "A10G x4 (96GB)", "price": 4.40},
-        "a100-large": {"name": "A100 (80GB)", "price": 2.50},
-    },
-    "modal": {
-        "T4": {"name": "T4 (16GB)", "price": 0.59},
-        "L4": {"name": "L4 (24GB)", "price": 0.73},
-        "A10G": {"name": "A10G (24GB)", "price": 1.10},
-        "L40S": {"name": "L40S (48GB)", "price": 1.40},
-        "A100": {"name": "A100 (40GB)", "price": 2.78},
-        "A100-80GB": {"name": "A100 (80GB)", "price": 3.72},
-        "H100": {"name": "H100 (80GB)", "price": 4.89},
-    },
-    "runpod": {
-        "NVIDIA RTX A6000": {"name": "RTX A6000 (48GB)", "price": 0.79},
-        "NVIDIA A100 80GB PCIe": {"name": "A100 (80GB)", "price": 1.64},
-        "NVIDIA H100 80GB HBM3": {"name": "H100 (80GB)", "price": 3.89},
-    },
-}
+# Module-level pricing cache (loaded from cloud_config.yaml on first access)
+_GPU_PRICING_CACHE: Optional[dict] = None
+
+
+def _find_cloud_config() -> Path:
+    """
+    Locate cloud_config.yaml relative to this module.
+
+    Walks up from base_cloud.py to the repo root and looks for
+    Trainers/cloud/cloud_config.yaml.
+
+    Returns:
+        Path to cloud_config.yaml (may not exist).
+    """
+    # base_cloud.py is at tuner/backends/training/cloud/base_cloud.py
+    # repo root is 4 levels up
+    repo_root = Path(__file__).resolve().parents[4]
+    return repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+
+
+def load_gpu_pricing(cloud_config_path: Optional[Path] = None) -> dict:
+    """
+    Load GPU pricing data from cloud_config.yaml.
+
+    Reads the 'pricing' section from the cloud config file. Results are
+    cached at module level so the file is only read once per process.
+
+    Args:
+        cloud_config_path: Optional explicit path to cloud_config.yaml.
+            If None, auto-detected relative to this module.
+
+    Returns:
+        Dictionary keyed by provider with nested GPU pricing dicts.
+        Each GPU entry has 'name' (str) and 'price' (float).
+        Returns empty dict if file not found or no pricing section.
+
+    Example:
+        pricing = load_gpu_pricing()
+        modal_h100 = pricing["modal"]["H100"]
+        # {"name": "H100 (80GB)", "price": 4.89}
+    """
+    global _GPU_PRICING_CACHE
+    if _GPU_PRICING_CACHE is not None:
+        return _GPU_PRICING_CACHE
+
+    config_path = cloud_config_path or _find_cloud_config()
+    if not config_path.exists():
+        _GPU_PRICING_CACHE = {}
+        return _GPU_PRICING_CACHE
+
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        _GPU_PRICING_CACHE = config.get("pricing", {}) if config else {}
+    except Exception as e:
+        logger.warning("Failed to load GPU pricing from %s: %s", config_path, e)
+        _GPU_PRICING_CACHE = {}
+
+    return _GPU_PRICING_CACHE
 
 
 # Supported training methods across all cloud backends
@@ -265,6 +300,8 @@ def estimate_cost(provider: str, gpu_type: str, timeout_hours: float) -> Optiona
     """
     Estimate cloud training cost based on provider, GPU, and timeout.
 
+    Reads pricing data from cloud_config.yaml (cached after first load).
+
     Args:
         provider: Cloud provider identifier ('hf_jobs', 'modal', 'runpod')
         gpu_type: Provider-specific GPU identifier
@@ -278,7 +315,8 @@ def estimate_cost(provider: str, gpu_type: str, timeout_hours: float) -> Optiona
         cost = estimate_cost("hf_jobs", "a10g-small", 4.0)
         # Returns "~$4.40"
     """
-    provider_pricing = GPU_PRICING.get(provider, {})
+    pricing = load_gpu_pricing()
+    provider_pricing = pricing.get(provider, {})
     gpu_info = provider_pricing.get(gpu_type)
     if not gpu_info:
         return None
@@ -290,6 +328,8 @@ def get_gpu_display_name(provider: str, gpu_type: str) -> str:
     """
     Get human-readable GPU name for display.
 
+    Reads pricing data from cloud_config.yaml (cached after first load).
+
     Args:
         provider: Cloud provider identifier
         gpu_type: Provider-specific GPU identifier
@@ -297,7 +337,8 @@ def get_gpu_display_name(provider: str, gpu_type: str) -> str:
     Returns:
         Display name (e.g., "A10G (24GB)") or the raw gpu_type if not found.
     """
-    provider_pricing = GPU_PRICING.get(provider, {})
+    pricing = load_gpu_pricing()
+    provider_pricing = pricing.get(provider, {})
     gpu_info = provider_pricing.get(gpu_type)
     if gpu_info:
         return gpu_info["name"]
