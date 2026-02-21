@@ -1,0 +1,63 @@
+# ============================================================================
+# Cloud Training Configuration
+# GPU tier definitions and provider-specific defaults for cloud training.
+#
+# Location: Trainers/cloud/cloud_config.yaml
+# Used by: tuner/backends/training/cloud/* backends
+# Merged with standard config.yaml when running cloud training.
+# ============================================================================
+
+# GPU tier mapping across providers.
+# Each tier maps a logical name to provider-specific GPU identifiers.
+gpu_tiers:
+  budget:
+    description: "Budget tier -- good for testing and small models"
+    hf_jobs: "cpu-basic"
+    modal: "T4"
+    runpod: "NVIDIA GeForce RTX 3090"
+    approx_cost_per_hour: 0.40
+
+  standard:
+    description: "Standard tier -- recommended for most training runs"
+    hf_jobs: "a10g-small"
+    modal: "L40S"
+    runpod: "NVIDIA A100 SXM"
+    approx_cost_per_hour: 1.95
+
+  performance:
+    description: "Performance tier -- fastest for large models"
+    hf_jobs: "a100-large"
+    modal: "A100"
+    runpod: "NVIDIA H100 SXM"
+    approx_cost_per_hour: 3.00
+
+# Provider-specific defaults
+cloud:
+  default_provider: hf_jobs
+
+  hf_jobs:
+    flavor: a10g-small
+    timeout: 4h
+    image: "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel"
+    python_version: "3.11"
+
+  modal:
+    gpu: L40S
+    timeout_hours: 6
+    cache_volume_name: "toolset-model-cache"
+    default_timeout: 7200
+
+  runpod:
+    gpu_type_id: "NVIDIA A100 SXM"
+    gpu_count: 1
+    volume_in_gb: 50
+    container_disk_in_gb: 50
+    cloud_type: "COMMUNITY"
+    default_image: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
+    result_path: "/workspace/outputs"
+    setup_commands:
+      - "pip install unsloth transformers trl huggingface_hub python-dotenv datasets peft"
+
+  # Common settings across all providers
+  push_to_hub: true
+  hub_repo: null  # Target HF repo (prompted at runtime if null)

@@ -1,0 +1,333 @@
+"""
+Location: tuner/backends/training/cloud/modal_backend.py
+
+Purpose:
+    Modal cloud backend implementation for the tuner CLI. Implements the
+    ITrainingBackend interface to enable submitting SFT and KTO training
+    jobs to Modal's serverless GPU infrastructure.
+
+    The backend works by running `modal run Trainers/cloud/train_modal.py`
+    as a subprocess. Modal's CLI handles authentication, container provisioning,
+    and log streaming. The train_modal.py script defines the remote function
+    that clones the repo and executes the training scripts.
+
+Usage:
+    from tuner.backends.training.cloud.modal_backend import ModalBackend
+
+    backend = ModalBackend(repo_root=Path("/path/to/repo"))
+    is_valid, error = backend.validate_environment()
+    config = backend.load_config("sft")
+    exit_code = backend.execute(config, python_path="python")
+
+Dependencies:
+    - tuner.core.interfaces.ITrainingBackend
+    - tuner.core.config.TrainingConfig
+    - tuner.core.exceptions.ConfigurationError, BackendError
+    - modal (optional, checked at runtime)
+    - Trainers/cloud/train_modal.py (Modal wrapper script)
+"""
+
+import logging
+import os
+import subprocess
+import yaml
+from pathlib import Path
+from typing import List, Tuple
+
+from tuner.backends.training.base import ITrainingBackend
+from tuner.core.config import TrainingConfig
+from tuner.core.exceptions import BackendError, ConfigurationError
+
+logger = logging.getLogger(__name__)
+
+# GPU options available on Modal, with approximate hourly cost (USD)
+MODAL_GPU_OPTIONS = {
+    "T4": {"vram_gb": 16, "cost_per_hour": 0.54},
+    "L4": {"vram_gb": 24, "cost_per_hour": 0.80},
+    "A10G": {"vram_gb": 24, "cost_per_hour": 1.10},
+    "L40S": {"vram_gb": 48, "cost_per_hour": 1.95},
+    "A100": {"vram_gb": 40, "cost_per_hour": 3.07},
+    "A100-80GB": {"vram_gb": 80, "cost_per_hour": 3.50},
+    "H100": {"vram_gb": 80, "cost_per_hour": 3.98},
+}
+
+DEFAULT_GPU = "L40S"
+DEFAULT_TIMEOUT_HOURS = 6
+
+
+class ModalBackend(ITrainingBackend):
+    """Modal cloud training backend.
+
+    Submits training jobs to Modal's serverless GPU infrastructure via the
+    Modal CLI. Training runs inside Modal containers with persistent volume
+    caching for model weights, reducing cold start times on repeated runs.
+
+    Authentication is handled by Modal's OAuth flow (modal setup) which stores
+    tokens in ~/.modal.toml, or via MODAL_TOKEN_ID + MODAL_TOKEN_SECRET
+    environment variables for CI/CD environments.
+    """
+
+    def __init__(self, repo_root: Path):
+        """Initialize Modal backend.
+
+        Args:
+            repo_root: Path to the Toolset-Training repository root
+        """
+        self.repo_root = Path(repo_root)
+
+    @property
+    def name(self) -> str:
+        """Backend identifier."""
+        return "modal"
+
+    def get_available_methods(self) -> List[str]:
+        """Get available training methods.
+
+        Returns:
+            List of supported training methods
+        """
+        return ["sft", "kto"]
+
+    def validate_environment(self) -> Tuple[bool, str]:
+        """Check that Modal is installed and authenticated.
+
+        Validates:
+        1. The `modal` Python package is importable
+        2. Modal authentication is configured (either ~/.modal.toml from
+           `modal setup`, or MODAL_TOKEN_ID + MODAL_TOKEN_SECRET env vars)
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Check if modal package is installed
+        try:
+            import modal  # noqa: F401
+        except ImportError:
+            return False, (
+                "Modal package is not installed. "
+                "Install with: pip install modal"
+            )
+
+        # Check authentication: either env vars or ~/.modal.toml
+        token_id = os.environ.get("MODAL_TOKEN_ID", "")
+        token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
+
+        if token_id and token_secret:
+            # Env var authentication configured
+            return True, ""
+
+        # Check for OAuth token file
+        modal_toml = Path.home() / ".modal.toml"
+        if modal_toml.exists():
+            return True, ""
+
+        # Try running `modal token show` as a final check
+        try:
+            result = subprocess.run(
+                ["modal", "token", "show"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return True, ""
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        return False, (
+            "Modal is not authenticated. Set up authentication with one of:\n"
+            "  1. Run: modal setup  (opens browser for OAuth login)\n"
+            "  2. Set env vars: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET\n"
+            "     Get tokens from: https://modal.com/settings"
+        )
+
+    def load_config(self, method: str) -> TrainingConfig:
+        """Load training configuration for the specified method.
+
+        Loads the standard training config from the trainer's config.yaml
+        and merges cloud-specific settings from Trainers/cloud/cloud_config.yaml
+        if it exists.
+
+        Args:
+            method: Training method ("sft" or "kto")
+
+        Returns:
+            TrainingConfig with merged cloud settings
+
+        Raises:
+            ConfigurationError: If config files are missing or invalid
+        """
+        if method not in self.get_available_methods():
+            raise ConfigurationError(
+                f"Unknown method '{method}' for Modal backend. "
+                f"Available: {self.get_available_methods()}"
+            )
+
+        # Load standard training config
+        trainer_dir = self.repo_root / "Trainers" / f"rtx3090_{method}"
+        config_path = trainer_dir / "configs" / "config.yaml"
+
+        if not config_path.exists():
+            raise ConfigurationError(f"Training config not found: {config_path}")
+
+        try:
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            raise ConfigurationError(f"Failed to parse training config: {e}")
+
+        # Load cloud config overlay if available
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        cloud_settings = {}
+        if cloud_config_path.exists():
+            try:
+                with open(cloud_config_path) as f:
+                    cloud_config = yaml.safe_load(f)
+                cloud_settings = (cloud_config or {}).get("cloud", {}).get("modal", {})
+            except Exception as e:
+                logger.warning("Failed to parse cloud config: %s", e)
+
+        # Extract relevant fields
+        model_config = config.get("model", {})
+        dataset_config = config.get("dataset", {})
+        training_config = config.get("training", {})
+
+        # Determine GPU type from cloud config or default
+        gpu_type = cloud_settings.get("gpu", DEFAULT_GPU)
+
+        return TrainingConfig(
+            method=method,
+            platform="modal",
+            config_path=config_path,
+            trainer_dir=trainer_dir,
+            model_name=model_config.get("model_name", "Unknown"),
+            dataset_file=dataset_config.get("local_file", "Unknown"),
+            epochs=training_config.get("num_train_epochs", 1),
+            batch_size=training_config.get("per_device_train_batch_size", 4),
+            learning_rate=training_config.get("learning_rate", 0.0),
+        )
+
+    def execute(self, config: TrainingConfig, python_path: str) -> int:
+        """Execute training by running the Modal wrapper script.
+
+        Invokes `modal run Trainers/cloud/train_modal.py` as a subprocess.
+        Modal's CLI handles:
+        - Container provisioning with the specified GPU
+        - Log streaming from the remote container to the local terminal
+        - Automatic cleanup on completion or failure
+
+        Args:
+            config: Training configuration (method, model_name, etc.)
+            python_path: Path to Python interpreter (unused for Modal,
+                         included for interface compatibility)
+
+        Returns:
+            Exit code from the modal run process (0 = success)
+
+        Raises:
+            BackendError: If the Modal wrapper script is not found
+        """
+        wrapper_script = self.repo_root / "Trainers" / "cloud" / "train_modal.py"
+        if not wrapper_script.exists():
+            raise BackendError(
+                f"Modal wrapper script not found: {wrapper_script}\n"
+                "Ensure Trainers/cloud/train_modal.py exists."
+            )
+
+        # Resolve GPU type from cloud config
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        gpu_type = DEFAULT_GPU
+        timeout_hours = DEFAULT_TIMEOUT_HOURS
+
+        if cloud_config_path.exists():
+            try:
+                with open(cloud_config_path) as f:
+                    cloud_config = yaml.safe_load(f)
+                modal_settings = (cloud_config or {}).get("cloud", {}).get("modal", {})
+                gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
+                timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
+            except Exception:
+                logger.warning("Could not read cloud config, using defaults")
+
+        # Resolve repo URL for code sync
+        repo_url = self._resolve_repo_url()
+
+        # Build the modal run command
+        cmd = [
+            "modal", "run",
+            str(wrapper_script),
+            "--trainer-type", config.method,
+            "--gpu", gpu_type,
+            "--timeout-hours", str(timeout_hours),
+            "--repo-url", repo_url,
+        ]
+
+        # Display cost estimate before starting
+        gpu_info = MODAL_GPU_OPTIONS.get(gpu_type, {})
+        cost_estimate = gpu_info.get("cost_per_hour", 0) * timeout_hours
+        vram = gpu_info.get("vram_gb", "?")
+
+        logger.info(
+            "Submitting Modal training job: method=%s gpu=%s (%sGB) timeout=%dh est_cost=$%.2f",
+            config.method, gpu_type, vram, timeout_hours, cost_estimate,
+        )
+
+        try:
+            process = subprocess.Popen(cmd, cwd=str(self.repo_root))
+            return process.wait()
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user.")
+            if process is not None:
+                process.terminate()
+            return 130
+        except FileNotFoundError:
+            raise BackendError(
+                "Modal CLI not found. Install with: pip install modal"
+            )
+        except Exception as e:
+            raise BackendError(f"Modal execution failed: {e}")
+
+    def _resolve_repo_url(self) -> str:
+        """Resolve the git repo URL for cloning in the Modal container.
+
+        Checks in order:
+        1. CLOUD_REPO_URL environment variable
+        2. Git remote 'origin' URL from local repo
+
+        Returns:
+            Git clone URL
+
+        Raises:
+            BackendError: If no repo URL can be determined
+        """
+        # Check env var first
+        repo_url = os.environ.get("CLOUD_REPO_URL", "")
+        if repo_url:
+            return repo_url
+
+        # Try git remote
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                cwd=str(self.repo_root),
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        raise BackendError(
+            "Cannot determine repo URL for Modal code sync.\n"
+            "Set CLOUD_REPO_URL env var or ensure a git remote 'origin' is configured."
+        )
+
+    def get_gpu_options(self) -> dict:
+        """Get available GPU options with pricing info.
+
+        Returns:
+            Dict mapping GPU type names to their specs (vram_gb, cost_per_hour)
+        """
+        return MODAL_GPU_OPTIONS.copy()

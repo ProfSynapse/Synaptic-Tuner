@@ -115,6 +115,13 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
 
+        # Cloud handler is optional (may not have cloud deps)
+        try:
+            from tuner.handlers.cloud_train_handler import CloudTrainHandler
+            has_cloud = True
+        except ImportError:
+            has_cloud = False
+
         # Step 1: Detect environment and load .env
         env = detect_environment()
         env_loaded = load_env_file(self.repo_root / ".env")
@@ -122,9 +129,10 @@ class MainMenuHandler(BaseHandler):
         # Step 2: Build status info
         status_info = self._build_status_info(env, env_loaded)
 
-        # Step 3: Define menu options (4 top-level categories)
+        # Step 3: Define menu options
         menu_options = [
-            ("train", f"{BOX['star']} Training - Train models (SFT, KTO, GRPO)"),
+            ("train", f"{BOX['star']} Training - Train models locally (SFT, KTO, GRPO)"),
+            ("cloud", f"{BOX['bullet']} Cloud Training - Train on GPU cloud (HF Jobs, Modal, RunPod)"),
             ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
             ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
             ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
@@ -137,6 +145,8 @@ class MainMenuHandler(BaseHandler):
             "synthchat": SynthChatHandler(args=self.args),
             "modelops": ModelOpsHandler(args=self.args),
         }
+        if has_cloud:
+            handlers["cloud"] = CloudTrainHandler(args=self.args)
 
         # Step 5: Main menu loop
         first_run = True

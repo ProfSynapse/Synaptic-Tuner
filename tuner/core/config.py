@@ -16,7 +16,7 @@ Used by: Handlers, backends, discovery services
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -198,3 +198,50 @@ class EvalConfig:
     temperature: float = 0.2
     top_p: float = 0.9
     max_tokens: int = 1024
+
+
+@dataclass
+class CloudTrainingConfig(TrainingConfig):
+    """
+    Configuration for cloud training runs.
+
+    Extends TrainingConfig with cloud-specific fields for provider selection,
+    GPU hardware, timeout, and HuggingFace Hub integration.
+
+    Attributes:
+        provider: Cloud provider identifier ('hf_jobs', 'modal', 'runpod')
+        gpu_type: Provider-specific GPU identifier (e.g., 'a10g-small', 'L40S')
+        timeout_hours: Maximum job duration in hours
+        cloud_image: Docker image for the cloud job
+        push_to_hub: Whether to push results to HF Hub on completion
+        hub_repo: Target HF repo ID (prompted if None)
+        hf_flavor: HF Jobs hardware flavor (HF Jobs only)
+        modal_volumes: Modal volume mappings (Modal only)
+        runpod_volume_gb: RunPod persistent volume size in GB (RunPod only)
+
+    Example:
+        config = CloudTrainingConfig(
+            method='sft',
+            platform='hf_jobs',
+            config_path=Path('/path/to/config.yaml'),
+            trainer_dir=Path('/path/to/Trainers/rtx3090_sft'),
+            model_name='unsloth/mistral-7b-v0.3-bnb-4bit',
+            dataset_file='../../Datasets/syngen_tools_sft_11.18.25.jsonl',
+            epochs=3,
+            batch_size=6,
+            learning_rate=2e-4,
+            provider='hf_jobs',
+            gpu_type='a10g-small',
+            timeout_hours=4.0,
+            cloud_image='pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel',
+        )
+    """
+    provider: str = ""
+    gpu_type: str = ""
+    timeout_hours: float = 4.0
+    cloud_image: str = ""
+    push_to_hub: bool = True
+    hub_repo: Optional[str] = None
+    hf_flavor: Optional[str] = None
+    modal_volumes: Optional[Dict[str, str]] = field(default=None)
+    runpod_volume_gb: Optional[int] = None

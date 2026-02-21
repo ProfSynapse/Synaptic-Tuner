@@ -66,6 +66,7 @@ def create_parser() -> argparse.ArgumentParser:
 Commands:
   (none)      Interactive menu
   train       Training workflow (SFT, KTO, GRPO)
+  cloud       Cloud training (HF Jobs, Modal, RunPod)
   eval        Evaluate a model
   synthchat   Synthetic data generation and improvement
   modelops    Model operations (run, merge, convert, upload)
@@ -83,6 +84,7 @@ List Subcommands:
 Examples:
   python tuner.py              # Interactive mode
   python tuner.py train        # Go directly to training
+  python tuner.py cloud        # Cloud training submenu
   python tuner.py eval         # Go directly to evaluation
   python tuner.py synthchat    # Generate or improve data
   python tuner.py modelops     # Model operations submenu
@@ -98,7 +100,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "eval", "synthchat", "modelops", "status", "doctor", "list"],
+        choices=["train", "cloud", "eval", "synthchat", "modelops", "status", "doctor", "list"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 

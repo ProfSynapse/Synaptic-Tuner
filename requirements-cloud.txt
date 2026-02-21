@@ -1,0 +1,16 @@
+# Cloud Training Provider Dependencies
+# Optional: Install for cloud GPU training support
+# Usage: pip install -r requirements-cloud.txt
+#
+# You only need the providers you plan to use.
+# The CLI gracefully handles missing providers.
+
+# HuggingFace Jobs (uses existing HF_TOKEN -- requires HF Pro subscription)
+huggingface_hub>=0.27.0
+hf_transfer
+
+# Modal (serverless GPU compute)
+modal>=0.73.0
+
+# RunPod (on-demand GPU pods)
+runpod>=1.7.0
