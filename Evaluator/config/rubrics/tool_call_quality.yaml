@@ -1,0 +1,104 @@
+# Evaluator/config/rubrics/tool_call_quality.yaml
+#
+# Evaluates whether the model called the correct tools with appropriate arguments.
+# Used by the Evaluator's LLM-as-judge pipeline (shared/judge/) to score tool-calling
+# accuracy alongside pattern-match validation.
+#
+# Template variables are rendered by Evaluator/judge_validator.py from ParsedResponse
+# and scenario metadata.
+
+name: Tool Call Quality
+description: Evaluates whether the model called the correct tools with appropriate arguments and proper context usage
+scope: response
+pass_threshold: 0.7
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating a tool-calling AI assistant's response. The assistant receives a system
+  prompt with session context, vault structure, and available tools, then responds to user
+  requests by calling tools with structured arguments.
+
+  **System Prompt (given to the assistant):**
+  ```
+  {system_prompt}
+  ```
+
+  **User Request:**
+  ```
+  {user_prompt}
+  ```
+
+  **Expected Tools:** {expected_tools}
+
+  **Pattern Match Result:** {pass_fail}
+
+  **Actual Tool Calls:**
+  ```
+  {tool_calls}
+  ```
+
+  **Response Text:**
+  ```
+  {response}
+  ```
+
+  # MISSION
+  Score how well the assistant chose and used tools for this request. Focus on whether the
+  right tools were selected, arguments were correct and complete, and session context was
+  properly utilized.
+
+  # INSTRUCTIONS
+  Evaluate these dimensions and weight them in your final score:
+
+  1. **Tool Selection** (40% weight):
+     - Did the assistant call the correct tool(s) listed in Expected Tools?
+     - Were any unnecessary or extra tools called?
+     - If no tool was expected (TEXT_ONLY), did the assistant correctly respond with text only?
+
+  2. **Argument Correctness** (30% weight):
+     - Are all required arguments present and correctly valued?
+     - Does the `context` parameter include the correct `sessionId` and `workspaceId` from the system prompt?
+     - Are file paths, agent IDs, workspace IDs, and other identifiers accurate per the vault structure?
+     - Are argument values well-formed (valid JSON, correct types)?
+
+  3. **Context Usage** (20% weight):
+     - Did the assistant extract session/workspace IDs from the `<session_context>` block?
+     - Did it reference the correct workspace, files, or agents from the system prompt?
+     - Did it avoid hallucinating IDs, paths, or names not present in the system prompt?
+
+  4. **Completeness** (10% weight):
+     - Did the response address the full user request?
+     - If the request required multiple steps, were all steps handled?
+
+  # SCORING GUIDE
+  Combine the weighted dimensions into a single score from 0.0 to 1.0:
+
+  - **1.0**: Correct tool(s), all arguments accurate, proper context IDs, complete response
+  - **0.8-0.9**: Correct tool(s), minor argument issues (e.g., slightly different wording in a name field, but functionally correct)
+  - **0.7**: Correct tool(s) but noticeable argument gaps (e.g., missing an optional but helpful parameter)
+  - **0.4-0.6**: Correct tool but significant argument problems (wrong IDs, missing context, hallucinated paths)
+  - **0.2-0.3**: Wrong tool called, or right tool with completely wrong arguments
+  - **0.0-0.1**: No tool called when one was expected, entirely wrong tool, or tool called when text-only was expected
+
+  Use the Pattern Match Result as context: if it says FAIL, look closely at what the pattern
+  matcher caught. If it says PASS, the structural format was correct but you should still
+  evaluate semantic quality.
+
+  # FORMAT
+  Return JSON with your score and a brief explanation of your reasoning.
+
+output_schema:
+  type: object
+  properties:
+    tool_call_quality_score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: Overall score for tool call quality (0.0 = complete failure, 1.0 = perfect)
+    overall_feedback:
+      type: string
+      description: Brief explanation of the score covering tool selection, argument quality, and context usage
+  required:
+    - tool_call_quality_score
+    - overall_feedback
+  additionalProperties: false
