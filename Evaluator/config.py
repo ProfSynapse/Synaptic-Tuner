@@ -374,6 +374,40 @@ class LlamaCppSettings:
 
 
 # ---------------------------------------------------------------------------
+# Judge Configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EvalJudgeConfig:
+    """Judge configuration for the Evaluator.
+
+    Can be set globally via CLI flags, and overridden per-scenario in YAML.
+
+    Attributes:
+        enabled: Whether LLM-as-judge evaluation is active.
+        mode: Composition mode ("and", "or", "judge_only") for combining
+              judge and pattern-match results.
+        provider: LLM provider for judge calls (defaults to eval backend).
+        model: LLM model for judge calls (defaults to eval model).
+        rubrics: Rubric keys to apply (empty = all available).
+        rubrics_dir: Path to rubrics YAML directory.
+        temperature: Sampling temperature for judge calls.
+        max_tokens: Maximum tokens for judge LLM response.
+        log_interactions: Whether to log judge calls for KTO training.
+    """
+
+    enabled: bool = False
+    mode: str = "and"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    rubrics: List[str] = field(default_factory=list)
+    rubrics_dir: Optional[str] = None
+    temperature: float = 0.3
+    max_tokens: int = 2048
+    log_interactions: bool = True
+
+
+# ---------------------------------------------------------------------------
 # Prompt Filtering
 # ---------------------------------------------------------------------------
 
@@ -420,6 +454,7 @@ class EvaluatorConfig:
         retries: HTTP retry attempts
         request_timeout: HTTP timeout in seconds
         dry_run: Skip backend calls (for testing)
+        judge: Judge configuration (LLM-as-judge evaluation)
     """
 
     prompts_path: Path
@@ -429,6 +464,7 @@ class EvaluatorConfig:
     retries: int = 2
     request_timeout: float = 60.0
     dry_run: bool = False
+    judge: EvalJudgeConfig = field(default_factory=EvalJudgeConfig)
 
     def validate(self) -> None:
         """Validate the configuration.

@@ -5,8 +5,11 @@ against a backend client and collects validation results.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 from .behavior_validator import BehaviorIssue, BehaviorValidationResult, validate_behavior
 from .prompt_sets import PromptCase
@@ -18,6 +21,12 @@ try:
 except ImportError:
     EnvironmentValidationResult = None
     EnvironmentValidator = None
+
+try:
+    from .judge_validator import JudgeValidationResult, JudgeValidator
+except ImportError:
+    JudgeValidationResult = None
+    JudgeValidator = None
 
 
 @dataclass
@@ -33,6 +42,7 @@ class EvaluationRecord:
         error: Error message if request/validation failed
         behavior: Behavior validation result (if expectations defined)
         environment: Environment validation result (if enabled)
+        judge: Judge validation result (if --judge enabled)
     """
 
     case: PromptCase
@@ -43,6 +53,7 @@ class EvaluationRecord:
     error: Optional[str] = None
     behavior: Optional[BehaviorValidationResult] = None
     environment: Optional["EnvironmentValidationResult"] = None
+    judge: Optional["JudgeValidationResult"] = None
 
     @property
     def status(self) -> str:
@@ -51,15 +62,47 @@ class EvaluationRecord:
         - pass: Tool correct + behavior expectations met (or no behavior expectations)
         - warn: Tool correct + behavior expectations NOT met
         - fail: Tool incorrect OR error
+
+        When judge is enabled, the judge_mode controls how pattern-match and
+        judge results combine:
+        - "and": Both pattern match AND judge must pass
+        - "or": Either pattern match OR judge can pass
+        - "judge_only": Only judge result matters for pass/fail
         """
         if self.error is not None:
             return "fail"
-        if self.validator is None or not self.validator.passed:
-            return "fail"
-        # Schema passed - check environment execution if enabled
+
+        # Determine pattern match result (schema + expected tools)
+        pattern_passed = self.validator is not None and self.validator.passed
+
+        # Environment validation is independent -- always fails if it fails
         if self.environment is not None and not self.environment.passed:
             return "fail"
-        # Schema passed - check behavior
+
+        # Combine pattern match with judge result
+        if self.judge is not None:
+            judge_passed = self.judge.passed
+            mode = self.judge.judge_mode
+
+            if mode == "and":
+                if not pattern_passed or not judge_passed:
+                    return "fail"
+            elif mode == "or":
+                if not pattern_passed and not judge_passed:
+                    return "fail"
+            elif mode == "judge_only":
+                if not judge_passed:
+                    return "fail"
+            else:
+                logger.warning("Unknown judge_mode '%s', defaulting to 'and'", mode)
+                if not pattern_passed or not judge_passed:
+                    return "fail"
+        else:
+            # No judge -- original behavior
+            if not pattern_passed:
+                return "fail"
+
+        # Behavior check (advisory: warn, not fail)
         if self.behavior is not None and not self.behavior.passed:
             return "warn"
         return "pass"
@@ -89,6 +132,11 @@ class EvaluationRecord:
         """Check if behavior validation passed (or not applicable)."""
         return self.behavior is None or self.behavior.passed
 
+    @property
+    def judge_passed(self) -> bool:
+        """Check if judge validation passed (or not applicable)."""
+        return self.judge is None or self.judge.passed
+
 
 def evaluate_cases(
     cases: Sequence[PromptCase],
@@ -97,6 +145,7 @@ def evaluate_cases(
     on_record: Callable[[EvaluationRecord], None] | None = None,
     validate_context: bool = False,
     environment_validator: "EnvironmentValidator" | None = None,
+    judge_validator: "JudgeValidator" | None = None,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -109,6 +158,7 @@ def evaluate_cases(
                          expected_context in prompt metadata
         environment_validator: Optional environment validator for
                               runtime-backed tool execution checks
+        judge_validator: Optional LLM-as-judge validator for semantic evaluation
 
     Returns:
         List of evaluation records
@@ -122,6 +172,7 @@ def evaluate_cases(
             dry_run,
             validate_context,
             environment_validator=environment_validator,
+            judge_validator=judge_validator,
         )
         records.append(record)
         if on_record:
@@ -136,6 +187,7 @@ def _evaluate_single_case(
     dry_run: bool,
     validate_context: bool = False,
     environment_validator: "EnvironmentValidator" | None = None,
+    judge_validator: "JudgeValidator" | None = None,
 ) -> EvaluationRecord:
     """Evaluate a single prompt case.
 
@@ -144,6 +196,7 @@ def _evaluate_single_case(
         client: Backend client
         dry_run: Skip backend calls
         validate_context: If True, validate IDs against expected_context in metadata
+        judge_validator: Optional LLM-as-judge validator
 
     Returns:
         EvaluationRecord with results
@@ -231,6 +284,42 @@ def _evaluate_single_case(
                     behavior=behavior_result,
                 )
 
+    # Run judge validation if enabled
+    judge_result = None
+    if judge_validator is not None:
+        # Determine judge_mode: per-test override > global CLI default
+        judge_meta = case.metadata.get("judge", {})
+        per_case_mode = judge_meta.get("mode") if judge_meta else None
+        effective_mode = per_case_mode or judge_validator.default_judge_mode
+
+        # AND optimization: skip judge if pattern match already fails in "and" mode
+        pattern_passed = validator_result is not None and validator_result.passed
+        skip_judge = (effective_mode == "and" and not pattern_passed)
+
+        if not skip_judge:
+            try:
+                from shared.validation.parsing import parse_response
+
+                parsed = parse_response(response.message)
+
+                # Build case metadata for template rendering
+                case_meta = {
+                    "system": case.metadata.get("system", ""),
+                    "user_prompt": case.question,
+                    "expected_tools": case.expected_tools or case.acceptable_tools or [],
+                    "pattern_passed": pattern_passed,
+                    "case_id": case.case_id,
+                }
+
+                judge_result = judge_validator.validate(
+                    parsed_response=parsed,
+                    case_metadata=case_meta,
+                    judge_mode=per_case_mode,
+                )
+            except Exception as exc:
+                # Judge failure should not crash the evaluation
+                logger.error("Judge validation error for %s: %s", case.case_id, exc)
+
     return EvaluationRecord(
         case=case,
         response_text=response.message,
@@ -240,6 +329,7 @@ def _evaluate_single_case(
         error=None,
         behavior=behavior_result,
         environment=environment_result,
+        judge=judge_result,
     )
 
 

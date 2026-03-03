@@ -52,6 +52,7 @@ from .cli_utils import (
 )
 from .client_factory import create_client, create_settings
 from .config import (
+    EvalJudgeConfig,
     EvaluatorConfig,
     PromptFilter,
     expand_path,
@@ -181,6 +182,43 @@ Backend Configuration:
     parser.add_argument(
         "--env-exec-config",
         help="Path to environment execution rules YAML (default: Evaluator/config/environment_execution.yaml)",
+    )
+
+    # Judge (LLM-as-judge evaluation)
+    judge_group = parser.add_argument_group("Judge (LLM-as-judge evaluation)")
+    judge_group.add_argument(
+        "--judge",
+        action="store_true",
+        help="Enable LLM-as-judge evaluation alongside pattern matching",
+    )
+    judge_group.add_argument(
+        "--judge-mode",
+        choices=["and", "or", "judge_only"],
+        default="and",
+        help="How to combine judge and pattern-match results (default: and)",
+    )
+    judge_group.add_argument(
+        "--judge-provider",
+        choices=["openrouter", "lmstudio", "ollama"],
+        help="LLM provider for judge (default: same as eval backend)",
+    )
+    judge_group.add_argument(
+        "--judge-model",
+        help="Model for judge calls (default: same as eval model)",
+    )
+    judge_group.add_argument(
+        "--judge-rubrics",
+        help="Comma-separated rubric names (e.g., tool_call_quality,response_appropriateness)",
+    )
+    judge_group.add_argument(
+        "--judge-rubrics-dir",
+        default="Evaluator/config/rubrics",
+        help="Path to rubric YAML files (default: Evaluator/config/rubrics/)",
+    )
+    judge_group.add_argument(
+        "--no-judge-log",
+        action="store_true",
+        help="Disable KTO interaction logging for judge calls",
     )
 
     # Lineage and HuggingFace options
@@ -353,6 +391,86 @@ def main(argv: List[str] | None = None) -> int:
             execution_config_path=args.env_exec_config,
         )
 
+    # Initialize judge validator if --judge enabled
+    judge_validator = None
+    judge_cfg = None
+    if args.judge:
+        try:
+            from shared.llm import LLMConfig, create_client as create_llm_client
+            from shared.judge import JudgeConfig, RubricLoader, InteractionLogger
+            from .judge_validator import JudgeValidator
+
+            # Populate EvalJudgeConfig from CLI args (single source of truth)
+            judge_cfg = EvalJudgeConfig(
+                enabled=True,
+                mode=args.judge_mode,
+                provider=args.judge_provider,
+                model=args.judge_model,
+                rubrics=parse_tags(args.judge_rubrics) if args.judge_rubrics else [],
+                rubrics_dir=args.judge_rubrics_dir,
+                temperature=0.3,
+                max_tokens=2048,
+                log_interactions=not args.no_judge_log,
+            )
+
+            # Create judge LLM client (can differ from eval backend)
+            judge_llm_config = LLMConfig.from_env(env_prefix="JUDGE")
+            if judge_cfg.provider:
+                judge_llm_config.provider = judge_cfg.provider
+            if judge_cfg.model:
+                judge_llm_config.model = judge_cfg.model
+            judge_llm_client = create_llm_client(config=judge_llm_config)
+
+            # Load rubrics (M4: validate rubrics_dir is sensible)
+            rubrics_dir = expand_path(judge_cfg.rubrics_dir)
+            project_root = Path(__file__).parent.parent.resolve()
+            if not rubrics_dir.is_relative_to(project_root):
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Judge rubrics directory '%s' is outside the project root '%s'",
+                    rubrics_dir,
+                    project_root,
+                )
+            loader = RubricLoader(rubrics_dir)
+            rubric_keys = judge_cfg.rubrics if judge_cfg.rubrics else []
+            if not rubric_keys:
+                rubric_keys = loader.list_available()
+            if not rubric_keys:
+                print(f"No rubrics found in {rubrics_dir}", file=sys.stderr)
+                return 1
+            rubrics = loader.load_many(rubric_keys)
+
+            # Interaction logger for KTO training
+            interaction_logger = None
+            if judge_cfg.log_interactions:
+                interaction_logger = InteractionLogger(
+                    output_dir=Path("Evaluator/interactions"),
+                    enabled=True,
+                    prefix="judge",
+                )
+
+            judge_config = JudgeConfig(
+                temperature=judge_cfg.temperature,
+                max_tokens=judge_cfg.max_tokens,
+            )
+            judge_validator = JudgeValidator(
+                llm_client=judge_llm_client,
+                rubrics=rubrics,
+                judge_config=judge_config,
+                interaction_logger=interaction_logger,
+                default_judge_mode=judge_cfg.mode,
+                eval_model=args.model,
+                judge_model=judge_cfg.model or "(same as eval)",
+            )
+            print(f"Judge enabled: {len(rubrics)} rubric(s) [{', '.join(rubric_keys)}], mode={judge_cfg.mode}")
+
+        except ImportError as exc:
+            print(f"Judge dependencies unavailable: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(f"Judge initialization failed: {exc}", file=sys.stderr)
+            return 1
+
     def on_record_dashboard(record):
         """Update dashboard with evaluation result."""
         name = record.case.case_id or "unnamed"
@@ -454,6 +572,7 @@ def main(argv: List[str] | None = None) -> int:
                 dry_run=config.dry_run,
                 validate_context=args.validate_context,
                 environment_validator=environment_validator,
+                judge_validator=judge_validator,
                 on_record=on_record_dashboard,
             )
     else:
@@ -464,6 +583,7 @@ def main(argv: List[str] | None = None) -> int:
             dry_run=config.dry_run,
             validate_context=args.validate_context,
             environment_validator=environment_validator,
+            judge_validator=judge_validator,
             on_record=on_record_text,
         )
 
@@ -531,7 +651,7 @@ def main(argv: List[str] | None = None) -> int:
     if args.upload_to_hf:
         hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if not hf_token:
-            print("\n❌ HuggingFace token required. Provide via --hf-token or HF_TOKEN env var")
+            print("\n❌ HuggingFace authentication required. Set HF_TOKEN env var or provide credentials via --hf flag.")
             return 1
 
         try:

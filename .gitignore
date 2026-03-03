@@ -110,6 +110,7 @@ llama.cpp/
 
 # SynthChat generated artifacts
 SynthChat/interactions/
+Evaluator/interactions/
 SynthChat/output/
 
 # Local training outputs
@@ -126,3 +127,5 @@ scratch/
 Meditations on Alignment/
 
 Datasets/synthchat/
+.worktrees/
+.serena/
