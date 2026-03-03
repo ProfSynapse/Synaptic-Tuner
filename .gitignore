@@ -129,3 +129,15 @@ Meditations on Alignment/
 Datasets/synthchat/
 .worktrees/
 .serena/
+
+# Obvious generated training/test artifacts
+Trainers/rtx3090_grpo/grpo_output_rtx3090/
+docs/test_*.jsonl
+docs/test_*.review.md
+docs/test_webllm_node.mjs
+docs/webllm_test.html
+
+# Archive folders (local historical snapshots)
+Datasets/archive/
+Evaluator/config/scenarios/archive/
+docs/archive/
