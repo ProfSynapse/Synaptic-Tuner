@@ -651,7 +651,7 @@ def main(argv: List[str] | None = None) -> int:
     if args.upload_to_hf:
         hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if not hf_token:
-            print("\n❌ HuggingFace authentication required. Provide via --hf-token or HF_TOKEN env var")
+            print("\n❌ HuggingFace authentication required. Set HF_TOKEN env var or provide credentials via --hf flag.")
             return 1
 
         try:
