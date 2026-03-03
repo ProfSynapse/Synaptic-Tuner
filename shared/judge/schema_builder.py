@@ -8,9 +8,12 @@ Summary: Builds a single combined JSON Schema from multiple RubricDef
          accepts typed RubricDef instances instead of raw dicts.
 """
 
+import logging
 from typing import Dict, List
 
 from .models import JudgeConfig, RubricDef
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaBuilder:
@@ -44,9 +47,17 @@ class SchemaBuilder:
         for rubric in rubrics:
             schema = rubric.output_schema
 
-            # Merge properties from this rubric's schema
+            # Merge properties from this rubric's schema (first definition wins)
             for prop_name, prop_def in schema.get("properties", {}).items():
-                properties[prop_name] = prop_def
+                if prop_name in properties:
+                    logger.warning(
+                        "Schema property '%s' already defined by a previous rubric; "
+                        "keeping first definition (from rubric '%s')",
+                        prop_name,
+                        rubric.key,
+                    )
+                else:
+                    properties[prop_name] = prop_def
 
             # Collect required fields
             required.extend(schema.get("required", []))

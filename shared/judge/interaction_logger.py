@@ -57,6 +57,9 @@ class InteractionLogger:
         passed: bool,
         case_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        judge_mode: Optional[str] = None,
+        eval_model: Optional[str] = None,
+        judge_model: Optional[str] = None,
     ) -> None:
         """Log a single judge interaction for KTO training.
 
@@ -68,6 +71,9 @@ class InteractionLogger:
             passed: Overall pass/fail for KTO label.
             case_id: Evaluation case identifier for lineage tracking.
             system_prompt: System prompt used for the judge call.
+            judge_mode: Composition mode used ("and", "or", "judge_only").
+            eval_model: Model being evaluated.
+            judge_model: Model used as judge.
         """
         if not self.enabled:
             return
@@ -93,6 +99,9 @@ class InteractionLogger:
                 "scores": scores,
                 "passed": passed,
                 "case_id": case_id,
+                "judge_mode": judge_mode,
+                "eval_model": eval_model,
+                "judge_model": judge_model,
                 "timestamp": datetime.now().isoformat(),
             },
         }

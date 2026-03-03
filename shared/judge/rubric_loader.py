@@ -41,8 +41,15 @@ class RubricLoader:
 
         Raises:
             FileNotFoundError: If the rubric YAML file does not exist.
-            ValueError: If the YAML is malformed or missing required fields.
+            ValueError: If the YAML is malformed, missing required fields,
+                        or contains path traversal characters.
         """
+        # Reject path traversal attempts
+        if ".." in rubric_key or "/" in rubric_key or "\\" in rubric_key:
+            raise ValueError(
+                f"Invalid rubric key '{rubric_key}': must not contain '..', '/', or '\\'"
+            )
+
         yaml_path = self.rubrics_dir / f"{rubric_key}.yaml"
 
         if not yaml_path.exists():

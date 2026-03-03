@@ -69,6 +69,9 @@ class JudgeValidator:
         rubrics: Loaded rubric definitions to judge against.
         judge_config: Configuration for judge execution behavior.
         interaction_logger: Optional logger for KTO interaction logging.
+        default_judge_mode: Global judge mode from CLI (overridable per-scenario).
+        eval_model: Name of the model being evaluated (for interaction logging).
+        judge_model: Name of the model used as judge (for interaction logging).
     """
 
     def __init__(
@@ -77,17 +80,23 @@ class JudgeValidator:
         rubrics: List[RubricDef],
         judge_config: JudgeConfig,
         interaction_logger: Optional[InteractionLogger] = None,
+        default_judge_mode: str = "and",
+        eval_model: Optional[str] = None,
+        judge_model: Optional[str] = None,
     ):
         self.judge_service = JudgeService(llm_client, judge_config)
         self.rubrics = rubrics
         self.judge_config = judge_config
         self.interaction_logger = interaction_logger
+        self.default_judge_mode = default_judge_mode
+        self.eval_model = eval_model
+        self.judge_model = judge_model
 
     def validate(
         self,
         parsed_response: ParsedResponse,
         case_metadata: Dict[str, Any],
-        judge_mode: str = "and",
+        judge_mode: Optional[str] = None,
     ) -> JudgeValidationResult:
         """Run judge validation on a parsed response.
 
@@ -95,11 +104,14 @@ class JudgeValidator:
             parsed_response: Parsed model response (from shared/validation/parsing).
             case_metadata: Scenario metadata containing system prompt, user question,
                           expected tools, pattern match result, etc.
-            judge_mode: How to combine with pattern matching ("and", "or", "judge_only").
+            judge_mode: Per-case override for composition mode. Falls back to
+                        default_judge_mode from CLI if None.
 
         Returns:
             JudgeValidationResult with scores and pass/fail.
         """
+        effective_mode = judge_mode or self.default_judge_mode
+
         # Render the combined judge prompt from all rubrics
         rendered_prompt = self._render_combined_prompt(
             parsed_response, case_metadata
@@ -122,11 +134,14 @@ class JudgeValidator:
                 scores=scores_dict,
                 passed=judge_result.passed,
                 case_id=case_metadata.get("case_id"),
+                judge_mode=effective_mode,
+                eval_model=self.eval_model,
+                judge_model=self.judge_model,
             )
 
         return JudgeValidationResult(
             judge_result=judge_result,
-            judge_mode=judge_mode,
+            judge_mode=effective_mode,
         )
 
     def _render_combined_prompt(
@@ -158,15 +173,16 @@ class JudgeValidator:
             parts.append(f"=== {rubric.name} ===\n{rendered}")
         return "\n\n".join(parts)
 
+    @staticmethod
     def _render_single_prompt(
-        self,
         rubric: RubricDef,
         template_vars: Dict[str, str],
     ) -> str:
         """Fill template variables in a single rubric's judge_prompt.
 
-        Uses str.format_map with a defaulting dict so missing variables
-        in the template are left as-is rather than raising KeyError.
+        Uses simple string replacement (str.replace) for each known variable,
+        avoiding str.format_map which could allow Python attribute access via
+        format strings. Missing variables are left as-is.
 
         Args:
             rubric: The rubric whose prompt to render.
@@ -175,13 +191,10 @@ class JudgeValidator:
         Returns:
             Rendered prompt string.
         """
-        try:
-            return rubric.judge_prompt.format_map(_SafeFormatDict(template_vars))
-        except Exception as exc:
-            logger.warning(
-                "Failed to render prompt for rubric '%s': %s", rubric.key, exc
-            )
-            return rubric.judge_prompt
+        prompt = rubric.judge_prompt
+        for key, val in template_vars.items():
+            prompt = prompt.replace(f"{{{key}}}", str(val))
+        return prompt
 
     def _build_template_vars(
         self,
@@ -265,15 +278,3 @@ class JudgeValidator:
             lines.append(f"{tc.name}({args_str})")
 
         return "\n".join(lines)
-
-
-class _SafeFormatDict(dict):
-    """Dict subclass that returns the key placeholder for missing keys.
-
-    Used with str.format_map() so that template variables not present
-    in the variable dict are left as literal {key} strings rather than
-    raising KeyError.
-    """
-
-    def __missing__(self, key: str) -> str:
-        return f"{{{key}}}"
