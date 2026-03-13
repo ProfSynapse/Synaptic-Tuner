@@ -53,7 +53,8 @@ def main(config_path: str) -> Path:
     logger.info("Data: %d train, %d test", len(X_train), len(X_test))
 
     # 3. Pipeline
-    pipeline = build_pipeline(config)
+    n_classes = int(y_train.nunique()) if config.task.type.value == "classification" else None
+    pipeline = build_pipeline(config, n_classes=n_classes)
     logger.info("Algorithm: %s", config.algorithm.name)
 
     # 4. Fit
@@ -132,8 +133,8 @@ def _build_schema(
             schema["n_features_after_transform"] = len(
                 preprocessor.get_feature_names_out()
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not determine n_features_after_transform: %s", e)
 
     return schema
 

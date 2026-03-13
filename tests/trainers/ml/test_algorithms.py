@@ -85,3 +85,21 @@ class TestLightGBMWrapper:
     def test_get_default_params_regression(self, wrapper):
         params = wrapper.get_default_params("regression")
         assert params["objective"] == "regression"
+
+    def test_get_default_params_multiclass(self, wrapper):
+        params = wrapper.get_default_params("classification", n_classes=4)
+        assert params["objective"] == "multiclass"
+        assert params["metric"] == "multi_logloss"
+        assert params["num_class"] == 4
+
+    def test_get_default_params_binary_explicit(self, wrapper):
+        params = wrapper.get_default_params("classification", n_classes=2)
+        assert params["objective"] == "binary"
+        assert params["metric"] == "binary_logloss"
+
+    def test_create_multiclass_estimator(self, wrapper):
+        est = wrapper.create_estimator("classification", {}, n_classes=3)
+        from lightgbm import LGBMClassifier
+        assert isinstance(est, LGBMClassifier)
+        assert est.get_params()["objective"] == "multiclass"
+        assert est.get_params()["num_class"] == 3

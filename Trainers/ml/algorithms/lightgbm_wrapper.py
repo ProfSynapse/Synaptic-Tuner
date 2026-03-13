@@ -34,10 +34,13 @@ class LightGBMWrapper(AlgorithmWrapper):
     def supports_gpu(self) -> bool:
         return True
 
-    def get_default_params(self, task_type: str) -> dict[str, Any]:
+    def get_default_params(
+        self, task_type: str, n_classes: int | None = None,
+    ) -> dict[str, Any]:
         """Return sensible defaults for LightGBM.
 
-        Classification uses binary crossentropy; regression uses RMSE.
+        Classification uses binary crossentropy for 2 classes, multiclass
+        softmax for >2. Regression uses RMSE.
         """
         base = {
             "n_estimators": 500,
@@ -48,21 +51,28 @@ class LightGBMWrapper(AlgorithmWrapper):
             "verbosity": -1,
         }
         if task_type == "classification":
-            base["objective"] = "binary"
-            base["metric"] = "binary_logloss"
+            if n_classes is not None and n_classes > 2:
+                base["objective"] = "multiclass"
+                base["metric"] = "multi_logloss"
+                base["num_class"] = n_classes
+            else:
+                base["objective"] = "binary"
+                base["metric"] = "binary_logloss"
         else:
             base["objective"] = "regression"
             base["metric"] = "rmse"
         return base
 
     def create_estimator(
-        self, task_type: str, params: dict[str, Any]
+        self, task_type: str, params: dict[str, Any],
+        n_classes: int | None = None,
     ) -> BaseEstimator:
         """Create a LightGBM estimator for the given task type.
 
         Args:
             task_type: "classification" or "regression".
             params: User overrides merged over defaults.
+            n_classes: Number of target classes (classification only).
 
         Returns:
             LGBMClassifier or LGBMRegressor.
@@ -75,7 +85,7 @@ class LightGBMWrapper(AlgorithmWrapper):
         if task_type not in ("classification", "regression"):
             raise ValueError(f"Unsupported task type: {task_type}")
 
-        merged = {**self.get_default_params(task_type), **params}
+        merged = {**self.get_default_params(task_type, n_classes), **params}
 
         if task_type == "classification":
             return LGBMClassifier(**merged)

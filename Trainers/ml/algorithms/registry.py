@@ -44,6 +44,7 @@ class AlgorithmWrapper(ABC):
         self,
         task_type: str,
         params: dict[str, Any],
+        n_classes: int | None = None,
     ) -> BaseEstimator:
         """Create a configured scikit-learn estimator.
 
@@ -51,6 +52,8 @@ class AlgorithmWrapper(ABC):
             task_type: "classification" or "regression".
             params: User-provided hyperparameters from config.
                     Merged over defaults (user params win).
+            n_classes: Number of target classes (classification only).
+                       Used to select binary vs multiclass objective.
 
         Returns:
             A scikit-learn compatible estimator (implements fit/predict).
@@ -61,8 +64,15 @@ class AlgorithmWrapper(ABC):
         ...
 
     @abstractmethod
-    def get_default_params(self, task_type: str) -> dict[str, Any]:
-        """Return sensible default hyperparameters for this task type."""
+    def get_default_params(
+        self, task_type: str, n_classes: int | None = None,
+    ) -> dict[str, Any]:
+        """Return sensible default hyperparameters for this task type.
+
+        Args:
+            task_type: "classification" or "regression".
+            n_classes: Number of target classes (classification only).
+        """
         ...
 
 
