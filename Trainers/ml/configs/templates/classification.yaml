@@ -1,0 +1,35 @@
+# Trainers/ml/configs/templates/classification.yaml
+# Minimal classification config — LightGBM on tabular data
+# Usage: python -m Trainers.ml.train --config Trainers/ml/configs/templates/classification.yaml
+
+task:
+  type: classification
+  name: my_classifier
+  target_column: target
+  eval_metric: f1_weighted
+
+data:
+  train_path: Datasets/ml/my_data.csv
+  test_size: 0.2
+  stratify: true
+
+features:
+  numeric:
+    columns: [feature_1, feature_2, feature_3]
+    imputer: median
+    scaler: standard
+  categorical:
+    columns: [category_a, category_b]
+    encoder: onehot
+
+algorithm:
+  name: lightgbm
+  params:
+    n_estimators: 500
+    learning_rate: 0.05
+
+evaluation:
+  metrics: [accuracy, f1_weighted, roc_auc]
+
+output:
+  dir: Trainers/ml/ml_output
