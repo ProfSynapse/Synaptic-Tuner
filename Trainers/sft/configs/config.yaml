@@ -12,14 +12,14 @@ model:
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
 
   # Model parameters
-  max_seq_length: 4096
+  max_seq_length: 2048
   dtype: null  # Auto-detection
   load_in_4bit: false  # Qwen3.5 smoke test: use non-4bit path so local and HF Jobs match
 
 # LoRA Adapter Configuration
 lora:
-  r: 64
-  lora_alpha: 128
+  r: 32
+  lora_alpha: 64
   lora_dropout: 0
   bias: "none"
   target_modules:
@@ -40,7 +40,7 @@ training:
   output_dir: "./sft_output"
 
   # Batch configuration
-  per_device_train_batch_size: 8
+  per_device_train_batch_size: 2
   gradient_accumulation_steps: 4  
 
   # Learning rate
@@ -49,7 +49,7 @@ training:
   lr_scheduler_type: "linear"
 
   # SFT-specific parameters
-  max_seq_length: 4096
+  max_seq_length: 2048
   packing: false  # Pack multiple examples per sequence (2.5-5x faster training!)
   completion_only_loss: true  # Train only on assistant completions
   assistant_only_loss: false  # For multi-turn (not needed here)
