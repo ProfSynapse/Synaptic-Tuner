@@ -164,22 +164,29 @@ def sync_results_from_pod(
 
 VALID_METHODS = {"sft", "kto"}
 
+# Project-specific dependencies not pre-installed in the unsloth Docker
+# image. Must stay in sync with RunPodBackend._PROJECT_DEPS.
+_PROJECT_DEPS = "pyyaml wandb hf_transfer python-dotenv rich"
+
 
 def build_training_startup_command(
     method: str,
-    setup_commands: Optional[list] = None,
+    extra_setup_commands: Optional[list] = None,
     repo_url: Optional[str] = None,
     target_dir: str = "/workspace/repo",
 ) -> str:
     """
     Build the full startup command for a RunPod training pod.
 
-    Chains together: dependency installation, repo clone, and training
-    script execution into a single shell command for docker_args.
+    The unsloth Docker image provides unsloth, transformers, trl, torch
+    and CUDA pre-installed. Only project-specific deps are pip-installed.
+    Chains: pip install project deps -> repo clone -> training script.
 
     Args:
         method: Training method ('sft' or 'kto').
-        setup_commands: List of setup commands (pip installs, etc.).
+        extra_setup_commands: Optional additional setup commands to run
+            after the standard project deps install (e.g. custom pip
+            packages for experiments).
         repo_url: Optional override for the repo URL.
         target_dir: Directory on the pod to clone into.
 
@@ -200,8 +207,12 @@ def build_training_startup_command(
 
     parts = []
 
-    if setup_commands:
-        parts.extend(setup_commands)
+    # Install only project-specific deps (unsloth/torch/trl pre-installed
+    # in the Docker image)
+    parts.append(f"pip install {_PROJECT_DEPS}")
+
+    if extra_setup_commands:
+        parts.extend(extra_setup_commands)
 
     parts.append(clone_cmd)
 

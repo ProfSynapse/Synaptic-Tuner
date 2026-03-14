@@ -91,7 +91,7 @@ def repo_root(tmp_path):
             "hf_jobs": {
                 "flavor": "a10g-small",
                 "timeout": "4h",
-                "image": "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
+                "image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
                 "artifact_backend": "hf_bucket",
                 "artifact_identifier": "toolset-training-artifacts",
                 "output_root": "/workspace/outputs",
