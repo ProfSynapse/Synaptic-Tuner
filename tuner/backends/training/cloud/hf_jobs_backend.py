@@ -27,7 +27,7 @@ from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
-from .base_cloud import load_cloud_config, poll_until_done, resolve_repo_source
+from .base_cloud import load_cloud_config, load_project_deps, poll_until_done, resolve_repo_source
 
 logger = logging.getLogger(__name__)
 
@@ -348,10 +348,14 @@ class HFJobsBackend(ITrainingBackend):
         run_slug = f"{timestamp}-{config.repo_commit[:8]}"
         artifact_prefix = f"runs/{config.provider}/{config.method}/{run_slug}"
 
+        # Read project-specific deps from cloud_config.yaml (single source of truth)
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        project_deps = load_project_deps(cloud_config_path)
+
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
-            "pip install pyyaml wandb hf_transfer python-dotenv rich",
+            f"pip install {' '.join(project_deps)}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

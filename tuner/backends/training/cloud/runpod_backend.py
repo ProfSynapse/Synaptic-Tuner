@@ -37,6 +37,7 @@ from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
+    load_project_deps,
     resolve_repo_source,
     estimate_cost,
     get_gpu_display_name,
@@ -400,11 +401,6 @@ class RunPodBackend(ITrainingBackend):
 
         return env
 
-    # Project-specific dependencies not pre-installed in the unsloth Docker
-    # image. These are the only packages that need pip-installing at pod
-    # startup; unsloth, transformers, trl, torch, etc. are already in the image.
-    _PROJECT_DEPS = "pyyaml wandb hf_transfer python-dotenv rich"
-
     def _build_startup_command(
         self, config: TrainingConfig, runpod_config: dict
     ) -> str:
@@ -437,11 +433,15 @@ class RunPodBackend(ITrainingBackend):
         if config.repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
             clone_url = config.repo_url.replace("https://", "https://$GH_TOKEN@")
 
+        # Read project-specific deps from cloud_config.yaml (single source of truth)
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        project_deps = load_project_deps(cloud_config_path)
+
         parts = []
 
         # Install only project-specific deps (unsloth/torch/trl pre-installed
         # in image). Also honour any extra_setup_commands from config.
-        parts.append(f"pip install {self._PROJECT_DEPS}")
+        parts.append(f"pip install {' '.join(project_deps)}")
         extra_commands = runpod_config.get("extra_setup_commands", [])
         parts.extend(extra_commands)
 

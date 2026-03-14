@@ -59,6 +59,17 @@ def repo_root(tmp_path):
     cloud_dir.mkdir(parents=True)
 
     cloud_config = {
+        "dependencies": {
+            "docker_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
+            "project_pip_deps": [
+                "pyyaml",
+                "wandb",
+                "hf_transfer",
+                "python-dotenv",
+                "rich",
+            ],
+            "extra_setup_commands": [],
+        },
         "pricing": {
             "hf_jobs": {
                 "t4-small": {"name": "T4 (16GB)", "price": 0.40},
@@ -110,7 +121,7 @@ def repo_root(tmp_path):
                 "volume_in_gb": 50,
                 "container_disk_in_gb": 50,
                 "cloud_type": "SECURE",
-                "default_image": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+                "default_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
                 "default_timeout": 7200,
                 "artifact_backend": "runpod_network_volume",
                 "network_volume_id": "runpod-vol-123",

@@ -97,7 +97,7 @@ cloud:
     volume_in_gb: 50
     container_disk_in_gb: 50
     cloud_type: "SECURE"  # Use SECURE for training to avoid preemption risk
-    default_image: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
+    default_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update"
     artifact_backend: runpod_network_volume
     network_volume_id: null
     output_mount_path: "/runpod-volume"

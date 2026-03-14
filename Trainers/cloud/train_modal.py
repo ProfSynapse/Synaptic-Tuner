@@ -92,6 +92,8 @@ training_image = (
         "huggingface_hub==0.30.2",
         # Project utilities — lighter deps, less sensitive to version drift
         "pyyaml",
+        "wandb",
+        "hf_transfer",
         "python-dotenv",
         "rich",
     )

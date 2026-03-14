@@ -139,11 +139,27 @@ class TestCrossBackendDepsConsistency:
             f"RunPod missing project deps: {EXPECTED_PROJECT_DEPS - packages}"
         )
 
-    def test_runpod_sync_installs_project_deps(self):
-        from Trainers.cloud.runpod_sync import _PROJECT_DEPS as sync_deps
-        sync_packages = {p.lower() for p in sync_deps.split()}
-        assert EXPECTED_PROJECT_DEPS.issubset(sync_packages), (
-            f"RunPod sync missing project deps: {EXPECTED_PROJECT_DEPS - sync_packages}"
+    def test_runpod_sync_installs_project_deps(self, repo_root):
+        """RunPod sync startup command must install all project deps."""
+        from Trainers.cloud.runpod_sync import build_training_startup_command
+
+        # Patch load_project_deps in the sync module's namespace to read
+        # from the test fixture's cloud_config.yaml (the real function
+        # resolves relative to __file__, which won't be the tmp_path).
+        from tuner.backends.training.cloud.base_cloud import load_project_deps
+        config_path = repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+
+        with patch(
+            "Trainers.cloud.runpod_sync.load_project_deps",
+            side_effect=lambda p=None: load_project_deps(config_path),
+        ):
+            cmd = build_training_startup_command(
+                method="sft",
+                repo_url="https://github.com/test/repo.git",
+            )
+        packages = _extract_pip_packages(cmd)
+        assert EXPECTED_PROJECT_DEPS.issubset(packages), (
+            f"RunPod sync missing project deps: {EXPECTED_PROJECT_DEPS - packages}"
         )
 
     def test_hf_jobs_and_runpod_install_same_deps(self, repo_root, clean_env):
@@ -162,14 +178,38 @@ class TestCrossBackendDepsConsistency:
             f"  RunPod only:  {rp_packages - hf_packages}"
         )
 
-    def test_runpod_backend_and_sync_deps_match(self):
-        """RunPodBackend._PROJECT_DEPS must match runpod_sync._PROJECT_DEPS."""
-        from Trainers.cloud.runpod_sync import _PROJECT_DEPS as sync_deps
-        backend_deps = RunPodBackend._PROJECT_DEPS
-        assert backend_deps == sync_deps, (
-            f"RunPod backend and sync script have different dep strings.\n"
-            f"  Backend: {backend_deps!r}\n"
-            f"  Sync:    {sync_deps!r}"
+    def test_runpod_backend_and_sync_deps_match(self, repo_root, clean_env):
+        """RunPod backend and sync script must install identical packages.
+
+        Both read from cloud_config.yaml via load_project_deps(), so their
+        pip install lines should contain the same set of packages.
+        """
+        from Trainers.cloud.runpod_sync import build_training_startup_command
+        from tuner.backends.training.cloud.base_cloud import load_project_deps
+
+        config_path = repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+
+        # Get packages from RunPod backend
+        backend = RunPodBackend(repo_root)
+        rp_config = _runpod_cloud_config()
+        backend_cmd = backend._build_startup_command(rp_config, {})
+        backend_packages = _extract_pip_packages(backend_cmd)
+
+        # Get packages from RunPod sync
+        with patch(
+            "Trainers.cloud.runpod_sync.load_project_deps",
+            side_effect=lambda p=None: load_project_deps(config_path),
+        ):
+            sync_cmd = build_training_startup_command(
+                method="sft",
+                repo_url="https://github.com/test/repo.git",
+            )
+        sync_packages = _extract_pip_packages(sync_cmd)
+
+        assert backend_packages == sync_packages, (
+            f"RunPod backend and sync install different packages.\n"
+            f"  Backend only: {backend_packages - sync_packages}\n"
+            f"  Sync only:    {sync_packages - backend_packages}"
         )
 
 

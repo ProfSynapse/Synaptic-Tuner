@@ -35,7 +35,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from tuner.backends.training.cloud.base_cloud import resolve_repo_url  # noqa: E402
+from tuner.backends.training.cloud.base_cloud import load_project_deps, resolve_repo_url  # noqa: E402
 from shared.utilities.paths import get_canonical_trainer_dir_name  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -164,10 +164,6 @@ def sync_results_from_pod(
 
 VALID_METHODS = {"sft", "kto"}
 
-# Project-specific dependencies not pre-installed in the unsloth Docker
-# image. Must stay in sync with RunPodBackend._PROJECT_DEPS.
-_PROJECT_DEPS = "pyyaml wandb hf_transfer python-dotenv rich"
-
 
 def build_training_startup_command(
     method: str,
@@ -205,11 +201,15 @@ def build_training_startup_command(
     url = repo_url or resolve_repo_url()
     clone_cmd = _build_clone_command(url, target_dir)
 
+    # Read project-specific deps from cloud_config.yaml (single source of truth)
+    config_path = Path(__file__).resolve().parent / "cloud_config.yaml"
+    project_deps = load_project_deps(config_path)
+
     parts = []
 
     # Install only project-specific deps (unsloth/torch/trl pre-installed
     # in the Docker image)
-    parts.append(f"pip install {_PROJECT_DEPS}")
+    parts.append(f"pip install {' '.join(project_deps)}")
 
     if extra_setup_commands:
         parts.extend(extra_setup_commands)

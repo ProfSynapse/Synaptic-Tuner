@@ -213,6 +213,37 @@ def load_cloud_config(cloud_config_path: Path) -> dict:
         return {}
 
 
+# Fallback project deps if cloud_config.yaml is missing or has no deps section
+_DEFAULT_PROJECT_DEPS = ["pyyaml", "wandb", "hf_transfer", "python-dotenv", "rich"]
+
+
+def load_project_deps(cloud_config_path: Optional[Path] = None) -> list[str]:
+    """
+    Load project-specific pip dependencies from cloud_config.yaml.
+
+    Reads the top-level ``dependencies.project_pip_deps`` list from the
+    config file. These are the only packages that need pip-installing at
+    cloud startup; the Docker image provides unsloth, torch, etc.
+
+    Args:
+        cloud_config_path: Path to cloud_config.yaml. Auto-detected if None.
+
+    Returns:
+        List of pip package names (e.g. ["pyyaml", "wandb", ...]).
+    """
+    config_path = cloud_config_path or _find_cloud_config()
+    if not config_path.exists():
+        return list(_DEFAULT_PROJECT_DEPS)
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        deps = config.get("dependencies", {}).get("project_pip_deps", [])
+        return deps if deps else list(_DEFAULT_PROJECT_DEPS)
+    except Exception as e:
+        logger.warning("Failed to load project deps from %s: %s", config_path, e)
+        return list(_DEFAULT_PROJECT_DEPS)
+
+
 def resolve_repo_url() -> str:
     """
     Get the repository URL for code sync to cloud jobs.
