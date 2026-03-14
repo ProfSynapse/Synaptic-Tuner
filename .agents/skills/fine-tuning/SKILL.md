@@ -86,6 +86,11 @@ python tuner.py cloud
 # Choose provider + method after confirming the working tree is clean and pushed
 ```
 
+**Cloud evaluation against latest HF run (vLLM, no GGUF):**
+```bash
+python tuner.py cloud-eval --run latest --preset full
+```
+
 ## Environment Variables
 
 ```bash
@@ -124,6 +129,15 @@ Provider-native storage defaults:
 
 Optional final-model publishing to Hugging Face Hub is off by default and only uploads `final_model`.
 
+HF Jobs-specific cloud behavior:
+- launch from a clean tracked worktree and a pushed commit only; the remote container checks out that exact SHA
+- keep the main training environment compatible with Unsloth/Transformers; any Buckets-only `huggingface_hub` upgrade must stay isolated from the trainer runtime
+- pass `HF_TOKEN` into the cloud job explicitly; do not assume HF Jobs injects it into the container environment
+- treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `
+- if a bucket name is bare, let the launcher resolve it to the canonical namespaced bucket ID before training starts
+- bucket creation / identity checks should happen once up front; repeated `whoami` / `create_bucket` calls during log sync can hit HF rate limits
+- for post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`; it launches an HF Job, downloads the bucketed LoRA, starts vLLM remotely, runs `Evaluator.cli`, and syncs results back to the same bucket under `.../evaluations/vllm/...`
+
 ## Tips
 
 - Always `--dry-run` first to verify setup without training
@@ -135,3 +149,4 @@ Optional final-model publishing to Hugging Face Hub is off by default and only u
 - Keep VRAM headroom — reduce `--batch-size` if OOM
 - `training_lineage.json` tracks full provenance for reproducibility
 - Cloud runs require a clean tracked worktree and a pushed commit; remote jobs clone the exact branch and commit you launched
+- For HF Jobs bucket troubleshooting, load `reference/cloud-training.md`

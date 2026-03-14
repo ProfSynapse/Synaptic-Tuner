@@ -24,12 +24,16 @@ import time
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
-from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
-from tuner.ui import RICH_AVAILABLE
+from shared.utilities.paths import (
+    get_canonical_trainer_dir_name,
+    get_primary_training_output_dir,
+    get_trainer_root,
+)
+from tuner.ui import BOX, RICH_AVAILABLE, print_config, print_info, print_menu, print_success
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -355,7 +359,7 @@ class HFJobsBackend(ITrainingBackend):
 
         if result == "COMPLETED":
             print(f"  Job {job_id} completed successfully.")
-            return 0
+            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
         else:
             error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
             print(f"  Job {job_id} failed: {error_detail}")
@@ -438,7 +442,7 @@ class HFJobsBackend(ITrainingBackend):
 
                     if status in ("completed", "COMPLETED"):
                         dashboard.update(log_message="Training completed successfully.")
-                        return 0
+                        return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
                     if status in ("error", "ERROR", "failed", "FAILED"):
                         dashboard.update(log_message=f"Job failed with status: {status}")
                         return 1
@@ -450,6 +454,15 @@ class HFJobsBackend(ITrainingBackend):
                     elapsed += poll_interval
         finally:
             shutil.rmtree(local_logs_dir, ignore_errors=True)
+
+        recovered = self._recover_completed_run_from_bucket(
+            config=config,
+            artifact_prefix=artifact_prefix,
+        )
+        if recovered:
+            print()
+            print(f"  Job {job_id} appears complete based on synced artifacts.")
+            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
 
         print()
         print(f"  Job {job_id} failed: Timeout exceeded")
@@ -517,6 +530,151 @@ class HFJobsBackend(ITrainingBackend):
         config.artifact_identifier = normalize_hf_bucket_id(str(resolved_bucket_id))
         logger.info("Using HF bucket: %s", config.artifact_identifier)
 
+    def _build_remote_run_uri(self, config: CloudTrainingConfig, artifact_prefix: str) -> str:
+        """Return the HF bucket URI for a completed run."""
+        if not config.artifact_identifier:
+            raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
+        return f"hf://buckets/{config.artifact_identifier}/{artifact_prefix.strip('/')}"
+
+    def _local_download_run_dir(self, config: CloudTrainingConfig, artifact_prefix: str) -> Path:
+        """Return the local run directory used for downloaded cloud runs."""
+        run_slug = artifact_prefix.strip("/").split("/")[-1]
+        return get_primary_training_output_dir(config.method, self.repo_root) / run_slug
+
+    def _sync_bucket_path(self, remote_uri: str, local_dir: Path, *, token: Optional[str] = None) -> None:
+        """Sync a remote HF bucket path into a local directory."""
+        from huggingface_hub import sync_bucket
+
+        local_dir = Path(local_dir)
+        local_dir.mkdir(parents=True, exist_ok=True)
+        sync_bucket(remote_uri, str(local_dir), token=token)
+
+    def _run_dir_has_completion_artifacts(self, run_dir: Path) -> bool:
+        """Return True when a run directory appears complete enough for next-step workflows."""
+        final_model_dir = run_dir / "final_model"
+        has_final_model = final_model_dir.exists() and any(final_model_dir.iterdir())
+        has_lineage = (run_dir / "training_lineage.json").exists()
+        return has_final_model and has_lineage
+
+    def _download_completed_run(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        artifact_prefix: str,
+        local_run_dir: Optional[Path] = None,
+    ) -> Path:
+        """Download a completed HF Jobs run into the local training outputs tree."""
+        target_dir = Path(local_run_dir) if local_run_dir else self._local_download_run_dir(config, artifact_prefix)
+        self._sync_bucket_path(
+            self._build_remote_run_uri(config, artifact_prefix),
+            target_dir,
+            token=get_hf_token(),
+        )
+        return target_dir
+
+    def _recover_completed_run_from_bucket(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        artifact_prefix: str,
+    ) -> bool:
+        """Best-effort completion recovery when HF status lags behind uploaded artifacts."""
+        recovery_dir = Path(tempfile.mkdtemp(prefix="hf-job-recovery-"))
+        try:
+            self._sync_bucket_path(
+                self._build_remote_run_uri(config, artifact_prefix),
+                recovery_dir,
+                token=get_hf_token(),
+            )
+            return self._run_dir_has_completion_artifacts(recovery_dir)
+        except Exception as exc:
+            logger.warning("HF Jobs completion recovery failed: %s", exc)
+            return False
+        finally:
+            shutil.rmtree(recovery_dir, ignore_errors=True)
+
+    def _print_completion_summary(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        artifact_prefix: str,
+        local_run_dir: Optional[Path] = None,
+    ) -> None:
+        """Print where the completed artifacts live and how they map locally."""
+        summary = {
+            "Remote artifacts": self._build_remote_run_uri(config, artifact_prefix),
+            "Suggested local path": str(self._local_download_run_dir(config, artifact_prefix)),
+        }
+        if local_run_dir:
+            summary["Local run"] = str(local_run_dir)
+        print_config(summary, "Cloud Training Artifacts")
+
+    def _handle_post_training_actions(self, *, config: CloudTrainingConfig, artifact_prefix: str) -> None:
+        """Offer a post-training menu that reuses the existing local workflows."""
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return
+
+        from tuner.handlers.convert_handler import ConvertHandler
+        from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.inference_handler import InferenceHandler
+        from tuner.handlers.upload_handler import UploadHandler
+
+        local_run_dir: Optional[Path] = None
+        menu_options = [
+            ("download", f"{BOX['star']} Download completed run locally"),
+            ("gguf", f"{BOX['bullet']} Convert model to GGUF"),
+            ("run", f"{BOX['bullet']} Run model locally"),
+            ("eval", f"{BOX['bullet']} Run evaluation"),
+            ("upload", f"{BOX['bullet']} Upload model to Hugging Face"),
+        ]
+
+        while True:
+            choice = print_menu(menu_options, "Choose your next step:")
+            if not choice:
+                return
+
+            if local_run_dir is None:
+                print_info("Downloading completed cloud run into local training outputs...")
+                local_run_dir = self._download_completed_run(
+                    config=config,
+                    artifact_prefix=artifact_prefix,
+                )
+                print_success(f"Downloaded run to: {local_run_dir}")
+
+            if choice == "download":
+                continue
+            if choice == "gguf":
+                print_info("Opening conversion workflow. Select the newly downloaded run when prompted.")
+                ConvertHandler().handle()
+                continue
+            if choice == "run":
+                print_info("Opening local inference workflow. Select the newly downloaded run when prompted.")
+                InferenceHandler().handle()
+                continue
+            if choice == "eval":
+                print_info("Opening evaluation workflow. Select the newly downloaded run when prompted.")
+                EvalHandler(args=None).handle()
+                continue
+            if choice == "upload":
+                print_info("Opening upload workflow. Select the newly downloaded run when prompted.")
+                UploadHandler(args=None).handle()
+
+    def _finalize_completed_job(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        artifact_prefix: str,
+        local_run_dir: Optional[Path] = None,
+    ) -> int:
+        """Print success details and offer post-training actions."""
+        self._print_completion_summary(
+            config=config,
+            artifact_prefix=artifact_prefix,
+            local_run_dir=local_run_dir,
+        )
+        self._handle_post_training_actions(config=config, artifact_prefix=artifact_prefix)
+        return 0
+
     def _build_artifact_prefix(self, config: CloudTrainingConfig, timestamp: str) -> str:
         """Build the canonical artifact prefix used by HF Jobs runs."""
         if not config.repo_commit:
@@ -529,8 +687,8 @@ class HFJobsBackend(ITrainingBackend):
         Build a shell command string for the HF Jobs container.
 
         The command installs training dependencies, clones the repo,
-        and runs the training script. HF_TOKEN is available in the
-        container environment automatically (HF Jobs injects it).
+        and runs the training script. HF auth is passed via job secrets
+        when the job is submitted.
 
         Args:
             config: Cloud training configuration

@@ -71,6 +71,7 @@ def route_command(args: Namespace) -> int:
     try:
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.cloud_eval_handler import CloudEvalHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.status_handler import StatusHandler
@@ -139,6 +140,7 @@ def route_command(args: Namespace) -> int:
     handlers = {
         'train': TrainHandler,
         'eval': EvalHandler,
+        'cloud-eval': CloudEvalHandler,
         'synthchat': SynthChatHandler,
         'modelops': ModelOpsHandler,
     }

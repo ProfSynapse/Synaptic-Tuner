@@ -1,0 +1,375 @@
+"""
+Cloud evaluation workflow handler.
+
+Launches a Hugging Face Job that downloads a bucketed training run,
+starts vLLM remotely, and runs the evaluator against it.
+"""
+
+from __future__ import annotations
+
+import logging
+import shlex
+from argparse import Namespace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from shared.cloud_artifacts import normalize_hf_bucket_id
+from shared.utilities.env import get_hf_token
+from tuner.handlers.base import BaseHandler
+from tuner.ui import (
+    BOX,
+    confirm,
+    print_config,
+    print_error,
+    print_header,
+    print_info,
+    print_menu,
+)
+from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps, resolve_repo_source
+from tuner.core.exceptions import CloudProviderError
+
+logger = logging.getLogger(__name__)
+
+
+class CloudEvalHandler(BaseHandler):
+    """Submit a cloud evaluation run to Hugging Face Jobs."""
+
+    def __init__(self, args: Optional[Namespace] = None):
+        super().__init__(args=args)
+
+    @property
+    def name(self) -> str:
+        return "cloud-eval"
+
+    def can_handle_direct_mode(self) -> bool:
+        return True
+
+    def _cloud_config_path(self) -> Path:
+        return self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+
+    def _load_cloud_config(self) -> dict:
+        return load_cloud_config(self._cloud_config_path())
+
+    def _hf_jobs_settings(self) -> dict:
+        return self._load_cloud_config().get("hf_jobs", {})
+
+    def _validate_environment(self):
+        hf_token = get_hf_token()
+        if not hf_token:
+            raise CloudProviderError("HF_TOKEN not set. Required for cloud evaluation.")
+
+        try:
+            import huggingface_hub
+        except ImportError as exc:
+            raise CloudProviderError(
+                "huggingface_hub not installed. Install with: pip install -r requirements-cloud.txt"
+            ) from exc
+
+        missing = [name for name in ("run_job", "create_bucket", "HfApi") if not hasattr(huggingface_hub, name)]
+        if missing:
+            version = getattr(huggingface_hub, "__version__", "unknown")
+            raise CloudProviderError(
+                f"huggingface_hub {version} is missing required APIs for cloud evaluation: {', '.join(missing)}"
+            )
+        return huggingface_hub
+
+    def _resolve_bucket_id(self, huggingface_hub, bucket_id: str) -> str:
+        requested_bucket_id = normalize_hf_bucket_id(bucket_id)
+        hf_token = get_hf_token()
+        try:
+            try:
+                bucket_info = huggingface_hub.create_bucket(
+                    requested_bucket_id,
+                    exist_ok=True,
+                    private=True,
+                    token=hf_token,
+                )
+            except TypeError:
+                bucket_info = huggingface_hub.create_bucket(
+                    requested_bucket_id,
+                    exist_ok=True,
+                    token=hf_token,
+                )
+        except Exception as exc:
+            raise CloudProviderError(f"Failed to resolve HF bucket '{requested_bucket_id}': {exc}") from exc
+
+        resolved = getattr(bucket_info, "bucket_id", None) or getattr(bucket_info, "id", None) or requested_bucket_id
+        return normalize_hf_bucket_id(str(resolved))
+
+    def _list_remote_runs(self, huggingface_hub, bucket_id: str, method: Optional[str]) -> List[Dict[str, str]]:
+        api = huggingface_hub.HfApi(token=get_hf_token())
+        methods = [method] if method else ["sft", "kto"]
+        runs: List[Dict[str, str]] = []
+
+        for current_method in methods:
+            for item in api.list_bucket_tree(
+                bucket_id,
+                prefix=f"runs/hf_jobs/{current_method}",
+                recursive=False,
+                token=get_hf_token(),
+            ):
+                item_type = getattr(item, "type", None)
+                item_path = getattr(item, "path", "")
+                if item_type != "directory":
+                    continue
+                if item_path.count("/") != 3:
+                    continue
+                runs.append(
+                    {
+                        "method": current_method,
+                        "slug": item_path.split("/")[-1],
+                        "prefix": item_path,
+                    }
+                )
+
+        runs.sort(key=lambda run: run["slug"], reverse=True)
+        return runs
+
+    def _select_run(self, runs: List[Dict[str, str]], requested_run: Optional[str]) -> Dict[str, str]:
+        if not runs:
+            raise CloudProviderError("No cloud training runs found in the configured HF bucket.")
+
+        if requested_run in (None, ""):
+            options = [
+                (
+                    run["prefix"],
+                    f"{BOX['bullet']} {run['method'].upper()} {run['slug']}",
+                )
+                for run in runs[:20]
+            ]
+            choice = print_menu(options, "Select cloud training run to evaluate:")
+            if not choice:
+                raise CloudProviderError("Cloud evaluation cancelled.")
+            for run in runs:
+                if run["prefix"] == choice:
+                    return run
+            raise CloudProviderError(f"Unknown run selection: {choice}")
+
+        if requested_run == "latest":
+            return runs[0]
+
+        normalized = requested_run.strip("/")
+        for run in runs:
+            if run["slug"] == normalized or run["prefix"] == normalized:
+                return run
+
+        raise CloudProviderError(f"Cloud run not found: {requested_run}")
+
+    def _build_eval_prefix(self, run_prefix: str, timestamp: str) -> str:
+        return f"{run_prefix.strip('/')}/evaluations/vllm/{timestamp}"
+
+    def _build_eval_command(
+        self,
+        *,
+        bucket_id: str,
+        run_prefix: str,
+        eval_prefix: str,
+        preset: Optional[str],
+        scenarios: Optional[List[str]],
+        tags: Optional[str],
+        upload_to_hf: Optional[str],
+        update_model_card: bool,
+    ) -> str:
+        repo_source = resolve_repo_source(self.repo_root)
+        cloud_config_path = self._cloud_config_path()
+        project_deps = load_project_deps(cloud_config_path)
+        quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
+        quoted_repo_url = shlex.quote(repo_source.url)
+        quoted_branch = shlex.quote(repo_source.branch)
+        quoted_commit = shlex.quote(repo_source.commit)
+
+        parts = [
+            f"git clone --branch {quoted_branch} --depth 1 {quoted_repo_url} /workspace/repo",
+            f"cd /workspace/repo && git fetch --depth 1 origin {quoted_commit} && git checkout {quoted_commit}",
+            f"cd /workspace/repo && python -m pip install --upgrade {quoted_project_deps}",
+            "cd /workspace/repo && python -m pip install --upgrade -r Evaluator/requirements.txt 'vllm>=0.6.0' 'huggingface_hub>=1.5.0' hf_transfer",
+            "export HF_HUB_ENABLE_HF_TRANSFER=1",
+        ]
+
+        eval_cmd = [
+            "python",
+            "Evaluator/cloud_hf_job.py",
+            "--bucket-id",
+            bucket_id,
+            "--run-prefix",
+            run_prefix,
+            "--eval-prefix",
+            eval_prefix,
+            "--config-dir",
+            "Evaluator/config",
+        ]
+        if preset:
+            eval_cmd.extend(["--preset", preset])
+        if scenarios:
+            for scenario in scenarios:
+                eval_cmd.extend(["--scenario", scenario])
+        if tags:
+            eval_cmd.extend(["--tags", tags])
+        if upload_to_hf:
+            eval_cmd.extend(["--upload-to-hf", upload_to_hf])
+        if update_model_card:
+            eval_cmd.append("--update-model-card")
+
+        parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
+        return " && ".join(parts)
+
+    def _poll_job(self, huggingface_hub, job_id: str, timeout_hours: float) -> int:
+        timeout_seconds = int(timeout_hours * 3600)
+        elapsed = 0
+        poll_interval = 30
+        last_log_offset = 0
+
+        while elapsed < timeout_seconds:
+            try:
+                job_info = huggingface_hub.inspect_job(job_id=job_id)
+                status_obj = getattr(job_info, "status", None)
+                status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
+            except Exception as exc:
+                logger.warning("Status check failed: %s", exc)
+                status = "UNKNOWN"
+
+            try:
+                logs = huggingface_hub.fetch_job_logs(job_id=job_id) or ""
+                if len(logs) > last_log_offset:
+                    print(logs[last_log_offset:], end="", flush=True)
+                    last_log_offset = len(logs)
+            except Exception:
+                pass
+
+            if status in ("completed", "COMPLETED"):
+                return 0
+            if status in ("error", "ERROR", "failed", "FAILED", "cancelled", "CANCELLED"):
+                print()
+                print(f"  Evaluation job {job_id} failed with status: {status}")
+                return 1
+
+            import time
+
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
+        print()
+        print(f"  Evaluation job {job_id} failed: Timeout exceeded")
+        return 1
+
+    def handle(self) -> int:
+        if self.json_mode:
+            try:
+                huggingface_hub = self._validate_environment()
+                hf_settings = self._hf_jobs_settings()
+                bucket_id = self._resolve_bucket_id(
+                    huggingface_hub,
+                    getattr(self.args, "bucket", None) or hf_settings.get("artifact_identifier", ""),
+                )
+                runs = self._list_remote_runs(
+                    huggingface_hub,
+                    bucket_id=bucket_id,
+                    method=getattr(self.args, "method", None),
+                )
+                self.output(
+                    {
+                        "provider": "hf_jobs",
+                        "bucket_id": bucket_id,
+                        "runs": runs[:20],
+                    }
+                )
+                return 0
+            except Exception as exc:
+                self.output_error(str(exc), code="CLOUD_EVAL_ERROR")
+                return 1
+
+        print_header("CLOUD EVALUATION", "Run vLLM evaluation on Hugging Face Jobs")
+
+        try:
+            huggingface_hub = self._validate_environment()
+            hf_settings = self._hf_jobs_settings()
+            bucket_id = self._resolve_bucket_id(
+                huggingface_hub,
+                getattr(self.args, "bucket", None) or hf_settings.get("artifact_identifier", ""),
+            )
+            runs = self._list_remote_runs(
+                huggingface_hub,
+                bucket_id=bucket_id,
+                method=getattr(self.args, "method", None),
+            )
+            selected_run = self._select_run(runs, getattr(self.args, "run", None))
+        except Exception as exc:
+            print_error(str(exc))
+            return 1
+
+        preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
+        scenarios = getattr(self.args, "scenario", None)
+        tags = getattr(self.args, "tags", None)
+        upload_to_hf = getattr(self.args, "upload_to_hf", None)
+        update_model_card = bool(getattr(self.args, "update_model_card", False))
+        flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
+        timeout_hours = float(getattr(self.args, "timeout_hours", None) or 4.0)
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        eval_prefix = self._build_eval_prefix(selected_run["prefix"], timestamp)
+        command = self._build_eval_command(
+            bucket_id=bucket_id,
+            run_prefix=selected_run["prefix"],
+            eval_prefix=eval_prefix,
+            preset=preset,
+            scenarios=scenarios,
+            tags=tags,
+            upload_to_hf=upload_to_hf,
+            update_model_card=update_model_card,
+        )
+
+        print_config(
+            {
+                "Provider": "hf_jobs",
+                "Run": selected_run["prefix"],
+                "Bucket": bucket_id,
+                "Backend": "vllm",
+                "Preset": preset or "-",
+                "Scenarios": ", ".join(scenarios) if scenarios else "-",
+                "Tags": tags or "-",
+                "GPU": flavor,
+                "Timeout": f"{timeout_hours:.1f}h",
+                "Results": f"hf://buckets/{bucket_id}/{eval_prefix}",
+            },
+            "Cloud Evaluation Configuration",
+        )
+
+        if not confirm("Start cloud evaluation with this configuration?"):
+            print_info("Cloud evaluation cancelled.")
+            return 0
+
+        try:
+            hf_token = get_hf_token()
+            job = huggingface_hub.run_job(
+                image=hf_settings.get("image"),
+                command=["bash", "-c", command],
+                flavor=flavor,
+                timeout=f"{timeout_hours}h",
+                secrets=(
+                    {
+                        "HF_TOKEN": hf_token,
+                        "HF_API_KEY": hf_token,
+                    }
+                    if hf_token
+                    else None
+                ),
+            )
+        except Exception as exc:
+            print_error(f"Failed to submit HF cloud evaluation: {exc}")
+            return 1
+
+        job_id = job.id if hasattr(job, "id") else str(job)
+        job_url = getattr(job, "url", None)
+        print_info(f"Evaluation job submitted: {job_id}")
+        if job_url:
+            print_info(f"Monitor at: {job_url}")
+        print_info(f"Evaluation artifacts will sync to: hf://buckets/{bucket_id}/{eval_prefix}")
+        print()
+
+        exit_code = self._poll_job(huggingface_hub, job_id, timeout_hours)
+        if exit_code == 0:
+            print()
+            print_info("Cloud evaluation completed successfully.")
+            print_info(f"Results: hf://buckets/{bucket_id}/{eval_prefix}")
+        return exit_code

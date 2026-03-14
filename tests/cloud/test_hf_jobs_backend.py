@@ -12,6 +12,7 @@ Covers:
 
 import os
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -300,6 +301,91 @@ class TestBuildTrainingCommand:
         assert (
             backend._build_artifact_prefix(config, "20260314_181946")
             == "runs/hf_jobs/sft/20260314_181946-abc12345"
+        )
+
+
+class TestHFJobsArtifacts:
+    def test_download_completed_run_uses_primary_output_dir(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(artifact_identifier="test-user/toolset-training-artifacts")
+
+        with patch.object(backend, "_sync_bucket_path") as mock_sync:
+            local_dir = backend._download_completed_run(
+                config=config,
+                artifact_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+            )
+
+        expected_dir = repo_root / "Trainers" / "sft" / "sft_output" / "20260314_191223-abc12345"
+        assert local_dir == expected_dir
+        mock_sync.assert_called_once_with(
+            "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_191223-abc12345",
+            expected_dir,
+            token="hf_test_token_12345",
+        )
+
+    def test_recover_completed_run_from_bucket_returns_true_when_artifacts_complete(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(artifact_identifier="test-user/toolset-training-artifacts")
+
+        def fake_sync(remote_uri, local_dir, token=None):
+            local_dir.mkdir(parents=True, exist_ok=True)
+            final_model_dir = local_dir / "final_model"
+            final_model_dir.mkdir(parents=True, exist_ok=True)
+            (final_model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (local_dir / "training_lineage.json").write_text("{}", encoding="utf-8")
+
+        with patch.object(backend, "_sync_bucket_path", side_effect=fake_sync):
+            assert backend._recover_completed_run_from_bucket(
+                config=config,
+                artifact_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+            ) is True
+
+    def test_remote_dashboard_timeout_recovers_when_artifacts_are_complete(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            timeout_hours=0.0,
+            artifact_identifier="test-user/toolset-training-artifacts",
+        )
+
+        mock_hub_module = ModuleType("huggingface_hub")
+        mock_hub_module.sync_bucket = lambda *args, **kwargs: None
+
+        class DummyDashboard:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def update(self, **kwargs):
+                return None
+
+            def _process_log_line(self, line):
+                return None
+
+        mock_shared_ui = ModuleType("shared.ui")
+        mock_shared_ui.LiveDashboard = DummyDashboard
+
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub_module, "shared.ui": mock_shared_ui}):
+            with patch.object(backend, "_recover_completed_run_from_bucket", return_value=True):
+                with patch.object(backend, "_finalize_completed_job", return_value=0) as mock_finalize:
+                    exit_code = backend._watch_job_with_remote_dashboard(
+                        config=config,
+                        huggingface_hub=MagicMock(),
+                        job_id="job-123",
+                        artifact_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+                    )
+
+        assert exit_code == 0
+        mock_finalize.assert_called_once_with(
+            config=config,
+            artifact_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
         )
 
 

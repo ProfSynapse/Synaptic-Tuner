@@ -73,6 +73,49 @@ Recommended first-pass checks:
 
 ---
 
+## HF Jobs Bucket and Auth Gotchas
+
+For `hf_jobs`, a few patterns matter enough to treat as hard rules:
+
+- The job runs from the exact pushed commit. If the remote logs show an older `HEAD`, you launched the wrong SHA and are debugging stale code.
+- Keep the main training interpreter compatible with Unsloth and Transformers. If bucket sync needs a newer `huggingface_hub`, install it in an isolated helper path or subprocess, not into the training runtime.
+- Pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets. Do not assume the container automatically receives your local token.
+- Normalize blank auth values to `None`. An empty `HF_TOKEN` or `HF_API_KEY` can produce `Authorization: Bearer ` and fail before the request is sent.
+- Resolve and, if needed, create the bucket once before training starts. During steady-state log sync, use the resolved bucket ID directly.
+- Polling and identity checks should be conservative. Frequent bucket creation attempts or repeated `whoami-v2` calls can hit Hugging Face rate limits.
+
+If the training process itself is healthy but uploads fail, inspect bucket auth and sync isolation before touching trainer code.
+
+---
+
+## HF Jobs Cloud Evaluation
+
+You can evaluate a bucketed HF Jobs run on remote GPU without converting to GGUF:
+
+```bash
+python tuner.py cloud-eval --run latest --preset full
+```
+
+What it does:
+- resolves the configured HF bucket and picks the requested run (`latest` works)
+- submits a new HF Job on GPU
+- downloads the run's `final_model/` LoRA adapter from the bucket
+- starts `vLLM` remotely with the adapter loaded on top of the base model
+- runs `Evaluator.cli --backend vllm ...`
+- syncs evaluation outputs back into the same bucket under:
+  `runs/hf_jobs/{method}/{run_slug}/evaluations/vllm/{timestamp}/`
+
+Useful flags:
+- `--method sft` or `--method kto` to filter run discovery
+- `--scenario behavior_prompts.yaml` to run specific scenarios instead of a preset
+- `--tags storageManager,intellectual_humility` to filter cases
+- `--upload-to-hf username/model-name --update-model-card` to push evaluation lineage to a model repo
+
+Current constraint:
+- the LoRA adapter's `base_model_name_or_path` must point to a hub-accessible model, not a local filesystem path
+
+---
+
 ## Recovery and Cleanup
 
 - Resume-from-provider-native-storage is not automatic yet.

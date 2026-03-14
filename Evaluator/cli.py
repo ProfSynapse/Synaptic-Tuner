@@ -105,7 +105,7 @@ def simplify_issue_message(msg: str, display_config: Dict[str, Any]) -> str | No
 def parse_args(argv: List[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Evaluate tool-calling models via Ollama, LM Studio, or llama.cpp.",
+        description="Evaluate tool-calling models via Ollama, LM Studio, vLLM, or llama.cpp.",
         epilog="""
 Backend Configuration:
   Ollama:    OLLAMA_HOST (default: 127.0.0.1), OLLAMA_PORT (default: 11434)
@@ -115,7 +115,7 @@ Backend Configuration:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio", "llamacpp", "unsloth", "openrouter", "mlc"],
+        choices=["ollama", "lmstudio", "vllm", "llamacpp", "unsloth", "openrouter", "mlc"],
         default=None,  # Auto-detect based on model path
         help="Backend to use for evaluation (auto-detects MLC models, default: ollama)",
     )
