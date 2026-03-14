@@ -544,7 +544,7 @@ class HFJobsBackend(ITrainingBackend):
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
-            f"pip install {' '.join(project_deps)}",
+            f"python -m pip install --upgrade {' '.join(project_deps)}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

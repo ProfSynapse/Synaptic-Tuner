@@ -270,7 +270,7 @@ class TestBuildTrainingCommand:
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
-        assert "pip install" in cmd
+        assert "python -m pip install --upgrade" in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
         assert "cd /workspace/repo/Trainers/sft" in cmd

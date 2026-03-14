@@ -13,6 +13,9 @@ from typing import Any, Dict, Optional
 from transformers import TrainerCallback
 
 
+_HF_BUCKET_CACHE: Dict[str, str] = {}
+
+
 @dataclass
 class RunPaths:
     """Canonical run paths for cloud training outputs."""
@@ -92,6 +95,10 @@ def build_manifest(
 def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:
     """Best-effort bucket creation returning the normalized bucket identifier."""
     normalized_bucket_id = normalize_hf_bucket_id(bucket_id)
+    cached_bucket_id = _HF_BUCKET_CACHE.get(normalized_bucket_id)
+    if cached_bucket_id:
+        return cached_bucket_id
+
     try:
         from huggingface_hub import create_bucket  # type: ignore
     except ImportError:
@@ -114,7 +121,9 @@ def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:
         or getattr(bucket_info, "id", None)
         or normalized_bucket_id
     )
-    return normalize_hf_bucket_id(str(resolved_bucket_id))
+    resolved_bucket_id = normalize_hf_bucket_id(str(resolved_bucket_id))
+    _HF_BUCKET_CACHE[normalized_bucket_id] = resolved_bucket_id
+    return resolved_bucket_id
 
 
 def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None) -> None:
