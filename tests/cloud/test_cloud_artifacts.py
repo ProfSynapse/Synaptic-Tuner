@@ -1,10 +1,14 @@
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 from shared.cloud_artifacts import (
     HFBucketSyncCallback,
     build_manifest,
     build_run_paths,
+    ensure_hf_bucket,
+    normalize_hf_bucket_id,
+    sync_directory_to_hf_bucket,
     write_manifest,
 )
 
@@ -72,3 +76,94 @@ def test_hf_bucket_sync_callback_syncs_run_dir(tmp_path):
         "runs/hf_jobs/sft/20260314_120000-abcdef12",
         token="hf_test_token",
     )
+
+
+def test_normalize_hf_bucket_id_strips_transport_prefixes():
+    assert normalize_hf_bucket_id("hf://buckets/user/toolset") == "user/toolset"
+    assert normalize_hf_bucket_id("buckets/user/toolset/") == "user/toolset"
+
+
+def test_ensure_hf_bucket_returns_namespaced_bucket_id():
+    mock_hub = ModuleType("huggingface_hub")
+
+    def create_bucket(bucket_id, **kwargs):
+        class BucketInfo:
+            pass
+
+        bucket = BucketInfo()
+        bucket.bucket_id = f"test-user/{bucket_id.split('/')[-1]}"
+        return bucket
+
+    mock_hub.create_bucket = create_bucket
+
+    with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+        assert ensure_hf_bucket("toolset-training-artifacts", token="hf_test_token") == "test-user/toolset-training-artifacts"
+
+
+def test_sync_directory_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
+    local_dir = tmp_path / "run"
+    local_dir.mkdir()
+    readme = local_dir / "README.md"
+    readme.write_text("test", encoding="utf-8")
+
+    mock_hub = ModuleType("huggingface_hub")
+
+    def sync_bucket(**kwargs):
+        raise RuntimeError("force filesystem fallback")
+
+    class FakeWriteHandle:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def write(self, _data):
+            return None
+
+    class FakeHfFileSystem:
+        last_instance = None
+
+        def __init__(self, token=None):
+            self.token = token
+            self.makedirs_calls = []
+            self.open_calls = []
+            FakeHfFileSystem.last_instance = self
+
+        def makedirs(self, path, exist_ok=False):
+            self.makedirs_calls.append((path, exist_ok))
+
+        def open(self, path, mode):
+            self.open_calls.append((path, mode))
+            return FakeWriteHandle()
+
+    def create_bucket(bucket_id, **kwargs):
+        class BucketInfo:
+            pass
+
+        bucket = BucketInfo()
+        bucket.bucket_id = f"test-user/{bucket_id.split('/')[-1]}"
+        return bucket
+
+    mock_hub.sync_bucket = sync_bucket
+    mock_hub.HfFileSystem = FakeHfFileSystem
+    mock_hub.create_bucket = create_bucket
+
+    with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+        sync_directory_to_hf_bucket(
+            local_dir,
+            "toolset-training-artifacts",
+            "runs/hf_jobs/sft/20260314_120000-abcdef12",
+            token="hf_test_token",
+        )
+
+    fs = FakeHfFileSystem.last_instance
+    assert fs is not None
+    assert (
+        "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_120000-abcdef12",
+        True,
+    ) in fs.makedirs_calls
+    assert (
+        "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_120000-abcdef12/README.md",
+        "wb",
+    ) in fs.open_calls

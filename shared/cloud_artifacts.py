@@ -25,6 +25,15 @@ class RunPaths:
     manifest_path: Path
 
 
+def normalize_hf_bucket_id(bucket_id: str) -> str:
+    """Normalize bucket identifiers to the canonical namespace/name form."""
+    normalized = bucket_id.strip()
+    for prefix in ("hf://buckets/", "buckets/"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+    return normalized.strip("/")
+
+
 def build_run_paths(base_output_dir: Path, provider: str, method: str, timestamp: str, commit: str) -> RunPaths:
     """Build the canonical run layout used by cloud providers."""
     short_sha = (commit or "local")[:8]
@@ -80,24 +89,38 @@ def build_manifest(
     }
 
 
-def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> None:
-    """Best-effort bucket creation. No-op when the SDK lacks bucket helpers."""
+def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:
+    """Best-effort bucket creation returning the normalized bucket identifier."""
+    normalized_bucket_id = normalize_hf_bucket_id(bucket_id)
     try:
         from huggingface_hub import create_bucket  # type: ignore
     except ImportError:
-        return
+        return normalized_bucket_id
     except Exception:
-        return
+        return normalized_bucket_id
 
     try:
-        create_bucket(bucket_id, exist_ok=True, token=token)
+        bucket_info = create_bucket(normalized_bucket_id, exist_ok=True, private=True, token=token)
     except TypeError:
-        create_bucket(bucket_id, token=token)
+        try:
+            bucket_info = create_bucket(normalized_bucket_id, exist_ok=True, token=token)
+        except TypeError:
+            bucket_info = create_bucket(normalized_bucket_id, token=token)
+    except Exception:
+        return normalized_bucket_id
+
+    resolved_bucket_id = (
+        getattr(bucket_info, "bucket_id", None)
+        or getattr(bucket_info, "id", None)
+        or normalized_bucket_id
+    )
+    return normalize_hf_bucket_id(str(resolved_bucket_id))
 
 
 def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None) -> None:
     """Sync a local directory into a Hugging Face Bucket."""
     local_dir = Path(local_dir)
+    bucket_id = ensure_hf_bucket(bucket_id, token=token)
     prefix = prefix.strip("/")
 
     try:

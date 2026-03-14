@@ -6,7 +6,8 @@
 # The CLI gracefully handles missing providers.
 
 # HuggingFace Jobs (uses existing HF_TOKEN -- requires HF Pro subscription)
-huggingface_hub>=0.27.0
+# Buckets support requires a newer hub client than the Jobs minimum.
+huggingface_hub>=1.5.0
 hf_transfer
 
 # Modal (serverless GPU compute)

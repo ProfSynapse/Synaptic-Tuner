@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
+from shared.cloud_artifacts import normalize_hf_bucket_id
+from shared.utilities.env import get_hf_token
 from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
@@ -125,6 +127,12 @@ class HFJobsBackend(ITrainingBackend):
             return False, (
                 f"huggingface_hub {version} does not support Jobs API. "
                 "Upgrade with: pip install --upgrade huggingface_hub>=0.27.0"
+            )
+        if not hasattr(huggingface_hub, "create_bucket"):
+            version = getattr(huggingface_hub, "__version__", "unknown")
+            return False, (
+                f"huggingface_hub {version} does not support Buckets API. "
+                "Upgrade with: pip install --upgrade huggingface_hub>=1.5.0"
             )
 
         return True, ""
@@ -239,6 +247,9 @@ class HFJobsBackend(ITrainingBackend):
                 f"got {type(config).__name__}"
             )
 
+        if config.artifact_backend == "hf_bucket":
+            self._ensure_hf_bucket(config, huggingface_hub)
+
         # Build the training command
         training_command = self._build_training_command(config)
         image = config.cloud_image or DEFAULT_IMAGE
@@ -324,6 +335,54 @@ class HFJobsBackend(ITrainingBackend):
             error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
             print(f"  Job {job_id} failed: {error_detail}")
             return 1
+
+    def _ensure_hf_bucket(self, config: CloudTrainingConfig, huggingface_hub) -> None:
+        """Resolve and create the configured HF bucket before launching the job."""
+        if not config.artifact_identifier:
+            raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
+
+        hf_token = get_hf_token()
+        if not hf_token:
+            raise CloudProviderError(
+                "HF_TOKEN not set. Required for HuggingFace Jobs bucket creation."
+            )
+        if not hasattr(huggingface_hub, "create_bucket"):
+            version = getattr(huggingface_hub, "__version__", "unknown")
+            raise CloudProviderError(
+                f"huggingface_hub {version} does not support Buckets API. "
+                "Upgrade with: pip install --upgrade huggingface_hub>=1.5.0"
+            )
+
+        requested_bucket_id = normalize_hf_bucket_id(config.artifact_identifier)
+        try:
+            try:
+                bucket_info = huggingface_hub.create_bucket(
+                    requested_bucket_id,
+                    exist_ok=True,
+                    private=True,
+                    token=hf_token,
+                )
+            except TypeError:
+                bucket_info = huggingface_hub.create_bucket(
+                    requested_bucket_id,
+                    exist_ok=True,
+                    token=hf_token,
+                )
+        except Exception as e:
+            error_msg = str(e)
+            if "hf_" in error_msg:
+                error_msg = "check credentials and subscription"
+            raise CloudProviderError(
+                f"Failed to create or resolve HF bucket '{requested_bucket_id}': {error_msg}"
+            )
+
+        resolved_bucket_id = (
+            getattr(bucket_info, "bucket_id", None)
+            or getattr(bucket_info, "id", None)
+            or requested_bucket_id
+        )
+        config.artifact_identifier = normalize_hf_bucket_id(str(resolved_bucket_id))
+        logger.info("Using HF bucket: %s", config.artifact_identifier)
 
     def _build_training_command(self, config: CloudTrainingConfig) -> str:
         """

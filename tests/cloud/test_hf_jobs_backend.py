@@ -103,6 +103,7 @@ class TestHFJobsValidateEnvironment:
         backend = HFJobsBackend(repo_root)
         mock_hub = MagicMock()
         mock_hub.run_job = MagicMock()
+        mock_hub.create_bucket = MagicMock()
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             is_valid, error = backend.validate_environment()
         assert is_valid
@@ -113,6 +114,7 @@ class TestHFJobsValidateEnvironment:
         backend = HFJobsBackend(repo_root)
         mock_hub = MagicMock()
         mock_hub.run_job = MagicMock()
+        mock_hub.create_bucket = MagicMock()
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             is_valid, error = backend.validate_environment()
         assert is_valid
@@ -180,10 +182,14 @@ class TestHFJobsExecute:
                 backend.execute(config, python_path="")
 
     def test_masks_token_in_error_messages(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
         mock_hub = MagicMock()
         mock_hub.run_job.side_effect = Exception("Error with hf_abc123 token")
+        bucket_info = MagicMock()
+        bucket_info.bucket_id = "test-user/toolset-training-artifacts"
+        mock_hub.create_bucket.return_value = bucket_info
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             with pytest.raises(CloudProviderError) as exc_info:
                 backend.execute(config, python_path="")
@@ -192,10 +198,14 @@ class TestHFJobsExecute:
         assert "check credentials" in str(exc_info.value).lower()
 
     def test_successful_job_returns_zero(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
 
         mock_hub = MagicMock()
+        bucket_info = MagicMock()
+        bucket_info.bucket_id = "test-user/toolset-training-artifacts"
+        mock_hub.create_bucket.return_value = bucket_info
         mock_job = MagicMock()
         mock_job.id = "job-123"
         mock_job.url = "https://hf.co/jobs/123"
@@ -211,12 +221,24 @@ class TestHFJobsExecute:
             with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
                 exit_code = backend.execute(config, python_path="")
         assert exit_code == 0
+        mock_hub.create_bucket.assert_called_once_with(
+            "toolset-training-artifacts",
+            exist_ok=True,
+            private=True,
+            token="hf_test_token_12345",
+        )
+        submitted_command = mock_hub.run_job.call_args.kwargs["command"][2]
+        assert "--artifact-bucket test-user/toolset-training-artifacts" in submitted_command
 
     def test_failed_job_returns_one(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
 
         mock_hub = MagicMock()
+        bucket_info = MagicMock()
+        bucket_info.bucket_id = "test-user/toolset-training-artifacts"
+        mock_hub.create_bucket.return_value = bucket_info
         mock_job = MagicMock()
         mock_job.id = "job-456"
         mock_job.url = None
@@ -231,6 +253,16 @@ class TestHFJobsExecute:
             with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
                 exit_code = backend.execute(config, python_path="")
         assert exit_code == 1
+
+    def test_raises_when_bucket_api_unavailable(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+        mock_hub = MagicMock(spec=["run_job", "__version__"])
+        mock_hub.__version__ = "1.2.3"
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with pytest.raises(CloudProviderError, match="Buckets API"):
+                backend.execute(config, python_path="")
 
 
 class TestBuildTrainingCommand:
