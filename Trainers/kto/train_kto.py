@@ -980,6 +980,7 @@ def main():
                 bucket_id=args.artifact_bucket,
                 prefix=args.artifact_prefix,
                 token=args.hf_token,
+                log_every_n_steps=5,
             )
         )
 

@@ -269,7 +269,7 @@ class TestBuildTrainingCommand:
     def test_command_structure(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()
-        cmd = backend._build_training_command(config)
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
         assert "pip install" in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
@@ -278,13 +278,21 @@ class TestBuildTrainingCommand:
         assert "--output-root /workspace/outputs" in cmd
         assert "--artifact-backend hf_bucket" in cmd
         assert "--artifact-bucket toolset-training-artifacts" in cmd
-        assert "--artifact-prefix runs/hf_jobs/sft/" in cmd
+        assert "--artifact-prefix runs/hf_jobs/sft/20260314_181946-abc12345" in cmd
 
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config(repo_url="")
         with pytest.raises(CloudProviderError, match="exact repo source metadata"):
             backend._build_training_command(config)
+
+    def test_build_artifact_prefix(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config()
+        assert (
+            backend._build_artifact_prefix(config, "20260314_181946")
+            == "runs/hf_jobs/sft/20260314_181946-abc12345"
+        )
 
 
 # ---------------------------------------------------------------------------

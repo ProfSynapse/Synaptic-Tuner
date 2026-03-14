@@ -17,6 +17,10 @@ Requirements:
 
 import logging
 import os
+import shutil
+import sys
+import tempfile
+import time
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +29,7 @@ from typing import List, Tuple
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
 from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
+from tuner.ui import RICH_AVAILABLE
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -250,8 +255,11 @@ class HFJobsBackend(ITrainingBackend):
         if config.artifact_backend == "hf_bucket":
             self._ensure_hf_bucket(config, huggingface_hub)
 
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        artifact_prefix = self._build_artifact_prefix(config, timestamp)
+
         # Build the training command
-        training_command = self._build_training_command(config)
+        training_command = self._build_training_command(config, timestamp=timestamp)
         image = config.cloud_image or DEFAULT_IMAGE
         flavor = config.hf_flavor or config.gpu_type
 
@@ -281,6 +289,14 @@ class HFJobsBackend(ITrainingBackend):
             if "hf_" in error_msg:
                 error_msg = "Job submission failed (check credentials and subscription)"
             raise CloudProviderError(f"Failed to submit HF Jobs training: {error_msg}")
+
+        if self._should_use_remote_dashboard(config):
+            return self._watch_job_with_remote_dashboard(
+                config=config,
+                huggingface_hub=huggingface_hub,
+                job_id=job_id,
+                artifact_prefix=artifact_prefix,
+            )
 
         # Poll until completion
         timeout_seconds = int(config.timeout_hours * 3600)
@@ -336,6 +352,114 @@ class HFJobsBackend(ITrainingBackend):
             print(f"  Job {job_id} failed: {error_detail}")
             return 1
 
+    def _should_use_remote_dashboard(self, config: CloudTrainingConfig) -> bool:
+        """Only use the live remote dashboard for interactive HF bucket runs."""
+        return (
+            config.artifact_backend == "hf_bucket"
+            and RICH_AVAILABLE
+            and sys.stdin.isatty()
+            and sys.stdout.isatty()
+        )
+
+    def _watch_job_with_remote_dashboard(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        huggingface_hub,
+        job_id: str,
+        artifact_prefix: str,
+    ) -> int:
+        """Render the existing training dashboard using metrics mirrored to the HF bucket."""
+        from shared.ui import LiveDashboard
+
+        hf_token = get_hf_token()
+        from huggingface_hub import sync_bucket
+
+        timeout_seconds = int(config.timeout_hours * 3600)
+        poll_interval = 5
+        elapsed = 0
+        last_status = None
+        last_job_log_offset = 0
+        processed_remote_lines = 0
+        local_logs_dir = Path(tempfile.mkdtemp(prefix="hf-job-logs-"))
+        dashboard = LiveDashboard(
+            title=f"HF Jobs {config.method.upper()}",
+            training_type=config.method,
+            log_lines=5,
+        )
+
+        try:
+            with dashboard:
+                while elapsed < timeout_seconds:
+                    try:
+                        job_info = huggingface_hub.inspect_job(job_id=job_id)
+                        status_obj = getattr(job_info, "status", None)
+                        status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
+                    except Exception as e:
+                        dashboard.update(log_message=f"Status check failed: {e}")
+                        status = last_status or "UNKNOWN"
+
+                    if status != last_status:
+                        dashboard.update(log_message=f"Job status: {status}")
+                        last_status = status
+
+                    try:
+                        logs = huggingface_hub.fetch_job_logs(job_id=job_id) or ""
+                        if len(logs) > last_job_log_offset:
+                            new_lines = [line for line in logs[last_job_log_offset:].splitlines() if line.strip()]
+                            for line in new_lines[-2:]:
+                                dashboard.update(log_message=line)
+                            last_job_log_offset = len(logs)
+                    except Exception:
+                        pass
+
+                    try:
+                        sync_bucket(
+                            f"hf://buckets/{config.artifact_identifier}/{artifact_prefix}/logs",
+                            str(local_logs_dir),
+                            token=hf_token,
+                        )
+                        processed_remote_lines = self._update_dashboard_from_local_log(
+                            local_logs_dir=local_logs_dir,
+                            dashboard=dashboard,
+                            processed_remote_lines=processed_remote_lines,
+                        )
+                    except Exception as e:
+                        dashboard.update(log_message=f"Remote log sync unavailable: {e}")
+
+                    if status in ("completed", "COMPLETED"):
+                        dashboard.update(log_message="Training completed successfully.")
+                        return 0
+                    if status in ("error", "ERROR", "failed", "FAILED"):
+                        dashboard.update(log_message=f"Job failed with status: {status}")
+                        return 1
+                    if status in ("cancelled", "CANCELLED"):
+                        dashboard.update(log_message="Job was cancelled.")
+                        return 1
+
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+        finally:
+            shutil.rmtree(local_logs_dir, ignore_errors=True)
+
+        print()
+        print(f"  Job {job_id} failed: Timeout exceeded")
+        return 1
+
+    def _update_dashboard_from_local_log(self, *, local_logs_dir: Path, dashboard, processed_remote_lines: int) -> int:
+        """Read mirrored bucket logs from a local temp directory and feed them into the dashboard."""
+        candidates = sorted(local_logs_dir.glob("training_*.jsonl"))
+        if not candidates:
+            return processed_remote_lines
+
+        with candidates[-1].open("r", encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle.readlines() if line.strip()]
+
+        for line in lines[processed_remote_lines:]:
+            dashboard._process_log_line(line)
+
+        return len(lines)
+
     def _ensure_hf_bucket(self, config: CloudTrainingConfig, huggingface_hub) -> None:
         """Resolve and create the configured HF bucket before launching the job."""
         if not config.artifact_identifier:
@@ -384,7 +508,14 @@ class HFJobsBackend(ITrainingBackend):
         config.artifact_identifier = normalize_hf_bucket_id(str(resolved_bucket_id))
         logger.info("Using HF bucket: %s", config.artifact_identifier)
 
-    def _build_training_command(self, config: CloudTrainingConfig) -> str:
+    def _build_artifact_prefix(self, config: CloudTrainingConfig, timestamp: str) -> str:
+        """Build the canonical artifact prefix used by HF Jobs runs."""
+        if not config.repo_commit:
+            raise CloudProviderError("HF Jobs requires exact repo source metadata.")
+        run_slug = f"{timestamp}-{config.repo_commit[:8]}"
+        return f"runs/{config.provider}/{config.method}/{run_slug}"
+
+    def _build_training_command(self, config: CloudTrainingConfig, timestamp: str | None = None) -> str:
         """
         Build a shell command string for the HF Jobs container.
 
@@ -403,9 +534,8 @@ class HFJobsBackend(ITrainingBackend):
         if not config.artifact_identifier:
             raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        run_slug = f"{timestamp}-{config.repo_commit[:8]}"
-        artifact_prefix = f"runs/{config.provider}/{config.method}/{run_slug}"
+        timestamp = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        artifact_prefix = self._build_artifact_prefix(config, timestamp)
 
         # Read project-specific deps from cloud_config.yaml (single source of truth)
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"

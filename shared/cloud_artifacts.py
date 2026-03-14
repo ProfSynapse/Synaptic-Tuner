@@ -125,30 +125,31 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
 
     try:
         from huggingface_hub import sync_bucket  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub sync_bucket is unavailable; install huggingface_hub>=1.5.0."
+        ) from exc
 
+    try:
         sync_bucket(
-            local_folder=str(local_dir),
-            bucket_path=f"hf://buckets/{bucket_id}/{prefix}",
+            str(local_dir),
+            f"hf://buckets/{bucket_id}/{prefix}",
             token=token,
         )
+    except Exception as exc:
+        raise RuntimeError(
+            f"HF bucket sync failed for {bucket_id}/{prefix}: {exc}"
+        ) from exc
+
+
+def sync_file_to_hf_bucket(local_path: Path, bucket_id: str, remote_path: str, token: Optional[str] = None) -> None:
+    """Sync a single file into a Hugging Face Bucket."""
+    local_path = Path(local_path)
+    if not local_path.exists() or not local_path.is_file():
         return
-    except Exception:
-        pass
 
-    from huggingface_hub import HfFileSystem
-
-    fs = HfFileSystem(token=token)
-    bucket_root = f"hf://buckets/{bucket_id}/{prefix}".rstrip("/")
-    fs.makedirs(bucket_root, exist_ok=True)
-
-    for path in sorted(local_dir.rglob("*")):
-        relative = path.relative_to(local_dir).as_posix()
-        remote_path = f"{bucket_root}/{relative}" if relative else bucket_root
-        if path.is_dir():
-            fs.makedirs(remote_path, exist_ok=True)
-            continue
-        with path.open("rb") as src, fs.open(remote_path, "wb") as dst:
-            dst.write(src.read())
+    remote_parent = remote_path.strip("/").rsplit("/", 1)[0]
+    sync_directory_to_hf_bucket(local_path.parent, bucket_id, remote_parent, token=token)
 
 
 def publish_final_model_to_hub(final_model_dir: Path, repo_id: str, token: str, private: bool = True) -> None:
@@ -167,11 +168,41 @@ def publish_final_model_to_hub(final_model_dir: Path, repo_id: str, token: str, 
 class HFBucketSyncCallback(TrainerCallback):
     """Checkpoint-triggered sync for HF Jobs bucket persistence."""
 
-    def __init__(self, run_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None):
+    def __init__(
+        self,
+        run_dir: Path,
+        bucket_id: str,
+        prefix: str,
+        token: Optional[str] = None,
+        log_every_n_steps: int = 5,
+    ):
         self.run_dir = Path(run_dir)
         self.bucket_id = bucket_id
         self.prefix = prefix
         self.token = token
+        self.log_every_n_steps = max(1, int(log_every_n_steps))
+
+    def _latest_training_log(self) -> Optional[Path]:
+        logs_dir = self.run_dir / "logs"
+        candidates = sorted(logs_dir.glob("training_*.jsonl"))
+        return candidates[-1] if candidates else None
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None or state is None:
+            return
+        if state.global_step == 0 or state.global_step % self.log_every_n_steps != 0:
+            return
+
+        logs_dir = self.run_dir / "logs"
+        if not logs_dir.exists():
+            return
+
+        sync_directory_to_hf_bucket(
+            logs_dir,
+            self.bucket_id,
+            f"{self.prefix}/logs",
+            token=self.token,
+        )
 
     def on_save(self, args, state, control, **kwargs):
         sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)
