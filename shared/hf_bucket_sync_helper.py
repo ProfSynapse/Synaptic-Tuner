@@ -14,6 +14,7 @@ def main() -> int:
     parser.add_argument("local_dir")
     parser.add_argument("bucket_uri")
     parser.add_argument("--delete", action="store_true")
+    parser.add_argument("--skip-create", action="store_true")
     args = parser.parse_args()
 
     from huggingface_hub import sync_bucket

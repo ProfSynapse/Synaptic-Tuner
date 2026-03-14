@@ -271,9 +271,10 @@ class TestBuildTrainingCommand:
         config = _cloud_config()
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
         assert "python -m pip install --upgrade" in cmd
-        assert "python -m venv /tmp/hf-bucket-sync" in cmd
-        assert "/tmp/hf-bucket-sync/bin/python -m pip install --upgrade huggingface_hub>=1.5.0 hf_transfer" in cmd
-        assert "export HF_BUCKET_SYNC_PYTHON=/tmp/hf-bucket-sync/bin/python" in cmd
+        assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
+        assert "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer" in cmd
+        assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python)" in cmd
+        assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
         assert "cd /workspace/repo/Trainers/sft" in cmd

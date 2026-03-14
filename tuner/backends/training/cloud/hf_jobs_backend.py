@@ -376,7 +376,7 @@ class HFJobsBackend(ITrainingBackend):
         from huggingface_hub import sync_bucket
 
         timeout_seconds = int(config.timeout_hours * 3600)
-        poll_interval = 5
+        poll_interval = 15
         elapsed = 0
         last_status = None
         last_job_log_offset = 0
@@ -545,9 +545,10 @@ class HFJobsBackend(ITrainingBackend):
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
             f"python -m pip install --upgrade {' '.join(project_deps)}",
-            "python -m venv /tmp/hf-bucket-sync",
-            "/tmp/hf-bucket-sync/bin/python -m pip install --upgrade huggingface_hub>=1.5.0 hf_transfer",
-            "export HF_BUCKET_SYNC_PYTHON=/tmp/hf-bucket-sync/bin/python",
+            "mkdir -p /tmp/hf-bucket-sync-site",
+            "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

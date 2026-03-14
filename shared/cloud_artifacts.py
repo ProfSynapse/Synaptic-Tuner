@@ -25,6 +25,12 @@ def _bucket_sync_helper_python() -> Optional[str]:
     return helper_python or None
 
 
+def _bucket_sync_helper_pythonpath() -> Optional[str]:
+    """Return additional PYTHONPATH entries for the isolated bucket helper."""
+    helper_pythonpath = os.environ.get("HF_BUCKET_SYNC_PYTHONPATH", "").strip()
+    return helper_pythonpath or None
+
+
 def _bucket_sync_helper_script() -> Path:
     """Return the helper script path used for isolated bucket sync."""
     return Path(__file__).with_name("hf_bucket_sync_helper.py")
@@ -154,9 +160,22 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
             "HF_TOKEN": token or os.environ.get("HF_TOKEN", ""),
             "HF_API_KEY": token or os.environ.get("HF_API_KEY", ""),
         }
+        helper_pythonpath = _bucket_sync_helper_pythonpath()
+        if helper_pythonpath:
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = (
+                f"{helper_pythonpath}:{existing_pythonpath}"
+                if existing_pythonpath
+                else helper_pythonpath
+            )
         try:
             subprocess.run(
-                [helper_python, str(_bucket_sync_helper_script()), str(local_dir), bucket_uri],
+                [
+                    helper_python,
+                    str(_bucket_sync_helper_script()),
+                    str(local_dir),
+                    bucket_uri,
+                ],
                 check=True,
                 env=env,
             )
