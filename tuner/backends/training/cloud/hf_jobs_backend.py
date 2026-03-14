@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Default HF Jobs settings
 DEFAULT_FLAVOR = "a10g-small"
 DEFAULT_TIMEOUT = "4h"
-DEFAULT_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update"
+DEFAULT_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
 
 
 class HFJobsBackend(ITrainingBackend):

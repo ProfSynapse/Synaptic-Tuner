@@ -273,7 +273,7 @@ class RunPodBackend(ITrainingBackend):
             gpu_count = runpod_config.get("gpu_count", 1)
             image = runpod_config.get(
                 "default_image",
-                "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
+                "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
             )
             container_disk_gb = runpod_config.get("container_disk_in_gb", 50)
             cloud_type = runpod_config.get("cloud_type", "COMMUNITY")

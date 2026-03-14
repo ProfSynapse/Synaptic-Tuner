@@ -32,7 +32,7 @@ from tuner.core.config import CloudTrainingConfig
 # ---------------------------------------------------------------------------
 
 EXPECTED_PROJECT_DEPS = {"pyyaml", "wandb", "hf_transfer", "python-dotenv", "rich"}
-EXPECTED_UNSLOTH_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update"
+EXPECTED_UNSLOTH_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
 
 # Packages pre-installed in the unsloth Docker image that backends
 # must NOT pip-install (doing so causes version conflicts)
@@ -288,7 +288,7 @@ class TestDefaultImageTags:
         value is missing) must be the unsloth image."""
         # In execute(), the fallback when runpod_config has no default_image:
         #   runpod_config.get("default_image",
-        #       "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update")
+        #       "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39")
         # We verify this by inspecting the source directly.
         import inspect
         source = inspect.getsource(RunPodBackend.execute)
@@ -306,8 +306,9 @@ class TestCloudConfigDependencies:
     """Verify the dependencies section in cloud_config.yaml is well-formed
     and consistent with what backends actually install."""
 
-    def test_dependencies_section_exists_in_real_config(self):
-        """The actual cloud_config.yaml must have a dependencies section."""
+    @pytest.fixture(autouse=True)
+    def _load_real_config(self):
+        """Load the real cloud_config.yaml once for all tests in this class."""
         config_path = (
             Path(__file__).resolve().parents[2]
             / "Trainers" / "cloud" / "cloud_config.yaml"
@@ -315,34 +316,21 @@ class TestCloudConfigDependencies:
         if not config_path.exists():
             pytest.skip("Real cloud_config.yaml not found (running outside repo)")
         with open(config_path) as f:
-            config = yaml.safe_load(f)
-        deps = config.get("dependencies")
+            self.config = yaml.safe_load(f)
+
+    def test_dependencies_section_exists(self):
+        """The actual cloud_config.yaml must have a dependencies section."""
+        deps = self.config.get("dependencies")
         assert deps is not None, "cloud_config.yaml missing 'dependencies' section"
 
     def test_dependencies_docker_image_matches_expected(self):
         """dependencies.docker_image must match the expected unsloth image."""
-        config_path = (
-            Path(__file__).resolve().parents[2]
-            / "Trainers" / "cloud" / "cloud_config.yaml"
-        )
-        if not config_path.exists():
-            pytest.skip("Real cloud_config.yaml not found")
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        deps = config["dependencies"]
+        deps = self.config["dependencies"]
         assert deps["docker_image"] == EXPECTED_UNSLOTH_IMAGE
 
     def test_dependencies_pip_deps_match_backends(self):
         """dependencies.project_pip_deps must match what backends install."""
-        config_path = (
-            Path(__file__).resolve().parents[2]
-            / "Trainers" / "cloud" / "cloud_config.yaml"
-        )
-        if not config_path.exists():
-            pytest.skip("Real cloud_config.yaml not found")
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        config_deps = set(config["dependencies"]["project_pip_deps"])
+        config_deps = set(self.config["dependencies"]["project_pip_deps"])
         assert config_deps == EXPECTED_PROJECT_DEPS, (
             f"cloud_config.yaml deps don't match expected.\n"
             f"  Config: {config_deps}\n"
@@ -351,33 +339,65 @@ class TestCloudConfigDependencies:
 
     def test_dependencies_extra_setup_commands_is_list(self):
         """dependencies.extra_setup_commands must be a list."""
-        config_path = (
-            Path(__file__).resolve().parents[2]
-            / "Trainers" / "cloud" / "cloud_config.yaml"
-        )
-        if not config_path.exists():
-            pytest.skip("Real cloud_config.yaml not found")
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        extra = config["dependencies"]["extra_setup_commands"]
+        extra = self.config["dependencies"]["extra_setup_commands"]
         assert isinstance(extra, list)
 
     def test_hf_jobs_image_matches_dependencies_image(self):
         """cloud.hf_jobs.image must match dependencies.docker_image."""
-        config_path = (
-            Path(__file__).resolve().parents[2]
-            / "Trainers" / "cloud" / "cloud_config.yaml"
-        )
-        if not config_path.exists():
-            pytest.skip("Real cloud_config.yaml not found")
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        deps_image = config["dependencies"]["docker_image"]
-        hf_image = config["cloud"]["hf_jobs"]["image"]
+        deps_image = self.config["dependencies"]["docker_image"]
+        hf_image = self.config["cloud"]["hf_jobs"]["image"]
         assert hf_image == deps_image, (
             f"HF Jobs image ({hf_image}) doesn't match "
             f"dependencies.docker_image ({deps_image})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Modal backend dependency consistency
+# ---------------------------------------------------------------------------
+
+
+class TestModalDepsConsistency:
+    """Verify the Modal backend (train_modal.py) installs the same project
+    deps as HF Jobs and RunPod.
+
+    Modal uses modal.Image.pip_install() instead of shell commands, so we
+    inspect the source of the training_image definition directly.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load_modal_source(self):
+        """Read the training_image source from train_modal.py."""
+        modal_path = (
+            Path(__file__).resolve().parents[2]
+            / "Trainers" / "cloud" / "train_modal.py"
+        )
+        if not modal_path.exists():
+            pytest.skip("train_modal.py not found (running outside repo)")
+        with open(modal_path) as f:
+            self.modal_source = f.read()
+
+    def test_modal_includes_project_deps(self):
+        """Modal training image must pip_install all project deps."""
+        for dep in EXPECTED_PROJECT_DEPS:
+            assert f'"{dep}"' in self.modal_source, (
+                f"Modal training image missing project dep: {dep}"
+            )
+
+    def test_modal_does_not_install_unpinned_preinstalled(self):
+        """Modal should pin pre-installed packages (torch, unsloth, etc.)
+        with exact versions, not install them unpinned."""
+        import re
+        # Find all .pip_install(...) argument strings
+        pip_args = re.findall(r'\.pip_install\((.*?)\)', self.modal_source, re.DOTALL)
+        full_pip_block = " ".join(pip_args)
+        # Project deps are allowed unpinned; pre-installed must have ==
+        for dep in IMAGE_PREINSTALLED:
+            # If the dep appears in pip_install, it must have a version pin
+            if f'"{dep}' in full_pip_block:
+                assert f'"{dep}==' in full_pip_block or f'"{dep}[' in full_pip_block, (
+                    f"Modal installs pre-installed package '{dep}' without version pin"
+                )
 
 
 # ---------------------------------------------------------------------------

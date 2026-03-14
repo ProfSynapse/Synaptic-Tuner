@@ -60,7 +60,7 @@ def repo_root(tmp_path):
 
     cloud_config = {
         "dependencies": {
-            "docker_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
+            "docker_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
             "project_pip_deps": [
                 "pyyaml",
                 "wandb",
@@ -102,7 +102,7 @@ def repo_root(tmp_path):
             "hf_jobs": {
                 "flavor": "a10g-small",
                 "timeout": "4h",
-                "image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
+                "image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
                 "artifact_backend": "hf_bucket",
                 "artifact_identifier": "toolset-training-artifacts",
                 "output_root": "/workspace/outputs",
@@ -121,7 +121,7 @@ def repo_root(tmp_path):
                 "volume_in_gb": 50,
                 "container_disk_in_gb": 50,
                 "cloud_type": "SECURE",
-                "default_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update",
+                "default_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
                 "default_timeout": 7200,
                 "artifact_backend": "runpod_network_volume",
                 "network_volume_id": "runpod-vol-123",

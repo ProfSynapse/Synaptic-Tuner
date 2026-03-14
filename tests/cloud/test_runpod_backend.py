@@ -421,7 +421,7 @@ class TestBuildStartupCommand:
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
         config = _cloud_config(repo_url="")
-        runpod_config = {"setup_commands": ["pip install torch"]}
+        runpod_config = {}
         with pytest.raises(CloudProviderError, match="exact repo source metadata"):
             backend._build_startup_command(config, runpod_config)
 
