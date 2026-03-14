@@ -439,7 +439,7 @@ def _select_training_run(
     """
     if not training_runs:
         print(color("\nNo training runs found!", "yellow"))
-        print("Train a model first using Trainers/rtx3090_sft or rtx3090_kto.")
+        print("Train a model first using Trainers/sft or Trainers/kto.")
         return None, "", None
 
     print(color("\nAvailable training runs:", "magenta"))

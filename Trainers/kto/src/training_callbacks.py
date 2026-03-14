@@ -30,7 +30,7 @@ class MetricsTableCallback(TrainerCallback):
     Shows metrics every N steps to track training progress.
     """
 
-    def __init__(self, log_every_n_steps: int = 5, output_dir: str = "./kto_output_rtx3090",
+    def __init__(self, log_every_n_steps: int = 5, output_dir: str = "./kto_output",
                  previous_log_entries: list = None):
         """
         Args:
@@ -329,7 +329,7 @@ class LiveDashboardCallback(TrainerCallback):
     def __init__(
         self,
         log_every_n_steps: int = 5,
-        output_dir: str = "./kto_output_rtx3090",
+        output_dir: str = "./kto_output",
         previous_log_entries: list = None
     ):
         self.log_every_n_steps = log_every_n_steps

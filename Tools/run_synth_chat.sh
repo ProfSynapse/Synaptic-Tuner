@@ -187,7 +187,7 @@ if [ $? -eq 0 ]; then
     echo "     python tools/validate_syngen.py $OUTPUT_FILE"
     echo ""
     echo "  2. Train with KTO:"
-    echo "     cd Trainers/rtx3090_kto"
+    echo "     cd Trainers/kto"
     echo "     python train_kto.py --model-size 7b --local-file ../../$OUTPUT_FILE"
     echo ""
     echo "  3. Evaluate results:"

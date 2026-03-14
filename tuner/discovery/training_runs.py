@@ -16,6 +16,8 @@ Pattern migrated from: tuner.py lines 220-234 (list_training_runs function)
 from pathlib import Path
 from typing import List
 
+from shared.utilities.paths import iter_training_output_dirs
+
 
 class TrainingRunDiscovery:
     """
@@ -96,34 +98,24 @@ class TrainingRunDiscovery:
             └── 20251122_100000/       <- Invalid (no final_model or checkpoints)
                 └── logs/
         """
-        # Build output directory path
-        output_dir = (
-            self.repo_root
-            / "Trainers"
-            / f"rtx3090_{trainer_type}"
-            / f"{trainer_type}_output_rtx3090"
-        )
-
-        # Return empty list if directory doesn't exist
-        if not output_dir.exists():
-            return []
-
         runs = []
 
-        # Iterate through directories, sorted by modification time (newest first)
-        for d in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not d.is_dir():
+        for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+            if not output_dir.exists():
                 continue
 
-            # Include runs with final_model OR checkpoints
-            has_final = (d / "final_model").exists()
-            has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
+            for d in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if not d.is_dir():
+                    continue
 
-            if has_final or has_checkpoints:
-                runs.append(d)
+                has_final = (d / "final_model").exists()
+                has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
 
-                # Apply limit if specified
-                if limit is not None and len(runs) >= limit:
-                    break
+                if has_final or has_checkpoints:
+                    runs.append(d)
+
+        runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        if limit is not None:
+            runs = runs[:limit]
 
         return runs

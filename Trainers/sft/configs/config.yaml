@@ -37,7 +37,7 @@ lora:
 # SFT Training Configuration
 training:
   # Output directory
-  output_dir: "./sft_output_rtx3090"
+  output_dir: "./sft_output"
 
   # Batch configuration
   per_device_train_batch_size: 8
@@ -84,7 +84,7 @@ dataset:
   dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
   dataset_file: "nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl"
 
-  # Use local file (relative to Trainers/rtx3090_sft/)
+  # Use local file (relative to Trainers/sft/)
   # Leave null by default so cloud jobs use the HuggingFace dataset above.
   # For local smoke tests, pass --local-file ../../Datasets/nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
   local_file: null

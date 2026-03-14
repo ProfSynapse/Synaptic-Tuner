@@ -51,7 +51,7 @@ python train_sft.py --model-size 7b --dry-run
 
 ## SFT vs KTO
 
-| Feature | SFT (this trainer) | KTO (rtx3090_kto) |
+| Feature | SFT (this trainer) | KTO (kto) |
 |---------|-------------------|-------------------|
 | **Method** | Direct supervision | Preference learning |
 | **Dataset** | Positive examples only | Positive + negative pairs |
@@ -76,7 +76,7 @@ The interactive CLI (see Quick Start above) handles this automatically. When you
 
 **To customize settings:**
 - Edit `configs/config.yaml` for SFT configuration
-- Edit `../rtx3090_kto/configs/config.yaml` for KTO configuration
+- Edit `../kto/configs/config.yaml` for KTO configuration
 - Run `./train.sh` (Linux) or `.\train.ps1` (Windows) from `Trainers/` directory
 - Choose option 3 and follow prompts
 
@@ -183,7 +183,7 @@ SFT uses ChatML conversational format natively:
 ## Output Structure
 
 ```
-sft_output_rtx3090/
+sft_output/
 └── 20251118_183000/          # Timestamped run
     ├── final_model/           # Trained model
     ├── checkpoints/           # Periodic checkpoints
@@ -205,7 +205,7 @@ sft_output_rtx3090/
 ./upload_model.sh username/model-name yes
 
 # Direct Python
-python src/upload_to_hf.py ./sft_output_rtx3090/20251118_183000/final_model \
+python src/upload_to_hf.py ./sft_output/20251118_183000/final_model \
   username/model-name \
   --save-method merged_16bit
 ```
@@ -298,8 +298,8 @@ bash setup.sh --with-flash-attn
 1. **Train:** `./train.sh --model-size 7b`
 2. **Evaluate:** Test with `Evaluator/` module
 3. **Upload:** Share to HuggingFace
-4. **Optional:** Refine with KTO (rtx3090_kto)
+4. **Optional:** Refine with KTO (kto)
 
 ## Support
 
-See `../rtx3090_kto/README.md` for detailed troubleshooting and advanced configuration options.
+See `../kto/README.md` for detailed troubleshooting and advanced configuration options.

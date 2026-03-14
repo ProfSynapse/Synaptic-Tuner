@@ -9,7 +9,7 @@ model:
   # Base model (same as SFT)
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
   # Path to SFT LoRA adapters (checkpoint from latest run)
-  lora_path: "../rtx3090_sft/sft_output_rtx3090/20251225_125047/checkpoints/checkpoint-1150"
+  lora_path: "../sft/sft_output/20251225_125047/checkpoints/checkpoint-1150"
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -36,7 +36,7 @@ lora:
 
 # Training Configuration (maps to TRL GRPOConfig where applicable)
 training:
-  output_dir: "./grpo_output_rtx3090"
+  output_dir: "./grpo_output"
 
   # Performance
   per_device_train_batch_size: 6
@@ -125,7 +125,7 @@ rewards:
   custom:
     enabled: false
     module: null     # e.g. "my_project.rewards"
-    file: null       # e.g. "./my_rewards.py" (relative to Trainers/rtx3090_grpo/)
+    file: null       # e.g. "./my_rewards.py" (relative to Trainers/grpo/)
     functions: []    # list of {name, weight, params}
 
 # Weights & Biases (optional)

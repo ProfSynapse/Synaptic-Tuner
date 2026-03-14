@@ -93,9 +93,9 @@ Generate Data (SynthChat)  →  Train (SFT → KTO → GRPO)  →  Evaluate  →
 |-------|------|------------|
 | **Generate** | `python -m SynthChat.run generate` | `SynthChat/scenarios/`, `SynthChat/rubrics/`, `SynthChat/config/settings.yaml` |
 | **Improve** | `python -m SynthChat.run improve` | Rubric YAMLs define judge/improver prompts |
-| **Train SFT** | `python train_sft.py --model-size 7b` | `Trainers/rtx3090_sft/configs/config.yaml` |
-| **Train KTO** | `python train_kto.py --model-size 7b` | `Trainers/rtx3090_kto/configs/config.yaml` |
-| **Train GRPO** | `python train_grpo.py` | `Trainers/rtx3090_grpo/configs/config.yaml` |
+| **Train SFT** | `python train_sft.py --model-size 7b` | `Trainers/sft/configs/config.yaml` |
+| **Train KTO** | `python train_kto.py --model-size 7b` | `Trainers/kto/configs/config.yaml` |
+| **Train GRPO** | `python train_grpo.py` | `Trainers/grpo/configs/config.yaml` |
 | **Evaluate** | `python -m Evaluator.cli --backend lmstudio --model MODEL` | `Evaluator/config/scenarios/` |
 | **Upload** | `python src/upload_to_hf.py MODEL user/repo --save-method merged_16bit` | Supports LoRA, merged 16-bit, GGUF |
 
@@ -123,9 +123,9 @@ JSONL with `conversations` array. Tool call structure is fully configurable.
 Synaptic-Tuner/
 ├── SynthChat/              # Synthetic data generation (scenarios, rubrics, config)
 ├── Trainers/
-│   ├── rtx3090_sft/        # SFT training
-│   ├── rtx3090_kto/        # KTO training
-│   ├── rtx3090_grpo/       # GRPO training
+│   ├── sft/                # SFT training
+│   ├── kto/                # KTO training
+│   ├── grpo/               # GRPO training
 │   └── notebooks/          # Colab notebooks (beginner + advanced)
 ├── Evaluator/              # Model evaluation (scenarios, backends, results)
 ├── Datasets/               # Training data (JSONL)

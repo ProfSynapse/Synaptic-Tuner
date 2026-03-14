@@ -10,7 +10,7 @@ Usage:
 
 Examples:
     # Basic upload with 16-bit merge
-    python upload_model.py ../rtx3090_sft/sft_output_rtx3090/20251122/final_model username/my-model
+    python upload_model.py ../sft/sft_output/20251122/final_model username/my-model
 
     # Upload with GGUF creation
     python upload_model.py ./model username/my-model --create-gguf

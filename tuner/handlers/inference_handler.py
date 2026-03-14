@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
 from tuner.handlers.base import BaseHandler
 
 # Import shared UI components
@@ -103,57 +104,41 @@ class InferenceHandler(BaseHandler):
     def _discover_gguf_models(self) -> List[DiscoveredModel]:
         """Discover GGUF models from training outputs."""
         models = []
-        trainers_dir = self._get_trainers_dir()
 
-        # Search patterns for training outputs
-        output_patterns = [
-            ("rtx3090_sft/sft_output_rtx3090", "sft"),
-            ("rtx3090_kto/kto_output_rtx3090", "kto"),
-        ]
-
-        for pattern, trainer_type in output_patterns:
-            output_dir = trainers_dir / pattern
-            if not output_dir.exists():
-                continue
-
-            # Find GGUF files recursively
-            for gguf_file in output_dir.rglob("*.gguf"):
-                # Skip vocab files and mmproj files
-                if "vocab" in gguf_file.name.lower() or "mmproj" in gguf_file.name.lower():
+        for trainer_type in ("sft", "kto"):
+            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+                if not output_dir.exists():
                     continue
 
-                # Extract info from path
-                # Expected: .../YYYYMMDD_HHMMSS/model-name/gguf/model.gguf
-                try:
-                    # Get timestamp from parent directories
-                    parts = gguf_file.relative_to(output_dir).parts
-                    timestamp = parts[0] if parts else "unknown"
+                for gguf_file in output_dir.rglob("*.gguf"):
+                    if "vocab" in gguf_file.name.lower() or "mmproj" in gguf_file.name.lower():
+                        continue
 
-                    # Get model name
-                    model_name = gguf_file.stem
+                    try:
+                        parts = gguf_file.relative_to(output_dir).parts
+                        timestamp = parts[0] if parts else "unknown"
+                        model_name = gguf_file.stem
 
-                    # Detect quantization
-                    quant = None
-                    for q in ["Q4_K_M", "Q5_K_M", "Q8_0", "Q4_K_S", "Q6_K"]:
-                        if q in gguf_file.name:
-                            quant = q
-                            model_name = model_name.replace(f"-{q}", "")
-                            break
+                        quant = None
+                        for q in ["Q4_K_M", "Q5_K_M", "Q8_0", "Q4_K_S", "Q6_K"]:
+                            if q in gguf_file.name:
+                                quant = q
+                                model_name = model_name.replace(f"-{q}", "")
+                                break
 
-                    # Get file size
-                    size_gb = gguf_file.stat().st_size / (1024**3)
+                        size_gb = gguf_file.stat().st_size / (1024**3)
 
-                    models.append(DiscoveredModel(
-                        name=model_name,
-                        path=gguf_file,
-                        model_type="gguf",
-                        trainer_type=trainer_type,
-                        timestamp=timestamp,
-                        size_gb=size_gb,
-                        quantization=quant,
-                    ))
-                except Exception:
-                    continue
+                        models.append(DiscoveredModel(
+                            name=model_name,
+                            path=gguf_file,
+                            model_type="gguf",
+                            trainer_type=trainer_type,
+                            timestamp=timestamp,
+                            size_gb=size_gb,
+                            quantization=quant,
+                        ))
+                    except Exception:
+                        continue
 
         # Sort by timestamp (newest first), then by quantization
         models.sort(key=lambda m: (m.timestamp, m.quantization or ""), reverse=True)
@@ -162,47 +147,38 @@ class InferenceHandler(BaseHandler):
     def _discover_lora_models(self) -> List[DiscoveredModel]:
         """Discover LoRA adapter models from training outputs."""
         models = []
-        trainers_dir = self._get_trainers_dir()
 
-        output_patterns = [
-            ("rtx3090_sft/sft_output_rtx3090", "sft"),
-            ("rtx3090_kto/kto_output_rtx3090", "kto"),
-        ]
-
-        for pattern, trainer_type in output_patterns:
-            output_dir = trainers_dir / pattern
-            if not output_dir.exists():
-                continue
-
-            # Find final_model directories with adapter_config.json
-            for adapter_config in output_dir.rglob("final_model/adapter_config.json"):
-                try:
-                    final_model_dir = adapter_config.parent
-                    run_dir = final_model_dir.parent
-                    timestamp = run_dir.name
-
-                    # Read adapter config for base model info
-                    with open(adapter_config) as f:
-                        config = json.load(f)
-                    base_model = config.get("base_model_name_or_path", "unknown")
-
-                    # Get adapter size
-                    adapter_file = final_model_dir / "adapter_model.safetensors"
-                    size_gb = None
-                    if adapter_file.exists():
-                        size_gb = adapter_file.stat().st_size / (1024**3)
-
-                    models.append(DiscoveredModel(
-                        name=f"{timestamp}_{trainer_type}",
-                        path=final_model_dir,
-                        model_type="lora",
-                        trainer_type=trainer_type,
-                        timestamp=timestamp,
-                        size_gb=size_gb,
-                        base_model=base_model,
-                    ))
-                except Exception:
+        for trainer_type in ("sft", "kto"):
+            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+                if not output_dir.exists():
                     continue
+
+                for adapter_config in output_dir.rglob("final_model/adapter_config.json"):
+                    try:
+                        final_model_dir = adapter_config.parent
+                        run_dir = final_model_dir.parent
+                        timestamp = run_dir.name
+
+                        with open(adapter_config) as f:
+                            config = json.load(f)
+                        base_model = config.get("base_model_name_or_path", "unknown")
+
+                        adapter_file = final_model_dir / "adapter_model.safetensors"
+                        size_gb = None
+                        if adapter_file.exists():
+                            size_gb = adapter_file.stat().st_size / (1024**3)
+
+                        models.append(DiscoveredModel(
+                            name=f"{timestamp}_{trainer_type}",
+                            path=final_model_dir,
+                            model_type="lora",
+                            trainer_type=trainer_type,
+                            timestamp=timestamp,
+                            size_gb=size_gb,
+                            base_model=base_model,
+                        ))
+                    except Exception:
+                        continue
 
         models.sort(key=lambda m: m.timestamp, reverse=True)
         return models
@@ -307,7 +283,7 @@ class InferenceHandler(BaseHandler):
         print_header("INTERACTIVE CHAT", f"Model: {model.display_name}")
 
         # Use the existing inference.py script
-        inference_script = self.repo_root / "Trainers" / "rtx3090_sft" / "src" / "inference.py"
+        inference_script = get_trainer_root("sft", self.repo_root) / "src" / "inference.py"
 
         if not inference_script.exists():
             print_error("inference.py not found.")

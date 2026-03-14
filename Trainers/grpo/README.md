@@ -19,13 +19,13 @@ Select:
 ## Direct Run
 
 ```bash
-cd Trainers/rtx3090_grpo
+cd Trainers/grpo
 python3 train_grpo.py
 ```
 
 ## Configuration
 
-Edit `Trainers/rtx3090_grpo/configs/config.yaml`:
+Edit `Trainers/grpo/configs/config.yaml`:
 - Model and LoRA settings
 - Dataset (HF/local)
 - GRPO/GSPO training hyperparameters

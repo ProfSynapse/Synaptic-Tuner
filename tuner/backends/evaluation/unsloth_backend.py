@@ -17,6 +17,8 @@ Design decisions:
 import json
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from shared.utilities.paths import iter_training_output_dirs
 from .base import IEvaluationBackend
 
 
@@ -58,24 +60,15 @@ class UnslothBackend(IEvaluationBackend):
             Empty list if no adapters found
         """
         models = []
-        trainers_dir = self._repo_root / "Trainers"
 
-        # Search patterns for training outputs
-        output_patterns = [
-            "rtx3090_sft/sft_output_rtx3090",
-            "rtx3090_kto/kto_output_rtx3090",
-            "rtx3090_grpo/grpo_output_rtx3090",
-        ]
+        for method in ("sft", "kto", "grpo"):
+            for output_dir in iter_training_output_dirs(method, self._repo_root):
+                if not output_dir.exists():
+                    continue
 
-        for pattern in output_patterns:
-            output_dir = trainers_dir / pattern
-            if not output_dir.exists():
-                continue
-
-            # Find final_model directories with adapter_config.json
-            for adapter_config in output_dir.rglob("final_model/adapter_config.json"):
-                adapter_dir = adapter_config.parent
-                models.append(str(adapter_dir.resolve()))
+                for adapter_config in output_dir.rglob("final_model/adapter_config.json"):
+                    adapter_dir = adapter_config.parent
+                    models.append(str(adapter_dir.resolve()))
 
         # Sort by modification time (newest first)
         models.sort(key=lambda p: Path(p).stat().st_mtime, reverse=True)

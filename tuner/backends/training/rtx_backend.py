@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
+from shared.utilities.paths import get_trainer_root
 from .base import ITrainingBackend
 from tuner.core.config import TrainingConfig
 from tuner.core.exceptions import ConfigurationError
@@ -86,7 +87,7 @@ class RTXBackend(ITrainingBackend):
                 f"Available: {self.get_available_methods()}"
             )
 
-        trainer_dir = self.repo_root / "Trainers" / f"rtx3090_{method}"
+        trainer_dir = get_trainer_root(method, self.repo_root)
         config_path = trainer_dir / "configs" / "config.yaml"
 
         if not config_path.exists():

@@ -16,6 +16,8 @@ from typing import List, Optional, Tuple
 
 import yaml
 
+from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
+
 
 @dataclass
 class ModelInfo:
@@ -93,8 +95,8 @@ class BaseModelDiscovery:
 
         # Check each trainer config
         config_paths = [
-            self.repo_root / "Trainers" / "rtx3090_sft" / "configs" / "config.yaml",
-            self.repo_root / "Trainers" / "rtx3090_kto" / "configs" / "config.yaml",
+            get_trainer_root("sft", self.repo_root) / "configs" / "config.yaml",
+            get_trainer_root("kto", self.repo_root) / "configs" / "config.yaml",
         ]
 
         for config_path in config_paths:
@@ -138,34 +140,27 @@ class BaseModelDiscovery:
         results: List[ModelInfo] = []
 
         # Trainer output directories
-        trainer_dirs = [
-            ("sft", self.repo_root / "Trainers" / "rtx3090_sft" / "sft_output_rtx3090"),
-            ("kto", self.repo_root / "Trainers" / "rtx3090_kto" / "kto_output_rtx3090"),
-            ("grpo", self.repo_root / "Trainers" / "rtx3090_grpo" / "grpo_output_rtx3090"),
-        ]
-
-        for trainer_type, output_dir in trainer_dirs:
-            if not output_dir.exists():
-                continue
-
-            # Find all runs with final_model
-            for run_dir in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if not run_dir.is_dir():
+        for trainer_type in ("sft", "kto", "grpo"):
+            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+                if not output_dir.exists():
                     continue
 
-                final_model = run_dir / "final_model"
-                if final_model.exists():
-                    # Calculate relative path from repo root
-                    try:
-                        relative_path = str(final_model.relative_to(self.repo_root))
-                    except ValueError:
-                        relative_path = str(final_model)
+                for run_dir in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                    if not run_dir.is_dir():
+                        continue
 
-                    results.append(ModelInfo(
-                        name=run_dir.name,
-                        model_type='finetuned',
-                        source=trainer_type.upper(),
-                        path=relative_path,
-                    ))
+                    final_model = run_dir / "final_model"
+                    if final_model.exists():
+                        try:
+                            relative_path = str(final_model.relative_to(self.repo_root))
+                        except ValueError:
+                            relative_path = str(final_model)
+
+                        results.append(ModelInfo(
+                            name=run_dir.name,
+                            model_type='finetuned',
+                            source=trainer_type.upper(),
+                            path=relative_path,
+                        ))
 
         return results

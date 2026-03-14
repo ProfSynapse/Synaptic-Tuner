@@ -398,7 +398,7 @@ class TestBuildStartupCommand:
         assert "pip install torch" in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
-        assert "Trainers/rtx3090_sft" in cmd
+        assert "Trainers/sft" in cmd
         assert "python train_sft.py" in cmd
         assert "--output-root /runpod-volume/outputs" in cmd
         assert "--artifact-backend runpod_network_volume" in cmd

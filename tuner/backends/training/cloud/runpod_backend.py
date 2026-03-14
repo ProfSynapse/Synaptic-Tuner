@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
+from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -139,7 +140,7 @@ class RunPodBackend(ITrainingBackend):
             )
 
         # Load standard training config
-        trainer_dir = self.repo_root / "Trainers" / f"rtx3090_{method}"
+        trainer_dir = get_trainer_root(method, self.repo_root)
         config_path = trainer_dir / "configs" / "config.yaml"
 
         if not config_path.exists():
@@ -422,7 +423,7 @@ class RunPodBackend(ITrainingBackend):
         ])
 
         target_dir = "/workspace/repo"
-        trainer_subdir = f"Trainers/rtx3090_{config.method}"
+        trainer_subdir = f"Trainers/{get_canonical_trainer_dir_name(config.method)}"
         run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         if not config.repo_url or not config.repo_branch or not config.repo_commit:

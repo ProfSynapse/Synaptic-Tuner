@@ -67,10 +67,10 @@ Write-Host "Using Python at: $PythonPath" -ForegroundColor Gray
 Write-Host "Installing dependencies..." -ForegroundColor Green
 & $PythonPath -m pip install --upgrade pip setuptools wheel -q
 
-if (Test-Path "Trainers\rtx3090_sft\requirements.txt") {
-    & $PythonPath -m pip install -r Trainers\rtx3090_sft\requirements.txt
+if (Test-Path "Trainers\sft\requirements.txt") {
+    & $PythonPath -m pip install -r Trainers\sft\requirements.txt
 } else {
-    Write-Error "Trainers\rtx3090_sft\requirements.txt not found"
+    Write-Error "Trainers\sft\requirements.txt not found"
 }
 
 # Install Unsloth and Xformers

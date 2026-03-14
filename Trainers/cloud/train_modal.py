@@ -37,6 +37,8 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
+from shared.utilities.paths import get_canonical_output_dir_name, get_canonical_trainer_dir_name
+
 try:
     import modal
 except ImportError:
@@ -206,7 +208,7 @@ def run_training(
         )
 
     # Determine trainer directory and script
-    trainer_dir = os.path.join(workspace, "Trainers", f"rtx3090_{trainer_type}")
+    trainer_dir = os.path.join(workspace, "Trainers", get_canonical_trainer_dir_name(trainer_type))
     train_script = f"train_{trainer_type}.py"
 
     if not os.path.isfile(os.path.join(trainer_dir, train_script)):
@@ -293,7 +295,7 @@ def _upload_to_hub(trainer_type: str, trainer_dir: str, hub_repo: str):
         print("[Modal] Warning: HF_TOKEN not set, skipping Hub upload")
         return
 
-    output_dir_name = f"{trainer_type}_output_rtx3090"
+    output_dir_name = get_canonical_output_dir_name(trainer_type)
     output_base = Path(trainer_dir) / output_dir_name
 
     if not output_base.exists():

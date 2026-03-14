@@ -28,6 +28,7 @@ from .documentation.manifest import ManifestGenerator
 from .documentation.model_card import ModelCardGenerator
 from .documentation.readme import ReadmeGenerator
 from ..model_loading.registry import ModelLoaderRegistry
+from ..utilities.paths import is_training_output_dir
 
 
 class UploadOrchestrator:
@@ -306,11 +307,11 @@ class UploadOrchestrator:
         model_path = Path(self.upload_config.model_path)
         model_name = self.upload_config.repo_id.split('/')[-1]
 
-        # Pattern: sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model
-        # We want: sft_output_rtx3090/YYYYMMDD_HHMMSS/model-name/
+        # Pattern: sft_output/YYYYMMDD_HHMMSS/final_model
+        # We want: sft_output/YYYYMMDD_HHMMSS/model-name/
         if model_path.name == "final_model":
             parent_name = model_path.parent.parent.name
-            if parent_name in ["sft_output_rtx3090", "kto_output_rtx3090"]:
+            if is_training_output_dir(parent_name):
                 return model_path.parent / model_name
 
         return model_path.parent / model_name
