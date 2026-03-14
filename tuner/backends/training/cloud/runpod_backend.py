@@ -169,7 +169,7 @@ class RunPodBackend(ITrainingBackend):
             config_path=config_path,
             trainer_dir=trainer_dir,
             model_name=model_config.get("model_name", "Unknown"),
-            dataset_file=dataset_config.get("local_file", "Unknown"),
+            dataset_file=dataset_config.get("local_file") or f"{dataset_config.get('dataset_name', '')}/{dataset_config.get('dataset_file', 'Unknown')}",
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
