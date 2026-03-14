@@ -213,7 +213,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Output "     python tools/validate_syngen.py $OUTPUT_FILE"
     Write-Output ""
     Write-Output "  2. Train with KTO:"
-    Write-Output "     cd Trainers/rtx3090_kto"
+    Write-Output "     cd Trainers/kto"
     Write-Output "     python train_kto.py --model-size 7b --local-file ../../$OUTPUT_FILE"
     Write-Output ""
     Write-Output "  3. Evaluate results:"

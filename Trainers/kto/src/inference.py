@@ -231,7 +231,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Usage: python inference.py <model_path>")
-        print("Example: python inference.py ./kto_output_rtx3090/final_model")
+        print("Example: python inference.py ./kto_output/final_model")
         sys.exit(1)
 
     model_path = sys.argv[1]

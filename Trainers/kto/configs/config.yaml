@@ -21,7 +21,7 @@ lora:
   use_rslora: false
   use_dora: false
 training:
-  output_dir: ./kto_output_rtx3090
+  output_dir: ./kto_output
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 4
   beta: 0.1

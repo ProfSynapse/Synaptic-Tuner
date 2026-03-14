@@ -10,7 +10,7 @@ This script:
 
 Usage:
     python tools/convert_to_webllm.py \
-        --lora-path Trainers/rtx3090_sft/sft_output_rtx3090/20251218_200347/final_model \
+        --lora-path Trainers/sft/sft_output/20251218_200347/final_model \
         --output-dir ./webllm_output \
         --model-name "Nexus-Quark-Q3.0.1" \
         --quantization q4f16_1

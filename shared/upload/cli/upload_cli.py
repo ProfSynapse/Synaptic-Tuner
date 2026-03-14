@@ -73,7 +73,7 @@ Examples:
         type=str,
         nargs="?",
         default=None,
-        help="Path to saved model directory (e.g., sft_output_rtx3090/20251122/final_model)"
+        help="Path to saved model directory (e.g., sft_output/20251122/final_model)"
     )
     parser.add_argument(
         "repo_id",

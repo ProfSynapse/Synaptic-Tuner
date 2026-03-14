@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 
 import requests
 
+from shared.utilities.paths import iter_training_output_dirs
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -28,10 +29,7 @@ import requests
 
 # Default paths for training outputs
 TRAINERS_DIR = Path(__file__).resolve().parent.parent / "Trainers"
-SFT_OUTPUT_PATTERNS = [
-    "rtx3090_sft/sft_output_rtx3090",
-    "rtx3090_kto/kto_output_rtx3090",
-]
+TRAINING_METHODS = ("sft", "kto")
 
 # vLLM server defaults
 DEFAULT_HOST = "127.0.0.1"
@@ -237,54 +235,47 @@ def discover_training_runs(base_dir: Optional[Path] = None) -> List[TrainingRun]
         base_dir = TRAINERS_DIR
 
     runs: List[TrainingRun] = []
+    repo_root = base_dir.parent if base_dir.name == "Trainers" else base_dir
 
-    for pattern in SFT_OUTPUT_PATTERNS:
-        output_dir = base_dir / pattern
-        if not output_dir.exists():
-            continue
-
-        trainer_type = "sft" if "sft" in pattern else "kto"
-
-        # Each subdirectory is a training run (timestamp format)
-        for run_dir in output_dir.iterdir():
-            if not run_dir.is_dir():
+    for trainer_type in TRAINING_METHODS:
+        for output_dir in iter_training_output_dirs(trainer_type, repo_root):
+            if not output_dir.exists():
                 continue
 
-            # Check if it matches timestamp format (YYYYMMDD_HHMMSS)
-            if not re.match(r"\d{8}_\d{6}", run_dir.name):
-                continue
+            for run_dir in output_dir.iterdir():
+                if not run_dir.is_dir():
+                    continue
 
-            # Check what's available in this run
-            has_final_model = (run_dir / "final_model").exists()
-            has_merged_16bit = False
-            has_lora = False
+                if not re.match(r"\d{8}_\d{6}", run_dir.name):
+                    continue
 
-            # Check for merged models in subdirectories
-            for subdir in run_dir.iterdir():
-                if subdir.is_dir():
-                    if (subdir / "merged-16bit").exists():
-                        has_merged_16bit = True
-                    if (subdir / "lora").exists():
-                        has_lora = True
+                has_final_model = (run_dir / "final_model").exists()
+                has_merged_16bit = False
+                has_lora = False
 
-            # Also check if final_model has LoRA adapters
-            if has_final_model:
-                adapter_config = run_dir / "final_model" / "adapter_config.json"
-                has_lora = has_lora or adapter_config.exists()
+                for subdir in run_dir.iterdir():
+                    if subdir.is_dir():
+                        if (subdir / "merged-16bit").exists():
+                            has_merged_16bit = True
+                        if (subdir / "lora").exists():
+                            has_lora = True
 
-            # Try to detect model size from config or directory name
-            model_size = _detect_model_size(run_dir)
+                if has_final_model:
+                    adapter_config = run_dir / "final_model" / "adapter_config.json"
+                    has_lora = has_lora or adapter_config.exists()
 
-            runs.append(TrainingRun(
-                path=run_dir,
-                name=run_dir.name,
-                timestamp=run_dir.name,
-                trainer_type=trainer_type,
-                has_final_model=has_final_model,
-                has_merged_16bit=has_merged_16bit,
-                has_lora=has_lora,
-                model_size=model_size,
-            ))
+                model_size = _detect_model_size(run_dir)
+
+                runs.append(TrainingRun(
+                    path=run_dir,
+                    name=run_dir.name,
+                    timestamp=run_dir.name,
+                    trainer_type=trainer_type,
+                    has_final_model=has_final_model,
+                    has_merged_16bit=has_merged_16bit,
+                    has_lora=has_lora,
+                    model_size=model_size,
+                ))
 
     # Sort by timestamp (newest first)
     runs.sort(key=lambda r: r.timestamp, reverse=True)

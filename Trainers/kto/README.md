@@ -208,7 +208,7 @@ Unsloth provides **1.5-2x speedup** over standard PyTorch implementations.
 ### Interactive Chat
 
 ```bash
-python src/inference.py ./kto_output_rtx3090/final_model
+python src/inference.py ./kto_output/final_model
 ```
 
 ### Programmatic Inference
@@ -217,7 +217,7 @@ python src/inference.py ./kto_output_rtx3090/final_model
 from src.inference import KTOInference
 
 # Load model
-inference = KTOInference("./kto_output_rtx3090/final_model")
+inference = KTOInference("./kto_output/final_model")
 
 # Generate response
 response = inference.generate(
@@ -242,7 +242,7 @@ response = inference.chat(messages)
 
 ```bash
 python src/upload_to_hf.py \
-  ./kto_output_rtx3090/final_model \
+  ./kto_output/final_model \
   username/model-name \
   --token YOUR_HF_TOKEN \
   --save-method merged_16bit
@@ -252,7 +252,7 @@ python src/upload_to_hf.py \
 
 ```bash
 python src/upload_to_hf.py \
-  ./kto_output_rtx3090/final_model \
+  ./kto_output/final_model \
   username/model-name \
   --token YOUR_HF_TOKEN \
   --create-gguf \
@@ -341,7 +341,7 @@ python train_kto.py --learning-rate 1e-7
 ## Project Structure
 
 ```
-rtx3090_kto/
+kto/
 ├── README.md
 ├── requirements.txt
 ├── train_kto.py              # Main training script

@@ -31,7 +31,7 @@ class MetricsTableCallback(TrainerCallback):
     def __init__(
         self,
         log_every_n_steps: int = 5,
-        output_dir: str = "./grpo_output_rtx3090",
+        output_dir: str = "./grpo_output",
     ):
         self.log_every_n_steps = max(1, int(log_every_n_steps))
         self.output_dir = Path(output_dir)
@@ -132,7 +132,7 @@ class LiveDashboardCallback(TrainerCallback):
     def __init__(
         self,
         log_every_n_steps: int = 5,
-        output_dir: str = "./grpo_output_rtx3090",
+        output_dir: str = "./grpo_output",
         previous_log_entries: list = None
     ):
         self.log_every_n_steps = log_every_n_steps

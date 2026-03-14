@@ -36,6 +36,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from tuner.backends.training.cloud.base_cloud import resolve_repo_url  # noqa: E402
+from shared.utilities.paths import get_canonical_trainer_dir_name  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,7 @@ def build_training_startup_command(
 
     parts.append(clone_cmd)
 
-    trainer_subdir = f"Trainers/rtx3090_{method}"
+    trainer_subdir = f"Trainers/{get_canonical_trainer_dir_name(method)}"
     parts.append(f"cd {target_dir}/{trainer_subdir}")
     parts.append(f"python train_{method}.py")
 

@@ -39,7 +39,7 @@ def repo_root(tmp_path):
     """Create a temporary repo root with standard directory structure."""
     # Create trainer directories
     for method in ("sft", "kto"):
-        trainer_dir = tmp_path / "Trainers" / f"rtx3090_{method}" / "configs"
+        trainer_dir = tmp_path / "Trainers" / method / "configs"
         trainer_dir.mkdir(parents=True)
 
         config = {

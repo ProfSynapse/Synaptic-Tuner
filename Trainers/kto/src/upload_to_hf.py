@@ -6,7 +6,7 @@ This is a thin wrapper around the shared upload framework.
 All upload logic is in Trainers/shared/upload/.
 
 Usage:
-    python src/upload_to_hf_new.py ./kto_output_rtx3090/20251122/final_model username/model-name [options]
+    python src/upload_to_hf_new.py ./kto_output/20251122/final_model username/model-name [options]
 
 For full options, run:
     python src/upload_to_hf_new.py --help

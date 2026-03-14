@@ -130,7 +130,7 @@ class TestResolveRepoSource:
             resolve_repo_source(repo_root)
 
     def test_rejects_dirty_tracked_worktree(self, repo_root, clean_env):
-        config_path = repo_root / "Trainers" / "rtx3090_sft" / "configs" / "config.yaml"
+        config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
         config_path.write_text(config_path.read_text() + "\n# dirty\n")
 
         with pytest.raises(CloudProviderError, match="clean tracked worktree"):

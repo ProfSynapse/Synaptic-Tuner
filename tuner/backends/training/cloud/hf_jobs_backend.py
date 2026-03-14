@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
+from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -151,7 +152,7 @@ class HFJobsBackend(ITrainingBackend):
             )
 
         # Load standard training config
-        trainer_dir = self.repo_root / "Trainers" / f"rtx3090_{method}"
+        trainer_dir = get_trainer_root(method, self.repo_root)
         config_path = trainer_dir / "configs" / "config.yaml"
 
         if not config_path.exists():
@@ -357,7 +358,7 @@ class HFJobsBackend(ITrainingBackend):
             f"git clone --branch {config.repo_branch} --depth 1 {config.repo_url} /workspace/repo",
             f"cd /workspace/repo && git checkout {config.repo_commit}",
             # Run training
-            f"cd /workspace/repo/Trainers/rtx3090_{config.method}",
+            f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}",
             "python "
             f"train_{config.method}.py "
             f"--run-timestamp {timestamp} "

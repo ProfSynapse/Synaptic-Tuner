@@ -158,7 +158,7 @@ class TestModalLoadConfig:
             backend.load_config("sft")
 
     def test_raises_on_malformed_yaml(self, repo_root):
-        config_path = repo_root / "Trainers" / "rtx3090_sft" / "configs" / "config.yaml"
+        config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
         config_path.write_text(": : : invalid yaml [[[")
         backend = ModalBackend(repo_root)
         with pytest.raises(ConfigurationError, match="Failed to parse"):
