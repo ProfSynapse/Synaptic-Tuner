@@ -545,6 +545,9 @@ class HFJobsBackend(ITrainingBackend):
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
             f"python -m pip install --upgrade {' '.join(project_deps)}",
+            "python -m venv /tmp/hf-bucket-sync",
+            "/tmp/hf-bucket-sync/bin/python -m pip install --upgrade huggingface_hub>=1.5.0 hf_transfer",
+            "export HF_BUCKET_SYNC_PYTHON=/tmp/hf-bucket-sync/bin/python",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

@@ -5,6 +5,9 @@ Cloud artifact helpers shared by training scripts and cloud backends.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +17,17 @@ from transformers import TrainerCallback
 
 
 _HF_BUCKET_CACHE: Dict[str, str] = {}
+
+
+def _bucket_sync_helper_python() -> Optional[str]:
+    """Return the isolated Python interpreter for bucket sync, if configured."""
+    helper_python = os.environ.get("HF_BUCKET_SYNC_PYTHON", "").strip()
+    return helper_python or None
+
+
+def _bucket_sync_helper_script() -> Path:
+    """Return the helper script path used for isolated bucket sync."""
+    return Path(__file__).with_name("hf_bucket_sync_helper.py")
 
 
 @dataclass
@@ -129,8 +143,30 @@ def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:
 def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None) -> None:
     """Sync a local directory into a Hugging Face Bucket."""
     local_dir = Path(local_dir)
-    bucket_id = ensure_hf_bucket(bucket_id, token=token)
+    bucket_id = normalize_hf_bucket_id(bucket_id)
     prefix = prefix.strip("/")
+    bucket_uri = f"hf://buckets/{bucket_id}/{prefix}"
+
+    helper_python = _bucket_sync_helper_python()
+    if helper_python:
+        env = {
+            **os.environ,
+            "HF_TOKEN": token or os.environ.get("HF_TOKEN", ""),
+            "HF_API_KEY": token or os.environ.get("HF_API_KEY", ""),
+        }
+        try:
+            subprocess.run(
+                [helper_python, str(_bucket_sync_helper_script()), str(local_dir), bucket_uri],
+                check=True,
+                env=env,
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"HF bucket sync failed for {bucket_id}/{prefix}: {exc}"
+            ) from exc
+
+    bucket_id = ensure_hf_bucket(bucket_id, token=token)
 
     try:
         from huggingface_hub import sync_bucket  # type: ignore
