@@ -37,6 +37,7 @@ from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
+    load_project_deps,
     resolve_repo_source,
     estimate_cost,
     get_gpu_display_name,
@@ -272,7 +273,7 @@ class RunPodBackend(ITrainingBackend):
             gpu_count = runpod_config.get("gpu_count", 1)
             image = runpod_config.get(
                 "default_image",
-                "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+                "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
             )
             container_disk_gb = runpod_config.get("container_disk_in_gb", 50)
             cloud_type = runpod_config.get("cloud_type", "COMMUNITY")
@@ -406,9 +407,9 @@ class RunPodBackend(ITrainingBackend):
         """
         Build the docker startup command for the training pod.
 
-        Chains: dependency install -> git clone -> run training script.
-        Training scripts push results to HF Hub using HF_TOKEN from
-        the pod environment.
+        The unsloth Docker image provides unsloth, transformers, trl, torch
+        and CUDA pre-installed. Only project-specific deps are pip-installed.
+        Chains: pip install project deps -> git clone -> run training script.
 
         Args:
             config: Training configuration.
@@ -417,11 +418,6 @@ class RunPodBackend(ITrainingBackend):
         Returns:
             Shell command string for docker_args.
         """
-        setup_commands = runpod_config.get("setup_commands", [
-            "pip install unsloth transformers trl huggingface_hub "
-            "python-dotenv datasets peft"
-        ])
-
         target_dir = "/workspace/repo"
         trainer_subdir = f"Trainers/{get_canonical_trainer_dir_name(config.method)}"
         run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -437,7 +433,18 @@ class RunPodBackend(ITrainingBackend):
         if config.repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
             clone_url = config.repo_url.replace("https://", "https://$GH_TOKEN@")
 
-        parts = list(setup_commands)
+        # Read project-specific deps from cloud_config.yaml (single source of truth)
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        project_deps = load_project_deps(cloud_config_path)
+
+        parts = []
+
+        # Install only project-specific deps (unsloth/torch/trl pre-installed
+        # in image). Also honour any extra_setup_commands from config.
+        parts.append(f"pip install {' '.join(project_deps)}")
+        extra_commands = runpod_config.get("extra_setup_commands", [])
+        parts.extend(extra_commands)
+
         parts.append(f"git clone --branch {config.repo_branch} --depth 1 {clone_url} {target_dir}")
         parts.append(f"cd {target_dir} && git checkout {config.repo_commit}")
         parts.append(f"cd {target_dir}/{trainer_subdir}")

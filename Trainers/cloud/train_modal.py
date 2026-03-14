@@ -73,19 +73,27 @@ OUTPUT_MOUNT_PATH = os.environ.get("MODAL_OUTPUT_MOUNT_PATH", "/vol/artifacts")
 # Using debian_slim as the base keeps the image small while providing
 # a stable foundation. Dependencies are installed via pip_install since
 # unsloth has complex CUDA dependency resolution that works better with pip.
+#
+# Version pins follow Modal's official unsloth example pattern. The CUDA 12.8 /
+# PyTorch 2.7.0 extras align with the unsloth Docker image used by HF Jobs and
+# RunPod (see cloud_config.yaml). Update these together when upgrading unsloth.
 training_image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
-        "torch>=2.4.0",
-        "unsloth[cu124-torch240] @ git+https://github.com/unslothai/unsloth.git",
-        "trl>=0.15",
-        "transformers>=4.46",
-        "datasets",
-        "peft",
-        "accelerate",
-        "bitsandbytes",
-        "huggingface_hub>=0.25",
+        # Core ML stack — pinned to exact versions for reproducibility
+        "torch==2.7.0",
+        "unsloth[cu128-torch270]==2025.7.8",
+        "trl==0.19.1",
+        "transformers==4.54.0",
+        "datasets==3.6.0",
+        "peft==0.15.2",
+        "accelerate==1.6.0",
+        "bitsandbytes==0.45.5",
+        "huggingface_hub==0.30.2",
+        # Project utilities — lighter deps, less sensitive to version drift
         "pyyaml",
+        "wandb",
+        "hf_transfer",
         "python-dotenv",
         "rich",
     )

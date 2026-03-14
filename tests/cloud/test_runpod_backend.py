@@ -393,9 +393,13 @@ class TestBuildStartupCommand:
     def test_command_structure(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
         config = _cloud_config()
-        runpod_config = {"setup_commands": ["pip install torch"]}
+        runpod_config = {}
         cmd = backend._build_startup_command(config, runpod_config)
-        assert "pip install torch" in cmd
+        # Verify project-specific deps are installed (not full unsloth stack)
+        assert "pip install pyyaml wandb hf_transfer python-dotenv rich" in cmd
+        assert "unsloth" not in cmd
+        assert "transformers" not in cmd
+        assert "trl" not in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
         assert "Trainers/sft" in cmd
@@ -417,7 +421,7 @@ class TestBuildStartupCommand:
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
         config = _cloud_config(repo_url="")
-        runpod_config = {"setup_commands": ["pip install torch"]}
+        runpod_config = {}
         with pytest.raises(CloudProviderError, match="exact repo source metadata"):
             backend._build_startup_command(config, runpod_config)
 

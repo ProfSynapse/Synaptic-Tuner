@@ -130,7 +130,7 @@ class TestHFJobsLoadConfig:
         assert config.gpu_type == "a10g-small"
         assert config.hf_flavor == "a10g-small"
         assert config.timeout_hours == 4.0
-        assert config.cloud_image == "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel"
+        assert config.cloud_image == "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
         assert config.model_name == "test-org/test-model-sft"
         assert config.artifact_backend == "hf_bucket"
         assert config.artifact_identifier == "toolset-training-artifacts"

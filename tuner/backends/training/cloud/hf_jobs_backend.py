@@ -27,14 +27,14 @@ from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
-from .base_cloud import load_cloud_config, poll_until_done, resolve_repo_source
+from .base_cloud import load_cloud_config, load_project_deps, poll_until_done, resolve_repo_source
 
 logger = logging.getLogger(__name__)
 
 # Default HF Jobs settings
 DEFAULT_FLAVOR = "a10g-small"
 DEFAULT_TIMEOUT = "4h"
-DEFAULT_IMAGE = "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel"
+DEFAULT_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
 
 
 class HFJobsBackend(ITrainingBackend):
@@ -348,10 +348,14 @@ class HFJobsBackend(ITrainingBackend):
         run_slug = f"{timestamp}-{config.repo_commit[:8]}"
         artifact_prefix = f"runs/{config.provider}/{config.method}/{run_slug}"
 
+        # Read project-specific deps from cloud_config.yaml (single source of truth)
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        project_deps = load_project_deps(cloud_config_path)
+
         parts = [
-            # Install training dependencies
-            "pip install unsloth trl>=0.15 transformers datasets peft "
-            "pyyaml wandb hf_transfer python-dotenv",
+            # Install project-specific deps only; unsloth, trl, transformers,
+            # datasets, peft, and PyTorch are pre-installed in the Docker image
+            f"pip install {' '.join(project_deps)}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

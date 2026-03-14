@@ -35,7 +35,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from tuner.backends.training.cloud.base_cloud import resolve_repo_url  # noqa: E402
+from tuner.backends.training.cloud.base_cloud import load_project_deps, resolve_repo_url  # noqa: E402
 from shared.utilities.paths import get_canonical_trainer_dir_name  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -167,19 +167,22 @@ VALID_METHODS = {"sft", "kto"}
 
 def build_training_startup_command(
     method: str,
-    setup_commands: Optional[list] = None,
+    extra_setup_commands: Optional[list] = None,
     repo_url: Optional[str] = None,
     target_dir: str = "/workspace/repo",
 ) -> str:
     """
     Build the full startup command for a RunPod training pod.
 
-    Chains together: dependency installation, repo clone, and training
-    script execution into a single shell command for docker_args.
+    The unsloth Docker image provides unsloth, transformers, trl, torch
+    and CUDA pre-installed. Only project-specific deps are pip-installed.
+    Chains: pip install project deps -> repo clone -> training script.
 
     Args:
         method: Training method ('sft' or 'kto').
-        setup_commands: List of setup commands (pip installs, etc.).
+        extra_setup_commands: Optional additional setup commands to run
+            after the standard project deps install (e.g. custom pip
+            packages for experiments).
         repo_url: Optional override for the repo URL.
         target_dir: Directory on the pod to clone into.
 
@@ -198,10 +201,18 @@ def build_training_startup_command(
     url = repo_url or resolve_repo_url()
     clone_cmd = _build_clone_command(url, target_dir)
 
+    # Read project-specific deps from cloud_config.yaml (single source of truth)
+    config_path = Path(__file__).resolve().parent / "cloud_config.yaml"
+    project_deps = load_project_deps(config_path)
+
     parts = []
 
-    if setup_commands:
-        parts.extend(setup_commands)
+    # Install only project-specific deps (unsloth/torch/trl pre-installed
+    # in the Docker image)
+    parts.append(f"pip install {' '.join(project_deps)}")
+
+    if extra_setup_commands:
+        parts.extend(extra_setup_commands)
 
     parts.append(clone_cmd)
 

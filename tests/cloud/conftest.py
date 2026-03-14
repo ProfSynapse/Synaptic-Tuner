@@ -59,6 +59,17 @@ def repo_root(tmp_path):
     cloud_dir.mkdir(parents=True)
 
     cloud_config = {
+        "dependencies": {
+            "docker_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
+            "project_pip_deps": [
+                "pyyaml",
+                "wandb",
+                "hf_transfer",
+                "python-dotenv",
+                "rich",
+            ],
+            "extra_setup_commands": [],
+        },
         "pricing": {
             "hf_jobs": {
                 "t4-small": {"name": "T4 (16GB)", "price": 0.40},
@@ -91,7 +102,7 @@ def repo_root(tmp_path):
             "hf_jobs": {
                 "flavor": "a10g-small",
                 "timeout": "4h",
-                "image": "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
+                "image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
                 "artifact_backend": "hf_bucket",
                 "artifact_identifier": "toolset-training-artifacts",
                 "output_root": "/workspace/outputs",
@@ -110,7 +121,7 @@ def repo_root(tmp_path):
                 "volume_in_gb": 50,
                 "container_disk_in_gb": 50,
                 "cloud_type": "SECURE",
-                "default_image": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+                "default_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
                 "default_timeout": 7200,
                 "artifact_backend": "runpod_network_volume",
                 "network_volume_id": "runpod-vol-123",
