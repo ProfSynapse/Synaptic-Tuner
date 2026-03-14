@@ -374,15 +374,26 @@ After agent reviews completed:
 - Synthesize findings and recommendations in `docs/review/` (note agreements and conflicts)
 - Execute `/PACT:pin-memory`
 
+<!-- SESSION_START -->
+## Current Session
+<!-- Auto-managed by session_init hook. Overwritten each session. -->
+- Resume: `claude --resume a5318eed-9691-4bea-a18f-b6b7f619072c`
+- Team: `pact-a5318eed`
+- Started: 2026-03-14 17:30:01 UTC
+<!-- SESSION_END -->
+
 ## Retrieved Context
 <!-- Auto-managed by pact-memory skill. Last 5 retrieved memories shown. -->
 
 ## Working Memory
-<!-- Auto-managed by pact-memory skill. Last 7 memories shown. Full history searchable via pact-memory skill. -->
+<!-- Auto-managed by pact-memory skill. Last 3 memories shown. Full history searchable via pact-memory skill. -->
 
-
-Quick reference for Claude Code when working in this repository.
-
+### 2026-03-14 17:50
+**Context**: Working on the Synthetic Conversations project (ML pipeline for LLM fine-tuning with SFT/KTO training). PR #62 was merged to fix cloud training dependency management across three backends: HuggingFace Jobs, RunPod, and Modal. The fix addressed a fragmented dependency specification problem where each cloud backend was independently managing its own Python package lists, leading to environment drift and incompatible torch/unsloth versions at runtime. The work was done on a feature branch and merged to main. The codebase uses unsloth for efficient fine-tuning and targets CUDA 12.8 with PyTorch 2.9.0.
+**Goal**: Establish a single source of truth for cloud training dependencies across all three backends (HF Jobs, RunPod, Modal), eliminating environment drift and ensuring reproducible training runs in cloud environments.
+**Decisions**: Use unsloth/unsloth Docker image (digest-pinned) for HF Jobs and RunPod backends, Single source of truth: project deps in cloud_config.yaml, backends read via load_project_deps() in base_cloud.py, Modal uses unsloth[cu128-torch270]==2025.7.8, trl==0.19.1, transformers==4.54.0 via pinned pip
+**Lessons**: PyTorch Docker images (e.g., pytorch/pytorch base images) do not include git by default — this causes failures when pip tries to install packages from git URLs or when any training code clones repos at startup. Always verify git availability or use images that bundle it (like unsloth/unsloth)., Unsloth pip install without version pinning pulls incompatible torch versions as transitive dependencies, overwriting the torch already in the environment. Always pin unsloth with its CUDA/torch variant suffix (e.g., unsloth[cu128-torch270]==2025.7.8) to prevent torch downgrade., RunPod was silently failing due to an old CUDA 11.8 image — the mismatch between the image CUDA version and the code assumptions was a hidden failure point that only surfaced at runtime. Always verify the CUDA version of the base image matches the CUDA version in dependency specs., Using a digest-pinned Docker image (unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update) for HF Jobs and RunPod provides reproducibility: the same image hash guarantees the same environment regardless of tag mutation., A hybrid strategy makes sense when backends have different constraints: Docker image for HF Jobs and RunPod (where container control is available), pinned pip packages for Modal (which has its own image building system).
+**Memory ID**: 1c172f3cec2054a15055ac0056cfd04f
 ---
 
 ## AI Assistant Quick Reference
