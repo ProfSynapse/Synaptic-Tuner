@@ -230,3 +230,23 @@ def test_sync_directory_to_hf_bucket_raises_real_sync_error(tmp_path):
                 "runs/hf_jobs/sft/20260314_120000-abcdef12",
                 token="hf_test_token",
             )
+
+
+def test_sync_directory_to_hf_bucket_helper_omits_blank_auth_env(tmp_path, monkeypatch):
+    local_dir = tmp_path / "run"
+    local_dir.mkdir()
+
+    monkeypatch.setenv("HF_BUCKET_SYNC_PYTHON", "/usr/bin/python3")
+    monkeypatch.setenv("HF_TOKEN", "   ")
+    monkeypatch.setenv("HF_API_KEY", "")
+
+    with patch("shared.cloud_artifacts.subprocess.run") as mock_run:
+        sync_directory_to_hf_bucket(
+            local_dir,
+            "toolset-training-artifacts",
+            "runs/hf_jobs/sft/20260314_120000-abcdef12",
+        )
+
+    helper_env = mock_run.call_args.kwargs["env"]
+    assert "HF_TOKEN" not in helper_env
+    assert "HF_API_KEY" not in helper_env

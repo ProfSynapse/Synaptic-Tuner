@@ -269,9 +269,18 @@ class HFJobsBackend(ITrainingBackend):
         logger.info("Timeout: %.1f hours", config.timeout_hours)
 
         try:
+            hf_token = get_hf_token()
             job = huggingface_hub.run_job(
                 image=image,
                 command=["bash", "-c", training_command],
+                secrets=(
+                    {
+                        "HF_TOKEN": hf_token,
+                        "HF_API_KEY": hf_token,
+                    }
+                    if hf_token
+                    else None
+                ),
                 flavor=flavor,
             )
             # JobInfo has .id and .url attributes

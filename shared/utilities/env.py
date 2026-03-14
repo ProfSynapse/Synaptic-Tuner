@@ -73,4 +73,11 @@ def get_hf_token() -> Optional[str]:
     Returns:
         HuggingFace token or None
     """
-    return os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+    for key in ("HF_TOKEN", "HF_API_KEY"):
+        value = os.environ.get(key)
+        if value is None:
+            continue
+        value = value.strip()
+        if value:
+            return value
+    return None

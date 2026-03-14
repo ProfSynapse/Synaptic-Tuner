@@ -9,6 +9,13 @@ import os
 import sys
 
 
+def _normalize_token(token: str | None) -> str | None:
+    if token is None:
+        return None
+    token = token.strip()
+    return token or None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync a local directory to a Hugging Face Bucket.")
     parser.add_argument("local_dir")
@@ -19,7 +26,7 @@ def main() -> int:
 
     from huggingface_hub import sync_bucket
 
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+    token = _normalize_token(os.environ.get("HF_TOKEN")) or _normalize_token(os.environ.get("HF_API_KEY"))
     sync_bucket(
         args.local_dir,
         args.bucket_uri,

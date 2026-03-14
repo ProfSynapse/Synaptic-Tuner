@@ -227,6 +227,10 @@ class TestHFJobsExecute:
             private=True,
             token="hf_test_token_12345",
         )
+        assert mock_hub.run_job.call_args.kwargs["secrets"] == {
+            "HF_TOKEN": "hf_test_token_12345",
+            "HF_API_KEY": "hf_test_token_12345",
+        }
         submitted_command = mock_hub.run_job.call_args.kwargs["command"][2]
         assert "--artifact-bucket test-user/toolset-training-artifacts" in submitted_command
 

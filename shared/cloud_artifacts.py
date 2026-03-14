@@ -19,6 +19,14 @@ from transformers import TrainerCallback
 _HF_BUCKET_CACHE: Dict[str, str] = {}
 
 
+def _normalize_token_value(token: Optional[str]) -> Optional[str]:
+    """Normalize optional auth tokens, treating blank strings as unset."""
+    if token is None:
+        return None
+    token = token.strip()
+    return token or None
+
+
 def _bucket_sync_helper_python() -> Optional[str]:
     """Return the isolated Python interpreter for bucket sync, if configured."""
     helper_python = os.environ.get("HF_BUCKET_SYNC_PYTHON", "").strip()
@@ -152,14 +160,22 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
     bucket_id = normalize_hf_bucket_id(bucket_id)
     prefix = prefix.strip("/")
     bucket_uri = f"hf://buckets/{bucket_id}/{prefix}"
+    token = _normalize_token_value(token)
 
     helper_python = _bucket_sync_helper_python()
     if helper_python:
-        env = {
-            **os.environ,
-            "HF_TOKEN": token or os.environ.get("HF_TOKEN", ""),
-            "HF_API_KEY": token or os.environ.get("HF_API_KEY", ""),
-        }
+        env = dict(os.environ)
+        env_token = (
+            token
+            or _normalize_token_value(env.get("HF_TOKEN"))
+            or _normalize_token_value(env.get("HF_API_KEY"))
+        )
+        if env_token:
+            env["HF_TOKEN"] = env_token
+            env["HF_API_KEY"] = env_token
+        else:
+            env.pop("HF_TOKEN", None)
+            env.pop("HF_API_KEY", None)
         helper_pythonpath = _bucket_sync_helper_pythonpath()
         if helper_pythonpath:
             existing_pythonpath = env.get("PYTHONPATH", "")
