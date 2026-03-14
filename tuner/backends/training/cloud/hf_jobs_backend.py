@@ -278,7 +278,7 @@ class HFJobsBackend(ITrainingBackend):
         def check_status():
             nonlocal last_log_offset
             try:
-                job_info = huggingface_hub.inspect_job(job_id)
+                job_info = huggingface_hub.inspect_job(job_id=job_id)
                 # JobInfo.status is a JobStatus with .stage attribute
                 status_obj = getattr(job_info, "status", None)
                 if status_obj and hasattr(status_obj, "stage"):
@@ -288,7 +288,7 @@ class HFJobsBackend(ITrainingBackend):
 
                 # Stream logs (best-effort)
                 try:
-                    logs = huggingface_hub.fetch_job_logs(job_id)
+                    logs = huggingface_hub.fetch_job_logs(job_id=job_id)
                     if logs and len(logs) > last_log_offset:
                         new_logs = logs[last_log_offset:]
                         print(new_logs, end="", flush=True)
