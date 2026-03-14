@@ -9,17 +9,17 @@ model:
   # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
   # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
   # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "unsloth/Qwen3.5-2B"
+  model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
 
   # Model parameters
-  max_seq_length: 2048
+  max_seq_length: 4096
   dtype: null  # Auto-detection
   load_in_4bit: false  # Qwen3.5 smoke test: use non-4bit path so local and HF Jobs match
 
 # LoRA Adapter Configuration
 lora:
-  r: 16
-  lora_alpha: 16
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0
   bias: "none"
   target_modules:
@@ -49,7 +49,7 @@ training:
   lr_scheduler_type: "linear"
 
   # SFT-specific parameters
-  max_seq_length: 2048
+  max_seq_length: 4096
   packing: false  # Pack multiple examples per sequence (2.5-5x faster training!)
   completion_only_loss: true  # Train only on assistant completions
   assistant_only_loss: false  # For multi-turn (not needed here)
