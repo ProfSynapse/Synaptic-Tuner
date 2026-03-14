@@ -1,0 +1,154 @@
+"""
+Cloud artifact helpers shared by training scripts and cloud backends.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from transformers import TrainerCallback
+
+
+@dataclass
+class RunPaths:
+    """Canonical run paths for cloud training outputs."""
+
+    run_dir: Path
+    checkpoints_dir: Path
+    logs_dir: Path
+    final_model_dir: Path
+    lineage_path: Path
+    manifest_path: Path
+
+
+def build_run_paths(base_output_dir: Path, provider: str, method: str, timestamp: str, commit: str) -> RunPaths:
+    """Build the canonical run layout used by cloud providers."""
+    short_sha = (commit or "local")[:8]
+    run_dir = base_output_dir / "runs" / provider / method / f"{timestamp}-{short_sha}"
+    return RunPaths(
+        run_dir=run_dir,
+        checkpoints_dir=run_dir / "checkpoints",
+        logs_dir=run_dir / "logs",
+        final_model_dir=run_dir / "final_model",
+        lineage_path=run_dir / "training_lineage.json",
+        manifest_path=run_dir / "manifest.json",
+    )
+
+
+def write_manifest(path: Path, payload: Dict[str, Any]) -> None:
+    """Write a manifest file using stable JSON formatting."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def build_manifest(
+    *,
+    provider: str,
+    method: str,
+    artifact_backend: str,
+    artifact_identifier: Optional[str],
+    run_paths: RunPaths,
+    repo_branch: Optional[str],
+    repo_commit: Optional[str],
+    publish_final_model: bool,
+    publish_target_repo: Optional[str],
+    status: str,
+) -> Dict[str, Any]:
+    """Build the canonical cloud run manifest."""
+    return {
+        "provider": provider,
+        "method": method,
+        "status": status,
+        "artifact_backend": artifact_backend,
+        "artifact_identifier": artifact_identifier,
+        "publish_final_model": publish_final_model,
+        "publish_target_repo": publish_target_repo,
+        "repo_branch": repo_branch,
+        "repo_commit": repo_commit,
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "paths": {
+            "run_dir": str(run_paths.run_dir),
+            "checkpoints_dir": str(run_paths.checkpoints_dir),
+            "logs_dir": str(run_paths.logs_dir),
+            "final_model_dir": str(run_paths.final_model_dir),
+            "training_lineage": str(run_paths.lineage_path),
+        },
+    }
+
+
+def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> None:
+    """Best-effort bucket creation. No-op when the SDK lacks bucket helpers."""
+    try:
+        from huggingface_hub import create_bucket  # type: ignore
+    except ImportError:
+        return
+    except Exception:
+        return
+
+    try:
+        create_bucket(bucket_id, exist_ok=True, token=token)
+    except TypeError:
+        create_bucket(bucket_id, token=token)
+
+
+def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None) -> None:
+    """Sync a local directory into a Hugging Face Bucket."""
+    local_dir = Path(local_dir)
+    prefix = prefix.strip("/")
+
+    try:
+        from huggingface_hub import sync_bucket  # type: ignore
+
+        sync_bucket(
+            local_folder=str(local_dir),
+            bucket_path=f"hf://buckets/{bucket_id}/{prefix}",
+            token=token,
+        )
+        return
+    except Exception:
+        pass
+
+    from huggingface_hub import HfFileSystem
+
+    fs = HfFileSystem(token=token)
+    bucket_root = f"hf://buckets/{bucket_id}/{prefix}".rstrip("/")
+    fs.makedirs(bucket_root, exist_ok=True)
+
+    for path in sorted(local_dir.rglob("*")):
+        relative = path.relative_to(local_dir).as_posix()
+        remote_path = f"{bucket_root}/{relative}" if relative else bucket_root
+        if path.is_dir():
+            fs.makedirs(remote_path, exist_ok=True)
+            continue
+        with path.open("rb") as src, fs.open(remote_path, "wb") as dst:
+            dst.write(src.read())
+
+
+def publish_final_model_to_hub(final_model_dir: Path, repo_id: str, token: str, private: bool = True) -> None:
+    """Upload a final model directory to a Hugging Face model repo."""
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    api.create_repo(repo_id=repo_id, exist_ok=True, private=private)
+    api.upload_folder(
+        folder_path=str(final_model_dir),
+        repo_id=repo_id,
+        commit_message="Upload final model from cloud training",
+    )
+
+
+class HFBucketSyncCallback(TrainerCallback):
+    """Checkpoint-triggered sync for HF Jobs bucket persistence."""
+
+    def __init__(self, run_dir: Path, bucket_id: str, prefix: str, token: Optional[str] = None):
+        self.run_dir = Path(run_dir)
+        self.bucket_id = bucket_id
+        self.prefix = prefix
+        self.token = token
+
+    def on_save(self, args, state, control, **kwargs):
+        sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)

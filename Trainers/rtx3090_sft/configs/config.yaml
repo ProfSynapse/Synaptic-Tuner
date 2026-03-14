@@ -9,12 +9,12 @@ model:
   # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
   # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
   # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
-  model_name: "LiquidAI/LFM2.5-1.2B-Instruct"
+  model_name: "unsloth/Qwen3.5-2B"
 
   # Model parameters
-  max_seq_length: 4096
+  max_seq_length: 2048
   dtype: null  # Auto-detection
-  load_in_4bit: false  # Disabled: LFM2.5 LIV convolution blocks incompatible with bnb-4bit
+  load_in_4bit: false  # Qwen3.5 smoke test: use non-4bit path so local and HF Jobs match
 
 # LoRA Adapter Configuration
 lora:
@@ -40,7 +40,7 @@ training:
   output_dir: "./sft_output_rtx3090"
 
   # Batch configuration
-  per_device_train_batch_size: 2
+  per_device_train_batch_size: 8
   gradient_accumulation_steps: 4  
 
   # Learning rate
@@ -49,7 +49,7 @@ training:
   lr_scheduler_type: "linear"
 
   # SFT-specific parameters
-  max_seq_length: 4096
+  max_seq_length: 2048
   packing: false  # Pack multiple examples per sequence (2.5-5x faster training!)
   completion_only_loss: true  # Train only on assistant completions
   assistant_only_loss: false  # For multi-turn (not needed here)
@@ -60,8 +60,8 @@ training:
   fp16: false  # Set dynamically based on GPU
   bf16: true  # RTX 3090 supports BF16 (Ampere)
 
-  # Training schedule - Multi-epoch for better learning
-  num_train_epochs: 1  # vs KTO's 1 (more epochs to internalize patterns)
+  # Training schedule - smoke test defaults for Qwen3.5-2B on 24GB-class GPUs
+  num_train_epochs: 1
   warmup_ratio: 0.02  # ~5 warmup steps out of ~233 total
 
   # Logging and saving
@@ -81,11 +81,13 @@ training:
 # Dataset Configuration
 dataset:
   # Dataset source
-  dataset_name: "professorsynapse/nexus-synthetic-dataset"
-  dataset_file: "brainstorm_outline_96essays_test_20260214_110012_train.jsonl"
+  dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
+  dataset_file: "nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl"
 
   # Use local file (relative to Trainers/rtx3090_sft/)
-  local_file: "../../Datasets/nonthinking_tools_sft_01.02.26.jsonl"
+  # Leave null by default so cloud jobs use the HuggingFace dataset above.
+  # For local smoke tests, pass --local-file ../../Datasets/nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
+  local_file: null
 
   # Dataset processing
   num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues

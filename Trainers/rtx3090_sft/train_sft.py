@@ -113,6 +113,14 @@ from src.training_callbacks import (
     suppress_training_logs,
     DASHBOARD_AVAILABLE,
 )
+from shared.cloud_artifacts import (
+    HFBucketSyncCallback,
+    build_manifest,
+    build_run_paths,
+    publish_final_model_to_hub,
+    sync_directory_to_hf_bucket,
+    write_manifest,
+)
 
 # Evolutionary training (optional)
 try:
@@ -482,6 +490,24 @@ def parse_args(argv=None):
                        help="Resume from checkpoint path")
     parser.add_argument("--hf-token", type=str,
                        help="HuggingFace API token (or set HF_TOKEN env var)")
+    parser.add_argument("--output-root", type=str,
+                       help="Override root directory for training outputs")
+    parser.add_argument("--cloud-provider", type=str,
+                       choices=["hf_jobs", "modal", "runpod"],
+                       help="Cloud provider identifier for canonical cloud run layout")
+    parser.add_argument("--artifact-backend", type=str,
+                       choices=["hf_bucket", "modal_volume", "runpod_network_volume"],
+                       help="Provider-native artifact backend")
+    parser.add_argument("--artifact-bucket", type=str,
+                       help="Hugging Face Bucket identifier used by HF Jobs")
+    parser.add_argument("--artifact-prefix", type=str,
+                       help="Bucket prefix for this run")
+    parser.add_argument("--publish-final-model", action="store_true",
+                       help="Publish final_model to Hugging Face Hub after training")
+    parser.add_argument("--publish-target-repo", type=str,
+                       help="Target Hugging Face model repo when publishing final_model")
+    parser.add_argument("--run-timestamp", type=str,
+                       help="Explicit run timestamp for canonical cloud run layout")
 
     # UI options
     parser.add_argument("--no-dashboard", action="store_true",
@@ -500,6 +526,7 @@ def run(args: argparse.Namespace):
         "run_dir": None,
         "final_model_dir": None,
         "logs_dir": None,
+        "manifest_path": None,
         "config_path": args.config,
     }
 
@@ -564,16 +591,52 @@ def run(args: argparse.Namespace):
     # Validate model compatibility BEFORE loading model
     validate_model_compatibility(config)
 
-    # Create timestamped run directory (following KTO pattern)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_output_dir = Path(config.training.output_dir)
-    run_dir = base_output_dir / timestamp
+    repo_branch = os.environ.get("CLOUD_REPO_BRANCH")
+    repo_commit = os.environ.get("CLOUD_REPO_COMMIT")
+    artifact_identifier = args.artifact_bucket or os.environ.get("CLOUD_ARTIFACT_IDENTIFIER")
 
-    # Create subdirectories for this run
-    checkpoints_dir = run_dir / "checkpoints"
-    logs_dir = run_dir / "logs"
-    checkpoints_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    # Create timestamped run directory (following KTO pattern)
+    timestamp = args.run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_output_dir = Path(args.output_root) if args.output_root else Path(config.training.output_dir)
+    if args.cloud_provider:
+        run_paths = build_run_paths(
+            base_output_dir=base_output_dir,
+            provider=args.cloud_provider,
+            method="sft",
+            timestamp=timestamp,
+            commit=repo_commit or "local",
+        )
+        run_dir = run_paths.run_dir
+        checkpoints_dir = run_paths.checkpoints_dir
+        logs_dir = run_paths.logs_dir
+        final_model_path = run_paths.final_model_dir
+        lineage_path = run_paths.lineage_path
+        manifest_path = run_paths.manifest_path
+        for path in (run_dir, checkpoints_dir, logs_dir):
+            path.mkdir(parents=True, exist_ok=True)
+        manifest = build_manifest(
+            provider=args.cloud_provider,
+            method="sft",
+            artifact_backend=args.artifact_backend or "",
+            artifact_identifier=artifact_identifier,
+            run_paths=run_paths,
+            repo_branch=repo_branch,
+            repo_commit=repo_commit,
+            publish_final_model=args.publish_final_model,
+            publish_target_repo=args.publish_target_repo,
+            status="running",
+        )
+        write_manifest(manifest_path, manifest)
+        run_metadata["manifest_path"] = str(manifest_path)
+    else:
+        run_dir = base_output_dir / timestamp
+        checkpoints_dir = run_dir / "checkpoints"
+        logs_dir = run_dir / "logs"
+        final_model_path = run_dir / "final_model"
+        lineage_path = run_dir / "training_lineage.json"
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = None
 
     # Update config to use checkpoints directory (trainer saves here)
     config.training.output_dir = str(checkpoints_dir)
@@ -584,7 +647,7 @@ def run(args: argparse.Namespace):
     run_metadata.update(
         {
             "run_dir": str(run_dir),
-            "final_model_dir": str(run_dir / "final_model"),
+            "final_model_dir": str(final_model_path),
             "logs_dir": str(logs_dir),
         }
     )
@@ -855,6 +918,15 @@ def run(args: argparse.Namespace):
             ),
             CheckpointMonitorCallback()
         ]
+    if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+        callbacks.append(
+            HFBucketSyncCallback(
+                run_dir=run_dir,
+                bucket_id=args.artifact_bucket,
+                prefix=args.artifact_prefix,
+                token=args.hf_token,
+            )
+        )
 
     # Apply log suppression for trainer initialization if quiet mode
     if use_quiet_mode:
@@ -931,10 +1003,35 @@ def run(args: argparse.Namespace):
     training_start_time = time.time()
 
     # Use evolutionary wrapper if enabled, otherwise standard training
-    if evo_wrapper:
-        evo_wrapper.train(resume_from_checkpoint=args.resume_from_checkpoint)
-    else:
-        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    training_failed = False
+    failure_message = None
+    try:
+        if evo_wrapper:
+            evo_wrapper.train(resume_from_checkpoint=args.resume_from_checkpoint)
+        else:
+            trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    except Exception as exc:
+        training_failed = True
+        failure_message = str(exc)
+        if manifest_path:
+            write_manifest(
+                manifest_path,
+                build_manifest(
+                    provider=args.cloud_provider or "local",
+                    method="sft",
+                    artifact_backend=args.artifact_backend or "",
+                    artifact_identifier=artifact_identifier,
+                    run_paths=run_paths,
+                    repo_branch=repo_branch,
+                    repo_commit=repo_commit,
+                    publish_final_model=args.publish_final_model,
+                    publish_target_repo=args.publish_target_repo,
+                    status=f"failed: {failure_message}",
+                ),
+            )
+            if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+                sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
+        raise
 
     training_end_time = time.time()
     training_time_seconds = training_end_time - training_start_time
@@ -944,7 +1041,6 @@ def run(args: argparse.Namespace):
     print("=" * 60)
 
     # Save final model
-    final_model_path = run_dir / "final_model"
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
 
@@ -963,8 +1059,35 @@ def run(args: argparse.Namespace):
         args=args,
         training_time_seconds=training_time_seconds
     )
-    lineage_path = save_training_lineage(lineage, run_dir)
-    run_metadata["lineage_path"] = str(lineage_path)
+    actual_lineage_path = save_training_lineage(lineage, run_dir)
+    run_metadata["lineage_path"] = str(actual_lineage_path)
+
+    if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+        sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
+
+    if args.publish_final_model and args.publish_target_repo:
+        if not args.hf_token:
+            raise RuntimeError("Publishing final_model requires HF_TOKEN or --hf-token.")
+        publish_final_model_to_hub(final_model_path, args.publish_target_repo, args.hf_token)
+
+    if manifest_path:
+        write_manifest(
+            manifest_path,
+            build_manifest(
+                provider=args.cloud_provider,
+                method="sft",
+                artifact_backend=args.artifact_backend or "",
+                artifact_identifier=artifact_identifier,
+                run_paths=run_paths,
+                repo_branch=repo_branch,
+                repo_commit=repo_commit,
+                publish_final_model=args.publish_final_model,
+                publish_target_repo=args.publish_target_repo,
+                status="completed",
+            ),
+        )
+        if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+            sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
 
     # Final GPU memory check
     print()

@@ -7,6 +7,7 @@ Used by: Main entry point (cli/main.py)
 
 Routes top-level commands to their handlers:
   - train: TrainHandler (SFT, KTO, GRPO workflows)
+  - cloud: CloudTrainHandler (cloud GPU training via HF Jobs, Modal, RunPod)
   - eval: EvalHandler (model evaluation)
   - synthchat: SynthChatHandler (data generation and improvement)
   - modelops: ModelOpsHandler (run, merge, convert, upload)
@@ -128,6 +129,12 @@ def route_command(args: Namespace) -> int:
         handler = ListHandler(subcommand=list_subcommand, output_json=json_mode)
         return handler.handle()
 
+    # Import cloud handler (conditional - may not have deps)
+    try:
+        from tuner.handlers.cloud_train_handler import CloudTrainHandler
+    except ImportError:
+        CloudTrainHandler = None
+
     # Map commands to handlers
     handlers = {
         'train': TrainHandler,
@@ -135,6 +142,8 @@ def route_command(args: Namespace) -> int:
         'synthchat': SynthChatHandler,
         'modelops': ModelOpsHandler,
     }
+    if CloudTrainHandler is not None:
+        handlers['cloud'] = CloudTrainHandler
 
     # Execute handler with args
     if command and command in handlers:

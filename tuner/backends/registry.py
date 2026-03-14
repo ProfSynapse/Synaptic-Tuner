@@ -213,3 +213,25 @@ EvaluationBackendRegistry.register("lmstudio", LMStudioBackend)
 EvaluationBackendRegistry.register("llamacpp", LlamaCppBackend)
 EvaluationBackendRegistry.register("unsloth", UnslothBackend)
 EvaluationBackendRegistry.register("mlc", MLCBackend)
+
+# Cloud backends (optional - registered only if SDK is available)
+try:
+    from tuner.backends.training.cloud import HFJobsBackend
+    if HFJobsBackend is not None:
+        TrainingBackendRegistry.register("hf_jobs", HFJobsBackend)
+except ImportError:
+    pass  # huggingface_hub not installed or too old
+
+try:
+    from tuner.backends.training.cloud import ModalBackend
+    if ModalBackend is not None:
+        TrainingBackendRegistry.register("modal", ModalBackend)
+except ImportError:
+    pass  # modal not installed
+
+try:
+    from tuner.backends.training.cloud import RunPodBackend
+    if RunPodBackend is not None:
+        TrainingBackendRegistry.register("runpod", RunPodBackend)
+except ImportError:
+    pass  # runpod not installed

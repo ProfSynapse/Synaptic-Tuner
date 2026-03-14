@@ -97,6 +97,14 @@ from src.model_loader import (
 from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, CheckpointMonitorCallback, TwoStageLRCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE
 from src.adaptive_memory import AdaptiveMemoryManager, get_adaptive_settings
 from src.debug_logger import TrainingDebugger
+from shared.cloud_artifacts import (
+    HFBucketSyncCallback,
+    build_manifest,
+    build_run_paths,
+    publish_final_model_to_hub,
+    sync_directory_to_hf_bucket,
+    write_manifest,
+)
 
 
 def setup_wandb():
@@ -467,6 +475,48 @@ def main():
         help="Override output directory"
     )
     parser.add_argument(
+        "--output-root",
+        type=str,
+        help="Override root directory for training outputs"
+    )
+    parser.add_argument(
+        "--cloud-provider",
+        type=str,
+        choices=["hf_jobs", "modal", "runpod"],
+        help="Cloud provider identifier for canonical cloud run layout"
+    )
+    parser.add_argument(
+        "--artifact-backend",
+        type=str,
+        choices=["hf_bucket", "modal_volume", "runpod_network_volume"],
+        help="Provider-native artifact backend"
+    )
+    parser.add_argument(
+        "--artifact-bucket",
+        type=str,
+        help="Hugging Face Bucket identifier used by HF Jobs"
+    )
+    parser.add_argument(
+        "--artifact-prefix",
+        type=str,
+        help="Bucket prefix for this run"
+    )
+    parser.add_argument(
+        "--publish-final-model",
+        action="store_true",
+        help="Publish final_model to Hugging Face Hub after training"
+    )
+    parser.add_argument(
+        "--publish-target-repo",
+        type=str,
+        help="Target Hugging Face model repo when publishing final_model"
+    )
+    parser.add_argument(
+        "--run-timestamp",
+        type=str,
+        help="Explicit run timestamp for canonical cloud run layout"
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         help="Override per_device_train_batch_size"
@@ -612,17 +662,52 @@ def main():
     print("Loading configuration from configs/config.yaml\n")
     config = load_config()
 
+    repo_branch = os.environ.get("CLOUD_REPO_BRANCH")
+    repo_commit = os.environ.get("CLOUD_REPO_COMMIT")
+    artifact_identifier = args.artifact_bucket or os.environ.get("CLOUD_ARTIFACT_IDENTIFIER")
+
     # Create timestamped run directory
     from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_output_dir = Path(config.training.output_dir)
-    run_dir = base_output_dir / timestamp
-
-    # Create subdirectories for this run
-    checkpoints_dir = run_dir / "checkpoints"
-    logs_dir = run_dir / "logs"
-    checkpoints_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = args.run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_output_dir = Path(args.output_root or args.output_dir or config.training.output_dir)
+    if args.cloud_provider:
+        run_paths = build_run_paths(
+            base_output_dir=base_output_dir,
+            provider=args.cloud_provider,
+            method="kto",
+            timestamp=timestamp,
+            commit=repo_commit or "local",
+        )
+        run_dir = run_paths.run_dir
+        checkpoints_dir = run_paths.checkpoints_dir
+        logs_dir = run_paths.logs_dir
+        output_path = run_paths.final_model_dir
+        manifest_path = run_paths.manifest_path
+        for path in (run_dir, checkpoints_dir, logs_dir):
+            path.mkdir(parents=True, exist_ok=True)
+        write_manifest(
+            manifest_path,
+            build_manifest(
+                provider=args.cloud_provider,
+                method="kto",
+                artifact_backend=args.artifact_backend or "",
+                artifact_identifier=artifact_identifier,
+                run_paths=run_paths,
+                repo_branch=repo_branch,
+                repo_commit=repo_commit,
+                publish_final_model=args.publish_final_model,
+                publish_target_repo=args.publish_target_repo,
+                status="running",
+            ),
+        )
+    else:
+        run_dir = base_output_dir / timestamp
+        checkpoints_dir = run_dir / "checkpoints"
+        logs_dir = run_dir / "logs"
+        output_path = run_dir / "final_model"
+        manifest_path = None
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
 
     # Update config to use timestamped directories
     config.training.output_dir = str(checkpoints_dir)
@@ -644,8 +729,6 @@ def main():
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
 
-    if args.output_dir:
-        config.training.output_dir = args.output_dir
     # Apply adaptive memory management if requested
     if args.adaptive_memory:
         print("\n" + "="*60)
@@ -701,6 +784,9 @@ def main():
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             config.wandb_run_name = f"{args.model_size}-{timestamp}"
+
+    if not args.hf_token:
+        args.hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
 
     # Load dataset - prioritize local_file from args, then config, then HuggingFace
     local_file_path = args.local_file or config.dataset.local_file
@@ -887,6 +973,15 @@ def main():
             ),
             CheckpointMonitorCallback()
         ]
+    if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+        callbacks.append(
+            HFBucketSyncCallback(
+                run_dir=run_dir,
+                bucket_id=args.artifact_bucket,
+                prefix=args.artifact_prefix,
+                token=args.hf_token,
+            )
+        )
 
     # Add two-stage LR callback if enabled
     if config.training.use_two_stage_lr:
@@ -1037,6 +1132,24 @@ def main():
             debugger.log_exception(trainer.state.global_step if hasattr(trainer, 'state') else -1,
                                   KeyboardInterrupt("User interrupted"))
             debugger.close()
+        if manifest_path:
+            write_manifest(
+                manifest_path,
+                build_manifest(
+                    provider=args.cloud_provider or "local",
+                    method="kto",
+                    artifact_backend=args.artifact_backend or "",
+                    artifact_identifier=artifact_identifier,
+                    run_paths=run_paths,
+                    repo_branch=repo_branch,
+                    repo_commit=repo_commit,
+                    publish_final_model=args.publish_final_model,
+                    publish_target_repo=args.publish_target_repo,
+                    status="interrupted",
+                ),
+            )
+            if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+                sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
         raise
     except Exception as e:
         print("\n" + "=" * 60)
@@ -1060,6 +1173,24 @@ def main():
         print("  5. Review logs above for specific error")
         if debugger:
             print(f"  6. Check debug log: {logs_dir}/training_debug.log")
+        if manifest_path:
+            write_manifest(
+                manifest_path,
+                build_manifest(
+                    provider=args.cloud_provider or "local",
+                    method="kto",
+                    artifact_backend=args.artifact_backend or "",
+                    artifact_identifier=artifact_identifier,
+                    run_paths=run_paths,
+                    repo_branch=repo_branch,
+                    repo_commit=repo_commit,
+                    publish_final_model=args.publish_final_model,
+                    publish_target_repo=args.publish_target_repo,
+                    status=f"failed: {type(e).__name__}",
+                ),
+            )
+            if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+                sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
         raise
 
     # Save final model
@@ -1067,7 +1198,6 @@ def main():
     print("SAVING MODEL")
     print("=" * 60)
 
-    output_path = run_dir / "final_model"
     model.save_pretrained(str(output_path))
     tokenizer.save_pretrained(str(output_path))
 
@@ -1090,6 +1220,33 @@ def main():
         final_loss=final_loss
     )
     save_training_lineage(lineage, run_dir)
+
+    if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+        sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
+
+    if args.publish_final_model and args.publish_target_repo:
+        if not args.hf_token:
+            raise RuntimeError("Publishing final_model requires HF_TOKEN or --hf-token.")
+        publish_final_model_to_hub(output_path, args.publish_target_repo, args.hf_token)
+
+    if manifest_path:
+        write_manifest(
+            manifest_path,
+            build_manifest(
+                provider=args.cloud_provider,
+                method="kto",
+                artifact_backend=args.artifact_backend or "",
+                artifact_identifier=artifact_identifier,
+                run_paths=run_paths,
+                repo_branch=repo_branch,
+                repo_commit=repo_commit,
+                publish_final_model=args.publish_final_model,
+                publish_target_repo=args.publish_target_repo,
+                status="completed",
+            ),
+        )
+        if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
+            sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
 
     print("\nTo upload to HuggingFace:")
     print(f"  model.push_to_hub_merged('username/model-name', tokenizer, save_method='merged_16bit')")

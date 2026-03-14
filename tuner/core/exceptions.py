@@ -131,3 +131,30 @@ class ValidationError(TunerError):
             raise ValidationError(f"Temperature must be between 0 and 2: {temperature}")
     """
     pass
+
+
+class CloudProviderError(BackendError):
+    """
+    Exception raised when a cloud provider operation fails.
+
+    Covers: authentication failures, job submission errors,
+    timeout exceeded, provider API errors.
+
+    Inherits from BackendError so existing handler error handling
+    catches it without modification.
+
+    Common causes:
+    - Cloud provider credentials missing or invalid
+    - Job submission rejected by provider API
+    - Job timeout exceeded
+    - Provider SDK not installed or incompatible version
+    - Network errors during job polling
+
+    Example:
+        if not os.environ.get('HF_TOKEN'):
+            raise CloudProviderError("HF_TOKEN not set. Required for HuggingFace Jobs.")
+
+        if job_status == 'ERROR':
+            raise CloudProviderError(f"Cloud job {job_id} failed: {error_details}")
+    """
+    pass

@@ -1,0 +1,296 @@
+"""
+Tests for tuner/backends/training/cloud/hf_jobs_backend.py
+
+Covers:
+- HFJobsBackend.name, get_available_methods
+- validate_environment: no token, bad format, hub not installed, no run_job
+- load_config: valid, unknown method, missing config
+- execute: type check, job submission, polling flow, error masking
+- _build_training_command: command structure, repo URL resolution
+- _parse_timeout: hours, minutes, bare numbers, invalid
+"""
+
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from tuner.backends.training.cloud.hf_jobs_backend import (
+    DEFAULT_FLAVOR,
+    DEFAULT_IMAGE,
+    DEFAULT_TIMEOUT,
+    HFJobsBackend,
+    _parse_timeout,
+)
+from tuner.core.config import CloudTrainingConfig, TrainingConfig
+from tuner.core.exceptions import CloudProviderError, ConfigurationError
+
+
+def _cloud_config(**overrides):
+    config = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake"),
+        trainer_dir=Path("/fake"),
+        model_name="test",
+        dataset_file="test",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a10g-small",
+        timeout_hours=4.0,
+        cloud_image=DEFAULT_IMAGE,
+        hf_flavor="a10g-small",
+        artifact_backend="hf_bucket",
+        artifact_identifier="toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="abc12345def67890",
+    )
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return config
+
+
+class TestHFJobsBackendProperties:
+    def test_name(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        assert backend.name == "hf_jobs"
+
+    def test_available_methods(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        assert backend.get_available_methods() == ["sft", "kto"]
+
+
+class TestHFJobsValidateEnvironment:
+    def test_fails_when_no_hf_token(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        is_valid, error = backend.validate_environment()
+        assert not is_valid
+        assert "HF_TOKEN" in error
+
+    def test_fails_when_token_bad_format(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "not-a-valid-token")
+        backend = HFJobsBackend(repo_root)
+        is_valid, error = backend.validate_environment()
+        assert not is_valid
+        assert "unexpected format" in error.lower()
+
+    def test_fails_when_hub_not_installed(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        with patch.dict("sys.modules", {"huggingface_hub": None}):
+            with patch("builtins.__import__", side_effect=ImportError):
+                is_valid, error = backend.validate_environment()
+        assert not is_valid
+        assert "not installed" in error.lower()
+
+    def test_fails_when_no_run_job(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        mock_hub = MagicMock(spec=[])  # No run_job attribute
+        mock_hub.__version__ = "0.20.0"
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            is_valid, error = backend.validate_environment()
+        assert not is_valid
+        assert "does not support" in error.lower()
+
+    def test_succeeds_with_valid_setup(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        mock_hub = MagicMock()
+        mock_hub.run_job = MagicMock()
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            is_valid, error = backend.validate_environment()
+        assert is_valid
+        assert error == ""
+
+    def test_accepts_hf_api_key_alias(self, repo_root, clean_env):
+        clean_env.setenv("HF_API_KEY", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        mock_hub = MagicMock()
+        mock_hub.run_job = MagicMock()
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            is_valid, error = backend.validate_environment()
+        assert is_valid
+        assert error == ""
+
+
+class TestHFJobsLoadConfig:
+    def test_loads_sft_config(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = backend.load_config("sft")
+        assert isinstance(config, CloudTrainingConfig)
+        assert config.method == "sft"
+        assert config.platform == "hf_jobs"
+        assert config.provider == "hf_jobs"
+        assert config.gpu_type == "a10g-small"
+        assert config.hf_flavor == "a10g-small"
+        assert config.timeout_hours == 4.0
+        assert config.cloud_image == "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel"
+        assert config.model_name == "test-org/test-model-sft"
+        assert config.artifact_backend == "hf_bucket"
+        assert config.artifact_identifier == "toolset-training-artifacts"
+        assert config.repo_branch == "main"
+        assert config.repo_commit
+
+    def test_loads_kto_config(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = backend.load_config("kto")
+        assert config.method == "kto"
+        assert config.artifact_mount_path == "/workspace/outputs"
+
+    def test_raises_on_unknown_method(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        with pytest.raises(ConfigurationError, match="Unknown method"):
+            backend.load_config("dpo")
+
+    def test_raises_on_missing_config(self, tmp_path):
+        backend = HFJobsBackend(tmp_path)
+        with pytest.raises(ConfigurationError, match="Training config not found"):
+            backend.load_config("sft")
+
+
+class TestHFJobsExecute:
+    def _make_config(self):
+        return _cloud_config()
+
+    def test_raises_when_hub_not_installed(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+        with patch.dict("sys.modules", {"huggingface_hub": None}):
+            with patch("builtins.__import__", side_effect=ImportError):
+                with pytest.raises(CloudProviderError, match="not installed"):
+                    backend.execute(config, python_path="")
+
+    def test_raises_when_wrong_config_type(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        # Pass a plain TrainingConfig instead of CloudTrainingConfig
+        config = TrainingConfig(
+            method="sft", platform="hf_jobs", config_path=Path("/fake"),
+            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
+            epochs=1, batch_size=4, learning_rate=2e-4,
+        )
+        mock_hub = MagicMock()
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with pytest.raises(CloudProviderError, match="requires CloudTrainingConfig"):
+                backend.execute(config, python_path="")
+
+    def test_masks_token_in_error_messages(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+        mock_hub = MagicMock()
+        mock_hub.run_job.side_effect = Exception("Error with hf_abc123 token")
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with pytest.raises(CloudProviderError) as exc_info:
+                backend.execute(config, python_path="")
+        # Token value should be masked
+        assert "hf_abc123" not in str(exc_info.value)
+        assert "check credentials" in str(exc_info.value).lower()
+
+    def test_successful_job_returns_zero(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+
+        mock_hub = MagicMock()
+        mock_job = MagicMock()
+        mock_job.id = "job-123"
+        mock_job.url = "https://hf.co/jobs/123"
+        mock_hub.run_job.return_value = mock_job
+
+        # inspect_job returns completed on first check
+        mock_job_info = MagicMock()
+        mock_job_info.status.stage = "completed"
+        mock_hub.inspect_job.return_value = mock_job_info
+        mock_hub.fetch_job_logs.return_value = "Training done."
+
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
+                exit_code = backend.execute(config, python_path="")
+        assert exit_code == 0
+
+    def test_failed_job_returns_one(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+
+        mock_hub = MagicMock()
+        mock_job = MagicMock()
+        mock_job.id = "job-456"
+        mock_job.url = None
+        mock_hub.run_job.return_value = mock_job
+
+        mock_job_info = MagicMock()
+        mock_job_info.status.stage = "ERROR"
+        mock_hub.inspect_job.return_value = mock_job_info
+        mock_hub.fetch_job_logs.return_value = ""
+
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
+                exit_code = backend.execute(config, python_path="")
+        assert exit_code == 1
+
+
+class TestBuildTrainingCommand:
+    def test_command_structure(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config()
+        cmd = backend._build_training_command(config)
+        assert "pip install" in cmd
+        assert "git clone --branch main" in cmd
+        assert "git checkout abc12345def67890" in cmd
+        assert "cd /workspace/repo/Trainers/rtx3090_sft" in cmd
+        assert "python train_sft.py" in cmd
+        assert "--output-root /workspace/outputs" in cmd
+        assert "--artifact-backend hf_bucket" in cmd
+        assert "--artifact-bucket toolset-training-artifacts" in cmd
+        assert "--artifact-prefix runs/hf_jobs/sft/" in cmd
+
+    def test_raises_when_no_repo_url(self, repo_root, clean_env):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(repo_url="")
+        with pytest.raises(CloudProviderError, match="exact repo source metadata"):
+            backend._build_training_command(config)
+
+
+# ---------------------------------------------------------------------------
+# _parse_timeout (module-level function)
+# ---------------------------------------------------------------------------
+
+
+class TestParseTimeout:
+    def test_hours_integer(self):
+        assert _parse_timeout("4h") == 4.0
+
+    def test_hours_decimal(self):
+        assert _parse_timeout("2.5h") == 2.5
+
+    def test_minutes(self):
+        assert _parse_timeout("90m") == 1.5
+
+    def test_minutes_decimal(self):
+        assert _parse_timeout("30m") == 0.5
+
+    def test_bare_number(self):
+        assert _parse_timeout("6") == 6.0
+
+    def test_bare_decimal(self):
+        assert _parse_timeout("3.5") == 3.5
+
+    def test_invalid_hours_returns_default(self):
+        assert _parse_timeout("abch") == 4.0
+
+    def test_invalid_minutes_returns_default(self):
+        assert _parse_timeout("xyzm") == 4.0
+
+    def test_invalid_bare_returns_default(self):
+        assert _parse_timeout("invalid") == 4.0
+
+    def test_whitespace_handling(self):
+        assert _parse_timeout("  4h  ") == 4.0
+
+    def test_case_insensitive(self):
+        assert _parse_timeout("4H") == 4.0
+        assert _parse_timeout("90M") == 1.5
