@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 try:
     import modal
@@ -57,14 +58,14 @@ HOURS = 60 * 60  # seconds
 # This avoids re-downloading multi-GB models on every training run, saving
 # both time and bandwidth costs.
 model_cache = modal.Volume.from_name(
-    "toolset-model-cache", create_if_missing=True
+    os.environ.get("MODAL_CACHE_VOLUME_NAME", "toolset-model-cache"), create_if_missing=True
 )
 
-# Persistent volume for storing training checkpoints between runs.
-# Allows resuming interrupted training without losing progress.
-checkpoint_cache = modal.Volume.from_name(
-    "toolset-checkpoints", create_if_missing=True
+# Persistent volume for storing provider-native training artifacts.
+output_volume = modal.Volume.from_name(
+    os.environ.get("MODAL_OUTPUT_VOLUME_NAME", "toolset-training-artifacts"), create_if_missing=True
 )
+OUTPUT_MOUNT_PATH = os.environ.get("MODAL_OUTPUT_MOUNT_PATH", "/vol/artifacts")
 
 # Container image with all training dependencies pre-installed.
 # Using debian_slim as the base keeps the image small while providing
@@ -125,7 +126,7 @@ DEFAULT_GPU = "L40S"
     timeout=6 * HOURS,
     volumes={
         "/cache/huggingface": model_cache,
-        "/cache/checkpoints": checkpoint_cache,
+        OUTPUT_MOUNT_PATH: output_volume,
     },
     # Scope secrets to only the env vars needed for training, rather than
     # exposing the entire .env file via Secret.from_dotenv().
@@ -138,9 +139,11 @@ def run_training(
     trainer_type: str = "sft",
     repo_url: str = "",
     repo_branch: str = "main",
+    repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
-    hub_repo: str = "",
+    publish_final_model: bool = False,
+    publish_target_repo: str = "",
     config_overrides: dict = None,
 ):
     """Run SFT or KTO training inside the Modal container.
@@ -149,7 +152,7 @@ def run_training(
     1. Clones the Toolset-Training repo into the container
     2. Sets up the HuggingFace cache to use the persistent volume
     3. Runs the appropriate training script (train_sft.py or train_kto.py)
-    4. Uploads results to HuggingFace Hub if hub_repo is specified
+        4. Publishes final_model to HuggingFace Hub only when explicitly requested
 
     Args:
         trainer_type: Training method - "sft" or "kto"
@@ -157,7 +160,8 @@ def run_training(
         repo_branch: Git branch to checkout
         model_name: Override model name (uses config.yaml default if empty)
         dataset_path: Override dataset path relative to repo root
-        hub_repo: HuggingFace Hub repo ID to push trained model to
+        publish_final_model: Whether to publish final_model to HuggingFace Hub
+        publish_target_repo: HuggingFace Hub repo ID to push trained model to
         config_overrides: Dict of CLI argument overrides (learning_rate, epochs, etc.)
     """
     if config_overrides is None:
@@ -185,6 +189,15 @@ def run_training(
             safe_stderr = re.sub(r'https?://[^@\s]+@', 'https://[REDACTED]@', clone_result.stderr)
             print(f"[Modal] Git clone failed: {safe_stderr}")
             raise RuntimeError(f"Failed to clone repo: {safe_stderr}")
+        if repo_commit:
+            checkout_result = subprocess.run(
+                ["git", "checkout", repo_commit],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+            )
+            if checkout_result.returncode != 0:
+                raise RuntimeError(f"Failed to checkout commit {repo_commit}: {checkout_result.stderr}")
     else:
         print("[Modal] No repo_url provided, skipping clone.")
         print("[Modal] Ensure training code is available in the container.")
@@ -203,6 +216,12 @@ def run_training(
 
     # Build training command with CLI overrides
     cmd = ["python", train_script]
+    cmd.extend([
+        "--run-timestamp", datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+        "--output-root", f"{OUTPUT_MOUNT_PATH}/outputs",
+        "--cloud-provider", "modal",
+        "--artifact-backend", "modal_volume",
+    ])
 
     if model_name:
         # Model name override requires modifying config before training.
@@ -214,6 +233,10 @@ def run_training(
         # Convert relative dataset path to absolute within the workspace
         abs_dataset = os.path.join(workspace, dataset_path)
         cmd.extend(["--local-file", abs_dataset])
+    if publish_final_model:
+        cmd.append("--publish-final-model")
+    if publish_target_repo:
+        cmd.extend(["--publish-target-repo", publish_target_repo])
 
     # Apply config overrides as CLI arguments
     if config_overrides.get("learning_rate"):
@@ -239,19 +262,14 @@ def run_training(
 
     if process.returncode != 0:
         print(f"[Modal] Training failed with exit code {process.returncode}")
-        # Commit checkpoint volume so partial work is preserved
-        checkpoint_cache.commit()
+        output_volume.commit()
         raise RuntimeError(f"Training script exited with code {process.returncode}")
 
     print("[Modal] Training completed successfully")
 
-    # Upload to HuggingFace Hub if requested
-    if hub_repo:
-        _upload_to_hub(trainer_type, trainer_dir, hub_repo)
-
-    # Commit volumes to persist cached models and checkpoints
+    # Commit volumes to persist cached models and artifacts
     model_cache.commit()
-    checkpoint_cache.commit()
+    output_volume.commit()
 
     return {"status": "completed", "trainer_type": trainer_type}
 
@@ -316,9 +334,11 @@ def main(
     gpu: str = DEFAULT_GPU,
     repo_url: str = "",
     repo_branch: str = "main",
+    repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
-    hub_repo: str = "",
+    publish_final_model: bool = False,
+    publish_target_repo: str = "",
     learning_rate: float = 0.0,
     num_epochs: int = 0,
     batch_size: int = 0,
@@ -337,7 +357,8 @@ def main(
         repo_branch: Git branch to checkout (default: main)
         model_name: Override model name in config
         dataset_path: Override dataset path (relative to repo root)
-        hub_repo: HuggingFace Hub repo ID for uploading trained model
+        publish_final_model: Publish final_model to HuggingFace Hub
+        publish_target_repo: HuggingFace Hub repo ID for publishing final_model
         learning_rate: Override learning rate (0 = use config default)
         num_epochs: Override number of epochs (0 = use config default)
         batch_size: Override batch size (0 = use config default)
@@ -404,8 +425,8 @@ def main(
         print(f"  Model:       {model_name}")
     if dataset_path:
         print(f"  Dataset:     {dataset_path}")
-    if hub_repo:
-        print(f"  Hub Repo:    {hub_repo}")
+    if publish_target_repo:
+        print(f"  Publish Repo:{publish_target_repo}")
     if config_overrides:
         print(f"  Overrides:   {config_overrides}")
     print("=" * 60 + "\n")
@@ -423,9 +444,11 @@ def main(
         trainer_type=trainer_type,
         repo_url=repo_url,
         repo_branch=repo_branch,
+        repo_commit=repo_commit,
         model_name=model_name,
         dataset_path=dataset_path,
-        hub_repo=hub_repo,
+        publish_final_model=publish_final_model,
+        publish_target_repo=publish_target_repo,
         config_overrides=config_overrides,
     )
 

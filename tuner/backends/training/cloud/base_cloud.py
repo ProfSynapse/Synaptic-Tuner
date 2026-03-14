@@ -17,6 +17,7 @@ import os
 import subprocess
 import time
 import yaml
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -26,6 +27,26 @@ logger = logging.getLogger(__name__)
 
 # Module-level pricing cache (loaded from cloud_config.yaml on first access)
 _GPU_PRICING_CACHE: Optional[dict] = None
+
+
+@dataclass(frozen=True)
+class RepoSource:
+    """Exact git source metadata for cloud execution."""
+
+    url: str
+    branch: str
+    commit: str
+
+
+def _run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess:
+    """Run a git command from repo_root and return the completed process."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 def _find_cloud_config() -> Path:
@@ -225,6 +246,68 @@ def resolve_repo_url() -> str:
         "Cannot determine repo URL for cloud code sync. "
         "Set CLOUD_REPO_URL environment variable or ensure git remote 'origin' is configured."
     )
+
+
+def resolve_repo_source(repo_root: Path) -> RepoSource:
+    """
+    Resolve the exact repository source for cloud execution.
+
+    Cloud jobs must use an exact pushed commit so the remote run matches the
+    code reviewed locally. This function enforces that requirement by verifying:
+    - repository has a usable remote URL
+    - current branch is not detached
+    - tracked files are clean
+    - HEAD is reachable from origin/<branch>
+    """
+    repo_root = Path(repo_root)
+    url = os.environ.get("CLOUD_REPO_URL")
+    if not url:
+        url_result = _run_git(repo_root, ["remote", "get-url", "origin"])
+        url = url_result.stdout.strip() if url_result.returncode == 0 else ""
+    if not url:
+        raise CloudProviderError(
+            "Cannot determine repo URL for cloud code sync. "
+            "Set CLOUD_REPO_URL environment variable or ensure git remote 'origin' is configured."
+        )
+
+    branch_result = _run_git(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    branch = branch_result.stdout.strip()
+    if branch_result.returncode != 0 or not branch or branch == "HEAD":
+        raise CloudProviderError(
+            "Cloud training requires a named git branch. "
+            "Check out a branch instead of a detached HEAD."
+        )
+
+    status_result = _run_git(repo_root, ["status", "--porcelain", "--untracked-files=no"])
+    if status_result.returncode != 0:
+        raise CloudProviderError("Failed to inspect git status for cloud source validation.")
+    if status_result.stdout.strip():
+        raise CloudProviderError(
+            "Cloud training requires a clean tracked worktree. "
+            "Commit or stash tracked changes before launching a remote job."
+        )
+
+    commit_result = _run_git(repo_root, ["rev-parse", "HEAD"])
+    commit = commit_result.stdout.strip()
+    if commit_result.returncode != 0 or not commit:
+        raise CloudProviderError("Failed to resolve HEAD commit for cloud source validation.")
+
+    remote_ref = f"origin/{branch}"
+    remote_result = _run_git(repo_root, ["rev-parse", "--verify", remote_ref])
+    if remote_result.returncode != 0:
+        raise CloudProviderError(
+            f"Cloud training requires a pushed remote branch. "
+            f"Remote ref '{remote_ref}' was not found."
+        )
+
+    pushed_result = _run_git(repo_root, ["merge-base", "--is-ancestor", commit, remote_ref])
+    if pushed_result.returncode != 0:
+        raise CloudProviderError(
+            f"Cloud training requires the exact commit to be pushed. "
+            f"Commit {commit[:8]} is not reachable from {remote_ref}."
+        )
+
+    return RepoSource(url=url, branch=branch, commit=commit)
 
 
 def poll_until_done(

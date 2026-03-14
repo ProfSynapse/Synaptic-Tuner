@@ -17,8 +17,8 @@ Requirements:
 
 import logging
 import os
-import time
 import yaml
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
@@ -26,7 +26,7 @@ from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
-from .base_cloud import load_cloud_config, resolve_repo_url, poll_until_done
+from .base_cloud import load_cloud_config, poll_until_done, resolve_repo_source
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +95,11 @@ class HFJobsBackend(ITrainingBackend):
             Tuple of (is_valid, error_message)
         """
         # Check HF_TOKEN
-        hf_token = os.environ.get("HF_TOKEN")
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
         if not hf_token:
             return False, (
                 "HF_TOKEN not set. Required for HuggingFace Jobs. "
-                "Set it in your .env file or environment."
+                "Set HF_TOKEN (or HF_API_KEY) in your .env file or environment."
             )
 
         # Validate token format without revealing full value
@@ -172,6 +172,8 @@ class HFJobsBackend(ITrainingBackend):
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         cloud_config = load_cloud_config(cloud_config_path)
         hf_config = cloud_config.get("hf_jobs", {})
+        artifacts_config = cloud_config.get("artifacts", {})
+        repo_source = resolve_repo_source(self.repo_root)
 
         flavor = hf_config.get("flavor", DEFAULT_FLAVOR)
         timeout_str = hf_config.get("timeout", DEFAULT_TIMEOUT)
@@ -194,9 +196,17 @@ class HFJobsBackend(ITrainingBackend):
             gpu_type=flavor,
             timeout_hours=timeout_hours,
             cloud_image=image,
-            push_to_hub=cloud_config.get("push_to_hub", True),
+            push_to_hub=cloud_config.get("push_to_hub", False),
             hub_repo=cloud_config.get("hub_repo"),
             hf_flavor=flavor,
+            artifact_backend=hf_config.get("artifact_backend", "hf_bucket"),
+            artifact_identifier=hf_config.get("artifact_identifier"),
+            artifact_mount_path=hf_config.get("output_root", "/workspace/outputs"),
+            publish_final_model=artifacts_config.get("publish_final_model", False),
+            publish_target_repo=artifacts_config.get("publish_target_repo"),
+            repo_url=repo_source.url,
+            repo_branch=repo_source.branch,
+            repo_commit=repo_source.commit,
         )
 
     def execute(self, config: TrainingConfig, python_path: str) -> int:
@@ -328,14 +338,14 @@ class HFJobsBackend(ITrainingBackend):
         Returns:
             Shell command string to pass as ["bash", "-c", command]
         """
-        try:
-            repo_url = resolve_repo_url()
-        except CloudProviderError:
-            raise CloudProviderError(
-                "Cannot determine repo URL for HF Jobs code sync. "
-                "Set CLOUD_REPO_URL environment variable or ensure "
-                "git remote 'origin' is configured."
-            )
+        if not config.repo_url or not config.repo_branch or not config.repo_commit:
+            raise CloudProviderError("HF Jobs requires exact repo source metadata.")
+        if not config.artifact_identifier:
+            raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        run_slug = f"{timestamp}-{config.repo_commit[:8]}"
+        artifact_prefix = f"runs/{config.provider}/{config.method}/{run_slug}"
 
         parts = [
             # Install training dependencies
@@ -344,10 +354,20 @@ class HFJobsBackend(ITrainingBackend):
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo
-            f"git clone --depth 1 {repo_url} /workspace/repo",
+            f"git clone --branch {config.repo_branch} --depth 1 {config.repo_url} /workspace/repo",
+            f"cd /workspace/repo && git checkout {config.repo_commit}",
             # Run training
             f"cd /workspace/repo/Trainers/rtx3090_{config.method}",
-            f"python train_{config.method}.py",
+            "python "
+            f"train_{config.method}.py "
+            f"--run-timestamp {timestamp} "
+            f"--output-root {config.artifact_mount_path} "
+            f"--cloud-provider {config.provider} "
+            f"--artifact-backend {config.artifact_backend} "
+            f"--artifact-bucket {config.artifact_identifier} "
+            f"--artifact-prefix {artifact_prefix} "
+            f"{'--publish-final-model' if config.publish_final_model else ''} "
+            f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}",
         ]
 
         return " && ".join(parts)

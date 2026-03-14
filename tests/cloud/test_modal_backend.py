@@ -10,10 +10,9 @@ Covers:
 - get_gpu_options
 """
 
-import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,6 +24,32 @@ from tuner.backends.training.cloud.modal_backend import (
 )
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import BackendError, ConfigurationError
+
+
+def _cloud_config(**overrides):
+    config = CloudTrainingConfig(
+        method="sft",
+        platform="modal",
+        config_path=Path("/fake"),
+        trainer_dir=Path("/fake"),
+        model_name="test",
+        dataset_file="test",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="modal",
+        gpu_type="L40S",
+        timeout_hours=6,
+        artifact_backend="modal_volume",
+        artifact_identifier="toolset-training-artifacts",
+        artifact_mount_path="/vol/artifacts",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="abc12345def67890",
+    )
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return config
 
 
 class TestModalBackendProperties:
@@ -109,12 +134,17 @@ class TestModalLoadConfig:
         assert config.batch_size == 4
         assert config.gpu_type == "L40S"
         assert config.timeout_hours == 6
+        assert config.artifact_backend == "modal_volume"
+        assert config.artifact_identifier == "toolset-training-artifacts"
+        assert config.repo_branch == "main"
+        assert config.repo_commit
 
     def test_loads_kto_config(self, repo_root):
         backend = ModalBackend(repo_root)
         config = backend.load_config("kto")
         assert config.method == "kto"
         assert config.model_name == "test-org/test-model-kto"
+        assert config.artifact_mount_path == "/vol/artifacts"
 
     def test_raises_on_unknown_method(self, repo_root):
         backend = ModalBackend(repo_root)
@@ -138,8 +168,12 @@ class TestModalLoadConfig:
         # Remove cloud config
         cloud_config = repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         cloud_config.unlink()
-        backend = ModalBackend(repo_root)
-        config = backend.load_config("sft")
+        with patch("tuner.backends.training.cloud.modal_backend.resolve_repo_source") as mock_source:
+            mock_source.return_value.url = "https://github.com/test/repo.git"
+            mock_source.return_value.branch = "main"
+            mock_source.return_value.commit = "abc12345def67890"
+            backend = ModalBackend(repo_root)
+            config = backend.load_config("sft")
         assert config.gpu_type == DEFAULT_GPU
         assert config.timeout_hours == DEFAULT_TIMEOUT_HOURS
 
@@ -150,24 +184,13 @@ class TestModalExecute:
         wrapper = repo_root / "Trainers" / "cloud" / "train_modal.py"
         wrapper.unlink()
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="modal",
-            gpu_type="L40S", timeout_hours=6,
-        )
+        config = _cloud_config()
         with pytest.raises(BackendError, match="wrapper script not found"):
             backend.execute(config, python_path="python")
 
     def test_subprocess_timeout_kills_process(self, repo_root, clean_env):
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="modal",
-            gpu_type="L40S", timeout_hours=0.001,  # Very short timeout
-        )
+        config = _cloud_config(timeout_hours=0.001)
         mock_process = MagicMock()
         mock_process.wait.side_effect = subprocess.TimeoutExpired(
             cmd="modal run", timeout=3
@@ -179,28 +202,16 @@ class TestModalExecute:
         mock_process.kill.assert_called_once()
 
     def test_file_not_found_raises_backend_error(self, repo_root, clean_env):
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="modal",
-            gpu_type="L40S", timeout_hours=6,
-        )
+        config = _cloud_config()
         with patch("tuner.backends.training.cloud.modal_backend.subprocess.Popen",
                     side_effect=FileNotFoundError):
             with pytest.raises(BackendError, match="Modal CLI not found"):
                 backend.execute(config, python_path="python")
 
     def test_keyboard_interrupt_returns_130(self, repo_root, clean_env):
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="modal",
-            gpu_type="L40S", timeout_hours=6,
-        )
+        config = _cloud_config()
         mock_process = MagicMock()
         mock_process.wait.side_effect = KeyboardInterrupt
         with patch("tuner.backends.training.cloud.modal_backend.subprocess.Popen",
@@ -210,45 +221,36 @@ class TestModalExecute:
         mock_process.terminate.assert_called_once()
 
     def test_successful_execution_returns_exit_code(self, repo_root, clean_env):
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="modal",
-            gpu_type="L40S", timeout_hours=6,
-        )
+        config = _cloud_config()
         mock_process = MagicMock()
         mock_process.wait.return_value = 0
-        with patch("tuner.backends.training.cloud.modal_backend.subprocess.Popen",
-                    return_value=mock_process):
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.subprocess.Popen",
+            return_value=mock_process,
+        ) as mock_popen:
             exit_code = backend.execute(config, python_path="python")
         assert exit_code == 0
+        called_env = mock_popen.call_args.kwargs["env"]
+        assert called_env["MODAL_OUTPUT_VOLUME_NAME"] == "toolset-training-artifacts"
+        assert called_env["MODAL_OUTPUT_MOUNT_PATH"] == "/vol/artifacts"
+        assert called_env["CLOUD_REPO_BRANCH"] == "main"
+        assert called_env["CLOUD_REPO_COMMIT"] == "abc12345def67890"
 
 
-class TestModalResolveRepoUrl:
-    """Test that ModalBackend.execute() calls resolve_repo_url from base_cloud.
+class TestModalResolveRepoSource:
+    """Test that ModalBackend.load_config() relies on resolve_repo_source.
 
-    The resolve_repo_url function itself is comprehensively tested in
-    test_base_cloud.py::TestResolveRepoUrl. Here we verify the integration:
-    execute() calls it and raises BackendError on failure.
+    The git validation itself is covered in test_base_cloud.py. Here we verify
+    the Modal backend surfaces failures when exact source metadata cannot be
+    resolved for a cloud run.
     """
 
-    def test_execute_raises_on_resolve_failure(self, repo_root, clean_env):
-        from tuner.core.config import CloudTrainingConfig
+    def test_load_config_raises_on_resolve_failure(self, repo_root, clean_env):
         backend = ModalBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="modal", config_path=repo_root / "config.yaml",
-            trainer_dir=repo_root / "Trainers" / "rtx3090_sft",
-            model_name="test", dataset_file="test.jsonl",
-            epochs=1, batch_size=4, learning_rate=2e-4,
-            provider="modal", gpu_type="L40S", timeout_hours=6,
-        )
-        # Ensure wrapper script exists so we reach the resolve_repo_url call
-        wrapper = repo_root / "Trainers" / "cloud" / "train_modal.py"
-        wrapper.parent.mkdir(parents=True, exist_ok=True)
-        wrapper.touch()
-        with patch("tuner.backends.training.cloud.modal_backend.resolve_repo_url",
-                    side_effect=Exception("no url")):
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.resolve_repo_source",
+            side_effect=BackendError("Cannot determine repo URL"),
+        ):
             with pytest.raises(BackendError, match="Cannot determine repo URL"):
-                backend.execute(config, python_path="python")
+                backend.load_config("sft")

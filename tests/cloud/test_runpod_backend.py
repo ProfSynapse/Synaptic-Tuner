@@ -28,6 +28,32 @@ from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
 
+def _cloud_config(**overrides):
+    config = CloudTrainingConfig(
+        method="sft",
+        platform="runpod",
+        config_path=Path("/fake"),
+        trainer_dir=Path("/fake"),
+        model_name="test",
+        dataset_file="test",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="runpod",
+        gpu_type="NVIDIA A100 SXM",
+        timeout_hours=6,
+        artifact_backend="runpod_network_volume",
+        artifact_identifier="runpod-vol-123",
+        artifact_mount_path="/runpod-volume",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="abc12345def67890",
+    )
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return config
+
+
 class TestRunPodBackendProperties:
     def test_name(self, repo_root):
         backend = RunPodBackend(repo_root)
@@ -84,6 +110,10 @@ class TestRunPodLoadConfig:
         assert config.provider == "runpod"
         assert config.gpu_type == "NVIDIA A100 SXM"
         assert config.runpod_volume_gb == 50
+        assert config.artifact_backend == "runpod_network_volume"
+        assert config.artifact_identifier == "runpod-vol-123"
+        assert config.repo_branch == "main"
+        assert config.repo_commit
 
     def test_raises_on_unknown_method(self, repo_root):
         backend = RunPodBackend(repo_root)
@@ -164,12 +194,7 @@ class TestTerminatePod:
 
 class TestPollTraining:
     def _make_config(self):
-        return CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        return _cloud_config()
 
     def test_returns_zero_on_exited(self, repo_root):
         backend = RunPodBackend(repo_root)
@@ -325,33 +350,38 @@ class TestBuildPodEnv:
     def test_passes_hf_token(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_123")
         backend = RunPodBackend(repo_root)
-        env = backend._build_pod_env()
+        env = backend._build_pod_env(_cloud_config())
         assert env["HF_TOKEN"] == "hf_test_123"
 
     def test_passes_wandb_key(self, repo_root, clean_env):
         clean_env.setenv("WANDB_API_KEY", "wandb_test_key")
         backend = RunPodBackend(repo_root)
-        env = backend._build_pod_env()
+        env = backend._build_pod_env(_cloud_config())
         assert env["WANDB_API_KEY"] == "wandb_test_key"
 
     def test_passes_gh_token(self, repo_root, clean_env):
         clean_env.setenv("GH_TOKEN", "ghp_test_token")
         backend = RunPodBackend(repo_root)
-        env = backend._build_pod_env()
+        env = backend._build_pod_env(_cloud_config())
         assert env["GH_TOKEN"] == "ghp_test_token"
 
     def test_empty_when_no_env_vars(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
-        env = backend._build_pod_env()
-        assert env == {}
+        env = backend._build_pod_env(_cloud_config())
+        assert env == {
+            "CLOUD_REPO_BRANCH": "main",
+            "CLOUD_REPO_COMMIT": "abc12345def67890",
+            "CLOUD_ARTIFACT_IDENTIFIER": "runpod-vol-123",
+        }
 
     def test_only_includes_set_vars(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test")
         backend = RunPodBackend(repo_root)
-        env = backend._build_pod_env()
+        env = backend._build_pod_env(_cloud_config())
         assert "HF_TOKEN" in env
         assert "WANDB_API_KEY" not in env
         assert "GH_TOKEN" not in env
+        assert env["CLOUD_ARTIFACT_IDENTIFIER"] == "runpod-vol-123"
 
 
 # ---------------------------------------------------------------------------
@@ -361,54 +391,35 @@ class TestBuildPodEnv:
 
 class TestBuildStartupCommand:
     def test_command_structure(self, repo_root, clean_env):
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
         runpod_config = {"setup_commands": ["pip install torch"]}
         cmd = backend._build_startup_command(config, runpod_config)
         assert "pip install torch" in cmd
-        assert "git clone" in cmd
+        assert "git clone --branch main" in cmd
+        assert "git checkout abc12345def67890" in cmd
         assert "Trainers/rtx3090_sft" in cmd
         assert "python train_sft.py" in cmd
+        assert "--output-root /runpod-volume/outputs" in cmd
+        assert "--artifact-backend runpod_network_volume" in cmd
 
     def test_uses_shell_variable_for_gh_token(self, repo_root, clean_env):
         """GH_TOKEN must be referenced as $GH_TOKEN shell variable, not embedded."""
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         clean_env.setenv("GH_TOKEN", "ghp_secret_value_do_not_leak")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
         runpod_config = {}
         cmd = backend._build_startup_command(config, runpod_config)
         # Must use shell variable expansion, NOT the actual token value
         assert "ghp_secret_value_do_not_leak" not in cmd
         assert "$GH_TOKEN@" in cmd
 
-    def test_fallback_when_no_repo_url(self, repo_root, clean_env):
+    def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config(repo_url="")
         runpod_config = {"setup_commands": ["pip install torch"]}
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        with patch("tuner.backends.training.cloud.base_cloud.subprocess.run",
-                    return_value=mock_result):
-            cmd = backend._build_startup_command(config, runpod_config)
-        assert "ERROR" in cmd
+        with pytest.raises(CloudProviderError, match="exact repo source metadata"):
+            backend._build_startup_command(config, runpod_config)
 
 
 # ---------------------------------------------------------------------------
@@ -419,14 +430,8 @@ class TestBuildStartupCommand:
 class TestExecuteLifecycle:
     def test_terminates_pod_on_success(self, repo_root, clean_env):
         clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
 
         mock_rp = MagicMock()
         mock_rp.create_pod.return_value = {"id": "pod-abc", "costPerHr": "1.64"}
@@ -445,14 +450,8 @@ class TestExecuteLifecycle:
 
     def test_terminates_pod_on_failure(self, repo_root, clean_env):
         clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
 
         mock_rp = MagicMock()
         mock_rp.create_pod.return_value = {"id": "pod-def", "costPerHr": "1.64"}
@@ -470,14 +469,8 @@ class TestExecuteLifecycle:
 
     def test_terminates_pod_on_keyboard_interrupt(self, repo_root, clean_env):
         clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
 
         mock_rp = MagicMock()
         mock_rp.create_pod.return_value = {"id": "pod-int", "costPerHr": "1.64"}
@@ -495,14 +488,8 @@ class TestExecuteLifecycle:
 
     def test_raises_when_no_pod_id_returned(self, repo_root, clean_env):
         clean_env.setenv("RUNPOD_API_KEY", "rptestkey12345678901234abcdef5678")
-        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/repo.git")
         backend = RunPodBackend(repo_root)
-        config = CloudTrainingConfig(
-            method="sft", platform="runpod", config_path=Path("/fake"),
-            trainer_dir=Path("/fake"), model_name="test", dataset_file="test",
-            epochs=1, batch_size=4, learning_rate=2e-4, provider="runpod",
-            gpu_type="A100", timeout_hours=6,
-        )
+        config = _cloud_config()
 
         mock_rp = MagicMock()
         mock_rp.create_pod.return_value = {}  # No 'id' key

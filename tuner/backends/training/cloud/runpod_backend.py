@@ -27,7 +27,7 @@ import logging
 import os
 import time
 import yaml
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
@@ -36,7 +36,7 @@ from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
-    resolve_repo_url,
+    resolve_repo_source,
     estimate_cost,
     get_gpu_display_name,
 )
@@ -158,6 +158,8 @@ class RunPodBackend(ITrainingBackend):
         # Load cloud-specific RunPod settings
         cloud_config = self._get_cloud_config()
         runpod_config = cloud_config.get("runpod", {})
+        artifacts_config = cloud_config.get("artifacts", {})
+        repo_source = resolve_repo_source(self.repo_root)
 
         return CloudTrainingConfig(
             method=method,
@@ -173,9 +175,17 @@ class RunPodBackend(ITrainingBackend):
             gpu_type=runpod_config.get("gpu_type_id", "NVIDIA A100 SXM"),
             timeout_hours=runpod_config.get("default_timeout", 7200) / 3600,
             cloud_image=runpod_config.get("default_image", ""),
-            push_to_hub=cloud_config.get("push_to_hub", True),
+            push_to_hub=cloud_config.get("push_to_hub", False),
             hub_repo=cloud_config.get("hub_repo"),
             runpod_volume_gb=runpod_config.get("volume_in_gb", 50),
+            artifact_backend=runpod_config.get("artifact_backend", "runpod_network_volume"),
+            artifact_identifier=runpod_config.get("network_volume_id"),
+            artifact_mount_path=runpod_config.get("output_mount_path", "/runpod-volume"),
+            publish_final_model=artifacts_config.get("publish_final_model", False),
+            publish_target_repo=artifacts_config.get("publish_target_repo"),
+            repo_url=repo_source.url,
+            repo_branch=repo_source.branch,
+            repo_commit=repo_source.commit,
         )
 
     def validate_environment(self) -> Tuple[bool, str]:
@@ -257,18 +267,24 @@ class RunPodBackend(ITrainingBackend):
 
             # Read pod configuration
             pod_name = self._generate_pod_name(config.method)
-            gpu_type = runpod_config.get("gpu_type_id", "NVIDIA A100 SXM")
+            gpu_type = config.gpu_type or runpod_config.get("gpu_type_id", "NVIDIA A100 SXM")
             gpu_count = runpod_config.get("gpu_count", 1)
             image = runpod_config.get(
                 "default_image",
                 "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             )
-            volume_gb = runpod_config.get("volume_in_gb", 50)
             container_disk_gb = runpod_config.get("container_disk_in_gb", 50)
             cloud_type = runpod_config.get("cloud_type", "COMMUNITY")
+            network_volume_id = config.artifact_identifier or runpod_config.get("network_volume_id")
+            mount_path = config.artifact_mount_path or runpod_config.get("output_mount_path", "/runpod-volume")
+
+            if not network_volume_id:
+                raise CloudProviderError(
+                    "RunPod cloud training requires cloud.runpod.network_volume_id in cloud_config.yaml."
+                )
 
             # Build pod environment variables (credentials passed securely)
-            pod_env = self._build_pod_env()
+            pod_env = self._build_pod_env(config)
 
             # Display configuration
             gpu_display = get_gpu_display_name("runpod", gpu_type)
@@ -278,7 +294,7 @@ class RunPodBackend(ITrainingBackend):
             print(f"\nCreating RunPod pod '{pod_name}'...")
             print(f"  GPU:    {gpu_display} x{gpu_count}")
             print(f"  Image:  {image}")
-            print(f"  Volume: {volume_gb}GB")
+            print(f"  Network Volume: {network_volume_id}")
             print(f"  Cloud:  {cloud_type}")
             print(f"  Est.:   {cost_str} (6hr max)")
 
@@ -287,11 +303,12 @@ class RunPodBackend(ITrainingBackend):
                 image_name=image,
                 gpu_type_id=gpu_type,
                 gpu_count=gpu_count,
-                volume_in_gb=volume_gb,
                 container_disk_in_gb=container_disk_gb,
                 cloud_type=cloud_type,
                 env=pod_env,
                 docker_args=startup_cmd,
+                network_volume_id=network_volume_id,
+                volume_mount_path=mount_path,
             )
 
             pod_id = pod.get("id")
@@ -342,7 +359,7 @@ class RunPodBackend(ITrainingBackend):
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         return f"toolset-{method}-{timestamp}"
 
-    def _build_pod_env(self) -> dict:
+    def _build_pod_env(self, config: CloudTrainingConfig) -> dict:
         """
         Build environment variables for the pod.
 
@@ -370,6 +387,16 @@ class RunPodBackend(ITrainingBackend):
         if gh_token:
             env["GH_TOKEN"] = gh_token
 
+        branch = config.repo_branch
+        commit = config.repo_commit
+        artifact_identifier = config.artifact_identifier
+        if branch:
+            env["CLOUD_REPO_BRANCH"] = branch
+        if commit:
+            env["CLOUD_REPO_COMMIT"] = commit
+        if artifact_identifier:
+            env["CLOUD_ARTIFACT_IDENTIFIER"] = artifact_identifier
+
         return env
 
     def _build_startup_command(
@@ -396,32 +423,33 @@ class RunPodBackend(ITrainingBackend):
 
         target_dir = "/workspace/repo"
         trainer_subdir = f"Trainers/rtx3090_{config.method}"
+        run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        # Resolve repo URL for code sync
-        try:
-            repo_url = resolve_repo_url()
-        except Exception as e:
-            logger.warning("Could not determine repo URL: %s", e)
-            # Fallback: just run setup commands
-            parts = list(setup_commands)
-            parts.append(
-                f"echo 'ERROR: Could not clone repo ({e}). "
-                f"Set CLOUD_REPO_URL in .env'"
-            )
-            return " && ".join(parts)
+        if not config.repo_url or not config.repo_branch or not config.repo_commit:
+            raise CloudProviderError("RunPod requires exact repo source metadata.")
 
         # Build clone command. Only inject $GH_TOKEN for authenticated cloning
         # when the token is actually set (passed via _build_pod_env() as a pod
         # env var). For public repos or when GH_TOKEN is not configured,
         # clone without authentication to avoid errors from empty token expansion.
-        clone_url = repo_url
-        if repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
-            clone_url = repo_url.replace("https://", "https://$GH_TOKEN@")
+        clone_url = config.repo_url
+        if config.repo_url.startswith("https://") and os.environ.get("GH_TOKEN"):
+            clone_url = config.repo_url.replace("https://", "https://$GH_TOKEN@")
 
         parts = list(setup_commands)
-        parts.append(f"git clone --depth 1 {clone_url} {target_dir}")
+        parts.append(f"git clone --branch {config.repo_branch} --depth 1 {clone_url} {target_dir}")
+        parts.append(f"cd {target_dir} && git checkout {config.repo_commit}")
         parts.append(f"cd {target_dir}/{trainer_subdir}")
-        parts.append(f"python train_{config.method}.py")
+        training_cmd = (
+            f"python train_{config.method}.py "
+            f"--run-timestamp {run_timestamp} "
+            f"--output-root {config.artifact_mount_path}/outputs "
+            f"--cloud-provider {config.provider} "
+            f"--artifact-backend {config.artifact_backend} "
+            f"{'--publish-final-model' if config.publish_final_model else ''} "
+            f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}"
+        )
+        parts.append(training_cmd)
 
         return " && ".join(parts)
 

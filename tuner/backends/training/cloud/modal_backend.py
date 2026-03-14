@@ -43,7 +43,7 @@ from .base_cloud import (
     get_gpu_display_name,
     load_cloud_config,
     load_gpu_pricing,
-    resolve_repo_url,
+    resolve_repo_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,8 @@ class ModalBackend(ITrainingBackend):
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         cloud_config = load_cloud_config(cloud_config_path)
         modal_config = cloud_config.get("modal", {})
+        artifacts_config = cloud_config.get("artifacts", {})
+        repo_source = resolve_repo_source(self.repo_root)
 
         # Extract relevant fields
         model_config = config.get("model", {})
@@ -200,8 +202,16 @@ class ModalBackend(ITrainingBackend):
             provider="modal",
             gpu_type=gpu_type,
             timeout_hours=timeout_hours,
-            push_to_hub=cloud_config.get("push_to_hub", True),
+            push_to_hub=cloud_config.get("push_to_hub", False),
             hub_repo=cloud_config.get("hub_repo"),
+            artifact_backend=modal_config.get("artifact_backend", "modal_volume"),
+            artifact_identifier=modal_config.get("output_volume_name", "toolset-training-artifacts"),
+            artifact_mount_path=modal_config.get("output_mount_path", "/vol/artifacts"),
+            publish_final_model=artifacts_config.get("publish_final_model", False),
+            publish_target_repo=artifacts_config.get("publish_target_repo"),
+            repo_url=repo_source.url,
+            repo_branch=repo_source.branch,
+            repo_commit=repo_source.commit,
         )
 
     def execute(self, config: TrainingConfig, python_path: str) -> int:
@@ -238,14 +248,8 @@ class ModalBackend(ITrainingBackend):
         gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
         timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
 
-        # Resolve repo URL for code sync
-        try:
-            repo_url = resolve_repo_url()
-        except Exception:
-            raise BackendError(
-                "Cannot determine repo URL for Modal code sync.\n"
-                "Set CLOUD_REPO_URL env var or ensure a git remote 'origin' is configured."
-            )
+        if not config.repo_url or not config.repo_branch or not config.repo_commit:
+            raise BackendError("Modal cloud runs require exact repo source metadata.")
 
         # Build the modal run command
         cmd = [
@@ -254,8 +258,14 @@ class ModalBackend(ITrainingBackend):
             "--trainer-type", config.method,
             "--gpu", gpu_type,
             "--timeout-hours", str(timeout_hours),
-            "--repo-url", repo_url,
+            "--repo-url", config.repo_url,
+            "--repo-branch", config.repo_branch,
+            "--repo-commit", config.repo_commit,
         ]
+        if config.publish_final_model:
+            cmd.append("--publish-final-model")
+        if config.publish_target_repo:
+            cmd.extend(["--publish-target-repo", config.publish_target_repo])
 
         # Display cost estimate before starting
         gpu_display = get_gpu_display_name("modal", gpu_type)
@@ -267,7 +277,16 @@ class ModalBackend(ITrainingBackend):
         )
 
         try:
-            process = subprocess.Popen(cmd, cwd=str(self.repo_root))
+            env = {
+                **os.environ,
+                "MODAL_CACHE_VOLUME_NAME": modal_settings.get("cache_volume_name", "toolset-model-cache"),
+                "MODAL_OUTPUT_VOLUME_NAME": config.artifact_identifier or "toolset-training-artifacts",
+                "MODAL_OUTPUT_MOUNT_PATH": config.artifact_mount_path or "/vol/artifacts",
+                "CLOUD_ARTIFACT_IDENTIFIER": config.artifact_identifier or "",
+                "CLOUD_REPO_BRANCH": config.repo_branch or "",
+                "CLOUD_REPO_COMMIT": config.repo_commit or "",
+            }
+            process = subprocess.Popen(cmd, cwd=str(self.repo_root), env=env)
             timeout_secs = int(timeout_hours * 3600)
             return process.wait(timeout=timeout_secs)
         except subprocess.TimeoutExpired:

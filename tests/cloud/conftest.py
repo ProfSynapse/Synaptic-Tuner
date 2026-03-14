@@ -10,6 +10,7 @@ Provides:
 """
 
 import os
+import subprocess
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -83,14 +84,25 @@ def repo_root(tmp_path):
         },
         "cloud": {
             "default_provider": "hf_jobs",
+            "artifacts": {
+                "publish_final_model": False,
+                "publish_target_repo": None,
+            },
             "hf_jobs": {
                 "flavor": "a10g-small",
                 "timeout": "4h",
                 "image": "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
+                "artifact_backend": "hf_bucket",
+                "artifact_identifier": "toolset-training-artifacts",
+                "output_root": "/workspace/outputs",
             },
             "modal": {
                 "gpu": "L40S",
                 "timeout_hours": 6,
+                "artifact_backend": "modal_volume",
+                "cache_volume_name": "toolset-model-cache",
+                "output_volume_name": "toolset-training-artifacts",
+                "output_mount_path": "/vol/artifacts",
             },
             "runpod": {
                 "gpu_type_id": "NVIDIA A100 SXM",
@@ -100,8 +112,12 @@ def repo_root(tmp_path):
                 "cloud_type": "SECURE",
                 "default_image": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
                 "default_timeout": 7200,
+                "artifact_backend": "runpod_network_volume",
+                "network_volume_id": "runpod-vol-123",
+                "output_mount_path": "/runpod-volume",
+                "result_path": "/runpod-volume/outputs",
             },
-            "push_to_hub": True,
+            "push_to_hub": False,
             "hub_repo": None,
         },
     }
@@ -110,6 +126,26 @@ def repo_root(tmp_path):
 
     # Create Modal wrapper script (empty file, just needs to exist)
     (cloud_dir / "train_modal.py").touch()
+
+    origin_repo = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(origin_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(origin_repo)], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial test repo"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
 
     return tmp_path
 
@@ -125,6 +161,7 @@ def clean_env(monkeypatch):
     """Remove all cloud-related environment variables for isolation."""
     env_vars = [
         "HF_TOKEN",
+        "HF_API_KEY",
         "MODAL_TOKEN_ID",
         "MODAL_TOKEN_SECRET",
         "RUNPOD_API_KEY",

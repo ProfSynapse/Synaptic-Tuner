@@ -16,7 +16,8 @@ This document specifies the architecture for integrating three GPU cloud provide
 2. **Handler-based CLI integration**: A new `CloudTrainHandler` sits alongside `TrainHandler` in the menu, keeping cloud training logically separate from local training without duplicating menu infrastructure.
 3. **Provider files live in `tuner/backends/training/cloud/`**: Follows the existing backend module pattern rather than creating a top-level `cloud/` directory.
 4. **Thin provider wrappers**: Each provider backend is a single file implementing `ITrainingBackend`. Complexity stays in the provider SDKs where it belongs.
-5. **Cloud config extends existing YAML**: A `cloud.yaml` config file alongside `config.yaml` in each trainer directory holds provider-specific settings (GPU type, timeout, etc.).
+5. **Provider-native storage first**: HF Jobs uses Hugging Face Buckets, Modal uses Modal Volumes, and RunPod uses Network Volumes as the source of truth for checkpoints and logs.
+6. **Exact revision execution**: Cloud jobs only launch from a clean tracked worktree with a pushed branch and commit.
 
 ---
 
@@ -46,12 +47,12 @@ This document specifies the architecture for integrating three GPU cloud provide
                                         |
                                         v
                             +---------------------------+
-                            |   HuggingFace Hub         |
-                            |   (model output target)   |
+                            |   Provider-Native         |
+                            |   Artifact Storage        |
                             +---------------------------+
 ```
 
-All three cloud providers ultimately push trained model artifacts to HuggingFace Hub. The CLI orchestrates job submission, status polling, and log streaming locally.
+Each cloud provider persists artifacts in its own durable storage by default. Hugging Face Hub publishing is optional and only applies to `final_model`. The CLI orchestrates job submission, source validation, status polling, and log streaming locally.
 
 ---
 
@@ -109,8 +110,8 @@ Shared utilities for all cloud backends. Not an abstract class -- just helper fu
 Implements `ITrainingBackend` for HuggingFace Jobs.
 
 - **`validate_environment()`**: Checks `HF_TOKEN` is set, `huggingface_hub` version >= 0.34.0 (Jobs support), and user has Pro/Team access.
-- **`load_config(method)`**: Loads standard training config + cloud overlay from `cloud_config.yaml`.
-- **`execute(config, python_path)`**: Calls `huggingface_hub.run_job()` to submit training script as a UV script with inline deps. Polls `inspect_job()` and streams `fetch_job_logs()` until completion.
+- **`load_config(method)`**: Loads standard training config + cloud overlay from `cloud_config.yaml`, plus exact git source metadata.
+- **`execute(config, python_path)`**: Calls `huggingface_hub.run_job()` to submit training, clones the exact branch/commit, and persists artifacts to a Hugging Face Bucket.
 - **`get_available_methods()`**: Returns `['sft', 'kto']` (same as local, since scripts run unchanged).
 
 #### `tuner/backends/training/cloud/modal_backend.py`
@@ -118,8 +119,8 @@ Implements `ITrainingBackend` for HuggingFace Jobs.
 Implements `ITrainingBackend` for Modal.
 
 - **`validate_environment()`**: Checks `modal` package is installed, token is configured (`MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` or OAuth via `~/.modal.toml`).
-- **`load_config(method)`**: Loads training config + cloud overlay.
-- **`execute(config, python_path)`**: Runs `modal run Trainers/cloud/train_modal.py` as a subprocess with config flags. Modal handles the remote execution.
+- **`load_config(method)`**: Loads training config + cloud overlay, plus exact git source metadata.
+- **`execute(config, python_path)`**: Runs `modal run Trainers/cloud/train_modal.py` as a subprocess with config flags. Modal persists artifacts in a dedicated Volume.
 - **`get_available_methods()`**: Returns `['sft', 'kto']`.
 
 #### `tuner/backends/training/cloud/runpod_backend.py`
@@ -127,8 +128,8 @@ Implements `ITrainingBackend` for Modal.
 Implements `ITrainingBackend` for RunPod.
 
 - **`validate_environment()`**: Checks `RUNPOD_API_KEY` is set, `runpod` package is installed.
-- **`load_config(method)`**: Loads training config + cloud overlay.
-- **`execute(config, python_path)`**: Creates pod via `runpod.create_pod()`, waits for it to start, streams pod logs, waits for training completion marker, then terminates pod.
+- **`load_config(method)`**: Loads training config + cloud overlay, plus exact git source metadata.
+- **`execute(config, python_path)`**: Creates pod via `runpod.create_pod()`, mounts a Network Volume for outputs, waits for it to start, streams pod logs, and terminates the pod after training.
 - **`get_available_methods()`**: Returns `['sft', 'kto']`.
 
 #### `tuner/handlers/cloud_train_handler.py`
@@ -163,31 +164,38 @@ cloud:
   # Default provider (can be overridden per-run)
   default_provider: hf_jobs
 
+  artifacts:
+    publish_final_model: false
+    publish_target_repo: null
+
   # HuggingFace Jobs settings
   hf_jobs:
     flavor: a10g-small           # GPU hardware flavor
     timeout: 4h                  # Job timeout
     image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+    artifact_backend: hf_bucket
+    artifact_identifier: toolset-training-artifacts
+    output_root: /workspace/outputs
 
   # Modal settings
   modal:
     gpu: L40S                    # GPU type
     timeout_hours: 6             # Function timeout
-    volumes:
-      model_cache: model-cache   # Volume name for model caching
-      checkpoints: checkpoints   # Volume name for checkpoints
+    artifact_backend: modal_volume
+    cache_volume_name: toolset-model-cache
+    output_volume_name: toolset-training-artifacts
+    output_mount_path: /vol/artifacts
 
   # RunPod settings
   runpod:
     gpu_type_id: NVIDIA RTX A6000
     gpu_count: 1
-    volume_gb: 50
-    image: runpod/pytorch:2.4.0-cuda12.4
+    volume_in_gb: 50
+    default_image: runpod/pytorch:2.4.0-cuda12.4
     cloud_type: COMMUNITY        # COMMUNITY or SECURE
-
-  # Common settings
-  push_to_hub: true              # Push results to HF Hub on completion
-  hub_repo: null                 # Target HF repo (prompted if null)
+    artifact_backend: runpod_network_volume
+    network_volume_id: runpod-vol-id
+    output_mount_path: /runpod-volume
 ```
 
 #### `Trainers/cloud/setup_cloud.sh`
@@ -234,12 +242,19 @@ class CloudTrainingConfig(TrainingConfig):
     gpu_type: str                    # Provider-specific GPU identifier
     timeout_hours: float             # Maximum job duration
     cloud_image: str                 # Docker image for the job
-    push_to_hub: bool = True         # Push results to HF Hub
+    push_to_hub: bool = False        # Legacy compatibility only
     hub_repo: Optional[str] = None   # Target HF repo ID
+    artifact_backend: str = ""       # hf_bucket | modal_volume | runpod_network_volume
+    artifact_identifier: Optional[str] = None
+    artifact_mount_path: Optional[str] = None
+    publish_final_model: bool = False
+    publish_target_repo: Optional[str] = None
+    repo_url: Optional[str] = None
+    repo_branch: Optional[str] = None
+    repo_commit: Optional[str] = None
 
     # Provider-specific (optional)
     hf_flavor: Optional[str] = None          # HF Jobs hardware flavor
-    modal_volumes: Optional[dict] = None     # Modal volume mappings
     runpod_volume_gb: Optional[int] = None   # RunPod persistent volume size
 ```
 
@@ -324,9 +339,9 @@ execute()
     +-- On ERROR: print error details, return 1
 ```
 
-**Code sync strategy**: HF Jobs can run UV scripts with inline dependencies. The training script can be uploaded as-is, or the repo can be cloned inside the job via the command. For simplicity, use the command-based approach: `git clone {repo_url} && cd Trainers/rtx3090_{method} && python train_{method}.py`. This avoids file upload complexity.
+**Code sync strategy**: clone the exact branch, then `git checkout {repo_commit}` before running the trainer.
 
-**Output retrieval**: Training scripts already push to HF Hub when `HF_TOKEN` is available. The cloud job inherits this behavior. No additional output retrieval needed.
+**Output retrieval**: checkpoints, logs, manifests, lineage, and `final_model` are synced into a Hugging Face Bucket during or after the run. Optional Hub publishing uploads only `final_model`.
 
 #### Modal
 
@@ -348,9 +363,9 @@ execute()
     +-- Return subprocess exit code
 ```
 
-**Code sync strategy**: Modal's decorator pattern means the `train_modal.py` script runs locally but the decorated function executes remotely. Modal serializes the function and its dependencies. The wrapper imports training logic from the existing codebase.
+**Code sync strategy**: the Modal wrapper clones the exact branch, then checks out the exact commit remotely before launching training.
 
-**Output retrieval**: Modal Volumes persist outputs. The wrapper script downloads results from the Volume after training completes, or pushes directly to HF Hub from within the remote function.
+**Output retrieval**: Modal Volumes persist outputs. The mounted output volume is the source of truth. Optional Hub publishing uploads only `final_model`.
 
 #### RunPod
 
@@ -361,7 +376,7 @@ execute()
     |       name="toolset-{method}-{timestamp}",
     |       image_name=config.cloud_image,
     |       gpu_type_id=config.gpu_type,
-    |       volume_in_gb=config.runpod_volume_gb,
+    |       network_volume_id=config.artifact_identifier,
     |       docker_args=startup_command,
     |   )
     |
@@ -372,7 +387,8 @@ execute()
     |     +-- Look for "TRAINING_COMPLETE" marker in output
     |
     +-- On completion:
-    |     +-- If push_to_hub: training script pushes to HF Hub from pod
+    |     +-- outputs already persisted to Network Volume
+    |     +-- optional final_model publish to HF Hub
     |     +-- runpod.terminate_pod(pod_id)
     |
     +-- Return 0 on success, 1 on error
@@ -385,7 +401,7 @@ execute()
 
 The clone URL can be the user's GitHub repo URL (if public) or use a GitHub token (if private). For private repos, `GH_TOKEN` or a deploy key can be passed as an environment variable.
 
-**Output retrieval**: Training scripts push models to HF Hub using `HF_TOKEN`, which is passed as a pod environment variable. This is the same mechanism used locally. No additional sync needed.
+**Output retrieval**: artifacts are written into the mounted RunPod Network Volume before pod termination. Optional Hub publishing uploads only `final_model`.
 
 ---
 

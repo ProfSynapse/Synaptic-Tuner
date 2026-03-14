@@ -57,17 +57,26 @@ pricing:
 # Provider-specific defaults
 cloud:
   default_provider: hf_jobs
+  artifacts:
+    publish_final_model: false
+    publish_target_repo: null
 
   hf_jobs:
     flavor: a10g-small
     timeout: 4h
     image: "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel"
     python_version: "3.11"
+    artifact_backend: hf_bucket
+    artifact_identifier: "toolset-training-artifacts"
+    output_root: "/workspace/outputs"
 
   modal:
     gpu: L40S
     timeout_hours: 6
     cache_volume_name: "toolset-model-cache"
+    artifact_backend: modal_volume
+    output_volume_name: "toolset-training-artifacts"
+    output_mount_path: "/vol/artifacts"
 
   runpod:
     gpu_type_id: "NVIDIA A100 SXM"
@@ -76,10 +85,13 @@ cloud:
     container_disk_in_gb: 50
     cloud_type: "SECURE"  # Use SECURE for training to avoid preemption risk
     default_image: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
-    result_path: "/workspace/outputs"
+    artifact_backend: runpod_network_volume
+    network_volume_id: null
+    output_mount_path: "/runpod-volume"
+    result_path: "/runpod-volume/outputs"
     setup_commands:
       - "pip install unsloth transformers trl huggingface_hub python-dotenv datasets peft"
 
   # Common settings across all providers
-  push_to_hub: true
+  push_to_hub: false
   hub_repo: null  # Target HF repo (prompted at runtime if null)

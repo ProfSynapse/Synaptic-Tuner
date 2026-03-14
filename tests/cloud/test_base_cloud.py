@@ -23,6 +23,7 @@ from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
     load_gpu_pricing,
     poll_until_done,
+    resolve_repo_source,
     resolve_repo_url,
 )
 from tuner.core.exceptions import CloudProviderError
@@ -99,6 +100,57 @@ class TestResolveRepoUrl:
                     side_effect=FileNotFoundError):
             with pytest.raises(CloudProviderError):
                 resolve_repo_url()
+
+
+class TestResolveRepoSource:
+    def test_returns_exact_repo_metadata(self, repo_root, clean_env):
+        source = resolve_repo_source(repo_root)
+        assert source.branch == "main"
+        assert source.commit
+        assert source.url.endswith("origin.git")
+
+    def test_uses_cloud_repo_url_override(self, repo_root, clean_env):
+        clean_env.setenv("CLOUD_REPO_URL", "https://github.com/test/override.git")
+        source = resolve_repo_source(repo_root)
+        assert source.url == "https://github.com/test/override.git"
+
+    def test_rejects_detached_head(self, repo_root, clean_env):
+        import subprocess
+
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", commit], cwd=repo_root, check=True, capture_output=True)
+
+        with pytest.raises(CloudProviderError, match="named git branch"):
+            resolve_repo_source(repo_root)
+
+    def test_rejects_dirty_tracked_worktree(self, repo_root, clean_env):
+        config_path = repo_root / "Trainers" / "rtx3090_sft" / "configs" / "config.yaml"
+        config_path.write_text(config_path.read_text() + "\n# dirty\n")
+
+        with pytest.raises(CloudProviderError, match="clean tracked worktree"):
+            resolve_repo_source(repo_root)
+
+    def test_rejects_unpushed_commit(self, repo_root, clean_env):
+        import subprocess
+
+        marker = repo_root / "README.test"
+        marker.write_text("unpushed\n")
+        subprocess.run(["git", "add", "README.test"], cwd=repo_root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Unpushed change"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(CloudProviderError, match="exact commit to be pushed"):
+            resolve_repo_source(repo_root)
 
     def test_handles_git_timeout(self, clean_env):
         import subprocess

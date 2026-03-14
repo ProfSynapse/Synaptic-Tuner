@@ -240,8 +240,16 @@ class CloudTrainingConfig(TrainingConfig):
     gpu_type: str = ""
     timeout_hours: float = 4.0
     cloud_image: str = ""
-    push_to_hub: bool = True
+    push_to_hub: bool = False
     hub_repo: Optional[str] = None
     hf_flavor: Optional[str] = None
     modal_volumes: Optional[Dict[str, str]] = field(default=None)
     runpod_volume_gb: Optional[int] = None
+    artifact_backend: str = ""
+    artifact_identifier: Optional[str] = None
+    artifact_mount_path: Optional[str] = None
+    publish_final_model: bool = False
+    publish_target_repo: Optional[str] = None
+    repo_url: Optional[str] = None
+    repo_branch: Optional[str] = None
+    repo_commit: Optional[str] = None
