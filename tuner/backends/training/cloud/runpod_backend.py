@@ -446,7 +446,7 @@ class RunPodBackend(ITrainingBackend):
         parts.extend(extra_commands)
 
         parts.append(f"git clone --branch {config.repo_branch} --depth 1 {clone_url} {target_dir}")
-        parts.append(f"cd {target_dir} && git checkout {config.repo_commit}")
+        parts.append(f"cd {target_dir} && git fetch --depth 1 origin {config.repo_commit} && git checkout {config.repo_commit}")
         parts.append(f"cd {target_dir}/{trainer_subdir}")
         training_cmd = (
             f"python train_{config.method}.py "

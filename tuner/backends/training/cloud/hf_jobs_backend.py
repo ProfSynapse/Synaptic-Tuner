@@ -360,7 +360,7 @@ class HFJobsBackend(ITrainingBackend):
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo
             f"git clone --branch {config.repo_branch} --depth 1 {config.repo_url} /workspace/repo",
-            f"cd /workspace/repo && git checkout {config.repo_commit}",
+            f"cd /workspace/repo && git fetch --depth 1 origin {config.repo_commit} && git checkout {config.repo_commit}",
             # Run training
             f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}",
             "python "
