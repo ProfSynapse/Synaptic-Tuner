@@ -16,6 +16,13 @@ python -m Evaluator.cli \
   --scenario behavior_prompts.yaml
 ```
 
+Before using a command from memory, confirm the current CLI surface first:
+
+```bash
+python tuner.py --help
+python -m Evaluator.cli --help
+```
+
 ## Architecture
 
 ```
@@ -262,6 +269,29 @@ environment:
       field: tags
       value: alpha
 ```
+
+Canonical assertion types currently supported by the environment validator:
+
+- `path_exists`
+- `path_not_exists`
+- `file_contains`
+- `file_not_contains`
+- `dir_contains`
+- `frontmatter_has_key`
+- `frontmatter_field_equals`
+- `frontmatter_field_contains`
+
+If a scenario uses assertion names outside that set, the validator will warn and
+the result may not be meaningful even if the model behavior looks reasonable.
+
+For HF Jobs evaluation of trained adapters, the main repo workflow is:
+
+```bash
+python tuner.py cloud-gym --run latest --method sft
+```
+
+Use `python tuner.py cloud-inspect --help` to confirm the current inspection
+flags before reading back saved HF results.
 
 Available note-specific assertions:
 - `frontmatter_has_key`

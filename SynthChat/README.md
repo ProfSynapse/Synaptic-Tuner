@@ -24,6 +24,14 @@ PYTHONPATH=. python3 -m SynthChat.run validate \
   --rubrics system_prompt_format
 ```
 
+Before using a command from memory, confirm the live CLI surface first:
+
+```bash
+python tuner.py --help
+python -m SynthChat.run --help
+python -m SynthChat.run generate --help
+```
+
 ## Configuration
 
 ### Two-Layer Config System
@@ -104,6 +112,14 @@ PYTHONPATH=. python3 -m SynthChat.run generate [options]
 Environment execution behavior (tool-action hints, inference rules) is config-driven via:
 `Evaluator/config/environment_execution.yaml`
 and can be replaced per run with `--env-tool-schema` / `--env-exec-config`.
+
+For environment-backed tool-use generation, scenarios can opt into structured
+generation instead of relying on unconstrained freeform JSON:
+
+- `environment_generation.schema: canonical_environment`
+- `assistant_generation.schema: use_tools_response`
+
+Use that path when you want executable tool data, not just tool-shaped text.
 
 **Example: Generate 5 content writing examples**
 
@@ -234,11 +250,14 @@ scenarios:
           description: Operational notes
           root_folder: ""
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output JSON with:
         - environment.fixture (directories/files/notes)
         - environment.assertions
         - system_context.session_id / workspace_id / selected_workspace
+    assistant_generation:
+      schema: use_tools_response
     prompts:
       user: |
         Generate the user request.
@@ -286,6 +305,41 @@ to train KTO only on:
 See `SynthChat/scenarios/content_writing.yaml` for examples.
 See `SynthChat/scenarios/tool_environments.yaml` for environment-backed examples.
 
+### Canonical Assertion Types
+
+When using structured environment generation, keep assertions to the canonical
+types currently supported by the environment validator:
+
+- `path_exists`
+- `path_not_exists`
+- `file_contains`
+- `file_not_contains`
+- `dir_contains`
+- `frontmatter_has_key`
+- `frontmatter_field_equals`
+- `frontmatter_field_contains`
+
+If the generator produces assertion names like `exists`, `yaml_front_matter`,
+or `file_unchanged`, the validator will treat them as unknown.
+
+### HF Pilot Flow
+
+The current remote-first pattern for a small SynthChat pilot is:
+
+```bash
+python tuner.py cloud-run --job-config Trainers/cloud/jobs/synthchat_vault_kto_pilot.yaml
+```
+
+That job:
+
+- runs SynthChat remotely on HF Jobs
+- writes dataset output under `/workspace/outputs/synthchat/`
+- syncs the dataset JSONL to the configured HF Bucket prefix
+- copies any `interactions_*.jsonl` files it finds into the same synced output
+
+Use a small pilot first. A 10-example batch is the right smoke test before
+scaling to larger counts.
+
 ## Rubrics
 
 Rubrics define quality criteria. Each rubric has:
@@ -319,6 +373,9 @@ Generated JSONL with metadata header:
 {"_meta": {"synthchat_version": "1.0.0", "generated_at": "...", "stats": {...}}}
 {"conversations": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}, {"role": "assistant", "content": null, "tool_calls": [...]}], "metadata": {...}}
 ```
+
+The first line may be a metadata/header record. Skip it when counting examples
+or sampling training rows.
 
 ## Troubleshooting
 

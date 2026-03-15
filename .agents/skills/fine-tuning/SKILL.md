@@ -13,13 +13,15 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
-| SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
-| KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
-| GRPO training | `cd Trainers/rtx3090_grpo && python train_grpo.py` |
+| SFT training | `python tuner.py train --method sft` |
+| KTO training | `python tuner.py train --method kto` |
+| GRPO training | `python tuner.py train --method grpo` |
 | Dry run (test setup) | `python train_sft.py --model-size 7b --dry-run` |
 | Resume checkpoint | `python train_sft.py --resume-from-checkpoint PATH` |
 | Monitor training | `tail -f logs/training_latest.jsonl` |
 | Environment setup | `cd Trainers/rtx3090_sft && bash setup.sh` |
+| HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
+| HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
 
 ## Training Methods at a Glance
 
@@ -38,6 +40,15 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 - `Trainers/rtx3090_grpo/` — GRPO trainer (configs, rewards, src)
 - `Trainers/shared/` — Shared UI components
 - `Datasets/` — Training datasets (JSONL)
+- `Trainers/cloud/jobs/` — Reusable HF Jobs configs for custom runs like SynthChat pilots
+- `SynthChat/scenarios/` — Synthetic data scenario packs, including environment-backed pilots
+
+## CLI Discipline
+
+- Do not guess command names or flags from memory.
+- Before giving command guidance, check the current parser definitions or run the real command with `--help`.
+- In this repo, the source of truth is the actual CLI surface in `tuner/cli/parser.py`, `tuner/cli/router.py`, and tool-specific `--help` output.
+- This matters for cloud workflows in particular because commands like `cloud-run`, `cloud-gym`, and `cloud-inspect` are evolving.
 
 ## Progressive Reference
 
@@ -86,6 +97,11 @@ python tuner.py cloud
 # Choose provider + method after confirming the working tree is clean and pushed
 ```
 
+**Custom HF job from checked-in config:**
+```bash
+python tuner.py cloud-run --job-config Trainers/cloud/jobs/synthchat_vault_kto_pilot.yaml
+```
+
 **Cloud evaluation against latest HF run (vLLM, no GGUF):**
 ```bash
 python tuner.py cloud-eval --run latest --preset full
@@ -94,6 +110,11 @@ python tuner.py cloud-eval --run latest --preset full
 **Cloud training + eval in one flow:**
 ```bash
 python tuner.py cloud-pipeline --method sft --preset full
+```
+
+**Environment-backed gym against latest trained adapter on HF:**
+```bash
+python tuner.py cloud-gym --run latest --method sft
 ```
 
 ## Environment Variables
@@ -149,6 +170,9 @@ HF Jobs-specific cloud behavior:
 - cloud eval results are saved to the same HF bucket. Inspect them in this order: `evaluation_results.json` for summary + records, `evaluation_results.md` for human-readable report, `evaluation_lineage.json` for provenance, and `logs/eval_progress.jsonl` for live/replayed progress
 - when reading `evaluation_results.json`, focus on how failures happened, not just how many there were
 - separate evaluator or parser noise from actual model behavior failures; warnings produced by a lower-level validator should not automatically be treated as model regressions
+- HF custom jobs can be used for non-training workloads like SynthChat generation; keep those jobs config-driven in `Trainers/cloud/jobs/*.yaml` and launch them with `python tuner.py cloud-run --job-config ...`
+- for environment-backed SynthChat pilots, prefer a small remote smoke test first, such as 10 total examples, before scaling counts
+- for environment-backed tool generation, prefer structured output for both generated environments and assistant tool responses so the artifact is executable instead of “tool-shaped prose”
 - the reusable inspection method is:
   compare expected behavior to actual behavior
   inspect parsed tool/action records before raw text when both are present
