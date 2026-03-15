@@ -28,6 +28,24 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+def _append_final_training_summary(log_file: Path, *, step: int, total_steps: int, total_epochs: int, elapsed: float) -> None:
+    """Persist a final summary row so bucketed logs retain runtime + peak capacity."""
+    capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+    entry = {
+        "event": "train_end",
+        "step": int(step),
+        "timestamp": datetime.now().isoformat(),
+        "total_steps": int(total_steps),
+        "total_epochs": int(total_epochs),
+        "train_runtime": round(elapsed, 3),
+        "train_steps_per_second": round((step / elapsed), 3) if elapsed > 0 else 0.0,
+        "train_samples_per_second": None,
+        **capacity_snapshot,
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 class MetricsTableCallback(TrainerCallback):
     """
     Custom callback that prints training metrics in a nice table format.
@@ -240,6 +258,13 @@ class MetricsTableCallback(TrainerCallback):
         """Called at the end of training."""
         print("=" * 100)
         elapsed = (datetime.now() - self.start_time).total_seconds()
+        _append_final_training_summary(
+            self.log_file,
+            step=state.global_step,
+            total_steps=state.max_steps if state.max_steps > 0 else state.global_step,
+            total_epochs=int(state.epoch or 0),
+            elapsed=elapsed,
+        )
         print("\n" + "=" * 100)
         print("TRAINING COMPLETED")
         print("=" * 100)
@@ -394,6 +419,7 @@ class LiveDashboardCallback(TrainerCallback):
         self.start_time = datetime.now()
         self.total_steps = state.max_steps if state.max_steps > 0 else 1000
         self.total_epochs = args.num_train_epochs
+        reset_capacity_peaks(torch)
 
         # Create symlink to latest log
         if self.latest_log.exists():
@@ -430,15 +456,31 @@ class LiveDashboardCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0:
             return
 
+        elapsed = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
+        steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0.0
+        samples_per_sec = (
+            state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps
+        ) / elapsed if elapsed > 0 else 0.0
+        capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+        if args.cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", args.cloud_provider)
+        cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
+        if cloud_gpu_type:
+            capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)
+
         # Save to log file
         log_entry = {
             "step": state.global_step,
             "timestamp": datetime.now().isoformat(),
             "total_steps": self.total_steps,
             "total_epochs": int(self.total_epochs),
+            "elapsed_seconds": round(elapsed, 3),
+            "steps_per_second": round(steps_per_sec, 3),
+            "samples_per_sec": round(samples_per_sec, 3),
+            **capacity_snapshot,
             **logs
         }
-        with open(self.log_file, "a") as f:
+        with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
 
         # Update dashboard
@@ -450,12 +492,15 @@ class LiveDashboardCallback(TrainerCallback):
                 learning_rate=logs.get('learning_rate'),
                 kl=logs.get('kl'),
                 margin=logs.get('rewards/margins'),
+                gpu_memory_gb=capacity_snapshot.get("gpu_memory_gb"),
             )
         else:
             # Fallback: print step info
             loss = logs.get('loss', 0)
             lr = logs.get('learning_rate', 0)
-            print(f"  Step {state.global_step}/{self.total_steps} | Loss: {loss:.4f} | LR: {lr:.2e}")
+            gpu_mem_value = capacity_snapshot.get("gpu_memory_gb")
+            gpu_mem = f"{gpu_mem_value:.1f}GB" if isinstance(gpu_mem_value, (int, float)) else "N/A"
+            print(f"  Step {state.global_step}/{self.total_steps} | Loss: {loss:.4f} | LR: {lr:.2e} | GPU: {gpu_mem}")
 
     def on_save(self, args, state, control, **kwargs):
         """Log checkpoint save."""
@@ -471,6 +516,13 @@ class LiveDashboardCallback(TrainerCallback):
             self.dashboard = None
 
         elapsed = (datetime.now() - self.start_time).total_seconds()
+        _append_final_training_summary(
+            self.log_file,
+            step=state.global_step,
+            total_steps=self.total_steps,
+            total_epochs=int(self.total_epochs),
+            elapsed=elapsed,
+        )
         print(f"\n{'=' * 60}")
         print("TRAINING COMPLETED")
         print(f"{'=' * 60}")

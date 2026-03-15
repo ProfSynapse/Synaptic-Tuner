@@ -32,6 +32,18 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _classify_oom_risk(max_reserved_pct: Optional[float]) -> Optional[str]:
+    if max_reserved_pct is None:
+        return None
+    if max_reserved_pct >= 97.0:
+        return "critical"
+    if max_reserved_pct >= 92.0:
+        return "high"
+    if max_reserved_pct >= 85.0:
+        return "moderate"
+    return "low"
+
+
 def _detect_total_system_memory_bytes() -> Optional[int]:
     try:
         import psutil  # type: ignore
@@ -191,8 +203,15 @@ def capture_runtime_capacity_snapshot(torch_module=None) -> Dict[str, Any]:
                     "max_gpu_memory_allocated_gb": _round_gb(max_allocated),
                     "gpu_memory_reserved_pct": round((reserved / total) * 100, 2) if total else None,
                     "gpu_memory_allocated_pct": round((allocated / total) * 100, 2) if total else None,
+                    "gpu_memory_reserved_headroom_gb": _round_gb(max(total - reserved, 0.0)),
+                    "gpu_memory_allocated_headroom_gb": _round_gb(max(total - allocated, 0.0)),
+                    "max_gpu_memory_reserved_pct": round((max_reserved / total) * 100, 2) if total else None,
+                    "max_gpu_memory_allocated_pct": round((max_allocated / total) * 100, 2) if total else None,
+                    "max_gpu_memory_reserved_headroom_gb": _round_gb(max(total - max_reserved, 0.0)),
+                    "max_gpu_memory_allocated_headroom_gb": _round_gb(max(total - max_allocated, 0.0)),
                 }
             )
+            snapshot["oom_risk_level"] = _classify_oom_risk(snapshot.get("max_gpu_memory_reserved_pct"))
         except Exception:
             pass
 
@@ -279,6 +298,10 @@ def summarize_capacity_from_logs(logs_dir: Path) -> Dict[str, Any]:
         "peak_gpu_memory_allocated_gb": "gpu_memory_allocated_gb",
         "peak_gpu_memory_reserved_pct": "gpu_memory_reserved_pct",
         "peak_gpu_memory_allocated_pct": "gpu_memory_allocated_pct",
+        "peak_max_gpu_memory_reserved_gb": "max_gpu_memory_reserved_gb",
+        "peak_max_gpu_memory_allocated_gb": "max_gpu_memory_allocated_gb",
+        "peak_max_gpu_memory_reserved_pct": "max_gpu_memory_reserved_pct",
+        "peak_max_gpu_memory_allocated_pct": "max_gpu_memory_allocated_pct",
         "peak_gpu_utilization_pct": "gpu_utilization_pct",
         "peak_gpu_vram_utilization_pct": "gpu_vram_utilization_pct",
         "peak_process_ram_gb": "process_ram_gb",
@@ -293,10 +316,27 @@ def summarize_capacity_from_logs(logs_dir: Path) -> Dict[str, Any]:
         if values:
             summary[output_key] = round(max(values), 3)
 
+    min_fields = {
+        "min_gpu_memory_reserved_headroom_gb": "gpu_memory_reserved_headroom_gb",
+        "min_gpu_memory_allocated_headroom_gb": "gpu_memory_allocated_headroom_gb",
+        "min_max_gpu_memory_reserved_headroom_gb": "max_gpu_memory_reserved_headroom_gb",
+        "min_max_gpu_memory_allocated_headroom_gb": "max_gpu_memory_allocated_headroom_gb",
+    }
+    for output_key, input_key in min_fields.items():
+        values = [_safe_float(entry.get(input_key)) for entry in entries]
+        values = [value for value in values if value is not None]
+        if values:
+            summary[output_key] = round(min(values), 3)
+
     latest = entries[-1]
     latest_fields = {
         "latest_gpu_memory_reserved_gb": "gpu_memory_reserved_gb",
         "latest_gpu_memory_allocated_gb": "gpu_memory_allocated_gb",
+        "latest_gpu_memory_reserved_headroom_gb": "gpu_memory_reserved_headroom_gb",
+        "latest_gpu_memory_allocated_headroom_gb": "gpu_memory_allocated_headroom_gb",
+        "latest_max_gpu_memory_reserved_gb": "max_gpu_memory_reserved_gb",
+        "latest_max_gpu_memory_reserved_pct": "max_gpu_memory_reserved_pct",
+        "latest_max_gpu_memory_reserved_headroom_gb": "max_gpu_memory_reserved_headroom_gb",
         "latest_gpu_utilization_pct": "gpu_utilization_pct",
         "latest_gpu_vram_utilization_pct": "gpu_vram_utilization_pct",
         "latest_samples_per_sec": "samples_per_sec",
@@ -306,6 +346,13 @@ def summarize_capacity_from_logs(logs_dir: Path) -> Dict[str, Any]:
         value = _safe_float(latest.get(input_key))
         if value is not None:
             summary[output_key] = round(value, 3)
+
+    risk_pct = summary.get("peak_max_gpu_memory_reserved_pct")
+    if risk_pct is None:
+        risk_pct = summary.get("peak_gpu_memory_reserved_pct")
+    risk_level = _classify_oom_risk(_safe_float(risk_pct))
+    if risk_level:
+        summary["oom_risk_level"] = risk_level
 
     for passthrough_key in (
         "gpu_name",

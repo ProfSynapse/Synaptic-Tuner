@@ -30,6 +30,23 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+def _append_final_training_summary(log_file: Path, *, step: int, total_steps: int, total_epochs: int, elapsed: float) -> None:
+    capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+    entry = {
+        "event": "train_end",
+        "step": int(step),
+        "timestamp": datetime.now().isoformat(),
+        "total_steps": int(total_steps),
+        "total_epochs": int(total_epochs),
+        "train_runtime": round(elapsed, 3),
+        "train_steps_per_second": round((step / elapsed), 3) if elapsed > 0 else 0.0,
+        "train_samples_per_second": None,
+        **capacity_snapshot,
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 class MetricsTableCallback(TrainerCallback):
     def __init__(
         self,
@@ -140,6 +157,16 @@ class MetricsTableCallback(TrainerCallback):
         print("\n" + "=" * 60)
         print("   Step     |   Loss  | Reward  |    LR     | GPU Mem")
         print("-" * 60)
+
+    def on_train_end(self, args, state, control, **kwargs):
+        elapsed = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
+        _append_final_training_summary(
+            self.log_file,
+            step=state.global_step,
+            total_steps=state.max_steps if state.max_steps > 0 else state.global_step,
+            total_epochs=int(state.epoch or 0),
+            elapsed=elapsed,
+        )
 
 
 class LiveDashboardCallback(TrainerCallback):
@@ -279,6 +306,13 @@ class LiveDashboardCallback(TrainerCallback):
             self.dashboard = None
 
         elapsed = (datetime.now() - self.start_time).total_seconds()
+        _append_final_training_summary(
+            self.log_file,
+            step=state.global_step,
+            total_steps=self.total_steps,
+            total_epochs=int(self.total_epochs),
+            elapsed=elapsed,
+        )
         print(f"\n{'=' * 60}")
         print("GRPO TRAINING COMPLETED")
         print(f"{'=' * 60}")

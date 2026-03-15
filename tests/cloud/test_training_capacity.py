@@ -71,6 +71,10 @@ def test_capture_runtime_capacity_snapshot(monkeypatch):
     assert snapshot["gpu_memory_reserved_gb"] == 12.0
     assert snapshot["gpu_memory_allocated_gb"] == 10.0
     assert snapshot["max_gpu_memory_reserved_gb"] == 14.0
+    assert snapshot["gpu_memory_reserved_headroom_gb"] == 12.0
+    assert snapshot["max_gpu_memory_reserved_headroom_gb"] == 10.0
+    assert snapshot["max_gpu_memory_reserved_pct"] == 58.33
+    assert snapshot["oom_risk_level"] == "low"
     assert snapshot["gpu_utilization_pct"] == 87.0
     assert snapshot["system_ram_total_gb"] == 64.0
     assert snapshot["process_ram_gb"] == 3.0
@@ -83,8 +87,8 @@ def test_summarize_capacity_from_logs(tmp_path: Path):
     log_file.write_text(
         "\n".join(
             [
-                '{"step": 5, "gpu_memory_reserved_gb": 10.0, "gpu_memory_allocated_gb": 8.0, "gpu_utilization_pct": 55.0, "samples_per_sec": 12.0, "steps_per_second": 1.5, "cloud_provider": "hf_jobs", "cloud_gpu_type": "a10g-small"}',
-                '{"step": 10, "gpu_memory_reserved_gb": 14.0, "gpu_memory_allocated_gb": 11.0, "gpu_utilization_pct": 81.0, "samples_per_sec": 14.5, "steps_per_second": 1.8, "gpu_name": "NVIDIA A10G", "gpu_total_memory_gb": 24.0, "system_ram_total_gb": 44.0}',
+                '{"step": 5, "gpu_memory_reserved_gb": 10.0, "gpu_memory_allocated_gb": 8.0, "gpu_memory_reserved_headroom_gb": 14.0, "max_gpu_memory_reserved_gb": 10.0, "max_gpu_memory_reserved_pct": 41.67, "max_gpu_memory_reserved_headroom_gb": 14.0, "gpu_utilization_pct": 55.0, "samples_per_sec": 12.0, "steps_per_second": 1.5, "cloud_provider": "hf_jobs", "cloud_gpu_type": "a10g-small"}',
+                '{"step": 10, "gpu_memory_reserved_gb": 14.0, "gpu_memory_allocated_gb": 11.0, "gpu_memory_reserved_headroom_gb": 10.0, "max_gpu_memory_reserved_gb": 18.0, "max_gpu_memory_reserved_pct": 75.0, "max_gpu_memory_reserved_headroom_gb": 6.0, "gpu_utilization_pct": 81.0, "samples_per_sec": 14.5, "steps_per_second": 1.8, "gpu_name": "NVIDIA A10G", "gpu_total_memory_gb": 24.0, "system_ram_total_gb": 44.0}',
             ]
         )
         + "\n",
@@ -98,6 +102,12 @@ def test_summarize_capacity_from_logs(tmp_path: Path):
     assert summary["peak_gpu_memory_allocated_gb"] == 11.0
     assert summary["peak_gpu_utilization_pct"] == 81.0
     assert summary["peak_samples_per_sec"] == 14.5
+    assert summary["peak_max_gpu_memory_reserved_gb"] == 18.0
+    assert summary["peak_max_gpu_memory_reserved_pct"] == 75.0
+    assert summary["min_gpu_memory_reserved_headroom_gb"] == 10.0
+    assert summary["min_max_gpu_memory_reserved_headroom_gb"] == 6.0
+    assert summary["latest_max_gpu_memory_reserved_headroom_gb"] == 6.0
+    assert summary["oom_risk_level"] == "low"
     assert summary["latest_steps_per_second"] == 1.8
     assert summary["cloud_provider"] == "hf_jobs"
     assert summary["cloud_gpu_type"] == "a10g-small"
