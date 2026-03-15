@@ -58,9 +58,12 @@ defaults:
       strict_schema: true
     loop:
       enabled: true
-      max_turns: 6
-      max_tool_steps: 6
+      mode: agentic
+      max_turns: 8
+      max_tool_steps: 8
+      continue_on_execution_error: true
       stop_on_text_response: true
+      stop_on_environment_pass: true
 
 tests:
   - id: vault_promote_inbox_note

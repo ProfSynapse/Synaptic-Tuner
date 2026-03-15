@@ -67,7 +67,15 @@ def execute_response_tool_calls(
         if strict_schema and schema_index and schema_entry is None:
             record.status = "error"
             record.error = "Tool not present in schema"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' is not defined in configured tool schema"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' is not defined in configured tool schema",
+                    code="tool_not_in_schema",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
@@ -75,14 +83,30 @@ def execute_response_tool_calls(
         if missing_required:
             record.status = "error"
             record.error = f"Missing required args: {', '.join(missing_required)}"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' missing required args: {', '.join(missing_required)}"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' missing required args: {', '.join(missing_required)}",
+                    code="missing_required_args",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
         if enforce_allowlist and name not in allowed:
             record.status = "blocked"
             record.error = "Tool not in allowlist"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' not in environment allowlist"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' not in environment allowlist",
+                    code="tool_not_allowed",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
@@ -99,10 +123,19 @@ def execute_response_tool_calls(
             output = _execute_action(runtime, action, args, key_hints=normalized_key_hints)
             record.output = output
             record.status = "ok"
+            record.recoverable = False
         except Exception as exc:
             record.status = "error"
             record.error = str(exc)
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' failed: {exc}"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' failed: {exc}",
+                    code="tool_execution_failed",
+                    recoverable=True,
+                )
+            )
 
         executions.append(record)
 
@@ -117,14 +150,14 @@ def format_tool_results_message(
     """Render executed tool results into a message for the next model turn."""
     payload = {
         "executed_tools": [tool.to_dict() for tool in executions],
-        "issues": [{"level": issue.level, "message": issue.message} for issue in issues],
+        "issues": [issue.to_dict() for issue in issues],
     }
     normalized = str(format_name or "json").strip().lower()
     if normalized == "json":
         return (
             "Tool execution results:\n"
             f"{json.dumps(payload, ensure_ascii=True, indent=2)}\n\n"
-            "Continue the task. If more tool use is needed, call tools again. "
+            "Continue the task. If a tool failed or returned incomplete results, adjust your approach and keep going. "
             "If the task is complete, respond with a final answer."
         )
     return (

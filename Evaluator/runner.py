@@ -430,6 +430,9 @@ def _evaluate_case_with_environment_loop(
     stop_on_environment_pass = bool(loop_cfg.get("stop_on_environment_pass", False))
     require_final_text = bool(loop_cfg.get("require_final_text", False))
     tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
+    continue_on_execution_error = bool(
+        loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
+    )
 
     messages = case.chat_messages()
     session = environment_validator.start_session(
@@ -490,7 +493,7 @@ def _evaluate_case_with_environment_loop(
                 stop_reason = "max_tool_steps_exceeded"
                 break
 
-            if any(issue.level.lower() == "error" for issue in step.issues):
+            if step.hard_error:
                 stop_reason = "environment_execution_failed"
                 break
 
@@ -504,6 +507,19 @@ def _evaluate_case_with_environment_loop(
                 break
 
             if has_tool_calls:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": _format_loop_tool_feedback(
+                            executions=step.executed_tools,
+                            issues=step.issues,
+                            format_name=tool_result_format,
+                        ),
+                    }
+                )
+                continue
+
+            if step.recoverable_error and continue_on_execution_error:
                 messages.append(
                     {
                         "role": "user",

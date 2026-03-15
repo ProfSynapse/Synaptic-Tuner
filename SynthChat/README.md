@@ -243,6 +243,11 @@ Those environment-backed scenarios can target either:
 The loop itself is owned by the evaluator's `environment.loop` config, not by
 SynthChat-specific code or one hardcoded tool wrapper.
 
+When you want "can the model navigate and recover?" rather than "can it get the
+workflow right on the first try?", prefer evaluator scenarios using
+`environment.loop.mode: agentic`. Final environment state should determine
+success; preferred workflows should be expressed in scoring, not hard failure.
+
 Environment sourcing is explicit via `environment_mode`:
 
 - `provided`: use the hand-authored `environment` block only

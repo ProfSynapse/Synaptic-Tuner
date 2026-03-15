@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
@@ -112,6 +113,8 @@ class EnvironmentSession:
     verb_rules: Dict[str, List[str]] = field(init=False, default_factory=dict)
     strict_schema: bool = field(init=False, default=False)
     default_action: str = field(init=False, default="simulate")
+    loop_mode: str = field(init=False, default="strict")
+    continue_on_execution_error: bool = field(init=False, default=False)
     issues: List[EnvironmentIssue] = field(init=False, default_factory=list)
     executed_tools: List[ExecutedToolCall] = field(init=False, default_factory=list)
     steps: List[EnvironmentStepResult] = field(init=False, default_factory=list)
@@ -165,6 +168,14 @@ class EnvironmentSession:
         )
 
         self.runtime = self.validator._create_runtime()
+        loop_cfg = config.get("loop") if isinstance(config.get("loop"), dict) else {}
+        self.loop_mode = str(loop_cfg.get("mode", "strict") or "strict").strip().lower()
+        self.continue_on_execution_error = bool(
+            loop_cfg.get(
+                "continue_on_execution_error",
+                self.loop_mode == "agentic",
+            )
+        )
 
         fixture = merge_environment_fixture(
             parse_environment_fixture(self.system_prompt),
@@ -197,11 +208,16 @@ class EnvironmentSession:
         step_issues.extend(exec_issues)
         self.issues.extend(step_issues)
         self.executed_tools.extend(executions)
+        has_errors = any(issue.level.lower() == "error" for issue in step_issues)
+        recoverable_error = has_errors and all(issue.recoverable is not False for issue in step_issues)
+        hard_error = has_errors and not (self.continue_on_execution_error and recoverable_error)
 
         step = EnvironmentStepResult(
             turn_index=len(self.steps) + 1,
             executed_tools=executions,
             issues=step_issues,
+            hard_error=hard_error,
+            recoverable_error=recoverable_error,
         )
         self.steps.append(step)
         return step
@@ -215,7 +231,7 @@ class EnvironmentSession:
         """Run final checks and return the aggregate environment result."""
         assertions_run = 0
         snapshot: Dict[str, Any] = {}
-        final_issues = list(self.issues)
+        final_issues = [_normalize_final_issue(issue) for issue in self.issues]
 
         if self.max_steps and len(self.executed_tools) > self.max_steps:
             final_issues.append(
@@ -247,13 +263,15 @@ class EnvironmentSession:
         except Exception as exc:
             final_issues.append(EnvironmentIssue("warning", f"Environment snapshot warning: {exc}"))
 
+        passed = all(issue.level.lower() != "error" for issue in final_issues)
         trace = EnvironmentEpisodeTrace(
             steps=list(self.steps),
             total_turns=total_turns if total_turns is not None else len(self.steps),
             total_tool_calls=len(self.executed_tools),
             stop_reason=stop_reason,
+            hard_failure=any(step.hard_error for step in self.steps),
+            recovered_after_error=_did_recover_after_error(self.steps, passed),
         )
-        passed = all(issue.level.lower() != "error" for issue in final_issues)
         return EnvironmentValidationResult(
             passed=passed,
             issues=final_issues,
@@ -296,24 +314,99 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
 
         if atype == "file_contains":
             needle = str(assertion.get("text", ""))
-            try:
-                content = runtime.read_text(path)
-            except Exception as exc:
-                issues.append(EnvironmentIssue("error", f"Assertion failed reading {path}: {exc}"))
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
                 continue
             if needle not in content:
-                issues.append(EnvironmentIssue("error", f"Assertion failed: '{path}' does not contain expected text"))
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' does not contain expected text",
+                        code="assertion_file_contains",
+                        recoverable=False,
+                    )
+                )
             continue
 
         if atype == "file_not_contains":
             needle = str(assertion.get("text", ""))
-            try:
-                content = runtime.read_text(path)
-            except Exception as exc:
-                issues.append(EnvironmentIssue("error", f"Assertion failed reading {path}: {exc}"))
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
                 continue
             if needle in content:
-                issues.append(EnvironmentIssue("error", f"Assertion failed: '{path}' contains forbidden text"))
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' contains forbidden text",
+                        code="assertion_file_not_contains",
+                        recoverable=False,
+                    )
+                )
+            continue
+
+        if atype == "file_matches_regex":
+            pattern = str(assertion.get("pattern", ""))
+            if not pattern:
+                issues.append(EnvironmentIssue("warning", "Assertion file_matches_regex missing 'pattern'"))
+                continue
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
+                continue
+            if re.search(pattern, content, re.MULTILINE) is None:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' does not match expected regex",
+                        code="assertion_file_matches_regex",
+                        recoverable=False,
+                    )
+                )
+            continue
+
+        if atype in {"file_line_contains", "file_line_not_contains"}:
+            expected_text = str(assertion.get("text", ""))
+            line_number = int(assertion.get("line", 0) or 0)
+            if line_number <= 0:
+                issues.append(EnvironmentIssue("warning", f"Assertion {atype} missing valid 'line'"))
+                continue
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
+                continue
+            lines = content.splitlines()
+            if line_number > len(lines):
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' has no line {line_number}",
+                        code="assertion_line_missing",
+                        recoverable=False,
+                    )
+                )
+                continue
+            line = lines[line_number - 1]
+            contains = expected_text in line
+            if atype == "file_line_contains" and not contains:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: line {line_number} of '{path}' does not contain expected text",
+                        code="assertion_file_line_contains",
+                        recoverable=False,
+                    )
+                )
+            if atype == "file_line_not_contains" and contains:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: line {line_number} of '{path}' contains forbidden text",
+                        code="assertion_file_line_not_contains",
+                        recoverable=False,
+                    )
+                )
             continue
 
         if atype == "dir_contains":
@@ -487,3 +580,27 @@ def _value_contains(actual: Any, expected: Any) -> bool:
     if isinstance(actual, dict):
         return expected in actual
     return actual == expected
+
+
+def _read_file(runtime: EnvironmentRuntime, path: str) -> tuple[str, Optional[str]]:
+    try:
+        return runtime.read_text(path), None
+    except Exception as exc:
+        return "", f"Assertion failed reading {path}: {exc}"
+
+
+def _did_recover_after_error(steps: List[EnvironmentStepResult], passed: bool) -> bool:
+    if not passed:
+        return False
+    return any(step.recoverable_error for step in steps)
+
+
+def _normalize_final_issue(issue: EnvironmentIssue) -> EnvironmentIssue:
+    if issue.level.lower() == "error" and issue.recoverable:
+        return EnvironmentIssue(
+            level="warning",
+            message=issue.message,
+            code=issue.code,
+            recoverable=issue.recoverable,
+        )
+    return issue

@@ -34,6 +34,8 @@ def test_config_loader_merges_environment_defaults_into_case_metadata():
     assert "storageManager_move" in environment["allowed_tools"]
     assert environment["execution"]["strict_schema"] is True
     assert environment["loop"]["enabled"] is True
+    assert environment["loop"]["mode"] == "agentic"
+    assert environment["loop"]["stop_on_environment_pass"] is True
     assert environment["loop"]["stop_on_text_response"] is True
 
 

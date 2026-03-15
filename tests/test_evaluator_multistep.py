@@ -229,3 +229,103 @@ def test_multistep_environment_loop_can_stop_when_environment_passes():
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.total_turns == 1
     assert record.environment.episode_trace.stop_reason == "environment_passed"
+
+
+def test_agentic_loop_can_recover_after_a_bad_first_step():
+    client = _SequenceClient(
+        [
+            _tool_response(
+                [
+                    {
+                        "agent": "contentManager",
+                        "tool": "read",
+                        "params": {"path": "Journal/Daily/2026-03-15.md", "startLine": 1},
+                    }
+                ]
+            ),
+            _tool_response(
+                [
+                    {
+                        "agent": "searchManager",
+                        "tool": "searchDirectory",
+                        "params": {"query": "daily-note", "paths": ["Templates/"]},
+                    }
+                ]
+            ),
+            _tool_response(
+                [
+                    {
+                        "agent": "contentManager",
+                        "tool": "write",
+                        "params": {
+                            "path": "Journal/Daily/2026-03-15.md",
+                            "content": (
+                                "---\n"
+                                "title: 2026-03-15\n"
+                                "type: daily\n"
+                                "tags:\n"
+                                "  - journal\n"
+                                "mood: focused\n"
+                                "---\n"
+                                "# Daily Note\n"
+                            ),
+                            "overwrite": True,
+                        },
+                    }
+                ]
+            ),
+        ],
+        expected_substrings=[
+            [],
+            ["Tool execution results", "Tool 'contentManager_read' failed"],
+            ["Templates/daily-note.md"],
+        ],
+    )
+    case = PromptCase(
+        case_id="loop_recovery_case",
+        question="Create today's daily note.",
+        metadata={
+            "system": "Loop system prompt",
+            "environment": {
+                "allowed_tools": [
+                    "contentManager_read",
+                    "searchManager_searchDirectory",
+                    "contentManager_write",
+                ],
+                "max_steps": 4,
+                "loop": {
+                    "enabled": True,
+                    "mode": "agentic",
+                    "max_turns": 4,
+                    "continue_on_execution_error": True,
+                    "stop_on_environment_pass": True,
+                },
+                "fixture": {
+                    "directories": ["Journal/Daily"],
+                    "notes": [
+                        {
+                            "path": "Templates/daily-note.md",
+                            "frontmatter": {"title": "Daily Note Template", "type": "daily"},
+                            "body": "# Daily Note\n",
+                        }
+                    ],
+                },
+                "assertions": [
+                    {"type": "path_exists", "path": "Journal/Daily/2026-03-15.md"},
+                    {"type": "frontmatter_field_equals", "path": "Journal/Daily/2026-03-15.md", "field": "mood", "value": "focused"},
+                ],
+            }
+        },
+    )
+
+    record = evaluate_cases(
+        [case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.passed is True
+    assert record.environment is not None
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.recovered_after_error is True
+    assert record.environment.episode_trace.stop_reason == "environment_passed"

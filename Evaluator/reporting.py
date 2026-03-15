@@ -31,6 +31,13 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     scoring_tested = sum(1 for record in records if record.scoring is not None)
     score_total = sum(record.scoring.awarded_score for record in records if record.scoring is not None)
     score_max_total = sum(record.scoring.max_score for record in records if record.scoring is not None)
+    episode_recoveries = sum(
+        1
+        for record in records
+        if record.environment
+        and record.environment.episode_trace is not None
+        and record.environment.episode_trace.recovered_after_error
+    )
 
     by_tag = defaultdict(
         lambda: {
@@ -138,6 +145,7 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         "score_max_total": score_max_total,
         "average_score": (score_total / scoring_tested) if scoring_tested else 0,
         "normalized_score": (score_total / score_max_total) if score_max_total else 0,
+        "episode_recoveries": episode_recoveries,
         "by_tag": {
             tag: {
                 "total": bucket["total"],
@@ -212,6 +220,8 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
         lines.append(
             f"  Path scoring: avg {stats['average_score']:.2f}, normalized {stats['normalized_score']*100:.1f}%"
         )
+    if stats["episode_recoveries"] > 0:
+        lines.append(f"  Recovered episodes: {stats['episode_recoveries']}")
     lines.append(f"Request errors: {stats['request_errors']}")
     lines.append("Results by tag:")
     for tag, bucket in stats["by_tag"].items():

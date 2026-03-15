@@ -191,3 +191,58 @@ def test_environment_validator_session_persists_runtime_across_multiple_steps():
         "contentManager_write",
         "storageManager_move",
     ]
+
+
+def test_environment_validator_supports_precise_regex_and_line_assertions():
+    validator = EnvironmentValidator(backend="local")
+
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_write",
+                    "arguments": json.dumps(
+                        {
+                            "path": "Settings/settings.yaml",
+                            "content": (
+                                "service: api\n"
+                                "database_url: postgresql://prod-user:prod-pass@db.prod.internal:5432/app\n"
+                                "retries: 3\n"
+                            ),
+                            "overwrite": True,
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {"directories": ["Settings"]},
+            "assertions": [
+                {
+                    "type": "file_line_contains",
+                    "path": "Settings/settings.yaml",
+                    "line": 2,
+                    "text": "database_url: postgresql://prod-user:prod-pass@db.prod.internal:5432/app",
+                },
+                {
+                    "type": "file_line_not_contains",
+                    "path": "Settings/settings.yaml",
+                    "line": 2,
+                    "text": "localhost",
+                },
+                {
+                    "type": "file_matches_regex",
+                    "path": "Settings/settings.yaml",
+                    "pattern": r"database_url:\s+postgresql://prod-user:prod-pass@db\.prod\.internal:5432/app",
+                },
+            ],
+        },
+    )
+
+    assert result.passed is True

@@ -177,6 +177,7 @@ HF Jobs-specific cloud behavior:
 - for environment-backed tool generation, prefer structured output for both generated environments and assistant tool responses so the artifact is executable instead of “tool-shaped prose”
 - keep tool wrapper choice config-driven via the canonical tool schema; do not assume `useTools` is a hardcoded invariant in new prompts, validators, or generators
 - for environment-backed gym work, keep multi-step agent loops config-driven via `environment.loop`; the evaluator runner owns the loop, while `local` and `e2b` are interchangeable runtime backends underneath it
+- if the goal is "can it navigate the space and recover", prefer `environment.loop.mode: agentic`; keep final environment state as the hard success criterion and use `scoring.paths` for preferred vs acceptable workflows
 - the reusable inspection method is:
   compare expected behavior to actual behavior
   inspect parsed tool/action records before raw text when both are present

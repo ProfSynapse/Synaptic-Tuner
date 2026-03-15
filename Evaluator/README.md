@@ -257,10 +257,12 @@ environment:
   max_steps: 8
   loop:
     enabled: true
-    max_turns: 6
+    mode: agentic
+    max_turns: 8
     max_tool_steps: 8
+    continue_on_execution_error: true
     stop_on_text_response: true
-    stop_on_environment_pass: false
+    stop_on_environment_pass: true
     tool_result_format: json
 ```
 
@@ -269,6 +271,15 @@ This split is intentional:
 - the evaluator runner owns the multi-turn control loop
 - the environment backend (`local` or `e2b`) owns runtime state only
 - scenario YAML decides whether looping is enabled
+
+Use loop modes this way:
+
+- `strict`: fail fast on execution errors; useful for "did it get the workflow right immediately?"
+- `agentic`: continue after recoverable tool errors; useful for "can it navigate the environment and recover?"
+
+In both modes, final environment state should be the hard success criterion.
+Preferred or efficient workflows belong in `scoring.paths`, not hard pass/fail,
+unless the task truly requires a specific tool family.
 
 For note-vault or "gym" style tasks, `environment.fixture` can define the runtime
 state directly instead of relying only on prompt parsing. It supports generic
@@ -482,6 +493,15 @@ python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_
 Models use the wrapper defined in the configured tool schema. The default schema
 uses `useTools`, but wrapper handling in the validator/executor is schema-driven
 and should not be hardcoded to one wrapper name.
+
+Additional precise file assertions are available for environment-backed tasks:
+
+- `file_matches_regex`
+- `file_line_contains`
+- `file_line_not_contains`
+
+Use these when correctness depends on updating the right line or preserving the
+rest of a file, not just on broad file existence checks.
 
 Default wrapper example:
 ```json
