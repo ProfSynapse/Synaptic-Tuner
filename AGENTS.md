@@ -11,10 +11,15 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset. Empty strings can produce `Authorization: Bearer ` and fail in `httpx` before any request reaches Hugging Face.
 - Resolve or create the bucket once up front, then sync against the resolved namespaced bucket ID during the run.
 - Avoid repeated bucket creation and `whoami-v2` calls during periodic sync. Cache bucket resolution and keep dashboard polling conservative.
-- Use `python tuner.py cloud-eval --run latest --preset full` for remote vLLM evaluation of bucketed HF Jobs runs; it launches a second HF Job and stores outputs under the source run's `evaluations/vllm/` prefix.
+- Use `python tuner.py cloud-eval --run latest --preset full` for remote HF Jobs evaluation of bucketed runs; the current stable runtime is direct Unsloth inference, not vLLM.
+- Use `python tuner.py cloud-pipeline --method sft --preset full` for the common train-then-evaluate path; it hands the exact finished run into cloud eval automatically.
+- Avoid forcing vLLM into the Unsloth HF Jobs image for this path. If you want vLLM later, treat it as a separate dedicated runtime.
+- If a preset resolves but scenario loading fails, inspect `Evaluator/config/eval_run.yaml` for stale filenames before debugging `config_loader.py`.
+- HF cloud eval results are saved under the source run's `evaluations/vllm/{timestamp}/` prefix. Inspect `evaluation_results.json` first, then `evaluation_results.md`, then `evaluation_lineage.json`; use `logs/eval_progress.jsonl` only for live/debug state.
 
 ## Cloud Artifact UX
 
 - HF Jobs local dashboard parity comes from syncing JSONL training logs to the bucket and replaying them locally.
+- HF Jobs cloud evaluation now uses the same adapter idea: remote JSONL progress, local replay into the existing evaluation dashboard.
 - Modal may stream usable remote stdout directly; verify that before adding a separate local watcher.
 - RunPod currently needs more explicit metric/log plumbing if local dashboard parity is required.

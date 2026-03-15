@@ -21,6 +21,19 @@ class ToolCall:
     arguments: Dict[str, Any]
 
 
+def _looks_like_wrapper_call(tool_call: ToolCall) -> bool:
+    """Return True when a tool call wraps delegated calls inside arguments."""
+    if not isinstance(tool_call.arguments, dict):
+        return False
+    calls = tool_call.arguments.get("calls")
+    if not isinstance(calls, list) or not calls:
+        return False
+    return any(
+        isinstance(call, dict) and (call.get("tool") or call.get("name"))
+        for call in calls
+    )
+
+
 def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
     """Expand useTools wrapper into individual tool calls.
 
@@ -38,6 +51,7 @@ def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
     expanded = []
     for tc in tool_calls:
         if tc.name == "useTools" and isinstance(tc.arguments, dict):
+            wrapper_context = tc.arguments.get("context")
             calls = tc.arguments.get("calls", [])
             if isinstance(calls, list):
                 for call in calls:
@@ -46,9 +60,12 @@ def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
                         tool = call.get("tool", "")
                         params = call.get("params", {})
                         if agent and tool:
+                            merged_args = dict(params) if isinstance(params, dict) else {}
+                            if isinstance(wrapper_context, dict) and "context" not in merged_args:
+                                merged_args["context"] = wrapper_context
                             # Construct full tool name: agent_tool
                             full_name = f"{agent}_{tool}"
-                            expanded.append(ToolCall(name=full_name, arguments=params))
+                            expanded.append(ToolCall(name=full_name, arguments=merged_args))
             # If no valid calls found, keep the original useTools
             if not expanded:
                 expanded.append(tc)
@@ -56,6 +73,39 @@ def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
             # Not useTools, keep as-is
             expanded.append(tc)
     return expanded
+
+
+def _filter_wrapper_schema_warnings(
+    issues: List["ValidatorIssue"],
+    raw_tool_calls: List[ToolCall],
+    expanded_tool_calls: List[ToolCall],
+) -> List["ValidatorIssue"]:
+    """Remove wrapper-level schema warnings once delegated calls expand cleanly.
+
+    The lower-level dataset validator validates raw function names before wrapper
+    expansion. For delegated-call wrappers, that can emit a generic "No schema
+    found" warning even when the evaluator successfully expands the response
+    into concrete tool/action names. Keep the concrete scoring signal and drop
+    the wrapper-only warning.
+    """
+    suppress_messages = set()
+    for index, tool_call in enumerate(raw_tool_calls, start=1):
+        if not _looks_like_wrapper_call(tool_call):
+            continue
+        expanded_from_call = _expand_use_tools([tool_call])
+        if not expanded_from_call:
+            continue
+        if len(expanded_from_call) == 1 and expanded_from_call[0].name == tool_call.name:
+            continue
+        suppress_messages.add(f"Tool call #{index} ({tool_call.name}): No schema found for this tool")
+
+    if not suppress_messages:
+        return issues
+
+    return [
+        issue for issue in issues
+        if not (issue.level == "WARN" and issue.message in suppress_messages)
+    ]
 
 
 @dataclass
@@ -165,11 +215,12 @@ def validate_assistant_response(
     else:
         report.add("ERROR", f"Assistant response must be string or dict, got {type(content).__name__}")
 
+    raw_tool_calls = list(tool_calls)
     issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
 
-    # Expand useTools wrapper into individual tool calls
-    # This allows expected_tools to use actual tool names like "storageManager_move"
+    # Expand wrapper calls into concrete tool names before downstream checks.
     tool_calls = _expand_use_tools(tool_calls)
+    issues = _filter_wrapper_schema_warnings(issues, raw_tool_calls, tool_calls)
 
     # Validate IDs against eval context if provided
     context_validation = None

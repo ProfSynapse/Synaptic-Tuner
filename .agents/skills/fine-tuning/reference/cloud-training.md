@@ -100,10 +100,41 @@ What it does:
 - resolves the configured HF bucket and picks the requested run (`latest` works)
 - submits a new HF Job on GPU
 - downloads the run's `final_model/` LoRA adapter from the bucket
-- starts `vLLM` remotely with the adapter loaded on top of the base model
-- runs `Evaluator.cli --backend vllm ...`
+- runs `Evaluator.cli --backend unsloth ...` directly in the HF job using the downloaded adapter
 - syncs evaluation outputs back into the same bucket under:
   `runs/hf_jobs/{method}/{run_slug}/evaluations/vllm/{timestamp}/`
+
+Saved files to inspect:
+- `evaluation_results.json` - canonical machine-readable summary and all records
+- `evaluation_results.md` - human-readable report
+- `evaluation_lineage.json` - provenance / model-card material
+- `logs/eval_progress.jsonl` - incremental progress events used for the local cloud dashboard
+
+Inspection workflow:
+1. Find the source training run under `runs/hf_jobs/{method}/{run_slug}/`
+2. Open the newest directory under `evaluations/vllm/`
+3. Read `evaluation_results.json` first
+4. Use `evaluation_results.md` when you want a concise human summary
+5. Use `evaluation_lineage.json` if the question is about reproducibility or upload metadata
+6. Use `logs/eval_progress.jsonl` only when debugging in-flight or partially failed runs
+7. For local inspection from the CLI, use:
+
+```bash
+python tuner.py cloud-inspect --run latest --eval-run latest --method sft
+```
+
+Interpreting saved failures:
+- Do not jump from a failed case count straight to a training conclusion.
+- First separate infrastructure or evaluator noise from actual model behavior failures.
+- Prefer the structured record fields over raw response text when both are available.
+- Classify failures by mechanism:
+  wrong action selected relative to the scenario
+  response type mismatch
+  malformed structured output or parse failure
+  missing required fields
+  behavior-expectation mismatch
+- The useful question is: what did the model do instead of what the evaluation expected?
+- Keep this analysis generic. The same method should work across different prompt formats, toolsets, and custom evaluation configs.
 
 Useful flags:
 - `--method sft` or `--method kto` to filter run discovery
@@ -113,6 +144,19 @@ Useful flags:
 
 Current constraint:
 - the LoRA adapter's `base_model_name_or_path` must point to a hub-accessible model, not a local filesystem path
+
+Anti-patterns:
+- Do not assume the Unsloth training image is also a stable vLLM-serving runtime. vLLM, Transformers, tokenizers, Triton, and CUDA can drift independently.
+- Do not install a newer `huggingface_hub` into the main Unsloth eval interpreter just to satisfy bucket sync. Keep bucket sync in the helper subprocess path.
+- Do not trust preset names blindly. The `eval_run.yaml` preset filenames must match the actual files under `Evaluator/config/scenarios/`.
+
+If you want one command for the common path, use:
+
+```bash
+python tuner.py cloud-pipeline --method sft --preset full
+```
+
+That trains on HF Jobs first, then launches cloud evaluation against the exact finished run. It is the preferred UX for train-followed-by-eval.
 
 ---
 

@@ -69,6 +69,7 @@ Commands:
   cloud       Cloud training (HF Jobs, Modal, RunPod)
   cloud-pipeline Train on HF Jobs, then evaluate on HF Jobs
   cloud-eval  Cloud evaluation on HF Jobs using vLLM
+  cloud-inspect Inspect saved HF cloud evaluation results
   eval        Evaluate a model
   synthchat   Synthetic data generation and improvement
   modelops    Model operations (run, merge, convert, upload)
@@ -102,7 +103,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-pipeline", "cloud-eval", "eval", "synthchat", "modelops", "status", "doctor", "list"],
+        choices=["train", "cloud", "cloud-pipeline", "cloud-eval", "cloud-inspect", "eval", "synthchat", "modelops", "status", "doctor", "list"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -148,5 +149,6 @@ Examples:
     )
     parser.add_argument("--gpu", help="Override HF Jobs hardware flavor for cloud-eval.")
     parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval.")
+    parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
 
     return parser

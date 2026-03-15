@@ -91,6 +91,11 @@ python tuner.py cloud
 python tuner.py cloud-eval --run latest --preset full
 ```
 
+**Cloud training + eval in one flow:**
+```bash
+python tuner.py cloud-pipeline --method sft --preset full
+```
+
 ## Environment Variables
 
 ```bash
@@ -136,7 +141,19 @@ HF Jobs-specific cloud behavior:
 - treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `
 - if a bucket name is bare, let the launcher resolve it to the canonical namespaced bucket ID before training starts
 - bucket creation / identity checks should happen once up front; repeated `whoami` / `create_bucket` calls during log sync can hit HF rate limits
-- for post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`; it launches an HF Job, downloads the bucketed LoRA, starts vLLM remotely, runs `Evaluator.cli`, and syncs results back to the same bucket under `.../evaluations/vllm/...`
+- for post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`; it launches an HF Job, downloads the bucketed LoRA, runs direct Unsloth inference remotely, and syncs results back to the same bucket under `.../evaluations/vllm/...`
+- for the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`; it runs HF Jobs training first, then launches cloud eval against that exact run without making you reselect it
+- to inspect a finished HF cloud evaluation run from the bucket, use `python tuner.py cloud-inspect --run latest --eval-run latest --method sft`
+- avoid trying to force vLLM into the Unsloth HF Jobs image for this path; direct Unsloth inference is the stable default unless you intentionally move evaluation to a dedicated vLLM runtime
+- if preset-based eval fails with missing scenario files, check `Evaluator/config/eval_run.yaml` before debugging the loader; stale preset filenames are an easy failure mode
+- cloud eval results are saved to the same HF bucket. Inspect them in this order: `evaluation_results.json` for summary + records, `evaluation_results.md` for human-readable report, `evaluation_lineage.json` for provenance, and `logs/eval_progress.jsonl` for live/replayed progress
+- when reading `evaluation_results.json`, focus on how failures happened, not just how many there were
+- separate evaluator or parser noise from actual model behavior failures; warnings produced by a lower-level validator should not automatically be treated as model regressions
+- the reusable inspection method is:
+  compare expected behavior to actual behavior
+  inspect parsed tool/action records before raw text when both are present
+  group failures by mechanism, such as wrong action selected, acted instead of clarifying, malformed structured output, missing required fields, or behavior-expectation mismatch
+- keep examples project-agnostic; use the saved evaluation record schema to understand the failure shape instead of hardcoding one model, one toolset, or one prompt format
 
 ## Tips
 

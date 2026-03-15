@@ -374,6 +374,14 @@ class CloudEvalHandler(BaseHandler):
         return local_root
 
     def _load_eval_summary(self, results_dir: Optional[Path]) -> Optional[Dict[str, int]]:
+        payload = self._load_eval_payload(results_dir)
+        if not payload:
+            return None
+
+        summary = payload.get("summary")
+        return summary if isinstance(summary, dict) else None
+
+    def _load_eval_payload(self, results_dir: Optional[Path]) -> Optional[Dict]:
         if results_dir is None:
             return None
 
@@ -382,8 +390,7 @@ class CloudEvalHandler(BaseHandler):
             return None
 
         payload = json.loads(results_path.read_text(encoding="utf-8"))
-        summary = payload.get("summary")
-        return summary if isinstance(summary, dict) else None
+        return payload if isinstance(payload, dict) else None
 
     def _print_eval_summary(self, summary: Optional[Dict[str, int]]) -> None:
         if not summary:
@@ -397,6 +404,53 @@ class CloudEvalHandler(BaseHandler):
             f"{summary.get('failed', 0)} failed "
             f"out of {summary.get('total', 0)}"
         )
+
+    def _extract_failure_reason(self, record: Dict) -> str:
+        error = record.get("error")
+        if error:
+            return str(error)
+
+        for section_name in ("validator", "environment", "behavior"):
+            section = record.get(section_name) or {}
+            for issue in section.get("issues", []) or []:
+                if issue.get("message"):
+                    return str(issue["message"])
+
+        judge = record.get("judge") or {}
+        judge_result = judge.get("judge_result") or {}
+        for score in judge_result.get("scores", []) or []:
+            if score.get("feedback"):
+                return str(score["feedback"])
+
+        return "No failure reason captured."
+
+    def _print_eval_failure_preview(self, payload: Optional[Dict]) -> None:
+        if not payload:
+            return
+
+        failed_records = [
+            record for record in (payload.get("records") or [])
+            if not bool(record.get("passed", False))
+        ]
+        if not failed_records:
+            return
+
+        print()
+        print_info(f"Failure preview: showing {min(len(failed_records), 3)} of {len(failed_records)} failed/warned cases")
+        for index, record in enumerate(failed_records[:3], start=1):
+            case_id = record.get("case_id") or f"case-{index}"
+            reason = self._extract_failure_reason(record)
+            response_text = str(record.get("response_text") or "").strip()
+            if len(response_text) > 240:
+                response_text = response_text[:240] + "..."
+            print_config(
+                {
+                    "Case": case_id,
+                    "Why": reason,
+                    "LLM Response": response_text or "(empty)",
+                },
+                f"Failure {index}",
+            )
 
     def _auto_confirm(self) -> bool:
         return bool(getattr(self.args, "auto_confirm", False))
@@ -536,12 +590,20 @@ class CloudEvalHandler(BaseHandler):
             if exit_code == 0:
                 results_dir = self._download_eval_results(bucket_id, eval_prefix)
                 local_root = results_dir
+            else:
+                recovered_results_dir = self._download_eval_results(bucket_id, eval_prefix)
+                if self._load_eval_payload(recovered_results_dir):
+                    exit_code = 0
+                    results_dir = recovered_results_dir
+                    local_root = recovered_results_dir
 
         if exit_code == 0:
             print()
             print_info("Cloud evaluation completed successfully.")
             print_info(f"Results: hf://buckets/{bucket_id}/{eval_prefix}")
+            payload = self._load_eval_payload(results_dir)
             self._print_eval_summary(self._load_eval_summary(results_dir))
+            self._print_eval_failure_preview(payload)
         elif failure_status:
             print_error(f"Cloud evaluation failed with status: {failure_status}")
         if local_root is not None:
