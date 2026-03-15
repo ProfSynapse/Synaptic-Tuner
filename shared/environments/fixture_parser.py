@@ -1,11 +1,16 @@
-"""Parse workspace fixture information from system prompts."""
+"""Parse workspace fixture information from system prompts and YAML fixtures."""
 
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 @dataclass
@@ -35,6 +40,28 @@ def parse_environment_fixture(system_prompt: str) -> EnvironmentFixture:
 
     if not collector.has_content():
         collector.add_dir(".")
+
+    return EnvironmentFixture(
+        directories=sorted(collector.directories),
+        files=dict(sorted(collector.files.items())),
+    )
+
+
+def merge_environment_fixture(
+    base_fixture: EnvironmentFixture,
+    fixture_config: Optional[Dict[str, Any]],
+) -> EnvironmentFixture:
+    """Merge an explicit YAML fixture into a prompt-derived fixture."""
+    if not isinstance(fixture_config, dict):
+        return base_fixture
+
+    collector = _FixtureCollector()
+    for directory in base_fixture.directories:
+        collector.add_dir(directory)
+    for path, content in base_fixture.files.items():
+        collector.add_file(path, content)
+
+    _hydrate_from_fixture_config(fixture_config, collector)
 
     return EnvironmentFixture(
         directories=sorted(collector.directories),
@@ -137,6 +164,44 @@ def _hydrate_from_vault_structure(section: str, collector: _FixtureCollector) ->
             collector.add_file(item)
 
 
+def _hydrate_from_fixture_config(config: Dict[str, Any], collector: _FixtureCollector) -> None:
+    directories = config.get("directories")
+    if not isinstance(directories, list):
+        directories = config.get("folders")
+    if isinstance(directories, list):
+        for directory in directories:
+            if isinstance(directory, str):
+                collector.add_dir(directory)
+
+    files = config.get("files")
+    if isinstance(files, dict):
+        for path, content in files.items():
+            collector.add_file(str(path), _stringify_content(content))
+    elif isinstance(files, list):
+        for entry in files:
+            if isinstance(entry, str):
+                collector.add_file(entry)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            path = str(entry.get("path", "")).strip()
+            if not path:
+                continue
+            collector.add_file(path, _stringify_content(entry.get("content", "")))
+
+    notes = config.get("notes")
+    if isinstance(notes, list):
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            path = str(note.get("path", "")).strip()
+            if not path:
+                continue
+            frontmatter = note.get("frontmatter") if isinstance(note.get("frontmatter"), dict) else {}
+            body = note.get("body", note.get("content", ""))
+            collector.add_file(path, _render_note(frontmatter, _stringify_content(body)))
+
+
 def _extract_first_json_object(text: str) -> Optional[str]:
     start = text.find("{")
     if start < 0:
@@ -196,3 +261,32 @@ def _join_paths(parent: str, child: str) -> str:
         return parent_norm
     return f"{parent_norm}/{child_norm}"
 
+
+def _render_note(frontmatter: Dict[str, Any], body: str) -> str:
+    clean_body = (body or "").rstrip()
+    if not frontmatter:
+        return clean_body
+    if yaml is None:
+        lines = ["---"]
+        for key, value in frontmatter.items():
+            lines.append(f"{key}: {json.dumps(value)}")
+        lines.append("---")
+        if clean_body:
+            lines.append(clean_body)
+        return "\n".join(lines)
+
+    rendered = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=False).strip()
+    parts = ["---", rendered, "---"]
+    if clean_body:
+        parts.append(clean_body)
+    return "\n".join(parts)
+
+
+def _stringify_content(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if yaml is not None:
+        return yaml.safe_dump(value, sort_keys=False, allow_unicode=False).strip()
+    return json.dumps(value)

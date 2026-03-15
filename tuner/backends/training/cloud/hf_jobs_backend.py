@@ -371,10 +371,18 @@ class HFJobsBackend(ITrainingBackend):
         if result == "COMPLETED":
             print(f"  Job {job_id} completed successfully.")
             return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
-        else:
-            error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
-            print(f"  Job {job_id} failed: {error_detail}")
-            return 1
+
+        recovered = self._recover_completed_run_from_bucket(
+            config=config,
+            artifact_prefix=artifact_prefix,
+        )
+        if recovered:
+            print(f"  Job {job_id} appears complete based on synced artifacts.")
+            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
+
+        error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
+        print(f"  Job {job_id} failed: {error_detail}")
+        return 1
 
     def _should_use_remote_dashboard(self, config: CloudTrainingConfig) -> bool:
         """Only use the live remote dashboard for interactive HF bucket runs."""

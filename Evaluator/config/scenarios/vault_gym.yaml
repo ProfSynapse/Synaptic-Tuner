@@ -1,0 +1,251 @@
+name: Vault Gym
+description: Obsidian-style note vault tasks for environment-backed evaluation.
+
+defaults:
+  environment:
+    allowed_tools:
+      - storageManager_createFolder
+      - storageManager_move
+      - storageManager_archive
+      - storageManager_list
+      - contentManager_read
+      - contentManager_write
+      - contentManager_update
+      - searchManager_searchContent
+      - searchManager_searchDirectory
+    max_steps: 6
+    execution:
+      strict_schema: true
+
+tests:
+  - id: vault_promote_inbox_note
+    question: >-
+      Promote the Alpha prototype idea into the active project folder. Put it in
+      `Projects/Alpha/alpha-prototype.md`, keep the body text, and make sure the
+      note front matter has `status: active` and `type: project`.
+    tags: [vault, notes, workflow, frontmatter]
+    system: |
+      <session_context>
+      IMPORTANT: When using tools, include these values in the tool-call context:
+
+      - sessionId: "session_vault_gym_001"
+      - workspaceId: "ws_vault_gym_alpha"
+      </session_context>
+
+      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
+      {
+        "context": {
+          "id": "ws_vault_gym_alpha",
+          "name": "Alpha Lab",
+          "rootFolder": ""
+        },
+        "workspaceStructure": [
+          {"path": "", "type": "folder", "children": ["Inbox/", "Projects/"]},
+          {"path": "Inbox/", "type": "folder", "children": ["alpha-prototype.md"]},
+          {"path": "Projects/", "type": "folder", "children": ["Alpha/"]},
+          {"path": "Projects/Alpha/", "type": "folder", "children": ["README.md"]}
+        ]
+      }
+      </selected_workspace>
+
+      <note_contents>
+      - Inbox/alpha-prototype.md
+        ---
+        title: Alpha Prototype
+        status: inbox
+        tags:
+          - fleeting
+          - alpha
+        ---
+        Need to compare RAG vs fine-tune for the support FAQ.
+
+      - Projects/Alpha/README.md
+        ---
+        title: Alpha Project Hub
+        type: index
+        status: active
+        ---
+        Canonical project docs live here.
+      </note_contents>
+    environment:
+      fixture:
+        notes:
+          - path: Inbox/alpha-prototype.md
+            frontmatter:
+              title: Alpha Prototype
+              status: inbox
+              tags: [fleeting, alpha]
+            body: |
+              Need to compare RAG vs fine-tune for the support FAQ.
+          - path: Projects/Alpha/README.md
+            frontmatter:
+              title: Alpha Project Hub
+              type: index
+              status: active
+            body: |
+              Canonical project docs live here.
+      assertions:
+        - type: path_exists
+          path: Projects/Alpha/alpha-prototype.md
+        - type: path_not_exists
+          path: Inbox/alpha-prototype.md
+        - type: frontmatter_field_equals
+          path: Projects/Alpha/alpha-prototype.md
+          field: status
+          value: active
+        - type: frontmatter_field_equals
+          path: Projects/Alpha/alpha-prototype.md
+          field: type
+          value: project
+        - type: file_contains
+          path: Projects/Alpha/alpha-prototype.md
+          text: Need to compare RAG vs fine-tune for the support FAQ.
+
+  - id: vault_create_daily_note
+    question: >-
+      Create today's daily note at `Journal/Daily/2026-03-15.md`. The front
+      matter should set `type: daily`, `mood: focused`, and `tags` should include
+      `journal`. In the body, link to `[[Projects/Alpha/meeting-notes]]`.
+    tags: [vault, notes, creation, frontmatter]
+    system: |
+      <session_context>
+      IMPORTANT: When using tools, include these values in the tool-call context:
+
+      - sessionId: "session_vault_gym_002"
+      - workspaceId: "ws_vault_gym_alpha"
+      </session_context>
+
+      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
+      {
+        "context": {
+          "id": "ws_vault_gym_alpha",
+          "name": "Alpha Lab",
+          "rootFolder": ""
+        },
+        "workspaceStructure": [
+          {"path": "", "type": "folder", "children": ["Projects/", "Journal/"]},
+          {"path": "Projects/", "type": "folder", "children": ["Alpha/"]},
+          {"path": "Projects/Alpha/", "type": "folder", "children": ["meeting-notes.md"]},
+          {"path": "Journal/", "type": "folder", "children": ["Daily/"]},
+          {"path": "Journal/Daily/", "type": "folder", "children": []}
+        ]
+      }
+      </selected_workspace>
+
+      <note_contents>
+      - Projects/Alpha/meeting-notes.md
+        ---
+        title: Alpha Meeting Notes
+        type: meeting
+        status: active
+        ---
+        Decisions from the weekly planning session.
+      </note_contents>
+    environment:
+      fixture:
+        directories:
+          - Journal/Daily
+        notes:
+          - path: Projects/Alpha/meeting-notes.md
+            frontmatter:
+              title: Alpha Meeting Notes
+              type: meeting
+              status: active
+            body: |
+              Decisions from the weekly planning session.
+      assertions:
+        - type: path_exists
+          path: Journal/Daily/2026-03-15.md
+        - type: frontmatter_field_equals
+          path: Journal/Daily/2026-03-15.md
+          field: type
+          value: daily
+        - type: frontmatter_field_equals
+          path: Journal/Daily/2026-03-15.md
+          field: mood
+          value: focused
+        - type: frontmatter_field_contains
+          path: Journal/Daily/2026-03-15.md
+          field: tags
+          value: journal
+        - type: file_contains
+          path: Journal/Daily/2026-03-15.md
+          text: "[[Projects/Alpha/meeting-notes]]"
+
+  - id: vault_triage_rate_limit_note
+    question: >-
+      Find the note about the 429 rate-limit issue and mark it as triaged by
+      updating its front matter to `status: triaged`. Leave the unrelated note
+      alone.
+    tags: [vault, notes, search, triage]
+    system: |
+      <session_context>
+      IMPORTANT: When using tools, include these values in the tool-call context:
+
+      - sessionId: "session_vault_gym_003"
+      - workspaceId: "ws_vault_gym_alpha"
+      </session_context>
+
+      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
+      {
+        "context": {
+          "id": "ws_vault_gym_alpha",
+          "name": "Alpha Lab",
+          "rootFolder": ""
+        },
+        "workspaceStructure": [
+          {"path": "", "type": "folder", "children": ["Inbox/"]},
+          {"path": "Inbox/", "type": "folder", "children": ["api-rate-limits.md", "oauth-cleanup.md"]}
+        ]
+      }
+      </selected_workspace>
+
+      <note_contents>
+      - Inbox/api-rate-limits.md
+        ---
+        title: API Rate Limits
+        status: open
+        tags:
+          - api
+          - incident
+        ---
+        Customer saw repeated 429 responses from the upstream provider after the deploy.
+
+      - Inbox/oauth-cleanup.md
+        ---
+        title: OAuth Cleanup
+        status: open
+        tags:
+          - auth
+        ---
+        Remove obsolete redirect URIs before the next release.
+      </note_contents>
+    expected_tools:
+      - searchManager_searchContent
+    environment:
+      require_expected_tools: true
+      fixture:
+        notes:
+          - path: Inbox/api-rate-limits.md
+            frontmatter:
+              title: API Rate Limits
+              status: open
+              tags: [api, incident]
+            body: |
+              Customer saw repeated 429 responses from the upstream provider after the deploy.
+          - path: Inbox/oauth-cleanup.md
+            frontmatter:
+              title: OAuth Cleanup
+              status: open
+              tags: [auth]
+            body: |
+              Remove obsolete redirect URIs before the next release.
+      assertions:
+        - type: frontmatter_field_equals
+          path: Inbox/api-rate-limits.md
+          field: status
+          value: triaged
+        - type: frontmatter_field_equals
+          path: Inbox/oauth-cleanup.md
+          field: status
+          value: open

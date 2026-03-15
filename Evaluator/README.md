@@ -235,6 +235,42 @@ The file is intentionally generic; add your own tool names in `tool_action_hints
 and/or `verb_rules` for your schema.
 Use `--env-tool-schema` and `--env-exec-config` to point to alternate YAML files.
 
+For note-vault or "gym" style tasks, `environment.fixture` can define the runtime
+state directly instead of relying only on prompt parsing. It supports generic
+`directories` / `files` plus an Obsidian-friendly `notes` shorthand:
+
+```yaml
+environment:
+  fixture:
+    directories:
+      - Journal/Daily
+    notes:
+      - path: Inbox/alpha.md
+        frontmatter:
+          title: Alpha Prototype
+          status: inbox
+          tags: [fleeting, alpha]
+        body: |
+          Need to compare RAG vs fine-tune.
+  assertions:
+    - type: frontmatter_field_equals
+      path: Inbox/alpha.md
+      field: status
+      value: inbox
+    - type: frontmatter_field_contains
+      path: Inbox/alpha.md
+      field: tags
+      value: alpha
+```
+
+Available note-specific assertions:
+- `frontmatter_has_key`
+- `frontmatter_field_equals`
+- `frontmatter_field_contains`
+
+See `Evaluator/config/scenarios/vault_gym.yaml` for a config-driven Obsidian-style
+scenario pack that works with either `--env-backend local` or `--env-backend e2b`.
+
 Example per-test override:
 
 ```yaml
@@ -251,6 +287,17 @@ tests:
       assertions:
         - type: path_exists
           path: "Projects/docs.md"
+```
+
+Example gym run:
+
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model your-model \
+  --scenario vault_gym.yaml \
+  --env-backend e2b \
+  --env-template your-template-id
 ```
 
 ## Backends

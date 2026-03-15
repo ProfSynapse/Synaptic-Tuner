@@ -259,6 +259,38 @@ class TestHFJobsExecute:
                 exit_code = backend.execute(config, python_path="")
         assert exit_code == 1
 
+    def test_polling_path_recovers_completed_run_from_bucket(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+        config = self._make_config()
+
+        mock_hub = MagicMock()
+        bucket_info = MagicMock()
+        bucket_info.bucket_id = "test-user/toolset-training-artifacts"
+        mock_hub.create_bucket.return_value = bucket_info
+        mock_job = MagicMock()
+        mock_job.id = "job-789"
+        mock_job.url = None
+        mock_hub.run_job.return_value = mock_job
+
+        mock_job_info = MagicMock()
+        mock_job_info.status.stage = "ERROR"
+        mock_hub.inspect_job.return_value = mock_job_info
+        mock_hub.fetch_job_logs.return_value = ""
+
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
+                with patch.object(backend, "_should_use_remote_dashboard", return_value=False):
+                    with patch.object(backend, "_recover_completed_run_from_bucket", return_value=True):
+                        with patch.object(backend, "_finalize_completed_job", return_value=0) as mock_finalize:
+                            exit_code = backend.execute(config, python_path="")
+
+        assert exit_code == 0
+        mock_finalize.assert_called_once_with(
+            config=config,
+            artifact_prefix=backend.last_artifact_prefix,
+        )
+
     def test_raises_when_bucket_api_unavailable(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)

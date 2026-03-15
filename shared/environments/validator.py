@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .base import EnvironmentRuntime
 from .e2b_runtime import E2BEnvironmentRuntime
-from .fixture_parser import parse_environment_fixture
+from .fixture_parser import merge_environment_fixture, parse_environment_fixture
 from .local_runtime import LocalEnvironmentRuntime
 from .tool_executor import execute_response_tool_calls
 from .types import EnvironmentIssue, EnvironmentValidationResult
@@ -113,7 +113,10 @@ class EnvironmentValidator:
         executions = []
 
         try:
-            fixture = parse_environment_fixture(system_prompt)
+            fixture = merge_environment_fixture(
+                parse_environment_fixture(system_prompt),
+                config.get("fixture"),
+            )
             runtime.setup(fixture)
 
             executions, exec_issues = execute_response_tool_calls(
@@ -239,6 +242,64 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
                 )
             continue
 
+        if atype == "frontmatter_has_key":
+            field = str(assertion.get("field", "")).strip()
+            if not field:
+                issues.append(EnvironmentIssue("warning", "Assertion frontmatter_has_key missing 'field'"))
+                continue
+            frontmatter, error = _read_frontmatter(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error))
+                continue
+            if field not in frontmatter:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' front matter is missing key '{field}'",
+                    )
+                )
+            continue
+
+        if atype == "frontmatter_field_equals":
+            field = str(assertion.get("field", "")).strip()
+            expected = assertion.get("value")
+            if not field:
+                issues.append(EnvironmentIssue("warning", "Assertion frontmatter_field_equals missing 'field'"))
+                continue
+            frontmatter, error = _read_frontmatter(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error))
+                continue
+            actual = frontmatter.get(field)
+            if actual != expected:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' front matter field '{field}' expected {expected!r}, got {actual!r}",
+                    )
+                )
+            continue
+
+        if atype == "frontmatter_field_contains":
+            field = str(assertion.get("field", "")).strip()
+            expected = assertion.get("value")
+            if not field:
+                issues.append(EnvironmentIssue("warning", "Assertion frontmatter_field_contains missing 'field'"))
+                continue
+            frontmatter, error = _read_frontmatter(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error))
+                continue
+            actual = frontmatter.get(field)
+            if not _value_contains(actual, expected):
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' front matter field '{field}' does not contain {expected!r}",
+                    )
+                )
+            continue
+
         issues.append(EnvironmentIssue("warning", f"Unknown assertion type: {atype}"))
 
     return issues
@@ -293,3 +354,47 @@ def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, An
     merged = dict(base or {})
     merged.update(override or {})
     return merged
+
+
+def _read_frontmatter(runtime: EnvironmentRuntime, path: str) -> tuple[Dict[str, Any], Optional[str]]:
+    if yaml is None:
+        return {}, "Front matter assertions require PyYAML to be installed"
+    try:
+        content = runtime.read_text(path)
+    except Exception as exc:
+        return {}, f"Assertion failed reading {path}: {exc}"
+
+    frontmatter_text = _extract_frontmatter_block(content)
+    if frontmatter_text is None:
+        return {}, f"Assertion failed: '{path}' does not contain YAML front matter"
+
+    try:
+        parsed = yaml.safe_load(frontmatter_text) or {}
+    except Exception as exc:
+        return {}, f"Assertion failed parsing front matter for {path}: {exc}"
+
+    if not isinstance(parsed, dict):
+        return {}, f"Assertion failed: '{path}' front matter is not a mapping"
+    return parsed, None
+
+
+def _extract_frontmatter_block(content: str) -> Optional[str]:
+    if not isinstance(content, str):
+        return None
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            return "\n".join(lines[1:idx])
+    return None
+
+
+def _value_contains(actual: Any, expected: Any) -> bool:
+    if isinstance(actual, list):
+        return expected in actual
+    if isinstance(actual, str):
+        return str(expected) in actual
+    if isinstance(actual, dict):
+        return expected in actual
+    return actual == expected

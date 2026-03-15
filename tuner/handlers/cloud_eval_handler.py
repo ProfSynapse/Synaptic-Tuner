@@ -406,24 +406,35 @@ class CloudEvalHandler(BaseHandler):
             f"out of {summary.get('total', 0)}"
         )
 
-    def _extract_failure_reason(self, record: Dict) -> str:
+    def _extract_failure_reasons(self, record: Dict) -> str:
+        reasons = []
+
         error = record.get("error")
         if error:
-            return str(error)
+            reasons.append(str(error))
 
         for section_name in ("validator", "environment", "behavior"):
             section = record.get(section_name) or {}
             for issue in section.get("issues", []) or []:
-                if issue.get("message"):
-                    return str(issue["message"])
+                message = issue.get("message")
+                if message:
+                    reasons.append(str(message))
 
         judge = record.get("judge") or {}
         judge_result = judge.get("judge_result") or {}
         for score in judge_result.get("scores", []) or []:
-            if score.get("feedback"):
-                return str(score["feedback"])
+            feedback = score.get("feedback")
+            if feedback:
+                reasons.append(str(feedback))
 
-        return "No failure reason captured."
+        deduped = []
+        seen = set()
+        for reason in reasons:
+            if reason not in seen:
+                deduped.append(reason)
+                seen.add(reason)
+
+        return "\n".join(deduped) if deduped else "No failure reason captured."
 
     def _print_eval_failure_preview(self, payload: Optional[Dict]) -> None:
         if not payload:
@@ -440,10 +451,8 @@ class CloudEvalHandler(BaseHandler):
         print_info(f"Failure preview: showing {min(len(failed_records), 3)} of {len(failed_records)} failed/warned cases")
         for index, record in enumerate(failed_records[:3], start=1):
             case_id = record.get("case_id") or f"case-{index}"
-            reason = self._extract_failure_reason(record)
+            reason = self._extract_failure_reasons(record)
             response_text = str(record.get("response_text") or "").strip()
-            if len(response_text) > 240:
-                response_text = response_text[:240] + "..."
             print_config(
                 {
                     "Case": case_id,
