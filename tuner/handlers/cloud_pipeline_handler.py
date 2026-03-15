@@ -132,7 +132,7 @@ class CloudPipelineHandler(BaseHandler):
             print_error(str(exc))
             return 1
 
-        if not confirm("Start cloud training and then evaluate the resulting run?"):
+        if not getattr(self.args, "auto_confirm", False) and not confirm("Start cloud training and then evaluate the resulting run?"):
             print_info("Cloud pipeline cancelled.")
             return 0
 

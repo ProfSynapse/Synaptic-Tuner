@@ -256,7 +256,7 @@ class CloudTrainHandler(BaseHandler):
         print_config(config_display, "Cloud Training Configuration")
 
         # Step 8: Confirm with user
-        if not confirm("Start cloud training with this configuration?"):
+        if not getattr(self.args, "auto_confirm", False) and not confirm("Start cloud training with this configuration?"):
             print_info("Cloud training cancelled.")
             return 0
 

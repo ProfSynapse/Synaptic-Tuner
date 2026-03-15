@@ -95,6 +95,7 @@ Examples:
   python tuner.py modelops     # Model operations submenu
   python tuner.py status       # Show system status
   python tuner.py status --json    # JSON output for AI parsing
+  python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -123,6 +124,13 @@ Examples:
         "--json",
         action="store_true",
         help="Output in JSON format for AI-parseable output (disables interactive menus)"
+    )
+    parser.add_argument(
+        "--yes",
+        "--auto-confirm",
+        action="store_true",
+        dest="auto_confirm",
+        help="Skip confirmation prompts for non-interactive command execution",
     )
 
     # Doctor-specific flags
