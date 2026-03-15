@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
@@ -189,6 +190,7 @@ class EnvironmentSession:
             raise RuntimeError("Environment session is closed")
 
         step_issues: List[EnvironmentIssue] = []
+        before_signature = _snapshot_signature(self.runtime)
         try:
             executions, exec_issues = execute_response_tool_calls(
                 runtime=self.runtime,
@@ -208,6 +210,8 @@ class EnvironmentSession:
         step_issues.extend(exec_issues)
         self.issues.extend(step_issues)
         self.executed_tools.extend(executions)
+        after_signature = _snapshot_signature(self.runtime)
+        state_changed = before_signature != after_signature
         has_errors = any(issue.level.lower() == "error" for issue in step_issues)
         recoverable_error = has_errors and all(issue.recoverable is not False for issue in step_issues)
         hard_error = has_errors and not (self.continue_on_execution_error and recoverable_error)
@@ -218,6 +222,9 @@ class EnvironmentSession:
             issues=step_issues,
             hard_error=hard_error,
             recoverable_error=recoverable_error,
+            state_changed=state_changed,
+            action_signature=_build_action_signature(executions),
+            issue_signature=_build_issue_signature(step_issues),
         )
         self.steps.append(step)
         return step
@@ -485,6 +492,58 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
         issues.append(EnvironmentIssue("warning", f"Unknown assertion type: {atype}"))
 
     return issues
+
+
+def _snapshot_signature(runtime: EnvironmentRuntime) -> str:
+    """Return a normalized state signature for no-progress detection."""
+    try:
+        snapshot = runtime.snapshot()
+    except Exception:
+        return "snapshot_unavailable"
+
+    directories = sorted(str(item) for item in snapshot.get("directories", []) if isinstance(item, str))
+    files = snapshot.get("files", [])
+    normalized_files = []
+    if isinstance(files, list):
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            normalized_files.append(
+                {
+                    "path": str(item.get("path", "")),
+                    "size": int(item.get("size", 0) or 0),
+                }
+            )
+    normalized_files.sort(key=lambda item: item["path"])
+    payload = {"directories": directories, "files": normalized_files}
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def _build_action_signature(executions: List[ExecutedToolCall]) -> str:
+    payload = []
+    for tool in executions:
+        payload.append(
+            {
+                "name": tool.name,
+                "arguments": tool.arguments,
+                "status": tool.status,
+                "error": tool.error,
+            }
+        )
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def _build_issue_signature(issues: List[EnvironmentIssue]) -> str:
+    payload = []
+    for issue in issues:
+        payload.append(
+            {
+                "level": issue.level,
+                "message": issue.message,
+                "code": issue.code,
+            }
+        )
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True)
 
 
 def _load_yaml_file(path: Path) -> Dict[str, Any]:

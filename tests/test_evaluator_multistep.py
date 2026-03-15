@@ -333,3 +333,58 @@ def test_agentic_loop_can_recover_after_a_bad_first_step():
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.recovered_after_error is True
     assert record.environment.episode_trace.stop_reason == "environment_passed"
+
+
+def test_agentic_loop_stops_repeated_failed_steps_as_stuck():
+    repeated_failure = _tool_response(
+        [
+            {
+                "agent": "contentManager",
+                "tool": "read",
+                "params": {"path": "Inbox/missing.md", "startLine": 1},
+            }
+        ]
+    )
+    client = _SequenceClient(
+        [repeated_failure, repeated_failure, repeated_failure],
+        expected_substrings=[
+            [],
+            ["Tool execution results", "missing.md"],
+            ["Tool execution results", "missing.md"],
+        ],
+    )
+    case = PromptCase(
+        case_id="loop_stuck_case",
+        question="Read the missing file.",
+        metadata={
+            "system": "Loop system prompt",
+            "environment": {
+                "allowed_tools": ["contentManager_read"],
+                "max_steps": 8,
+                "loop": {
+                    "enabled": True,
+                    "mode": "agentic",
+                    "max_turns": 6,
+                    "max_tool_steps": 8,
+                    "continue_on_execution_error": True,
+                    "stuck_repeat_limit": 2,
+                    "no_progress_window": 3,
+                },
+                "fixture": {"directories": ["Inbox"]},
+                "assertions": [{"type": "path_exists", "path": "Inbox/missing.md"}],
+            }
+        },
+    )
+
+    record = evaluate_cases(
+        [case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.failed is True
+    assert record.environment is not None
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.stop_reason == "stuck_repeated_failure"
+    assert record.environment.episode_trace.total_turns == 2
+    assert all(step.state_changed is False for step in record.environment.episode_trace.steps)

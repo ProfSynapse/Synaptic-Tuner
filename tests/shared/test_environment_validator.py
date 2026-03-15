@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from shared.environments import EnvironmentValidator
 from shared.environments.fixture_parser import EnvironmentFixture, merge_environment_fixture
@@ -35,6 +36,27 @@ def test_merge_environment_fixture_supports_obsidian_note_shorthand():
     assert "Need to compare RAG vs fine-tune for support." in note
 
 
+def test_merge_environment_fixture_can_load_from_local_path(tmp_path: Path):
+    source = tmp_path / "vault"
+    (source / "Inbox").mkdir(parents=True)
+    (source / "Inbox" / "capture.md").write_text("real note body", encoding="utf-8")
+    (source / "README.md").write_text("# Real Vault", encoding="utf-8")
+
+    merged = merge_environment_fixture(
+        EnvironmentFixture(),
+        {
+            "source": {
+                "type": "local_path",
+                "path": str(source),
+            }
+        },
+    )
+
+    assert "Inbox" in merged.directories
+    assert merged.files["Inbox/capture.md"] == "real note body"
+    assert merged.files["README.md"] == "# Real Vault"
+
+
 def test_environment_validator_applies_explicit_fixture_and_frontmatter_assertions():
     validator = EnvironmentValidator(backend="local")
 
@@ -61,6 +83,29 @@ def test_environment_validator_applies_explicit_fixture_and_frontmatter_assertio
 
     assert result.passed is True
     assert result.assertions_run == 3
+
+
+def test_environment_validator_can_copy_real_local_path_into_runtime(tmp_path: Path):
+    source = tmp_path / "workspace"
+    (source / "Docs").mkdir(parents=True)
+    (source / "Docs" / "spec.md").write_text("spec v1", encoding="utf-8")
+
+    validator = EnvironmentValidator(backend="local")
+    result = validator.validate_response(
+        system_prompt="",
+        response={"content": "No tool call needed."},
+        environment_config={
+            "fixture": {
+                "local_path": str(source),
+            },
+            "assertions": [
+                {"type": "path_exists", "path": "Docs/spec.md"},
+                {"type": "file_contains", "path": "Docs/spec.md", "text": "spec v1"},
+            ],
+        },
+    )
+
+    assert result.passed is True
 
 
 def test_environment_validator_updates_note_and_checks_frontmatter_contains():

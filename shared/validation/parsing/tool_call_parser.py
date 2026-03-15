@@ -209,20 +209,18 @@ def parse_qwen_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
                     pass
 
         if not tool_obj:
-            # Fallback: Try to extract name and arguments separately
-            name_match = re.search(r'"name"\s*:\s*"([^"]+)"', json_content)
-            args_match = re.search(r'"arguments"\s*:\s*(\{[\s\S]*\})', json_content)
+            # Fallback: Try to extract name and arguments separately from
+            # partially malformed JSON. Keep this best-effort and generic.
+            name = _extract_string_field(json_content, "name")
+            args_str = _extract_object_field(json_content, "arguments")
 
-            if name_match:
-                name = name_match.group(1)
+            if name:
                 arguments = "{}"
-                if args_match:
-                    args_str = args_match.group(1)
+                if args_str:
                     try:
                         args_obj = json.loads(args_str)
                         arguments = json.dumps(args_obj)
                     except json.JSONDecodeError:
-                        # Try fixing newlines in arguments
                         try:
                             fixed_args = fix_json_newlines(args_str)
                             args_obj = json.loads(fixed_args)
@@ -233,6 +231,7 @@ def parse_qwen_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
                 openai_tool_calls.append({
                     "id": f"call_{i}",
                     "type": "function",
+                    "recovered": True,
                     "function": {
                         "name": name,
                         "arguments": arguments
@@ -262,6 +261,59 @@ def parse_qwen_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
         })
 
     return openai_tool_calls if openai_tool_calls else None
+
+
+def _extract_string_field(content: str, field_name: str) -> Optional[str]:
+    pattern = re.compile(
+        rf'["\']{re.escape(field_name)}["\']\s*:\s*["\']([^"\']+)["\']',
+        re.IGNORECASE,
+    )
+    match = pattern.search(content or "")
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _extract_object_field(content: str, field_name: str) -> Optional[str]:
+    key_match = re.search(
+        rf'["\']{re.escape(field_name)}["\']\s*:\s*',
+        content or "",
+        re.IGNORECASE,
+    )
+    if not key_match:
+        return None
+
+    start = (content or "").find("{", key_match.end())
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    quote_char = ""
+    for index in range(start, len(content)):
+        char = content[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == quote_char:
+                in_string = False
+            continue
+
+        if char in {'"', "'"}:
+            in_string = True
+            quote_char = char
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[start:index + 1]
+
+    return None
 
 
 def is_qwen_tool_call(content: str) -> bool:

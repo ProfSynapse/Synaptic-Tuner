@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 try:
@@ -165,6 +166,10 @@ def _hydrate_from_vault_structure(section: str, collector: _FixtureCollector) ->
 
 
 def _hydrate_from_fixture_config(config: Dict[str, Any], collector: _FixtureCollector) -> None:
+    local_path = _extract_local_path_source(config)
+    if local_path:
+        _hydrate_from_local_path(local_path, collector)
+
     directories = config.get("directories")
     if not isinstance(directories, list):
         directories = config.get("folders")
@@ -200,6 +205,50 @@ def _hydrate_from_fixture_config(config: Dict[str, Any], collector: _FixtureColl
             frontmatter = note.get("frontmatter") if isinstance(note.get("frontmatter"), dict) else {}
             body = note.get("body", note.get("content", ""))
             collector.add_file(path, _render_note(frontmatter, _stringify_content(body)))
+
+
+def _extract_local_path_source(config: Dict[str, Any]) -> Optional[str]:
+    direct = config.get("local_path")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
+    source = config.get("source")
+    if not isinstance(source, dict):
+        return None
+
+    source_type = str(source.get("type", "")).strip().lower()
+    if source_type not in {"local_path", "local", "path"}:
+        return None
+
+    path = source.get("path")
+    if isinstance(path, str) and path.strip():
+        return path.strip()
+    return None
+
+
+def _hydrate_from_local_path(path: str, collector: _FixtureCollector) -> None:
+    root = Path(path).expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Local environment source not found: {path}")
+
+    if root.is_file():
+        collector.add_file(root.name, _read_text_file(root))
+        return
+
+    collector.add_dir(".")
+    for entry in sorted(root.rglob("*")):
+        rel = entry.relative_to(root).as_posix()
+        if entry.is_dir():
+            collector.add_dir(rel)
+            continue
+        collector.add_file(rel, _read_text_file(entry))
+
+
+def _read_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _extract_first_json_object(text: str) -> Optional[str]:

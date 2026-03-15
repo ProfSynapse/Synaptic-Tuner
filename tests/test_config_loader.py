@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from Evaluator.config_loader import ConfigLoader
+from shared.environments.fixture_parser import EnvironmentFixture
 
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "Evaluator" / "config"
@@ -50,3 +51,26 @@ def test_config_loader_infers_expected_context_from_system_context():
     assert expected_context["workspace_id"] == "ws_1732300800000_alphalab"
     assert "ws_1732300800000_alphalab" in expected_context["workspace_ids"]
     assert "agent_1732300800000_docwriter" in expected_context["agent_ids"]
+
+
+def test_config_loader_merged_fixture_from_local_path_source(tmp_path: Path):
+    source = tmp_path / "real-vault"
+    (source / "Notes").mkdir(parents=True)
+    (source / "Notes" / "todo.md").write_text("buy milk", encoding="utf-8")
+
+    from Evaluator.config_loader import _merged_fixture_from_config
+
+    fixture = _merged_fixture_from_config(
+        {
+            "fixture": {
+                "source": {
+                    "type": "local_path",
+                    "path": str(source),
+                }
+            }
+        }
+    )
+
+    assert isinstance(fixture, EnvironmentFixture)
+    assert "Notes" in fixture.directories
+    assert fixture.files["Notes/todo.md"] == "buy milk"

@@ -178,6 +178,15 @@ def validate_assistant_response(
             converted = _convert_qwen_to_openai(content)
             if converted:
                 dataset_validator.validate_assistant_message_openai(converted, report)
+                recovered_calls = [
+                    tc for tc in converted.get("tool_calls", [])
+                    if isinstance(tc, dict) and tc.get("recovered")
+                ]
+                if recovered_calls:
+                    report.add(
+                        "ERROR",
+                        "Assistant response contains malformed <tool_call> JSON recovered heuristically",
+                    )
                 try:
                     for name, args in dataset_validator.extract_tool_calls_openai(converted["tool_calls"]):
                         tool_calls.append(ToolCall(name=name, arguments=args))

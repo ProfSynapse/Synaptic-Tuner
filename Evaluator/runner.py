@@ -435,6 +435,8 @@ def _evaluate_case_with_environment_loop(
     continue_on_execution_error = bool(
         loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
     )
+    stuck_repeat_limit = int(loop_cfg.get("stuck_repeat_limit", 2) or 2)
+    no_progress_window = int(loop_cfg.get("no_progress_window", 3) or 3)
 
     messages = case.chat_messages()
     conversation_trace = _messages_to_trace(messages)
@@ -503,6 +505,15 @@ def _evaluate_case_with_environment_loop(
 
             if max_tool_steps and len(session.executed_tools) > max_tool_steps:
                 stop_reason = "max_tool_steps_exceeded"
+                break
+
+            stuck_reason = _detect_stuck_episode(
+                session.steps,
+                repeat_limit=stuck_repeat_limit,
+                no_progress_window=no_progress_window,
+            )
+            if stuck_reason:
+                stop_reason = stuck_reason
                 break
 
             if step.hard_error:
@@ -781,6 +792,42 @@ def _messages_to_trace(messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, 
             }
         )
     return trace
+
+
+def _detect_stuck_episode(
+    steps,
+    *,
+    repeat_limit: int,
+    no_progress_window: int,
+) -> Optional[str]:
+    if not steps:
+        return None
+
+    repeat_limit = max(int(repeat_limit or 0), 2)
+    no_progress_window = max(int(no_progress_window or 0), 2)
+
+    tail = steps[-repeat_limit:]
+    if len(tail) == repeat_limit:
+        first = tail[0]
+        if (
+            first.issue_signature
+            and all(step.issue_signature == first.issue_signature for step in tail)
+            and all(step.action_signature == first.action_signature for step in tail)
+            and all(not step.state_changed for step in tail)
+            and all(any(issue.level.lower() == "error" for issue in step.issues) for step in tail)
+        ):
+            return "stuck_repeated_failure"
+
+    window = steps[-no_progress_window:]
+    if (
+        len(window) == no_progress_window
+        and all(not step.state_changed for step in window)
+        and all(step.executed_tools for step in window)
+        and any(any(issue.level.lower() == "error" for issue in step.issues) for step in window)
+    ):
+        return "stuck_no_progress"
+
+    return None
 
 
 def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, Any]]:

@@ -178,6 +178,9 @@ HF Jobs-specific cloud behavior:
 - keep tool wrapper choice config-driven via the canonical tool schema; do not assume `useTools` is a hardcoded invariant in new prompts, validators, or generators
 - for environment-backed gym work, keep multi-step agent loops config-driven via `environment.loop`; the evaluator runner owns the loop, while `local` and `e2b` are interchangeable runtime backends underneath it
 - if the goal is "can it navigate the space and recover", prefer `environment.loop.mode: agentic`; keep final environment state as the hard success criterion and use `scoring.paths` for preferred vs acceptable workflows
+- for environment-backed recovery tests, prefer realistic runtime feedback over evaluator nudges; hydrate errors from the actual sandbox state and let the model infer recovery from `read`, `list`, or `search`
+- use `environment.fixture.local_path` when you want the gym to operate on a real folder snapshot instead of inline YAML-authored files
+- repeated identical failed steps with no state change are a loop anti-pattern; stop and inspect `conversation_trace` plus `environment.episode_trace.stop_reason` rather than increasing step budgets
 - the reusable inspection method is:
   compare expected behavior to actual behavior
   inspect parsed tool/action records before raw text when both are present

@@ -61,6 +61,9 @@ class EnvironmentStepResult:
     observation_type: str = "tool_results"
     hard_error: bool = False
     recoverable_error: bool = False
+    state_changed: bool = False
+    action_signature: Optional[str] = None
+    issue_signature: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -70,6 +73,9 @@ class EnvironmentStepResult:
             "observation_type": self.observation_type,
             "hard_error": self.hard_error,
             "recoverable_error": self.recoverable_error,
+            "state_changed": self.state_changed,
+            "action_signature": self.action_signature,
+            "issue_signature": self.issue_signature,
         }
 
 

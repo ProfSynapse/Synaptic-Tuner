@@ -242,6 +242,17 @@ The file is intentionally generic; add your own tool names in `tool_action_hints
 and/or `verb_rules` for your schema.
 Use `--env-tool-schema` and `--env-exec-config` to point to alternate YAML files.
 
+Environment fixtures can also hydrate from a real local folder snapshot:
+
+```yaml
+environment:
+  fixture:
+    local_path: /absolute/path/to/vault
+```
+
+The evaluator copies that source into the sandbox runtime first, so the model
+interacts with a real filesystem snapshot without mutating your original folder.
+
 Environment execution can be one-shot or multi-step. One-shot mode executes a
 single assistant response and validates the resulting state. Loop mode keeps the
 same runtime alive across turns, feeds tool execution results back to the
@@ -280,6 +291,12 @@ Use loop modes this way:
 In both modes, final environment state should be the hard success criterion.
 Preferred or efficient workflows belong in `scoring.paths`, not hard pass/fail,
 unless the task truly requires a specific tool family.
+Model-facing tool feedback should stay close to real runtime output. Preserve
+realistic filesystem errors such as missing paths or existing destinations, and
+use internal issue codes only for scoring, reporting, or stuck detection.
+If the same failing action repeats without changing the runtime state, the loop
+stops as `stuck_repeated_failure` or `stuck_no_progress` rather than tutoring
+the model toward a specific next tool.
 
 For note-vault or "gym" style tasks, `environment.fixture` can define the runtime
 state directly instead of relying only on prompt parsing. It supports generic
