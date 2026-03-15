@@ -266,6 +266,23 @@ Generated examples store the environment spec under
 `metadata.generated_environment`. If environment validation is enabled, the
 runtime execution trace still appears under `metadata.environment`.
 
+Generated examples also store filterable labels under `metadata.labels`:
+
+- `metadata.labels.flat`: simple tags such as `scenario:...`,
+  `environment_passed:true`, `kto_candidate:negative`,
+  `issue:missing_expected_tool`
+- `metadata.labels.filter`: structured fields for slicing datasets later, such
+  as `scenario_key`, `tool_name`, `stage_failures`, `issue_labels`,
+  `executed_tools`, and `kto_candidate_label`
+
+This is intended for downstream filtering, not just immediate training labels.
+For example, you can keep all environment-backed generations, then later choose
+to train KTO only on:
+
+- strong positives: `kto_candidate_label == true`
+- behaviorally meaningful negatives: `kto_candidate_label == false`
+- excluding noisy cases: `schema_error` only, or other harness-only failures
+
 See `SynthChat/scenarios/content_writing.yaml` for examples.
 See `SynthChat/scenarios/tool_environments.yaml` for environment-backed examples.
 

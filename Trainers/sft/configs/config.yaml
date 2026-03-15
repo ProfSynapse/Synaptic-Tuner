@@ -18,8 +18,8 @@ model:
 
 # LoRA Adapter Configuration
 lora:
-  r: 32
-  lora_alpha: 64
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0
   bias: "none"
   target_modules:
@@ -40,7 +40,7 @@ training:
   output_dir: "./sft_output"
 
   # Batch configuration
-  per_device_train_batch_size: 2
+  per_device_train_batch_size: 8
   gradient_accumulation_steps: 4  
 
   # Learning rate
