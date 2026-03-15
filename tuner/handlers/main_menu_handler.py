@@ -112,6 +112,7 @@ class MainMenuHandler(BaseHandler):
         # Import handlers here to avoid circular imports
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
         from tuner.handlers.cloud_eval_handler import CloudEvalHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
@@ -134,6 +135,7 @@ class MainMenuHandler(BaseHandler):
         menu_options = [
             ("train", f"{BOX['star']} Training - Train models locally (SFT, KTO, GRPO)"),
             ("cloud", f"{BOX['bullet']} Cloud Training - Train on GPU cloud (HF Jobs, Modal, RunPod)"),
+            ("cloud-pipeline", f"{BOX['bullet']} Cloud Pipeline - Train then evaluate on HF Jobs"),
             ("cloud-eval", f"{BOX['bullet']} Cloud Evaluation - Evaluate cloud runs on HF Jobs (vLLM)"),
             ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
             ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
@@ -143,6 +145,7 @@ class MainMenuHandler(BaseHandler):
         # Step 4: Create handler instances (pass args for consistency)
         handlers = {
             "train": TrainHandler(args=self.args),
+            "cloud-pipeline": CloudPipelineHandler(args=self.args),
             "eval": EvalHandler(args=self.args),
             "cloud-eval": CloudEvalHandler(args=self.args),
             "synthchat": SynthChatHandler(args=self.args),

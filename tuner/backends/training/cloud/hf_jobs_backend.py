@@ -76,6 +76,10 @@ class HFJobsBackend(ITrainingBackend):
             repo_root: Path to repository root directory
         """
         self.repo_root = Path(repo_root)
+        self.show_post_training_actions = True
+        self.last_artifact_prefix: Optional[str] = None
+        self.last_bucket_id: Optional[str] = None
+        self.last_job_id: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -256,11 +260,17 @@ class HFJobsBackend(ITrainingBackend):
                 f"got {type(config).__name__}"
             )
 
+        self.last_artifact_prefix = None
+        self.last_bucket_id = None
+        self.last_job_id = None
+
         if config.artifact_backend == "hf_bucket":
             self._ensure_hf_bucket(config, huggingface_hub)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         artifact_prefix = self._build_artifact_prefix(config, timestamp)
+        self.last_artifact_prefix = artifact_prefix
+        self.last_bucket_id = config.artifact_identifier
 
         # Build the training command
         training_command = self._build_training_command(config, timestamp=timestamp)
@@ -289,6 +299,7 @@ class HFJobsBackend(ITrainingBackend):
             )
             # JobInfo has .id and .url attributes
             job_id = job.id if hasattr(job, "id") else str(job)
+            self.last_job_id = job_id
             job_url = getattr(job, "url", None)
             print(f"  Job submitted: {job_id}")
             if job_url:
@@ -672,7 +683,8 @@ class HFJobsBackend(ITrainingBackend):
             artifact_prefix=artifact_prefix,
             local_run_dir=local_run_dir,
         )
-        self._handle_post_training_actions(config=config, artifact_prefix=artifact_prefix)
+        if self.show_post_training_actions:
+            self._handle_post_training_actions(config=config, artifact_prefix=artifact_prefix)
         return 0
 
     def _build_artifact_prefix(self, config: CloudTrainingConfig, timestamp: str) -> str:

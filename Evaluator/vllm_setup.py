@@ -383,11 +383,13 @@ def start_vllm_server(
 
     print(f"\n[vLLM] Command: {' '.join(cmd)}")
 
-    # Set environment to disable torch.compile (avoids nvcc requirement in WSL)
+    # Set environment for broadest compatibility across local and cloud vLLM runs.
     env = os.environ.copy()
     env["TORCH_COMPILE_DISABLE"] = "1"
-    env["VLLM_USE_V1"] = "0"  # Use V0 engine which is more stable
-    print("[vLLM] Disabled torch.compile for WSL compatibility\n")
+    # vLLM 0.11.0+ requires the V1 engine for the OpenAI API server path.
+    # Allow callers to override explicitly, but default to the modern engine.
+    env.setdefault("VLLM_USE_V1", "1")
+    print(f"[vLLM] Disabled torch.compile; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
 
     try:
         # Start server process with live output

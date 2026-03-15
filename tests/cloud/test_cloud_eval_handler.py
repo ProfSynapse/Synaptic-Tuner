@@ -65,6 +65,22 @@ def test_select_run_latest_returns_newest(repo_root):
     assert selected["slug"] == "20260314_191223-abc12345"
 
 
+def test_resolve_display_scenarios_uses_preset_when_no_explicit_scenarios(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    with patch("tuner.handlers.cloud_eval_handler.ConfigLoader") as mock_loader_cls:
+        mock_loader = MagicMock()
+        mock_loader.load_eval_run.return_value = SimpleNamespace(
+            scenarios=["tool_coverage.yaml", "behavior_tests.yaml"]
+        )
+        mock_loader_cls.return_value = mock_loader
+
+        scenarios = handler._resolve_display_scenarios(preset="full", scenarios=None)
+
+    assert scenarios == ["tool_coverage.yaml", "behavior_tests.yaml"]
+
+
 def test_handle_submits_hf_eval_job(repo_root, clean_env):
     clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
     args = Namespace(

@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
+from Evaluator.config_loader import ConfigLoader
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_dashboard import (
     CloudEvalDashboardWatcher,
@@ -202,6 +203,24 @@ class CloudEvalHandler(BaseHandler):
     def _build_eval_prefix(self, run_prefix: str, timestamp: str) -> str:
         return f"{run_prefix.strip('/')}/evaluations/vllm/{timestamp}"
 
+    def _resolve_display_scenarios(
+        self,
+        *,
+        preset: Optional[str],
+        scenarios: Optional[List[str]],
+    ) -> List[str]:
+        if scenarios:
+            return list(scenarios)
+        if not preset:
+            return []
+
+        config_dir = self.repo_root / "Evaluator" / "config"
+        try:
+            run_config = ConfigLoader(config_dir).load_eval_run(preset)
+        except Exception:
+            return []
+        return list(run_config.scenarios or [])
+
     def _build_eval_command(
         self,
         *,
@@ -367,6 +386,9 @@ class CloudEvalHandler(BaseHandler):
             f"out of {summary.get('total', 0)}"
         )
 
+    def _auto_confirm(self) -> bool:
+        return bool(getattr(self.args, "auto_confirm", False))
+
     def handle(self) -> int:
         if self.json_mode:
             try:
@@ -414,6 +436,7 @@ class CloudEvalHandler(BaseHandler):
 
         preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
         scenarios = getattr(self.args, "scenario", None)
+        display_scenarios = self._resolve_display_scenarios(preset=preset, scenarios=scenarios)
         tags = getattr(self.args, "tags", None)
         upload_to_hf = getattr(self.args, "upload_to_hf", None)
         update_model_card = bool(getattr(self.args, "update_model_card", False))
@@ -440,7 +463,7 @@ class CloudEvalHandler(BaseHandler):
                 "Bucket": bucket_id,
                 "Backend": "vllm",
                 "Preset": preset or "-",
-                "Scenarios": ", ".join(scenarios) if scenarios else "-",
+                "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
                 "Tags": tags or "-",
                 "GPU": flavor,
                 "Timeout": f"{timeout_hours:.1f}h",
@@ -449,7 +472,7 @@ class CloudEvalHandler(BaseHandler):
             "Cloud Evaluation Configuration",
         )
 
-        if not confirm("Start cloud evaluation with this configuration?"):
+        if not self._auto_confirm() and not confirm("Start cloud evaluation with this configuration?"):
             print_info("Cloud evaluation cancelled.")
             return 0
 
