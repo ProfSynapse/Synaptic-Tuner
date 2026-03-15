@@ -268,6 +268,47 @@ Available note-specific assertions:
 - `frontmatter_field_equals`
 - `frontmatter_field_contains`
 
+Scenarios can also render production-style mocked system prompts instead of
+embedding a giant raw `system` string. Use `system_template: mocked_workspace_vault`
+plus a structured `system_context`:
+
+```yaml
+defaults:
+  system_template: mocked_workspace_vault
+  system_context:
+    workspace_id: ws_1732300800000_alphalab
+    available_workspaces:
+      - id: ws_1732300800000_alphalab
+        name: Alpha Lab
+        description: Product planning workspace
+        root_folder: ""
+    selected_workspace:
+      id: ws_1732300800000_alphalab
+      name: Alpha Lab
+      root_folder: ""
+    assistant_instructions: >
+      You are an AI assistant helping manage an Obsidian vault.
+
+tests:
+  - id: example_rendered_prompt
+    system_context:
+      session_id: session_1732300800000_example
+      selected_workspace:
+        recent_files: ["Inbox/alpha.md"]
+    environment:
+      fixture:
+        notes:
+          - path: Inbox/alpha.md
+            frontmatter:
+              title: Alpha
+            body: Test note
+```
+
+The loader will render `<session_context>`, `<vault_structure>`,
+`<available_workspaces>`, `<available_prompts>`, `<selected_workspace>`, and
+`<note_contents>` from that config. If you omit `expected_context`, it is
+derived automatically from `system_context`.
+
 See `Evaluator/config/scenarios/vault_gym.yaml` for a config-driven Obsidian-style
 scenario pack that works with either `--env-backend local` or `--env-backend e2b`.
 

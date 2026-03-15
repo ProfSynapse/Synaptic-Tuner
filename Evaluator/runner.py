@@ -6,7 +6,7 @@ against a backend client and collects validation results.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class EvaluationRecord:
     behavior: Optional[BehaviorValidationResult] = None
     environment: Optional["EnvironmentValidationResult"] = None
     judge: Optional["JudgeValidationResult"] = None
+    scoring: Optional["PathScoringResult"] = None
 
     @property
     def status(self) -> str:
@@ -136,6 +137,58 @@ class EvaluationRecord:
     def judge_passed(self) -> bool:
         """Check if judge validation passed (or not applicable)."""
         return self.judge is None or self.judge.passed
+
+    @property
+    def score(self) -> Optional[float]:
+        """Normalized config-driven score, if present."""
+        return self.scoring.normalized_score if self.scoring is not None else None
+
+
+@dataclass
+class PathScoreMatch:
+    """Match result for one configured scoring path."""
+
+    name: str
+    tier: str
+    score: float
+    matched: bool
+    reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "tier": self.tier,
+            "score": self.score,
+            "matched": self.matched,
+            "reasons": list(self.reasons),
+        }
+
+
+@dataclass
+class PathScoringResult:
+    """Aggregate score for a case with preferred/acceptable paths."""
+
+    max_score: float
+    awarded_score: float
+    matched_path: Optional[str] = None
+    matched_tier: Optional[str] = None
+    matches: List[PathScoreMatch] = field(default_factory=list)
+
+    @property
+    def normalized_score(self) -> float:
+        if self.max_score <= 0:
+            return 0.0
+        return self.awarded_score / self.max_score
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "max_score": self.max_score,
+            "awarded_score": self.awarded_score,
+            "normalized_score": self.normalized_score,
+            "matched_path": self.matched_path,
+            "matched_tier": self.matched_tier,
+            "matches": [match.to_dict() for match in self.matches],
+        }
 
 
 def evaluate_cases(
@@ -320,6 +373,14 @@ def _evaluate_single_case(
                 # Judge failure should not crash the evaluation
                 logger.error("Judge validation error for %s: %s", case.case_id, exc)
 
+    scoring_result = _run_path_scoring(
+        case=case,
+        validator_result=validator_result,
+        behavior_result=behavior_result,
+        environment_result=environment_result,
+        judge_result=judge_result,
+    )
+
     return EvaluationRecord(
         case=case,
         response_text=response.message,
@@ -330,6 +391,7 @@ def _evaluate_single_case(
         behavior=behavior_result,
         environment=environment_result,
         judge=judge_result,
+        scoring=scoring_result,
     )
 
 
@@ -420,3 +482,145 @@ def _run_behavior_validation(
                 message=f"Behavior validation error: {exc}"
             )]
         )
+
+
+def _run_path_scoring(
+    *,
+    case: PromptCase,
+    validator_result: Optional[ValidationResult],
+    behavior_result: Optional[BehaviorValidationResult],
+    environment_result: Optional["EnvironmentValidationResult"],
+    judge_result: Optional["JudgeValidationResult"],
+) -> Optional[PathScoringResult]:
+    scoring_cfg = case.metadata.get("scoring")
+    if not isinstance(scoring_cfg, dict):
+        return None
+
+    paths = scoring_cfg.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return None
+
+    tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
+    matches: List[PathScoreMatch] = []
+    max_score = 0.0
+    best_score = 0.0
+    best_name = None
+    best_tier = None
+
+    for idx, path_cfg in enumerate(paths, start=1):
+        if not isinstance(path_cfg, dict):
+            continue
+
+        score_value = float(path_cfg.get("score", 0.0) or 0.0)
+        max_score = max(max_score, score_value)
+        matched, reasons = _matches_scoring_path(
+            path_cfg=path_cfg,
+            tool_names=tool_names,
+            validator_result=validator_result,
+            behavior_result=behavior_result,
+            environment_result=environment_result,
+            judge_result=judge_result,
+        )
+        name = str(path_cfg.get("name") or f"path_{idx}")
+        tier = str(path_cfg.get("tier") or "acceptable")
+        matches.append(
+            PathScoreMatch(
+                name=name,
+                tier=tier,
+                score=score_value,
+                matched=matched,
+                reasons=reasons,
+            )
+        )
+
+        if matched and score_value >= best_score:
+            best_score = score_value
+            best_name = name
+            best_tier = tier
+
+    return PathScoringResult(
+        max_score=max_score,
+        awarded_score=best_score,
+        matched_path=best_name,
+        matched_tier=best_tier,
+        matches=matches,
+    )
+
+
+def _matches_scoring_path(
+    *,
+    path_cfg: Dict[str, Any],
+    tool_names: List[str],
+    validator_result: Optional[ValidationResult],
+    behavior_result: Optional[BehaviorValidationResult],
+    environment_result: Optional["EnvironmentValidationResult"],
+    judge_result: Optional["JudgeValidationResult"],
+) -> tuple[bool, List[str]]:
+    reasons: List[str] = []
+
+    all_tools = _string_list(path_cfg.get("all_tools"))
+    if all_tools:
+        missing = [tool for tool in all_tools if tool not in tool_names]
+        if missing:
+            reasons.append(f"missing tools: {', '.join(missing)}")
+
+    any_tools = _string_list(path_cfg.get("any_tools"))
+    if any_tools and not any(tool in tool_names for tool in any_tools):
+        reasons.append(f"needs any of: {', '.join(any_tools)}")
+
+    ordered_tools = _string_list(path_cfg.get("ordered_tools"))
+    if ordered_tools and not _contains_subsequence(tool_names, ordered_tools):
+        reasons.append(f"ordered tools not matched: {', '.join(ordered_tools)}")
+
+    first_tool = str(path_cfg.get("first_tool", "")).strip()
+    if first_tool and (not tool_names or tool_names[0] != first_tool):
+        reasons.append(f"first tool should be {first_tool}")
+
+    first_tool_any_of = _string_list(path_cfg.get("first_tool_any_of"))
+    if first_tool_any_of and (not tool_names or tool_names[0] not in first_tool_any_of):
+        reasons.append(f"first tool should be one of: {', '.join(first_tool_any_of)}")
+
+    max_tool_calls = path_cfg.get("max_tool_calls")
+    if max_tool_calls is not None and len(tool_names) > int(max_tool_calls):
+        reasons.append(f"too many tool calls: {len(tool_names)} > {int(max_tool_calls)}")
+
+    min_tool_calls = path_cfg.get("min_tool_calls")
+    if min_tool_calls is not None and len(tool_names) < int(min_tool_calls):
+        reasons.append(f"too few tool calls: {len(tool_names)} < {int(min_tool_calls)}")
+
+    if path_cfg.get("require_schema_pass") and not (validator_result and validator_result.passed):
+        reasons.append("schema validation did not pass")
+
+    if path_cfg.get("require_behavior_pass") and not (behavior_result is None or behavior_result.passed):
+        reasons.append("behavior validation did not pass")
+
+    if path_cfg.get("require_environment_pass") and not (environment_result and environment_result.passed):
+        reasons.append("environment validation did not pass")
+
+    if path_cfg.get("require_judge_pass") and not (judge_result and judge_result.passed):
+        reasons.append("judge validation did not pass")
+
+    return len(reasons) == 0, reasons
+
+
+def _contains_subsequence(items: List[str], subsequence: List[str]) -> bool:
+    if not subsequence:
+        return True
+    pos = 0
+    for item in items:
+        if item == subsequence[pos]:
+            pos += 1
+            if pos == len(subsequence):
+                return True
+    return False
+
+
+def _string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        clean = value.strip()
+        return [clean] if clean else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []

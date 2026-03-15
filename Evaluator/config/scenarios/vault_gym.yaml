@@ -2,9 +2,49 @@ name: Vault Gym
 description: Obsidian-style note vault tasks for environment-backed evaluation.
 
 defaults:
+  system_template: mocked_workspace_vault
+  system_context:
+    workspace_id: ws_1732300800000_alphalab
+    available_workspaces:
+      - id: ws_1732300800000_alphalab
+        name: Alpha Lab
+        description: Product planning, notes, and operations workspace
+        root_folder: ""
+    available_prompts:
+      - id: agent_1732300800000_organizer
+        name: Vault Organizer
+        purpose: Organizes folders and keeps note workflows consistent
+      - id: agent_1732300800000_researchbot
+        name: Research Assistant
+        purpose: Finds relevant notes and supporting context in the vault
+      - id: agent_1732300800000_docwriter
+        name: Documentation Writer
+        purpose: Writes and updates structured markdown notes
+    selected_workspace:
+      id: ws_1732300800000_alphalab
+      name: Alpha Lab
+      root_folder: ""
+      preferences: Use YAML front matter for structured notes. Prefer reading before overwriting.
+      workflows:
+        - name: Inbox Triage
+          steps:
+            - Review the note
+            - Match an existing format if needed
+            - Move or update the note
+        - name: Note Maintenance
+          steps:
+            - Find the right note
+            - Read current contents
+            - Update only what is needed
+      sessions: []
+    assistant_instructions: >-
+      You are an AI assistant helping manage an Obsidian vault. Use the provided
+      tools to help the user with their requests. Always include proper context
+      (sessionId, workspaceId, memory, goal) in your tool calls.
   environment:
     allowed_tools:
       - storageManager_createFolder
+      - storageManager_open
       - storageManager_move
       - storageManager_archive
       - storageManager_list
@@ -22,51 +62,17 @@ tests:
     question: >-
       Promote the Alpha prototype idea into the active project folder. Put it in
       `Projects/Alpha/alpha-prototype.md`, keep the body text, and make sure the
-      note front matter has `status: active` and `type: project`.
+      note front matter has `status: active` and `type: project`. Match the
+      format used by the existing project note.
     tags: [vault, notes, workflow, frontmatter]
-    system: |
-      <session_context>
-      IMPORTANT: When using tools, include these values in the tool-call context:
-
-      - sessionId: "session_vault_gym_001"
-      - workspaceId: "ws_vault_gym_alpha"
-      </session_context>
-
-      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
-      {
-        "context": {
-          "id": "ws_vault_gym_alpha",
-          "name": "Alpha Lab",
-          "rootFolder": ""
-        },
-        "workspaceStructure": [
-          {"path": "", "type": "folder", "children": ["Inbox/", "Projects/"]},
-          {"path": "Inbox/", "type": "folder", "children": ["alpha-prototype.md"]},
-          {"path": "Projects/", "type": "folder", "children": ["Alpha/"]},
-          {"path": "Projects/Alpha/", "type": "folder", "children": ["README.md"]}
-        ]
-      }
-      </selected_workspace>
-
-      <note_contents>
-      - Inbox/alpha-prototype.md
-        ---
-        title: Alpha Prototype
-        status: inbox
-        tags:
-          - fleeting
-          - alpha
-        ---
-        Need to compare RAG vs fine-tune for the support FAQ.
-
-      - Projects/Alpha/README.md
-        ---
-        title: Alpha Project Hub
-        type: index
-        status: active
-        ---
-        Canonical project docs live here.
-      </note_contents>
+    system_context:
+      session_id: session_1732300800000_vault001
+      selected_workspace:
+        recent_files:
+          - Inbox/alpha-prototype.md
+          - Projects/Alpha/README.md
+        key_files:
+          - Projects/Alpha/README.md
     environment:
       fixture:
         notes:
@@ -100,52 +106,54 @@ tests:
         - type: file_contains
           path: Projects/Alpha/alpha-prototype.md
           text: Need to compare RAG vs fine-tune for the support FAQ.
+    scoring:
+      paths:
+        - name: inspect-then-promote
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - contentManager_read
+            - contentManager_write
+          require_environment_pass: true
+        - name: direct-promote
+          tier: acceptable
+          score: 0.7
+          all_tools:
+            - contentManager_write
+          require_environment_pass: true
 
   - id: vault_create_daily_note
     question: >-
-      Create today's daily note at `Journal/Daily/2026-03-15.md`. The front
-      matter should set `type: daily`, `mood: focused`, and `tags` should include
-      `journal`. In the body, link to `[[Projects/Alpha/meeting-notes]]`.
+      Create today's daily note at `Journal/Daily/2026-03-15.md`. Find the daily
+      note template in the vault and match its front matter and structure. Set
+      `mood: focused` and include a link to `[[Projects/Alpha/meeting-notes]]`.
     tags: [vault, notes, creation, frontmatter]
-    system: |
-      <session_context>
-      IMPORTANT: When using tools, include these values in the tool-call context:
-
-      - sessionId: "session_vault_gym_002"
-      - workspaceId: "ws_vault_gym_alpha"
-      </session_context>
-
-      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
-      {
-        "context": {
-          "id": "ws_vault_gym_alpha",
-          "name": "Alpha Lab",
-          "rootFolder": ""
-        },
-        "workspaceStructure": [
-          {"path": "", "type": "folder", "children": ["Projects/", "Journal/"]},
-          {"path": "Projects/", "type": "folder", "children": ["Alpha/"]},
-          {"path": "Projects/Alpha/", "type": "folder", "children": ["meeting-notes.md"]},
-          {"path": "Journal/", "type": "folder", "children": ["Daily/"]},
-          {"path": "Journal/Daily/", "type": "folder", "children": []}
-        ]
-      }
-      </selected_workspace>
-
-      <note_contents>
-      - Projects/Alpha/meeting-notes.md
-        ---
-        title: Alpha Meeting Notes
-        type: meeting
-        status: active
-        ---
-        Decisions from the weekly planning session.
-      </note_contents>
+    system_context:
+      session_id: session_1732300800000_vault002
+      selected_workspace:
+        recent_files:
+          - Templates/daily-note.md
+          - Projects/Alpha/meeting-notes.md
+        key_files:
+          - Templates/daily-note.md
     environment:
       fixture:
         directories:
           - Journal/Daily
         notes:
+          - path: Templates/daily-note.md
+            frontmatter:
+              title: Daily Note Template
+              type: daily
+              tags: [journal]
+              mood: neutral
+            body: |
+              # Daily Note
+
+              ## Focus
+              -
+
+              ## Linked Notes
           - path: Projects/Alpha/meeting-notes.md
             frontmatter:
               title: Alpha Meeting Notes
@@ -171,6 +179,29 @@ tests:
         - type: file_contains
           path: Journal/Daily/2026-03-15.md
           text: "[[Projects/Alpha/meeting-notes]]"
+    scoring:
+      paths:
+        - name: template-driven-daily-note
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - searchManager_searchDirectory
+            - contentManager_read
+            - contentManager_write
+          require_environment_pass: true
+        - name: read-template-then-write
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - contentManager_read
+            - contentManager_write
+          require_environment_pass: true
+        - name: direct-write-daily-note
+          tier: partial
+          score: 0.4
+          all_tools:
+            - contentManager_write
+          require_environment_pass: true
 
   - id: vault_triage_rate_limit_note
     question: >-
@@ -178,50 +209,16 @@ tests:
       updating its front matter to `status: triaged`. Leave the unrelated note
       alone.
     tags: [vault, notes, search, triage]
-    system: |
-      <session_context>
-      IMPORTANT: When using tools, include these values in the tool-call context:
-
-      - sessionId: "session_vault_gym_003"
-      - workspaceId: "ws_vault_gym_alpha"
-      </session_context>
-
-      <selected_workspace name="Alpha Lab" id="ws_vault_gym_alpha">
-      {
-        "context": {
-          "id": "ws_vault_gym_alpha",
-          "name": "Alpha Lab",
-          "rootFolder": ""
-        },
-        "workspaceStructure": [
-          {"path": "", "type": "folder", "children": ["Inbox/"]},
-          {"path": "Inbox/", "type": "folder", "children": ["api-rate-limits.md", "oauth-cleanup.md"]}
-        ]
-      }
-      </selected_workspace>
-
-      <note_contents>
-      - Inbox/api-rate-limits.md
-        ---
-        title: API Rate Limits
-        status: open
-        tags:
-          - api
-          - incident
-        ---
-        Customer saw repeated 429 responses from the upstream provider after the deploy.
-
-      - Inbox/oauth-cleanup.md
-        ---
-        title: OAuth Cleanup
-        status: open
-        tags:
-          - auth
-        ---
-        Remove obsolete redirect URIs before the next release.
-      </note_contents>
     expected_tools:
       - searchManager_searchContent
+    system_context:
+      session_id: session_1732300800000_vault003
+      selected_workspace:
+        recent_files:
+          - Inbox/api-rate-limits.md
+          - Inbox/oauth-cleanup.md
+        key_files:
+          - Inbox/api-rate-limits.md
     environment:
       require_expected_tools: true
       fixture:
@@ -249,3 +246,375 @@ tests:
           path: Inbox/oauth-cleanup.md
           field: status
           value: open
+    scoring:
+      paths:
+        - name: search-read-update-correct-note
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - searchManager_searchContent
+            - contentManager_read
+            - contentManager_update
+          require_environment_pass: true
+        - name: search-then-update-correct-note
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - searchManager_searchContent
+            - contentManager_update
+          require_environment_pass: true
+
+  - id: vault_archive_empty_test_folder
+    question: >-
+      Archive the empty `Projects/test/` folder. Verify that it is empty before
+      removing it, and leave the other project folders untouched.
+    tags: [vault, verification, destructive, cleanup]
+    system_context:
+      session_id: session_1732300800000_vault004
+      selected_workspace:
+        recent_files:
+          - Projects/Alpha/overview.md
+        key_files:
+          - Projects/Alpha/overview.md
+          - Projects/Phoenix/design.md
+    environment:
+      fixture:
+        directories:
+          - Projects/test
+        notes:
+          - path: Projects/Alpha/overview.md
+            frontmatter:
+              title: Alpha Overview
+              type: project
+              status: active
+            body: |
+              Alpha release notes and scope.
+          - path: Projects/Phoenix/design.md
+            frontmatter:
+              title: Phoenix Design
+              type: design
+              status: active
+            body: |
+              Phoenix architecture sketches.
+      assertions:
+        - type: path_not_exists
+          path: Projects/test
+        - type: path_exists
+          path: Projects/Alpha/overview.md
+        - type: path_exists
+          path: Projects/Phoenix/design.md
+    scoring:
+      paths:
+        - name: list-then-archive-empty-folder
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - storageManager_list
+            - storageManager_archive
+          require_environment_pass: true
+        - name: search-then-archive-empty-folder
+          tier: acceptable
+          score: 0.7
+          ordered_tools:
+            - searchManager_searchDirectory
+            - storageManager_archive
+          require_environment_pass: true
+
+  - id: vault_update_production_endpoint_note
+    question: >-
+      Find the production config note and update its `api_base_url` to
+      `https://api.prod.example.com`. Keep the rest of the note intact and leave
+      the staging config note unchanged.
+    tags: [vault, verification, update, preservation]
+    system_context:
+      session_id: session_1732300800000_vault005
+      selected_workspace:
+        recent_files:
+          - Operations/production-config.md
+          - Operations/staging-config.md
+        key_files:
+          - Operations/production-config.md
+          - Operations/staging-config.md
+    environment:
+      fixture:
+        notes:
+          - path: Operations/production-config.md
+            frontmatter:
+              title: Production Config
+              type: config
+              environment: production
+            body: |
+              api_base_url: https://api.old.example.com
+              retry_policy: exponential
+              owner: platform
+          - path: Operations/staging-config.md
+            frontmatter:
+              title: Staging Config
+              type: config
+              environment: staging
+            body: |
+              api_base_url: https://api.staging.example.com
+              retry_policy: linear
+              owner: platform
+          - path: Operations/overview.md
+            frontmatter:
+              title: Operations Overview
+              type: index
+            body: |
+              Production and staging runbooks live here.
+      assertions:
+        - type: file_contains
+          path: Operations/production-config.md
+          text: "api_base_url: https://api.prod.example.com"
+        - type: file_contains
+          path: Operations/production-config.md
+          text: "retry_policy: exponential"
+        - type: frontmatter_field_equals
+          path: Operations/production-config.md
+          field: environment
+          value: production
+        - type: file_contains
+          path: Operations/staging-config.md
+          text: "api_base_url: https://api.staging.example.com"
+        - type: frontmatter_field_equals
+          path: Operations/staging-config.md
+          field: environment
+          value: staging
+    scoring:
+      paths:
+        - name: search-read-update-production-config
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - searchManager_searchContent
+            - contentManager_read
+            - contentManager_update
+          require_environment_pass: true
+        - name: read-update-production-config
+          tier: acceptable
+          score: 0.75
+          ordered_tools:
+            - contentManager_read
+            - contentManager_update
+          require_environment_pass: true
+
+  - id: vault_archive_only_deprecated_api_notes
+    question: >-
+      In `Docs/API/`, archive only the deprecated API notes. Verify which notes
+      are deprecated before removing them, and leave the active API notes in
+      place.
+    tags: [vault, verification, destructive, batch]
+    system_context:
+      session_id: session_1732300800000_vault006
+      selected_workspace:
+        recent_files:
+          - Docs/API/v3-endpoints.md
+          - Docs/API/deprecated-v1-auth.md
+        key_files:
+          - Docs/API/v3-endpoints.md
+          - Docs/API/deprecated-v1-auth.md
+    environment:
+      fixture:
+        notes:
+          - path: Docs/API/deprecated-v1-auth.md
+            frontmatter:
+              title: Deprecated V1 Auth
+              type: api-doc
+              status: deprecated
+            body: |
+              Legacy auth flow kept only for sunset support.
+          - path: Docs/API/deprecated-v1-users.md
+            frontmatter:
+              title: Deprecated V1 Users
+              type: api-doc
+              status: deprecated
+            body: |
+              Legacy user endpoints pending removal.
+          - path: Docs/API/v2-endpoints.md
+            frontmatter:
+              title: V2 Endpoints
+              type: api-doc
+              status: active
+            body: |
+              Current public API endpoints.
+          - path: Docs/API/v3-endpoints.md
+            frontmatter:
+              title: V3 Endpoints
+              type: api-doc
+              status: active
+            body: |
+              Preview endpoints for the next release.
+      assertions:
+        - type: path_not_exists
+          path: Docs/API/deprecated-v1-auth.md
+        - type: path_not_exists
+          path: Docs/API/deprecated-v1-users.md
+        - type: path_exists
+          path: Docs/API/v2-endpoints.md
+        - type: path_exists
+          path: Docs/API/v3-endpoints.md
+    scoring:
+      paths:
+        - name: search-read-selective-archive
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - searchManager_searchDirectory
+            - contentManager_read
+            - storageManager_archive
+          min_tool_calls: 4
+          require_environment_pass: true
+        - name: search-selective-archive
+          tier: acceptable
+          score: 0.75
+          ordered_tools:
+            - searchManager_searchDirectory
+            - storageManager_archive
+          min_tool_calls: 3
+          require_environment_pass: true
+
+  - id: vault_read_before_replace_settings
+    question: >-
+      Update `Settings/settings.yaml` so its `database_url` is
+      `postgresql://prod-user:prod-pass@db.prod.internal:5432/app`. Read the
+      file first so you only change the connection string, keep the existing
+      feature flags intact, and leave `Settings/database.yaml` unchanged.
+    tags: [vault, verification, update, config]
+    system_context:
+      session_id: session_1732300800000_vault007
+      selected_workspace:
+        recent_files:
+          - Settings/settings.yaml
+        key_files:
+          - Settings/settings.yaml
+          - Settings/database.yaml
+    environment:
+      fixture:
+        files:
+          Settings/settings.yaml: |
+            database_url: postgresql://dev-user:dev-pass@localhost:5432/app
+            feature_flags:
+              - sync
+              - beta-ui
+            log_level: info
+          Settings/database.yaml: |
+            pool_size: 15
+            ssl: false
+      assertions:
+        - type: file_contains
+          path: Settings/settings.yaml
+          text: "database_url: postgresql://prod-user:prod-pass@db.prod.internal:5432/app"
+        - type: file_contains
+          path: Settings/settings.yaml
+          text: "feature_flags:"
+        - type: file_contains
+          path: Settings/settings.yaml
+          text: "  - beta-ui"
+        - type: file_contains
+          path: Settings/database.yaml
+          text: "pool_size: 15"
+        - type: file_contains
+          path: Settings/database.yaml
+          text: "ssl: false"
+    scoring:
+      paths:
+        - name: read-then-update-settings
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - contentManager_read
+            - contentManager_update
+          require_environment_pass: true
+        - name: read-then-write-settings
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - contentManager_read
+            - contentManager_write
+          require_environment_pass: true
+
+  - id: vault_continue_inbox_organization
+    question: Now organize those files by topic.
+    tags: [vault, context_continuity, workflow, multi_step]
+    system_context:
+      session_id: session_1732300800000_vault008
+      selected_workspace:
+        recent_files:
+          - Inbox/meeting-summary-dec.md
+          - Inbox/bug-report-login.md
+        key_files:
+          - README.md
+        workflows:
+          - name: Inbox Organization
+            steps:
+              - Review inbox notes
+              - Create topic folders
+              - Move notes into the matching folder
+        preferences: Process the inbox weekly. Group notes by topic.
+      extra_sections:
+        - tag: prior_conversation
+          content: |
+            User: Find all the unsorted files in my inbox folder
+
+            Assistant: I found 3 files in your Inbox/ folder:
+            - Inbox/api-integration-notes.md (API documentation)
+            - Inbox/meeting-summary-dec.md (Meeting notes)
+            - Inbox/bug-report-login.md (Bug report)
+
+            These files cover different topics: API docs, meetings, and bugs.
+            Would you like me to organize them?
+    environment:
+      max_steps: 8
+      fixture:
+        files:
+          README.md: |
+            Alpha Lab vault root.
+        notes:
+          - path: Inbox/api-integration-notes.md
+            frontmatter:
+              title: API Integration Notes
+              type: reference
+            body: |
+              Notes on the webhook payload and auth flow.
+          - path: Inbox/meeting-summary-dec.md
+            frontmatter:
+              title: December Meeting Summary
+              type: meeting
+            body: |
+              Action items from the December planning review.
+          - path: Inbox/bug-report-login.md
+            frontmatter:
+              title: Login Bug Report
+              type: bug
+            body: |
+              Users are seeing an infinite spinner after login.
+      assertions:
+        - type: path_exists
+          path: Topics/API/api-integration-notes.md
+        - type: path_exists
+          path: Topics/Meetings/meeting-summary-dec.md
+        - type: path_exists
+          path: Topics/Bugs/bug-report-login.md
+        - type: path_not_exists
+          path: Inbox/api-integration-notes.md
+        - type: path_not_exists
+          path: Inbox/meeting-summary-dec.md
+        - type: path_not_exists
+          path: Inbox/bug-report-login.md
+    scoring:
+      paths:
+        - name: create-folders-then-move-files
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - storageManager_createFolder
+            - storageManager_move
+          min_tool_calls: 6
+          require_environment_pass: true
+        - name: move-files-without-folder-discovery
+          tier: acceptable
+          score: 0.7
+          all_tools:
+            - storageManager_move
+          min_tool_calls: 3
+          require_environment_pass: true
