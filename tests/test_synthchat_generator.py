@@ -563,3 +563,108 @@ def test_synthchat_generator_labels_behavioral_environment_failures_for_filterin
     assert filter_labels["environment_passed"] is False
     assert filter_labels["kto_candidate_label"] is False
     assert "missing_expected_tool" in filter_labels["issue_labels"]
+
+
+def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    assistant_json = json.dumps(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {
+                        "name": "useTools",
+                        "arguments": {
+                            "context": {
+                                "sessionId": "session_1732300800000_retry001",
+                                "workspaceId": "ws_retry_ops",
+                                "memory": "Update the production config note.",
+                                "goal": "Set the production API base URL.",
+                            },
+                            "calls": [
+                                {
+                                    "agent": "contentManager",
+                                    "tool": "update",
+                                    "params": {
+                                        "path": "Ops/production-config.md",
+                                        "startLine": 1,
+                                        "content": "---\ntitle: Production Config\ntype: config\n---\napi_base_url: https://api.prod.example.com\n",
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    client = _FakeLLMClient(
+        [
+            "Update the production config note.",
+            None,
+            assistant_json,
+        ]
+    )
+    validator = EnvironmentValidator(backend="local")
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=validator,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "tool",
+        "tool": "contentManager_update",
+        "environment_mode": "provided",
+        "environment": {
+            "fixture": {
+                "notes": [
+                    {
+                        "path": "Ops/production-config.md",
+                        "frontmatter": {"title": "Production Config", "type": "config"},
+                        "body": "api_base_url: https://api.old.example.com\n",
+                    }
+                ]
+            },
+            "assertions": [
+                {
+                    "type": "file_contains",
+                    "path": "Ops/production-config.md",
+                    "text": "api_base_url: https://api.prod.example.com",
+                }
+            ],
+        },
+        "system_template": "mocked_workspace_vault",
+        "system_context": {
+            "session_id": "session_1732300800000_retry001",
+            "workspace_id": "ws_retry_ops",
+            "selected_workspace": {"id": "ws_retry_ops", "name": "Retry Workspace"},
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant tool JSON.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="retry_empty_assistant",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    assert len(client.messages) == 3
+    assert result.example["metadata"]["environment"]["passed"] is True
+    assistant = result.example["conversations"][-1]
+    assert assistant["tool_calls"][0]["function"]["name"] == "useTools"

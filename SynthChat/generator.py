@@ -689,14 +689,35 @@ class SynthChatGenerator:
         Returns:
             Generated text
         """
-        # shared.llm.chat() returns str directly
-        temperature = random.uniform(0.5, 0.9) if randomize else 0.7
-        response = self.llm_client.chat(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=2048
-        )
-        return response
+        # Some providers occasionally return null/empty content; retry briefly
+        # instead of crashing the whole generation job on a transient response.
+        last_error = None
+
+        for _ in range(3):
+            temperature = random.uniform(0.5, 0.9) if randomize else 0.7
+            try:
+                response = self.llm_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=2048
+                )
+            except Exception as exc:  # pragma: no cover - provider-specific failures
+                last_error = exc
+                continue
+
+            if isinstance(response, str):
+                if response.strip():
+                    return response
+            elif response is not None:
+                response_text = str(response).strip()
+                if response_text:
+                    return response_text
+
+            last_error = ValueError("LLM returned an empty response")
+
+        if last_error is not None:
+            raise last_error
+        raise ValueError("LLM returned an empty response")
 
     def _build_user_context(self, example: Dict) -> str:
         """Build context for user generation from current example."""
@@ -740,6 +761,9 @@ class SynthChatGenerator:
         """
         # Case 1: Check if response is already in final JSON format
         # This handles scenarios that ask the LLM to output direct JSON
+        if content is None:
+            content = ""
+
         content_stripped = content.strip()
 
         # Strip markdown code fences if present

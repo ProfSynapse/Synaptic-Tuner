@@ -78,7 +78,24 @@ class OpenRouterClient(BaseLLMClient):
 
         try:
             data = self._make_request(payload)
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message.get("content")
+
+            if content is None:
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                raise LLMResponseError("Empty response from OpenRouter")
+
+            if not isinstance(content, str):
+                content = str(content)
+            if not content.strip():
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                raise LLMResponseError("Empty response from OpenRouter")
+
+            return content
 
         except Exception as e:
             raise LLMResponseError(f"OpenRouter chat request failed: {e}")

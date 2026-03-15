@@ -54,7 +54,12 @@ scenarios:
         folder, preserve the body, and match the format used by the existing
         project note.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools. The path should inspect the existing project note first,
         then write the promoted note.
@@ -107,7 +112,12 @@ scenarios:
         Ask the assistant to create today's daily note, find the template in the
         vault, match its structure, and include a link to the relevant project note.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with:
         - searchManager.searchDirectory first
@@ -153,7 +163,12 @@ scenarios:
         Ask the assistant to find the note about the rate-limit problem and mark
         it as triaged, leaving unrelated notes alone.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with:
         - searchManager.searchContent
@@ -201,7 +216,12 @@ scenarios:
         Ask the assistant to update the production config note to use a new API
         base URL while preserving the rest of the note.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with search, read, then update.
 
@@ -244,7 +264,12 @@ scenarios:
         Ask the assistant to update the database connection string in the
         settings file while preserving the rest of the configuration.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with contentManager.read followed by contentManager.update.
 
@@ -286,7 +311,12 @@ scenarios:
         Ask the assistant to archive the empty test folder and make it clear the
         folder should be verified first.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with:
         - storageManager.list
@@ -331,7 +361,12 @@ scenarios:
         Ask the assistant to archive only the deprecated API notes and verify
         which ones are actually deprecated before removing them.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with search, read, then archive.
 
@@ -378,7 +413,12 @@ scenarios:
         Ask the assistant to continue organizing the inbox by topic, assuming
         earlier context already established the intended folder categories.
       assistant: |
-        Generate assistant response as valid JSON only.
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and
+        "tool_calls". Do not use markdown fences. Do not return an empty
+        response. Do not rely on native provider tool-calling output outside the
+        JSON text.
 
         Use useTools with any needed folder creation followed by file moves.
 
