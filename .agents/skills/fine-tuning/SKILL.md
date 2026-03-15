@@ -142,6 +142,7 @@ Cloud runs use the canonical provider-native layout:
 ```
 runs/{provider}/{method}/{timestamp}-{shortsha}/
 ├── checkpoints/
+├── capacity_features.json
 ├── logs/
 ├── final_model/
 ├── training_lineage.json
@@ -168,6 +169,7 @@ HF Jobs-specific cloud behavior:
 - avoid trying to force vLLM into the Unsloth HF Jobs image for this path; direct Unsloth inference is the stable default unless you intentionally move evaluation to a dedicated vLLM runtime
 - if preset-based eval fails with missing scenario files, check `Evaluator/config/eval_run.yaml` before debugging the loader; stale preset filenames are an easy failure mode
 - cloud eval results are saved to the same HF bucket. Inspect them in this order: `evaluation_results.json` for summary + records, `evaluation_results.md` for human-readable report, `evaluation_lineage.json` for provenance, and `logs/eval_progress.jsonl` for live/replayed progress
+- completed SFT/KTO runs now also save a flat `capacity_features.json` artifact with model params, hardware, throughput, peak memory, headroom, and outcome fields designed for tabular modeling or capacity prediction
 - when reading `evaluation_results.json`, focus on how failures happened, not just how many there were
 - separate evaluator or parser noise from actual model behavior failures; warnings produced by a lower-level validator should not automatically be treated as model regressions
 - HF custom jobs can be used for non-training workloads like SynthChat generation; keep those jobs config-driven in `Trainers/cloud/jobs/*.yaml` and launch them with `python tuner.py cloud-run --job-config ...`

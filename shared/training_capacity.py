@@ -44,6 +44,30 @@ def _classify_oom_risk(max_reserved_pct: Optional[float]) -> Optional[str]:
     return "low"
 
 
+def _coerce_bool_flag(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(bool(value))
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return 1
+    if text in {"false", "0", "no", "n"}:
+        return 0
+    return None
+
+
+def _get_nested(mapping: Dict[str, Any], *keys: str) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
 def _detect_total_system_memory_bytes() -> Optional[int]:
     try:
         import psutil  # type: ignore
@@ -372,3 +396,91 @@ def summarize_capacity_from_logs(logs_dir: Path) -> Dict[str, Any]:
             summary[passthrough_key] = value
 
     return summary
+
+
+def build_capacity_feature_row(lineage: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten lineage into a model-friendly per-run feature row."""
+    if not isinstance(lineage, dict):
+        return {}
+
+    model = lineage.get("model") if isinstance(lineage.get("model"), dict) else {}
+    lora = lineage.get("lora") if isinstance(lineage.get("lora"), dict) else {}
+    training = lineage.get("training") if isinstance(lineage.get("training"), dict) else {}
+    dataset = lineage.get("dataset") if isinstance(lineage.get("dataset"), dict) else {}
+    hardware = lineage.get("hardware") if isinstance(lineage.get("hardware"), dict) else {}
+    capacity = lineage.get("capacity_profile") if isinstance(lineage.get("capacity_profile"), dict) else {}
+    results = lineage.get("results") if isinstance(lineage.get("results"), dict) else {}
+
+    row: Dict[str, Any] = {
+        "features_version": 1,
+        "training_type": lineage.get("training_type"),
+        "timestamp": lineage.get("timestamp"),
+        "run_directory": lineage.get("run_directory"),
+        "status_completed": 1,
+        "oom_observed": 0,
+        "oom_risk_level": capacity.get("oom_risk_level"),
+        "model_base_model": model.get("base_model"),
+        "model_max_seq_length": model.get("max_seq_length"),
+        "model_load_in_4bit": _coerce_bool_flag(model.get("load_in_4bit")),
+        "model_dtype": model.get("dtype"),
+        "lora_rank": lora.get("rank"),
+        "lora_alpha": lora.get("alpha"),
+        "lora_dropout": lora.get("dropout"),
+        "lora_target_module_count": len(lora.get("target_modules", [])) if isinstance(lora.get("target_modules"), list) else None,
+        "training_batch_size": training.get("batch_size"),
+        "training_gradient_accumulation_steps": training.get("gradient_accumulation_steps"),
+        "training_effective_batch_size": training.get("effective_batch_size"),
+        "training_learning_rate": training.get("learning_rate"),
+        "training_num_epochs": training.get("num_epochs"),
+        "training_max_steps": training.get("max_steps"),
+        "training_warmup_ratio": training.get("warmup_ratio"),
+        "training_lr_scheduler": training.get("lr_scheduler"),
+        "training_optimizer": training.get("optimizer"),
+        "training_max_grad_norm": training.get("max_grad_norm"),
+        "training_packing": _coerce_bool_flag(training.get("packing")),
+        "training_completion_only_loss": _coerce_bool_flag(training.get("completion_only_loss")),
+        "training_gradient_checkpointing": _coerce_bool_flag(training.get("gradient_checkpointing")),
+        "training_fp16": _coerce_bool_flag(training.get("fp16")),
+        "training_bf16": _coerce_bool_flag(training.get("bf16")),
+        "training_seed": training.get("seed"),
+        "dataset_train_examples": dataset.get("train_examples"),
+        "dataset_eval_examples": dataset.get("eval_examples"),
+        "dataset_source": dataset.get("source"),
+        "hardware_cloud_provider": hardware.get("cloud_provider"),
+        "hardware_cloud_gpu_type": hardware.get("cloud_gpu_type"),
+        "hardware_gpu_name": hardware.get("gpu_name"),
+        "hardware_gpu_memory_gb": hardware.get("gpu_memory_gb"),
+        "hardware_system_memory_gb": hardware.get("system_memory_gb"),
+        "capacity_logged_steps": capacity.get("logged_steps"),
+        "capacity_peak_gpu_memory_reserved_gb": capacity.get("peak_gpu_memory_reserved_gb"),
+        "capacity_peak_gpu_memory_reserved_pct": capacity.get("peak_gpu_memory_reserved_pct"),
+        "capacity_peak_max_gpu_memory_reserved_gb": capacity.get("peak_max_gpu_memory_reserved_gb"),
+        "capacity_peak_max_gpu_memory_reserved_pct": capacity.get("peak_max_gpu_memory_reserved_pct"),
+        "capacity_min_gpu_memory_reserved_headroom_gb": capacity.get("min_gpu_memory_reserved_headroom_gb"),
+        "capacity_min_max_gpu_memory_reserved_headroom_gb": capacity.get("min_max_gpu_memory_reserved_headroom_gb"),
+        "capacity_peak_samples_per_sec": capacity.get("peak_samples_per_sec"),
+        "capacity_peak_steps_per_second": capacity.get("peak_steps_per_second"),
+        "capacity_latest_max_gpu_memory_reserved_pct": capacity.get("latest_max_gpu_memory_reserved_pct"),
+        "capacity_latest_max_gpu_memory_reserved_headroom_gb": capacity.get("latest_max_gpu_memory_reserved_headroom_gb"),
+        "result_final_step": results.get("final_step"),
+        "result_total_epochs": results.get("total_epochs"),
+        "result_final_loss": results.get("final_loss"),
+        "result_training_time_seconds": results.get("training_time_seconds"),
+    }
+
+    # Method-specific knobs that are useful predictors.
+    if "max_length" in training:
+        row["training_max_length"] = training.get("max_length")
+    if "max_prompt_length" in training:
+        row["training_max_prompt_length"] = training.get("max_prompt_length")
+    if "beta" in training:
+        row["training_beta"] = training.get("beta")
+    if "desirable_weight" in training:
+        row["training_desirable_weight"] = training.get("desirable_weight")
+    if "undesirable_weight" in training:
+        row["training_undesirable_weight"] = training.get("undesirable_weight")
+    if "use_kto_s" in training:
+        row["training_use_kto_s"] = _coerce_bool_flag(training.get("use_kto_s"))
+
+    row = {key: value for key, value in row.items() if value is not None}
+    return row

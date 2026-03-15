@@ -105,7 +105,7 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
-from shared.training_capacity import capture_hardware_info, summarize_capacity_from_logs
+from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
 
 
 def setup_wandb():
@@ -383,6 +383,14 @@ def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:
         json.dump(lineage, f, indent=2, default=str)
 
     print(f"✓ Training lineage saved to: {lineage_path}")
+
+    feature_row = build_capacity_feature_row(lineage)
+    if feature_row:
+        features_path = run_dir / "capacity_features.json"
+        with open(features_path, 'w', encoding='utf-8') as f:
+            json.dump(feature_row, f, indent=2, default=str)
+        print(f"✓ Capacity features saved to: {features_path}")
+
     return lineage_path
 
 
