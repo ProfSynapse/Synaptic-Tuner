@@ -12,7 +12,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -73,7 +72,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -125,7 +123,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -172,7 +169,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -218,7 +214,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -262,7 +257,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment, response_quality]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -307,7 +301,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment, response_quality]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -351,7 +344,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -397,7 +389,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [response_quality]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
@@ -438,7 +429,6 @@ scenarios:
     system_template: mocked_workspace_vault
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [response_quality]
     system_context:
       available_workspaces:
         - id: ws_vault_pilot
