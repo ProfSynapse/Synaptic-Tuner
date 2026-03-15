@@ -280,6 +280,8 @@ class TestBuildTrainingCommand:
         assert "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer" in cmd
         assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python)" in cmd
         assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
+        assert "export CLOUD_PROVIDER=hf_jobs" in cmd
+        assert "export CLOUD_GPU_TYPE=a10g-small" in cmd
         assert "git clone --branch main" in cmd
         assert "git checkout abc12345def67890" in cmd
         assert "cd /workspace/repo/Trainers/sft" in cmd

@@ -10,10 +10,13 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import json
 import sys
+import os
 from pathlib import Path
 
 # Add shared to path for UI components
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from shared.training_capacity import capture_runtime_capacity_snapshot, reset_capacity_peaks
 
 # Try to import LiveDashboard
 try:
@@ -64,6 +67,7 @@ class MetricsTableCallback(TrainerCallback):
         self.start_time = datetime.now()
         self.last_log_time = datetime.now()
         self.header_printed = False
+        reset_capacity_peaks(torch)
 
         # Create symlink to latest log for easy access
         if self.latest_log.exists():
@@ -93,8 +97,26 @@ class MetricsTableCallback(TrainerCallback):
         interval_time = (current_time - self.last_log_time).total_seconds() if self.last_log_time else 0
         self.last_log_time = current_time
 
+        elapsed = (current_time - self.start_time).total_seconds()
+        steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0
+        samples_per_sec = (state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps) / elapsed if elapsed > 0 else 0
+        capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+        if args.cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", args.cloud_provider)
+        cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
+        if cloud_gpu_type:
+            capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)
+
         # Save full metrics to file (every step) with interval time
-        self._save_metrics_to_file(logs, state.global_step, interval_time)
+        self._save_metrics_to_file(
+            logs,
+            state.global_step,
+            interval_time,
+            elapsed,
+            steps_per_sec,
+            samples_per_sec,
+            capacity_snapshot,
+        )
 
         # Check training health and warn if needed
         self._check_training_health(logs, state.global_step, args.max_grad_norm)
@@ -108,16 +130,8 @@ class MetricsTableCallback(TrainerCallback):
             self._print_header()
             self.header_printed = True
 
-        # Calculate metrics
-        current_time = datetime.now()
-        elapsed = (current_time - self.start_time).total_seconds()
-        steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0
-        samples_per_sec = (state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps) / elapsed if elapsed > 0 else 0
-
-        # Get GPU memory if available (use reserved memory for accurate total)
-        gpu_mem = "N/A"
-        if torch.cuda.is_available():
-            gpu_mem = f"{torch.cuda.memory_reserved() / 1e9:.1f}GB"
+        gpu_mem_value = capacity_snapshot.get("gpu_memory_gb")
+        gpu_mem = f"{gpu_mem_value:.1f}GB" if isinstance(gpu_mem_value, (int, float)) else "N/A"
 
         # Extract metrics from logs
         loss = logs.get('loss', 0.0)
@@ -142,12 +156,25 @@ class MetricsTableCallback(TrainerCallback):
               f"{kto_chosen:>6.3f} | {kto_rejected:>6.3f} | {kto_margin:>6.3f} | "
               f"{gpu_mem:>8} | {interval_time:>7.1f}s | {samples_per_sec:>8.1f} | {eta:>9} ")
 
-    def _save_metrics_to_file(self, logs: Dict[str, Any], step: int, interval_time: float):
+    def _save_metrics_to_file(
+        self,
+        logs: Dict[str, Any],
+        step: int,
+        interval_time: float,
+        elapsed: float,
+        steps_per_sec: float,
+        samples_per_sec: float,
+        capacity_snapshot: Dict[str, Any],
+    ):
         """Save detailed metrics to JSONL file."""
         log_entry = {
             "step": step,
             "timestamp": datetime.now().isoformat(),
             "interval_time": interval_time,
+            "elapsed_seconds": round(elapsed, 3),
+            "steps_per_second": round(steps_per_sec, 3),
+            "samples_per_sec": round(samples_per_sec, 3),
+            **capacity_snapshot,
             **logs
         }
 

@@ -121,6 +121,7 @@ from shared.cloud_artifacts import (
     sync_directory_to_hf_bucket,
     write_manifest,
 )
+from shared.training_capacity import capture_hardware_info, summarize_capacity_from_logs
 
 # Evolutionary training (optional)
 try:
@@ -318,22 +319,7 @@ def build_training_lineage(
     Returns:
         Dictionary containing complete training lineage
     """
-    import platform
-
-    # Get hardware info
-    hardware_info = {
-        "platform": platform.system(),
-        "python_version": platform.python_version(),
-        "pytorch_version": torch.__version__,
-        "cuda_available": torch.cuda.is_available(),
-    }
-
-    if torch.cuda.is_available():
-        hardware_info.update({
-            "cuda_version": torch.version.cuda,
-            "gpu_name": torch.cuda.get_device_name(0),
-            "gpu_memory_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1),
-        })
+    hardware_info = capture_hardware_info(torch)
 
     # Get dataset source info
     dataset_source = args.local_file or config.dataset.local_file
@@ -389,6 +375,7 @@ def build_training_lineage(
         },
 
         "hardware": hardware_info,
+        "capacity_profile": summarize_capacity_from_logs(run_dir / "logs"),
 
         "results": {},
     }

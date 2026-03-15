@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,6 +18,8 @@ from transformers import TrainerCallback, TrainerControl, TrainerState
 
 # Add shared to path for UI components
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from shared.training_capacity import capture_runtime_capacity_snapshot, reset_capacity_peaks
 
 # Try to import LiveDashboard
 try:
@@ -50,6 +53,7 @@ class MetricsTableCallback(TrainerCallback):
         self.start_time = datetime.now()
         self.last_log_time = self.start_time
         self.header_printed = False
+        reset_capacity_peaks(torch)
 
         if self.latest_log.exists():
             try:
@@ -76,11 +80,27 @@ class MetricsTableCallback(TrainerCallback):
         current_time = datetime.now()
         interval_time = (current_time - self.last_log_time).total_seconds() if self.last_log_time else 0.0
         self.last_log_time = current_time
+        elapsed = (current_time - self.start_time).total_seconds() if self.start_time else 0.0
+        steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0.0
+        samples_per_sec = (
+            state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps
+        ) / elapsed if elapsed > 0 else 0.0
+        capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+        cloud_provider = os.environ.get("CLOUD_PROVIDER", "").strip()
+        if cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", cloud_provider)
+        cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
+        if cloud_gpu_type:
+            capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)
 
         entry = dict(logs)
         entry["step"] = int(state.global_step)
         entry["timestamp"] = current_time.isoformat()
         entry["interval_seconds"] = interval_time
+        entry["elapsed_seconds"] = round(elapsed, 3)
+        entry["steps_per_second"] = round(steps_per_sec, 3)
+        entry["samples_per_sec"] = round(samples_per_sec, 3)
+        entry.update(capacity_snapshot)
 
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
@@ -99,9 +119,8 @@ class MetricsTableCallback(TrainerCallback):
         lr = logs.get("learning_rate")
         reward = logs.get("reward") or logs.get("rewards") or logs.get("rewards/mean") or logs.get("mean_reward")
 
-        gpu_mem = "N/A"
-        if torch.cuda.is_available():
-            gpu_mem = f"{torch.cuda.memory_reserved() / 1e9:.1f}GB"
+        gpu_mem_value = capacity_snapshot.get("gpu_memory_gb")
+        gpu_mem = f"{gpu_mem_value:.1f}GB" if isinstance(gpu_mem_value, (int, float)) else "N/A"
 
         def fmt(x, default="-"):
             if x is None:
@@ -161,6 +180,7 @@ class LiveDashboardCallback(TrainerCallback):
         self.start_time = datetime.now()
         self.total_steps = state.max_steps if state.max_steps > 0 else 1000
         self.total_epochs = args.num_train_epochs
+        reset_capacity_peaks(torch)
 
         if self.latest_log.exists():
             try:
@@ -195,12 +215,29 @@ class LiveDashboardCallback(TrainerCallback):
         if state.global_step % self.log_every_n_steps != 0:
             return
 
+        elapsed = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0.0
+        steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0.0
+        samples_per_sec = (
+            state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps
+        ) / elapsed if elapsed > 0 else 0.0
+        capacity_snapshot = capture_runtime_capacity_snapshot(torch)
+        cloud_provider = os.environ.get("CLOUD_PROVIDER", "").strip()
+        if cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", cloud_provider)
+        cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
+        if cloud_gpu_type:
+            capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)
+
         # Save to log file
         log_entry = {
             "step": state.global_step,
             "timestamp": datetime.now().isoformat(),
             "total_steps": self.total_steps,
             "total_epochs": int(self.total_epochs),
+            "elapsed_seconds": round(elapsed, 3),
+            "steps_per_second": round(steps_per_sec, 3),
+            "samples_per_sec": round(samples_per_sec, 3),
+            **capacity_snapshot,
             **logs
         }
         with open(self.log_file, "a") as f:
@@ -224,6 +261,7 @@ class LiveDashboardCallback(TrainerCallback):
                 reward_std=reward_std,
                 kl_penalty=kl_penalty,
                 advantage=advantage,
+                gpu_memory_gb=capacity_snapshot.get("gpu_memory_gb"),
             )
         else:
             loss = logs.get('loss', 0)

@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
+from shared.utilities.paths import get_primary_training_output_dir
 from Evaluator.config_loader import ConfigLoader
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_dashboard import (
@@ -455,6 +456,60 @@ class CloudEvalHandler(BaseHandler):
     def _auto_confirm(self) -> bool:
         return bool(getattr(self.args, "auto_confirm", False))
 
+    def _local_training_run_dir(self, method: str, run_prefix: str) -> Path:
+        run_slug = run_prefix.strip("/").split("/")[-1]
+        return get_primary_training_output_dir(method, self.repo_root) / run_slug
+
+    def _download_training_run(self, *, bucket_id: str, run_prefix: str, method: str) -> Path:
+        from huggingface_hub import sync_bucket
+
+        target_dir = self._local_training_run_dir(method, run_prefix)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        sync_bucket(
+            f"hf://buckets/{bucket_id}/{run_prefix.strip('/')}",
+            str(target_dir),
+            token=get_hf_token(),
+        )
+        return target_dir
+
+    def _handle_post_eval_actions(
+        self,
+        *,
+        bucket_id: str,
+        selected_run: Dict[str, str],
+    ) -> None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return
+
+        from tuner.handlers.inference_handler import InferenceHandler
+
+        local_run_dir: Optional[Path] = None
+        menu_options = [
+            ("download", f"{BOX['star']} Download source training run locally"),
+            ("chat", f"{BOX['bullet']} Chat with the trained model locally"),
+        ]
+
+        while True:
+            choice = print_menu(menu_options, "Choose your next step:")
+            if not choice:
+                return
+
+            if local_run_dir is None:
+                print_info("Downloading source training run into local outputs...")
+                local_run_dir = self._download_training_run(
+                    bucket_id=bucket_id,
+                    run_prefix=selected_run["prefix"],
+                    method=selected_run["method"],
+                )
+                print_info(f"Downloaded run to: {local_run_dir}")
+
+            if choice == "download":
+                continue
+            if choice == "chat":
+                print_info("Opening local inference workflow. Select the downloaded run when prompted.")
+                InferenceHandler().handle()
+                return
+
     def handle(self) -> int:
         if self.json_mode:
             try:
@@ -604,6 +659,10 @@ class CloudEvalHandler(BaseHandler):
             payload = self._load_eval_payload(results_dir)
             self._print_eval_summary(self._load_eval_summary(results_dir))
             self._print_eval_failure_preview(payload)
+            self._handle_post_eval_actions(
+                bucket_id=bucket_id,
+                selected_run=selected_run,
+            )
         elif failure_status:
             print_error(f"Cloud evaluation failed with status: {failure_status}")
         if local_root is not None:

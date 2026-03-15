@@ -132,3 +132,15 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
     }
     assert kwargs["flavor"] == "a10g-small"
     assert "Evaluator.cloud_hf_job" in kwargs["command"][2]
+
+
+def test_local_training_run_dir_uses_primary_output_dir(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    run_dir = handler._local_training_run_dir(
+        "sft",
+        "runs/hf_jobs/sft/20260314_191223-abc12345",
+    )
+
+    assert run_dir == repo_root / "Trainers" / "sft" / "sft_output" / "20260314_191223-abc12345"

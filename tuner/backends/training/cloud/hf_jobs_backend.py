@@ -728,6 +728,8 @@ class HFJobsBackend(ITrainingBackend):
             "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
             "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
+            f"export CLOUD_PROVIDER={config.provider}",
+            f"export CLOUD_GPU_TYPE={config.hf_flavor or config.gpu_type}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             # Clone repo

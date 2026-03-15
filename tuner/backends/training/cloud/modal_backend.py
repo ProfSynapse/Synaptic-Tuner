@@ -283,6 +283,8 @@ class ModalBackend(ITrainingBackend):
                 "MODAL_CACHE_VOLUME_NAME": modal_settings.get("cache_volume_name", "toolset-model-cache"),
                 "MODAL_OUTPUT_VOLUME_NAME": config.artifact_identifier or "toolset-training-artifacts",
                 "MODAL_OUTPUT_MOUNT_PATH": config.artifact_mount_path or "/vol/artifacts",
+                "CLOUD_PROVIDER": "modal",
+                "CLOUD_GPU_TYPE": gpu_type,
                 "CLOUD_ARTIFACT_IDENTIFIER": config.artifact_identifier or "",
                 "CLOUD_REPO_BRANCH": config.repo_branch or "",
                 "CLOUD_REPO_COMMIT": config.repo_commit or "",

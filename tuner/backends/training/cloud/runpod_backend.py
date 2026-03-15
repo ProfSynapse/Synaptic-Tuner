@@ -392,6 +392,9 @@ class RunPodBackend(ITrainingBackend):
         branch = config.repo_branch
         commit = config.repo_commit
         artifact_identifier = config.artifact_identifier
+        env["CLOUD_PROVIDER"] = "runpod"
+        if config.gpu_type:
+            env["CLOUD_GPU_TYPE"] = config.gpu_type
         if branch:
             env["CLOUD_REPO_BRANCH"] = branch
         if commit:
