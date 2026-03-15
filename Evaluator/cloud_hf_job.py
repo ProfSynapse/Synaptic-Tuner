@@ -34,6 +34,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--preset")
     parser.add_argument("--scenario", action="append", dest="scenarios")
     parser.add_argument("--tags")
+    parser.add_argument("--env-backend", choices=["none", "local", "e2b"], default="none")
+    parser.add_argument("--env-template")
+    parser.add_argument("--env-tool-schema")
+    parser.add_argument("--env-exec-config")
     parser.add_argument("--upload-to-hf")
     parser.add_argument("--update-model-card", action="store_true")
     return parser.parse_args()
@@ -189,6 +193,14 @@ def main() -> int:
             cli_args.extend(["--scenario", scenario])
     if args.tags:
         cli_args.extend(["--tags", args.tags])
+    if args.env_backend and args.env_backend != "none":
+        cli_args.extend(["--env-backend", args.env_backend])
+    if args.env_template:
+        cli_args.extend(["--env-template", args.env_template])
+    if args.env_tool_schema:
+        cli_args.extend(["--env-tool-schema", args.env_tool_schema])
+    if args.env_exec_config:
+        cli_args.extend(["--env-exec-config", args.env_exec_config])
     if args.upload_to_hf:
         cli_args.extend(["--upload-to-hf", args.upload_to_hf, "--hf-token", hf_token])
         if args.update_model_card:

@@ -17,10 +17,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
 from shared.utilities.paths import get_primary_training_output_dir
 from Evaluator.config_loader import ConfigLoader
+from tuner.cloud import (
+    CloudJobSpec,
+    HFJobExecutor,
+    RepoCheckoutSpec,
+    build_bash_command,
+    build_hf_job_secrets,
+    build_repo_checkout_steps,
+    load_huggingface_hub,
+    resolve_hf_bucket_id,
+)
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_dashboard import (
     CloudEvalDashboardWatcher,
@@ -111,44 +120,15 @@ class CloudEvalHandler(BaseHandler):
         hf_token = get_hf_token()
         if not hf_token:
             raise CloudProviderError("HF_TOKEN not set. Required for cloud evaluation.")
-
-        try:
-            import huggingface_hub
-        except ImportError as exc:
-            raise CloudProviderError(
-                "huggingface_hub not installed. Install with: pip install -r requirements-cloud.txt"
-            ) from exc
-
-        missing = [name for name in ("run_job", "create_bucket", "HfApi") if not hasattr(huggingface_hub, name)]
-        if missing:
-            version = getattr(huggingface_hub, "__version__", "unknown")
-            raise CloudProviderError(
-                f"huggingface_hub {version} is missing required APIs for cloud evaluation: {', '.join(missing)}"
-            )
-        return huggingface_hub
+        return load_huggingface_hub(require_apis=("run_job", "create_bucket", "HfApi"))
 
     def _resolve_bucket_id(self, huggingface_hub, bucket_id: str) -> str:
-        requested_bucket_id = normalize_hf_bucket_id(bucket_id)
-        hf_token = get_hf_token()
-        try:
-            try:
-                bucket_info = huggingface_hub.create_bucket(
-                    requested_bucket_id,
-                    exist_ok=True,
-                    private=True,
-                    token=hf_token,
-                )
-            except TypeError:
-                bucket_info = huggingface_hub.create_bucket(
-                    requested_bucket_id,
-                    exist_ok=True,
-                    token=hf_token,
-                )
-        except Exception as exc:
-            raise CloudProviderError(f"Failed to resolve HF bucket '{requested_bucket_id}': {exc}") from exc
-
-        resolved = getattr(bucket_info, "bucket_id", None) or getattr(bucket_info, "id", None) or requested_bucket_id
-        return normalize_hf_bucket_id(str(resolved))
+        return resolve_hf_bucket_id(
+            huggingface_hub,
+            bucket_id,
+            token=get_hf_token(),
+            private=True,
+        )
 
     def _list_remote_runs(self, huggingface_hub, bucket_id: str, method: Optional[str]) -> List[Dict[str, str]]:
         api = huggingface_hub.HfApi(token=get_hf_token())
@@ -239,6 +219,10 @@ class CloudEvalHandler(BaseHandler):
         preset: Optional[str],
         scenarios: Optional[List[str]],
         tags: Optional[str],
+        env_backend: Optional[str],
+        env_template: Optional[str],
+        env_tool_schema: Optional[str],
+        env_exec_config: Optional[str],
         upload_to_hf: Optional[str],
         update_model_card: bool,
     ) -> str:
@@ -247,13 +231,16 @@ class CloudEvalHandler(BaseHandler):
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
         quoted_eval_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_PIP_PACKAGES)
-        quoted_repo_url = shlex.quote(repo_source.url)
-        quoted_branch = shlex.quote(repo_source.branch)
-        quoted_commit = shlex.quote(repo_source.commit)
+        checkout_steps = build_repo_checkout_steps(
+            RepoCheckoutSpec(
+                url=repo_source.url,
+                branch=repo_source.branch,
+                commit=repo_source.commit,
+            )
+        )
 
         parts = [
-            f"git clone --branch {quoted_branch} --depth 1 {quoted_repo_url} /workspace/repo",
-            f"cd /workspace/repo && git fetch --depth 1 origin {quoted_commit} && git checkout {quoted_commit}",
+            *checkout_steps,
             f"cd /workspace/repo && python -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_OVERLAY}",
             f"cd /workspace/repo && python -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
@@ -282,6 +269,14 @@ class CloudEvalHandler(BaseHandler):
                 eval_cmd.extend(["--scenario", scenario])
         if tags:
             eval_cmd.extend(["--tags", tags])
+        if env_backend and env_backend != "none":
+            eval_cmd.extend(["--env-backend", env_backend])
+        if env_template:
+            eval_cmd.extend(["--env-template", env_template])
+        if env_tool_schema:
+            eval_cmd.extend(["--env-tool-schema", env_tool_schema])
+        if env_exec_config:
+            eval_cmd.extend(["--env-exec-config", env_exec_config])
         if upload_to_hf:
             eval_cmd.extend(["--upload-to-hf", upload_to_hf])
         if update_model_card:
@@ -568,6 +563,10 @@ class CloudEvalHandler(BaseHandler):
         scenarios = getattr(self.args, "scenario", None)
         display_scenarios = self._resolve_display_scenarios(preset=preset, scenarios=scenarios)
         tags = getattr(self.args, "tags", None)
+        env_backend = getattr(self.args, "env_backend", None) or "none"
+        env_template = getattr(self.args, "env_template", None)
+        env_tool_schema = getattr(self.args, "env_tool_schema", None)
+        env_exec_config = getattr(self.args, "env_exec_config", None)
         upload_to_hf = getattr(self.args, "upload_to_hf", None)
         update_model_card = bool(getattr(self.args, "update_model_card", False))
         flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
@@ -582,6 +581,10 @@ class CloudEvalHandler(BaseHandler):
             preset=preset,
             scenarios=scenarios,
             tags=tags,
+            env_backend=env_backend,
+            env_template=env_template,
+            env_tool_schema=env_tool_schema,
+            env_exec_config=env_exec_config,
             upload_to_hf=upload_to_hf,
             update_model_card=update_model_card,
         )
@@ -595,6 +598,7 @@ class CloudEvalHandler(BaseHandler):
                 "Preset": preset or "-",
                 "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
                 "Tags": tags or "-",
+                "Env Backend": env_backend,
                 "GPU": flavor,
                 "Timeout": f"{timeout_hours:.1f}h",
                 "Results": f"hf://buckets/{bucket_id}/{eval_prefix}",
@@ -607,27 +611,27 @@ class CloudEvalHandler(BaseHandler):
             return 0
 
         try:
-            hf_token = get_hf_token()
-            job = huggingface_hub.run_job(
-                image=hf_settings.get("image"),
-                command=["bash", "-c", command],
-                flavor=flavor,
-                timeout=f"{timeout_hours}h",
-                secrets=(
-                    {
-                        "HF_TOKEN": hf_token,
-                        "HF_API_KEY": hf_token,
-                    }
-                    if hf_token
-                    else None
-                ),
+            submission = HFJobExecutor(huggingface_hub).submit(
+                CloudJobSpec(
+                    provider="hf_jobs",
+                    image=hf_settings.get("image"),
+                    command=build_bash_command([command]),
+                    flavor=flavor,
+                    timeout_hours=timeout_hours,
+                    secrets=build_hf_job_secrets(),
+                    labels={
+                        "task": "evaluation",
+                        "provider": "hf_jobs",
+                        "run_prefix": selected_run["prefix"].split("/")[-1],
+                    },
+                )
             )
         except Exception as exc:
             print_error(f"Failed to submit HF cloud evaluation: {exc}")
             return 1
 
-        job_id = job.id if hasattr(job, "id") else str(job)
-        job_url = getattr(job, "url", None)
+        job_id = submission.job_id
+        job_url = submission.job_url
         print_info(f"Evaluation job submitted: {job_id}")
         if job_url:
             print_info(f"Monitor at: {job_url}")

@@ -33,6 +33,16 @@ from shared.utilities.paths import (
     get_primary_training_output_dir,
     get_trainer_root,
 )
+from tuner.cloud import (
+    CloudJobSpec,
+    HFJobExecutor,
+    RepoCheckoutSpec,
+    build_bash_command,
+    build_hf_job_secrets,
+    build_repo_checkout_steps,
+    load_huggingface_hub,
+    resolve_hf_bucket_id,
+)
 from tuner.ui import BOX, RICH_AVAILABLE, print_config, print_info, print_menu, print_success
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
@@ -127,26 +137,9 @@ class HFJobsBackend(ITrainingBackend):
 
         # Check huggingface_hub is installed
         try:
-            import huggingface_hub
-        except ImportError:
-            return False, (
-                "huggingface_hub not installed. "
-                "Install with: pip install -r requirements-cloud.txt"
-            )
-
-        # Check for run_job support (requires recent version)
-        if not hasattr(huggingface_hub, "run_job"):
-            version = getattr(huggingface_hub, "__version__", "unknown")
-            return False, (
-                f"huggingface_hub {version} does not support Jobs API. "
-                "Upgrade with: pip install --upgrade huggingface_hub>=0.27.0"
-            )
-        if not hasattr(huggingface_hub, "create_bucket"):
-            version = getattr(huggingface_hub, "__version__", "unknown")
-            return False, (
-                f"huggingface_hub {version} does not support Buckets API. "
-                "Upgrade with: pip install --upgrade huggingface_hub>=1.5.0"
-            )
+            load_huggingface_hub(require_apis=("run_job", "create_bucket"))
+        except CloudProviderError as exc:
+            return False, str(exc)
 
         return True, ""
 
@@ -246,13 +239,7 @@ class HFJobsBackend(ITrainingBackend):
         Returns:
             Exit code (0 = success, 1 = failure)
         """
-        try:
-            import huggingface_hub
-        except ImportError:
-            raise CloudProviderError(
-                "huggingface_hub not installed. "
-                "Install with: pip install -r requirements-cloud.txt"
-            )
+        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
 
         if not isinstance(config, CloudTrainingConfig):
             raise CloudProviderError(
@@ -283,36 +270,32 @@ class HFJobsBackend(ITrainingBackend):
         logger.info("Timeout: %.1f hours", config.timeout_hours)
 
         try:
-            hf_token = get_hf_token()
-            job = huggingface_hub.run_job(
-                image=image,
-                command=["bash", "-c", training_command],
-                secrets=(
-                    {
-                        "HF_TOKEN": hf_token,
-                        "HF_API_KEY": hf_token,
-                    }
-                    if hf_token
-                    else None
-                ),
-                flavor=flavor,
+            submission = HFJobExecutor(huggingface_hub).submit(
+                CloudJobSpec(
+                    provider=self.name,
+                    image=image,
+                    command=build_bash_command([training_command]),
+                    flavor=flavor,
+                    timeout_hours=config.timeout_hours,
+                    secrets=build_hf_job_secrets(),
+                    labels={
+                        "task": "training",
+                        "method": config.method,
+                        "provider": config.provider,
+                    },
+                )
             )
-            # JobInfo has .id and .url attributes
-            job_id = job.id if hasattr(job, "id") else str(job)
+            job_id = submission.job_id
             self.last_job_id = job_id
-            job_url = getattr(job, "url", None)
+            job_url = submission.job_url
             print(f"  Job submitted: {job_id}")
             if job_url:
                 print(f"  Monitor at: {job_url}")
             print(f"  Polling for completion (every 30s, timeout: {config.timeout_hours}h)...")
             print()
 
-        except Exception as e:
-            error_msg = str(e)
-            # Mask any token values in error messages
-            if "hf_" in error_msg:
-                error_msg = "Job submission failed (check credentials and subscription)"
-            raise CloudProviderError(f"Failed to submit HF Jobs training: {error_msg}")
+        except CloudProviderError as exc:
+            raise CloudProviderError(f"Failed to submit HF Jobs training: {exc}") from exc
 
         if self._should_use_remote_dashboard(config):
             return self._watch_job_with_remote_dashboard(
@@ -511,42 +494,12 @@ class HFJobsBackend(ITrainingBackend):
             raise CloudProviderError(
                 "HF_TOKEN not set. Required for HuggingFace Jobs bucket creation."
             )
-        if not hasattr(huggingface_hub, "create_bucket"):
-            version = getattr(huggingface_hub, "__version__", "unknown")
-            raise CloudProviderError(
-                f"huggingface_hub {version} does not support Buckets API. "
-                "Upgrade with: pip install --upgrade huggingface_hub>=1.5.0"
-            )
-
-        requested_bucket_id = normalize_hf_bucket_id(config.artifact_identifier)
-        try:
-            try:
-                bucket_info = huggingface_hub.create_bucket(
-                    requested_bucket_id,
-                    exist_ok=True,
-                    private=True,
-                    token=hf_token,
-                )
-            except TypeError:
-                bucket_info = huggingface_hub.create_bucket(
-                    requested_bucket_id,
-                    exist_ok=True,
-                    token=hf_token,
-                )
-        except Exception as e:
-            error_msg = str(e)
-            if "hf_" in error_msg:
-                error_msg = "check credentials and subscription"
-            raise CloudProviderError(
-                f"Failed to create or resolve HF bucket '{requested_bucket_id}': {error_msg}"
-            )
-
-        resolved_bucket_id = (
-            getattr(bucket_info, "bucket_id", None)
-            or getattr(bucket_info, "id", None)
-            or requested_bucket_id
+        config.artifact_identifier = resolve_hf_bucket_id(
+            huggingface_hub,
+            config.artifact_identifier,
+            token=hf_token,
+            private=True,
         )
-        config.artifact_identifier = normalize_hf_bucket_id(str(resolved_bucket_id))
         logger.info("Using HF bucket: %s", config.artifact_identifier)
 
     def _build_remote_run_uri(self, config: CloudTrainingConfig, artifact_prefix: str) -> str:
@@ -727,6 +680,13 @@ class HFJobsBackend(ITrainingBackend):
         # Read project-specific deps from cloud_config.yaml (single source of truth)
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         project_deps = load_project_deps(cloud_config_path)
+        checkout_steps = build_repo_checkout_steps(
+            RepoCheckoutSpec(
+                url=config.repo_url,
+                branch=config.repo_branch,
+                commit=config.repo_commit,
+            )
+        )
 
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
@@ -740,9 +700,7 @@ class HFJobsBackend(ITrainingBackend):
             f"export CLOUD_GPU_TYPE={config.hf_flavor or config.gpu_type}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
-            # Clone repo
-            f"git clone --branch {config.repo_branch} --depth 1 {config.repo_url} /workspace/repo",
-            f"cd /workspace/repo && git fetch --depth 1 origin {config.repo_commit} && git checkout {config.repo_commit}",
+            *checkout_steps,
             # Run training
             f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}",
             "python "

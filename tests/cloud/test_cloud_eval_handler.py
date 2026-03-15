@@ -16,6 +16,10 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
         preset="full",
         scenarios=None,
         tags=None,
+        env_backend="local",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
         upload_to_hf=None,
         update_model_card=False,
     )
@@ -27,6 +31,8 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "runs/hf_jobs/sft/20260314_191223-abc12345" in command
     assert "--preset" in command
     assert "full" in command
+    assert "--env-backend" in command
+    assert "local" in command
     assert "huggingface_hub>=1.5.0" in command
     assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
     assert "vllm==0.11.0" not in command

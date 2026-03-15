@@ -114,6 +114,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.eval_handler import EvalHandler
         from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
         from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+        from tuner.handlers.cloud_gym_handler import CloudGymHandler
         from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
@@ -138,6 +139,7 @@ class MainMenuHandler(BaseHandler):
             ("cloud", f"{BOX['bullet']} Cloud Training - Train on GPU cloud (HF Jobs, Modal, RunPod)"),
             ("cloud-pipeline", f"{BOX['bullet']} Cloud Pipeline - Train then evaluate on HF Jobs"),
             ("cloud-eval", f"{BOX['bullet']} Cloud Evaluation - Evaluate cloud runs on HF Jobs (vLLM)"),
+            ("cloud-gym", f"{BOX['bullet']} Cloud Gym - Run vault gym scenarios against a trained cloud run"),
             ("cloud-inspect", f"{BOX['bullet']} Cloud Inspect - Review saved HF cloud evaluation results"),
             ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
             ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
@@ -150,6 +152,7 @@ class MainMenuHandler(BaseHandler):
             "cloud-pipeline": CloudPipelineHandler(args=self.args),
             "eval": EvalHandler(args=self.args),
             "cloud-eval": CloudEvalHandler(args=self.args),
+            "cloud-gym": CloudGymHandler(args=self.args),
             "cloud-inspect": CloudInspectHandler(args=self.args),
             "synthchat": SynthChatHandler(args=self.args),
             "modelops": ModelOpsHandler(args=self.args),
