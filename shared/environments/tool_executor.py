@@ -109,6 +109,31 @@ def execute_response_tool_calls(
     return executions, issues
 
 
+def format_tool_results_message(
+    executions: List[ExecutedToolCall],
+    issues: List[EnvironmentIssue],
+    format_name: str = "json",
+) -> str:
+    """Render executed tool results into a message for the next model turn."""
+    payload = {
+        "executed_tools": [tool.to_dict() for tool in executions],
+        "issues": [{"level": issue.level, "message": issue.message} for issue in issues],
+    }
+    normalized = str(format_name or "json").strip().lower()
+    if normalized == "json":
+        return (
+            "Tool execution results:\n"
+            f"{json.dumps(payload, ensure_ascii=True, indent=2)}\n\n"
+            "Continue the task. If more tool use is needed, call tools again. "
+            "If the task is complete, respond with a final answer."
+        )
+    return (
+        "Tool execution results:\n"
+        f"{json.dumps(payload, ensure_ascii=True)}\n\n"
+        "Continue the task."
+    )
+
+
 def _looks_like_wrapper_call(call) -> bool:
     """Return True when a tool call delegates concrete calls via arguments.calls."""
     args = call.arguments if isinstance(call.arguments, dict) else {}

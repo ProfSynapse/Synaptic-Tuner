@@ -7,20 +7,25 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
 from .behavior_validator import BehaviorIssue, BehaviorValidationResult, validate_behavior
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
-from .schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
+from .schema_validator import ToolCall, ValidationResult, ValidatorIssue, validate_assistant_response
 
 try:
     from shared.environments import EnvironmentValidationResult, EnvironmentValidator
 except ImportError:
     EnvironmentValidationResult = None
     EnvironmentValidator = None
+
+try:
+    from shared.environments.tool_executor import format_tool_results_message
+except ImportError:
+    format_tool_results_message = None
 
 try:
     from .judge_validator import JudgeValidationResult, JudgeValidator
@@ -272,6 +277,20 @@ def _evaluate_single_case(
     if validate_context:
         eval_context = case.metadata.get("expected_context")
 
+    environment_config = case.metadata.get("environment") or {}
+    loop_cfg = environment_config.get("loop") if isinstance(environment_config.get("loop"), dict) else {}
+    loop_enabled = bool(environment_validator is not None and loop_cfg.get("enabled"))
+
+    if loop_enabled and environment_validator is not None:
+        return _evaluate_case_with_environment_loop(
+            case=case,
+            client=client,
+            eval_context=eval_context,
+            environment_validator=environment_validator,
+            judge_validator=judge_validator,
+            environment_config=environment_config,
+        )
+
     # Make request to backend
     try:
         response = client.chat(case.chat_messages())
@@ -309,7 +328,6 @@ def _evaluate_single_case(
     if environment_validator is not None:
         try:
             system_prompt = case.metadata.get("system", "")
-            environment_config = case.metadata.get("environment") or {}
             expected_for_env = case.expected_tools if environment_config.get("require_expected_tools") else None
             environment_result = environment_validator.validate_response(
                 system_prompt=system_prompt,
@@ -395,6 +413,195 @@ def _evaluate_single_case(
     )
 
 
+def _evaluate_case_with_environment_loop(
+    *,
+    case: PromptCase,
+    client: BackendClient,
+    eval_context: Optional[Dict[str, Any]],
+    environment_validator: "EnvironmentValidator",
+    judge_validator: "JudgeValidator" | None,
+    environment_config: Dict[str, Any],
+) -> EvaluationRecord:
+    """Evaluate a case with a persistent environment and multi-turn tool loop."""
+    loop_cfg = environment_config.get("loop") if isinstance(environment_config.get("loop"), dict) else {}
+    max_turns = int(loop_cfg.get("max_turns", 6) or 6)
+    max_tool_steps = int(loop_cfg.get("max_tool_steps", environment_config.get("max_steps", 0)) or 0)
+    stop_on_text_response = bool(loop_cfg.get("stop_on_text_response", True))
+    stop_on_environment_pass = bool(loop_cfg.get("stop_on_environment_pass", False))
+    require_final_text = bool(loop_cfg.get("require_final_text", False))
+    tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
+
+    messages = case.chat_messages()
+    session = environment_validator.start_session(
+        system_prompt=case.metadata.get("system", ""),
+        environment_config=environment_config,
+    )
+
+    turn_validators: List[ValidationResult] = []
+    turn_behaviors: List[BehaviorValidationResult] = []
+    final_response = None
+    final_raw = None
+    final_latency = 0.0
+    stop_reason = "max_turns_reached"
+
+    try:
+        for turn_index in range(1, max_turns + 1):
+            try:
+                response = client.chat(messages)
+            except Exception as exc:
+                return EvaluationRecord(
+                    case=case,
+                    response_text=None,
+                    validator=None,
+                    latency_s=final_latency or None,
+                    raw_response=final_raw,
+                    error=str(exc),
+                )
+
+            final_latency += response.latency_s
+            final_response = response.message
+            final_raw = response.raw
+
+            validator_result = validate_assistant_response(response.message, eval_context)
+            turn_validators.append(validator_result)
+            behavior_result = _run_behavior_validation(
+                case,
+                response.message,
+                extracted_tool_names=[tc.name for tc in validator_result.tool_calls],
+            )
+            if behavior_result is not None:
+                turn_behaviors.append(behavior_result)
+
+            if not validator_result.passed:
+                stop_reason = "schema_validation_failed"
+                break
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": _stringify_assistant_response(response.message),
+                }
+            )
+
+            has_tool_calls = bool(validator_result.tool_calls)
+            step = session.execute_response(response.message)
+
+            if max_tool_steps and len(session.executed_tools) > max_tool_steps:
+                stop_reason = "max_tool_steps_exceeded"
+                break
+
+            if any(issue.level.lower() == "error" for issue in step.issues):
+                stop_reason = "environment_execution_failed"
+                break
+
+            environment_preview = session.finalize(
+                expected_tools=None,
+                total_turns=turn_index,
+                stop_reason="preview",
+            )
+            if stop_on_environment_pass and environment_preview.passed:
+                stop_reason = "environment_passed"
+                break
+
+            if has_tool_calls:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": _format_loop_tool_feedback(
+                            executions=step.executed_tools,
+                            issues=step.issues,
+                            format_name=tool_result_format,
+                        ),
+                    }
+                )
+                continue
+
+            if stop_on_text_response:
+                stop_reason = "text_response"
+                break
+
+        environment_result = session.finalize(
+            expected_tools=case.expected_tools if environment_config.get("require_expected_tools") else None,
+            total_turns=len(turn_validators),
+            stop_reason=stop_reason,
+        )
+    finally:
+        session.close()
+
+    combined_validator = _combine_validation_results(turn_validators)
+    if combined_validator is not None:
+        _check_expected_tools(case, combined_validator)
+
+    combined_behavior = _combine_behavior_results(turn_behaviors)
+    if require_final_text and combined_validator is not None:
+        final_text = _extract_text_content(final_response)
+        if not final_text.strip():
+            if combined_behavior is None:
+                combined_behavior = BehaviorValidationResult(
+                    passed=False,
+                    issues=[],
+                    response_type_detected="empty",
+                )
+            combined_behavior.issues.append(
+                BehaviorIssue(
+                    check="final_text_required",
+                    expected=True,
+                    actual=False,
+                    passed=False,
+                    message="Loop expected a final text response but none was produced.",
+                )
+            )
+            combined_behavior.passed = False
+
+    judge_result = None
+    if judge_validator is not None and final_response is not None and combined_validator is not None:
+        judge_meta = case.metadata.get("judge", {})
+        per_case_mode = judge_meta.get("mode") if judge_meta else None
+        effective_mode = per_case_mode or judge_validator.default_judge_mode
+        pattern_passed = combined_validator is not None and combined_validator.passed
+        skip_judge = effective_mode == "and" and not pattern_passed
+        if not skip_judge:
+            try:
+                from shared.validation.parsing import parse_response
+
+                parsed = parse_response(final_response)
+                case_meta = {
+                    "system": case.metadata.get("system", ""),
+                    "user_prompt": case.question,
+                    "expected_tools": case.expected_tools or case.acceptable_tools or [],
+                    "pattern_passed": pattern_passed,
+                    "case_id": case.case_id,
+                }
+                judge_result = judge_validator.validate(
+                    parsed_response=parsed,
+                    case_metadata=case_meta,
+                    judge_mode=per_case_mode,
+                )
+            except Exception as exc:
+                logger.error("Judge validation error for %s: %s", case.case_id, exc)
+
+    scoring_result = _run_path_scoring(
+        case=case,
+        validator_result=combined_validator,
+        behavior_result=combined_behavior,
+        environment_result=environment_result,
+        judge_result=judge_result,
+    )
+
+    return EvaluationRecord(
+        case=case,
+        response_text=final_response,
+        validator=combined_validator,
+        latency_s=final_latency or None,
+        raw_response=final_raw,
+        error=None,
+        behavior=combined_behavior,
+        environment=environment_result,
+        judge=judge_result,
+        scoring=scoring_result,
+    )
+
+
 def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) -> None:
     """Check if expected tools were called, updating validator_result in place.
 
@@ -436,6 +643,85 @@ def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) 
                     message=f"No acceptable tool called. Valid options: {options_str}"
                 )
             )
+
+
+def _combine_validation_results(results: List[ValidationResult]) -> Optional[ValidationResult]:
+    if not results:
+        return None
+
+    combined_tool_calls: List[ToolCall] = []
+    combined_issues: List[ValidatorIssue] = []
+    combined_context: Dict[str, Any] = {"all_match": True}
+
+    for result in results:
+        combined_tool_calls.extend(result.tool_calls)
+        combined_issues.extend(result.issues)
+        if result.context_validation:
+            for key, value in result.context_validation.items():
+                if key == "all_match":
+                    combined_context["all_match"] = combined_context.get("all_match", True) and bool(value)
+                    continue
+                combined_context.setdefault(key, [])
+                if isinstance(value, list):
+                    combined_context[key].extend(value)
+
+    return ValidationResult(
+        passed=all(result.passed for result in results),
+        issues=combined_issues,
+        tool_calls=combined_tool_calls,
+        context_validation=combined_context if len(combined_context) > 1 else None,
+    )
+
+
+def _combine_behavior_results(results: List[BehaviorValidationResult]) -> Optional[BehaviorValidationResult]:
+    if not results:
+        return None
+
+    issues: List[BehaviorIssue] = []
+    for result in results:
+        issues.extend(result.issues)
+
+    return BehaviorValidationResult(
+        passed=all(result.passed for result in results),
+        issues=issues,
+        response_type_detected=results[-1].response_type_detected,
+    )
+
+
+def _stringify_assistant_response(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        content = response.get("content")
+        tool_calls = response.get("tool_calls") or []
+        parts: List[str] = []
+        if isinstance(content, str) and content.strip():
+            parts.append(content.strip())
+        if tool_calls:
+            parts.append(f"Tool calls: {tool_calls}")
+        return "\n\n".join(parts).strip() or str(response)
+    return str(response)
+
+
+def _format_loop_tool_feedback(
+    *,
+    executions,
+    issues,
+    format_name: str,
+) -> str:
+    if format_tool_results_message is not None:
+        return format_tool_results_message(executions=executions, issues=issues, format_name=format_name)
+    return "Tool execution results received. Continue the task."
+
+
+def _extract_text_content(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        content = response.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
 
 
 def _run_behavior_validation(

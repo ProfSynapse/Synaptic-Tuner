@@ -242,6 +242,34 @@ The file is intentionally generic; add your own tool names in `tool_action_hints
 and/or `verb_rules` for your schema.
 Use `--env-tool-schema` and `--env-exec-config` to point to alternate YAML files.
 
+Environment execution can be one-shot or multi-step. One-shot mode executes a
+single assistant response and validates the resulting state. Loop mode keeps the
+same runtime alive across turns, feeds tool execution results back to the
+conversation, and stops based on config. Loop mode is opt-in per scenario via
+`environment.loop`:
+
+```yaml
+environment:
+  allowed_tools:
+    - searchManager_searchContent
+    - contentManager_read
+    - contentManager_update
+  max_steps: 8
+  loop:
+    enabled: true
+    max_turns: 6
+    max_tool_steps: 8
+    stop_on_text_response: true
+    stop_on_environment_pass: false
+    tool_result_format: json
+```
+
+This split is intentional:
+
+- the evaluator runner owns the multi-turn control loop
+- the environment backend (`local` or `e2b`) owns runtime state only
+- scenario YAML decides whether looping is enabled
+
 For note-vault or "gym" style tasks, `environment.fixture` can define the runtime
 state directly instead of relying only on prompt parsing. It supports generic
 `directories` / `files` plus an Obsidian-friendly `notes` shorthand:

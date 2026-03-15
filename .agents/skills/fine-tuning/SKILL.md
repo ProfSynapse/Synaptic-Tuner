@@ -176,6 +176,7 @@ HF Jobs-specific cloud behavior:
 - for environment-backed SynthChat pilots, prefer a small remote smoke test first, such as 10 total examples, before scaling counts
 - for environment-backed tool generation, prefer structured output for both generated environments and assistant tool responses so the artifact is executable instead of “tool-shaped prose”
 - keep tool wrapper choice config-driven via the canonical tool schema; do not assume `useTools` is a hardcoded invariant in new prompts, validators, or generators
+- for environment-backed gym work, keep multi-step agent loops config-driven via `environment.loop`; the evaluator runner owns the loop, while `local` and `e2b` are interchangeable runtime backends underneath it
 - the reusable inspection method is:
   compare expected behavior to actual behavior
   inspect parsed tool/action records before raw text when both are present

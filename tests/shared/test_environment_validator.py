@@ -126,3 +126,68 @@ Need to compare RAG vs fine-tune for support.
 
     assert result.passed is True
     assert [tool.name for tool in result.executed_tools] == ["contentManager_write"]
+
+
+def test_environment_validator_session_persists_runtime_across_multiple_steps():
+    validator = EnvironmentValidator(backend="local")
+    session = validator.start_session(
+        system_prompt="",
+        environment_config={
+            "fixture": {"directories": ["Inbox"]},
+            "assertions": [
+                {"type": "path_exists", "path": "Inbox/step-two.md"},
+            ],
+        },
+    )
+
+    try:
+        session.execute_response(
+            {
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "contentManager_write",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "Inbox/step-one.md",
+                                    "content": "first",
+                                    "overwrite": True,
+                                }
+                            ),
+                        },
+                    }
+                ]
+            }
+        )
+        session.execute_response(
+            {
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "storageManager_move",
+                            "arguments": json.dumps(
+                                {
+                                    "path": "Inbox/step-one.md",
+                                    "newPath": "Inbox/step-two.md",
+                                }
+                            ),
+                        },
+                    }
+                ]
+            }
+        )
+        result = session.finalize(total_turns=2, stop_reason="test_complete")
+    finally:
+        session.close()
+
+    assert result.passed is True
+    assert result.episode_trace is not None
+    assert result.episode_trace.total_turns == 2
+    assert result.episode_trace.total_tool_calls == 2
+    assert result.episode_trace.stop_reason == "test_complete"
+    assert [tool.name for tool in result.executed_tools] == [
+        "contentManager_write",
+        "storageManager_move",
+    ]

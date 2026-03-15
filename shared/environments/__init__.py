@@ -8,16 +8,20 @@ tool calls against a concrete workspace environment. It supports:
 """
 
 from .types import (
+    EnvironmentEpisodeTrace,
     EnvironmentIssue,
+    EnvironmentStepResult,
     EnvironmentValidationResult,
     ExecutedToolCall,
 )
-from .validator import EnvironmentValidator
+from .validator import EnvironmentSession, EnvironmentValidator
 
 __all__ = [
+    "EnvironmentEpisodeTrace",
     "EnvironmentIssue",
+    "EnvironmentSession",
+    "EnvironmentStepResult",
     "ExecutedToolCall",
     "EnvironmentValidationResult",
     "EnvironmentValidator",
 ]
-

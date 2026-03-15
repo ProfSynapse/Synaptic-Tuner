@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from .base import EnvironmentRuntime
@@ -10,7 +11,13 @@ from .e2b_runtime import E2BEnvironmentRuntime
 from .fixture_parser import merge_environment_fixture, parse_environment_fixture
 from .local_runtime import LocalEnvironmentRuntime
 from .tool_executor import execute_response_tool_calls
-from .types import EnvironmentIssue, EnvironmentValidationResult
+from .types import (
+    EnvironmentEpisodeTrace,
+    EnvironmentIssue,
+    EnvironmentStepResult,
+    EnvironmentValidationResult,
+    ExecutedToolCall,
+)
 
 try:
     import yaml
@@ -60,119 +67,23 @@ class EnvironmentValidator:
         expected_tools: Optional[Iterable[str]] = None,
     ) -> EnvironmentValidationResult:
         """Validate a response by executing its tool calls against runtime state."""
-        config = environment_config or {}
-        assertions = config.get("assertions", [])
-        allowed_tools = config.get("allowed_tools")
-        max_steps = int(config.get("max_steps", 0) or 0)
-        execution_overrides = config.get("execution") if isinstance(config.get("execution"), dict) else {}
-        strict_schema = bool(
-            execution_overrides.get(
-                "strict_schema",
-                self.execution_config.get("strict_schema", False),
-            )
-        )
-        default_action = str(
-            execution_overrides.get(
-                "default_action",
-                self.execution_config.get("default_action", "simulate"),
-            )
-        ).strip().lower() or "simulate"
-
-        global_action_hints = self.execution_config.get("tool_action_hints", {})
-        override_action_hints = (
-            execution_overrides.get("tool_action_hints")
-            if isinstance(execution_overrides.get("tool_action_hints"), dict)
-            else {}
-        )
-        inline_action_hints = config.get("action_hints") if isinstance(config.get("action_hints"), dict) else {}
-        action_hints = _merge_dicts(
-            _merge_dicts(global_action_hints, override_action_hints),
-            inline_action_hints,
-        )
-
-        override_key_hints = execution_overrides.get("key_hints")
-        if not isinstance(override_key_hints, dict):
-            override_key_hints = {}
-        key_hints = _merge_rule_lists(
-            self.execution_config.get("key_hints", {}),
-            override_key_hints,
-        )
-
-        override_verb_rules = execution_overrides.get("verb_rules")
-        if not isinstance(override_verb_rules, dict):
-            override_verb_rules = {}
-        verb_rules = _merge_rule_lists(
-            self.execution_config.get("verb_rules", {}),
-            override_verb_rules,
-        )
-
-        runtime = self._create_runtime()
-        issues: List[EnvironmentIssue] = []
-        assertions_run = 0
-        snapshot: Dict[str, Any] = {}
-        executions = []
-
+        session = self.start_session(system_prompt=system_prompt, environment_config=environment_config)
         try:
-            fixture = merge_environment_fixture(
-                parse_environment_fixture(system_prompt),
-                config.get("fixture"),
-            )
-            runtime.setup(fixture)
-
-            executions, exec_issues = execute_response_tool_calls(
-                runtime=runtime,
-                response=response,
-                allowed_tools=allowed_tools,
-                tool_schema=self.tool_schema,
-                action_hints=action_hints,
-                strict_schema=strict_schema,
-                key_hints=key_hints,
-                verb_rules=verb_rules,
-                default_action=default_action,
-            )
-            issues.extend(exec_issues)
-
-            if max_steps and len(executions) > max_steps:
-                issues.append(
-                    EnvironmentIssue(
-                        "error",
-                        f"Response executed {len(executions)} tool calls, exceeding max_steps={max_steps}",
-                    )
-                )
-
-            if expected_tools:
-                expected = set(expected_tools)
-                called = {tool.name for tool in executions}
-                missing = sorted(expected - called)
-                if missing:
-                    issues.append(
-                        EnvironmentIssue(
-                            "error",
-                            f"Expected tool(s) not executed in environment simulation: {', '.join(missing)}",
-                        )
-                    )
-
-            if isinstance(assertions, list):
-                assertion_issues = _run_assertions(runtime, assertions)
-                assertions_run = len(assertions)
-                issues.extend(assertion_issues)
-
-            snapshot = runtime.snapshot()
-        except Exception as exc:
-            issues.append(EnvironmentIssue("error", f"Environment validation failed: {exc}"))
+            session.execute_response(response)
+            return session.finalize(expected_tools=expected_tools, total_turns=1, stop_reason="single_response")
         finally:
-            try:
-                runtime.teardown()
-            except Exception as exc:
-                issues.append(EnvironmentIssue("warning", f"Environment teardown warning: {exc}"))
+            session.close()
 
-        passed = all(issue.level.lower() != "error" for issue in issues)
-        return EnvironmentValidationResult(
-            passed=passed,
-            issues=issues,
-            executed_tools=executions,
-            assertions_run=assertions_run,
-            snapshot=snapshot,
+    def start_session(
+        self,
+        system_prompt: str,
+        environment_config: Optional[Dict[str, Any]] = None,
+    ) -> "EnvironmentSession":
+        """Create a persistent environment session for multi-turn episodes."""
+        return EnvironmentSession(
+            validator=self,
+            system_prompt=system_prompt,
+            environment_config=environment_config or {},
         )
 
     def _create_runtime(self) -> EnvironmentRuntime:
@@ -183,6 +94,184 @@ class EnvironmentValidator:
             api_key=self.e2b_api_key,
             timeout_seconds=self.timeout_seconds,
         )
+
+
+@dataclass
+class EnvironmentSession:
+    """Persistent runtime session for one environment-backed episode."""
+
+    validator: EnvironmentValidator
+    system_prompt: str
+    environment_config: Dict[str, Any] = field(default_factory=dict)
+    runtime: EnvironmentRuntime = field(init=False)
+    assertions: List[Dict[str, Any]] = field(init=False, default_factory=list)
+    allowed_tools: Optional[Iterable[str]] = field(init=False, default=None)
+    max_steps: int = field(init=False, default=0)
+    action_hints: Dict[str, str] = field(init=False, default_factory=dict)
+    key_hints: Dict[str, List[str]] = field(init=False, default_factory=dict)
+    verb_rules: Dict[str, List[str]] = field(init=False, default_factory=dict)
+    strict_schema: bool = field(init=False, default=False)
+    default_action: str = field(init=False, default="simulate")
+    issues: List[EnvironmentIssue] = field(init=False, default_factory=list)
+    executed_tools: List[ExecutedToolCall] = field(init=False, default_factory=list)
+    steps: List[EnvironmentStepResult] = field(init=False, default_factory=list)
+    closed: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        config = self.environment_config or {}
+        self.assertions = config.get("assertions", []) if isinstance(config.get("assertions"), list) else []
+        self.allowed_tools = config.get("allowed_tools")
+        self.max_steps = int(config.get("max_steps", 0) or 0)
+        execution_overrides = config.get("execution") if isinstance(config.get("execution"), dict) else {}
+        self.strict_schema = bool(
+            execution_overrides.get(
+                "strict_schema",
+                self.validator.execution_config.get("strict_schema", False),
+            )
+        )
+        self.default_action = str(
+            execution_overrides.get(
+                "default_action",
+                self.validator.execution_config.get("default_action", "simulate"),
+            )
+        ).strip().lower() or "simulate"
+
+        global_action_hints = self.validator.execution_config.get("tool_action_hints", {})
+        override_action_hints = (
+            execution_overrides.get("tool_action_hints")
+            if isinstance(execution_overrides.get("tool_action_hints"), dict)
+            else {}
+        )
+        inline_action_hints = config.get("action_hints") if isinstance(config.get("action_hints"), dict) else {}
+        self.action_hints = _merge_dicts(
+            _merge_dicts(global_action_hints, override_action_hints),
+            inline_action_hints,
+        )
+
+        override_key_hints = execution_overrides.get("key_hints")
+        if not isinstance(override_key_hints, dict):
+            override_key_hints = {}
+        self.key_hints = _merge_rule_lists(
+            self.validator.execution_config.get("key_hints", {}),
+            override_key_hints,
+        )
+
+        override_verb_rules = execution_overrides.get("verb_rules")
+        if not isinstance(override_verb_rules, dict):
+            override_verb_rules = {}
+        self.verb_rules = _merge_rule_lists(
+            self.validator.execution_config.get("verb_rules", {}),
+            override_verb_rules,
+        )
+
+        self.runtime = self.validator._create_runtime()
+
+        fixture = merge_environment_fixture(
+            parse_environment_fixture(self.system_prompt),
+            config.get("fixture"),
+        )
+        self.runtime.setup(fixture)
+
+    def execute_response(self, response: Any) -> EnvironmentStepResult:
+        """Execute one assistant response against the persistent runtime."""
+        if self.closed:
+            raise RuntimeError("Environment session is closed")
+
+        step_issues: List[EnvironmentIssue] = []
+        try:
+            executions, exec_issues = execute_response_tool_calls(
+                runtime=self.runtime,
+                response=response,
+                allowed_tools=self.allowed_tools,
+                tool_schema=self.validator.tool_schema,
+                action_hints=self.action_hints,
+                strict_schema=self.strict_schema,
+                key_hints=self.key_hints,
+                verb_rules=self.verb_rules,
+                default_action=self.default_action,
+            )
+        except Exception as exc:
+            executions = []
+            exec_issues = [EnvironmentIssue("error", f"Environment validation failed: {exc}")]
+
+        step_issues.extend(exec_issues)
+        self.issues.extend(step_issues)
+        self.executed_tools.extend(executions)
+
+        step = EnvironmentStepResult(
+            turn_index=len(self.steps) + 1,
+            executed_tools=executions,
+            issues=step_issues,
+        )
+        self.steps.append(step)
+        return step
+
+    def finalize(
+        self,
+        expected_tools: Optional[Iterable[str]] = None,
+        total_turns: Optional[int] = None,
+        stop_reason: Optional[str] = None,
+    ) -> EnvironmentValidationResult:
+        """Run final checks and return the aggregate environment result."""
+        assertions_run = 0
+        snapshot: Dict[str, Any] = {}
+        final_issues = list(self.issues)
+
+        if self.max_steps and len(self.executed_tools) > self.max_steps:
+            final_issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Response executed {len(self.executed_tools)} tool calls, exceeding max_steps={self.max_steps}",
+                )
+            )
+
+        if expected_tools:
+            expected = set(expected_tools)
+            called = {tool.name for tool in self.executed_tools}
+            missing = sorted(expected - called)
+            if missing:
+                final_issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Expected tool(s) not executed in environment simulation: {', '.join(missing)}",
+                    )
+                )
+
+        if isinstance(self.assertions, list):
+            assertion_issues = _run_assertions(self.runtime, self.assertions)
+            assertions_run = len(self.assertions)
+            final_issues.extend(assertion_issues)
+
+        try:
+            snapshot = self.runtime.snapshot()
+        except Exception as exc:
+            final_issues.append(EnvironmentIssue("warning", f"Environment snapshot warning: {exc}"))
+
+        trace = EnvironmentEpisodeTrace(
+            steps=list(self.steps),
+            total_turns=total_turns if total_turns is not None else len(self.steps),
+            total_tool_calls=len(self.executed_tools),
+            stop_reason=stop_reason,
+        )
+        passed = all(issue.level.lower() != "error" for issue in final_issues)
+        return EnvironmentValidationResult(
+            passed=passed,
+            issues=final_issues,
+            executed_tools=list(self.executed_tools),
+            assertions_run=assertions_run,
+            snapshot=snapshot,
+            episode_trace=trace,
+        )
+
+    def close(self) -> None:
+        """Tear down the underlying runtime."""
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self.runtime.teardown()
+        except Exception as exc:
+            self.issues.append(EnvironmentIssue("warning", f"Environment teardown warning: {exc}"))
 
 
 def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]]) -> List[EnvironmentIssue]:

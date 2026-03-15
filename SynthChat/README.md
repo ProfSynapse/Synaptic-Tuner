@@ -234,6 +234,15 @@ tool-use scenarios. This lets a scenario generate a filesystem-like environment
 first, then render a production-style mocked system prompt from that environment
 before generating the user and assistant turns.
 
+Those environment-backed scenarios can target either:
+
+- one-shot tool responses
+- multi-step evaluator episodes, where the same runtime persists across turns
+  and tool outputs are fed back to the model
+
+The loop itself is owned by the evaluator's `environment.loop` config, not by
+SynthChat-specific code or one hardcoded tool wrapper.
+
 Environment sourcing is explicit via `environment_mode`:
 
 - `provided`: use the hand-authored `environment` block only

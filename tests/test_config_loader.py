@@ -33,6 +33,8 @@ def test_config_loader_merges_environment_defaults_into_case_metadata():
     assert environment["max_steps"] == 8
     assert "storageManager_move" in environment["allowed_tools"]
     assert environment["execution"]["strict_schema"] is True
+    assert environment["loop"]["enabled"] is True
+    assert environment["loop"]["stop_on_text_response"] is True
 
 
 def test_config_loader_infers_expected_context_from_system_context():

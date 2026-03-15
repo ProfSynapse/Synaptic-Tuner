@@ -168,6 +168,8 @@ def validate_assistant_response(
             except Exception:
                 # Extraction errors already surfaced as validation issues
                 pass
+        elif isinstance(message.get("content"), str):
+            dataset_validator.validate_assistant_content(message["content"], report)
         else:
             # Dict without tool_calls - invalid
             report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
