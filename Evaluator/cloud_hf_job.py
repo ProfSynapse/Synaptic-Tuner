@@ -102,11 +102,26 @@ class _PeriodicBucketSyncer:
             print(f"Progress sync warning: {exc}")
 
 
+def _log_runtime_versions() -> None:
+    """Log the key eval runtime package versions for cloud debugging."""
+    package_names = ["torch", "vllm", "transformers", "tokenizers", "huggingface_hub"]
+    versions = []
+    for package_name in package_names:
+        try:
+            module = __import__(package_name)
+            versions.append(f"{package_name}={getattr(module, '__version__', 'unknown')}")
+        except Exception as exc:
+            versions.append(f"{package_name}=unavailable({exc})")
+    print("Eval runtime versions: " + ", ".join(versions))
+
+
 def main() -> int:
     args = _parse_args()
     hf_token = get_hf_token()
     if not hf_token:
         raise RuntimeError("HF_TOKEN or HF_API_KEY is required inside the cloud evaluation job.")
+
+    _log_runtime_versions()
 
     output_root = Path(args.output_root)
     model_dir = output_root / "model"

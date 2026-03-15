@@ -41,6 +41,17 @@ from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
 
+_HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
+_HF_EVAL_PIP_PACKAGES = [
+    "-r",
+    "Evaluator/requirements.txt",
+    "vllm==0.11.0",
+    "transformers>=4.57.1,<4.58",
+    "tokenizers>=0.22.1,<0.23",
+    "huggingface_hub>=1.5.0",
+    "hf_transfer",
+]
+
 
 class HFJobsCloudEvalAdapter(CloudEvalProviderAdapter):
     """HF Jobs implementation of the cloud evaluation dashboard adapter."""
@@ -237,6 +248,7 @@ class CloudEvalHandler(BaseHandler):
         cloud_config_path = self._cloud_config_path()
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
+        quoted_eval_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_PIP_PACKAGES)
         quoted_repo_url = shlex.quote(repo_source.url)
         quoted_branch = shlex.quote(repo_source.branch)
         quoted_commit = shlex.quote(repo_source.commit)
@@ -245,7 +257,9 @@ class CloudEvalHandler(BaseHandler):
             f"git clone --branch {quoted_branch} --depth 1 {quoted_repo_url} /workspace/repo",
             f"cd /workspace/repo && git fetch --depth 1 origin {quoted_commit} && git checkout {quoted_commit}",
             f"cd /workspace/repo && python -m pip install --upgrade {quoted_project_deps}",
-            "cd /workspace/repo && python -m pip install --upgrade -r Evaluator/requirements.txt 'vllm>=0.6.0' 'huggingface_hub>=1.5.0' hf_transfer",
+            f"mkdir -p {_HF_EVAL_OVERLAY}",
+            f"cd /workspace/repo && python -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+            f"export PYTHONPATH={_HF_EVAL_OVERLAY}:$PYTHONPATH",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
 
