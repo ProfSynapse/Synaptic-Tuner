@@ -20,7 +20,7 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
         update_model_card=False,
     )
 
-    assert "Evaluator/cloud_hf_job.py" in command
+    assert "Evaluator.cloud_hf_job" in command
     assert "--bucket-id" in command
     assert "test-user/toolset-training-artifacts" in command
     assert "--run-prefix" in command
@@ -113,4 +113,4 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
         "HF_API_KEY": "hf_test_token_12345",
     }
     assert kwargs["flavor"] == "a10g-small"
-    assert "Evaluator/cloud_hf_job.py" in kwargs["command"][2]
+    assert "Evaluator.cloud_hf_job" in kwargs["command"][2]

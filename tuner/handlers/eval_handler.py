@@ -42,6 +42,7 @@ from shared.ui import (
     COLORS,
     BOX,
 )
+from shared.cloud_eval_progress import extract_record_progress
 
 # Import evaluation dashboard and UI
 try:
@@ -799,36 +800,7 @@ class EvalHandler(BaseHandler):
 
         def on_record_dashboard(record):
             """Update dashboard with evaluation result."""
-            name = record.case.case_id or "unnamed"
-            latency = record.latency_s or 0.0
-
-            # Get brief failure reason for log display
-            reason = None
-            if record.status in ("fail", "warn"):
-                if record.error:
-                    reason = f"Error: {record.error[:40]}..."
-                elif record.validator and record.validator.issues:
-                    for issue in record.validator.issues:
-                        reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
-                        break
-                elif record.behavior and not record.behavior.passed:
-                    for issue in record.behavior.issues:
-                        if hasattr(issue, 'message'):
-                            reason = issue.message[:50] + "..." if len(issue.message) > 50 else issue.message
-                            break
-
-            # Check behavior results
-            behavior_tested = record.behavior is not None
-            behavior_passed = behavior_tested and record.behavior.passed
-
-            dashboard.update(
-                status=record.status,
-                name=name,
-                latency=latency,
-                reason=reason,
-                behavior_tested=behavior_tested,
-                behavior_passed=behavior_passed,
-            )
+            dashboard.update(**extract_record_progress(record))
 
         # Run evaluation with dashboard
         try:

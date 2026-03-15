@@ -68,6 +68,7 @@ from .reporting import (
     generate_evaluation_model_card_section,
 )
 from .runner import evaluate_cases
+from shared.cloud_eval_progress import CloudEvaluationProgressWriter, extract_record_progress
 
 
 def load_display_config(config_dir: Path) -> Dict[str, Any]:
@@ -245,6 +246,7 @@ Backend Configuration:
         action="store_true",
         help="Disable live dashboard, use simple text output",
     )
+    parser.add_argument("--progress-jsonl", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -374,6 +376,22 @@ def main(argv: List[str] | None = None) -> int:
             log_lines=5,
         )
 
+    def format_issue_for_display(message: str) -> str | None:
+        return simplify_issue_message(message, display_config)
+
+    progress_writer = None
+    if args.progress_jsonl:
+        progress_writer = CloudEvaluationProgressWriter(
+            Path(args.progress_jsonl),
+            sync_every_events=5,
+        )
+        progress_writer.write_metadata(
+            total_tests=len(selected_cases),
+            title="Cloud Evaluation",
+            backend=args.backend,
+            model=args.model,
+        )
+
     environment_validator = None
     if args.env_backend != "none":
         try:
@@ -473,45 +491,13 @@ def main(argv: List[str] | None = None) -> int:
 
     def on_record_dashboard(record):
         """Update dashboard with evaluation result."""
-        name = record.case.case_id or "unnamed"
-        latency = record.latency_s or 0.0
+        dashboard.update(**extract_record_progress(record, issue_formatter=format_issue_for_display))
 
-        # Get brief failure reason for log display
-        reason = None
-        if record.status in ("fail", "warn"):
-            if record.error:
-                reason = f"Error: {record.error[:40]}..."
-            elif record.validator and record.validator.issues:
-                for issue in record.validator.issues:
-                    msg = simplify_issue_message(issue.message, display_config)
-                    if msg:
-                        reason = msg[:50] + "..." if len(msg) > 50 else msg
-                        break
-            elif record.environment and record.environment.issues:
-                for issue in record.environment.issues:
-                    msg = simplify_issue_message(issue.message, display_config)
-                    if msg:
-                        reason = msg[:50] + "..." if len(msg) > 50 else msg
-                        break
-            elif record.behavior and not record.behavior.passed:
-                for issue in record.behavior.issues:
-                    msg = simplify_issue_message(issue.message, display_config)
-                    if msg:
-                        reason = msg[:50] + "..." if len(msg) > 50 else msg
-                        break
-
-        # Check behavior results
-        behavior_tested = record.behavior is not None
-        behavior_passed = behavior_tested and record.behavior.passed
-
-        dashboard.update(
-            status=record.status,
-            name=name,
-            latency=latency,
-            reason=reason,
-            behavior_tested=behavior_tested,
-            behavior_passed=behavior_passed,
-        )
+    def on_record_progress(record):
+        """Write structured progress events for cloud replay."""
+        if progress_writer is None:
+            return
+        progress_writer.write_record(record, issue_formatter=format_issue_for_display)
 
     # Fallback text-based callback (original implementation)
     def on_record_text(record):
@@ -563,6 +549,14 @@ def main(argv: List[str] | None = None) -> int:
                             print(f"         {lbl_why}: {msg}")
                             break
 
+    callbacks = [on_record_dashboard] if use_dashboard else [on_record_text]
+    if progress_writer is not None:
+        callbacks.append(on_record_progress)
+
+    def on_record(record):
+        for callback in callbacks:
+            callback(record)
+
     # Run evaluation with appropriate callback
     if use_dashboard:
         with dashboard:
@@ -573,7 +567,7 @@ def main(argv: List[str] | None = None) -> int:
                 validate_context=args.validate_context,
                 environment_validator=environment_validator,
                 judge_validator=judge_validator,
-                on_record=on_record_dashboard,
+                on_record=on_record,
             )
     else:
         print(f"\nRunning {len(selected_cases)} evaluations...\n")
@@ -584,7 +578,7 @@ def main(argv: List[str] | None = None) -> int:
             validate_context=args.validate_context,
             environment_validator=environment_validator,
             judge_validator=judge_validator,
-            on_record=on_record_text,
+            on_record=on_record,
         )
 
     print()  # Blank line before summary
@@ -617,6 +611,9 @@ def main(argv: List[str] | None = None) -> int:
 
     if markdown_path:
         markdown_path.write_text(render_markdown(records, args.model, str(prompt_path.name)), encoding="utf-8")
+
+    if progress_writer is not None:
+        progress_writer.write_complete()
 
     # Generate evaluation lineage if requested
     lineage = None

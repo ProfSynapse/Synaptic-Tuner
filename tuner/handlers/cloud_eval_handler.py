@@ -7,16 +7,25 @@ starts vLLM remotely, and runs the evaluator against it.
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 import shlex
+import sys
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
 from tuner.handlers.base import BaseHandler
+from tuner.handlers.cloud_eval_dashboard import (
+    CloudEvalDashboardWatcher,
+    CloudEvalProviderAdapter,
+    CloudEvalWatchResult,
+    can_render_cloud_eval_dashboard,
+)
 from tuner.ui import (
     BOX,
     confirm,
@@ -30,6 +39,40 @@ from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_pro
 from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
+
+
+class HFJobsCloudEvalAdapter(CloudEvalProviderAdapter):
+    """HF Jobs implementation of the cloud evaluation dashboard adapter."""
+
+    def __init__(self, huggingface_hub, *, bucket_id: str, eval_prefix: str, job_id: str, token: Optional[str]) -> None:
+        self.huggingface_hub = huggingface_hub
+        self.bucket_id = bucket_id
+        self.eval_prefix = eval_prefix.strip("/")
+        self.job_id = job_id
+        self.token = token
+
+    def fetch_status(self) -> str:
+        job_info = self.huggingface_hub.inspect_job(job_id=self.job_id)
+        status_obj = getattr(job_info, "status", None)
+        return status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
+
+    def sync_progress(self, local_dir: Path) -> None:
+        from huggingface_hub import sync_bucket
+
+        sync_bucket(
+            f"hf://buckets/{self.bucket_id}/{self.eval_prefix}/logs",
+            str(local_dir),
+            token=self.token,
+        )
+
+    def sync_results(self, local_dir: Path) -> None:
+        from huggingface_hub import sync_bucket
+
+        sync_bucket(
+            f"hf://buckets/{self.bucket_id}/{self.eval_prefix}",
+            str(local_dir),
+            token=self.token,
+        )
 
 
 class CloudEvalHandler(BaseHandler):
@@ -189,7 +232,8 @@ class CloudEvalHandler(BaseHandler):
 
         eval_cmd = [
             "python",
-            "Evaluator/cloud_hf_job.py",
+            "-m",
+            "Evaluator.cloud_hf_job",
             "--bucket-id",
             bucket_id,
             "--run-prefix",
@@ -252,6 +296,76 @@ class CloudEvalHandler(BaseHandler):
         print()
         print(f"  Evaluation job {job_id} failed: Timeout exceeded")
         return 1
+
+    def _should_use_live_dashboard(self) -> bool:
+        return can_render_cloud_eval_dashboard() and sys.stdin.isatty() and sys.stdout.isatty()
+
+    def _watch_job_with_dashboard(
+        self,
+        *,
+        huggingface_hub,
+        bucket_id: str,
+        eval_prefix: str,
+        job_id: str,
+        timeout_hours: float,
+    ) -> CloudEvalWatchResult:
+        watcher = CloudEvalDashboardWatcher(
+            HFJobsCloudEvalAdapter(
+                huggingface_hub,
+                bucket_id=bucket_id,
+                eval_prefix=eval_prefix,
+                job_id=job_id,
+                token=get_hf_token(),
+            ),
+            title="Cloud Evaluation",
+            poll_interval=15,
+        )
+        return watcher.watch(timeout_seconds=int(timeout_hours * 3600))
+
+    def _download_eval_results(self, bucket_id: str, eval_prefix: str) -> Optional[Path]:
+        try:
+            from huggingface_hub import sync_bucket
+        except ImportError:
+            return None
+
+        import tempfile
+
+        local_root = Path(tempfile.mkdtemp(prefix="cloud-eval-results-"))
+        try:
+            sync_bucket(
+                f"hf://buckets/{bucket_id}/{eval_prefix.strip('/')}",
+                str(local_root),
+                token=get_hf_token(),
+            )
+        except Exception:
+            shutil.rmtree(local_root, ignore_errors=True)
+            return None
+        return local_root
+
+    def _load_eval_summary(self, results_dir: Optional[Path]) -> Optional[Dict[str, int]]:
+        if results_dir is None:
+            return None
+
+        results_path = Path(results_dir) / "evaluation_results.json"
+        if not results_path.exists():
+            return None
+
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+        summary = payload.get("summary")
+        return summary if isinstance(summary, dict) else None
+
+    def _print_eval_summary(self, summary: Optional[Dict[str, int]]) -> None:
+        if not summary:
+            return
+
+        print()
+        print_info(
+            "Summary: "
+            f"{summary.get('passed', 0)} passed, "
+            f"{summary.get('warned', 0)} warned, "
+            f"{summary.get('failed', 0)} failed "
+            f"out of {summary.get('total', 0)}"
+        )
 
     def handle(self) -> int:
         if self.json_mode:
@@ -367,9 +481,34 @@ class CloudEvalHandler(BaseHandler):
         print_info(f"Evaluation artifacts will sync to: hf://buckets/{bucket_id}/{eval_prefix}")
         print()
 
-        exit_code = self._poll_job(huggingface_hub, job_id, timeout_hours)
+        results_dir = None
+        local_root = None
+        failure_status = None
+        if self._should_use_live_dashboard():
+            watch_result = self._watch_job_with_dashboard(
+                huggingface_hub=huggingface_hub,
+                bucket_id=bucket_id,
+                eval_prefix=eval_prefix,
+                job_id=job_id,
+                timeout_hours=timeout_hours,
+            )
+            exit_code = watch_result.exit_code
+            results_dir = watch_result.results_dir
+            local_root = watch_result.local_root
+            failure_status = watch_result.status
+        else:
+            exit_code = self._poll_job(huggingface_hub, job_id, timeout_hours)
+            if exit_code == 0:
+                results_dir = self._download_eval_results(bucket_id, eval_prefix)
+                local_root = results_dir
+
         if exit_code == 0:
             print()
             print_info("Cloud evaluation completed successfully.")
             print_info(f"Results: hf://buckets/{bucket_id}/{eval_prefix}")
+            self._print_eval_summary(self._load_eval_summary(results_dir))
+        elif failure_status:
+            print_error(f"Cloud evaluation failed with status: {failure_status}")
+        if local_root is not None:
+            shutil.rmtree(local_root, ignore_errors=True)
         return exit_code
