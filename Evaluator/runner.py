@@ -60,6 +60,7 @@ class EvaluationRecord:
     environment: Optional["EnvironmentValidationResult"] = None
     judge: Optional["JudgeValidationResult"] = None
     scoring: Optional["PathScoringResult"] = None
+    conversation_trace: Optional[List[Dict[str, Any]]] = None
 
     @property
     def status(self) -> str:
@@ -407,10 +408,11 @@ def _evaluate_single_case(
         raw_response=response.raw,
         error=None,
         behavior=behavior_result,
-        environment=environment_result,
-        judge=judge_result,
-        scoring=scoring_result,
-    )
+            environment=environment_result,
+            judge=judge_result,
+            scoring=scoring_result,
+            conversation_trace=_build_single_turn_trace(case, response.message),
+        )
 
 
 def _evaluate_case_with_environment_loop(
@@ -435,6 +437,7 @@ def _evaluate_case_with_environment_loop(
     )
 
     messages = case.chat_messages()
+    conversation_trace = _messages_to_trace(messages)
     session = environment_validator.start_session(
         system_prompt=case.metadata.get("system", ""),
         environment_config=environment_config,
@@ -464,6 +467,15 @@ def _evaluate_case_with_environment_loop(
             final_latency += response.latency_s
             final_response = response.message
             final_raw = response.raw
+            conversation_trace.append(
+                {
+                    "role": "assistant",
+                    "kind": "assistant_response",
+                    "content": _stringify_assistant_response(response.message),
+                    "raw": response.message,
+                    "turn_index": turn_index,
+                }
+            )
 
             validator_result = validate_assistant_response(response.message, eval_context)
             turn_validators.append(validator_result)
@@ -517,6 +529,14 @@ def _evaluate_case_with_environment_loop(
                         ),
                     }
                 )
+                conversation_trace.append(
+                    {
+                        "role": "user",
+                        "kind": "tool_feedback",
+                        "content": messages[-1]["content"],
+                        "turn_index": turn_index,
+                    }
+                )
                 continue
 
             if step.recoverable_error and continue_on_execution_error:
@@ -528,6 +548,14 @@ def _evaluate_case_with_environment_loop(
                             issues=step.issues,
                             format_name=tool_result_format,
                         ),
+                    }
+                )
+                conversation_trace.append(
+                    {
+                        "role": "user",
+                        "kind": "tool_feedback",
+                        "content": messages[-1]["content"],
+                        "turn_index": turn_index,
                     }
                 )
                 continue
@@ -615,6 +643,7 @@ def _evaluate_case_with_environment_loop(
         environment=environment_result,
         judge=judge_result,
         scoring=scoring_result,
+        conversation_trace=conversation_trace,
     )
 
 
@@ -738,6 +767,34 @@ def _extract_text_content(response: Any) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+def _messages_to_trace(messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    trace: List[Dict[str, Any]] = []
+    for index, message in enumerate(messages, start=1):
+        trace.append(
+            {
+                "index": index,
+                "role": str(message.get("role", "")),
+                "kind": "prompt_message",
+                "content": message.get("content"),
+            }
+        )
+    return trace
+
+
+def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, Any]]:
+    trace = _messages_to_trace(case.chat_messages())
+    trace.append(
+        {
+            "index": len(trace) + 1,
+            "role": "assistant",
+            "kind": "assistant_response",
+            "content": _stringify_assistant_response(response),
+            "raw": response,
+        }
+    )
+    return trace
 
 
 def _run_behavior_validation(

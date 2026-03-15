@@ -147,23 +147,37 @@ def format_tool_results_message(
     issues: List[EnvironmentIssue],
     format_name: str = "json",
 ) -> str:
-    """Render executed tool results into a message for the next model turn."""
+    """Render executed tool results into a message for the next model turn.
+
+    Model-facing feedback should describe what actually happened in the runtime,
+    not prescribe the next tool. Internal issue codes remain available for
+    analysis/reporting, but the conversation payload should stay close to real
+    filesystem/tool output.
+    """
     payload = {
-        "executed_tools": [tool.to_dict() for tool in executions],
-        "issues": [issue.to_dict() for issue in issues],
+        "tool_results": [
+            {
+                "name": tool.name,
+                "status": tool.status,
+                **({"output": tool.output} if tool.output is not None else {}),
+                **({"error": tool.error} if tool.error is not None else {}),
+            }
+            for tool in executions
+        ],
+        "issues": [
+            {
+                "level": issue.level,
+                "message": issue.message,
+            }
+            for issue in issues
+        ],
     }
     normalized = str(format_name or "json").strip().lower()
     if normalized == "json":
-        return (
-            "Tool execution results:\n"
-            f"{json.dumps(payload, ensure_ascii=True, indent=2)}\n\n"
-            "Continue the task. If a tool failed or returned incomplete results, adjust your approach and keep going. "
-            "If the task is complete, respond with a final answer."
-        )
+        return "Tool execution results:\n" f"{json.dumps(payload, ensure_ascii=True, indent=2)}"
     return (
         "Tool execution results:\n"
-        f"{json.dumps(payload, ensure_ascii=True)}\n\n"
-        "Continue the task."
+        f"{json.dumps(payload, ensure_ascii=True)}"
     )
 
 

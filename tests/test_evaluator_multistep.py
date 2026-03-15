@@ -178,6 +178,10 @@ def test_multistep_environment_loop_feeds_tool_results_back_to_model():
     assert record.environment.episode_trace is not None
     assert record.environment.episode_trace.total_turns == 4
     assert record.environment.episode_trace.stop_reason == "text_response"
+    assert record.conversation_trace is not None
+    assert [entry["kind"] for entry in record.conversation_trace[:2]] == ["prompt_message", "prompt_message"]
+    assert any(entry["kind"] == "tool_feedback" for entry in record.conversation_trace)
+    assert record.conversation_trace[-1]["kind"] == "assistant_response"
 
 
 def test_multistep_environment_loop_can_stop_when_environment_passes():

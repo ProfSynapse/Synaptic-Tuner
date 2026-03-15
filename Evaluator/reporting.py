@@ -303,6 +303,7 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
         "judge": judge,
         "scoring": record.scoring.to_dict() if record.scoring else None,
         "raw_response": record.raw_response,
+        "conversation_trace": record.conversation_trace,
     }
 
 
