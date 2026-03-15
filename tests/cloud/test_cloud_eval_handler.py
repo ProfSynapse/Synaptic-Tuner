@@ -27,10 +27,9 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "runs/hf_jobs/sft/20260314_191223-abc12345" in command
     assert "--preset" in command
     assert "full" in command
-    assert "vllm==0.11.0" in command
-    assert "transformers>=4.57.1,<4.58" in command
-    assert "tokenizers>=0.22.1,<0.23" in command
-    assert "PYTHONPATH=/tmp/hf-eval-site:$PYTHONPATH" in command
+    assert "huggingface_hub>=1.5.0" in command
+    assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
+    assert "vllm==0.11.0" not in command
 
 
 def test_list_remote_runs_sorts_newest_first(repo_root, clean_env):

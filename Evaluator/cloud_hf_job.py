@@ -6,19 +6,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
 from typing import Optional
-
-from huggingface_hub import sync_bucket
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from Evaluator.cli import main as evaluator_main
-from Evaluator.vllm_setup import start_vllm_server, stop_vllm_server
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
 from shared.utilities.env import get_hf_token
 
@@ -42,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _sync_from_bucket(bucket_id: str, remote_prefix: str, local_dir: Path, token: Optional[str]) -> None:
     local_dir.mkdir(parents=True, exist_ok=True)
-    sync_bucket(
+    _sync_bucket(
         f"hf://buckets/{bucket_id}/{remote_prefix.strip('/')}",
         str(local_dir),
         token=token,
@@ -64,6 +63,37 @@ def _load_base_model_name(final_model_dir: Path) -> str:
             "Cloud vLLM evaluation currently requires a hub-accessible base model."
         )
     return base_model
+
+
+def _sync_bucket(source_path: str, destination_path: str, token: Optional[str]) -> None:
+    helper_python = os.environ.get("HF_BUCKET_SYNC_PYTHON", "").strip() or sys.executable
+    helper_pythonpath = os.environ.get("HF_BUCKET_SYNC_PYTHONPATH", "").strip()
+    env = dict(os.environ)
+    normalized_token = token.strip() if token else ""
+    if normalized_token:
+        env["HF_TOKEN"] = normalized_token
+        env["HF_API_KEY"] = normalized_token
+    else:
+        env.pop("HF_TOKEN", None)
+        env.pop("HF_API_KEY", None)
+    if helper_pythonpath:
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{helper_pythonpath}:{existing_pythonpath}"
+            if existing_pythonpath
+            else helper_pythonpath
+        )
+
+    subprocess.run(
+        [
+            helper_python,
+            str(_REPO_ROOT / "shared" / "hf_bucket_sync_helper.py"),
+            source_path,
+            destination_path,
+        ],
+        check=True,
+        env=env,
+    )
 
 
 class _PeriodicBucketSyncer:
@@ -93,7 +123,7 @@ class _PeriodicBucketSyncer:
         if not self.local_dir.exists():
             return
         try:
-            sync_bucket(
+            _sync_bucket(
                 str(self.local_dir),
                 f"hf://buckets/{self.bucket_id}/{self.remote_prefix}",
                 token=self.token,
@@ -104,7 +134,7 @@ class _PeriodicBucketSyncer:
 
 def _log_runtime_versions() -> None:
     """Log the key eval runtime package versions for cloud debugging."""
-    package_names = ["torch", "vllm", "transformers", "tokenizers", "huggingface_hub"]
+    package_names = ["torch", "unsloth", "transformers", "tokenizers", "huggingface_hub"]
     versions = []
     for package_name in package_names:
         try:
@@ -130,20 +160,8 @@ def main() -> int:
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
 
-    # Download only the adapter payload needed for vLLM LoRA evaluation.
+    # Download only the adapter payload needed for direct Unsloth LoRA evaluation.
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
-    base_model = _load_base_model_name(model_dir)
-
-    started = start_vllm_server(
-        model=base_model,
-        host="127.0.0.1",
-        port=8000,
-        lora_modules={"finetuned": str(model_dir)},
-        timeout=600,
-        show_logs=True,
-    )
-    if not started:
-        raise RuntimeError("Failed to start vLLM server inside the HF evaluation job.")
 
     output_json = results_dir / "evaluation_results.json"
     output_md = results_dir / "evaluation_results.md"
@@ -151,15 +169,11 @@ def main() -> int:
 
     cli_args = [
         "--backend",
-        "vllm",
+        "unsloth",
         "--model",
-        "finetuned",
+        str(model_dir),
         "--config-dir",
         args.config_dir,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8000",
         "--output",
         str(output_json),
         "--markdown",
@@ -195,9 +209,8 @@ def main() -> int:
     finally:
         progress_syncer.stop()
         progress_syncer.sync_once()
-        stop_vllm_server()
 
-    sync_bucket(
+    _sync_bucket(
         str(results_dir),
         f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
         token=hf_token,

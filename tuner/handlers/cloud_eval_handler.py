@@ -45,9 +45,6 @@ _HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
 _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
-    "vllm==0.11.0",
-    "transformers>=4.57.1,<4.58",
-    "tokenizers>=0.22.1,<0.23",
     "huggingface_hub>=1.5.0",
     "hf_transfer",
 ]
@@ -259,7 +256,8 @@ class CloudEvalHandler(BaseHandler):
             f"cd /workspace/repo && python -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_OVERLAY}",
             f"cd /workspace/repo && python -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
-            f"export PYTHONPATH={_HF_EVAL_OVERLAY}:$PYTHONPATH",
+            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
 
@@ -475,7 +473,7 @@ class CloudEvalHandler(BaseHandler):
                 "Provider": "hf_jobs",
                 "Run": selected_run["prefix"],
                 "Bucket": bucket_id,
-                "Backend": "vllm",
+                "Backend": "unsloth",
                 "Preset": preset or "-",
                 "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
                 "Tags": tags or "-",
