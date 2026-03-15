@@ -28,7 +28,7 @@ run:
   steps:
     - "mkdir -p {output_dir}/synthchat"
     - "cd {repo_dir} && python -m SynthChat.run generate --config-dir SynthChat/config --scenarios-dir SynthChat/scenarios --rubrics-dir SynthChat/rubrics --targets-file SynthChat/config/targets_vault_kto_pilot.json --output {output_dir}/synthchat/vault_kto_pilot.jsonl --provider openrouter --model openai/gpt-oss-120b --max-iterations 1 --workers 1 --env-backend local"
-    - "mkdir -p {output_dir}/synthchat/interactions && if [ -d {repo_dir}/SynthChat/interactions ]; then cp -R {repo_dir}/SynthChat/interactions/. {output_dir}/synthchat/interactions/; fi"
+    - "mkdir -p {output_dir}/synthchat/interactions && find {repo_dir} -type f -name 'interactions_*.jsonl' -exec cp {} {output_dir}/synthchat/interactions/ \\;"
 
 artifacts:
   bucket: "toolset-training-artifacts"

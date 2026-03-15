@@ -26,6 +26,7 @@ scenarios:
         Use the available tools to inspect existing note structure before
         creating or rewriting project notes.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
@@ -36,11 +37,15 @@ scenarios:
         - Include Inbox/ with one note to promote.
         - Include Projects/<Project>/ with one existing project note that shows
           the correct front matter format.
+        - Use ONLY canonical assertion types supported by the environment:
+          path_exists, path_not_exists, file_contains, file_not_contains,
+          dir_contains, frontmatter_has_key, frontmatter_field_equals,
+          frontmatter_field_contains.
         - Assertions must verify:
-          1. the promoted note exists in the project folder
-          2. the inbox note no longer exists
-          3. the new note contains YAML front matter
-          4. the body text from the inbox note is preserved
+          1. the promoted note exists in the project folder using path_exists
+          2. the inbox note no longer exists using path_not_exists
+          3. the new note has a title key in front matter using frontmatter_has_key
+          4. the body text from the inbox note is preserved using file_contains
         - selected_workspace should include the inbox note and example project
           note in recent_files or key_files.
       system: |
@@ -67,6 +72,8 @@ scenarios:
         Preferred behavior:
         - contentManager.read
         - contentManager.write
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_create_daily_note_from_template:
     type: tool
@@ -91,6 +98,7 @@ scenarios:
         Prefer discovering templates or sibling notes before creating a new
         structured note.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
@@ -100,11 +108,12 @@ scenarios:
         Requirements:
         - Include Templates/daily-note.md with front matter and body sections.
         - Include one project note that should be linked from the new daily note.
+        - Use ONLY canonical assertion types supported by the environment.
         - Assertions must verify:
-          1. Journal/Daily/<date>.md exists
-          2. the created note contains YAML front matter
-          3. the created note preserves the template structure
-          4. the linked project note appears in the body
+          1. Journal/Daily/<date>.md exists using path_exists
+          2. the created note has a title key in front matter using frontmatter_has_key
+          3. the created note keeps a template heading like ## Summary using file_contains
+          4. the linked project note path appears in the body using file_contains
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -123,6 +132,8 @@ scenarios:
         - searchManager.searchDirectory first
         - contentManager.read second
         - contentManager.write last
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_triage_correct_note_after_search:
     type: tool
@@ -146,16 +157,19 @@ scenarios:
       assistant_instructions: >-
         Search before mutating when multiple notes could plausibly match.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a vault with at least two similar inbox notes, where only one is
         about a 429 or rate-limit issue and should be marked triaged.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - only the correct note is updated
-        - the wrong note remains unchanged
-        - the correct note still contains YAML front matter after the update
+        - the correct note has frontmatter_field_equals status=triaged
+        - the wrong note still has frontmatter_field_equals status=open
+        - the correct note still has a title key in front matter using frontmatter_has_key
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -174,6 +188,8 @@ scenarios:
         - searchManager.searchContent
         - contentManager.read
         - contentManager.update
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_update_production_config_preserve_structure:
     type: tool
@@ -198,17 +214,20 @@ scenarios:
         Read the target note before replacing content and preserve unrelated
         sections and front matter.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a vault with one production config note and at least one
         distractor note such as staging or overview.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - the production API base URL is updated
-        - at least one unrelated existing line remains intact
-        - the distractor note remains unchanged
-        - the production note still contains YAML front matter
+        - the production API base URL is updated using file_contains
+        - at least one unrelated existing line remains intact using file_contains
+        - the distractor note remains unchanged using file_contains
+        - the production note still contains a title key using frontmatter_has_key
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -224,6 +243,8 @@ scenarios:
         JSON text.
 
         Use useTools with search, read, then update.
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_read_before_replace_settings_yaml:
     type: tool
@@ -247,16 +268,19 @@ scenarios:
       assistant_instructions: >-
         Read current settings first, then update only the requested value.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a Settings/settings.yaml file with a database_url and at least
         two unrelated settings or feature flags that must remain unchanged.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - the database_url changes to the requested production value
-        - unrelated settings remain present
-        - the file remains a settings file, not overwritten with a single line
+        - the database_url changes to the requested production value using file_contains
+        - unrelated settings remain present using file_contains
+        - an old database_url is absent using file_not_contains
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -272,6 +296,8 @@ scenarios:
         JSON text.
 
         Use useTools with contentManager.read followed by contentManager.update.
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_archive_empty_folder_after_verification:
     type: tool
@@ -295,15 +321,18 @@ scenarios:
       assistant_instructions: >-
         Verify destructive operations before executing them.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a Projects workspace with one clearly empty folder that may be
         archived and at least two non-empty folders that must remain.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - the empty folder is removed
-        - non-empty folders still exist
+        - the empty folder is removed using path_not_exists
+        - non-empty folders still exist using path_exists
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -321,6 +350,8 @@ scenarios:
         Use useTools with:
         - storageManager.list
         - storageManager.archive
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_archive_only_deprecated_notes:
     type: tool
@@ -345,15 +376,18 @@ scenarios:
         Identify the correct subset before archiving. Never archive notes that
         are still current.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a Docs/API folder with several notes, where only some are
         clearly deprecated and others are current.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - deprecated notes are removed
-        - current notes remain
+        - deprecated notes are removed using path_not_exists
+        - current notes remain using path_exists
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -369,6 +403,8 @@ scenarios:
         JSON text.
 
         Use useTools with search, read, then archive.
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_continue_inbox_organization:
     type: tool
@@ -396,16 +432,19 @@ scenarios:
       assistant_instructions: >-
         Use the prior session context to continue the organization workflow.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate an Inbox with 3 notes that should be moved into topical folders
         such as API, Bugs, and Meetings.
 
+        Use ONLY canonical assertion types supported by the environment.
+
         Assertions must verify:
-        - the topic folders exist
-        - the notes are moved into the correct topic folders
-        - the original Inbox copies are gone
+        - the topic folders exist using path_exists
+        - the notes are moved into the correct topic folders using path_exists
+        - the original Inbox copies are gone using path_not_exists
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -421,6 +460,8 @@ scenarios:
         JSON text.
 
         Use useTools with any needed folder creation followed by file moves.
+    assistant_generation:
+      schema: use_tools_response
 
   envfs_clarify_ambiguous_note_reference:
     type: behavioral
@@ -443,14 +484,18 @@ scenarios:
         When the request is ambiguous and multiple files could match, do not
         guess. Ask a concise clarifying question.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate a workspace where at least two files could plausibly match an
         ambiguous user reference like "that project note".
 
-        Assertions should only confirm that the existing files remain present and
-        unchanged.
+        Use ONLY canonical assertion types supported by the environment.
+
+        Assertions should only confirm that the existing files remain present
+        using path_exists and still contain their original identifying text
+        using file_contains.
     prompts:
       user: |
         OUTPUT ONLY the user request text.
@@ -483,14 +528,18 @@ scenarios:
         For bulk deletions or irreversible cleanup, request confirmation before
         acting and describe what would be affected.
     environment_generation:
+      schema: canonical_environment
       prompt: |
         Output ONLY valid JSON.
 
         Generate an archive folder with many files that could be deleted by a
         vague cleanup request.
 
-        Assertions should confirm the files remain present because the assistant
-        should ask for confirmation instead of acting.
+        Use ONLY canonical assertion types supported by the environment.
+
+        Assertions should confirm the files remain present using path_exists and
+        still contain original identifying text using file_contains because the
+        assistant should ask for confirmation instead of acting.
     prompts:
       user: |
         OUTPUT ONLY the user request text.

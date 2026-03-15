@@ -389,9 +389,11 @@ class SynthChatGenerator:
         if thinking_content:
             assistant_context = f"{assistant_context}\n\nYour thinking:\n{thinking_content}"
 
-        assistant_content = self._call_llm(
-            f"{assistant_context}\n\n{assistant_prompt}",
-            randomize_params
+        assistant_content = self._generate_assistant_response(
+            scenario=scenario,
+            assistant_context=assistant_context,
+            assistant_prompt=assistant_prompt,
+            randomize_params=randomize_params,
         )
 
         # Parse assistant response for tool calls
@@ -448,6 +450,7 @@ class SynthChatGenerator:
                 }
 
         example["metadata"] = {
+            "scenario": scenario_key,
             "category": scenario_key,
             "type": scenario.get("type", "unknown"),
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -504,16 +507,53 @@ class SynthChatGenerator:
             return {}
 
         environment_system = generation_cfg.get("system") or prompts.get("environment_system")
-        prompt_parts = []
-        if environment_system:
-            prompt_parts.append(render_prompt(str(environment_system)))
-        prompt_parts.append(render_prompt(str(environment_prompt)))
+        user_prompt = render_prompt(str(environment_prompt))
+        system_prompt = render_prompt(str(environment_system)) if environment_system else None
+        schema_name = str(generation_cfg.get("schema") or "").strip()
 
-        raw = self._call_llm("\n\n".join(part for part in prompt_parts if part), randomize_params)
-        parsed = self._parse_json_object(raw)
+        if schema_name == "canonical_environment":
+            parsed = self._call_llm_structured(
+                prompt=user_prompt,
+                schema=_build_canonical_environment_schema(),
+                randomize=randomize_params,
+                system_prompt=system_prompt,
+            )
+        else:
+            prompt_parts = []
+            if system_prompt:
+                prompt_parts.append(system_prompt)
+            prompt_parts.append(user_prompt)
+            raw = self._call_llm("\n\n".join(part for part in prompt_parts if part), randomize_params)
+            parsed = self._parse_json_object(raw)
+
         if not isinstance(parsed, dict):
             return {}
         return self._normalize_generated_environment(parsed)
+
+    def _generate_assistant_response(
+        self,
+        *,
+        scenario: Dict[str, Any],
+        assistant_context: str,
+        assistant_prompt: str,
+        randomize_params: bool,
+    ) -> str:
+        """Generate assistant output, optionally with structured tool schema."""
+        generation_cfg = scenario.get("assistant_generation")
+        if not isinstance(generation_cfg, dict):
+            generation_cfg = {}
+
+        schema_name = str(generation_cfg.get("schema") or "").strip()
+        prompt = f"{assistant_context}\n\n{assistant_prompt}"
+        if schema_name == "use_tools_response":
+            payload = self._call_llm_structured(
+                prompt=prompt,
+                schema=_build_use_tools_response_schema(),
+                randomize=randomize_params,
+            )
+            return json.dumps(payload)
+
+        return self._call_llm(prompt, randomize_params)
 
     def _build_metadata_labels(
         self,
@@ -718,6 +758,52 @@ class SynthChatGenerator:
         if last_error is not None:
             raise last_error
         raise ValueError("LLM returned an empty response")
+
+    def _call_llm_structured(
+        self,
+        *,
+        prompt: str,
+        schema: Dict[str, Any],
+        randomize: bool = True,
+        system_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Call structured output if available, retrying transient empty failures."""
+        if not hasattr(self.llm_client, "structured_output"):
+            raw = self._call_llm(
+                f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
+                randomize=randomize,
+            )
+            parsed = self._parse_json_object(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            raise ValueError("Structured generation requested but provider returned non-JSON output")
+
+        last_error = None
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        for _ in range(3):
+            temperature = random.uniform(0.1, 0.4) if randomize else 0.2
+            try:
+                payload = self.llm_client.structured_output(
+                    messages=messages,
+                    schema=schema,
+                    temperature=temperature,
+                    max_tokens=2048,
+                )
+            except Exception as exc:  # pragma: no cover - provider-specific failures
+                last_error = exc
+                continue
+
+            if isinstance(payload, dict) and payload:
+                return payload
+            last_error = ValueError("LLM returned an empty structured response")
+
+        if last_error is not None:
+            raise last_error
+        raise ValueError("LLM returned an empty structured response")
 
     def _build_user_context(self, example: Dict) -> str:
         """Build context for user generation from current example."""
@@ -1231,6 +1317,301 @@ def _render_note_contents(note_entries: Any) -> str:
             lines.append("  ")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _scalar_schema() -> Dict[str, Any]:
+    return {
+        "anyOf": [
+            {"type": "string"},
+            {"type": "number"},
+            {"type": "boolean"},
+            {"type": "null"},
+            {
+                "type": "array",
+                "items": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "number"},
+                        {"type": "boolean"},
+                        {"type": "null"},
+                    ]
+                },
+            },
+        ]
+    }
+
+
+def _assertion_schema() -> Dict[str, Any]:
+    scalar = _scalar_schema()
+    return {
+        "anyOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "path_exists"},
+                    "path": {"type": "string", "minLength": 1},
+                },
+                "required": ["type", "path"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "path_not_exists"},
+                    "path": {"type": "string", "minLength": 1},
+                },
+                "required": ["type", "path"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "file_contains"},
+                    "path": {"type": "string", "minLength": 1},
+                    "text": {"type": "string"},
+                },
+                "required": ["type", "path", "text"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "file_not_contains"},
+                    "path": {"type": "string", "minLength": 1},
+                    "text": {"type": "string"},
+                },
+                "required": ["type", "path", "text"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "dir_contains"},
+                    "path": {"type": "string"},
+                    "item": {"type": "string", "minLength": 1},
+                },
+                "required": ["type", "path", "item"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "frontmatter_has_key"},
+                    "path": {"type": "string", "minLength": 1},
+                    "field": {"type": "string", "minLength": 1},
+                },
+                "required": ["type", "path", "field"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "frontmatter_field_equals"},
+                    "path": {"type": "string", "minLength": 1},
+                    "field": {"type": "string", "minLength": 1},
+                    "value": scalar,
+                },
+                "required": ["type", "path", "field", "value"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "frontmatter_field_contains"},
+                    "path": {"type": "string", "minLength": 1},
+                    "field": {"type": "string", "minLength": 1},
+                    "value": scalar,
+                },
+                "required": ["type", "path", "field", "value"],
+            },
+        ]
+    }
+
+
+def _build_canonical_environment_schema() -> Dict[str, Any]:
+    scalar = _scalar_schema()
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "environment": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "fixture": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "directories": {
+                                "type": "array",
+                                "items": {"type": "string", "minLength": 1},
+                            },
+                            "files": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            "notes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "path": {"type": "string", "minLength": 1},
+                                        "frontmatter": {
+                                            "type": "object",
+                                            "additionalProperties": scalar,
+                                        },
+                                        "body": {"type": "string"},
+                                    },
+                                    "required": ["path"],
+                                },
+                            },
+                        },
+                    },
+                    "assertions": {
+                        "type": "array",
+                        "items": _assertion_schema(),
+                    },
+                    "allowed_tools": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                    },
+                    "max_steps": {"type": "integer", "minimum": 1},
+                },
+                "required": ["fixture", "assertions"],
+            },
+            "system_context": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "workspace_id": {"type": "string"},
+                    "assistant_instructions": {"type": "string"},
+                    "available_workspaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "properties": {
+                                "id": {"type": "string"},
+                                "name": {"type": "string"},
+                                "description": {"type": "string"},
+                                "root_folder": {"type": "string"},
+                            },
+                        },
+                    },
+                    "available_prompts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "properties": {
+                                "id": {"type": "string"},
+                                "name": {"type": "string"},
+                                "purpose": {"type": "string"},
+                            },
+                        },
+                    },
+                    "selected_workspace": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "properties": {
+                            "id": {"type": "string"},
+                            "name": {"type": "string"},
+                            "root_folder": {"type": "string"},
+                            "recent_files": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "key_files": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "preferences": {"type": "string"},
+                        },
+                    },
+                },
+                "additionalProperties": True,
+            },
+        },
+        "required": ["environment"],
+    }
+
+
+def _build_use_tools_response_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "content": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "null"},
+                ]
+            },
+            "tool_calls": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "type": {"const": "function"},
+                        "function": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"const": "useTools"},
+                                "arguments": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "context": {
+                                            "type": "object",
+                                            "additionalProperties": True,
+                                            "properties": {
+                                                "sessionId": {"type": "string", "minLength": 1},
+                                                "workspaceId": {"type": "string", "minLength": 1},
+                                                "memory": {"type": "string", "minLength": 1},
+                                                "goal": {"type": "string", "minLength": 1},
+                                            },
+                                            "required": ["sessionId", "workspaceId", "memory", "goal"],
+                                        },
+                                        "calls": {
+                                            "type": "array",
+                                            "minItems": 1,
+                                            "items": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "agent": {"type": "string", "minLength": 1},
+                                                    "tool": {"type": "string", "minLength": 1},
+                                                    "params": {
+                                                        "type": "object",
+                                                        "additionalProperties": True,
+                                                    },
+                                                },
+                                                "required": ["agent", "tool", "params"],
+                                            },
+                                        },
+                                        "strategy": {
+                                            "type": "string",
+                                            "enum": ["serial", "parallel"],
+                                        },
+                                    },
+                                    "required": ["context", "calls"],
+                                },
+                            },
+                            "required": ["name", "arguments"],
+                        },
+                    },
+                    "required": ["id", "type", "function"],
+                },
+            },
+        },
+        "required": ["content", "tool_calls"],
+    }
 
 
 def _clean_path(path: str) -> str:

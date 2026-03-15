@@ -8,15 +8,30 @@ from shared.environments import EnvironmentValidator
 
 
 class _FakeLLMClient:
-    def __init__(self, responses):
-        self._responses = list(responses)
+    def __init__(self, responses=None, structured_responses=None):
+        self._responses = list(responses or [])
+        self._structured_responses = list(structured_responses or [])
         self.messages = []
+        self.structured_messages = []
 
     def chat(self, messages, temperature=0.7, max_tokens=2048):
         self.messages.append({"messages": messages, "temperature": temperature, "max_tokens": max_tokens})
         if not self._responses:
             raise AssertionError("No more fake responses available")
         return self._responses.pop(0)
+
+    def structured_output(self, messages, schema, temperature=0.3, max_tokens=2048):
+        self.structured_messages.append(
+            {
+                "messages": messages,
+                "schema": schema,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
+        if not self._structured_responses:
+            raise AssertionError("No more fake structured responses available")
+        return self._structured_responses.pop(0)
 
 
 def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_environment():
@@ -668,3 +683,137 @@ def test_synthchat_generator_retries_empty_llm_response_for_assistant_stage():
     assert result.example["metadata"]["environment"]["passed"] is True
     assistant = result.example["conversations"][-1]
     assert assistant["tool_calls"][0]["function"]["name"] == "useTools"
+
+
+def test_synthchat_generator_uses_structured_environment_and_tool_response_schemas():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    structured_environment = {
+        "environment": {
+            "fixture": {
+                "notes": [
+                    {
+                        "path": "Inbox/alpha-prototype.md",
+                        "frontmatter": {"title": "Alpha Prototype", "status": "inbox"},
+                        "body": "Prototype notes that should be preserved.\n",
+                    },
+                    {
+                        "path": "Projects/Alpha/example-project.md",
+                        "frontmatter": {"title": "Example Project", "status": "active", "type": "project"},
+                        "body": "Example project note.\n",
+                    },
+                ]
+            },
+            "assertions": [
+                {"type": "path_exists", "path": "Projects/Alpha/alpha-prototype.md"},
+                {"type": "path_not_exists", "path": "Inbox/alpha-prototype.md"},
+                {"type": "frontmatter_has_key", "path": "Projects/Alpha/alpha-prototype.md", "field": "title"},
+                {
+                    "type": "file_contains",
+                    "path": "Projects/Alpha/alpha-prototype.md",
+                    "text": "Prototype notes that should be preserved.",
+                },
+            ],
+        },
+        "system_context": {
+            "session_id": "session_structured_001",
+            "workspace_id": "ws_alpha",
+            "selected_workspace": {
+                "id": "ws_alpha",
+                "name": "Alpha Lab",
+                "recent_files": ["Inbox/alpha-prototype.md", "Projects/Alpha/example-project.md"],
+                "key_files": ["Projects/Alpha/example-project.md"],
+            },
+        },
+    }
+
+    structured_assistant = {
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_001",
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": {
+                        "context": {
+                            "sessionId": "session_structured_001",
+                            "workspaceId": "ws_alpha",
+                            "memory": "Need to match the project note format.",
+                            "goal": "Promote the inbox note into the Alpha project folder.",
+                        },
+                        "calls": [
+                            {
+                                "agent": "contentManager",
+                                "tool": "read",
+                                "params": {"path": "Projects/Alpha/example-project.md", "startLine": 1},
+                            },
+                            {
+                                "agent": "contentManager",
+                                "tool": "write",
+                                "params": {
+                                    "path": "Projects/Alpha/alpha-prototype.md",
+                                    "content": "---\ntitle: Alpha Prototype\nstatus: active\ntype: project\n---\nPrototype notes that should be preserved.\n",
+                                },
+                            },
+                            {
+                                "agent": "storageManager",
+                                "tool": "archive",
+                                "params": {"path": "Inbox/alpha-prototype.md"},
+                            },
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    client = _FakeLLMClient(
+        responses=["Promote the alpha prototype note into the project folder."],
+        structured_responses=[structured_environment, structured_assistant],
+    )
+    validator = EnvironmentValidator(backend="local")
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=validator,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "tool",
+        "tool": "contentManager_write",
+        "expected_tools": ["contentManager_read", "contentManager_write", "storageManager_archive"],
+        "environment_mode": "generated",
+        "system_template": "mocked_workspace_vault",
+        "environment_generation": {
+            "schema": "canonical_environment",
+            "prompt": "Generate the vault fixture and assertions.",
+        },
+        "assistant_generation": {
+            "schema": "use_tools_response",
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant tool JSON.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="structured_tool_case",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    assistant = result.example["conversations"][-1]
+    assert result.example["metadata"]["scenario"] == "structured_tool_case"
+    assert result.example["metadata"]["environment"]["passed"] is True
+    assert assistant["tool_calls"][0]["function"]["name"] == "useTools"
+    assert len(client.structured_messages) == 2
