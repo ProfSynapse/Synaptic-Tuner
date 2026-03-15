@@ -23,6 +23,7 @@ from shared.llm import create_client
 from shared.environments import EnvironmentValidator
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocsLoader, DocFile
+from .utils.logger import get_logger
 from .engine import ImprovementEngine
 from .generator import SynthChatGenerator, ScenarioLoader
 
@@ -199,6 +200,7 @@ def generate_mode(args):
     # Load configuration
     config_dir = Path(args.config_dir or "SynthChat/config")
     settings = load_settings(config_dir)
+    logger = get_logger("synthchat_generate")
 
     scenarios_dir = Path(args.scenarios_dir or "SynthChat/scenarios")
     rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
@@ -219,6 +221,7 @@ def generate_mode(args):
         llm_client=improve_client,
         rubrics_dir=rubrics_dir,
         config_path=validation_config,
+        logger=logger,
         enable_interactions=settings["logging"]["save_interactions"]
     )
 
@@ -230,7 +233,8 @@ def generate_mode(args):
         llm_client=gen_client,
         engine=engine,
         environment_validator=environment_validator,
-        enable_stage_validation=settings["generation"]["stage_validation"]
+        enable_stage_validation=settings["generation"]["stage_validation"],
+        logger=logger,
     )
 
     # Load targets
@@ -670,6 +674,7 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
                               settings: Dict, provider: str = None, model: str = None,
                               environment_options: Optional[Dict] = None):
     """Create a new generator instance for a worker thread."""
+    logger = get_logger("synthchat_generate_worker")
     gen_client = create_llm_client(settings, mode="generation",
                                    provider_override=provider, model_override=model)
     improve_client = create_llm_client(settings, mode="improvement",
@@ -680,6 +685,7 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
         llm_client=improve_client,
         rubrics_dir=rubrics_dir,
         config_path=validation_config,
+        logger=logger,
         enable_interactions=settings["logging"]["save_interactions"]
     )
 
@@ -690,7 +696,8 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
         llm_client=gen_client,
         engine=engine,
         environment_validator=_create_environment_validator_from_options(environment_options or {}),
-        enable_stage_validation=settings["generation"]["stage_validation"]
+        enable_stage_validation=settings["generation"]["stage_validation"],
+        logger=logger,
     )
     return generator
 

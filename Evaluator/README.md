@@ -439,7 +439,7 @@ python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_
    a. Build system prompt + user question
    b. Send to model backend
    c. Parse response for tool calls
-   d. Expand useTools wrapper → individual tool names
+   d. Expand configured tool wrapper → individual tool names
    e. Validate against expected_tools/acceptable_tools
    f. Check behavior expectations
    g. Generate EvaluationRecord
@@ -451,7 +451,11 @@ python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_
 
 ### Tool Call Format
 
-Models use the `useTools` wrapper:
+Models use the wrapper defined in the configured tool schema. The default schema
+uses `useTools`, but wrapper handling in the validator/executor is schema-driven
+and should not be hardcoded to one wrapper name.
+
+Default wrapper example:
 ```json
 {
   "name": "useTools",

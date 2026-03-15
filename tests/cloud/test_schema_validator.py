@@ -74,3 +74,36 @@ def test_validate_assistant_response_preserves_wrapper_context_on_expanded_calls
     assert result.context_validation is not None
     assert result.context_validation["all_match"] is True
     assert result.tool_calls[0].arguments["context"]["goal"] == "Find the crash notes."
+
+
+def test_validate_assistant_response_expands_non_default_wrapper_name():
+    response = """
+<tool_call>
+{
+  "name": "batchTools",
+  "arguments": {
+    "context": {
+      "workspaceId": "ws_1732300800000_atlasroll",
+      "sessionId": "session_1732300800000_eval01234",
+      "memory": "Search for the crash notes.",
+      "goal": "Find the crash notes."
+    },
+    "calls": [
+      {
+        "agent": "searchManager",
+        "tool": "searchContent",
+        "params": {
+          "query": "workspace crash",
+          "limit": 10
+        }
+      }
+    ]
+  }
+}
+</tool_call>
+""".strip()
+
+    result = validate_assistant_response(response)
+
+    assert [tool.name for tool in result.tool_calls] == ["searchManager_searchContent"]
+    assert result.tool_calls[0].arguments["context"]["workspaceId"] == "ws_1732300800000_atlasroll"

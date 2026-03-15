@@ -34,25 +34,14 @@ def _looks_like_wrapper_call(tool_call: ToolCall) -> bool:
     )
 
 
-def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
-    """Expand useTools wrapper into individual tool calls.
-
-    useTools format:
-    {
-        "name": "useTools",
-        "arguments": {
-            "context": {...},
-            "calls": [{"agent": "storageManager", "tool": "move", "params": {...}}]
-        }
-    }
-
-    Becomes: [ToolCall(name="storageManager_move", arguments={...})]
-    """
+def _expand_wrapper_calls(tool_calls: List[ToolCall]) -> List[ToolCall]:
+    """Expand delegated wrapper calls into individual concrete tool calls."""
     expanded = []
     for tc in tool_calls:
-        if tc.name == "useTools" and isinstance(tc.arguments, dict):
+        if _looks_like_wrapper_call(tc) and isinstance(tc.arguments, dict):
             wrapper_context = tc.arguments.get("context")
             calls = tc.arguments.get("calls", [])
+            added = 0
             if isinstance(calls, list):
                 for call in calls:
                     if isinstance(call, dict):
@@ -66,11 +55,12 @@ def _expand_use_tools(tool_calls: List[ToolCall]) -> List[ToolCall]:
                             # Construct full tool name: agent_tool
                             full_name = f"{agent}_{tool}"
                             expanded.append(ToolCall(name=full_name, arguments=merged_args))
-            # If no valid calls found, keep the original useTools
-            if not expanded:
+                            added += 1
+            # If no valid delegated calls found, keep the original wrapper call.
+            if added == 0:
                 expanded.append(tc)
         else:
-            # Not useTools, keep as-is
+            # Not a delegated wrapper, keep as-is.
             expanded.append(tc)
     return expanded
 
@@ -92,7 +82,7 @@ def _filter_wrapper_schema_warnings(
     for index, tool_call in enumerate(raw_tool_calls, start=1):
         if not _looks_like_wrapper_call(tool_call):
             continue
-        expanded_from_call = _expand_use_tools([tool_call])
+        expanded_from_call = _expand_wrapper_calls([tool_call])
         if not expanded_from_call:
             continue
         if len(expanded_from_call) == 1 and expanded_from_call[0].name == tool_call.name:
@@ -219,7 +209,7 @@ def validate_assistant_response(
     issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
 
     # Expand wrapper calls into concrete tool names before downstream checks.
-    tool_calls = _expand_use_tools(tool_calls)
+    tool_calls = _expand_wrapper_calls(tool_calls)
     issues = _filter_wrapper_schema_warnings(issues, raw_tool_calls, tool_calls)
 
     # Validate IDs against eval context if provided

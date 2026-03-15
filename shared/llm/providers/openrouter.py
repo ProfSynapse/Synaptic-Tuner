@@ -11,7 +11,13 @@ from ..exceptions import LLMConnectionError, LLMResponseError
 class OpenRouterClient(BaseLLMClient):
     """OpenRouter API client with structured output and provider routing support."""
 
-    def __init__(self, api_key: str, model: str, provider: Dict[str, Any] = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        provider: Dict[str, Any] = None,
+        timeout_seconds: float = 60.0,
+    ):
         """
         Initialize OpenRouter client.
 
@@ -28,6 +34,7 @@ class OpenRouterClient(BaseLLMClient):
         self.model = model
         self.provider = provider
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.timeout_seconds = float(timeout_seconds)
 
     @property
     def provider_name(self) -> str:
@@ -157,7 +164,7 @@ class OpenRouterClient(BaseLLMClient):
                 self.api_url,
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=self.timeout_seconds,
             )
             response.raise_for_status()
             return response.json()

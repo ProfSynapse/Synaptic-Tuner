@@ -14,6 +14,7 @@ Architecture:
 import json
 import re
 import random
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -233,10 +234,18 @@ class SynthChatGenerator:
         environment_mode = self._resolve_environment_mode(scenario)
         generated_environment = {}
         if environment_mode in {"generated", "hybrid"}:
+            self._log_stage(scenario_key, "environment_generation", "start")
             generated_environment = self._generate_environment_spec(
                 scenario=scenario,
                 render_prompt=render_prompt,
                 randomize_params=randomize_params,
+                trace_label=f"{scenario_key}:environment_generation",
+            )
+            self._log_stage(
+                scenario_key,
+                "environment_generation",
+                "done",
+                extra=f"keys={sorted(generated_environment.keys())}" if generated_environment else "empty",
             )
         if generated_environment:
             template_vars["environment_json"] = json.dumps(generated_environment, indent=2)
@@ -262,6 +271,7 @@ class SynthChatGenerator:
             system_content = self._render_mocked_workspace_system_prompt(
                 system_context=resolved_system_context or {},
                 environment_config=resolved_environment_config or {},
+                tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
             )
             example["conversations"].append({
                 "role": "system",
@@ -280,7 +290,13 @@ class SynthChatGenerator:
             # Legacy: generate system prompt from "system" prompt
             system_prompt = render_prompt(prompts.get("system", ""))
             if system_prompt:
-                system_content = self._call_llm(system_prompt, randomize_params)
+                self._log_stage(scenario_key, "system_prompt", "start")
+                system_content = self._call_llm(
+                    system_prompt,
+                    randomize_params,
+                    trace_label=f"{scenario_key}:system_prompt",
+                )
+                self._log_stage(scenario_key, "system_prompt", "done", extra=f"chars={len(system_content)}")
 
                 example["conversations"].append({
                     "role": "system",
@@ -330,7 +346,13 @@ class SynthChatGenerator:
             user_context_parts.append(existing_context)
 
         user_context = "\n\n".join(user_context_parts)
-        user_content = self._call_llm(f"{user_context}\n\n{user_prompt}", randomize_params)
+        self._log_stage(scenario_key, "user", "start")
+        user_content = self._call_llm(
+            f"{user_context}\n\n{user_prompt}",
+            randomize_params,
+            trace_label=f"{scenario_key}:user",
+        )
+        self._log_stage(scenario_key, "user", "done", extra=f"chars={len(user_content)}")
 
         example["conversations"].append({
             "role": "user",
@@ -360,9 +382,17 @@ class SynthChatGenerator:
             thinking_prompt = render_prompt(prompts.get("thinking", ""))
             if thinking_prompt:
                 thinking_context = self._build_assistant_context(example, scenario)
+                self._log_stage(scenario_key, "thinking", "start")
                 thinking_content = self._call_llm(
                     f"{thinking_context}\n\n{thinking_prompt}",
-                    randomize_params
+                    randomize_params,
+                    trace_label=f"{scenario_key}:thinking",
+                )
+                self._log_stage(
+                    scenario_key,
+                    "thinking",
+                    "done",
+                    extra=f"chars={len(thinking_content)}",
                 )
 
                 # Temporarily add thinking to example for validation
@@ -389,12 +419,15 @@ class SynthChatGenerator:
         if thinking_content:
             assistant_context = f"{assistant_context}\n\nYour thinking:\n{thinking_content}"
 
+        self._log_stage(scenario_key, "assistant", "start")
         assistant_content = self._generate_assistant_response(
             scenario=scenario,
             assistant_context=assistant_context,
             assistant_prompt=assistant_prompt,
             randomize_params=randomize_params,
+            trace_label=f"{scenario_key}:assistant",
         )
+        self._log_stage(scenario_key, "assistant", "done", extra=f"chars={len(assistant_content)}")
 
         # Parse assistant response for tool calls
         assistant_msg = self._parse_assistant_response(assistant_content, scenario)
@@ -498,6 +531,7 @@ class SynthChatGenerator:
         scenario: Dict,
         render_prompt,
         randomize_params: bool,
+        trace_label: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate structured environment/system-context data before other stages."""
         prompts = scenario.get("prompts", {})
@@ -517,13 +551,18 @@ class SynthChatGenerator:
                 schema=_build_canonical_environment_schema(),
                 randomize=randomize_params,
                 system_prompt=system_prompt,
+                trace_label=trace_label,
             )
         else:
             prompt_parts = []
             if system_prompt:
                 prompt_parts.append(system_prompt)
             prompt_parts.append(user_prompt)
-            raw = self._call_llm("\n\n".join(part for part in prompt_parts if part), randomize_params)
+            raw = self._call_llm(
+                "\n\n".join(part for part in prompt_parts if part),
+                randomize_params,
+                trace_label=trace_label,
+            )
             parsed = self._parse_json_object(raw)
 
         if not isinstance(parsed, dict):
@@ -537,6 +576,7 @@ class SynthChatGenerator:
         assistant_context: str,
         assistant_prompt: str,
         randomize_params: bool,
+        trace_label: Optional[str] = None,
     ) -> str:
         """Generate assistant output, optionally with structured tool schema."""
         generation_cfg = scenario.get("assistant_generation")
@@ -546,14 +586,16 @@ class SynthChatGenerator:
         schema_name = str(generation_cfg.get("schema") or "").strip()
         prompt = f"{assistant_context}\n\n{assistant_prompt}"
         if schema_name == "use_tools_response":
+            wrapper_name = _tool_wrapper_name(self.environment_validator.tool_schema if self.environment_validator else None)
             payload = self._call_llm_structured(
                 prompt=prompt,
-                schema=_build_use_tools_response_schema(),
+                schema=_build_use_tools_response_schema(wrapper_name=wrapper_name),
                 randomize=randomize_params,
+                trace_label=trace_label,
             )
             return json.dumps(payload)
 
-        return self._call_llm(prompt, randomize_params)
+        return self._call_llm(prompt, randomize_params, trace_label=trace_label)
 
     def _build_metadata_labels(
         self,
@@ -718,7 +760,16 @@ class SynthChatGenerator:
                 self.logger.error(f"Stage improvement failed: {e}")
             return example, 0, False
 
-    def _call_llm(self, prompt: str, randomize: bool = True) -> str:
+    def _log_stage(self, scenario_key: str, stage: str, event: str, extra: Optional[str] = None) -> None:
+        """Emit lightweight stage progress logs when a logger is available."""
+        if not self.logger:
+            return
+        message = f"[{scenario_key}] {stage} {event}"
+        if extra:
+            message = f"{message} ({extra})"
+        self.logger.info(message)
+
+    def _call_llm(self, prompt: str, randomize: bool = True, trace_label: Optional[str] = None) -> str:
         """
         Call LLM for generation.
 
@@ -733,8 +784,14 @@ class SynthChatGenerator:
         # instead of crashing the whole generation job on a transient response.
         last_error = None
 
-        for _ in range(3):
+        for attempt in range(1, 4):
             temperature = random.uniform(0.5, 0.9) if randomize else 0.7
+            started_at = time.monotonic()
+            if self.logger:
+                self.logger.info(
+                    f"LLM chat start [{trace_label or 'unlabeled'}] "
+                    f"attempt={attempt} temp={temperature:.2f}"
+                )
             try:
                 response = self.llm_client.chat(
                     messages=[{"role": "user", "content": prompt}],
@@ -743,17 +800,37 @@ class SynthChatGenerator:
                 )
             except Exception as exc:  # pragma: no cover - provider-specific failures
                 last_error = exc
+                if self.logger:
+                    self.logger.warning(
+                        f"LLM chat failed [{trace_label or 'unlabeled'}] "
+                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s error={exc}"
+                    )
                 continue
 
             if isinstance(response, str):
                 if response.strip():
+                    if self.logger:
+                        self.logger.info(
+                            f"LLM chat success [{trace_label or 'unlabeled'}] "
+                            f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s chars={len(response)}"
+                        )
                     return response
             elif response is not None:
                 response_text = str(response).strip()
                 if response_text:
+                    if self.logger:
+                        self.logger.info(
+                            f"LLM chat success [{trace_label or 'unlabeled'}] "
+                            f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s chars={len(response_text)}"
+                        )
                     return response_text
 
             last_error = ValueError("LLM returned an empty response")
+            if self.logger:
+                self.logger.warning(
+                    f"LLM chat empty [{trace_label or 'unlabeled'}] "
+                    f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s"
+                )
 
         if last_error is not None:
             raise last_error
@@ -766,12 +843,14 @@ class SynthChatGenerator:
         schema: Dict[str, Any],
         randomize: bool = True,
         system_prompt: Optional[str] = None,
+        trace_label: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Call structured output if available, retrying transient empty failures."""
         if not hasattr(self.llm_client, "structured_output"):
             raw = self._call_llm(
                 f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
                 randomize=randomize,
+                trace_label=trace_label,
             )
             parsed = self._parse_json_object(raw)
             if isinstance(parsed, dict):
@@ -784,8 +863,14 @@ class SynthChatGenerator:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        for _ in range(3):
+        for attempt in range(1, 4):
             temperature = random.uniform(0.1, 0.4) if randomize else 0.2
+            started_at = time.monotonic()
+            if self.logger:
+                self.logger.info(
+                    f"LLM structured start [{trace_label or schema.get('name', 'unlabeled')}] "
+                    f"attempt={attempt} temp={temperature:.2f}"
+                )
             try:
                 payload = self.llm_client.structured_output(
                     messages=messages,
@@ -795,11 +880,26 @@ class SynthChatGenerator:
                 )
             except Exception as exc:  # pragma: no cover - provider-specific failures
                 last_error = exc
+                if self.logger:
+                    self.logger.warning(
+                        f"LLM structured failed [{trace_label or schema.get('name', 'unlabeled')}] "
+                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s error={exc}"
+                    )
                 continue
 
             if isinstance(payload, dict) and payload:
+                if self.logger:
+                    self.logger.info(
+                        f"LLM structured success [{trace_label or schema.get('name', 'unlabeled')}] "
+                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s keys={sorted(payload.keys())}"
+                    )
                 return payload
             last_error = ValueError("LLM returned an empty structured response")
+            if self.logger:
+                self.logger.warning(
+                    f"LLM structured empty [{trace_label or schema.get('name', 'unlabeled')}] "
+                    f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s"
+                )
 
         if last_error is not None:
             raise last_error
@@ -1047,6 +1147,7 @@ class SynthChatGenerator:
         self,
         system_context: Dict[str, Any],
         environment_config: Dict[str, Any],
+        tool_schema: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Render production-style mocked workspace prompt from structured config."""
         session_id = str(system_context.get("session_id") or "session_eval_001")
@@ -1105,6 +1206,7 @@ class SynthChatGenerator:
             _build_wrapped_section("vault_structure", _vault_structure_text_from_fixture(fixture)),
             _build_wrapped_section("available_workspaces", _render_available_workspaces(available_workspaces)),
             _build_wrapped_section("available_prompts", _render_available_prompts(available_prompts)),
+            _build_wrapped_section("available_tools", _render_available_tools(tool_schema)),
             _build_selected_workspace_section(
                 selected_workspace.get("name") or context_payload.get("name") or "Current Workspace",
                 selected_workspace.get("id") or context_payload.get("id") or workspace_id,
@@ -1239,6 +1341,44 @@ def _render_available_prompts(prompts: List[Dict[str, Any]]) -> str:
         purpose = prompt.get("purpose") or prompt.get("description")
         if purpose:
             lines.append(f"  Purpose: {purpose}")
+    return "\n".join(lines).strip()
+
+
+def _tool_wrapper_name(tool_schema: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(tool_schema, dict):
+        return "useTools"
+    wrapper_cfg = tool_schema.get("tool_format") or {}
+    return str(wrapper_cfg.get("wrapper") or "useTools").strip() or "useTools"
+
+
+def _render_available_tools(tool_schema: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(tool_schema, dict):
+        return ""
+
+    wrapper_name = _tool_wrapper_name(tool_schema)
+    lines: List[str] = [
+        f"Use the `{wrapper_name}` wrapper for tool calls.",
+        "Required wrapper context fields: sessionId, workspaceId, memory, goal.",
+        "",
+    ]
+
+    tools = tool_schema.get("tools") or {}
+    for agent in sorted(tools.keys()):
+        agent_tools = tools.get(agent)
+        if not isinstance(agent_tools, list) or not agent_tools:
+            continue
+        lines.append(f"{agent}:")
+        for tool in agent_tools:
+            if not isinstance(tool, dict):
+                continue
+            tool_name = str(tool.get("name") or "").strip()
+            params = tool.get("params") or {}
+            required = ", ".join(str(item) for item in params.get("required") or []) or "-"
+            optional = ", ".join(str(item) for item in params.get("optional") or []) or "-"
+            if tool_name:
+                lines.append(f"- {tool_name}: required [{required}] optional [{optional}]")
+        lines.append("")
+
     return "\n".join(lines).strip()
 
 
@@ -1538,7 +1678,7 @@ def _build_canonical_environment_schema() -> Dict[str, Any]:
     }
 
 
-def _build_use_tools_response_schema() -> Dict[str, Any]:
+def _build_use_tools_response_schema(wrapper_name: str = "useTools") -> Dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
@@ -1562,7 +1702,7 @@ def _build_use_tools_response_schema() -> Dict[str, Any]:
                             "type": "object",
                             "additionalProperties": False,
                             "properties": {
-                                "name": {"const": "useTools"},
+                                "name": {"const": wrapper_name},
                                 "arguments": {
                                     "type": "object",
                                     "additionalProperties": False,

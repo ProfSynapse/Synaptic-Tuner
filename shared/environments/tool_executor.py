@@ -56,7 +56,7 @@ def execute_response_tool_calls(
     executions: List[ExecutedToolCall] = []
     issues: List[EnvironmentIssue] = []
 
-    expanded_calls = _expand_use_tools(parsed.tool_calls)
+    expanded_calls = _expand_wrapper_calls(parsed.tool_calls)
 
     for call in expanded_calls:
         name = call.name
@@ -109,11 +109,23 @@ def execute_response_tool_calls(
     return executions, issues
 
 
-def _expand_use_tools(parsed_calls) -> List:
-    """Expand useTools wrapper into concrete tool calls."""
+def _looks_like_wrapper_call(call) -> bool:
+    """Return True when a tool call delegates concrete calls via arguments.calls."""
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    calls = args.get("calls")
+    if not isinstance(calls, list) or not calls:
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("agent", "")).strip() and str(item.get("tool", "")).strip()
+        for item in calls
+    )
+
+
+def _expand_wrapper_calls(parsed_calls) -> List:
+    """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
-        if call.name != "useTools":
+        if not _looks_like_wrapper_call(call):
             expanded.append(call)
             continue
 

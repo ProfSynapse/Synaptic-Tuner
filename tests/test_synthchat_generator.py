@@ -192,6 +192,9 @@ def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_envi
 
     system_prompt = result.example["conversations"][0]["content"]
     assert "<available_workspaces>" in system_prompt
+    assert "<available_tools>" in system_prompt
+    assert "contentManager:" in system_prompt
+    assert "read: required [path, startLine]" in system_prompt
     assert '<selected_workspace name="Operations Workspace" id="ws_generated_ops">' in system_prompt
     assert "Ops/production-config.md" in system_prompt
     assert result.example["metadata"]["generated_environment"]["system_context"]["workspace_id"] == "ws_generated_ops"
@@ -817,3 +820,112 @@ def test_synthchat_generator_uses_structured_environment_and_tool_response_schem
     assert result.example["metadata"]["environment"]["passed"] is True
     assert assistant["tool_calls"][0]["function"]["name"] == "useTools"
     assert len(client.structured_messages) == 2
+
+
+def test_synthchat_generator_structured_tool_schema_uses_configured_wrapper_name():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    structured_environment = {
+        "environment": {
+            "fixture": {
+                "directories": ["Inbox", "Projects", "Projects/Alpha"],
+                "notes": [
+                    {"path": "Inbox/alpha-prototype.md", "body": "Prototype notes."},
+                    {
+                        "path": "Projects/Alpha/example-project.md",
+                        "frontmatter": {"title": "Example Project", "status": "active", "type": "project"},
+                        "body": "Reference project note.",
+                    },
+                ],
+            },
+            "assertions": [
+                {"type": "path_exists", "path": "Projects/Alpha/alpha-prototype.md"},
+            ],
+        },
+        "system_context": {
+            "session_id": "session_structured_002",
+            "workspace_id": "ws_alpha",
+            "selected_workspace": {"id": "ws_alpha", "name": "Alpha Lab"},
+        },
+    }
+    structured_assistant = {
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_001",
+                "type": "function",
+                "function": {
+                    "name": "batchTools",
+                    "arguments": {
+                        "context": {
+                            "sessionId": "session_structured_002",
+                            "workspaceId": "ws_alpha",
+                            "memory": "Need to promote the note.",
+                            "goal": "Promote the note.",
+                        },
+                        "calls": [
+                            {
+                                "agent": "contentManager",
+                                "tool": "write",
+                                "params": {
+                                    "path": "Projects/Alpha/alpha-prototype.md",
+                                    "content": "---\ntitle: Alpha Prototype\nstatus: active\ntype: project\n---\nPrototype notes.\n",
+                                },
+                            }
+                        ],
+                    },
+                },
+            }
+        ],
+    }
+
+    client = _FakeLLMClient(
+        responses=["Promote the note."],
+        structured_responses=[structured_environment, structured_assistant],
+    )
+    validator = EnvironmentValidator(backend="local")
+    validator.tool_schema["tool_format"]["wrapper"] = "batchTools"
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=validator,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "tool",
+        "tool": "contentManager_write",
+        "environment_mode": "generated",
+        "system_template": "mocked_workspace_vault",
+        "environment_generation": {
+            "schema": "canonical_environment",
+            "prompt": "Generate the vault fixture and assertions.",
+        },
+        "assistant_generation": {
+            "schema": "use_tools_response",
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant tool JSON.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="structured_wrapper_case",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    assistant = result.example["conversations"][-1]
+    assistant_schema = client.structured_messages[-1]["schema"]
+    assert assistant_schema["properties"]["tool_calls"]["items"]["properties"]["function"]["properties"]["name"]["const"] == "batchTools"
+    assert "<available_tools>" in result.example["conversations"][0]["content"]
+    assert "Use the `batchTools` wrapper for tool calls." in result.example["conversations"][0]["content"]
+    assert assistant["tool_calls"][0]["function"]["name"] == "batchTools"

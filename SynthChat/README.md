@@ -121,6 +121,13 @@ generation instead of relying on unconstrained freeform JSON:
 
 Use that path when you want executable tool data, not just tool-shaped text.
 
+Important pattern:
+- The tool wrapper name is schema-driven, not hardcoded.
+- Core generation/execution reads the wrapper from the configured tool schema
+  (`--env-tool-schema` or the default evaluator schema).
+- Keep wrapper choice in config/YAML. Do not add code branches for one wrapper
+  name or one scenario pack.
+
 **Example: Generate 5 content writing examples**
 
 ```bash

@@ -19,6 +19,7 @@ class LLMConfig:
     # OpenRouter config
     openrouter_api_key: Optional[str] = None
     provider_routing: Optional[Dict[str, Any]] = None  # OpenRouter provider routing
+    openrouter_timeout_seconds: float = 60.0
 
     # LM Studio config
     lmstudio_host: str = "localhost"
@@ -93,6 +94,12 @@ class LLMConfig:
             max_tokens=max_tokens,
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
             provider_routing=provider_routing,
+            openrouter_timeout_seconds=float(
+                cfg.get(
+                    "timeout_seconds",
+                    os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"),
+                )
+            ),
             lmstudio_host=os.getenv("LMSTUDIO_HOST", "localhost"),
             lmstudio_port=int(os.getenv("LMSTUDIO_PORT", "1234")),
             ollama_host=os.getenv("OLLAMA_HOST", "localhost"),
