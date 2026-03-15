@@ -14,10 +14,11 @@ Architecture:
 import json
 import re
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
+from copy import deepcopy
 
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocFile
@@ -229,13 +230,45 @@ class SynthChatGenerator:
         example = {"conversations": []}
         stage_failures = []
         total_iterations = 0
+        environment_mode = self._resolve_environment_mode(scenario)
+        generated_environment = {}
+        if environment_mode in {"generated", "hybrid"}:
+            generated_environment = self._generate_environment_spec(
+                scenario=scenario,
+                render_prompt=render_prompt,
+                randomize_params=randomize_params,
+            )
+        if generated_environment:
+            template_vars["environment_json"] = json.dumps(generated_environment, indent=2)
+
+        base_environment_config = scenario.get("environment") if environment_mode in {"provided", "hybrid"} else None
+        generated_environment_config = generated_environment.get("environment") if environment_mode in {"generated", "hybrid"} else None
+        resolved_environment_config = _deep_merge_dicts(
+            base_environment_config,
+            generated_environment_config,
+        )
+        resolved_system_context = _deep_merge_dicts(
+            scenario.get("system_context"),
+            generated_environment.get("system_context"),
+        )
 
         # Stage 1: Assistant's system prompt
         # Priority: assistant_system > system (legacy) > system: true (generate)
         assistant_system_prompt = prompts.get("assistant_system")
         system_enabled = scenario.get("system", True)
+        system_template = scenario.get("system_template")
 
-        if assistant_system_prompt:
+        if system_template == "mocked_workspace_vault":
+            system_content = self._render_mocked_workspace_system_prompt(
+                system_context=resolved_system_context or {},
+                environment_config=resolved_environment_config or {},
+            )
+            example["conversations"].append({
+                "role": "system",
+                "content": system_content
+            })
+
+        elif assistant_system_prompt:
             # New style: assistant_system in prompts (static template with vars)
             system_content = render_prompt(assistant_system_prompt)
             example["conversations"].append({
@@ -394,11 +427,10 @@ class SynthChatGenerator:
                     if msg.get("role") == "system":
                         system_prompt_text = msg.get("content") or ""
                         break
-                environment_config = scenario.get("environment")
                 env_result = self.environment_validator.validate_response(
                     system_prompt=system_prompt_text,
                     response=assistant_msg,
-                    environment_config=environment_config,
+                    environment_config=resolved_environment_config,
                     expected_tools=[scenario.get("tool")] if scenario.get("tool") else None,
                 )
                 environment_trace = env_result.to_dict()
@@ -415,8 +447,11 @@ class SynthChatGenerator:
         example["metadata"] = {
             "category": scenario_key,
             "type": scenario.get("type", "unknown"),
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "environment_mode": environment_mode,
         }
+        if generated_environment:
+            example["metadata"]["generated_environment"] = generated_environment
         if environment_trace is not None:
             example["metadata"]["environment"] = environment_trace
         if doc_context:
@@ -429,6 +464,45 @@ class SynthChatGenerator:
             success=len(stage_failures) == 0,
             stage_failures=stage_failures
         )
+
+    def _resolve_environment_mode(self, scenario: Dict[str, Any]) -> str:
+        """Resolve how environment data should be sourced for this scenario."""
+        configured_mode = str(scenario.get("environment_mode") or "").strip().lower()
+        if configured_mode in {"provided", "generated", "hybrid"}:
+            return configured_mode
+
+        has_generation = bool(scenario.get("environment_generation") or scenario.get("prompts", {}).get("environment"))
+        has_base_environment = bool(scenario.get("environment"))
+        if has_generation and has_base_environment:
+            return "hybrid"
+        if has_generation:
+            return "generated"
+        return "provided"
+
+    def _generate_environment_spec(
+        self,
+        scenario: Dict,
+        render_prompt,
+        randomize_params: bool,
+    ) -> Dict[str, Any]:
+        """Generate structured environment/system-context data before other stages."""
+        prompts = scenario.get("prompts", {})
+        generation_cfg = scenario.get("environment_generation") or {}
+        environment_prompt = generation_cfg.get("prompt") or prompts.get("environment")
+        if not environment_prompt:
+            return {}
+
+        environment_system = generation_cfg.get("system") or prompts.get("environment_system")
+        prompt_parts = []
+        if environment_system:
+            prompt_parts.append(render_prompt(str(environment_system)))
+        prompt_parts.append(render_prompt(str(environment_prompt)))
+
+        raw = self._call_llm("\n\n".join(part for part in prompt_parts if part), randomize_params)
+        parsed = self._parse_json_object(raw)
+        if not isinstance(parsed, dict):
+            return {}
+        return self._normalize_generated_environment(parsed)
 
     def _improve_stage(
         self,
@@ -654,3 +728,346 @@ class SynthChatGenerator:
             message["content"] = content
 
         return message
+
+    def _parse_json_object(self, content: str) -> Optional[Dict[str, Any]]:
+        """Parse a JSON object from model output, tolerating code fences."""
+        candidate = (content or "").strip()
+        if not candidate:
+            return None
+
+        if candidate.startswith("```"):
+            first_newline = candidate.find("\n")
+            if first_newline != -1:
+                candidate = candidate[first_newline + 1:]
+            candidate = candidate.rstrip()
+            if candidate.endswith("```"):
+                candidate = candidate[:-3].rstrip()
+
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            start = candidate.find("{")
+            end = candidate.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None
+            try:
+                parsed = json.loads(candidate[start:end + 1])
+            except json.JSONDecodeError:
+                return None
+
+        return parsed if isinstance(parsed, dict) else None
+
+    def _normalize_generated_environment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Accept a few config-driven shapes for generated environment payloads."""
+        normalized = deepcopy(payload)
+        environment = normalized.get("environment")
+
+        if not isinstance(environment, dict):
+            if any(key in normalized for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution")):
+                environment = {
+                    key: normalized.pop(key)
+                    for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution")
+                    if key in normalized
+                }
+            elif any(key in normalized for key in ("directories", "files", "notes", "folders")):
+                environment = {
+                    "fixture": {
+                        key: normalized.pop(key)
+                        for key in ("directories", "files", "notes", "folders")
+                        if key in normalized
+                    }
+                }
+            else:
+                environment = {}
+
+        if environment and not environment.get("fixture"):
+            fixture = {
+                key: normalized.pop(key)
+                for key in ("directories", "files", "notes", "folders")
+                if key in normalized
+            }
+            if fixture:
+                environment["fixture"] = fixture
+
+        normalized["environment"] = environment
+        normalized.setdefault("system_context", {})
+        return normalized
+
+    def _render_mocked_workspace_system_prompt(
+        self,
+        system_context: Dict[str, Any],
+        environment_config: Dict[str, Any],
+    ) -> str:
+        """Render production-style mocked workspace prompt from structured config."""
+        session_id = str(system_context.get("session_id") or "session_eval_001")
+        workspace_id = str(system_context.get("workspace_id") or "default")
+        fixture = _merged_fixture_from_config(environment_config)
+
+        available_workspaces = system_context.get("available_workspaces") or []
+        available_prompts = system_context.get("available_prompts") or []
+        selected_workspace = dict(system_context.get("selected_workspace") or {})
+        note_contents = system_context.get("note_contents")
+        note_paths = system_context.get("note_content_paths") or []
+        extra_sections = system_context.get("extra_sections") or []
+
+        selected_workspace.setdefault("id", workspace_id)
+        selected_workspace.setdefault("name", "Current Workspace")
+
+        matched_workspace = None
+        for workspace in available_workspaces:
+            if isinstance(workspace, dict) and workspace.get("id") == selected_workspace.get("id"):
+                matched_workspace = workspace
+                break
+
+        context_payload = dict(selected_workspace.get("context") or {})
+        context_payload.setdefault("id", selected_workspace.get("id"))
+        context_payload.setdefault("name", selected_workspace.get("name"))
+        if matched_workspace:
+            context_payload.setdefault("description", matched_workspace.get("description"))
+            context_payload.setdefault("rootFolder", matched_workspace.get("root_folder", ""))
+        context_payload.setdefault("rootFolder", selected_workspace.get("root_folder", ""))
+
+        workspace_structure = selected_workspace.get("workspace_structure") or _workspace_structure_from_fixture(fixture)
+        recent_files = selected_workspace.get("recent_files") or []
+        key_files = selected_workspace.get("key_files") or []
+        workflows = selected_workspace.get("workflows") or []
+        preferences = selected_workspace.get("preferences", "")
+        sessions = selected_workspace.get("sessions") or []
+
+        selected_workspace_json = json.dumps(
+            {
+                "context": context_payload,
+                "workspaceStructure": workspace_structure,
+                "recentFiles": recent_files,
+                "keyFiles": key_files,
+                "workflows": workflows,
+                "preferences": preferences,
+                "sessions": sessions,
+            },
+            indent=2,
+        )
+
+        if not note_contents:
+            note_contents = _note_entries_from_fixture(fixture, note_paths=note_paths)
+
+        sections = [
+            _build_session_context_section(session_id, workspace_id),
+            _build_wrapped_section("vault_structure", _vault_structure_text_from_fixture(fixture)),
+            _build_wrapped_section("available_workspaces", _render_available_workspaces(available_workspaces)),
+            _build_wrapped_section("available_prompts", _render_available_prompts(available_prompts)),
+            _build_selected_workspace_section(
+                selected_workspace.get("name") or context_payload.get("name") or "Current Workspace",
+                selected_workspace.get("id") or context_payload.get("id") or workspace_id,
+                selected_workspace_json,
+            ),
+            _build_wrapped_section("note_contents", _render_note_contents(note_contents)),
+            _render_extra_sections(extra_sections),
+            str(system_context.get("assistant_instructions", "")).strip(),
+        ]
+        return "\n\n".join(section for section in sections if section)
+
+
+def _deep_merge_dicts(base: Optional[Dict[str, Any]], override: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(base, dict) and not isinstance(override, dict):
+        return override if override is not None else base
+    if not isinstance(base, dict):
+        return deepcopy(override or {})
+    if not isinstance(override, dict):
+        return deepcopy(base)
+
+    merged: Dict[str, Any] = deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _merged_fixture_from_config(environment_config: Optional[Dict[str, Any]]):
+    fixture_config = {}
+    if isinstance(environment_config, dict):
+        fixture_config = environment_config.get("fixture") or {}
+    from shared.environments.fixture_parser import EnvironmentFixture, merge_environment_fixture
+
+    return merge_environment_fixture(EnvironmentFixture(), fixture_config)
+
+
+def _workspace_structure_from_fixture(fixture) -> List[Dict[str, Any]]:
+    directory_set = {""}
+    for directory in fixture.directories:
+        cleaned = _clean_path(directory)
+        if not cleaned:
+            continue
+        parts = [part for part in cleaned.split("/") if part]
+        current = ""
+        for part in parts:
+            current = f"{current}/{part}" if current else part
+            directory_set.add(current)
+
+    for file_path in fixture.files:
+        cleaned = _clean_path(file_path)
+        parent = Path(cleaned).parent
+        current = ""
+        for part in parent.parts:
+            if part in {"", "."}:
+                continue
+            current = f"{current}/{part}" if current else part
+            directory_set.add(current)
+
+    child_map: Dict[str, set[str]] = {directory: set() for directory in directory_set}
+    for directory in directory_set:
+        if not directory:
+            continue
+        parent = str(Path(directory).parent)
+        parent_key = "" if parent == "." else parent.replace("\\", "/")
+        child_map.setdefault(parent_key, set()).add(f"{Path(directory).name}/")
+
+    for file_path in fixture.files:
+        cleaned = _clean_path(file_path)
+        parent = str(Path(cleaned).parent)
+        parent_key = "" if parent == "." else parent.replace("\\", "/")
+        child_map.setdefault(parent_key, set()).add(Path(cleaned).name)
+
+    entries: List[Dict[str, Any]] = []
+    for directory in sorted(directory_set):
+        entries.append(
+            {
+                "path": f"{directory}/" if directory else "",
+                "type": "folder",
+                "children": sorted(child_map.get(directory, set())),
+            }
+        )
+    return entries
+
+
+def _vault_structure_text_from_fixture(fixture) -> str:
+    folders = sorted(
+        str(entry.get("path", "")).strip()
+        for entry in _workspace_structure_from_fixture(fixture)
+        if isinstance(entry, dict) and str(entry.get("path", "")).strip()
+    )
+    files = sorted(_clean_path(path) for path in fixture.files if _clean_path(path))
+    lines = ["Folders:"]
+    lines.extend(f" - {path}" for path in folders)
+    lines.append("")
+    lines.append("Files:")
+    lines.extend(f" - {path}" for path in files)
+    return "\n".join(lines).strip()
+
+
+def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
+    if not isinstance(workspaces, list) or not workspaces:
+        return ""
+    lines: List[str] = []
+    for workspace in workspaces:
+        if not isinstance(workspace, dict):
+            continue
+        lines.append(f'- {workspace.get("name", "Workspace")} (id: "{workspace.get("id", "")}")')
+        description = workspace.get("description")
+        if description:
+            lines.append(f"  Description: {description}")
+        root_folder = workspace.get("root_folder")
+        if root_folder is not None:
+            lines.append(f"  Root folder: {root_folder}")
+        lines.append("")
+    if lines:
+        lines.append("Use memoryManager with loadWorkspace mode to get full workspace context.")
+    return "\n".join(lines).strip()
+
+
+def _render_available_prompts(prompts: List[Dict[str, Any]]) -> str:
+    if not isinstance(prompts, list) or not prompts:
+        return ""
+    lines: List[str] = []
+    for prompt in prompts:
+        if not isinstance(prompt, dict):
+            continue
+        prompt_id = prompt.get("id")
+        name = prompt.get("name", "Prompt")
+        lines.append(f"- {prompt_id} - {name}" if prompt_id else f"- {name}")
+        purpose = prompt.get("purpose") or prompt.get("description")
+        if purpose:
+            lines.append(f"  Purpose: {purpose}")
+    return "\n".join(lines).strip()
+
+
+def _build_selected_workspace_section(name: str, workspace_id: str, payload: str) -> str:
+    return "\n".join(
+        [
+            f'<selected_workspace name="{name}" id="{workspace_id}">',
+            "This workspace is currently selected.",
+            "",
+            payload,
+            "</selected_workspace>",
+        ]
+    )
+
+
+def _build_session_context_section(session_id: str, workspace_id: str) -> str:
+    return "\n".join(
+        [
+            "<session_context>",
+            "IMPORTANT: When using tools, include these values in your tool call parameters:",
+            "",
+            f'- sessionId: "{session_id}"',
+            f'- workspaceId: "{workspace_id}" (current workspace)',
+            "",
+            'Include these in the "context" parameter of your tool calls.',
+            "</session_context>",
+        ]
+    )
+
+
+def _build_wrapped_section(tag: str, content: str) -> str:
+    clean = str(content or "").strip()
+    if not clean:
+        return ""
+    return f"<{tag}>\n{clean}\n</{tag}>"
+
+
+def _render_extra_sections(extra_sections: List[Dict[str, Any]]) -> str:
+    rendered: List[str] = []
+    for section in extra_sections:
+        if not isinstance(section, dict):
+            continue
+        tag = str(section.get("tag", "")).strip()
+        content = str(section.get("content", "")).strip()
+        if tag and content:
+            rendered.append(_build_wrapped_section(tag, content))
+    return "\n\n".join(rendered)
+
+
+def _note_entries_from_fixture(fixture, note_paths: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    selected_paths = {str(path).strip() for path in (note_paths or []) if str(path).strip()}
+    entries: List[Dict[str, str]] = []
+    for path, content in sorted(fixture.files.items()):
+        if selected_paths and path not in selected_paths:
+            continue
+        entries.append({"path": path, "content": content})
+    return entries
+
+
+def _render_note_contents(note_entries: Any) -> str:
+    if not note_entries:
+        return ""
+    lines: List[str] = []
+    for entry in note_entries:
+        if not isinstance(entry, dict):
+            continue
+        path = str(entry.get("path", "")).strip()
+        content = str(entry.get("content", "")).rstrip()
+        if not path:
+            continue
+        lines.append(f"- {path}")
+        if content:
+            for line in content.splitlines():
+                lines.append(f"  {line}")
+        else:
+            lines.append("  ")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _clean_path(path: str) -> str:
+    return str(path or "").strip().replace("\\", "/").strip("/")

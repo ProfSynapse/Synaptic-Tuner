@@ -206,7 +206,68 @@ Scenarios define what to generate. Each scenario specifies:
 - Prompts for each stage (system, user, thinking, assistant)
 - Rubrics to validate each stage
 
+SynthChat also supports an optional structured environment-generation stage for
+tool-use scenarios. This lets a scenario generate a filesystem-like environment
+first, then render a production-style mocked system prompt from that environment
+before generating the user and assistant turns.
+
+Environment sourcing is explicit via `environment_mode`:
+
+- `provided`: use the hand-authored `environment` block only
+- `generated`: generate the environment from `environment_generation`
+- `hybrid`: start from the hand-authored `environment` block and merge generated
+  values over it
+
+Example shape:
+
+```yaml
+scenarios:
+  envfs_update_config_note:
+    type: tool
+    tool: contentManager_update
+    environment_mode: generated
+    system_template: mocked_workspace_vault
+    system_context:
+      available_workspaces:
+        - id: ws_generated_ops
+          name: Operations Workspace
+          description: Operational notes
+          root_folder: ""
+    environment_generation:
+      prompt: |
+        Output JSON with:
+        - environment.fixture (directories/files/notes)
+        - environment.assertions
+        - system_context.session_id / workspace_id / selected_workspace
+    prompts:
+      user: |
+        Generate the user request.
+      assistant: |
+        Generate the assistant tool response as JSON.
+```
+
+For hybrid scenarios:
+
+```yaml
+scenarios:
+  envfs_hybrid_case:
+    type: tool
+    tool: contentManager_update
+    environment_mode: hybrid
+    environment:
+      fixture:
+        directories: ["Ops"]
+    environment_generation:
+      prompt: |
+        Output JSON with environment.fixture.files and assertions.
+```
+
+Generated examples store the environment spec under
+`metadata.generated_environment`. If environment validation is enabled, the
+runtime execution trace still appears under `metadata.environment`.
+
 See `SynthChat/scenarios/content_writing.yaml` for examples.
+See `SynthChat/scenarios/tool_environments.yaml` for environment-backed examples.
 
 ## Rubrics
 

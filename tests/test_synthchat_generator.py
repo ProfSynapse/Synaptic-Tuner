@@ -1,0 +1,340 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from SynthChat.generator import SynthChatGenerator
+from shared.environments import EnvironmentValidator
+
+
+class _FakeLLMClient:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.messages = []
+
+    def chat(self, messages, temperature=0.7, max_tokens=2048):
+        self.messages.append({"messages": messages, "temperature": temperature, "max_tokens": max_tokens})
+        if not self._responses:
+            raise AssertionError("No more fake responses available")
+        return self._responses.pop(0)
+
+
+def test_synthchat_generator_renders_mocked_workspace_prompt_from_generated_environment():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    environment_json = json.dumps(
+        {
+            "environment": {
+                "fixture": {
+                    "notes": [
+                        {
+                            "path": "Ops/production-config.md",
+                            "frontmatter": {
+                                "title": "Production Config",
+                                "type": "config",
+                                "environment": "production",
+                            },
+                            "body": "api_base_url: https://api.old.example.com\nretry_policy: exponential\n",
+                        },
+                        {
+                            "path": "Ops/staging-config.md",
+                            "frontmatter": {
+                                "title": "Staging Config",
+                                "type": "config",
+                                "environment": "staging",
+                            },
+                            "body": "api_base_url: https://api.staging.example.com\nretry_policy: linear\n",
+                        },
+                    ]
+                },
+                "assertions": [
+                    {
+                        "type": "file_contains",
+                        "path": "Ops/production-config.md",
+                        "text": "api_base_url: https://api.prod.example.com",
+                    },
+                    {
+                        "type": "file_contains",
+                        "path": "Ops/staging-config.md",
+                        "text": "api_base_url: https://api.staging.example.com",
+                    },
+                ],
+            },
+            "system_context": {
+                "session_id": "session_1732300800000_env001",
+                "workspace_id": "ws_generated_ops",
+                "selected_workspace": {
+                    "id": "ws_generated_ops",
+                    "name": "Operations Workspace",
+                    "root_folder": "",
+                    "recent_files": ["Ops/production-config.md"],
+                    "key_files": ["Ops/production-config.md", "Ops/staging-config.md"],
+                    "workflows": [{"name": "Config Maintenance", "steps": ["Find note", "Read note", "Update note"]}],
+                    "preferences": "Read before overwrite.",
+                },
+            },
+        }
+    )
+
+    assistant_json = json.dumps(
+        {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {
+                        "name": "useTools",
+                        "arguments": {
+                            "context": {
+                                "sessionId": "session_1732300800000_env001",
+                                "workspaceId": "ws_generated_ops",
+                                "memory": "Need to update the production note only.",
+                                "goal": "Find and update the production config note.",
+                            },
+                            "calls": [
+                                {
+                                    "agent": "searchManager",
+                                    "tool": "searchContent",
+                                    "params": {"query": "api.old.example.com", "path": "Ops/"},
+                                },
+                                {
+                                    "agent": "contentManager",
+                                    "tool": "read",
+                                    "params": {"path": "Ops/production-config.md", "startLine": 1},
+                                },
+                                {
+                                    "agent": "contentManager",
+                                    "tool": "update",
+                                    "params": {
+                                        "path": "Ops/production-config.md",
+                                        "startLine": 1,
+                                        "content": "---\ntitle: Production Config\ntype: config\nenvironment: production\n---\napi_base_url: https://api.prod.example.com\nretry_policy: exponential\n",
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    client = _FakeLLMClient(
+        [
+            environment_json,
+            "Please update the production config note to use the new API base URL.",
+            assistant_json,
+        ]
+    )
+    validator = EnvironmentValidator(backend="local")
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=validator,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "tool",
+        "tool": "contentManager_update",
+        "system_template": "mocked_workspace_vault",
+        "system_context": {
+            "available_workspaces": [
+                {
+                    "id": "ws_generated_ops",
+                    "name": "Operations Workspace",
+                    "description": "Operational notes and service configuration",
+                    "root_folder": "",
+                }
+            ],
+            "available_prompts": [
+                {"id": "agent_ops_writer", "name": "Ops Writer", "purpose": "Updates config notes"},
+            ],
+            "assistant_instructions": "Use tools carefully.",
+        },
+        "environment_generation": {
+            "prompt": "Generate environment JSON.",
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant tool JSON.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="env_case",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    system_prompt = result.example["conversations"][0]["content"]
+    assert "<available_workspaces>" in system_prompt
+    assert '<selected_workspace name="Operations Workspace" id="ws_generated_ops">' in system_prompt
+    assert "Ops/production-config.md" in system_prompt
+    assert result.example["metadata"]["generated_environment"]["system_context"]["workspace_id"] == "ws_generated_ops"
+    assert result.example["metadata"]["environment"]["passed"] is True
+
+
+def test_synthchat_generator_loads_environment_generation_scenarios():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=_FakeLLMClient([]),
+        engine=None,
+        environment_validator=None,
+        enable_stage_validation=False,
+    )
+
+    scenario_keys = set(generator.scenario_loader.list_scenarios())
+    assert "envfs_update_config_note" in scenario_keys
+    assert "envfs_archive_empty_folder" in scenario_keys
+
+
+def test_synthchat_generator_provided_environment_mode_skips_generation():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    assistant_json = json.dumps({"content": "No tool call needed."})
+    client = _FakeLLMClient(["Use the provided environment as-is.", assistant_json])
+
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=None,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "chat",
+        "environment_mode": "provided",
+        "system_template": "mocked_workspace_vault",
+        "system_context": {
+            "workspace_id": "ws_provided_ops",
+            "available_workspaces": [
+                {"id": "ws_provided_ops", "name": "Provided Workspace", "root_folder": ""}
+            ],
+            "selected_workspace": {"id": "ws_provided_ops", "name": "Provided Workspace"},
+        },
+        "environment": {
+            "fixture": {
+                "files": {
+                    "Ops/config.md": "hello from provided env\n",
+                }
+            }
+        },
+        "environment_generation": {
+            "prompt": "This should never be called.",
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant response.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="provided_case",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    assert len(client.messages) == 2
+    assert result.example["metadata"]["environment_mode"] == "provided"
+    assert "generated_environment" not in result.example["metadata"]
+    assert "Ops/config.md" in result.example["conversations"][0]["content"]
+
+
+def test_synthchat_generator_hybrid_environment_mode_merges_base_and_generated_environment():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "SynthChat" / "config"
+    scenarios_dir = repo_root / "SynthChat" / "scenarios"
+    rubrics_dir = repo_root / "SynthChat" / "rubrics"
+
+    environment_json = json.dumps(
+        {
+            "environment": {
+                "fixture": {
+                    "files": {
+                        "Ops/production.md": "api_base_url: https://api.prod.example.com\n",
+                    }
+                }
+            },
+            "system_context": {
+                "selected_workspace": {
+                    "recent_files": ["Ops/production.md"],
+                }
+            },
+        }
+    )
+    assistant_json = json.dumps({"content": "Merged environment response."})
+    client = _FakeLLMClient([environment_json, "Use the hybrid environment.", assistant_json])
+
+    generator = SynthChatGenerator(
+        config_dir=config_dir,
+        scenarios_dir=scenarios_dir,
+        rubrics_dir=rubrics_dir,
+        llm_client=client,
+        engine=None,
+        environment_validator=None,
+        enable_stage_validation=False,
+    )
+
+    scenario = {
+        "type": "chat",
+        "environment_mode": "hybrid",
+        "system_template": "mocked_workspace_vault",
+        "system_context": {
+            "workspace_id": "ws_hybrid_ops",
+            "available_workspaces": [
+                {"id": "ws_hybrid_ops", "name": "Hybrid Workspace", "root_folder": ""}
+            ],
+            "selected_workspace": {"id": "ws_hybrid_ops", "name": "Hybrid Workspace"},
+        },
+        "environment": {
+            "fixture": {
+                "directories": ["Ops"],
+                "files": {
+                    "Ops/README.md": "baseline readme\n",
+                },
+            }
+        },
+        "environment_generation": {
+            "prompt": "Generate hybrid environment JSON.",
+        },
+        "prompts": {
+            "user": "Generate user request.",
+            "assistant": "Generate assistant response.",
+        },
+    }
+
+    result = generator.generate_single(
+        scenario_key="hybrid_case",
+        scenario=scenario,
+        max_iterations=1,
+        randomize_params=False,
+    )
+
+    system_prompt = result.example["conversations"][0]["content"]
+    assert result.example["metadata"]["environment_mode"] == "hybrid"
+    assert "generated_environment" in result.example["metadata"]
+    assert "Ops/README.md" in system_prompt
+    assert "Ops/production.md" in system_prompt
