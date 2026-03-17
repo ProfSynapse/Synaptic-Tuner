@@ -30,7 +30,7 @@ Fine-tuning a local LLM is a multi-step pipeline that most people never finish. 
 Synaptic Tuner handles the full pipeline in one repo, and it's designed to be **operated by AI coding agents**. Instead of memorizing CLI flags and YAML schemas, you describe what you want in plain English. Built-in skills give your agent deep knowledge of every component — it generates data, trains models, runs evaluations, and deploys, enforcing best practices at each step.
 
 **Agentic-first means:**
-- The repo ships with 4 agent skills covering the entire workflow
+- The repo ships with project skills covering the entire workflow
 - Skills use progressive disclosure — your agent loads only what it needs, when it needs it
 - Best practices are encoded as protocols (dry-run before generation, interleave KTO datasets, etc.)
 - You describe intent, your agent handles execution — *"train a 7B model on my dataset"* just works
@@ -66,7 +66,7 @@ Skills use progressive disclosure — lean SKILL.md files auto-load, detailed re
 
 ## Using with Other AI Coding Tools
 
-The skills in `.claude/skills/` are plain Markdown — they work with any AI coding tool. Most platforms use `AGENTS.md` as their entrypoint (Claude Code uses `CLAUDE.md`). Copy the skill files to your platform's rules directory, or use the universal `.skills/` folder at your project root:
+The skills in `.agents/skills/` are plain Markdown — they work with any AI coding tool. Most platforms use `AGENTS.md` as their entrypoint (Claude Code uses `CLAUDE.md`). Copy the skill files to your platform's rules directory, or use the universal `.skills/` folder at your project root:
 
 | Platform | Where to put skills |
 |----------|-------------------|
@@ -86,18 +86,26 @@ Most platforms auto-discover Markdown in their rules directory. For tools that u
 ## The Pipeline
 
 ```
-Generate Data (SynthChat)  →  Train (SFT → KTO → GRPO)  →  Evaluate  →  Upload to HF
+SynthChat (env-backed data)  →  SFT  →  merge/publish Nexus model  →  KTO  →  env-GRPO  →  Evaluate  →  Upload/Deploy
 ```
 
 | Stage | Tool | Key Config |
 |-------|------|------------|
-| **Generate** | `python -m SynthChat.run generate` | `SynthChat/scenarios/`, `SynthChat/rubrics/`, `SynthChat/config/settings.yaml` |
-| **Improve** | `python -m SynthChat.run improve` | Rubric YAMLs define judge/improver prompts |
-| **Train SFT** | `python train_sft.py --model-size 7b` | `Trainers/sft/configs/config.yaml` |
-| **Train KTO** | `python train_kto.py --model-size 7b` | `Trainers/kto/configs/config.yaml` |
-| **Train GRPO** | `python train_grpo.py` | `Trainers/grpo/configs/config.yaml` |
+| **Generate env-backed data** | `python3 -m SynthChat.run generate` | `SynthChat/scenarios/`, `SynthChat/config/settings.yaml`, `SynthChat/config/targets_*.json` |
+| **Project datasets** | `python3 SynthChat/scripts/project_rollout_datasets.py` | `Datasets/environment_rollouts/`, `Datasets/kto/`, `Datasets/grpo/` |
+| **Train SFT** | `python tuner.py train` → `sft` | `Trainers/sft/configs/config.yaml` |
+| **Train KTO** | `python tuner.py train` → `kto` | `Trainers/kto/configs/config.yaml` |
+| **Train env-GRPO** | `python tuner.py train` → `grpo` | `Trainers/grpo/configs/env_config.yaml` |
+| **Cloud env-GRPO** | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml` | HF Jobs config + `Trainers/grpo/configs/env_config.yaml` |
 | **Evaluate** | `python -m Evaluator.cli --backend lmstudio --model MODEL` | `Evaluator/config/scenarios/` |
-| **Upload** | `python src/upload_to_hf.py MODEL user/repo --save-method merged_16bit` | Supports LoRA, merged 16-bit, GGUF |
+| **Upload / merge** | `python tuner.py modelops` or upload scripts | Hugging Face / Nexus model repos |
+
+### Current GRPO split
+
+- `Trainers/grpo/configs/config.yaml` is the older static projected-dataset GRPO path.
+- `Trainers/grpo/configs/env_config.yaml` is the current environment-backed multi-step GRPO path.
+- Local NVIDIA `train -> grpo` now routes to the env-backed trainer and will bootstrap the isolated GRPO runtime if it is missing.
+- The canonical alignment flow is documented in [.agents/skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.agents/skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
 
 ## Dataset Format
 
@@ -115,7 +123,8 @@ JSONL with `conversations` array. Tool call structure is fully configurable.
 
 - **SFT**: Positive examples only, `label` ignored
 - **KTO**: Interleaved `true`/`false` labels required
-- **GRPO**: Prompts + ground truth for reward scoring
+- **GRPO (static)**: Prompts + ground truth for reward scoring
+- **env-GRPO**: Canonical SynthChat rollout records with environment config, stage reviews, and replayable prompts
 
 ## Repository Map
 
@@ -125,13 +134,13 @@ Synaptic-Tuner/
 ├── Trainers/
 │   ├── sft/                # SFT training
 │   ├── kto/                # KTO training
-│   ├── grpo/               # GRPO training
+│   ├── grpo/               # Static GRPO + env-backed GRPO
 │   └── notebooks/          # Colab notebooks (beginner + advanced)
 ├── Evaluator/              # Model evaluation (scenarios, backends, results)
-├── Datasets/               # Training data (JSONL)
+├── Datasets/               # Training data + canonical environment rollouts
 ├── shared/                 # Shared infra (LLM client, upload, validation, UI)
 ├── tuner/                  # Unified CLI (used by run.sh)
-├── .claude/skills/         # Agent skills (4 skills, 22 reference docs — works with any AI coding tool)
+├── .agents/skills/         # Project skills and protocols
 └── CLAUDE.md               # Project-wide dev guide
 ```
 
