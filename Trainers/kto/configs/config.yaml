@@ -1,5 +1,5 @@
 model:
-  model_name: professorsynapse/nexus-tools_sft24
+  model_name: professorsynapse/Nexus-Quark-L2.5.28
   max_seq_length: 2048
   dtype: null
   load_in_4bit: true
@@ -51,9 +51,9 @@ training:
   eval_strategy: 'no'
   eval_steps: 100
 dataset:
-  dataset_name: professorsynapse/nexus-synthetic-dataset
-  dataset_file: behavior_merged_kto_v1.5_11.29.25.jsonl
-  local_file: ../../Datasets/behavior_merged_kto_v1.5_balanced.jsonl
+  dataset_name: null
+  dataset_file: null
+  local_file: ../../Datasets/kto/vault_shared_seed_dynamic_roles_kto_20260316.jsonl
   num_proc: 1
   test_size: 0.1
   chat_template: chatml

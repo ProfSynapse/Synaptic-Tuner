@@ -1,0 +1,79 @@
+# ============================================================================
+# Cloud-first environment-backed GRPO configuration
+# Uses the Unsloth Docker image as the base CUDA/PyTorch runtime, but expects
+# a dedicated isolated virtualenv for newer TRL/OpenEnv dependencies.
+# ============================================================================
+
+model:
+  # Use a merged/published SFT model on Hugging Face for env-GRPO.
+  model_name: "professorsynapse/Nexus-Quark-L2.5.28"
+  max_seq_length: 8192
+  chat_template: null
+
+dataset:
+  dataset_name: null
+  dataset_file: null
+  local_file: "../../../Datasets/environment_rollouts/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl"
+  num_proc: 1
+
+training:
+  output_dir: "./env_grpo_output"
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  num_generations: 4
+  max_prompt_length: 4096
+  max_completion_length: 1024
+  temperature: 0.9
+  learning_rate: 5e-6
+  weight_decay: 0.0
+  warmup_ratio: 0.05
+  lr_scheduler_type: "cosine"
+  num_train_epochs: 1
+  max_steps: -1
+  beta: 0.04
+  fp16: false
+  bf16: true
+  optim: "adamw_torch"
+  logging_steps: 1
+  save_steps: 25
+  save_total_limit: 2
+  report_to: "none"
+  use_vllm: false
+  vllm_mode: "colocate"
+  extra_args: {}
+
+env_training:
+  backend: "trl_rollout_func"
+  require_environment_passed: true
+  require_environment_config: true
+  required_stage_reviews:
+    - "environment_generation"
+    - "user_generation"
+    - "final"
+  max_turns: 6
+  max_tool_steps: 8
+
+  runtime:
+    # Keep using the shared Unsloth image for cloud jobs, but isolate modern
+    # env-GRPO deps in a venv so we don't destabilize existing trainers.
+    cloud_base_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    repo_root_in_container: "/workspace/repo"
+    isolated_venv_dir: "/workspace/.venvs/grpo-openenv"
+    project_pip_deps:
+      - "pyyaml"
+      - "python-dotenv"
+      - "rich"
+      - "datasets"
+    python_packages:
+      - "trl>=0.24.0"
+      - "transformers>=4.56.0"
+      - "accelerate>=1.6.0"
+      - "peft>=0.15.0"
+      - "openenv @ git+https://github.com/meta-pytorch/OpenEnv.git"
+
+rewards:
+  success_reward: 1.0
+  failure_penalty: -1.0
+  step_penalty: 0.02
+  max_tool_steps_penalty: 0.25
+  text_before_completion_penalty: 0.5

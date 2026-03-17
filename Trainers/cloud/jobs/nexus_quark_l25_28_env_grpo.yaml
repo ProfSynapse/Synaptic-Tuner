@@ -1,0 +1,34 @@
+name: nexus-quark-l25-28-env-grpo
+description: Run cloud env-backed GRPO from Nexus-Quark-L2.5.28 on canonical SynthChat rollouts.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "a10g-small"
+  timeout_hours: 8
+  labels:
+    task: env-grpo
+    model: Nexus-Quark-L2_5_28
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  env:
+    PYTHONPATH: "{repo_dir}"
+  steps:
+    - "mkdir -p {output_dir}"
+    - "python -m venv /workspace/.venvs/grpo-openenv"
+    - ". /workspace/.venvs/grpo-openenv/bin/activate && python -m pip install --upgrade pip setuptools wheel pyyaml python-dotenv rich datasets 'trl>=0.24.0' 'transformers>=4.56.0' 'accelerate>=1.6.0' 'peft>=0.15.0' 'openenv @ git+https://github.com/meta-pytorch/OpenEnv.git'"
+    - ". /workspace/.venvs/grpo-openenv/bin/activate && cd {repo_dir}/Trainers/grpo && python train_env_grpo.py --config {repo_dir}/Trainers/grpo/configs/env_config.yaml"
+    - "if [ -d {repo_dir}/Trainers/grpo/env_grpo_output ]; then cp -R {repo_dir}/Trainers/grpo/env_grpo_output {output_dir}/; fi"
+
+artifacts:
+  bucket: "toolset-training-artifacts"
+  output_dir: "/workspace/outputs"
+  prefix: "runs/hf_jobs/custom/{job_name}/{timestamp}-{commit8}"
