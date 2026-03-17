@@ -27,7 +27,7 @@ run:
     - "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer"
     - "export HF_BUCKET_SYNC_PYTHON=$(command -v python)"
     - "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site"
-    - "cd {repo_dir}/Trainers/kto && python train_kto.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket toolset-training-artifacts --artifact-prefix runs/hf_jobs/kto/{timestamp}-{commit8} --output-root {output_dir}"
+    - "cd {repo_dir}/Trainers/kto && python train_kto.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket professorsynapse/toolset-training-artifacts --artifact-prefix runs/hf_jobs/kto/{timestamp}-{commit8} --output-root {output_dir}"
 
 artifacts:
   bucket: "toolset-training-artifacts"
