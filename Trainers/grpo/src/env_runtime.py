@@ -31,7 +31,8 @@ def build_cloud_bootstrap_commands(
     return [
         "mkdir -p /tmp/grpo-openenv-bootstrap",
         "python -m pip install --upgrade --target /tmp/grpo-openenv-bootstrap virtualenv",
-        f"PYTHONPATH=/tmp/grpo-openenv-bootstrap${{{{PYTHONPATH:+:$PYTHONPATH}}}} python -m virtualenv --no-download {_shell_quote(venv_dir)}",
+        "export PYTHONPATH=/tmp/grpo-openenv-bootstrap:$PYTHONPATH",
+        f"python -m virtualenv --no-download {_shell_quote(venv_dir)}",
         f". {_shell_quote(venv_dir)}/bin/activate",
         f"python -m pip install --upgrade {install_args}",
         f"cd {_shell_quote(str(Path(cloud_repo_root) / 'Trainers' / 'grpo'))}",
