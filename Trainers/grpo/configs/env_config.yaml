@@ -65,6 +65,7 @@ env_training:
       - "rich"
       - "datasets"
     python_packages:
+      - "huggingface_hub<1.0"
       - "trl>=0.24.0"
       - "transformers>=4.56.0"
       - "accelerate>=1.6.0"
