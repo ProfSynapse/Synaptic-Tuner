@@ -25,7 +25,7 @@ run:
     - "mkdir -p {output_dir}"
     - "mkdir -p /tmp/grpo-openenv-bootstrap"
     - "python -m pip install --upgrade --target /tmp/grpo-openenv-bootstrap virtualenv"
-    - "PYTHONPATH=/tmp/grpo-openenv-bootstrap${PYTHONPATH:+:$PYTHONPATH} python -m virtualenv --no-download /workspace/.venvs/grpo-openenv"
+    - "PYTHONPATH=/tmp/grpo-openenv-bootstrap${{PYTHONPATH:+:$PYTHONPATH}} python -m virtualenv --no-download /workspace/.venvs/grpo-openenv"
     - ". /workspace/.venvs/grpo-openenv/bin/activate && python -m pip install --upgrade pip setuptools wheel pyyaml python-dotenv rich datasets 'huggingface_hub<1.0' 'trl>=0.24.0' 'transformers>=4.56.0' 'accelerate>=1.6.0' 'peft>=0.15.0' 'openenv @ git+https://github.com/meta-pytorch/OpenEnv.git'"
     - ". /workspace/.venvs/grpo-openenv/bin/activate && cd {repo_dir}/Trainers/grpo && python train_env_grpo.py --config {repo_dir}/Trainers/grpo/configs/env_config.yaml"
     - "if [ -d {repo_dir}/Trainers/grpo/env_grpo_output ]; then cp -R {repo_dir}/Trainers/grpo/env_grpo_output {output_dir}/; fi"
