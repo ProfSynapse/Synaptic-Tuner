@@ -134,6 +134,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     from trl import GRPOConfig, GRPOTrainer
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer.model_input_names = [
+        name for name in list(getattr(tokenizer, "model_input_names", [])) if name != "token_type_ids"
+    ]
+    if hasattr(tokenizer, "return_token_type_ids"):
+        tokenizer.return_token_type_ids = False
     formatted_dataset = formatted_dataset.map(
         lambda ex: {
             **ex,
