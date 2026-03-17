@@ -11,9 +11,9 @@ model:
   chat_template: null
 
 dataset:
-  dataset_name: null
-  dataset_file: null
-  local_file: "../../../Datasets/environment_rollouts/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl"
+  dataset_name: "professorsynapse/nexus-synthetic-data"
+  dataset_file: "environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl"
+  local_file: null
   num_proc: 1
 
 training:

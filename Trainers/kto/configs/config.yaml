@@ -51,9 +51,9 @@ training:
   eval_strategy: 'no'
   eval_steps: 100
 dataset:
-  dataset_name: null
-  dataset_file: null
-  local_file: ../../Datasets/kto/vault_shared_seed_dynamic_roles_kto_20260316.jsonl
+  dataset_name: professorsynapse/nexus-synthetic-data
+  dataset_file: environment_rollouts/kto/vault_shared_seed_dynamic_roles_kto_20260316.jsonl
+  local_file: null
   num_proc: 1
   test_size: 0.1
   chat_template: chatml
