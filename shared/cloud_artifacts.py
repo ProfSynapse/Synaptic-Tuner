@@ -159,8 +159,9 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
     local_dir = Path(local_dir)
     bucket_id = normalize_hf_bucket_id(bucket_id)
     prefix = prefix.strip("/")
-    bucket_uri = f"hf://buckets/{bucket_id}/{prefix}"
     token = _normalize_token_value(token)
+    resolved_bucket_id = ensure_hf_bucket(bucket_id, token=token)
+    bucket_uri = f"hf://buckets/{resolved_bucket_id}/{prefix}"
 
     helper_python = _bucket_sync_helper_python()
     if helper_python:
@@ -198,10 +199,8 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
             return
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
-                f"HF bucket sync failed for {bucket_id}/{prefix}: {exc}"
+                f"HF bucket sync failed for {resolved_bucket_id}/{prefix}: {exc}"
             ) from exc
-
-    bucket_id = ensure_hf_bucket(bucket_id, token=token)
 
     try:
         from huggingface_hub import sync_bucket  # type: ignore
@@ -213,12 +212,12 @@ def sync_directory_to_hf_bucket(local_dir: Path, bucket_id: str, prefix: str, to
     try:
         sync_bucket(
             str(local_dir),
-            f"hf://buckets/{bucket_id}/{prefix}",
+            bucket_uri,
             token=token,
         )
     except Exception as exc:
         raise RuntimeError(
-            f"HF bucket sync failed for {bucket_id}/{prefix}: {exc}"
+            f"HF bucket sync failed for {resolved_bucket_id}/{prefix}: {exc}"
         ) from exc
 
 
