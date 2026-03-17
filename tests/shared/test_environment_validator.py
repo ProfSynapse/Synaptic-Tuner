@@ -76,13 +76,40 @@ def test_environment_validator_applies_explicit_fixture_and_frontmatter_assertio
             "assertions": [
                 {"type": "path_exists", "path": "Inbox/capture.md"},
                 {"type": "frontmatter_has_key", "path": "Inbox/capture.md", "field": "title"},
+                {"type": "frontmatter_has_keys", "path": "Inbox/capture.md", "fields": ["title", "status"]},
                 {"type": "frontmatter_field_equals", "path": "Inbox/capture.md", "field": "status", "value": "inbox"},
             ],
         },
     )
 
     assert result.passed is True
-    assert result.assertions_run == 3
+    assert result.assertions_run == 4
+
+
+def test_environment_validator_frontmatter_has_keys_reports_missing_fields():
+    validator = EnvironmentValidator(backend="local")
+
+    result = validator.validate_response(
+        system_prompt="",
+        response={"content": "No tool call needed."},
+        environment_config={
+            "fixture": {
+                "notes": [
+                    {
+                        "path": "Journal/Daily/2023-10-05.md",
+                        "frontmatter": {"date": "2023-10-05"},
+                        "body": "## Summary",
+                    }
+                ]
+            },
+            "assertions": [
+                {"type": "frontmatter_has_keys", "path": "Journal/Daily/2023-10-05.md", "fields": ["title", "date"]},
+            ],
+        },
+    )
+
+    assert result.passed is False
+    assert any("missing required keys: title" in issue.message for issue in result.issues)
 
 
 def test_environment_validator_can_copy_real_local_path_into_runtime(tmp_path: Path):
@@ -285,6 +312,44 @@ def test_environment_validator_supports_precise_regex_and_line_assertions():
                     "type": "file_matches_regex",
                     "path": "Settings/settings.yaml",
                     "pattern": r"database_url:\s+postgresql://prod-user:prod-pass@db\.prod\.internal:5432/app",
+                },
+            ],
+        },
+    )
+
+    assert result.passed is True
+
+
+def test_environment_validator_supports_invariant_style_contains_any_assertions():
+    validator = EnvironmentValidator(backend="local")
+
+    result = validator.validate_response(
+        system_prompt="",
+        response={"content": "No tool call needed."},
+        environment_config={
+            "fixture": {
+                "files": {
+                    "Policies/admin.md": (
+                        "Access policy updated for contractors.\n"
+                        "Effective immediately.\n"
+                    )
+                }
+            },
+            "assertions": [
+                {
+                    "type": "file_contains_any",
+                    "path": "Policies/admin.md",
+                    "texts": ["contractors", "vendors"],
+                },
+                {
+                    "type": "file_contains_all",
+                    "path": "Policies/admin.md",
+                    "texts": ["Access policy", "Effective immediately"],
+                },
+                {
+                    "type": "file_not_contains_any",
+                    "path": "Policies/admin.md",
+                    "texts": ["deprecated language", "legacy override"],
                 },
             ],
         },

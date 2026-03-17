@@ -112,7 +112,7 @@ class OpenRouterClient(BaseLLMClient):
         messages: List[Dict[str, str]],
         schema: Dict[str, Any],
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int | None = None,
         **kwargs
     ) -> Dict[str, Any]:
         """Send request with JSON schema for structured output."""
@@ -120,7 +120,6 @@ class OpenRouterClient(BaseLLMClient):
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -130,6 +129,8 @@ class OpenRouterClient(BaseLLMClient):
                 }
             }
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         # Add provider routing if configured
         if self.provider:
@@ -146,7 +147,10 @@ class OpenRouterClient(BaseLLMClient):
             return json.loads(content)
 
         except json.JSONDecodeError as e:
-            raise LLMResponseError(f"Failed to parse structured output: {e}")
+            raise LLMResponseError(
+                f"Failed to parse structured output: {e}\nResponse excerpt: {_truncate_response(content)}",
+                raw_response=content,
+            )
         except Exception as e:
             raise LLMResponseError(f"OpenRouter structured output failed: {e}")
 
@@ -197,3 +201,11 @@ class OpenRouterClient(BaseLLMClient):
             # Print error for debugging
             print(f"    Connection test error: {e}")
             return False
+
+
+def _truncate_response(content: Any, limit: int = 1200) -> str:
+    """Return a compact single-line excerpt for debugging malformed structured output."""
+    text = str(content or "").replace("\r", "\\r").replace("\n", "\\n")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...<truncated>"

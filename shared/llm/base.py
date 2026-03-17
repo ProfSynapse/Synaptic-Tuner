@@ -43,7 +43,7 @@ class BaseLLMClient(ABC):
         messages: List[Dict[str, str]],
         schema: Dict[str, Any],
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -53,7 +53,7 @@ class BaseLLMClient(ABC):
             messages: List of message dicts with 'role' and 'content'
             schema: JSON Schema for structured output
             temperature: Sampling temperature (lower for structured output)
-            max_tokens: Maximum tokens to generate
+            max_tokens: Optional maximum tokens to generate
             **kwargs: Provider-specific parameters
 
         Returns:

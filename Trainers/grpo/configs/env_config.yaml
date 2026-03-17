@@ -59,6 +59,7 @@ env_training:
     cloud_base_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
     repo_root_in_container: "/workspace/repo"
     isolated_venv_dir: "/workspace/.venvs/grpo-openenv"
+    local_venv_dir: ".venvs/grpo-openenv"
     project_pip_deps:
       - "pyyaml"
       - "python-dotenv"

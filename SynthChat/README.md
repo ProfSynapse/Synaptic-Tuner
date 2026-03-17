@@ -32,6 +32,10 @@ python -m SynthChat.run --help
 python -m SynthChat.run generate --help
 ```
 
+For real generation runs and reproducible smoke tests, prefer the SynthChat CLI
+or a checked-in script. Do not default to ad hoc bare-Python launchers when the
+same run can be expressed through `python3 -m SynthChat.run generate ...`.
+
 ## Configuration
 
 ### Two-Layer Config System
@@ -121,12 +125,33 @@ generation instead of relying on unconstrained freeform JSON:
 
 Use that path when you want executable tool data, not just tool-shaped text.
 
+Stage quality control is also config-driven. You can attach deterministic gates
+and a stage-specific judge to any generation stage:
+
+- `environment_generation.gates` / `environment_generation.judge`
+- `system_generation.gates` / `system_generation.judge`
+- `user_generation.gates` / `user_generation.judge`
+- `assistant_generation.gates` / `assistant_generation.judge`
+- `final_judge.gates` / `final_judge.judge`
+
+If a stage has no gate/judge config, nothing runs for that stage. Keep this in
+YAML; do not hardcode which stages are judged in Python.
+
 Important pattern:
 - The tool wrapper name is schema-driven, not hardcoded.
+- For pure synthgen, scenario YAML should define workflow families and tool
+  primitives, not fixed target paths or one exact replacement string. The
+  generated filesystem is the source of truth; derive task context, assertions,
+  and user prompts from that seed.
+- Prefer explicit family kinds such as `move_file`, `edit_file`,
+  `write_new_file`, `archive_file`, and `answer_question`, then keep candidate
+  selection, ambiguity, and preservation rules under `task_family`.
 - Core generation/execution reads the wrapper from the configured tool schema
   (`--env-tool-schema` or the default evaluator schema).
 - Keep wrapper choice in config/YAML. Do not add code branches for one wrapper
   name or one scenario pack.
+- Keep stage review in config/YAML too. Programmatic gates and LLM judges should
+  be attached per stage through scenario config, not hardcoded around one pack.
 
 **Example: Generate 5 content writing examples**
 
@@ -240,13 +265,72 @@ Those environment-backed scenarios can target either:
 - multi-step evaluator episodes, where the same runtime persists across turns
   and tool outputs are fed back to the model
 
-The loop itself is owned by the evaluator's `environment.loop` config, not by
-SynthChat-specific code or one hardcoded tool wrapper.
+The loop is now a shared runtime utility used by both the evaluator and
+SynthChat. It is still controlled by scenario `environment.loop` config, not by
+one hardcoded tool wrapper or a SynthChat-only code path.
+
+For the shared-seed tutored pack, a small checked-in smoke target is available
+at `SynthChat/config/targets_vault_shared_seed_move_edit_smoke.json`. Use the
+CLI to validate the generic `move_file` and `edit_file` families end to end.
 
 When you want "can the model navigate and recover?" rather than "can it get the
 workflow right on the first try?", prefer evaluator scenarios using
 `environment.loop.mode: agentic`. Final environment state should determine
 success; preferred workflows should be expressed in scoring, not hard failure.
+
+When `environment.loop.enabled: true` is present in a SynthChat scenario and an
+environment validator backend is configured, SynthChat will use the same shared
+agentic loop for rollout generation instead of a one-shot response plus final
+validation.
+
+SynthChat can also opt into a tutored generation mode by configuring
+`judge.in_loop` on the scenario. In that mode:
+- the shared environment loop still executes the real tools/runtime
+- a per-turn judge can inspect each step and emit feedback
+- judge feedback is only shown to the model if `feedback_visible_to_model: true`
+- the resulting artifact records `metadata.judge.trace` so tutored rollouts stay
+  distinguishable from autonomous eval traces
+- the judge does not control loop termination; environment/runtime stop
+  conditions remain the source of truth
+
+If the scenario sets `environment.loop.require_final_text_after_pass: true`,
+the loop will request one final text-only assistant turn after the environment
+already satisfies the hard success criteria. This is useful when the desired
+behavior is "complete the task, then tell the user it is done."
+
+### Inspecting Failed Rollouts
+
+For environment-backed rollouts, the fastest way to understand behavior is to
+inspect the saved artifact rather than only reading the pass/fail summary.
+
+Use:
+
+```bash
+python3 SynthChat/scripts/inspect_rollout_trace.py \
+  --input /tmp/synthchat_vault_shared_seed_10x10_generated_mercury_uncapped.jsonl \
+  --scenario sharedvault_promote_inbox_note_with_example \
+  --failed-only \
+  --limit 1
+```
+
+What this surfaces:
+- `conversation_trace`: the exact assistant turns and tool-feedback messages the
+  model saw
+- `metadata.environment.episode_trace.stop_reason`: why the loop stopped
+- `metadata.environment.issues`: final assertion/runtime failures
+- per-turn executed tools and reconstructed tool feedback
+
+Important pattern:
+- if `episode_trace.steps[*].tool_feedback` is sparse, treat
+  `conversation_trace` as the source of truth for model-facing tool results
+- the user-facing feedback should be realistic runtime output, not evaluator
+  coaching
+
+Common failure signatures worth checking first:
+- repeated successful updates followed by `max_tool_steps_exceeded`
+- repeated reads against a file that was already moved or archived
+- user-prompt contamination, where the saved `user` turn contains tool JSON
+  instead of a natural request
 
 Environment sourcing is explicit via `environment_mode`:
 
@@ -325,6 +409,68 @@ to train KTO only on:
 
 See `SynthChat/scenarios/content_writing.yaml` for examples.
 See `SynthChat/scenarios/tool_environments.yaml` for environment-backed examples.
+
+### Seeded Rollouts
+
+Target files can use either:
+
+- legacy count form:
+  - `"scenario_key": 5`
+  - means `5` independent seeds with `1` rollout each
+- seeded rollout form:
+  - `"scenario_key": {"seed_count": 3, "rollouts_per_seed": 10}`
+  - means generate `3` environments for that scenario and run `10` rollouts
+    against each one
+
+Use seeded rollouts when you want KTO/GRPO data where multiple attempts are
+comparable because they operate inside the same environment snapshot.
+
+For one common workspace reused across multiple different scenarios, use a
+top-level `_shared_seed` entry in the targets file:
+
+```json
+{
+  "_shared_seed": {
+    "scenario": "sharedvault_workspace_seed",
+    "seed_count": 1
+  },
+  "sharedvault_create_daily_note_from_template": {"rollouts_per_seed": 1},
+  "sharedvault_triage_correct_note_after_search": {"rollouts_per_seed": 1}
+}
+```
+
+In shared-seed mode:
+
+- the `_shared_seed.scenario` prepares one reusable environment bundle
+- all targeted scenarios in that file consume the same seed id
+- scenario-local `task_context`, `system_context`, and `environment.assertions`
+  are layered on top of the shared workspace instead of generating separate
+  workspaces per scenario
+
+Practical pattern:
+
+- generate one environment seed, then reuse it across multiple rollouts
+- log environment generation at the seed level, not only at the rollout level
+- keep `seed_id` in both logs and metadata so provider stalls can be tied to a
+  specific generated environment
+
+Anti-patterns:
+
+- regenerating a brand new environment for every single rollout when you want
+  behavior comparisons
+- dropping the base `environment` config when `environment_mode: generated`
+  adds fixture/assertions; loop settings and runtime budgets must still merge in
+- assuming a stalled rollout means the local environment loop is broken; check
+  whether the first failure is actually in `environment_generation`
+
+For `canonical_environment`, use both:
+
+- the API-level `json_schema`
+- a compact in-band contract in the prompt describing allowed top-level keys
+  and canonical assertion types
+
+That combination is more reliable than schema-only prompting for provider
+paths that sometimes return malformed structured JSON.
 
 ### Canonical Assertion Types
 

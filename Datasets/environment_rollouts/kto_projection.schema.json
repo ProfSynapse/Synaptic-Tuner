@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntheticconversations.local/schemas/kto_projection.schema.json",
+  "title": "KTO Projection Record",
+  "type": "object",
+  "required": [
+    "prompt",
+    "completion",
+    "label"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string"
+    },
+    "completion": {
+      "type": "string"
+    },
+    "label": {
+      "type": "boolean"
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "scenario_family": {
+      "type": "string"
+    },
+    "source_example_id": {
+      "type": "string"
+    },
+    "score_tier": {
+      "type": ["string", "null"]
+    },
+    "failure_labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

@@ -336,6 +336,47 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
                 )
             continue
 
+        if atype == "file_contains_any":
+            needles = assertion.get("texts")
+            if not isinstance(needles, list) or not needles:
+                issues.append(EnvironmentIssue("warning", "Assertion file_contains_any missing 'texts'"))
+                continue
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
+                continue
+            if not any(str(needle) in content for needle in needles):
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' does not contain any expected text",
+                        code="assertion_file_contains_any",
+                        recoverable=False,
+                    )
+                )
+            continue
+
+        if atype == "file_contains_all":
+            needles = assertion.get("texts")
+            if not isinstance(needles, list) or not needles:
+                issues.append(EnvironmentIssue("warning", "Assertion file_contains_all missing 'texts'"))
+                continue
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
+                continue
+            missing = [str(needle) for needle in needles if str(needle) not in content]
+            if missing:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' is missing required text fragments",
+                        code="assertion_file_contains_all",
+                        recoverable=False,
+                    )
+                )
+            continue
+
         if atype == "file_not_contains":
             needle = str(assertion.get("text", ""))
             content, error = _read_file(runtime, path)
@@ -348,6 +389,26 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
                         "error",
                         f"Assertion failed: '{path}' contains forbidden text",
                         code="assertion_file_not_contains",
+                        recoverable=False,
+                    )
+                )
+            continue
+
+        if atype == "file_not_contains_any":
+            needles = assertion.get("texts")
+            if not isinstance(needles, list) or not needles:
+                issues.append(EnvironmentIssue("warning", "Assertion file_not_contains_any missing 'texts'"))
+                continue
+            content, error = _read_file(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error, code="assertion_read_failed", recoverable=False))
+                continue
+            if any(str(needle) in content for needle in needles):
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' contains forbidden text fragment",
+                        code="assertion_file_not_contains_any",
                         recoverable=False,
                     )
                 )
@@ -445,6 +506,29 @@ def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]
                     EnvironmentIssue(
                         "error",
                         f"Assertion failed: '{path}' front matter is missing key '{field}'",
+                    )
+                )
+            continue
+
+        if atype == "frontmatter_has_keys":
+            fields = assertion.get("fields")
+            if not isinstance(fields, list):
+                issues.append(EnvironmentIssue("warning", "Assertion frontmatter_has_keys missing 'fields' list"))
+                continue
+            required_fields = [str(field).strip() for field in fields if str(field).strip()]
+            if not required_fields:
+                issues.append(EnvironmentIssue("warning", "Assertion frontmatter_has_keys has no non-empty fields"))
+                continue
+            frontmatter, error = _read_frontmatter(runtime, path)
+            if error:
+                issues.append(EnvironmentIssue("error", error))
+                continue
+            missing = [field for field in required_fields if field not in frontmatter]
+            if missing:
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Assertion failed: '{path}' front matter is missing required keys: {', '.join(missing)}",
                     )
                 )
             continue

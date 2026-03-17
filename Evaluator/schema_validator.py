@@ -151,6 +151,8 @@ def validate_assistant_response(
     # Detect format and validate accordingly
     if isinstance(content, dict):
         message = dict(content)
+        if message.get("tool_calls", "__missing__") is None and isinstance(message.get("content"), str):
+            message.pop("tool_calls", None)
         # Qwen sometimes embeds tool calls in content without tool_calls array
         if (not message.get("tool_calls")) and isinstance(message.get("content"), str):
             converted = _convert_qwen_to_openai(message["content"])

@@ -17,18 +17,34 @@ import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Mapping, Sequence
 from dataclasses import dataclass
 from copy import deepcopy
 
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocFile
 from .engine import ImprovementEngine
+from .stage_gates import run_stage_gates
+from .task_derivation import derive_task_spec
+from shared.llm.factory import create_client
+from shared.stage_judges import ConfigurableStageJudge
 
 try:
     from shared.environments import EnvironmentValidator
 except ImportError:
     EnvironmentValidator = None
+
+try:
+    from shared.agentic_judge import AgenticTurnJudge
+    from shared.agentic_loop import AgenticModelResponse, run_environment_episode
+    from Evaluator.schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
+except ImportError:
+    AgenticTurnJudge = None
+    AgenticModelResponse = None
+    run_environment_episode = None
+    ValidationResult = None
+    ValidatorIssue = None
+    validate_assistant_response = None
 
 
 @dataclass
@@ -117,6 +133,7 @@ class SynthChatGenerator:
         self.logger = logger
         self.enable_stage_validation = enable_stage_validation
         self.environment_validator = environment_validator
+        self._llm_client_cache: Dict[Tuple[Any, ...], Any] = {}
 
         # Load scenario configurations
         self.scenario_loader = ScenarioLoader(scenarios_dir)
@@ -138,10 +155,12 @@ class SynthChatGenerator:
 
     def generate_batch(
         self,
-        targets: Dict[str, int],  # {scenario_key: count}
+        targets: Dict[str, Any],  # {scenario_key: count|target_spec}
         max_iterations: int = 3,
         randomize_params: bool = True,
-        doc_context: Optional[DocFile] = None
+        doc_context: Optional[DocFile] = None,
+        on_result=None,
+        shared_seed_spec: Optional[Dict[str, Any]] = None,
     ) -> List[GenerationResult]:
         """
         Generate a batch of examples from scenario targets.
@@ -152,37 +171,288 @@ class SynthChatGenerator:
             randomize_params: Whether to randomize LLM parameters
             doc_context: Optional document context for template variables
                         Makes {doc_content} and {doc_path} available in prompts
+            on_result: Optional callback invoked for each completed GenerationResult
 
         Returns:
             List of GenerationResult objects
         """
         results = []
-        total = sum(targets.values())
-        current = 0
+        total = 0
+        normalized_targets: List[Tuple[str, Dict[str, Any], Dict[str, int]]] = []
 
-        for scenario_key, count in targets.items():
+        shared_seed_targets = set((shared_seed_spec or {}).get("targets") or [])
+        using_shared_seed = bool(shared_seed_spec)
+        shared_seed_count = int((shared_seed_spec or {}).get("seed_count", 0) or 0)
+
+        for scenario_key, raw_target in targets.items():
             scenario = self.scenario_loader.get_scenario(scenario_key)
             if not scenario:
                 if self.logger:
                     self.logger.warning(f"Scenario not found: {scenario_key}")
                 continue
+            target_spec = _normalize_target_spec(raw_target)
+            normalized_targets.append((scenario_key, scenario, target_spec))
+            if using_shared_seed and (not shared_seed_targets or scenario_key in shared_seed_targets):
+                total += shared_seed_count * target_spec["rollouts_per_seed"]
+            else:
+                total += target_spec["seed_count"] * target_spec["rollouts_per_seed"]
 
-            for i in range(count):
-                current += 1
-                if self.logger:
-                    self.logger.info(f"Generating {current}/{total}: {scenario_key}")
+        current = 0
 
-                # Generate single example
-                result = self.generate_single(
-                    scenario_key,
-                    scenario,
-                    max_iterations,
-                    randomize_params,
-                    doc_context
+        if using_shared_seed:
+            shared_scenario_key = str(shared_seed_spec.get("scenario") or "").strip()
+            shared_scenario = self.scenario_loader.get_scenario(shared_scenario_key)
+            if not shared_scenario:
+                raise ValueError(f"Shared seed scenario not found: {shared_scenario_key}")
+
+            applicable_targets = [
+                item
+                for item in normalized_targets
+                if not shared_seed_targets or item[0] in shared_seed_targets
+            ]
+            local_targets = [
+                item
+                for item in normalized_targets
+                if shared_seed_targets and item[0] not in shared_seed_targets
+            ]
+
+            for shared_seed_index in range(shared_seed_count):
+                shared_seed_id = f"{shared_scenario_key}:shared_seed:{shared_seed_index + 1}"
+                shared_seed_bundle = self.prepare_seed_bundle(
+                    scenario_key=shared_scenario_key,
+                    seed_id=shared_seed_id,
+                    scenario=shared_scenario,
+                    randomize_params=randomize_params,
+                    doc_context=doc_context,
                 )
-                results.append(result)
+
+                for scenario_key, scenario, target_spec in applicable_targets:
+                    if target_spec["seed_count"] not in {0, 1} and self.logger:
+                        self.logger.warning(
+                            f"Scenario '{scenario_key}' uses shared seed mode; ignoring seed_count={target_spec['seed_count']} "
+                            "and reusing the pack-global shared seed instead."
+                        )
+
+                    for rollout_index in range(target_spec["rollouts_per_seed"]):
+                        current += 1
+                        if self.logger:
+                            self.logger.info(
+                                f"Generating {current}/{total}: {scenario_key} "
+                                f"(shared seed {shared_seed_index + 1}/{shared_seed_count}, "
+                                f"rollout {rollout_index + 1}/{target_spec['rollouts_per_seed']})"
+                            )
+
+                        result = self.generate_single(
+                            scenario_key,
+                            scenario,
+                            max_iterations,
+                            randomize_params,
+                            doc_context,
+                            seed_bundle=shared_seed_bundle,
+                            rollout_metadata={
+                                "seed_id": shared_seed_id,
+                                "seed_index": shared_seed_index,
+                                "seed_count": shared_seed_count,
+                                "rollout_index": rollout_index,
+                                "rollouts_per_seed": target_spec["rollouts_per_seed"],
+                                "shared_seed_source": shared_scenario_key,
+                                "shared_across_scenarios": True,
+                            },
+                        )
+                        results.append(result)
+                        if on_result is not None:
+                            on_result(result)
+
+            for scenario_key, scenario, target_spec in local_targets:
+                seed_count = target_spec["seed_count"]
+                rollouts_per_seed = target_spec["rollouts_per_seed"]
+
+                for seed_index in range(seed_count):
+                    seed_id = f"{scenario_key}:seed:{seed_index + 1}"
+                    seed_bundle = self.prepare_seed_bundle(
+                        scenario_key=scenario_key,
+                        seed_id=seed_id,
+                        scenario=scenario,
+                        randomize_params=randomize_params,
+                        doc_context=doc_context,
+                    )
+
+                    for rollout_index in range(rollouts_per_seed):
+                        current += 1
+                        if self.logger:
+                            self.logger.info(
+                                f"Generating {current}/{total}: {scenario_key} "
+                                f"(seed {seed_index + 1}/{seed_count}, rollout {rollout_index + 1}/{rollouts_per_seed})"
+                            )
+
+                        result = self.generate_single(
+                            scenario_key,
+                            scenario,
+                            max_iterations,
+                            randomize_params,
+                            doc_context,
+                            seed_bundle=seed_bundle,
+                            rollout_metadata={
+                                "seed_id": seed_id,
+                                "seed_index": seed_index,
+                                "seed_count": seed_count,
+                                "rollout_index": rollout_index,
+                                "rollouts_per_seed": rollouts_per_seed,
+                            },
+                        )
+                        results.append(result)
+                        if on_result is not None:
+                            on_result(result)
+
+            return results
+
+        for scenario_key, scenario, target_spec in normalized_targets:
+            seed_count = target_spec["seed_count"]
+            rollouts_per_seed = target_spec["rollouts_per_seed"]
+
+            for seed_index in range(seed_count):
+                seed_id = f"{scenario_key}:seed:{seed_index + 1}"
+                seed_bundle = self.prepare_seed_bundle(
+                    scenario_key=scenario_key,
+                    seed_id=seed_id,
+                    scenario=scenario,
+                    randomize_params=randomize_params,
+                    doc_context=doc_context,
+                )
+
+                for rollout_index in range(rollouts_per_seed):
+                    current += 1
+                    if self.logger:
+                        self.logger.info(
+                            f"Generating {current}/{total}: {scenario_key} "
+                            f"(seed {seed_index + 1}/{seed_count}, rollout {rollout_index + 1}/{rollouts_per_seed})"
+                        )
+
+                    result = self.generate_single(
+                        scenario_key,
+                        scenario,
+                        max_iterations,
+                        randomize_params,
+                        doc_context,
+                        seed_bundle=seed_bundle,
+                        rollout_metadata={
+                            "seed_id": seed_id,
+                            "seed_index": seed_index,
+                            "seed_count": seed_count,
+                            "rollout_index": rollout_index,
+                            "rollouts_per_seed": rollouts_per_seed,
+                        },
+                    )
+                    results.append(result)
+                    if on_result is not None:
+                        on_result(result)
 
         return results
+
+    def prepare_seed_bundle(
+        self,
+        *,
+        scenario_key: Optional[str] = None,
+        seed_id: Optional[str] = None,
+        scenario: Dict[str, Any],
+        randomize_params: bool,
+        doc_context: Optional[DocFile] = None,
+    ) -> Dict[str, Any]:
+        """Prepare a reusable environment/system-context seed for one or more rollouts."""
+        prompts = scenario.get("prompts", {})
+        template_vars = {}
+        if doc_context:
+            template_vars["doc_content"] = doc_context.content
+            template_vars["doc_path"] = doc_context.path
+
+        def render_prompt(prompt: str) -> str:
+            result = prompt
+            for key, value in template_vars.items():
+                result = result.replace(f"{{{key}}}", value)
+            return result
+
+        environment_mode = self._resolve_environment_mode(scenario)
+        generated_environment = {}
+        stage_reviews: Dict[str, Any] = {}
+        seed_stage_failures: List[str] = []
+        if environment_mode in {"generated", "hybrid"}:
+            generation_cfg = scenario.get("environment_generation") or {}
+            trace_label = ":".join(
+                part for part in [scenario_key, "environment_generation", seed_id] if part
+            ) or "environment_generation"
+            if scenario_key:
+                self._log_stage(
+                    scenario_key,
+                    "environment_generation",
+                    "start",
+                    extra=f"seed_id={seed_id}" if seed_id else "seed_prepare",
+                )
+            generated_environment = self._generate_environment_spec(
+                scenario=scenario,
+                render_prompt=render_prompt,
+                randomize_params=randomize_params,
+                trace_label=trace_label,
+            )
+            review = self._run_stage_review(
+                stage_name="environment_generation",
+                stage_config=generation_cfg,
+                scenario_key=scenario_key or seed_id or "environment_generation",
+                scenario=scenario,
+                task_context={},
+                payload=self._build_environment_generation_review_payload(
+                    generated_environment=generated_environment,
+                    seed_id=seed_id,
+                ),
+            )
+            if review is not None:
+                stage_reviews["environment_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True):
+                    seed_stage_failures.append("environment_generation")
+            if scenario_key:
+                self._log_stage(
+                    scenario_key,
+                    "environment_generation",
+                    "done",
+                    extra=(
+                        f"seed_id={seed_id} keys={sorted(generated_environment.keys())}"
+                        if generated_environment
+                        else f"seed_id={seed_id} empty"
+                    ) if seed_id else (
+                        f"keys={sorted(generated_environment.keys())}" if generated_environment else "empty"
+                    ),
+                )
+        if generated_environment:
+            template_vars["environment_json"] = json.dumps(generated_environment, indent=2)
+
+        base_environment_config = scenario.get("environment")
+        generated_environment_config = (
+            generated_environment.get("environment") if environment_mode in {"generated", "hybrid"} else None
+        )
+        resolved_environment_config = _deep_merge_dicts(
+            base_environment_config,
+            generated_environment_config,
+        )
+        resolved_system_context = _deep_merge_dicts(
+            scenario.get("system_context"),
+            generated_environment.get("system_context"),
+        )
+        resolved_task_context = _make_json_safe(
+            _deep_merge_dicts(
+                scenario.get("task_context"),
+                generated_environment.get("task_context"),
+            )
+        )
+        return {
+            "environment_mode": environment_mode,
+            "generated_environment": generated_environment,
+            "resolved_environment_config": resolved_environment_config,
+            "resolved_system_context": resolved_system_context,
+            "resolved_task_context": resolved_task_context,
+            "template_vars": template_vars,
+            "prompts": prompts,
+            "stage_reviews": stage_reviews,
+            "stage_failures": seed_stage_failures,
+        }
 
     def generate_single(
         self,
@@ -190,7 +460,9 @@ class SynthChatGenerator:
         scenario: Dict,
         max_iterations: int,
         randomize_params: bool,
-        doc_context: Optional[DocFile] = None
+        doc_context: Optional[DocFile] = None,
+        seed_bundle: Optional[Dict[str, Any]] = None,
+        rollout_metadata: Optional[Dict[str, Any]] = None,
     ) -> GenerationResult:
         """
         Generate a single example through stage-by-stage pipeline.
@@ -231,34 +503,95 @@ class SynthChatGenerator:
         example = {"conversations": []}
         stage_failures = []
         total_iterations = 0
-        environment_mode = self._resolve_environment_mode(scenario)
-        generated_environment = {}
-        if environment_mode in {"generated", "hybrid"}:
-            self._log_stage(scenario_key, "environment_generation", "start")
-            generated_environment = self._generate_environment_spec(
-                scenario=scenario,
-                render_prompt=render_prompt,
-                randomize_params=randomize_params,
-                trace_label=f"{scenario_key}:environment_generation",
+        stage_reviews: Dict[str, Any] = {}
+        if seed_bundle is not None:
+            environment_mode = seed_bundle.get("environment_mode", self._resolve_environment_mode(scenario))
+            generated_environment = deepcopy(seed_bundle.get("generated_environment") or {})
+            resolved_environment_config = _deep_merge_dicts(
+                deepcopy(seed_bundle.get("resolved_environment_config")),
+                scenario.get("environment"),
             )
-            self._log_stage(
-                scenario_key,
-                "environment_generation",
-                "done",
-                extra=f"keys={sorted(generated_environment.keys())}" if generated_environment else "empty",
+            resolved_system_context = _deep_merge_dicts(
+                deepcopy(seed_bundle.get("resolved_system_context")),
+                scenario.get("system_context"),
             )
-        if generated_environment:
-            template_vars["environment_json"] = json.dumps(generated_environment, indent=2)
+            resolved_task_context = _deep_merge_dicts(
+                deepcopy(seed_bundle.get("resolved_task_context")),
+                scenario.get("task_context"),
+            )
+            for key, value in (seed_bundle.get("template_vars") or {}).items():
+                template_vars[key] = value
+            stage_reviews.update(deepcopy(seed_bundle.get("stage_reviews") or {}))
+            stage_failures.extend(list(seed_bundle.get("stage_failures") or []))
+        else:
+            environment_mode = self._resolve_environment_mode(scenario)
+            generated_environment = {}
+            if environment_mode in {"generated", "hybrid"}:
+                self._log_stage(scenario_key, "environment_generation", "start")
+                generation_cfg = scenario.get("environment_generation") or {}
+                generated_environment = self._generate_environment_spec(
+                    scenario=scenario,
+                    render_prompt=render_prompt,
+                    randomize_params=randomize_params,
+                    trace_label=f"{scenario_key}:environment_generation",
+                )
+                review = self._run_stage_review(
+                    stage_name="environment_generation",
+                    stage_config=generation_cfg,
+                    scenario_key=scenario_key,
+                    scenario=scenario,
+                    task_context={},
+                    payload=self._build_environment_generation_review_payload(
+                        generated_environment=generated_environment,
+                    ),
+                )
+                if review is not None:
+                    stage_reviews["environment_generation"] = review
+                    if review.get("passed") is False and review.get("enforce", True):
+                        stage_failures.append("environment_generation")
+                self._log_stage(
+                    scenario_key,
+                    "environment_generation",
+                    "done",
+                    extra=f"keys={sorted(generated_environment.keys())}" if generated_environment else "empty",
+                )
+            if generated_environment:
+                template_vars["environment_json"] = json.dumps(generated_environment, indent=2)
 
-        base_environment_config = scenario.get("environment") if environment_mode in {"provided", "hybrid"} else None
-        generated_environment_config = generated_environment.get("environment") if environment_mode in {"generated", "hybrid"} else None
-        resolved_environment_config = _deep_merge_dicts(
-            base_environment_config,
-            generated_environment_config,
+            base_environment_config = scenario.get("environment")
+            generated_environment_config = (
+                generated_environment.get("environment") if environment_mode in {"generated", "hybrid"} else None
+            )
+            resolved_environment_config = _deep_merge_dicts(
+                base_environment_config,
+                generated_environment_config,
+            )
+            resolved_system_context = _deep_merge_dicts(
+                scenario.get("system_context"),
+                generated_environment.get("system_context"),
+            )
+            resolved_task_context = _deep_merge_dicts(
+                scenario.get("task_context"),
+                generated_environment.get("task_context"),
+            )
+
+        derived_task_spec = derive_task_spec(
+            scenario_key=scenario_key,
+            scenario=scenario,
+            environment_config=resolved_environment_config or {},
+            existing_task_context=resolved_task_context,
         )
-        resolved_system_context = _deep_merge_dicts(
-            scenario.get("system_context"),
-            generated_environment.get("system_context"),
+        resolved_task_context = _make_json_safe(derived_task_spec.task_context)
+        template_vars.update(_task_context_template_vars(resolved_task_context))
+        resolved_environment_config = _render_template_object(
+            resolved_environment_config,
+            template_vars,
+            resolved_task_context,
+        )
+        resolved_system_context = _render_template_object(
+            resolved_system_context,
+            template_vars,
+            resolved_task_context,
         )
 
         # Stage 1: Assistant's system prompt
@@ -277,6 +610,24 @@ class SynthChatGenerator:
                 "role": "system",
                 "content": system_content
             })
+            review = self._run_stage_review(
+                stage_name="system_generation",
+                stage_config=scenario.get("system_generation"),
+                scenario_key=scenario_key,
+                scenario=scenario,
+                task_context=resolved_task_context or {},
+                payload={
+                    "text": system_content,
+                    "system_text": system_content,
+                    "generated_environment": generated_environment,
+                    "system_context": resolved_system_context or {},
+                    "environment_config": resolved_environment_config or {},
+                },
+            )
+            if review is not None:
+                stage_reviews["system_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True):
+                    stage_failures.append("system_generation")
 
         elif assistant_system_prompt:
             # New style: assistant_system in prompts (static template with vars)
@@ -285,6 +636,24 @@ class SynthChatGenerator:
                 "role": "system",
                 "content": system_content
             })
+            review = self._run_stage_review(
+                stage_name="system_generation",
+                stage_config=scenario.get("system_generation"),
+                scenario_key=scenario_key,
+                scenario=scenario,
+                task_context=resolved_task_context or {},
+                payload={
+                    "text": system_content,
+                    "system_text": system_content,
+                    "generated_environment": generated_environment,
+                    "system_context": resolved_system_context or {},
+                    "environment_config": resolved_environment_config or {},
+                },
+            )
+            if review is not None:
+                stage_reviews["system_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True):
+                    stage_failures.append("system_generation")
 
         elif system_enabled and isinstance(system_enabled, bool):
             # Legacy: generate system prompt from "system" prompt
@@ -302,6 +671,24 @@ class SynthChatGenerator:
                     "role": "system",
                     "content": system_content
                 })
+                review = self._run_stage_review(
+                    stage_name="system_generation",
+                    stage_config=scenario.get("system_generation"),
+                    scenario_key=scenario_key,
+                    scenario=scenario,
+                    task_context=resolved_task_context or {},
+                    payload={
+                        "text": system_content,
+                        "system_text": system_content,
+                        "generated_environment": generated_environment,
+                        "system_context": resolved_system_context or {},
+                        "environment_config": resolved_environment_config or {},
+                    },
+                )
+                if review is not None:
+                    stage_reviews["system_generation"] = review
+                    if review.get("passed") is False and review.get("enforce", True):
+                        stage_failures.append("system_generation")
 
                 # Validate/improve system stage (config-driven)
                 system_rubrics = scenario_rubrics.get("system_prompt", [])
@@ -327,6 +714,45 @@ class SynthChatGenerator:
                     "role": "system",
                     "content": system_content
                 })
+                review = self._run_stage_review(
+                    stage_name="system_generation",
+                    stage_config=scenario.get("system_generation"),
+                    scenario_key=scenario_key,
+                    scenario=scenario,
+                    task_context=resolved_task_context or {},
+                    payload={
+                        "text": system_content,
+                        "system_text": system_content,
+                        "generated_environment": generated_environment,
+                        "system_context": resolved_system_context or {},
+                        "environment_config": resolved_environment_config or {},
+                    },
+                )
+                if review is not None:
+                    stage_reviews["system_generation"] = review
+                    if review.get("passed") is False and review.get("enforce", True):
+                        stage_failures.append("system_generation")
+
+        system_message = next((msg for msg in example["conversations"] if msg.get("role") == "system"), None)
+        if system_message is not None:
+            review = self._run_stage_review(
+                stage_name="system_generation",
+                stage_config=scenario.get("system_generation"),
+                scenario_key=scenario_key,
+                scenario=scenario,
+                task_context=resolved_task_context or {},
+                payload={
+                    "text": system_message.get("content") or "",
+                    "system_text": system_message.get("content") or "",
+                    "generated_environment": generated_environment,
+                    "system_context": resolved_system_context or {},
+                    "environment_config": resolved_environment_config or {},
+                },
+            )
+            if review is not None:
+                stage_reviews["system_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True) and "system_generation" not in stage_failures:
+                    stage_failures.append("system_generation")
 
         # Stage 2: User request
         # Check for user_system (persona) to guide user generation
@@ -344,13 +770,20 @@ class SynthChatGenerator:
         existing_context = self._build_user_context(example)
         if existing_context:
             user_context_parts.append(existing_context)
+        user_context_parts.append(
+            "Return only a natural user request in plain text. Do not output JSON, tool calls, code fences, parameter blobs, or internal instructions."
+        )
+        user_context_parts.extend(_user_generation_style_instructions(scenario))
 
         user_context = "\n\n".join(user_context_parts)
+        user_stage_cfg = scenario.get("user_generation") if isinstance(scenario.get("user_generation"), dict) else {}
         self._log_stage(scenario_key, "user", "start")
         user_content = self._call_llm(
             f"{user_context}\n\n{user_prompt}",
             randomize_params,
             trace_label=f"{scenario_key}:user",
+            llm_clients=self._get_stage_llm_clients(user_stage_cfg),
+            max_retries=int(user_stage_cfg.get("max_retries", 3) or 3),
         )
         self._log_stage(scenario_key, "user", "done", extra=f"chars={len(user_content)}")
 
@@ -358,6 +791,23 @@ class SynthChatGenerator:
             "role": "user",
             "content": user_content
         })
+        review = self._run_stage_review(
+            stage_name="user_generation",
+            stage_config=scenario.get("user_generation"),
+            scenario_key=scenario_key,
+            scenario=scenario,
+            task_context=resolved_task_context or {},
+            payload={
+                "text": user_content,
+                "user_text": user_content,
+                "task_context": resolved_task_context or {},
+                "allowed_tools": _resolve_allowed_tool_names(
+                    scenario=scenario,
+                    tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
+                ),
+            },
+        )
+        _apply_stage_review_result(stage_failures, stage_reviews, "user_generation", review)
 
         # Validate/improve user stage (config-driven)
         user_rubrics = scenario_rubrics.get("user", [])
@@ -373,6 +823,29 @@ class SynthChatGenerator:
             if not passed:
                 stage_failures.append("user")
 
+        latest_user_message = next(
+            (msg for msg in reversed(example["conversations"]) if msg.get("role") == "user"),
+            None,
+        )
+        if latest_user_message is not None:
+            review = self._run_stage_review(
+                stage_name="user_generation",
+                stage_config=scenario.get("user_generation"),
+                scenario_key=scenario_key,
+                scenario=scenario,
+                task_context=resolved_task_context or {},
+                payload={
+                    "text": latest_user_message.get("content") or "",
+                    "user_text": latest_user_message.get("content") or "",
+                    "task_context": resolved_task_context or {},
+                    "allowed_tools": _resolve_allowed_tool_names(
+                        scenario=scenario,
+                        tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
+                    ),
+                },
+            )
+            _apply_stage_review_result(stage_failures, stage_reviews, "user_generation", review)
+
         # Stage 3: Thinking (if rubrics.thinking specified)
         thinking_rubrics = scenario_rubrics.get("thinking", [])
         thinking_content = None
@@ -387,6 +860,8 @@ class SynthChatGenerator:
                     f"{thinking_context}\n\n{thinking_prompt}",
                     randomize_params,
                     trace_label=f"{scenario_key}:thinking",
+                    llm_clients=self._get_stage_llm_clients(scenario.get("thinking_generation")),
+                    max_retries=int(((scenario.get("thinking_generation") or {}).get("max_retries", 3)) or 3),
                 )
                 self._log_stage(
                     scenario_key,
@@ -413,31 +888,77 @@ class SynthChatGenerator:
 
         # Stage 4: Assistant response (text or tool)
         assistant_prompt = render_prompt(prompts.get("assistant", ""))
-        assistant_context = self._build_assistant_context(example, scenario)
-
-        # Include thinking in context if it was generated
-        if thinking_content:
-            assistant_context = f"{assistant_context}\n\nYour thinking:\n{thinking_content}"
-
-        self._log_stage(scenario_key, "assistant", "start")
-        assistant_content = self._generate_assistant_response(
-            scenario=scenario,
-            assistant_context=assistant_context,
-            assistant_prompt=assistant_prompt,
-            randomize_params=randomize_params,
-            trace_label=f"{scenario_key}:assistant",
+        loop_cfg = (
+            resolved_environment_config.get("loop")
+            if isinstance(resolved_environment_config, dict) and isinstance(resolved_environment_config.get("loop"), dict)
+            else {}
         )
-        self._log_stage(scenario_key, "assistant", "done", extra=f"chars={len(assistant_content)}")
+        use_agentic_loop = bool(
+            self.environment_validator is not None
+            and run_environment_episode is not None
+            and validate_assistant_response is not None
+            and loop_cfg.get("enabled")
+        )
 
-        # Parse assistant response for tool calls
-        assistant_msg = self._parse_assistant_response(assistant_content, scenario)
+        if use_agentic_loop:
+            assistant_msg, example, environment_trace = self._generate_agentic_episode(
+                scenario_key=scenario_key,
+                scenario=scenario,
+                example=example,
+                assistant_prompt=assistant_prompt,
+                randomize_params=randomize_params,
+                resolved_system_context=resolved_system_context or {},
+                resolved_environment_config=resolved_environment_config or {},
+                resolved_task_context=resolved_task_context or {},
+                hard_requirements=derived_task_spec.hard_requirements,
+                quality_rubric=derived_task_spec.quality_rubric,
+                thinking_content=thinking_content,
+                stage_failures=stage_failures,
+            )
+        else:
+            assistant_context = self._build_assistant_context(example, scenario)
 
-        # If thinking was generated separately, prepend it to content
-        if thinking_content and assistant_msg.get("tool_calls"):
-            # For tool calls, thinking goes in content field
-            assistant_msg["content"] = f"<thinking>{thinking_content}</thinking>"
+            # Include thinking in context if it was generated
+            if thinking_content:
+                assistant_context = f"{assistant_context}\n\nYour thinking:\n{thinking_content}"
 
-        example["conversations"].append(assistant_msg)
+            self._log_stage(scenario_key, "assistant", "start")
+            assistant_content = self._generate_assistant_response(
+                scenario=scenario,
+                system_context=resolved_system_context or {},
+                assistant_context=assistant_context,
+                assistant_prompt=assistant_prompt,
+                randomize_params=randomize_params,
+                trace_label=f"{scenario_key}:assistant",
+            )
+            self._log_stage(scenario_key, "assistant", "done", extra=f"chars={len(assistant_content)}")
+
+            # Parse assistant response for tool calls
+            assistant_msg = self._parse_assistant_response(assistant_content, scenario)
+
+            # If thinking was generated separately, prepend it to content
+            if thinking_content and assistant_msg.get("tool_calls"):
+                # For tool calls, thinking goes in content field
+                assistant_msg["content"] = f"<thinking>{thinking_content}</thinking>"
+
+            example["conversations"].append(assistant_msg)
+            review = self._run_stage_review(
+                stage_name="assistant_generation",
+                stage_config=scenario.get("assistant_generation"),
+                scenario_key=scenario_key,
+                scenario=scenario,
+                task_context=resolved_task_context or {},
+                payload={
+                    "assistant_response": assistant_msg,
+                    "assistant_response_json": json.dumps(_make_json_safe(assistant_msg), ensure_ascii=False, indent=2),
+                    "text": self._stringify_assistant_message(assistant_msg),
+                    "task_context": resolved_task_context or {},
+                },
+            )
+            if review is not None:
+                stage_reviews["assistant_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True):
+                    stage_failures.append("assistant_generation")
 
         # Validate/improve response stage (config-driven)
         response_rubrics = scenario_rubrics.get("response", [])
@@ -454,8 +975,8 @@ class SynthChatGenerator:
                 stage_failures.append("response")
 
         # Add metadata
-        environment_trace = None
-        if self.environment_validator is not None:
+        environment_trace = locals().get("environment_trace")
+        if self.environment_validator is not None and environment_trace is None:
             try:
                 system_prompt_text = ""
                 for msg in example["conversations"]:
@@ -489,12 +1010,60 @@ class SynthChatGenerator:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "environment_mode": environment_mode,
         }
+        if rollout_metadata:
+            example["metadata"]["environment_seed"] = dict(rollout_metadata)
         if generated_environment:
             example["metadata"]["generated_environment"] = generated_environment
+        if resolved_environment_config:
+            example["metadata"]["resolved_environment_config"] = _make_json_safe(
+                resolved_environment_config
+            )
+        if resolved_task_context:
+            example["metadata"]["task_context"] = resolved_task_context
+        if derived_task_spec.hard_requirements:
+            example["metadata"]["hard_requirements"] = derived_task_spec.hard_requirements
+        if derived_task_spec.quality_rubric:
+            example["metadata"]["quality_rubric"] = derived_task_spec.quality_rubric
+        if derived_task_spec.derivation_summary:
+            example["metadata"]["derivation_summary"] = derived_task_spec.derivation_summary
         if environment_trace is not None:
             example["metadata"]["environment"] = environment_trace
+            if isinstance(environment_trace.get("judge_trace"), list):
+                example["metadata"]["judge"] = {
+                    "in_loop": True,
+                    "trace": environment_trace.get("judge_trace", []),
+                    "feedback_visible_to_model": bool(
+                        ((scenario.get("judge") or {}).get("in_loop") or {}).get("feedback_visible_to_model", False)
+                    ),
+                }
+        final_review = self._run_stage_review(
+            stage_name="final",
+            stage_config=scenario.get("final_judge"),
+            scenario_key=scenario_key,
+            scenario=scenario,
+            task_context=resolved_task_context or {},
+            payload={
+                "user_text": user_content,
+                "assistant_response": assistant_msg,
+                "assistant_response_json": json.dumps(_make_json_safe(assistant_msg), ensure_ascii=False, indent=2),
+                "environment_result": environment_trace or {},
+                "environment_passed": bool((environment_trace or {}).get("passed")) if environment_trace is not None else None,
+                "final_text_required": (environment_trace or {}).get("final_text_required") if isinstance(environment_trace, dict) else None,
+                "final_text_satisfied": (environment_trace or {}).get("final_text_satisfied") if isinstance(environment_trace, dict) else None,
+                "conversation_trace": example.get("conversation_trace") or [],
+                "task_context": resolved_task_context or {},
+                "hard_requirements": derived_task_spec.hard_requirements,
+                "quality_rubric": derived_task_spec.quality_rubric,
+            },
+        )
+        if final_review is not None:
+            stage_reviews["final"] = final_review
+            if final_review.get("passed") is False and final_review.get("enforce", True):
+                stage_failures.append("final")
         if doc_context:
             example["metadata"]["source_doc"] = doc_context.path
+        if stage_reviews:
+            example["metadata"]["stage_reviews"] = stage_reviews
         example["metadata"]["labels"] = self._build_metadata_labels(
             scenario_key=scenario_key,
             scenario=scenario,
@@ -511,6 +1080,483 @@ class SynthChatGenerator:
             success=len(stage_failures) == 0,
             stage_failures=stage_failures
         )
+
+    def _run_stage_review(
+        self,
+        *,
+        stage_name: str,
+        stage_config: Optional[Dict[str, Any]],
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        task_context: Dict[str, Any],
+        payload: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(stage_config, dict):
+            return None
+
+        gates_cfg = stage_config.get("gates") if isinstance(stage_config.get("gates"), list) else []
+        judge_cfg = stage_config.get("judge") if isinstance(stage_config.get("judge"), dict) else {}
+        if not gates_cfg and not judge_cfg:
+            return None
+
+        review: Dict[str, Any] = {
+            "stage": stage_name,
+            "enforce": bool(stage_config.get("enforce", True)),
+            "passed": True,
+            "gates": [],
+            "judge": None,
+        }
+
+        gate_results = run_stage_gates(gates_cfg, payload)
+        if gate_results:
+            review["gates"] = [result.to_dict() for result in gate_results]
+            if any(not result.passed for result in gate_results):
+                review["passed"] = False
+            if self.logger:
+                failed = sum(1 for result in gate_results if not result.passed)
+                self.logger.info(f"[{scenario_key}] {stage_name} gates done (failed={failed}/{len(gate_results)})")
+
+        judge_result = self._run_configured_stage_judge(
+            stage_name=stage_name,
+            judge_config=judge_cfg,
+            scenario_key=scenario_key,
+            scenario=scenario,
+            task_context=task_context,
+            payload=payload,
+        )
+        if judge_result is not None:
+            review["judge"] = judge_result
+            if not judge_result.get("passed", True):
+                review["passed"] = False
+            min_quality_score = judge_cfg.get("min_quality_score")
+            if min_quality_score is not None:
+                score = judge_result.get("score")
+                if score is None or float(score) < float(min_quality_score):
+                    review["passed"] = False
+                    review["judge"]["below_min_quality_score"] = True
+            if self.logger:
+                self.logger.info(
+                    f"[{scenario_key}] {stage_name} judge done "
+                    f"(passed={judge_result.get('passed')} score={judge_result.get('score')})"
+                )
+
+        return review
+
+    def _build_environment_generation_review_payload(
+        self,
+        *,
+        generated_environment: Dict[str, Any],
+        seed_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        environment = generated_environment.get("environment") if isinstance(generated_environment, dict) else {}
+        fixture_snapshot = {}
+        if isinstance(environment, dict):
+            try:
+                fixture = _merged_fixture_from_config(environment)
+                fixture_snapshot = {
+                    "directories": list(fixture.directories),
+                    "files": [
+                        {"path": path, "content": content}
+                        for path, content in fixture.files.items()
+                    ],
+                }
+            except Exception as exc:
+                fixture_snapshot = {"error": str(exc)}
+        payload = {
+            "value": {
+                "environment": {
+                    "fixture": fixture_snapshot,
+                    "assertions": list(environment.get("assertions") or []) if isinstance(environment, dict) else [],
+                },
+                "system_context": generated_environment.get("system_context") if isinstance(generated_environment, dict) else {},
+                "task_context": generated_environment.get("task_context") if isinstance(generated_environment, dict) else {},
+            },
+            "generated_environment": generated_environment,
+        }
+        if seed_id:
+            payload["seed_id"] = seed_id
+        return payload
+
+    def _get_stage_llm_clients(self, stage_config: Optional[Dict[str, Any]]) -> List[Any]:
+        if not isinstance(stage_config, dict):
+            return [self.llm_client]
+
+        client_chain: List[Any] = []
+        primary_spec = self._normalize_stage_llm_spec(stage_config)
+        if primary_spec is None:
+            client_chain.append(self.llm_client)
+        else:
+            client_chain.append(self._get_or_create_llm_client(primary_spec))
+
+        fallback_specs = stage_config.get("fallback_models")
+        if isinstance(fallback_specs, list):
+            for raw_spec in fallback_specs:
+                spec = self._normalize_stage_llm_spec(raw_spec)
+                if spec is None:
+                    continue
+                client = self._get_or_create_llm_client(spec)
+                if all(client is not existing for existing in client_chain):
+                    client_chain.append(client)
+        return client_chain
+
+    def _normalize_stage_llm_spec(self, value: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(value, str):
+            model = value.strip()
+            return {"model": model} if model else None
+        if not isinstance(value, dict):
+            return None
+
+        model = str(value.get("model") or "").strip()
+        provider = str(value.get("provider") or "").strip().lower()
+        provider_routing = value.get("provider_routing")
+        timeout_seconds = value.get("timeout_seconds")
+
+        has_override = bool(model or provider or provider_routing is not None or timeout_seconds is not None)
+        if not has_override:
+            return None
+
+        spec: Dict[str, Any] = {}
+        if model:
+            spec["model"] = model
+        if provider:
+            spec["provider"] = provider
+        if provider_routing is not None:
+            spec["provider_routing"] = provider_routing
+        if timeout_seconds is not None:
+            spec["timeout_seconds"] = timeout_seconds
+        return spec
+
+    def _get_or_create_llm_client(self, spec: Dict[str, Any]):
+        base_provider = str(getattr(self.llm_client, "provider_name", "openrouter") or "openrouter").strip().lower()
+        base_model = str(getattr(self.llm_client, "model_name", "") or "").strip()
+        base_provider_routing = deepcopy(getattr(self.llm_client, "provider", None))
+        base_timeout_seconds = getattr(self.llm_client, "timeout_seconds", None)
+
+        provider = str(spec.get("provider") or base_provider).strip().lower()
+        model = str(spec.get("model") or base_model).strip()
+        provider_routing = deepcopy(spec.get("provider_routing", base_provider_routing))
+        timeout_seconds = spec.get("timeout_seconds", base_timeout_seconds)
+
+        cache_key = (
+            provider,
+            model,
+            json.dumps(provider_routing, sort_keys=True) if provider_routing is not None else "",
+            str(timeout_seconds) if timeout_seconds is not None else "",
+        )
+        cached = self._llm_client_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if provider == base_provider and model == base_model:
+            same_routing = provider_routing == base_provider_routing
+            same_timeout = (
+                timeout_seconds == base_timeout_seconds
+                or (timeout_seconds is None and base_timeout_seconds is None)
+            )
+            if same_routing and same_timeout:
+                self._llm_client_cache[cache_key] = self.llm_client
+                return self.llm_client
+
+        config_defaults = {
+            "provider": provider,
+            "model": model,
+        }
+        if provider_routing is not None:
+            config_defaults["provider_routing"] = provider_routing
+        if timeout_seconds is not None:
+            config_defaults["timeout_seconds"] = timeout_seconds
+
+        client = create_client(
+            provider=provider,
+            model=model,
+            config_defaults=config_defaults,
+        )
+        self._llm_client_cache[cache_key] = client
+        return client
+
+    def _run_configured_stage_judge(
+        self,
+        *,
+        stage_name: str,
+        judge_config: Optional[Dict[str, Any]],
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        task_context: Dict[str, Any],
+        payload: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(judge_config, dict) or not bool(judge_config.get("enabled")):
+            return None
+        prompt_template = str(judge_config.get("prompt") or "").strip()
+        if not prompt_template:
+            return None
+
+        judge = ConfigurableStageJudge(
+            llm_client=self.llm_client,
+            llm_clients=self._get_stage_llm_clients(judge_config),
+            prompt_template=prompt_template,
+            system_prompt=judge_config.get("system"),
+            output_schema=judge_config.get("output_schema"),
+            temperature=float(judge_config.get("temperature", 0.2) or 0.2),
+            max_tokens=judge_config.get("max_tokens"),
+            max_retries=int(judge_config.get("max_retries", 3) or 3),
+        )
+        template_vars = self._build_stage_judge_template_vars(
+            stage_name=stage_name,
+            scenario_key=scenario_key,
+            scenario=scenario,
+            task_context=task_context,
+            payload=payload,
+        )
+        return judge.judge(template_vars).to_dict()
+
+    def _build_stage_judge_template_vars(
+        self,
+        *,
+        stage_name: str,
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        task_context: Dict[str, Any],
+        payload: Dict[str, Any],
+    ) -> Dict[str, str]:
+        safe_payload = _make_json_safe(payload or {})
+        safe_scenario = _make_json_safe(scenario or {})
+        safe_task_context = _make_json_safe(task_context or {})
+        return {
+            "stage_name": stage_name,
+            "scenario_key": scenario_key,
+            "scenario_json": json.dumps(safe_scenario, ensure_ascii=False, indent=2),
+            "task_context_json": json.dumps(safe_task_context, ensure_ascii=False, indent=2),
+            "payload_json": json.dumps(safe_payload, ensure_ascii=False, indent=2),
+            "value_json": json.dumps(safe_payload.get("value"), ensure_ascii=False, indent=2),
+            "text": str(safe_payload.get("text") or ""),
+            "system_text": str(safe_payload.get("system_text") or ""),
+            "user_text": str(safe_payload.get("user_text") or ""),
+            "assistant_response_json": (
+                safe_payload.get("assistant_response_json")
+                if isinstance(safe_payload.get("assistant_response_json"), str)
+                else json.dumps(safe_payload.get("assistant_response"), ensure_ascii=False, indent=2)
+            ),
+            "environment_result_json": json.dumps(safe_payload.get("environment_result") or {}, ensure_ascii=False, indent=2),
+            "conversation_trace_json": json.dumps(safe_payload.get("conversation_trace") or [], ensure_ascii=False, indent=2),
+            "hard_requirements_json": json.dumps(safe_payload.get("hard_requirements") or [], ensure_ascii=False, indent=2),
+            "quality_rubric_json": json.dumps(safe_payload.get("quality_rubric") or [], ensure_ascii=False, indent=2),
+        }
+
+    def _generate_agentic_episode(
+        self,
+        *,
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        example: Dict[str, Any],
+        assistant_prompt: str,
+        randomize_params: bool,
+        resolved_system_context: Dict[str, Any],
+        resolved_environment_config: Dict[str, Any],
+        resolved_task_context: Dict[str, Any],
+        hard_requirements: List[Dict[str, Any]],
+        quality_rubric: List[str],
+        thinking_content: Optional[str],
+        stage_failures: List[str],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
+        """Generate a multi-turn agentic rollout using the shared episode runner."""
+        loop_cfg = resolved_environment_config.get("loop") if isinstance(resolved_environment_config, dict) else {}
+        max_turns = int(loop_cfg.get("max_turns", 6) or 6)
+        max_tool_steps = int(loop_cfg.get("max_tool_steps", resolved_environment_config.get("max_steps", 0)) or 0)
+        stop_on_text_response = bool(loop_cfg.get("stop_on_text_response", True))
+        stop_on_environment_pass = bool(loop_cfg.get("stop_on_environment_pass", False))
+        require_final_text_after_pass = bool(
+            loop_cfg.get("require_final_text_after_pass", loop_cfg.get("require_final_text", False))
+        )
+        final_text_prompt = loop_cfg.get("final_text_prompt")
+        continue_on_execution_error = bool(
+            loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
+        )
+        stuck_repeat_limit = int(loop_cfg.get("stuck_repeat_limit", 2) or 2)
+        no_progress_window = int(loop_cfg.get("no_progress_window", 3) or 3)
+        tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
+        judge_cfg = scenario.get("judge") if isinstance(scenario.get("judge"), dict) else {}
+        in_loop_judge_cfg = judge_cfg.get("in_loop") if isinstance(judge_cfg.get("in_loop"), dict) else {}
+        judge_feedback_visible_to_model = bool(in_loop_judge_cfg.get("feedback_visible_to_model", False))
+        judge_stop_on_hard_failure = bool(in_loop_judge_cfg.get("stop_on_hard_failure", False))
+        turn_judge = self._build_turn_judge(
+            scenario_key=scenario_key,
+            scenario=scenario,
+            assistant_prompt=assistant_prompt,
+            system_context=resolved_system_context,
+            task_context=resolved_task_context,
+            hard_requirements=hard_requirements,
+            quality_rubric=quality_rubric,
+            judge_config=in_loop_judge_cfg,
+        )
+
+        system_prompt_text = ""
+        for msg in example["conversations"]:
+            if msg.get("role") == "system":
+                system_prompt_text = msg.get("content") or ""
+                break
+
+        session = self.environment_validator.start_session(
+            system_prompt=system_prompt_text,
+            environment_config=resolved_environment_config,
+        )
+        try:
+            self._log_stage(scenario_key, "assistant_loop", "start")
+            episode = run_environment_episode(
+                initial_messages=example["conversations"],
+                session=session,
+                respond=lambda messages, turn_index: self._synthchat_loop_response(
+                    scenario=scenario,
+                    system_context=resolved_system_context,
+                    messages=messages,
+                    assistant_prompt=assistant_prompt,
+                    randomize_params=randomize_params,
+                    scenario_key=scenario_key,
+                    turn_index=turn_index,
+                    thinking_content=thinking_content,
+                ),
+                validate=self._validate_agentic_synthchat_response,
+                max_turns=max_turns,
+                max_tool_steps=max_tool_steps,
+                stop_on_text_response=stop_on_text_response,
+                stop_on_environment_pass=stop_on_environment_pass,
+                continue_on_execution_error=continue_on_execution_error,
+                stuck_repeat_limit=stuck_repeat_limit,
+                no_progress_window=no_progress_window,
+                tool_result_format=tool_result_format,
+                expected_tools=scenario.get("expected_tools") or ([scenario.get("tool")] if scenario.get("tool") else None),
+                require_expected_tools=bool(resolved_environment_config.get("require_expected_tools")),
+                stringify_response=self._stringify_assistant_message,
+                judge_turn=turn_judge,
+                judge_feedback_visible_to_model=judge_feedback_visible_to_model,
+                judge_stop_on_hard_failure=judge_stop_on_hard_failure,
+                require_final_text_after_pass=require_final_text_after_pass,
+                final_text_prompt=final_text_prompt,
+            )
+        finally:
+            session.close()
+
+        if not episode.environment_result.passed:
+            stage_failures.append("environment")
+
+        if episode.stop_reason in {
+            "schema_validation_failed",
+            "final_text_tool_calls_emitted",
+            "final_text_missing",
+            "judge_hard_failure",
+            "judge_requested_stop",
+        }:
+            stage_failures.append("response")
+
+        example["conversations"] = [dict(message) for message in episode.messages]
+        example["conversation_trace"] = episode.conversation_trace
+        final_response = episode.final_response if isinstance(episode.final_response, dict) else {"role": "assistant", "content": str(episode.final_response or "")}
+        self._log_stage(
+            scenario_key,
+            "assistant_loop",
+            "done",
+            extra=f"turns={len(episode.turns)} stop={episode.stop_reason}",
+        )
+        environment_trace = episode.environment_result.to_dict()
+        environment_trace["final_text_required"] = episode.final_text_required
+        environment_trace["final_text_satisfied"] = episode.final_text_satisfied
+        return final_response, example, {
+            **environment_trace,
+            "judge_trace": list(episode.judge_trace),
+        }
+
+    def _build_turn_judge(
+        self,
+        *,
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        assistant_prompt: str,
+        system_context: Dict[str, Any],
+        task_context: Dict[str, Any],
+        hard_requirements: List[Dict[str, Any]],
+        quality_rubric: List[str],
+        judge_config: Dict[str, Any],
+    ):
+        if AgenticTurnJudge is None or not judge_config:
+            return None
+        if not bool(judge_config.get("enabled")):
+            return None
+        prompt_template = str(judge_config.get("prompt") or "").strip()
+        if not prompt_template:
+            return None
+        judge = AgenticTurnJudge(
+            llm_client=self.llm_client,
+            llm_clients=self._get_stage_llm_clients(judge_config),
+            prompt_template=prompt_template,
+            system_prompt=judge_config.get("system"),
+            output_schema=judge_config.get("output_schema"),
+            temperature=float(judge_config.get("temperature", 0.2) or 0.2),
+            max_tokens=judge_config.get("max_tokens"),
+            max_retries=int(judge_config.get("max_retries", 3) or 3),
+        )
+
+        def run_judge(turn_payload: Dict[str, Any]):
+            template_vars = self._build_turn_judge_template_vars(
+                scenario_key=scenario_key,
+                scenario=scenario,
+                assistant_prompt=assistant_prompt,
+                system_context=system_context,
+                task_context=task_context,
+                hard_requirements=hard_requirements,
+                quality_rubric=quality_rubric,
+                turn_payload=turn_payload,
+            )
+            result = judge.judge(template_vars)
+            if self.logger:
+                self.logger.info(
+                    f"[{scenario_key}] turn_judge done "
+                    f"(turn={turn_payload.get('turn_index')} passed={result.passed} "
+                    f"hard_failure={result.hard_failure} stop={result.should_stop})"
+                )
+            return result
+
+        return run_judge
+
+    def _build_turn_judge_template_vars(
+        self,
+        *,
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        assistant_prompt: str,
+        system_context: Dict[str, Any],
+        task_context: Dict[str, Any],
+        hard_requirements: List[Dict[str, Any]],
+        quality_rubric: List[str],
+        turn_payload: Dict[str, Any],
+    ) -> Dict[str, str]:
+        messages = turn_payload.get("messages") or []
+        safe_scenario = _make_json_safe(scenario or {})
+        safe_system_context = _make_json_safe(system_context or {})
+        safe_task_context = _make_json_safe(task_context or {})
+        safe_hard_requirements = _make_json_safe(hard_requirements or [])
+        safe_quality_rubric = _make_json_safe(quality_rubric or [])
+        safe_turn_payload = _make_json_safe(turn_payload or {})
+        latest_user = ""
+        for message in reversed(messages):
+            if str(message.get("role", "")).strip() == "user":
+                latest_user = str(message.get("content") or "")
+                break
+        return {
+            "scenario_key": scenario_key,
+            "assistant_prompt": assistant_prompt,
+            "scenario_json": json.dumps(safe_scenario, ensure_ascii=False, indent=2),
+            "system_context_json": json.dumps(safe_system_context, ensure_ascii=False, indent=2),
+            "task_context_json": json.dumps(safe_task_context, ensure_ascii=False, indent=2),
+            "hard_requirements_json": json.dumps(safe_hard_requirements, ensure_ascii=False, indent=2),
+            "quality_rubric_json": json.dumps(safe_quality_rubric, ensure_ascii=False, indent=2),
+            "messages_json": json.dumps(_make_json_safe(messages), ensure_ascii=False, indent=2),
+            "latest_user_message": latest_user,
+            "assistant_response_json": json.dumps(safe_turn_payload.get("response_message"), ensure_ascii=False, indent=2),
+            "validation_json": json.dumps(safe_turn_payload.get("validation") or {}, ensure_ascii=False, indent=2),
+            "environment_step_json": json.dumps(safe_turn_payload.get("environment_step") or {}, ensure_ascii=False, indent=2),
+            "environment_preview_json": json.dumps(safe_turn_payload.get("environment_preview") or {}, ensure_ascii=False, indent=2),
+            "tool_feedback": str(safe_turn_payload.get("tool_feedback") or ""),
+            "turn_index": str(turn_payload.get("turn_index") or ""),
+        }
 
     def _resolve_environment_mode(self, scenario: Dict[str, Any]) -> str:
         """Resolve how environment data should be sourced for this scenario."""
@@ -544,14 +1590,19 @@ class SynthChatGenerator:
         user_prompt = render_prompt(str(environment_prompt))
         system_prompt = render_prompt(str(environment_system)) if environment_system else None
         schema_name = str(generation_cfg.get("schema") or "").strip()
+        max_tokens = generation_cfg.get("max_tokens")
 
         if schema_name == "canonical_environment":
+            user_prompt = _build_canonical_environment_generation_prompt(user_prompt)
             parsed = self._call_llm_structured(
                 prompt=user_prompt,
                 schema=_build_canonical_environment_schema(),
                 randomize=randomize_params,
                 system_prompt=system_prompt,
                 trace_label=trace_label,
+                max_tokens=max_tokens,
+                llm_clients=self._get_stage_llm_clients(generation_cfg),
+                max_retries=int(generation_cfg.get("max_retries", 3) or 3),
             )
         else:
             prompt_parts = []
@@ -562,6 +1613,9 @@ class SynthChatGenerator:
                 "\n\n".join(part for part in prompt_parts if part),
                 randomize_params,
                 trace_label=trace_label,
+                max_tokens=max_tokens,
+                llm_clients=self._get_stage_llm_clients(generation_cfg),
+                max_retries=int(generation_cfg.get("max_retries", 3) or 3),
             )
             parsed = self._parse_json_object(raw)
 
@@ -573,6 +1627,7 @@ class SynthChatGenerator:
         self,
         *,
         scenario: Dict[str, Any],
+        system_context: Dict[str, Any],
         assistant_context: str,
         assistant_prompt: str,
         randomize_params: bool,
@@ -584,18 +1639,48 @@ class SynthChatGenerator:
             generation_cfg = {}
 
         schema_name = str(generation_cfg.get("schema") or "").strip()
+        max_tokens = generation_cfg.get("max_tokens")
+        llm_clients = self._get_stage_llm_clients(generation_cfg)
+        max_retries = int(generation_cfg.get("max_retries", 3) or 3)
         prompt = f"{assistant_context}\n\n{assistant_prompt}"
         if schema_name == "use_tools_response":
             wrapper_name = _tool_wrapper_name(self.environment_validator.tool_schema if self.environment_validator else None)
+            allowed_tools = _resolve_allowed_tool_names(
+                scenario=scenario,
+                tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
+            )
+            session_id, workspace_id = _resolve_context_defaults(
+                system_context=system_context,
+            )
+            prompt = _build_use_tools_generation_prompt(
+                base_prompt=prompt,
+                wrapper_name=wrapper_name,
+                allowed_tools=allowed_tools,
+            )
             payload = self._call_llm_structured(
                 prompt=prompt,
-                schema=_build_use_tools_response_schema(wrapper_name=wrapper_name),
+                schema=_build_use_tools_response_schema(
+                    wrapper_name=wrapper_name,
+                    allowed_tools=allowed_tools,
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                ),
                 randomize=randomize_params,
                 trace_label=trace_label,
+                max_tokens=max_tokens,
+                llm_clients=llm_clients,
+                max_retries=max_retries,
             )
             return json.dumps(payload)
 
-        return self._call_llm(prompt, randomize_params, trace_label=trace_label)
+        return self._call_llm(
+            prompt,
+            randomize_params,
+            trace_label=trace_label,
+            max_tokens=max_tokens,
+            llm_clients=llm_clients,
+            max_retries=max_retries,
+        )
 
     def _build_metadata_labels(
         self,
@@ -687,7 +1772,7 @@ class SynthChatGenerator:
             flat_labels.add("failure_type:environment")
         if any(stage in stage_failure_labels for stage in ("response", "thinking")):
             flat_labels.add("failure_type:behavior")
-        if any(stage in stage_failure_labels for stage in ("system_prompt", "user")):
+        if any(stage in stage_failure_labels for stage in ("system_prompt", "user", "system_generation", "user_generation", "assistant_generation", "environment_generation", "final")):
             flat_labels.add("failure_type:generation")
 
         if any(label in issue_labels for label in {"missing_expected_tool", "retrieval_missing"}):
@@ -769,7 +1854,15 @@ class SynthChatGenerator:
             message = f"{message} ({extra})"
         self.logger.info(message)
 
-    def _call_llm(self, prompt: str, randomize: bool = True, trace_label: Optional[str] = None) -> str:
+    def _call_llm(
+        self,
+        prompt: str,
+        randomize: bool = True,
+        trace_label: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        llm_clients: Optional[Sequence[Any]] = None,
+        max_retries: int = 3,
+    ) -> str:
         """
         Call LLM for generation.
 
@@ -783,54 +1876,65 @@ class SynthChatGenerator:
         # Some providers occasionally return null/empty content; retry briefly
         # instead of crashing the whole generation job on a transient response.
         last_error = None
+        resolved_max_tokens = max_tokens
+        if resolved_max_tokens is None:
+            resolved_max_tokens = getattr(self.llm_client, "default_max_tokens", None)
 
-        for attempt in range(1, 4):
-            temperature = random.uniform(0.5, 0.9) if randomize else 0.7
-            started_at = time.monotonic()
-            if self.logger:
-                self.logger.info(
-                    f"LLM chat start [{trace_label or 'unlabeled'}] "
-                    f"attempt={attempt} temp={temperature:.2f}"
-                )
-            try:
-                response = self.llm_client.chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=2048
-                )
-            except Exception as exc:  # pragma: no cover - provider-specific failures
-                last_error = exc
+        client_chain = list(llm_clients or [self.llm_client])
+        for client_index, client in enumerate(client_chain):
+            for attempt in range(1, max(1, int(max_retries or 1)) + 1):
+                temperature = random.uniform(0.5, 0.9) if randomize else 0.7
+                started_at = time.monotonic()
+                if self.logger:
+                    self.logger.info(
+                        f"LLM chat start [{trace_label or 'unlabeled'}] "
+                        f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} temp={temperature:.2f}"
+                    )
+                try:
+                    chat_kwargs = {
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": temperature,
+                    }
+                    if resolved_max_tokens is not None:
+                        chat_kwargs["max_tokens"] = resolved_max_tokens
+                    response = client.chat(**chat_kwargs)
+                except Exception as exc:  # pragma: no cover - provider-specific failures
+                    last_error = exc
+                    if self.logger:
+                        self.logger.warning(
+                            f"LLM chat failed [{trace_label or 'unlabeled'}] "
+                            f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                            f"elapsed={time.monotonic() - started_at:.1f}s error={exc}"
+                        )
+                    continue
+
+                if isinstance(response, str):
+                    if response.strip():
+                        if self.logger:
+                            self.logger.info(
+                                f"LLM chat success [{trace_label or 'unlabeled'}] "
+                                f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                                f"elapsed={time.monotonic() - started_at:.1f}s chars={len(response)}"
+                            )
+                        return response
+                elif response is not None:
+                    response_text = str(response).strip()
+                    if response_text:
+                        if self.logger:
+                            self.logger.info(
+                                f"LLM chat success [{trace_label or 'unlabeled'}] "
+                                f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                                f"elapsed={time.monotonic() - started_at:.1f}s chars={len(response_text)}"
+                            )
+                        return response_text
+
+                last_error = ValueError("LLM returned an empty response")
                 if self.logger:
                     self.logger.warning(
-                        f"LLM chat failed [{trace_label or 'unlabeled'}] "
-                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s error={exc}"
+                        f"LLM chat empty [{trace_label or 'unlabeled'}] "
+                        f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                        f"elapsed={time.monotonic() - started_at:.1f}s"
                     )
-                continue
-
-            if isinstance(response, str):
-                if response.strip():
-                    if self.logger:
-                        self.logger.info(
-                            f"LLM chat success [{trace_label or 'unlabeled'}] "
-                            f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s chars={len(response)}"
-                        )
-                    return response
-            elif response is not None:
-                response_text = str(response).strip()
-                if response_text:
-                    if self.logger:
-                        self.logger.info(
-                            f"LLM chat success [{trace_label or 'unlabeled'}] "
-                            f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s chars={len(response_text)}"
-                        )
-                    return response_text
-
-            last_error = ValueError("LLM returned an empty response")
-            if self.logger:
-                self.logger.warning(
-                    f"LLM chat empty [{trace_label or 'unlabeled'}] "
-                    f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s"
-                )
 
         if last_error is not None:
             raise last_error
@@ -844,6 +1948,9 @@ class SynthChatGenerator:
         randomize: bool = True,
         system_prompt: Optional[str] = None,
         trace_label: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        llm_clients: Optional[Sequence[Any]] = None,
+        max_retries: int = 3,
     ) -> Dict[str, Any]:
         """Call structured output if available, retrying transient empty failures."""
         if not hasattr(self.llm_client, "structured_output"):
@@ -851,6 +1958,8 @@ class SynthChatGenerator:
                 f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
                 randomize=randomize,
                 trace_label=trace_label,
+                llm_clients=llm_clients,
+                max_retries=max_retries,
             )
             parsed = self._parse_json_object(raw)
             if isinstance(parsed, dict):
@@ -858,48 +1967,58 @@ class SynthChatGenerator:
             raise ValueError("Structured generation requested but provider returned non-JSON output")
 
         last_error = None
+        resolved_max_tokens = max_tokens
+        if resolved_max_tokens is None:
+            resolved_max_tokens = getattr(self.llm_client, "default_max_tokens", None)
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        for attempt in range(1, 4):
-            temperature = random.uniform(0.1, 0.4) if randomize else 0.2
-            started_at = time.monotonic()
-            if self.logger:
-                self.logger.info(
-                    f"LLM structured start [{trace_label or schema.get('name', 'unlabeled')}] "
-                    f"attempt={attempt} temp={temperature:.2f}"
-                )
-            try:
-                payload = self.llm_client.structured_output(
-                    messages=messages,
-                    schema=schema,
-                    temperature=temperature,
-                    max_tokens=2048,
-                )
-            except Exception as exc:  # pragma: no cover - provider-specific failures
-                last_error = exc
-                if self.logger:
-                    self.logger.warning(
-                        f"LLM structured failed [{trace_label or schema.get('name', 'unlabeled')}] "
-                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s error={exc}"
-                    )
-                continue
-
-            if isinstance(payload, dict) and payload:
+        client_chain = list(llm_clients or [self.llm_client])
+        for client_index, client in enumerate(client_chain):
+            for attempt in range(1, max(1, int(max_retries or 1)) + 1):
+                temperature = random.uniform(0.1, 0.4) if randomize else 0.2
+                started_at = time.monotonic()
                 if self.logger:
                     self.logger.info(
-                        f"LLM structured success [{trace_label or schema.get('name', 'unlabeled')}] "
-                        f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s keys={sorted(payload.keys())}"
+                        f"LLM structured start [{trace_label or schema.get('name', 'unlabeled')}] "
+                        f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} temp={temperature:.2f}"
                     )
-                return payload
-            last_error = ValueError("LLM returned an empty structured response")
-            if self.logger:
-                self.logger.warning(
-                    f"LLM structured empty [{trace_label or schema.get('name', 'unlabeled')}] "
-                    f"attempt={attempt} elapsed={time.monotonic() - started_at:.1f}s"
-                )
+                try:
+                    structured_kwargs = {
+                        "messages": messages,
+                        "schema": schema,
+                        "temperature": temperature,
+                    }
+                    if resolved_max_tokens is not None:
+                        structured_kwargs["max_tokens"] = resolved_max_tokens
+                    payload = client.structured_output(**structured_kwargs)
+                except Exception as exc:  # pragma: no cover - provider-specific failures
+                    last_error = exc
+                    if self.logger:
+                        self.logger.warning(
+                            f"LLM structured failed [{trace_label or schema.get('name', 'unlabeled')}] "
+                            f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                            f"elapsed={time.monotonic() - started_at:.1f}s error={exc}"
+                        )
+                    continue
+
+                if isinstance(payload, dict) and payload:
+                    if self.logger:
+                        self.logger.info(
+                            f"LLM structured success [{trace_label or schema.get('name', 'unlabeled')}] "
+                            f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                            f"elapsed={time.monotonic() - started_at:.1f}s keys={sorted(payload.keys())}"
+                        )
+                    return payload
+                last_error = ValueError("LLM returned an empty structured response")
+                if self.logger:
+                    self.logger.warning(
+                        f"LLM structured empty [{trace_label or schema.get('name', 'unlabeled')}] "
+                        f"attempt={attempt} client={getattr(client, 'model_name', 'unknown')} "
+                        f"elapsed={time.monotonic() - started_at:.1f}s"
+                    )
 
         if last_error is not None:
             raise last_error
@@ -931,6 +2050,93 @@ class SynthChatGenerator:
                 break
 
         return "\n\n".join(context_parts)
+
+    def _build_loop_assistant_context(self, messages: List[Mapping[str, Any]]) -> str:
+        """Build transcript-aware assistant context for multi-turn rollouts."""
+        parts: List[str] = []
+        for message in messages:
+            role = str(message.get("role", "")).strip() or "unknown"
+            content = message.get("content")
+            if isinstance(content, dict):
+                content_str = json.dumps(content)
+            else:
+                content_str = str(content or "")
+            if not content_str.strip():
+                continue
+            parts.append(f"{role.upper()}:\n{content_str}")
+        return "\n\n".join(parts)
+
+    def _synthchat_loop_response(
+        self,
+        *,
+        scenario: Dict[str, Any],
+        system_context: Dict[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        assistant_prompt: str,
+        randomize_params: bool,
+        scenario_key: str,
+        turn_index: int,
+        thinking_content: Optional[str],
+    ) -> AgenticModelResponse:
+        """Generate one assistant turn for a shared agentic episode."""
+        assistant_context = self._build_loop_assistant_context(list(messages))
+        if thinking_content:
+            assistant_context = f"{assistant_context}\n\nYour prior thinking:\n{thinking_content}"
+
+        trace_label = f"{scenario_key}:assistant_turn_{turn_index}"
+        assistant_content = self._generate_assistant_response(
+            scenario=scenario,
+            system_context=system_context,
+            assistant_context=assistant_context,
+            assistant_prompt=assistant_prompt,
+            randomize_params=randomize_params,
+            trace_label=trace_label,
+        )
+        assistant_msg = self._parse_assistant_response(assistant_content, scenario)
+        if thinking_content and assistant_msg.get("tool_calls"):
+            assistant_msg["content"] = f"<thinking>{thinking_content}</thinking>"
+        return AgenticModelResponse(
+            message=assistant_msg,
+            raw={"message": assistant_msg},
+            latency_s=0.0,
+        )
+
+    def _stringify_assistant_message(self, response: Any) -> str:
+        if isinstance(response, str):
+            return response
+        if isinstance(response, dict):
+            content = response.get("content")
+            tool_calls = response.get("tool_calls") or []
+            parts: List[str] = []
+            if isinstance(content, str) and content.strip():
+                parts.append(content.strip())
+            if tool_calls:
+                parts.append(f"Tool calls: {tool_calls}")
+            return "\n\n".join(parts).strip() or json.dumps(response)
+        return str(response)
+
+    def _validate_agentic_synthchat_response(self, message: Any):
+        """Relax eval-only generator-format checks for synthetic loop rollouts."""
+        result = validate_assistant_response(message, None)
+        filtered_issues = []
+        for issue in result.issues:
+            message_text = str(issue.message)
+            if "does not match generator format" in message_text:
+                continue
+            filtered_issues.append(issue)
+
+        passed = all(str(issue.level).lower() != "error" for issue in filtered_issues)
+        return ValidationResult(
+            passed=passed,
+            issues=[
+                issue
+                if isinstance(issue, ValidatorIssue)
+                else ValidatorIssue(level=getattr(issue, "level", "ERROR"), message=getattr(issue, "message", str(issue)))
+                for issue in filtered_issues
+            ],
+            tool_calls=result.tool_calls,
+            context_validation=None,
+        )
 
     def _parse_assistant_response(self, content: str, scenario: Dict) -> Dict:
         """
@@ -1005,6 +2211,11 @@ class SynthChatGenerator:
 
                     message["tool_calls"] = tool_calls
                     return message
+            if parsed and parsed.get("tool_calls") is None and isinstance(parsed.get("content"), str):
+                return {
+                    "role": "assistant",
+                    "content": parsed.get("content"),
+                }
 
         # Extract thinking block if present
         thinking_match = re.search(r'<thinking>(.*?)</thinking>', content, re.DOTALL)
@@ -1140,7 +2351,37 @@ class SynthChatGenerator:
                 environment["fixture"] = fixture
 
         normalized["environment"] = environment
+        assertions = environment.get("assertions")
+        if isinstance(assertions, list):
+            environment["assertions"] = [self._normalize_generated_assertion(assertion) for assertion in assertions]
         normalized.setdefault("system_context", {})
+        normalized.setdefault("task_context", {})
+        return normalized
+
+    def _normalize_generated_assertion(self, assertion: Any) -> Any:
+        if not isinstance(assertion, dict):
+            return assertion
+
+        normalized = deepcopy(assertion)
+        assertion_type = str(normalized.get("type") or "").strip()
+
+        # Generated environments often use more natural field names than the
+        # validator contract. Normalize those aliases here so environment seeds
+        # stay strict downstream without having to tutor the model in the prompt.
+        if assertion_type in {"file_contains", "file_not_contains"}:
+            if "text" not in normalized and "content" in normalized:
+                normalized["text"] = normalized.pop("content")
+        elif assertion_type == "frontmatter_has_key":
+            if "field" not in normalized and "key" in normalized:
+                normalized["field"] = normalized.pop("key")
+        elif assertion_type in {"frontmatter_field_equals", "frontmatter_field_contains"}:
+            if "field" not in normalized and "key" in normalized:
+                normalized["field"] = normalized.pop("key")
+            if assertion_type == "frontmatter_field_equals" and "value" not in normalized and "content" in normalized:
+                normalized["value"] = normalized.pop("content")
+            if assertion_type == "frontmatter_field_contains" and "text" not in normalized and "content" in normalized:
+                normalized["text"] = normalized.pop("content")
+
         return normalized
 
     def _render_mocked_workspace_system_prompt(
@@ -1234,6 +2475,133 @@ def _deep_merge_dicts(base: Optional[Dict[str, Any]], override: Optional[Dict[st
         else:
             merged[key] = deepcopy(value)
     return merged
+
+
+def _task_context_template_vars(task_context: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    if not isinstance(task_context, dict) or not task_context:
+        return {}
+
+    safe_task_context = _make_json_safe(task_context)
+    template_vars: Dict[str, str] = {
+        "task_context_json": json.dumps(safe_task_context, indent=2),
+    }
+    for key, value in safe_task_context.items():
+        key_str = str(key).strip()
+        if not key_str:
+            continue
+        if isinstance(value, (dict, list)):
+            rendered = json.dumps(value)
+        else:
+            rendered = str(value)
+        template_vars[f"task_{key_str}"] = rendered
+    return template_vars
+
+
+def _user_generation_style_instructions(scenario: Optional[Dict[str, Any]]) -> List[str]:
+    task_family = scenario.get("task_family") if isinstance(scenario, dict) else None
+    if not isinstance(task_family, dict):
+        return []
+    style = task_family.get("user_request_style")
+    if not isinstance(style, dict):
+        return []
+
+    instructions: List[str] = []
+    if style.get("vague_human_request"):
+        instructions.append(
+            "Write like a normal human user, not an operator reading internal paths or system metadata."
+        )
+    if style.get("require_request_form"):
+        instructions.append(
+            "Phrase the text as a request or question to the assistant, not as a status update, report, or completed action."
+        )
+    if style.get("allow_exact_paths") is False:
+        instructions.append(
+            "Do not mention exact file or folder paths in the user request."
+        )
+    if style.get("allow_exact_links") is False:
+        instructions.append(
+            "Do not include literal markdown links or exact linked file paths in the user request."
+        )
+    if style.get("avoid_exact_source_path") or style.get("avoid_exact_target_path"):
+        instructions.append(
+            "Avoid exact filesystem paths unless the scenario explicitly requires them."
+        )
+    if style.get("avoid_exact_source_path"):
+        instructions.append(
+            "Refer to the source file by a natural title, topic, or fuzzy description rather than its exact current path."
+        )
+    if style.get("avoid_exact_target_path"):
+        instructions.append(
+            "Refer to the destination or target location by a human folder description rather than an exact target path."
+        )
+    reference_mode = str(style.get("reference_mode") or "").strip().lower()
+    if reference_mode == "title_only":
+        instructions.append(
+            "Prefer note titles, project names, or topic names over any internal path-like wording."
+        )
+    elif reference_mode == "folder_purpose":
+        instructions.append(
+            "Prefer describing folders by their purpose, such as logs, project notes, or meeting notes, rather than their exact names."
+        )
+    examples = style.get("examples")
+    if isinstance(examples, list):
+        cleaned_examples = [str(item).strip() for item in examples if str(item).strip()]
+        if cleaned_examples:
+            instructions.append("Use the following only as style examples. Do not copy them verbatim.")
+            instructions.extend(f"- {example}" for example in cleaned_examples[:3])
+    return instructions
+
+
+def _apply_stage_review_result(
+    stage_failures: List[str],
+    stage_reviews: Dict[str, Any],
+    stage_name: str,
+    review: Optional[Dict[str, Any]],
+) -> None:
+    if review is None:
+        return
+    stage_reviews[stage_name] = review
+    enforce = review.get("enforce", True)
+    passed = review.get("passed")
+    if passed is False and enforce:
+        if stage_name not in stage_failures:
+            stage_failures.append(stage_name)
+        return
+    if passed is True and stage_name in stage_failures:
+        stage_failures.remove(stage_name)
+
+
+def _render_template_object(value: Any, template_vars: Dict[str, str], task_context: Optional[Dict[str, Any]] = None) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _render_template_object(item, template_vars, task_context)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_render_template_object(item, template_vars, task_context) for item in value]
+    if isinstance(value, str):
+        exact_match = re.fullmatch(r"\{task_([A-Za-z0-9_]+)\}", value.strip())
+        if exact_match and isinstance(task_context, dict):
+            raw_value = task_context.get(exact_match.group(1))
+            if raw_value is not None:
+                return deepcopy(raw_value)
+        rendered = value
+        for key, replacement in template_vars.items():
+            rendered = rendered.replace(f"{{{key}}}", str(replacement))
+        return rendered
+    return deepcopy(value)
+
+
+def _make_json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_make_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_make_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 def _merged_fixture_from_config(environment_config: Optional[Dict[str, Any]]):
@@ -1569,6 +2937,34 @@ def _assertion_schema() -> Dict[str, Any]:
     }
 
 
+def _build_canonical_environment_generation_prompt(base_prompt: str) -> str:
+    """Add a compact in-band contract for canonical environment generation."""
+    contract_lines = [
+        "Return one valid JSON object only.",
+        "Top-level keys allowed: environment, system_context, task_context.",
+        "environment may contain: fixture, assertions, allowed_tools, max_steps, loop, execution.",
+        "fixture may contain: directories, files, notes, local_path, source.",
+        "notes entries may contain: path, frontmatter, body.",
+        "task_context should contain the hidden task anchors used to keep the environment, user request, and assertions aligned.",
+        "Use only these assertion types:",
+        "- path_exists",
+        "- path_not_exists",
+        "- file_contains",
+        "- file_not_contains",
+        "- dir_contains",
+        "- frontmatter_has_key",
+        "- frontmatter_field_equals",
+        "- frontmatter_field_contains",
+        "Do not add unsupported assertion types or extra top-level keys.",
+        "Do not use markdown fences.",
+    ]
+    contract = "\n".join(contract_lines)
+    prompt_text = str(base_prompt or "").strip()
+    if not prompt_text:
+        return contract
+    return f"{contract}\n\nTask:\n{prompt_text}"
+
+
 def _build_canonical_environment_schema() -> Dict[str, Any]:
     scalar = _scalar_schema()
     return {
@@ -1673,12 +3069,49 @@ def _build_canonical_environment_schema() -> Dict[str, Any]:
                 },
                 "additionalProperties": True,
             },
+            "task_context": {
+                "type": "object",
+                "additionalProperties": scalar,
+            },
         },
         "required": ["environment"],
     }
 
 
-def _build_use_tools_response_schema(wrapper_name: str = "useTools") -> Dict[str, Any]:
+def _build_use_tools_response_schema(
+    wrapper_name: str = "useTools",
+    allowed_tools: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    allowed_tools = [tool for tool in (allowed_tools or []) if isinstance(tool, str) and "_" in tool]
+    agent_enum = sorted({tool.split("_", 1)[0] for tool in allowed_tools})
+    tool_enum = sorted({tool.split("_", 1)[1] for tool in allowed_tools})
+
+    context_properties: Dict[str, Any] = {
+        "sessionId": {"type": "string", "minLength": 1},
+        "workspaceId": {"type": "string", "minLength": 1},
+        "memory": {"type": "string", "minLength": 1},
+        "goal": {"type": "string", "minLength": 1},
+    }
+    if session_id:
+        context_properties["sessionId"] = {"const": session_id}
+    if workspace_id:
+        context_properties["workspaceId"] = {"const": workspace_id}
+
+    call_properties: Dict[str, Any] = {
+        "agent": {"type": "string", "minLength": 1},
+        "tool": {"type": "string", "minLength": 1},
+        "params": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    }
+    if agent_enum:
+        call_properties["agent"] = {"enum": agent_enum}
+    if tool_enum:
+        call_properties["tool"] = {"enum": tool_enum}
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -1690,68 +3123,147 @@ def _build_use_tools_response_schema(wrapper_name: str = "useTools") -> Dict[str
                 ]
             },
             "tool_calls": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "id": {"type": "string", "minLength": 1},
-                        "type": {"const": "function"},
-                        "function": {
+                "anyOf": [
+                    {"type": "null"},
+                    {
+                        "type": "array",
+                        "maxItems": 0,
+                    },
+                    {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "items": {
                             "type": "object",
                             "additionalProperties": False,
                             "properties": {
-                                "name": {"const": wrapper_name},
-                                "arguments": {
+                                "id": {"type": "string", "minLength": 1},
+                                "type": {"const": "function"},
+                                "function": {
                                     "type": "object",
                                     "additionalProperties": False,
                                     "properties": {
-                                        "context": {
+                                        "name": {"const": wrapper_name},
+                                        "arguments": {
                                             "type": "object",
-                                            "additionalProperties": True,
+                                            "additionalProperties": False,
                                             "properties": {
-                                                "sessionId": {"type": "string", "minLength": 1},
-                                                "workspaceId": {"type": "string", "minLength": 1},
-                                                "memory": {"type": "string", "minLength": 1},
-                                                "goal": {"type": "string", "minLength": 1},
-                                            },
-                                            "required": ["sessionId", "workspaceId", "memory", "goal"],
-                                        },
-                                        "calls": {
-                                            "type": "array",
-                                            "minItems": 1,
-                                            "items": {
-                                                "type": "object",
-                                                "additionalProperties": False,
-                                                "properties": {
-                                                    "agent": {"type": "string", "minLength": 1},
-                                                    "tool": {"type": "string", "minLength": 1},
-                                                    "params": {
+                                                "context": {
+                                                    "type": "object",
+                                                    "additionalProperties": True,
+                                                    "properties": context_properties,
+                                                    "required": ["sessionId", "workspaceId", "memory", "goal"],
+                                                },
+                                                "calls": {
+                                                    "type": "array",
+                                                    "minItems": 1,
+                                                    "items": {
                                                         "type": "object",
-                                                        "additionalProperties": True,
+                                                        "additionalProperties": False,
+                                                        "properties": call_properties,
+                                                        "required": ["agent", "tool", "params"],
                                                     },
                                                 },
-                                                "required": ["agent", "tool", "params"],
+                                                "strategy": {
+                                                    "type": "string",
+                                                    "enum": ["serial", "parallel"],
+                                                },
                                             },
-                                        },
-                                        "strategy": {
-                                            "type": "string",
-                                            "enum": ["serial", "parallel"],
+                                            "required": ["context", "calls"],
                                         },
                                     },
-                                    "required": ["context", "calls"],
+                                    "required": ["name", "arguments"],
                                 },
                             },
-                            "required": ["name", "arguments"],
+                            "required": ["id", "type", "function"],
                         },
                     },
-                    "required": ["id", "type", "function"],
-                },
+                ]
             },
         },
         "required": ["content", "tool_calls"],
     }
+
+
+def _resolve_allowed_tool_names(
+    *,
+    scenario: Dict[str, Any],
+    tool_schema: Optional[Dict[str, Any]],
+) -> List[str]:
+    configured = []
+    for key in ("expected_tools", "acceptable_tools"):
+        values = scenario.get(key) or []
+        if isinstance(values, list):
+            configured.extend(
+                str(value).strip() for value in values
+                if isinstance(value, str) and str(value).strip() and str(value).strip() != "TEXT_ONLY"
+            )
+    tool_name = str(scenario.get("tool") or "").strip()
+    if tool_name:
+        configured.append(tool_name)
+
+    configured = sorted(dict.fromkeys(configured))
+    if configured:
+        return configured
+
+    if not isinstance(tool_schema, dict):
+        return []
+
+    names: List[str] = []
+    for agent, tools in (tool_schema.get("tools") or {}).items():
+        if not isinstance(tools, list):
+            continue
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            tool_name = str(tool.get("name", "")).strip()
+            if tool_name:
+                names.append(f"{agent}_{tool_name}")
+    return sorted(dict.fromkeys(names))
+
+
+def _resolve_context_defaults(
+    *,
+    system_context: Optional[Dict[str, Any]],
+) -> Tuple[Optional[str], Optional[str]]:
+    if not isinstance(system_context, dict):
+        return None, None
+
+    session_id = system_context.get("session_id")
+    workspace_id = system_context.get("workspace_id")
+    if not workspace_id and isinstance(system_context.get("selected_workspace"), dict):
+        workspace_id = system_context["selected_workspace"].get("id")
+
+    session_id = str(session_id).strip() if isinstance(session_id, str) and str(session_id).strip() else None
+    workspace_id = str(workspace_id).strip() if isinstance(workspace_id, str) and str(workspace_id).strip() else None
+    return session_id, workspace_id
+
+
+def _build_use_tools_generation_prompt(
+    *,
+    base_prompt: str,
+    wrapper_name: str,
+    allowed_tools: List[str],
+) -> str:
+    lines = [
+        "Return a single JSON object only.",
+        "Your job is to either call tools or respond via text.",
+        f"If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'.",
+        "If no tool call is needed, respond with normal text in content and set tool_calls to null or [].",
+        "Inside function.arguments.calls, each item must use this exact shape:",
+        '{"agent": "AgentName", "tool": "toolName", "params": {...}}',
+        "Do not use dotted names like 'contentManager.read' for either agent or tool.",
+        "Do not use nested wrappers like params.tool, params.parameters, or assistant as the agent name.",
+        "Put the real tool arguments directly inside params.",
+        "Use content as null when the response is tool-only.",
+        "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools.",
+    ]
+    if allowed_tools:
+        formatted = ", ".join(allowed_tools)
+        lines.append(f"Allowed concrete tools for this task: {formatted}.")
+    lines.append("")
+    lines.append(base_prompt)
+    return "\n".join(lines)
 
 
 def _clean_path(path: str) -> str:
@@ -1812,3 +3324,61 @@ def _derive_kto_candidate_label(
             return None
         return False
     return None
+
+
+def _normalize_target_spec(raw_target: Any) -> Dict[str, int]:
+    """Normalize target count config into explicit seed/rollout counts."""
+    if isinstance(raw_target, bool):
+        raise ValueError("Boolean target specs are not supported")
+    if isinstance(raw_target, int):
+        if raw_target < 0:
+            raise ValueError("Target counts must be non-negative")
+        return {"seed_count": raw_target, "rollouts_per_seed": 1}
+    if not isinstance(raw_target, dict):
+        raise ValueError(f"Unsupported target spec: {raw_target!r}")
+
+    count = raw_target.get("count")
+    seed_count = raw_target.get("seed_count", count if count is not None else 1)
+    rollouts_per_seed = raw_target.get("rollouts_per_seed", 1)
+
+    seed_count = int(seed_count)
+    rollouts_per_seed = int(rollouts_per_seed)
+    if seed_count < 0 or rollouts_per_seed < 0:
+        raise ValueError("Target specs must use non-negative integers")
+    return {
+        "seed_count": seed_count,
+        "rollouts_per_seed": rollouts_per_seed,
+    }
+
+
+def _extract_shared_seed_spec(targets: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Split special shared-seed config from normal scenario targets."""
+    if not isinstance(targets, dict):
+        raise ValueError("Targets must be a dictionary")
+
+    cleaned_targets = dict(targets)
+    raw_spec = cleaned_targets.pop("_shared_seed", None)
+    if raw_spec is None:
+        return None, cleaned_targets
+    if not isinstance(raw_spec, dict):
+        raise ValueError("_shared_seed must be an object")
+
+    scenario_key = str(raw_spec.get("scenario") or raw_spec.get("scenario_key") or "").strip()
+    if not scenario_key:
+        raise ValueError("_shared_seed requires a 'scenario' key")
+
+    seed_count = int(raw_spec.get("seed_count", 1) or 1)
+    if seed_count < 0:
+        raise ValueError("_shared_seed.seed_count must be non-negative")
+
+    raw_targets = raw_spec.get("targets") or raw_spec.get("scenarios") or []
+    target_keys = [str(item).strip() for item in raw_targets if str(item).strip()]
+
+    return (
+        {
+            "scenario": scenario_key,
+            "seed_count": seed_count,
+            "targets": target_keys,
+        },
+        cleaned_targets,
+    )
