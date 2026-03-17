@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntheticconversations.local/schemas/grpo_projection.schema.json",
+  "title": "GRPO Projection Record",
+  "type": "object",
+  "required": [
+    "prompt",
+    "scenario_id",
+    "scenario_family",
+    "environment_passed",
+    "schema_passed"
+  ],
+  "properties": {
+    "prompt": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "scenario_family": {
+      "type": "string"
+    },
+    "source_example_id": {
+      "type": "string"
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "environment_passed": {
+      "type": "boolean"
+    },
+    "schema_passed": {
+      "type": "boolean"
+    },
+    "score_value": {
+      "type": ["number", "null"]
+    },
+    "score_tier": {
+      "type": ["string", "null"]
+    },
+    "stop_reason": {
+      "type": ["string", "null"]
+    },
+    "tool_call_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failure_labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ground_truth_tool": {
+      "type": ["string", "null"]
+    },
+    "ground_truth_args_json": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

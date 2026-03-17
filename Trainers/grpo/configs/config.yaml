@@ -87,8 +87,10 @@ training:
 dataset:
   dataset_name: null  # Not using HuggingFace
   dataset_file: null
-  # Local dataset - uses same as SFT for now (can split for held-out GSPO)
-  local_file: "../../Datasets/nonthinking_tools_sft_12.28.25.jsonl"
+  # Local projected environment-rollout dataset.
+  # This current smoke projection uses the first successful tool call as
+  # ground truth for the existing args/format reward stack.
+  local_file: "../../Datasets/grpo/vault_shared_seed_dynamic_roles_grpo_20260316.jsonl"
   num_proc: 1
   prompt_column: "prompt"
 

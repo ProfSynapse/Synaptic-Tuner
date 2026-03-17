@@ -283,6 +283,23 @@ This split is intentional:
 - the environment backend (`local` or `e2b`) owns runtime state only
 - scenario YAML decides whether looping is enabled
 
+The same shared episode runner is also used by SynthChat for environment-backed
+agentic rollout generation, so generation and evaluation now share the same
+runtime/session/feedback mechanics.
+
+Patterns:
+
+- keep final environment state as the hard success criterion
+- keep preferred workflows in `scoring.paths`, not hard pass/fail
+- preserve realistic runtime/tool errors and let the model infer recovery
+- stop repeated no-progress episodes as `stuck_*` instead of tutoring the next step
+
+Anti-patterns:
+
+- treating one-shot failures as full workflow negatives when the task is truly multi-turn
+- hiding provider-side structured generation failures behind generic “stalled” debugging
+- letting generated fixture data overwrite loop/runtime config such as `environment.loop`
+
 Use loop modes this way:
 
 - `strict`: fail fast on execution errors; useful for "did it get the workflow right immediately?"

@@ -23,9 +23,9 @@ except ImportError:
     EnvironmentValidator = None
 
 try:
-    from shared.environments.tool_executor import format_tool_results_message
+    from shared.agentic_loop import run_environment_episode
 except ImportError:
-    format_tool_results_message = None
+    run_environment_episode = None
 
 try:
     from .judge_validator import JudgeValidationResult, JudgeValidator
@@ -431,6 +431,10 @@ def _evaluate_case_with_environment_loop(
     stop_on_text_response = bool(loop_cfg.get("stop_on_text_response", True))
     stop_on_environment_pass = bool(loop_cfg.get("stop_on_environment_pass", False))
     require_final_text = bool(loop_cfg.get("require_final_text", False))
+    require_final_text_after_pass = bool(
+        loop_cfg.get("require_final_text_after_pass", require_final_text)
+    )
+    final_text_prompt = loop_cfg.get("final_text_prompt")
     tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
     continue_on_execution_error = bool(
         loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
@@ -439,149 +443,50 @@ def _evaluate_case_with_environment_loop(
     no_progress_window = int(loop_cfg.get("no_progress_window", 3) or 3)
 
     messages = case.chat_messages()
-    conversation_trace = _messages_to_trace(messages)
     session = environment_validator.start_session(
         system_prompt=case.metadata.get("system", ""),
         environment_config=environment_config,
     )
 
-    turn_validators: List[ValidationResult] = []
-    turn_behaviors: List[BehaviorValidationResult] = []
-    final_response = None
-    final_raw = None
-    final_latency = 0.0
-    stop_reason = "max_turns_reached"
-
     try:
-        for turn_index in range(1, max_turns + 1):
-            try:
-                response = client.chat(messages)
-            except Exception as exc:
-                return EvaluationRecord(
-                    case=case,
-                    response_text=None,
-                    validator=None,
-                    latency_s=final_latency or None,
-                    raw_response=final_raw,
-                    error=str(exc),
-                )
-
-            final_latency += response.latency_s
-            final_response = response.message
-            final_raw = response.raw
-            conversation_trace.append(
-                {
-                    "role": "assistant",
-                    "kind": "assistant_response",
-                    "content": _stringify_assistant_response(response.message),
-                    "raw": response.message,
-                    "turn_index": turn_index,
-                }
-            )
-
-            validator_result = validate_assistant_response(response.message, eval_context)
-            turn_validators.append(validator_result)
-            behavior_result = _run_behavior_validation(
-                case,
-                response.message,
-                extracted_tool_names=[tc.name for tc in validator_result.tool_calls],
-            )
-            if behavior_result is not None:
-                turn_behaviors.append(behavior_result)
-
-            if not validator_result.passed:
-                stop_reason = "schema_validation_failed"
-                break
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": _stringify_assistant_response(response.message),
-                }
-            )
-
-            has_tool_calls = bool(validator_result.tool_calls)
-            step = session.execute_response(response.message)
-
-            if max_tool_steps and len(session.executed_tools) > max_tool_steps:
-                stop_reason = "max_tool_steps_exceeded"
-                break
-
-            stuck_reason = _detect_stuck_episode(
-                session.steps,
-                repeat_limit=stuck_repeat_limit,
-                no_progress_window=no_progress_window,
-            )
-            if stuck_reason:
-                stop_reason = stuck_reason
-                break
-
-            if step.hard_error:
-                stop_reason = "environment_execution_failed"
-                break
-
-            environment_preview = session.finalize(
-                expected_tools=None,
-                total_turns=turn_index,
-                stop_reason="preview",
-            )
-            if stop_on_environment_pass and environment_preview.passed:
-                stop_reason = "environment_passed"
-                break
-
-            if has_tool_calls:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": _format_loop_tool_feedback(
-                            executions=step.executed_tools,
-                            issues=step.issues,
-                            format_name=tool_result_format,
-                        ),
-                    }
-                )
-                conversation_trace.append(
-                    {
-                        "role": "user",
-                        "kind": "tool_feedback",
-                        "content": messages[-1]["content"],
-                        "turn_index": turn_index,
-                    }
-                )
-                continue
-
-            if step.recoverable_error and continue_on_execution_error:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": _format_loop_tool_feedback(
-                            executions=step.executed_tools,
-                            issues=step.issues,
-                            format_name=tool_result_format,
-                        ),
-                    }
-                )
-                conversation_trace.append(
-                    {
-                        "role": "user",
-                        "kind": "tool_feedback",
-                        "content": messages[-1]["content"],
-                        "turn_index": turn_index,
-                    }
-                )
-                continue
-
-            if stop_on_text_response:
-                stop_reason = "text_response"
-                break
-
-        environment_result = session.finalize(
-            expected_tools=case.expected_tools if environment_config.get("require_expected_tools") else None,
-            total_turns=len(turn_validators),
-            stop_reason=stop_reason,
+        episode = run_environment_episode(
+            initial_messages=messages,
+            session=session,
+            respond=lambda episode_messages, turn_index: client.chat(episode_messages),
+            validate=lambda message: validate_assistant_response(message, eval_context),
+            max_turns=max_turns,
+            max_tool_steps=max_tool_steps,
+            stop_on_text_response=stop_on_text_response,
+            stop_on_environment_pass=stop_on_environment_pass,
+            continue_on_execution_error=continue_on_execution_error,
+            stuck_repeat_limit=stuck_repeat_limit,
+            no_progress_window=no_progress_window,
+            tool_result_format=tool_result_format,
+            expected_tools=case.expected_tools,
+            require_expected_tools=bool(environment_config.get("require_expected_tools")),
+            stringify_response=_stringify_assistant_response,
+            require_final_text_after_pass=require_final_text_after_pass,
+            final_text_prompt=final_text_prompt,
         )
     finally:
         session.close()
+
+    turn_validators = [turn.validation for turn in episode.turns]
+    turn_behaviors: List[BehaviorValidationResult] = []
+    for turn in episode.turns:
+        behavior_result = _run_behavior_validation(
+            case,
+            turn.response.message,
+            extracted_tool_names=[tc.name for tc in turn.validation.tool_calls],
+        )
+        if behavior_result is not None:
+            turn_behaviors.append(behavior_result)
+
+    final_response = episode.final_response
+    final_raw = episode.final_raw
+    final_latency = episode.total_latency_s
+    environment_result = episode.environment_result
+    conversation_trace = episode.conversation_trace
 
     combined_validator = _combine_validation_results(turn_validators)
     if combined_validator is not None:
@@ -759,17 +664,6 @@ def _stringify_assistant_response(response: Any) -> str:
     return str(response)
 
 
-def _format_loop_tool_feedback(
-    *,
-    executions,
-    issues,
-    format_name: str,
-) -> str:
-    if format_tool_results_message is not None:
-        return format_tool_results_message(executions=executions, issues=issues, format_name=format_name)
-    return "Tool execution results received. Continue the task."
-
-
 def _extract_text_content(response: Any) -> str:
     if isinstance(response, str):
         return response
@@ -780,9 +674,9 @@ def _extract_text_content(response: Any) -> str:
     return ""
 
 
-def _messages_to_trace(messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    trace: List[Dict[str, Any]] = []
-    for index, message in enumerate(messages, start=1):
+def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, Any]]:
+    trace = []
+    for index, message in enumerate(case.chat_messages(), start=1):
         trace.append(
             {
                 "index": index,
@@ -791,47 +685,6 @@ def _messages_to_trace(messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, 
                 "content": message.get("content"),
             }
         )
-    return trace
-
-
-def _detect_stuck_episode(
-    steps,
-    *,
-    repeat_limit: int,
-    no_progress_window: int,
-) -> Optional[str]:
-    if not steps:
-        return None
-
-    repeat_limit = max(int(repeat_limit or 0), 2)
-    no_progress_window = max(int(no_progress_window or 0), 2)
-
-    tail = steps[-repeat_limit:]
-    if len(tail) == repeat_limit:
-        first = tail[0]
-        if (
-            first.issue_signature
-            and all(step.issue_signature == first.issue_signature for step in tail)
-            and all(step.action_signature == first.action_signature for step in tail)
-            and all(not step.state_changed for step in tail)
-            and all(any(issue.level.lower() == "error" for issue in step.issues) for step in tail)
-        ):
-            return "stuck_repeated_failure"
-
-    window = steps[-no_progress_window:]
-    if (
-        len(window) == no_progress_window
-        and all(not step.state_changed for step in window)
-        and all(step.executed_tools for step in window)
-        and any(any(issue.level.lower() == "error" for issue in step.issues) for step in window)
-    ):
-        return "stuck_no_progress"
-
-    return None
-
-
-def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, Any]]:
-    trace = _messages_to_trace(case.chat_messages())
     trace.append(
         {
             "index": len(trace) + 1,

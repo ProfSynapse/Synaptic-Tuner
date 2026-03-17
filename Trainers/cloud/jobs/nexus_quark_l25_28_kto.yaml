@@ -1,0 +1,31 @@
+name: nexus-quark-l25-28-kto
+description: Run KTO from Nexus-Quark-L2.5.28 on the dynamic-role vault KTO dataset.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "a10g-small"
+  timeout_hours: 8
+  labels:
+    task: kto
+    model: Nexus-Quark-L2_5_28
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  env:
+    PYTHONPATH: "{repo_dir}"
+  steps:
+    - "mkdir -p {output_dir}"
+    - "cd {repo_dir}/Trainers/kto && python train_kto.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket toolset-training-artifacts --artifact-prefix runs/hf_jobs/kto/{timestamp}-{commit8} --output-root {output_dir}"
+
+artifacts:
+  bucket: "toolset-training-artifacts"
+  output_dir: "/workspace/outputs"
+  prefix: "runs/hf_jobs/custom/{job_name}/{timestamp}-{commit8}"

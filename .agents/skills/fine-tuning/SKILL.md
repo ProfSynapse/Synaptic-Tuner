@@ -49,6 +49,10 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 - Before giving command guidance, check the current parser definitions or run the real command with `--help`.
 - In this repo, the source of truth is the actual CLI surface in `tuner/cli/parser.py`, `tuner/cli/router.py`, and tool-specific `--help` output.
 - This matters for cloud workflows in particular because commands like `cloud-run`, `cloud-gym`, and `cloud-inspect` are evolving.
+- Prefer repo CLIs and checked-in scripts over ad hoc `python - <<'PY'` runs.
+- For SynthChat generation, use `python3 -m SynthChat.run ...`.
+- For training/eval workflows, use `python tuner.py ...`.
+- Only drop to direct Python snippets for tiny local inspection or one-off parsing when there is no existing CLI/script path; do not use bare Python as the default way to launch real jobs or smoke tests.
 
 ## Progressive Reference
 
@@ -64,6 +68,7 @@ Load the specific reference you need:
 | **Training Config** | YAML config deep-dive, all settings explained | `reference/training-config.md` |
 | **Cloud Training** | Provider-native persistence, exact-commit rules, cloud smoke tests | `reference/cloud-training.md` |
 | **Troubleshooting** | OOM errors, training instability, platform issues | `reference/troubleshooting.md` |
+| **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |
 
 ## Common Patterns
 
@@ -175,17 +180,58 @@ HF Jobs-specific cloud behavior:
 - HF custom jobs can be used for non-training workloads like SynthChat generation; keep those jobs config-driven in `Trainers/cloud/jobs/*.yaml` and launch them with `python tuner.py cloud-run --job-config ...`
 - for environment-backed SynthChat pilots, prefer a small remote smoke test first, such as 10 total examples, before scaling counts
 - for environment-backed tool generation, prefer structured output for both generated environments and assistant tool responses so the artifact is executable instead of “tool-shaped prose”
+- for stable KTO/GRPO rollout generation, prefer seeded targets such as `{"seed_count": 3, "rollouts_per_seed": 10}` so multiple attempts are comparable inside the same environment snapshot
+- when you want many different tasks to operate in one common workspace, use a shared-seed targets file with a top-level `_shared_seed` entry; this reuses one environment bundle across multiple scenarios instead of one seed per scenario
 - keep tool wrapper choice config-driven via the canonical tool schema; do not assume `useTools` is a hardcoded invariant in new prompts, validators, or generators
-- for environment-backed gym work, keep multi-step agent loops config-driven via `environment.loop`; the evaluator runner owns the loop, while `local` and `e2b` are interchangeable runtime backends underneath it
+- for environment-backed gym and SynthChat rollout work, keep multi-step agent loops config-driven via `environment.loop`; evaluator and SynthChat now share the same episode runner, while `local` and `e2b` are interchangeable runtime backends underneath it
+- keep eval and synthgen loop behavior distinct:
+  eval should measure autonomous behavior with no in-loop tutoring
+  synthgen may opt into per-turn tutoring via scenario `judge.in_loop`
+- in tutored synthgen, the judge can provide feedback and mark hard failures,
+  but it should not terminate the episode on its own; loop termination must
+  still come from programmatic environment/runtime conditions
+- if the desired interaction should end with a user-facing completion message,
+  use `environment.loop.require_final_text_after_pass: true`; this lets the
+  environment satisfy hard success first, then asks for one final text-only turn
+- for tutored SynthChat rollouts, record the tutor history separately from the
+  environment state. Current artifacts store this under `metadata.judge.trace`
+  while the model-facing runtime/tool feedback still lives in `conversation_trace`
+- for generated environments, keep base runtime config merged in; `environment_mode: generated` should still preserve loop settings, step budgets, and other non-fixture environment controls
+- for SynthChat stage quality, keep judges and deterministic gates config-driven per stage:
+  `environment_generation`, `system_generation`, `user_generation`,
+  `assistant_generation`, and `final_judge` can each declare their own
+  `gates` and `judge` blocks in scenario YAML
+- if a stage should not be judged, omit that stage config; do not hardcode
+  stage-specific judging behavior in Python for one scenario family
 - if the goal is "can it navigate the space and recover", prefer `environment.loop.mode: agentic`; keep final environment state as the hard success criterion and use `scoring.paths` for preferred vs acceptable workflows
 - for environment-backed recovery tests, prefer realistic runtime feedback over evaluator nudges; hydrate errors from the actual sandbox state and let the model infer recovery from `read`, `list`, or `search`
+- log environment generation at the seed level with `scenario_key`, `seed_id`, attempt number, and elapsed time; many apparent “loop stalls” are actually provider failures before the first environment exists
+- for canonical environment generation, use both the structured-output schema and a compact in-band contract for allowed keys/assertions; relying on schema alone is a common provider-side failure mode
 - use `environment.fixture.local_path` when you want the gym to operate on a real folder snapshot instead of inline YAML-authored files
 - repeated identical failed steps with no state change are a loop anti-pattern; stop and inspect `conversation_trace` plus `environment.episode_trace.stop_reason` rather than increasing step budgets
+- for SynthChat rollout artifacts, the primary debugging path is:
+  inspect `conversation_trace` first to see the exact tool-feedback/error message
+  the model received, then compare that to `metadata.environment.issues` and
+  `metadata.environment.episode_trace.stop_reason`
+- use `python3 SynthChat/scripts/inspect_rollout_trace.py --input <artifact.jsonl> --failed-only --limit 3`
+  to pull concrete failed episodes without writing ad hoc parsing code each time
+- if `episode_trace.steps[*]` is sparse, do not assume the feedback was lost;
+  current artifacts may preserve the model-facing intermediary returns only in
+  `conversation_trace`
+- when diagnosing agentic failures, separate:
+  real runtime/tool errors
+  repeated action after success
+  wrong-target updates
+  prompt contamination where the saved `user` message is actually tool JSON
 - the reusable inspection method is:
   compare expected behavior to actual behavior
   inspect parsed tool/action records before raw text when both are present
   group failures by mechanism, such as wrong action selected, acted instead of clarifying, malformed structured output, missing required fields, or behavior-expectation mismatch
 - keep examples project-agnostic; use the saved evaluation record schema to understand the failure shape instead of hardcoding one model, one toolset, or one prompt format
+- for pure SynthChat environment generation, do not hardcode exact target paths,
+  exact target values, or one gold replacement string in scenario YAML unless
+  you are intentionally modeling a fixed provided-environment benchmark; prefer
+  workflow-family configs plus task derivation from the generated filesystem
 
 ## Tips
 
@@ -199,3 +245,4 @@ HF Jobs-specific cloud behavior:
 - `training_lineage.json` tracks full provenance for reproducibility
 - Cloud runs require a clean tracked worktree and a pushed commit; remote jobs clone the exact branch and commit you launched
 - For HF Jobs bucket troubleshooting, load `reference/cloud-training.md`
+- For the canonical environment-backed training flow, load `protocols/environment-backed-alignment-pipeline.md`

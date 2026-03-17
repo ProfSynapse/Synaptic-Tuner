@@ -826,7 +826,6 @@ def main():
 
     # Only create explicit reference model if requested via env var
     # This uses ~8GB extra VRAM but provides more stable KL computation
-    import os
     if os.getenv("USE_EXPLICIT_REF_MODEL", "false").lower() == "true":
         print("\n⚠️  Creating explicit reference model (uses ~8GB extra VRAM)")
         ref_model = create_reference_model(

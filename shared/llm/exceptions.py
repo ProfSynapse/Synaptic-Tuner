@@ -13,7 +13,9 @@ class LLMConnectionError(LLMError):
 
 class LLMResponseError(LLMError):
     """Raised when LLM returns invalid or unexpected response."""
-    pass
+    def __init__(self, message: str, *, raw_response: str | None = None):
+        super().__init__(message)
+        self.raw_response = raw_response
 
 
 class LLMConfigError(LLMError):

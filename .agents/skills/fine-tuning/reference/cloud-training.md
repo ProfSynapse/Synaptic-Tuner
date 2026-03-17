@@ -71,6 +71,21 @@ Recommended first-pass checks:
 - `modal`: inspect the configured Modal Volume path
 - `runpod`: inspect the mounted RunPod Network Volume path
 
+## HF Jobs Hardware Lookup
+
+Use the checked-in helper when you want the live HF Jobs hardware list and hourly pricing instead of guessing from memory:
+
+```bash
+python3 Trainers/scripts/hf_jobs_hardware.py
+python3 Trainers/scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml
+python3 Trainers/scripts/hf_jobs_hardware.py --sort-by vram --min-vram 40
+```
+
+Notes:
+- the script queries `GET https://huggingface.co/api/jobs/hardware`
+- it uses `HF_TOKEN` or `HF_API_KEY` automatically when present
+- `--job-config` highlights the current flavor from a cloud job YAML
+
 ---
 
 ## HF Jobs Bucket and Auth Gotchas

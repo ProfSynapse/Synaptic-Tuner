@@ -235,6 +235,166 @@ def test_multistep_environment_loop_can_stop_when_environment_passes():
     assert record.environment.episode_trace.stop_reason == "environment_passed"
 
 
+def test_multistep_environment_loop_can_require_final_text_after_pass():
+    client = _SequenceClient(
+        [
+            _tool_response(
+                [
+                    {
+                        "agent": "contentManager",
+                        "tool": "write",
+                        "params": {
+                            "path": "Inbox/final.md",
+                            "content": "complete",
+                            "overwrite": True,
+                        },
+                    }
+                ]
+            ),
+            {"content": "Done. I wrote the file.", "tool_calls": None},
+        ],
+        expected_substrings=[
+            [],
+            ["Reply to the user with a brief final text-only response."],
+        ],
+    )
+    case = PromptCase(
+        case_id="loop_final_text_after_pass",
+        question="Write the final file.",
+        metadata={
+            "system": "Loop system prompt",
+            "environment": {
+                "allowed_tools": ["contentManager_write"],
+                "max_steps": 2,
+                "loop": {
+                    "enabled": True,
+                    "max_turns": 3,
+                    "stop_on_environment_pass": True,
+                    "require_final_text_after_pass": True,
+                    "final_text_prompt": "Reply to the user with a brief final text-only response.",
+                },
+                "fixture": {"directories": ["Inbox"]},
+                "assertions": [{"type": "path_exists", "path": "Inbox/final.md"}],
+            }
+        },
+    )
+
+    record = evaluate_cases(
+        [case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.passed is True
+    assert record.environment is not None
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.total_turns == 2
+    assert record.environment.episode_trace.stop_reason == "environment_passed_final_text"
+    assert record.conversation_trace is not None
+    assert any(entry["kind"] == "final_text_request" for entry in record.conversation_trace)
+
+
+def test_multistep_environment_loop_prefers_success_over_tool_budget_on_same_turn():
+    client = _SequenceClient(
+        [
+            _tool_response(
+                [
+                    {
+                        "agent": "contentManager",
+                        "tool": "write",
+                        "params": {
+                            "path": "Inbox/final.md",
+                            "content": "complete",
+                            "overwrite": True,
+                        },
+                    },
+                    {
+                        "agent": "contentManager",
+                        "tool": "read",
+                        "params": {"path": "Inbox/final.md", "startLine": 1},
+                    },
+                ]
+            ),
+            {"content": "Done. I wrote the file.", "tool_calls": None},
+        ],
+        expected_substrings=[
+            [],
+            ["Reply to the user with a brief final text-only response."],
+        ],
+    )
+    case = PromptCase(
+        case_id="loop_success_beats_budget",
+        question="Write the final file.",
+        metadata={
+            "system": "Loop system prompt",
+            "environment": {
+                "allowed_tools": ["contentManager_write", "contentManager_read"],
+                "max_steps": 3,
+                "loop": {
+                    "enabled": True,
+                    "max_turns": 3,
+                    "max_tool_steps": 1,
+                    "stop_on_environment_pass": True,
+                    "require_final_text_after_pass": True,
+                    "final_text_prompt": "Reply to the user with a brief final text-only response.",
+                },
+                "fixture": {"directories": ["Inbox"]},
+                "assertions": [{"type": "path_exists", "path": "Inbox/final.md"}],
+            }
+        },
+    )
+
+    record = evaluate_cases(
+        [case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.passed is True
+    assert record.environment is not None
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.stop_reason == "environment_passed_final_text"
+
+
+def test_multistep_environment_loop_rejects_text_before_completion_when_final_text_required():
+    client = _SequenceClient(
+        [
+            {"content": "Done. I handled it.", "tool_calls": None},
+        ],
+        expected_substrings=[[]],
+    )
+    case = PromptCase(
+        case_id="loop_text_before_completion",
+        question="Write the final file.",
+        metadata={
+            "system": "Loop system prompt",
+            "environment": {
+                "allowed_tools": ["contentManager_write"],
+                "max_steps": 2,
+                "loop": {
+                    "enabled": True,
+                    "max_turns": 2,
+                    "stop_on_text_response": True,
+                    "require_final_text_after_pass": True,
+                },
+                "fixture": {"directories": ["Inbox"]},
+                "assertions": [{"type": "path_exists", "path": "Inbox/final.md"}],
+            }
+        },
+    )
+
+    record = evaluate_cases(
+        [case],
+        client=client,
+        environment_validator=EnvironmentValidator(backend="local"),
+    )[0]
+
+    assert record.passed is False
+    assert record.environment is not None
+    assert record.environment.episode_trace is not None
+    assert record.environment.episode_trace.stop_reason == "text_response_before_completion"
+
+
 def test_agentic_loop_can_recover_after_a_bad_first_step():
     client = _SequenceClient(
         [
