@@ -70,7 +70,7 @@ env_training:
       - "transformers>=4.56.0"
       - "accelerate>=1.6.0"
       - "peft>=0.15.0"
-      - "openenv @ git+https://github.com/meta-pytorch/OpenEnv.git"
+      - "git+https://github.com/meta-pytorch/OpenEnv.git"
 
 rewards:
   success_reward: 1.0
