@@ -10,6 +10,7 @@ Routes top-level commands to their handlers:
   - eval: EvalHandler (model evaluation)
   - synthchat: SynthChatHandler (data generation and improvement)
   - modelops: ModelOpsHandler (run, merge, convert, upload)
+  - ml: MLHandler (traditional ML training - LightGBM, XGBoost, sklearn)
   - status: StatusHandler (system status overview)
   - doctor: DoctorHandler (system diagnostics with recommendations)
   - list: ListHandler (resource discovery)
@@ -44,6 +45,7 @@ def route_command(args: Namespace) -> int:
         eval      -> EvalHandler (model evaluation)
         synthchat -> SynthChatHandler (data generation/improvement)
         modelops  -> ModelOpsHandler (run, merge, convert, upload)
+        ml        -> MLHandler (traditional ML training)
         status    -> StatusHandler (system status overview)
         doctor    -> DoctorHandler (system diagnostics)
         list      -> ListHandler (resource discovery)
@@ -72,6 +74,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.eval_handler import EvalHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
+        from tuner.handlers.ml_handler import MLHandler
         from tuner.handlers.status_handler import StatusHandler
         from tuner.handlers.doctor_handler import DoctorHandler
         from tuner.handlers.list_handler import ListHandler
@@ -103,7 +106,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, eval, synthchat, modelops, status, doctor, list)",
+                "message": "JSON mode requires a command (train, eval, synthchat, modelops, ml, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -124,8 +127,17 @@ def route_command(args: Namespace) -> int:
 
     # Special handling for list command (has subcommand and json_output)
     if command == 'list':
-        list_subcommand = getattr(args, 'list_subcommand', None)
+        list_subcommand = getattr(args, 'subcommand', None)
         handler = ListHandler(subcommand=list_subcommand, output_json=json_mode)
+        return handler.handle()
+
+    # Special handling for ml command (has subcommand and --config)
+    if command == 'ml':
+        ml_sub = getattr(args, 'subcommand', None)
+        # Map the generic subcommand to ml_subcommand for the handler
+        if args is not None:
+            args.ml_subcommand = ml_sub
+        handler = MLHandler(args=args)
         return handler.handle()
 
     # Map commands to handlers
@@ -134,6 +146,7 @@ def route_command(args: Namespace) -> int:
         'eval': EvalHandler,
         'synthchat': SynthChatHandler,
         'modelops': ModelOpsHandler,
+        'ml': MLHandler,
     }
 
     # Execute handler with args
