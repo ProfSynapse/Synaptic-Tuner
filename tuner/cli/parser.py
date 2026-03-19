@@ -10,6 +10,7 @@ The parser defines the top-level command structure:
   - eval: Model evaluation
   - synthchat: Synthetic data generation and improvement
   - modelops: Model operations (run, merge, convert, upload)
+  - ml: Traditional ML training (LightGBM, XGBoost, sklearn)
   - status: System status overview
   - doctor: System diagnostics with recommendations and auto-fix
   - list: Resource discovery (datasets, models, runs, rubrics, scenarios)
@@ -75,6 +76,7 @@ Commands:
   eval        Evaluate a model
   synthchat   Synthetic data generation and improvement
   modelops    Model operations (run, merge, convert, upload)
+  ml          Traditional ML training (LightGBM, XGBoost, sklearn)
   status      System status overview (use --json for structured output)
   doctor      System diagnostics (use --fix to auto-fix issues)
   list        Discover available resources
@@ -99,6 +101,9 @@ Examples:
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
+  python tuner.py ml                   # Interactive ML training
+  python tuner.py ml train --config path/to/config.yaml
+  python tuner.py ml list-configs      # Show available configs
   python tuner.py list models --json   # List models as JSON
 """
     )
@@ -106,17 +111,18 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "status", "doctor", "list"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
-    # List subcommand argument (only used when command is 'list')
+    # Subcommand argument (shared positional for list and ml sub-commands)
+    # When command is 'list': accepts datasets, models, runs, rubrics, scenarios
+    # When command is 'ml': accepts train, list-configs
     parser.add_argument(
-        "list_subcommand",
+        "subcommand",
         nargs="?",
-        choices=["datasets", "models", "runs", "rubrics", "scenarios"],
         default=None,
-        help="Resource type to list (only for 'list' command)"
+        help="Sub-command (e.g., 'datasets' for list, 'train' for ml)"
     )
 
     # Global flags
@@ -141,6 +147,14 @@ Examples:
         help="Auto-fix simple issues (only used with 'doctor' command)"
     )
 
+    # ML-specific flags
+    parser.add_argument(
+        "--config",
+        dest="ml_config",
+        help="Path to ML training config YAML (only used with 'ml train')"
+    )
+
+    # Cloud-specific flags
     parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
     parser.add_argument("--method", choices=["sft", "kto"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym.")

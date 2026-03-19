@@ -118,6 +118,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
+        from tuner.handlers.ml_handler import MLHandler
 
         # Cloud handler is optional (may not have cloud deps)
         try:
@@ -144,6 +145,7 @@ class MainMenuHandler(BaseHandler):
             ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
             ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
             ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
+            ("ml", f"{BOX['bullet']} ML Training - Traditional ML (LightGBM, XGBoost, sklearn)"),
         ]
 
         # Step 4: Create handler instances (pass args for consistency)
@@ -156,6 +158,7 @@ class MainMenuHandler(BaseHandler):
             "cloud-inspect": CloudInspectHandler(args=self.args),
             "synthchat": SynthChatHandler(args=self.args),
             "modelops": ModelOpsHandler(args=self.args),
+            "ml": MLHandler(args=self.args),
         }
         if has_cloud:
             handlers["cloud"] = CloudTrainHandler(args=self.args)

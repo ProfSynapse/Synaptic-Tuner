@@ -23,6 +23,7 @@ from tuner.handlers.main_menu_handler import MainMenuHandler
 from tuner.handlers.synthchat_handler import SynthChatHandler
 from tuner.handlers.status_handler import StatusHandler
 from tuner.handlers.doctor_handler import DoctorHandler
+from tuner.handlers.ml_handler import MLHandler
 
 __all__ = [
     "TrainHandler",
@@ -33,4 +34,5 @@ __all__ = [
     "SynthChatHandler",
     "StatusHandler",
     "DoctorHandler",
+    "MLHandler",
 ]

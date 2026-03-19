@@ -1,0 +1,32 @@
+# Trainers/ml/configs/templates/regression.yaml
+# Minimal regression config — LightGBM on tabular data
+# Usage: python -m Trainers.ml.train --config Trainers/ml/configs/templates/regression.yaml
+
+task:
+  type: regression
+  name: my_regressor
+  target_column: target
+  eval_metric: rmse
+
+data:
+  train_path: Datasets/ml/my_data.csv
+  test_size: 0.2
+  stratify: false
+
+features:
+  numeric:
+    columns: [feature_1, feature_2, feature_3]
+    imputer: median
+    scaler: standard
+
+algorithm:
+  name: lightgbm
+  params:
+    n_estimators: 500
+    learning_rate: 0.05
+
+evaluation:
+  metrics: [rmse, mae, r2]
+
+output:
+  dir: Trainers/ml/ml_output
