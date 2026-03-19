@@ -6,7 +6,7 @@ allowed-tools: Read, Bash, Write, Grep, Glob
 
 # Fine-Tuning Pipeline
 
-Train language models with SFT (supervised), KTO (preference), and GRPO (reward optimization) on NVIDIA RTX 3090.
+Train language models with SFT (supervised), KTO (preference), and GRPO (reward optimization) on NVIDIA RTX 3090 or supported cloud providers.
 
 ## Quick Reference
 
@@ -51,6 +51,7 @@ Load the specific reference you need:
 | **Model Presets** | Choosing models, VRAM planning, LoRA settings | `reference/model-presets.md` |
 | **Dataset Formats** | Preparing datasets, format requirements per method | `reference/dataset-formats.md` |
 | **Training Config** | YAML config deep-dive, all settings explained | `reference/training-config.md` |
+| **Cloud Training** | Provider-native persistence, exact-commit rules, cloud smoke tests | `reference/cloud-training.md` |
 | **Troubleshooting** | OOM errors, training instability, platform issues | `reference/troubleshooting.md` |
 
 ## Common Patterns
@@ -79,16 +80,25 @@ python train_grpo.py
 python train_sft.py --model-size 7b --wandb --wandb-project my-project
 ```
 
+**Cloud smoke test:**
+```bash
+python tuner.py cloud
+# Choose provider + method after confirming the working tree is clean and pushed
+```
+
 ## Environment Variables
 
 ```bash
 HF_TOKEN=hf_...                       # HuggingFace (gated models + uploads)
 WANDB_API_KEY=...                     # Weights & Biases (optional)
+MODAL_TOKEN_ID=...                    # Modal cloud auth (optional)
+MODAL_TOKEN_SECRET=...                # Modal cloud auth (optional)
+RUNPOD_API_KEY=...                    # RunPod cloud auth (optional)
 ```
 
 ## Output Structure
 
-All trainers produce timestamped run directories:
+Local trainers produce timestamped run directories:
 ```
 {method}_output_rtx3090/YYYYMMDD_HHMMSS/
 ├── checkpoints/           # Training checkpoints (last 3 kept)
@@ -96,6 +106,23 @@ All trainers produce timestamped run directories:
 ├── final_model/           # Final LoRA adapters
 └── training_lineage.json  # Complete training provenance
 ```
+
+Cloud runs use the canonical provider-native layout:
+```
+runs/{provider}/{method}/{timestamp}-{shortsha}/
+├── checkpoints/
+├── logs/
+├── final_model/
+├── training_lineage.json
+└── manifest.json
+```
+
+Provider-native storage defaults:
+- `hf_jobs` → Hugging Face Bucket
+- `modal` → Modal Volume
+- `runpod` → RunPod Network Volume
+
+Optional final-model publishing to Hugging Face Hub is off by default and only uploads `final_model`.
 
 ## Tips
 
@@ -107,3 +134,4 @@ All trainers produce timestamped run directories:
 - Monitor `training_latest.jsonl` for real-time metrics
 - Keep VRAM headroom — reduce `--batch-size` if OOM
 - `training_lineage.json` tracks full provenance for reproducibility
+- Cloud runs require a clean tracked worktree and a pushed commit; remote jobs clone the exact branch and commit you launched

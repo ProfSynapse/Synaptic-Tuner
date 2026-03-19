@@ -374,15 +374,26 @@ After agent reviews completed:
 - Synthesize findings and recommendations in `docs/review/` (note agreements and conflicts)
 - Execute `/PACT:pin-memory`
 
+<!-- SESSION_START -->
+## Current Session
+<!-- Auto-managed by session_init hook. Overwritten each session. -->
+- Resume: `claude --resume a5318eed-9691-4bea-a18f-b6b7f619072c`
+- Team: `pact-a5318eed`
+- Started: 2026-03-14 17:30:01 UTC
+<!-- SESSION_END -->
+
 ## Retrieved Context
 <!-- Auto-managed by pact-memory skill. Last 5 retrieved memories shown. -->
 
 ## Working Memory
-<!-- Auto-managed by pact-memory skill. Last 7 memories shown. Full history searchable via pact-memory skill. -->
+<!-- Auto-managed by pact-memory skill. Last 3 memories shown. Full history searchable via pact-memory skill. -->
 
-
-Quick reference for Claude Code when working in this repository.
-
+### 2026-03-14 17:50
+**Context**: Working on the Synthetic Conversations project (ML pipeline for LLM fine-tuning with SFT/KTO training). PR #62 was merged to fix cloud training dependency management across three backends: HuggingFace Jobs, RunPod, and Modal. The fix addressed a fragmented dependency specification problem where each cloud backend was independently managing its own Python package lists, leading to environment drift and incompatible torch/unsloth versions at runtime. The work was done on a feature branch and merged to main. The codebase uses unsloth for efficient fine-tuning and targets CUDA 12.8 with PyTorch 2.9.0.
+**Goal**: Establish a single source of truth for cloud training dependencies across all three backends (HF Jobs, RunPod, Modal), eliminating environment drift and ensuring reproducible training runs in cloud environments.
+**Decisions**: Use unsloth/unsloth Docker image (digest-pinned) for HF Jobs and RunPod backends, Single source of truth: project deps in cloud_config.yaml, backends read via load_project_deps() in base_cloud.py, Modal uses unsloth[cu128-torch270]==2025.7.8, trl==0.19.1, transformers==4.54.0 via pinned pip
+**Lessons**: PyTorch Docker images (e.g., pytorch/pytorch base images) do not include git by default — this causes failures when pip tries to install packages from git URLs or when any training code clones repos at startup. Always verify git availability or use images that bundle it (like unsloth/unsloth)., Unsloth pip install without version pinning pulls incompatible torch versions as transitive dependencies, overwriting the torch already in the environment. Always pin unsloth with its CUDA/torch variant suffix (e.g., unsloth[cu128-torch270]==2025.7.8) to prevent torch downgrade., RunPod was silently failing due to an old CUDA 11.8 image — the mismatch between the image CUDA version and the code assumptions was a hidden failure point that only surfaced at runtime. Always verify the CUDA version of the base image matches the CUDA version in dependency specs., Using a digest-pinned Docker image (unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update) for HF Jobs and RunPod provides reproducibility: the same image hash guarantees the same environment regardless of tag mutation., A hybrid strategy makes sense when backends have different constraints: Docker image for HF Jobs and RunPod (where container control is available), pinned pip packages for Modal (which has its own image building system).
+**Memory ID**: 1c172f3cec2054a15055ac0056cfd04f
 ---
 
 ## AI Assistant Quick Reference
@@ -1195,3 +1206,15 @@ touch Datasets/test_write && rm Datasets/test_write
 **Files**: `SynthChat/run.py`, `SynthChat/generator.py`
 
 ---
+
+### [2026-03-14] HF Jobs Buckets/Auth Runtime Lessons
+**Context**: Debugged Hugging Face Jobs cloud training for the fine-tuning pipeline after runs made it through setup and training initialization but failed during bucket sync, local dashboard polling, and auth propagation. Failures included `RepositoryNotFoundError` against `/api/models/buckets/...`, `sync_bucket` import errors, Unsloth/Transformers breakage after upgrading `huggingface_hub`, strict `/whoami-v2` rate limits, `ensurepip` failure in container venv setup, and `Authorization: Bearer ` from blank token handling.
+**Goal**: Make HF Jobs training stable end-to-end with provider-native artifact persistence, local dashboard parity, and no manual Hugging Face bucket setup for the user.
+**Decisions**: Resolve/create the bucket once before launch and normalize bare bucket names to the canonical namespaced bucket ID, remove the `HfFileSystem` fallback for bucket sync, keep the main Unsloth runtime on the image-compatible `huggingface_hub` version, isolate Buckets-only Hub functionality in a helper path installed with `pip --target`, pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets, normalize blank auth values to unset, cache bucket resolution to reduce identity calls, and slow HF Jobs dashboard polling to reduce rate-limit pressure.
+**Lessons**: HF Jobs runs the exact pushed commit; remote `HEAD` output is the fastest way to confirm whether you are debugging the right code. Hugging Face Buckets support and Unsloth/Transformers compatibility can require different `huggingface_hub` versions, so bucket sync must stay isolated from the training interpreter. Never assume HF Jobs injects the local `HF_TOKEN` into the container; pass it explicitly. Empty `HF_TOKEN` or `HF_API_KEY` values are worse than missing values because they generate `Authorization: Bearer ` and fail in `httpx` before the request reaches HF. Repeated bucket creation or `whoami-v2` checks during steady-state sync are enough to hit HF rate limits; resolve once, reuse the canonical bucket ID, and keep polling conservative. Local cloud TUI parity for HF Jobs depends on syncing training JSONL logs into the bucket during the run and replaying them locally.
+
+### [2026-03-15] HF Jobs Cloud Evaluation Final Runtime Lessons
+**Context**: Continued debugging the new HF Jobs cloud evaluation flow after the initial orchestration worked but the runtime repeatedly failed: module import path issues when invoking the helper as a script, false `Scenarios: -` display for preset-driven runs, vLLM V0/V1 engine mismatch, tokenizer/runtime skew in the Unsloth image, and finally missing preset scenario files from stale `eval_run.yaml` entries.
+**Goal**: Make cloud evaluation practical and repeatable for bucketed HF Jobs runs, and add a one-command train-then-evaluate path for the common workflow.
+**Decisions**: Launch the eval helper with `python -m Evaluator.cloud_hf_job`, add a local cloud-eval dashboard adapter/replayer using structured JSONL progress events, add `cloud-pipeline` to train on HF Jobs and then evaluate the exact resulting run automatically, switch the HF Jobs eval runtime from vLLM to direct Unsloth inference, keep bucket sync on the isolated helper subprocess path, fix `eval_run.yaml` presets to point at `tool_prompts.yaml` and `behavior_prompts.yaml`, and standardize the saved eval artifact set as `evaluation_results.json`, `evaluation_results.md`, `evaluation_lineage.json`, and `logs/eval_progress.jsonl`.
+**Lessons**: Treat HF Jobs cloud evaluation as a separate runtime design problem, not just “training plus a server.” The Unsloth training image is a good place to run direct Unsloth inference, but it is a poor place to force a fresh vLLM stack unless you fully isolate and pin that environment. Reuse the same bucket-helper isolation pattern for cloud eval sync that cloud training already needs. If preset-based eval resolves but file loading fails, inspect `Evaluator/config/eval_run.yaml` before touching the loader; stale scenario filenames are an easy anti-pattern. For the normal operator flow, `cloud-pipeline` is the right abstraction: train first, then pass the exact artifact prefix into eval instead of rediscovering “latest.” When asked to inspect cloud eval results, start with `evaluation_results.json`; the markdown and lineage files are secondary views, and `eval_progress.jsonl` is only for runtime/debugging.

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntheticconversations.local/schemas/canonical_rollout.schema.json",
+  "title": "Canonical Environment Rollout Record",
+  "type": "object",
+  "required": [
+    "record_type",
+    "dataset_version",
+    "example_id",
+    "scenario_id",
+    "scenario_family",
+    "system",
+    "user",
+    "assistant",
+    "conversation_trace",
+    "environment",
+    "results",
+    "labels"
+  ],
+  "properties": {
+    "record_type": {
+      "const": "environment_rollout"
+    },
+    "dataset_version": {
+      "type": "string"
+    },
+    "example_id": {
+      "type": "string"
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "scenario_family": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "environment_mode": {
+      "type": "string",
+      "enum": ["provided", "generated", "hybrid"]
+    },
+    "system": {
+      "type": "string"
+    },
+    "user": {
+      "type": "string"
+    },
+    "assistant": {
+      "type": "object",
+      "required": ["final_response"],
+      "properties": {
+        "final_response": {},
+        "tool_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool_call_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_text_response": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "conversation_trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "kind"],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "content": {},
+          "raw": {},
+          "turn_index": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["fixture", "assertions"],
+      "properties": {
+        "fixture": {
+          "type": "object"
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "episode_trace": {
+          "type": "object"
+        },
+        "judge_trace": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "results": {
+      "type": "object",
+      "required": [
+        "schema_passed",
+        "environment_passed"
+      ],
+      "properties": {
+        "schema_passed": {
+          "type": "boolean"
+        },
+        "behavior_passed": {
+          "type": ["boolean", "null"]
+        },
+        "environment_passed": {
+          "type": "boolean"
+        },
+        "score_value": {
+          "type": ["number", "null"]
+        },
+        "score_tier": {
+          "type": ["string", "null"]
+        },
+        "stop_reason": {
+          "type": ["string", "null"]
+        },
+        "final_text_required": {
+          "type": ["boolean", "null"]
+        },
+        "final_text_satisfied": {
+          "type": ["boolean", "null"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "labels": {
+      "type": "object",
+      "required": ["flat"],
+      "properties": {
+        "flat": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filter": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "hard_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "quality_rubric": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provenance": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

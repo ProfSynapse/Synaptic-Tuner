@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
 from tuner.handlers.base import BaseHandler
 from tuner.utils.validation import load_env_file
 
@@ -616,8 +617,8 @@ class DoctorHandler(BaseHandler):
         # Required folders
         folders = [
             ("Datasets", "Training datasets"),
-            ("Trainers/rtx3090_sft", "SFT trainer"),
-            ("Trainers/rtx3090_kto", "KTO trainer"),
+            (str(get_trainer_root("sft", self.repo_root).relative_to(self.repo_root)), "SFT trainer"),
+            (str(get_trainer_root("kto", self.repo_root).relative_to(self.repo_root)), "KTO trainer"),
             ("Evaluator", "Model evaluator"),
             ("shared", "Shared utilities"),
         ]
@@ -649,14 +650,15 @@ class DoctorHandler(BaseHandler):
 
         # Training output folders
         for trainer in ["sft", "kto", "grpo"]:
-            output_folder = self.repo_root / "Trainers" / f"rtx3090_{trainer}" / f"{trainer}_output_rtx3090"
-            if output_folder.exists():
-                run_count = len([d for d in output_folder.iterdir() if d.is_dir()])
-                section.add(CheckResult(
-                    name=f"{trainer.upper()} output folder",
-                    status=STATUS_OK,
-                    message=f"exists ({run_count} runs)"
-                ))
+            for output_folder in iter_training_output_dirs(trainer, self.repo_root):
+                if output_folder.exists():
+                    run_count = len([d for d in output_folder.iterdir() if d.is_dir()])
+                    section.add(CheckResult(
+                        name=f"{trainer.upper()} output folder",
+                        status=STATUS_OK,
+                        message=f"{output_folder.relative_to(self.repo_root)} ({run_count} runs)"
+                    ))
+                    break
 
         return section
 

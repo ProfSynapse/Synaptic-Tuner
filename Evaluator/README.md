@@ -16,6 +16,13 @@ python -m Evaluator.cli \
   --scenario behavior_prompts.yaml
 ```
 
+Before using a command from memory, confirm the current CLI surface first:
+
+```bash
+python tuner.py --help
+python -m Evaluator.cli --help
+```
+
 ## Architecture
 
 ```
@@ -235,6 +242,179 @@ The file is intentionally generic; add your own tool names in `tool_action_hints
 and/or `verb_rules` for your schema.
 Use `--env-tool-schema` and `--env-exec-config` to point to alternate YAML files.
 
+Environment fixtures can also hydrate from a real local folder snapshot:
+
+```yaml
+environment:
+  fixture:
+    local_path: /absolute/path/to/vault
+```
+
+The evaluator copies that source into the sandbox runtime first, so the model
+interacts with a real filesystem snapshot without mutating your original folder.
+
+Environment execution can be one-shot or multi-step. One-shot mode executes a
+single assistant response and validates the resulting state. Loop mode keeps the
+same runtime alive across turns, feeds tool execution results back to the
+conversation, and stops based on config. Loop mode is opt-in per scenario via
+`environment.loop`:
+
+```yaml
+environment:
+  allowed_tools:
+    - searchManager_searchContent
+    - contentManager_read
+    - contentManager_update
+  max_steps: 8
+  loop:
+    enabled: true
+    mode: agentic
+    max_turns: 8
+    max_tool_steps: 8
+    continue_on_execution_error: true
+    stop_on_text_response: true
+    stop_on_environment_pass: true
+    tool_result_format: json
+```
+
+This split is intentional:
+
+- the evaluator runner owns the multi-turn control loop
+- the environment backend (`local` or `e2b`) owns runtime state only
+- scenario YAML decides whether looping is enabled
+
+The same shared episode runner is also used by SynthChat for environment-backed
+agentic rollout generation, so generation and evaluation now share the same
+runtime/session/feedback mechanics.
+
+Patterns:
+
+- keep final environment state as the hard success criterion
+- keep preferred workflows in `scoring.paths`, not hard pass/fail
+- preserve realistic runtime/tool errors and let the model infer recovery
+- stop repeated no-progress episodes as `stuck_*` instead of tutoring the next step
+
+Anti-patterns:
+
+- treating one-shot failures as full workflow negatives when the task is truly multi-turn
+- hiding provider-side structured generation failures behind generic “stalled” debugging
+- letting generated fixture data overwrite loop/runtime config such as `environment.loop`
+
+Use loop modes this way:
+
+- `strict`: fail fast on execution errors; useful for "did it get the workflow right immediately?"
+- `agentic`: continue after recoverable tool errors; useful for "can it navigate the environment and recover?"
+
+In both modes, final environment state should be the hard success criterion.
+Preferred or efficient workflows belong in `scoring.paths`, not hard pass/fail,
+unless the task truly requires a specific tool family.
+Model-facing tool feedback should stay close to real runtime output. Preserve
+realistic filesystem errors such as missing paths or existing destinations, and
+use internal issue codes only for scoring, reporting, or stuck detection.
+If the same failing action repeats without changing the runtime state, the loop
+stops as `stuck_repeated_failure` or `stuck_no_progress` rather than tutoring
+the model toward a specific next tool.
+
+For note-vault or "gym" style tasks, `environment.fixture` can define the runtime
+state directly instead of relying only on prompt parsing. It supports generic
+`directories` / `files` plus an Obsidian-friendly `notes` shorthand:
+
+```yaml
+environment:
+  fixture:
+    directories:
+      - Journal/Daily
+    notes:
+      - path: Inbox/alpha.md
+        frontmatter:
+          title: Alpha Prototype
+          status: inbox
+          tags: [fleeting, alpha]
+        body: |
+          Need to compare RAG vs fine-tune.
+  assertions:
+    - type: frontmatter_field_equals
+      path: Inbox/alpha.md
+      field: status
+      value: inbox
+    - type: frontmatter_field_contains
+      path: Inbox/alpha.md
+      field: tags
+      value: alpha
+```
+
+Canonical assertion types currently supported by the environment validator:
+
+- `path_exists`
+- `path_not_exists`
+- `file_contains`
+- `file_not_contains`
+- `dir_contains`
+- `frontmatter_has_key`
+- `frontmatter_field_equals`
+- `frontmatter_field_contains`
+
+If a scenario uses assertion names outside that set, the validator will warn and
+the result may not be meaningful even if the model behavior looks reasonable.
+
+For HF Jobs evaluation of trained adapters, the main repo workflow is:
+
+```bash
+python tuner.py cloud-gym --run latest --method sft
+```
+
+Use `python tuner.py cloud-inspect --help` to confirm the current inspection
+flags before reading back saved HF results.
+
+Available note-specific assertions:
+- `frontmatter_has_key`
+- `frontmatter_field_equals`
+- `frontmatter_field_contains`
+
+Scenarios can also render production-style mocked system prompts instead of
+embedding a giant raw `system` string. Use `system_template: mocked_workspace_vault`
+plus a structured `system_context`:
+
+```yaml
+defaults:
+  system_template: mocked_workspace_vault
+  system_context:
+    workspace_id: ws_1732300800000_alphalab
+    available_workspaces:
+      - id: ws_1732300800000_alphalab
+        name: Alpha Lab
+        description: Product planning workspace
+        root_folder: ""
+    selected_workspace:
+      id: ws_1732300800000_alphalab
+      name: Alpha Lab
+      root_folder: ""
+    assistant_instructions: >
+      You are an AI assistant helping manage an Obsidian vault.
+
+tests:
+  - id: example_rendered_prompt
+    system_context:
+      session_id: session_1732300800000_example
+      selected_workspace:
+        recent_files: ["Inbox/alpha.md"]
+    environment:
+      fixture:
+        notes:
+          - path: Inbox/alpha.md
+            frontmatter:
+              title: Alpha
+            body: Test note
+```
+
+The loader will render `<session_context>`, `<vault_structure>`,
+`<available_workspaces>`, `<available_prompts>`, `<selected_workspace>`, and
+`<note_contents>` from that config. If you omit `expected_context`, it is
+derived automatically from `system_context`.
+
+See `Evaluator/config/scenarios/vault_gym.yaml` for a config-driven Obsidian-style
+scenario pack that works with either `--env-backend local` or `--env-backend e2b`.
+
 Example per-test override:
 
 ```yaml
@@ -251,6 +431,17 @@ tests:
       assertions:
         - type: path_exists
           path: "Projects/docs.md"
+```
+
+Example gym run:
+
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model your-model \
+  --scenario vault_gym.yaml \
+  --env-backend e2b \
+  --env-template your-template-id
 ```
 
 ## Backends
@@ -321,7 +512,7 @@ python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_
    a. Build system prompt + user question
    b. Send to model backend
    c. Parse response for tool calls
-   d. Expand useTools wrapper → individual tool names
+   d. Expand configured tool wrapper → individual tool names
    e. Validate against expected_tools/acceptable_tools
    f. Check behavior expectations
    g. Generate EvaluationRecord
@@ -333,7 +524,20 @@ python -m Evaluator.cli --backend unsloth --model path/to/model --scenario your_
 
 ### Tool Call Format
 
-Models use the `useTools` wrapper:
+Models use the wrapper defined in the configured tool schema. The default schema
+uses `useTools`, but wrapper handling in the validator/executor is schema-driven
+and should not be hardcoded to one wrapper name.
+
+Additional precise file assertions are available for environment-backed tasks:
+
+- `file_matches_regex`
+- `file_line_contains`
+- `file_line_not_contains`
+
+Use these when correctness depends on updating the right line or preserving the
+rest of a file, not just on broad file existence checks.
+
+Default wrapper example:
 ```json
 {
   "name": "useTools",

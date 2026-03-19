@@ -106,12 +106,13 @@ class LocalEnvironmentRuntime(EnvironmentRuntime):
         if not base.exists():
             return []
 
+        root = self._require_root().resolve()
         needle = (query or "").lower()
         matches: List[str] = []
         for file_path in base.rglob("*"):
             if not file_path.is_file():
                 continue
-            rel = str(file_path.relative_to(self._root))
+            rel = str(file_path.resolve().relative_to(root))
             if needle in rel.lower():
                 matches.append(rel)
                 continue

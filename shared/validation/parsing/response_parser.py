@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 from .enums import ResponseType, ToolCallFormat
+from .tool_call_parser import _extract_object_field, _extract_string_field
 from .utilities import fix_json_newlines
 
 
@@ -272,17 +273,13 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
             ))
         else:
             # Fallback: Try to extract name and arguments separately
-            name_match = re.search(r'"name"\s*:\s*"([^"]+)"', json_content)
-            if name_match:
-                name = name_match.group(1)
-
-                # Try to find arguments block and fix it
-                args_match = re.search(r'"arguments"\s*:\s*(\{[\s\S]*\})', json_content)
+            name = _extract_string_field(json_content, "name")
+            if name:
                 args = {}
                 raw = json_content
 
-                if args_match:
-                    args_str = args_match.group(1)
+                args_str = _extract_object_field(json_content, "arguments")
+                if args_str:
                     try:
                         args = json.loads(args_str)
                     except json.JSONDecodeError:

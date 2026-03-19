@@ -28,6 +28,16 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     environment_passed = sum(1 for record in records if record.environment is not None and record.environment.passed)
     judge_tested = sum(1 for record in records if record.judge is not None)
     judge_passed = sum(1 for record in records if record.judge is not None and record.judge.passed)
+    scoring_tested = sum(1 for record in records if record.scoring is not None)
+    score_total = sum(record.scoring.awarded_score for record in records if record.scoring is not None)
+    score_max_total = sum(record.scoring.max_score for record in records if record.scoring is not None)
+    episode_recoveries = sum(
+        1
+        for record in records
+        if record.environment
+        and record.environment.episode_trace is not None
+        and record.environment.episode_trace.recovered_after_error
+    )
 
     by_tag = defaultdict(
         lambda: {
@@ -42,6 +52,9 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             "environment_tested": 0,
             "judge_passed": 0,
             "judge_tested": 0,
+            "scoring_tested": 0,
+            "score_total": 0.0,
+            "score_max_total": 0.0,
         }
     )
     for record in records:
@@ -70,6 +83,10 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 bucket["judge_tested"] += 1
                 if record.judge.passed:
                     bucket["judge_passed"] += 1
+            if record.scoring is not None:
+                bucket["scoring_tested"] += 1
+                bucket["score_total"] += record.scoring.awarded_score
+                bucket["score_max_total"] += record.scoring.max_score
 
     failure_reasons = Counter()
     behavior_failures = Counter()
@@ -123,6 +140,12 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         "judge_tested": judge_tested,
         "judge_passed": judge_passed,
         "judge_pass_rate": (judge_passed / judge_tested) if judge_tested else 0,
+        "scoring_tested": scoring_tested,
+        "score_total": score_total,
+        "score_max_total": score_max_total,
+        "average_score": (score_total / scoring_tested) if scoring_tested else 0,
+        "normalized_score": (score_total / score_max_total) if score_max_total else 0,
+        "episode_recoveries": episode_recoveries,
         "by_tag": {
             tag: {
                 "total": bucket["total"],
@@ -146,6 +169,19 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 "judge_pass_rate": (
                     (bucket["judge_passed"] / bucket["judge_tested"])
                     if bucket["judge_tested"]
+                    else 0
+                ),
+                "scoring_tested": bucket["scoring_tested"],
+                "score_total": bucket["score_total"],
+                "score_max_total": bucket["score_max_total"],
+                "average_score": (
+                    (bucket["score_total"] / bucket["scoring_tested"])
+                    if bucket["scoring_tested"]
+                    else 0
+                ),
+                "normalized_score": (
+                    (bucket["score_total"] / bucket["score_max_total"])
+                    if bucket["score_max_total"]
                     else 0
                 ),
             }
@@ -180,6 +216,12 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
         lines.append(
             f"  Judge validation: {stats['judge_passed']}/{stats['judge_tested']} ({stats['judge_pass_rate']*100:.1f}%)"
         )
+    if stats['scoring_tested'] > 0:
+        lines.append(
+            f"  Path scoring: avg {stats['average_score']:.2f}, normalized {stats['normalized_score']*100:.1f}%"
+        )
+    if stats["episode_recoveries"] > 0:
+        lines.append(f"  Recovered episodes: {stats['episode_recoveries']}")
     lines.append(f"Request errors: {stats['request_errors']}")
     lines.append("Results by tag:")
     for tag, bucket in stats["by_tag"].items():
@@ -198,6 +240,9 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
         if bucket["judge_tested"] > 0:
             judge_pct = bucket["judge_pass_rate"] * 100
             line += f" [judge: {bucket['judge_passed']}/{bucket['judge_tested']} ({judge_pct:.1f}%)]"
+        if bucket["scoring_tested"] > 0:
+            score_pct = bucket["normalized_score"] * 100
+            line += f" [score: {bucket['average_score']:.2f}, {score_pct:.1f}%]"
         lines.append(line)
     if stats["top_failure_reasons"]:
         lines.append("Top schema failure reasons:")
@@ -250,12 +295,15 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
         "behavior_passed": record.behavior_passed,
         "environment_passed": record.environment.passed if record.environment else None,
         "judge_passed": record.judge.passed if record.judge else None,
+        "score": record.score,
         "error": record.error,
         "validator": validator,
         "behavior": behavior,
         "environment": environment,
         "judge": judge,
+        "scoring": record.scoring.to_dict() if record.scoring else None,
         "raw_response": record.raw_response,
+        "conversation_trace": record.conversation_trace,
     }
 
 

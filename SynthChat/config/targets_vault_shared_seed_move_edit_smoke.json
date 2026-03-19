@@ -1,0 +1,15 @@
+{
+  "_shared_seed": {
+    "scenario": "sharedvault_workspace_seed",
+    "seed_count": 1
+  },
+  "sharedvault_promote_inbox_note_with_example": {
+    "rollouts_per_seed": 1
+  },
+  "sharedvault_update_production_config_preserve_structure": {
+    "rollouts_per_seed": 1
+  },
+  "sharedvault_read_before_replace_settings_yaml": {
+    "rollouts_per_seed": 1
+  }
+}

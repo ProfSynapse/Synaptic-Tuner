@@ -72,7 +72,8 @@ def create_client(
         return OpenRouterClient(
             api_key=config.openrouter_api_key,
             model=config.model,
-            provider=config.provider_routing  # Pass provider routing (e.g., {"order": ["Groq"]})
+            provider=config.provider_routing,  # Pass provider routing (e.g., {"order": ["Groq"]})
+            timeout_seconds=config.openrouter_timeout_seconds,
         )
 
     elif config.provider == "lmstudio":

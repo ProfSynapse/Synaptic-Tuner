@@ -1,0 +1,110 @@
+# ============================================================================
+# Cloud Training Configuration
+# GPU tier definitions and provider-specific defaults for cloud training.
+#
+# Location: Trainers/cloud/cloud_config.yaml
+# Used by: tuner/backends/training/cloud/* backends
+# Merged with standard config.yaml when running cloud training.
+# ============================================================================
+
+# GPU tier mapping across providers.
+# Each tier maps a logical name to provider-specific GPU identifiers.
+gpu_tiers:
+  budget:
+    description: "Budget tier -- good for testing and small models"
+    hf_jobs: "cpu-basic"
+    modal: "T4"
+    runpod: "NVIDIA GeForce RTX 3090"
+    approx_cost_per_hour: 0.40
+
+  standard:
+    description: "Standard tier -- recommended for most training runs"
+    hf_jobs: "a10g-small"
+    modal: "L40S"
+    runpod: "NVIDIA A100 SXM"
+    approx_cost_per_hour: 1.95
+
+  performance:
+    description: "Performance tier -- fastest for large models"
+    hf_jobs: "a100-large"
+    modal: "A100"
+    runpod: "NVIDIA H100 SXM"
+    approx_cost_per_hour: 3.00
+
+# GPU pricing reference (approximate $/hr as of 2026-02).
+# Used by base_cloud.estimate_cost() and get_gpu_display_name().
+# Keys are provider-specific GPU identifiers matching the provider configs below.
+pricing:
+  hf_jobs:
+    t4-small:      { name: "T4 (16GB)",       price: 0.40 }
+    t4-medium:     { name: "T4 x2 (32GB)",    price: 0.80 }
+    a10g-small:    { name: "A10G (24GB)",      price: 1.10 }
+    a10g-large:    { name: "A10G x4 (96GB)",   price: 4.40 }
+    a100-large:    { name: "A100 (80GB)",      price: 2.50 }
+  modal:
+    T4:            { name: "T4 (16GB)",        price: 0.59 }
+    L4:            { name: "L4 (24GB)",        price: 0.73 }
+    A10G:          { name: "A10G (24GB)",      price: 1.10 }
+    L40S:          { name: "L40S (48GB)",      price: 1.40 }
+    A100:          { name: "A100 (40GB)",      price: 2.78 }
+    A100-80GB:     { name: "A100 (80GB)",      price: 3.72 }
+    H100:          { name: "H100 (80GB)",      price: 4.89 }
+  runpod:
+    "NVIDIA RTX A6000":      { name: "RTX A6000 (48GB)", price: 0.79 }
+    "NVIDIA A100 80GB PCIe": { name: "A100 (80GB)",      price: 1.64 }
+    "NVIDIA H100 80GB HBM3": { name: "H100 (80GB)",      price: 3.89 }
+
+# Shared dependency configuration across all cloud providers.
+# Docker image provides unsloth + PyTorch + CUDA pre-installed.
+# Project-specific pip deps are installed on top at runtime.
+dependencies:
+  docker_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  project_pip_deps:
+    - pyyaml
+    - wandb
+    - hf_transfer
+    - python-dotenv
+    - rich
+  extra_setup_commands: []
+
+# Provider-specific defaults
+cloud:
+  default_provider: hf_jobs
+  artifacts:
+    publish_final_model: false
+    publish_target_repo: null
+
+  hf_jobs:
+    flavor: a10g-small
+    timeout: 4h
+    image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    python_version: "3.11"
+    artifact_backend: hf_bucket
+    # Bare names are fine; the launcher resolves them to the token's namespace and creates the bucket if needed.
+    artifact_identifier: "toolset-training-artifacts"
+    output_root: "/workspace/outputs"
+
+  modal:
+    gpu: L40S
+    timeout_hours: 6
+    cache_volume_name: "toolset-model-cache"
+    artifact_backend: modal_volume
+    output_volume_name: "toolset-training-artifacts"
+    output_mount_path: "/vol/artifacts"
+
+  runpod:
+    gpu_type_id: "NVIDIA A100 SXM"
+    gpu_count: 1
+    volume_in_gb: 50
+    container_disk_in_gb: 50
+    cloud_type: "SECURE"  # Use SECURE for training to avoid preemption risk
+    default_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    artifact_backend: runpod_network_volume
+    network_volume_id: null
+    output_mount_path: "/runpod-volume"
+    result_path: "/runpod-volume/outputs"
+    extra_setup_commands: []
+
+  # Common settings across all providers
+  push_to_hub: false
+  hub_repo: null  # Target HF repo (prompted at runtime if null)

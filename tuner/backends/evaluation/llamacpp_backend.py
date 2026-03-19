@@ -17,6 +17,8 @@ Design decisions:
 import platform
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from shared.utilities.paths import iter_training_output_dirs
 from .base import IEvaluationBackend
 
 
@@ -128,28 +130,18 @@ class LlamaCppBackend(IEvaluationBackend):
         - Sorts by modification time (newest first)
         """
         models = []
-        trainers_dir = self._repo_root / "Trainers"
 
-        # Search patterns for training outputs
-        output_patterns = [
-            "rtx3090_sft/sft_output_rtx3090",
-            "rtx3090_kto/kto_output_rtx3090",
-            "rtx3090_grpo/grpo_output_rtx3090",
-        ]
-
-        for pattern in output_patterns:
-            output_dir = trainers_dir / pattern
-            if not output_dir.exists():
-                continue
-
-            # Find GGUF files recursively
-            for gguf_file in output_dir.rglob("*.gguf"):
-                # Skip vocab files and mmproj files
-                name_lower = gguf_file.name.lower()
-                if "vocab" in name_lower or "mmproj" in name_lower:
+        for method in ("sft", "kto", "grpo"):
+            for output_dir in iter_training_output_dirs(method, self._repo_root):
+                if not output_dir.exists():
                     continue
 
-                models.append(str(gguf_file.resolve()))
+                for gguf_file in output_dir.rglob("*.gguf"):
+                    name_lower = gguf_file.name.lower()
+                    if "vocab" in name_lower or "mmproj" in name_lower:
+                        continue
+
+                    models.append(str(gguf_file.resolve()))
 
         # Sort by modification time (newest first)
         models.sort(key=lambda p: Path(p).stat().st_mtime, reverse=True)

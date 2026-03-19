@@ -56,7 +56,7 @@ def execute_response_tool_calls(
     executions: List[ExecutedToolCall] = []
     issues: List[EnvironmentIssue] = []
 
-    expanded_calls = _expand_use_tools(parsed.tool_calls)
+    expanded_calls = _expand_wrapper_calls(parsed.tool_calls)
 
     for call in expanded_calls:
         name = call.name
@@ -67,7 +67,15 @@ def execute_response_tool_calls(
         if strict_schema and schema_index and schema_entry is None:
             record.status = "error"
             record.error = "Tool not present in schema"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' is not defined in configured tool schema"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' is not defined in configured tool schema",
+                    code="tool_not_in_schema",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
@@ -75,14 +83,30 @@ def execute_response_tool_calls(
         if missing_required:
             record.status = "error"
             record.error = f"Missing required args: {', '.join(missing_required)}"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' missing required args: {', '.join(missing_required)}"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' missing required args: {', '.join(missing_required)}",
+                    code="missing_required_args",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
         if enforce_allowlist and name not in allowed:
             record.status = "blocked"
             record.error = "Tool not in allowlist"
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' not in environment allowlist"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' not in environment allowlist",
+                    code="tool_not_allowed",
+                    recoverable=True,
+                )
+            )
             executions.append(record)
             continue
 
@@ -99,21 +123,81 @@ def execute_response_tool_calls(
             output = _execute_action(runtime, action, args, key_hints=normalized_key_hints)
             record.output = output
             record.status = "ok"
+            record.recoverable = False
         except Exception as exc:
             record.status = "error"
             record.error = str(exc)
-            issues.append(EnvironmentIssue("error", f"Tool '{name}' failed: {exc}"))
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' failed: {exc}",
+                    code="tool_execution_failed",
+                    recoverable=True,
+                )
+            )
 
         executions.append(record)
 
     return executions, issues
 
 
-def _expand_use_tools(parsed_calls) -> List:
-    """Expand useTools wrapper into concrete tool calls."""
+def format_tool_results_message(
+    executions: List[ExecutedToolCall],
+    issues: List[EnvironmentIssue],
+    format_name: str = "json",
+) -> str:
+    """Render executed tool results into a message for the next model turn.
+
+    Model-facing feedback should describe what actually happened in the runtime,
+    not prescribe the next tool. Internal issue codes remain available for
+    analysis/reporting, but the conversation payload should stay close to real
+    filesystem/tool output.
+    """
+    payload = {
+        "tool_results": [
+            {
+                "name": tool.name,
+                "status": tool.status,
+                **({"output": tool.output} if tool.output is not None else {}),
+                **({"error": tool.error} if tool.error is not None else {}),
+            }
+            for tool in executions
+        ],
+        "issues": [
+            {
+                "level": issue.level,
+                "message": issue.message,
+            }
+            for issue in issues
+        ],
+    }
+    normalized = str(format_name or "json").strip().lower()
+    if normalized == "json":
+        return "Tool execution results:\n" f"{json.dumps(payload, ensure_ascii=True, indent=2)}"
+    return (
+        "Tool execution results:\n"
+        f"{json.dumps(payload, ensure_ascii=True)}"
+    )
+
+
+def _looks_like_wrapper_call(call) -> bool:
+    """Return True when a tool call delegates concrete calls via arguments.calls."""
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    calls = args.get("calls")
+    if not isinstance(calls, list) or not calls:
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("agent", "")).strip() and str(item.get("tool", "")).strip()
+        for item in calls
+    )
+
+
+def _expand_wrapper_calls(parsed_calls) -> List:
+    """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
-        if call.name != "useTools":
+        if not _looks_like_wrapper_call(call):
             expanded.append(call)
             continue
 

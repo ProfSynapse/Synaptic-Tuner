@@ -67,6 +67,12 @@ def create_parser() -> argparse.ArgumentParser:
 Commands:
   (none)      Interactive menu
   train       Training workflow (SFT, KTO, GRPO)
+  cloud       Cloud training (HF Jobs, Modal, RunPod)
+  cloud-run   Config-driven HF cloud job
+  cloud-pipeline Train on HF Jobs, then evaluate on HF Jobs
+  cloud-eval  Cloud evaluation on HF Jobs using vLLM
+  cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
+  cloud-inspect Inspect saved HF cloud evaluation results
   eval        Evaluate a model
   synthchat   Synthetic data generation and improvement
   modelops    Model operations (run, merge, convert, upload)
@@ -85,11 +91,13 @@ List Subcommands:
 Examples:
   python tuner.py              # Interactive mode
   python tuner.py train        # Go directly to training
+  python tuner.py cloud        # Cloud training submenu
   python tuner.py eval         # Go directly to evaluation
   python tuner.py synthchat    # Generate or improve data
   python tuner.py modelops     # Model operations submenu
   python tuner.py status       # Show system status
   python tuner.py status --json    # JSON output for AI parsing
+  python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -103,7 +111,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -123,6 +131,13 @@ Examples:
         action="store_true",
         help="Output in JSON format for AI-parseable output (disables interactive menus)"
     )
+    parser.add_argument(
+        "--yes",
+        "--auto-confirm",
+        action="store_true",
+        dest="auto_confirm",
+        help="Skip confirmation prompts for non-interactive command execution",
+    )
 
     # Doctor-specific flags
     parser.add_argument(
@@ -138,5 +153,31 @@ Examples:
         dest="ml_config",
         help="Path to ML training config YAML (only used with 'ml train')"
     )
+
+    # Cloud-specific flags
+    parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
+    parser.add_argument("--method", choices=["sft", "kto"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
+    parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym.")
+    parser.add_argument("--preset", help="Evaluation preset from Evaluator/config/eval_run.yaml (cloud-eval, cloud-pipeline).")
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        help="Evaluation scenario file(s) to run (cloud-eval, cloud-gym, cloud-pipeline; can specify multiple).",
+    )
+    parser.add_argument("--tags", help="Comma-separated evaluation tag filter (cloud-eval, cloud-gym, cloud-pipeline).")
+    parser.add_argument("--upload-to-hf", help="Optional HF model repo to receive evaluation lineage.")
+    parser.add_argument(
+        "--update-model-card",
+        action="store_true",
+        help="Update README.md when using --upload-to-hf (cloud-eval, cloud-gym, cloud-pipeline).",
+    )
+    parser.add_argument("--gpu", help="Override HF Jobs hardware flavor for cloud-eval/cloud-gym.")
+    parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval/cloud-gym.")
+    parser.add_argument("--env-backend", choices=["none", "local", "e2b"], help="Remote evaluator environment backend for cloud-eval/cloud-gym.")
+    parser.add_argument("--env-template", help="E2B template ID for cloud-eval/cloud-gym when --env-backend e2b.")
+    parser.add_argument("--env-tool-schema", help="Custom tool schema YAML for cloud-eval/cloud-gym.")
+    parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
+    parser.add_argument("--job-config", help="Config-driven cloud job YAML (cloud-run workflow).")
+    parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
 
     return parser

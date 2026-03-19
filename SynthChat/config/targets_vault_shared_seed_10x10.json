@@ -1,0 +1,16 @@
+{
+  "_shared_seed": {
+    "scenario": "sharedvault_workspace_seed",
+    "seed_count": 10
+  },
+  "sharedvault_promote_inbox_note_with_example": {"rollouts_per_seed": 1},
+  "sharedvault_create_daily_note_from_template": {"rollouts_per_seed": 1},
+  "sharedvault_triage_correct_note_after_search": {"rollouts_per_seed": 1},
+  "sharedvault_update_production_config_preserve_structure": {"rollouts_per_seed": 1},
+  "sharedvault_read_before_replace_settings_yaml": {"rollouts_per_seed": 1},
+  "sharedvault_archive_empty_folder_after_verification": {"rollouts_per_seed": 1},
+  "sharedvault_archive_only_deprecated_notes": {"rollouts_per_seed": 1},
+  "sharedvault_continue_inbox_organization": {"rollouts_per_seed": 1},
+  "sharedvault_clarify_ambiguous_note_reference": {"rollouts_per_seed": 1},
+  "sharedvault_confirm_before_bulk_delete": {"rollouts_per_seed": 1}
+}

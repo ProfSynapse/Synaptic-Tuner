@@ -1,0 +1,177 @@
+# Environment-backed tool-use scenarios for SynthChat
+# These scenarios generate a structured filesystem/workspace first, then
+# generate user + assistant turns against that environment.
+
+scenarios:
+  envfs_update_config_note:
+    type: tool
+    tool: contentManager_update
+    environment_mode: generated
+    system_template: mocked_workspace_vault
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment]
+    system_context:
+      available_workspaces:
+        - id: ws_generated_ops
+          name: Operations Workspace
+          description: Operational notes and service configuration
+          root_folder: ""
+      available_prompts:
+        - id: agent_ops_writer
+          name: Ops Writer
+          purpose: Updates runbooks and configuration notes
+        - id: agent_ops_research
+          name: Ops Researcher
+          purpose: Finds the right operational note before editing it
+      assistant_instructions: >-
+        You are an AI assistant helping manage a workspace with filesystem-like
+        notes and documents. Use the available tools to find the right file and
+        update it carefully.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a configuration-note
+        update task. The environment should require retrieval before editing.
+
+        Requirements:
+        - Include 2-4 notes/files in an operational workspace.
+        - One file should be the correct production config note.
+        - At least one distractor note should look similar (for example staging or overview).
+        - Use files, notes, directories, assertions, and system_context.
+        - Assertions must verify:
+          1. the production note was updated to the new API base URL
+          2. at least one important existing line remains intact
+          3. the distractor note remains unchanged
+        - selected_workspace should include recent_files and key_files.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": [...]
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "ws_generated_ops",
+            "selected_workspace": {
+              "id": "ws_generated_ops",
+              "name": "Operations Workspace",
+              "root_folder": "",
+              "recent_files": [...],
+              "key_files": [...],
+              "workflows": [...],
+              "preferences": "..."
+            }
+          }
+        }
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Generate a natural user request asking to update the production config note
+        to use `https://api.prod.example.com` while preserving the rest of the note.
+        The request should imply the assistant needs to locate the correct note first.
+
+      assistant: |
+        Generate assistant response as valid JSON only.
+
+        Use the generated workspace context. The response should use useTools with:
+        - searchManager.searchContent first
+        - contentManager.read next
+        - contentManager.update last
+
+        Return:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_xxx",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "context": {
+                  "sessionId": "<from system prompt>",
+                  "workspaceId": "<from system prompt>",
+                  "memory": "<brief state>",
+                  "goal": "<goal>"
+                },
+                "calls": [...]
+              }
+            }
+          }]
+        }
+
+  envfs_archive_empty_folder:
+    type: tool
+    tool: storageManager_archive
+    environment_mode: generated
+    system_template: mocked_workspace_vault
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment]
+    system_context:
+      available_workspaces:
+        - id: ws_generated_projects
+          name: Projects Workspace
+          description: Project folders and housekeeping tasks
+          root_folder: ""
+      available_prompts:
+        - id: agent_file_keeper
+          name: File Keeper
+          purpose: Organizes folders and handles safe cleanup
+      assistant_instructions: >-
+        You are an AI assistant helping manage a filesystem-style project
+        workspace. Verify destructive actions before executing them.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a safe cleanup task.
+
+        Requirements:
+        - Include a Projects/ folder with one clearly empty folder that can be archived.
+        - Include 2-3 non-empty folders that must remain untouched.
+        - Use files, directories, assertions, and system_context.
+        - Assertions must verify:
+          1. the empty folder is removed
+          2. the non-empty folders or files still exist
+        - selected_workspace should include recent_files or key_files that point at the active project folders.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": [...]
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "ws_generated_projects",
+            "selected_workspace": {...}
+          }
+        }
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Generate a natural user request asking to archive or remove the empty test
+        folder in the Projects workspace. The request should imply the assistant
+        should verify the folder is empty first.
+
+      assistant: |
+        Generate assistant response as valid JSON only.
+
+        Use the generated workspace context. The response should use useTools with:
+        - storageManager.list first
+        - storageManager.archive second
+
+        Return OpenAI-style tool_calls JSON only.

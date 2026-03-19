@@ -133,7 +133,7 @@ presets:
   quick:
     description: "Quick smoke test"
     scenarios:
-      - tool_coverage.yaml
+      - tool_prompts.yaml
     tag_filter:
       - storageManager
     model:
@@ -143,15 +143,15 @@ presets:
   full:
     description: "Full evaluation suite"
     scenarios:
-      - tool_coverage.yaml
-      - behavior_tests.yaml
+      - tool_prompts.yaml
+      - behavior_prompts.yaml
     scoring:
       pass_threshold: 0.85
 
   behavior_only:
     description: "Behavior tests only"
     scenarios:
-      - behavior_tests.yaml
+      - behavior_prompts.yaml
     scoring:
       weights:
         behavior_pass: 1.0

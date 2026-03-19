@@ -17,6 +17,19 @@ class ModelLoaderRegistry:
     _loaders: Dict[str, Type[BaseModelLoader]] = {}
 
     @classmethod
+    def _ensure_builtin_loaders_registered(cls) -> None:
+        """
+        Lazily register built-in loaders.
+
+        Upload paths may import the registry directly, bypassing the package
+        __getattr__ hook in shared.model_loading. Register built-ins here too so
+        direct registry lookups cannot observe an empty registry.
+        """
+        if "unsloth" not in cls._loaders:
+            from .unsloth_loader import UnslothModelLoader
+            cls.register("unsloth", UnslothModelLoader)
+
+    @classmethod
     def register(cls, name: str, loader_class: Type[BaseModelLoader]) -> None:
         """
         Register a new model loader.
@@ -42,6 +55,7 @@ class ModelLoaderRegistry:
         Raises:
             ValueError: If loader name is not found
         """
+        cls._ensure_builtin_loaders_registered()
         loader_class = cls._loaders.get(name)
         if not loader_class:
             available = ", ".join(cls.list_loaders())
@@ -60,4 +74,5 @@ class ModelLoaderRegistry:
         Returns:
             List of loader names
         """
+        cls._ensure_builtin_loaders_registered()
         return list(cls._loaders.keys())

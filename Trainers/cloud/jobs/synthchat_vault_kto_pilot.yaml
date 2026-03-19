@@ -1,0 +1,34 @@
+name: synthchat-vault-kto-pilot
+description: Generate a first environment-backed vault pilot dataset for later KTO/GRPO filtering.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "a10g-small"
+  timeout_hours: 4
+  labels:
+    task: synthchat
+    dataset: vault-kto-pilot
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  secrets_from_env:
+    - OPENROUTER_API_KEY
+  env:
+    PYTHONPATH: "{repo_dir}"
+  steps:
+    - "mkdir -p {output_dir}/synthchat"
+    - "cd {repo_dir} && python -m SynthChat.run generate --config-dir SynthChat/config --scenarios-dir SynthChat/scenarios --rubrics-dir SynthChat/rubrics --targets-file SynthChat/config/targets_vault_kto_pilot.json --output {output_dir}/synthchat/vault_kto_pilot.jsonl --provider openrouter --model openai/gpt-oss-120b --max-iterations 1 --workers 1 --env-backend local"
+    - "mkdir -p {output_dir}/synthchat/interactions && find {repo_dir} -type f -name 'interactions_*.jsonl' -exec cp {{}} {output_dir}/synthchat/interactions/ \\;"
+
+artifacts:
+  bucket: "toolset-training-artifacts"
+  output_dir: "/workspace/outputs"
+  prefix: "runs/hf_jobs/custom/{job_name}/{timestamp}-{commit8}"

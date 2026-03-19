@@ -1,0 +1,154 @@
+# ============================================================================
+# SFT Training Configuration for RTX 3090
+# Supervised Fine-Tuning for tool-calling instruction learning
+# ============================================================================
+
+# Model Configuration
+model:
+  # Model selection - Tier 2 (7B) recommended for production
+  # Tier 1 (3B): "unsloth/Qwen2.5-3B-Instruct-bnb-4bit", "unsloth/Llama-3.2-3B-Instruct-bnb-4bit"
+  # Tier 2 (7B): "unsloth/mistral-7b-v0.3-bnb-4bit", "unsloth/llama-3.1-8b-instruct-bnb-4bit"
+  # Tier 3 (13B): "unsloth/llama-2-13b-bnb-4bit"
+  model_name: "unsloth/LFM2.5-1.2B-Instruct"
+
+  # Model parameters
+  max_seq_length: 2048
+  dtype: null  # Auto-detection
+  load_in_4bit: false  # Qwen3.5 smoke test: use non-4bit path so local and HF Jobs match
+
+# LoRA Adapter Configuration
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0
+  bias: "none"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "out_proj"
+    - "in_proj"
+    - "w1"
+    - "w2"
+    - "w3"
+  use_gradient_checkpointing: "unsloth"  # Unsloth's optimized version
+  random_state: 3407
+
+# SFT Training Configuration
+training:
+  # Output directory
+  output_dir: "./sft_output"
+
+  # Batch configuration
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4  
+
+  # Learning rate
+  learning_rate: 2e-4  # vs KTO's 2e-7
+  max_grad_norm: 1.0  # vs KTO's 0.5
+  lr_scheduler_type: "linear"
+
+  # SFT-specific parameters
+  max_seq_length: 2048
+  packing: false  # Pack multiple examples per sequence (2.5-5x faster training!)
+  completion_only_loss: true  # Train only on assistant completions
+  assistant_only_loss: false  # For multi-turn (not needed here)
+
+  # Memory optimizations
+  gradient_checkpointing: true  # Reduces memory usage
+  optim: "adamw_8bit"  # 8-bit optimizer saves ~2GB VRAM
+  fp16: false  # Set dynamically based on GPU
+  bf16: true  # RTX 3090 supports BF16 (Ampere)
+
+  # Training schedule - smoke test defaults for Qwen3.5-2B on 24GB-class GPUs
+  num_train_epochs: 1
+  warmup_ratio: 0.02  # ~5 warmup steps out of ~233 total
+
+  # Logging and saving
+  logging_steps: 5  # Log every 5 steps
+  save_steps: 50  # Save checkpoint every 50 steps
+  save_total_limit: 3  # Keep last 3 checkpoints
+
+  # Performance
+  dataloader_num_workers: 0  # MUST be 0 on WSL2 (multiprocessing hangs)
+  dataloader_pin_memory: true
+  group_by_length: false  # Can cause hangs with multiprocessing
+
+  # Evaluation (optional)
+  eval_strategy: "no"  # "steps" or "no"
+  eval_steps: 50
+
+# Dataset Configuration
+dataset:
+  # Dataset source
+  dataset_name: "professorsynapse/claudesidian-synthetic-dataset"
+  dataset_file: "nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl"
+
+  # Use local file (relative to Trainers/sft/)
+  # Leave null by default so cloud jobs use the HuggingFace dataset above.
+  # For local smoke tests, pass --local-file ../../Datasets/nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
+  local_file: null
+
+  # Dataset processing
+  num_proc: 1  # Set to 1 on Windows to avoid multiprocessing issues
+  test_size: 0.1  # For train/validation split (optional)
+  split_dataset: false  # Enable to create train/val split
+
+  # SFT-specific: filter for desirable examples only
+  filter_desirable: false  # False because SFT dataset already filtered
+
+# Weights & Biases (optional)
+wandb:
+  enabled: false  # Set to true to enable W&B logging
+  project: null  # W&B project name
+  run_name: null  # Run name (auto-generated if null)
+  entity: null  # W&B entity/team
+
+# Random seed
+seed: 42
+
+# ============================================================================
+# Evolutionary Training (Optional)
+# Gradient + ES Hybrid: Generate N gradient candidates, evaluate, apply best
+# ============================================================================
+evolutionary:
+  enabled: false  # Disabled - high gradient norms, needs tuning
+
+  # Number of gradient candidates to evaluate per step
+  candidates: 4
+
+  # Batch size for fitness evaluation (can be smaller than training batch)
+  eval_batch_size: 2
+
+  # Validation config for fitness scoring
+  # Uses same format as validation rubrics
+  validation_config: "configs/fitness/tool_calling.yaml"
+
+  # Strategy for generating gradient candidates
+  strategy:
+    type: "gradient_noise"  # Options: gradient_noise, scale_variation, combined
+    params:
+      noise_scale: 0.1  # For gradient_noise: std dev relative to gradient norm
+      scale_factors: [0.5, 1.0, 1.5, 2.0]  # For scale_variation: multipliers
+
+  # Selection method for choosing best candidate
+  selection:
+    method: "best"  # Options: best, tournament, proportional
+    min_improvement: 0.0  # Only apply if improves fitness by this much
+
+  # Performance tuning
+  eval_frequency: 1  # Evaluate every N steps (1 = every step)
+  warmup_steps: 0  # Train normally for N steps before enabling evolutionary
+  cache_baseline: true  # Cache baseline fitness to avoid recomputing
+
+  # Logging
+  logging:
+    candidates: true  # Log all candidate fitness scores
+    selected: true  # Log which candidate was selected
+
+# Notes:
+# - This is optimized for RTX 3090 24GB VRAM
+# - Expected VRAM usage: ~7-9GB for 7B model
+# - Training time: ~60 minutes for 3 epochs with 8,036 examples
+# - For 3B models: increase batch_size to 12, reduce to ~12GB VRAM
+# - For 13B models: reduce batch_size to 4, expect ~14GB VRAM

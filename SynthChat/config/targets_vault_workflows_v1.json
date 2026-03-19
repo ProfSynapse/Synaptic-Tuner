@@ -1,0 +1,12 @@
+{
+  "envfs_promote_inbox_note_with_example": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_create_daily_note_from_template": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_triage_correct_note_after_search": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_update_production_config_preserve_structure": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_read_before_replace_settings_yaml": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_archive_empty_folder_after_verification": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_archive_only_deprecated_notes": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_continue_inbox_organization": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_clarify_ambiguous_note_reference": {"seed_count": 3, "rollouts_per_seed": 10},
+  "envfs_confirm_before_bulk_delete": {"seed_count": 3, "rollouts_per_seed": 10}
+}

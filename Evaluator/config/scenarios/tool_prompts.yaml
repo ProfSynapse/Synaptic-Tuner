@@ -779,6 +779,8 @@ tests:
     \ Keep one file per rollout project.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - searchManager_searchDirectory
+  acceptable_tools:
+  - storageManager_list
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll

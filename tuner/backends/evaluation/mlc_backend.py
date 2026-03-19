@@ -17,6 +17,8 @@ Design decisions:
 
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from shared.utilities.paths import iter_training_output_dirs
 from .base import IEvaluationBackend
 
 
@@ -66,35 +68,23 @@ class MLCBackend(IEvaluationBackend):
         - Sorts by modification time (newest first)
         """
         models = []
-        trainers_dir = self._repo_root / "Trainers"
 
-        # Search patterns for training outputs
-        output_patterns = [
-            "rtx3090_sft/sft_output_rtx3090",
-            "rtx3090_kto/kto_output_rtx3090",
-            "rtx3090_grpo/grpo_output_rtx3090",
-        ]
-
-        for pattern in output_patterns:
-            output_dir = trainers_dir / pattern
-            if not output_dir.exists():
-                continue
-
-            # Find MLC model directories
-            # Look for webgpu directories containing mlc-chat-config.json
-            for webgpu_dir in output_dir.rglob("webgpu"):
-                if not webgpu_dir.is_dir():
+        for method in ("sft", "kto", "grpo"):
+            for output_dir in iter_training_output_dirs(method, self._repo_root):
+                if not output_dir.exists():
                     continue
 
-                # Check subdirectories for MLC models
-                for model_dir in webgpu_dir.iterdir():
-                    if not model_dir.is_dir():
+                for webgpu_dir in output_dir.rglob("webgpu"):
+                    if not webgpu_dir.is_dir():
                         continue
 
-                    # Verify it's an MLC model (has mlc-chat-config.json)
-                    config_file = model_dir / "mlc-chat-config.json"
-                    if config_file.exists():
-                        models.append(str(model_dir.resolve()))
+                    for model_dir in webgpu_dir.iterdir():
+                        if not model_dir.is_dir():
+                            continue
+
+                        config_file = model_dir / "mlc-chat-config.json"
+                        if config_file.exists():
+                            models.append(str(model_dir.resolve()))
 
         # Sort by modification time (newest first)
         models.sort(key=lambda p: Path(p).stat().st_mtime, reverse=True)

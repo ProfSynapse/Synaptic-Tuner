@@ -19,6 +19,23 @@ size_categories:
 
 # Nexus Synthetic Data - Balanced Behaviors v1.5
 
+## Current Working Specs
+
+In addition to the legacy merged datasets in this folder, the current
+environment-backed workflow spec lives here:
+
+- [environment_rollouts/README.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/Datasets/environment_rollouts/README.md)
+- [environment_rollouts/vault_workflows_v1_SPEC.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/Datasets/environment_rollouts/vault_workflows_v1_SPEC.md)
+- [environment_rollouts/canonical_rollout.schema.json](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/Datasets/environment_rollouts/canonical_rollout.schema.json)
+
+That spec defines:
+- one canonical rollout dataset with full environment traces
+- a separate `KTO` projection
+- a separate `GRPO` projection
+
+Keep those projections separate and merge later only when there is a specific
+training experiment that needs it.
+
 ## Dataset Description
 
 This dataset contains **4,572 perfectly balanced synthetic training examples** demonstrating behavioral patterns for training language models to use the Claudesidian-MCP toolset effectively with Obsidian vaults.

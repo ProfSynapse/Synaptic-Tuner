@@ -169,6 +169,34 @@ templates:
         - Projects/
           - Incoming/
 
+  mocked_workspace_vault:
+    description: "Production-style mocked workspace prompt with selected workspace context"
+    content: |
+      {session_context_section}
+
+      {vault_structure_section}
+
+      {available_workspaces_section}
+
+      {available_prompts_section}
+
+      {selected_workspace_section}
+
+      {note_contents_section}
+
+      {extra_sections}
+
+      {assistant_instructions}
+    defaults:
+      session_context_section: ""
+      vault_structure_section: ""
+      available_workspaces_section: ""
+      available_prompts_section: ""
+      selected_workspace_section: ""
+      note_contents_section: ""
+      extra_sections: ""
+      assistant_instructions: "You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests."
+
 # ============================================================
 # AUTO-GENERATION
 # ============================================================

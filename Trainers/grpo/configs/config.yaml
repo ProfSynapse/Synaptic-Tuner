@@ -1,0 +1,140 @@
+# ============================================================================
+# GRPO / GSPO Training Configuration for RTX 3090
+# Uses TRL's GRPOTrainer. Set training.use_gspo=true for GSPO mode.
+# ============================================================================
+
+# Model Configuration
+# For GSPO test: Load from SFT checkpoint trained on 2/3 split
+model:
+  # Base model (same as SFT)
+  model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
+  # Path to SFT LoRA adapters (checkpoint from latest run)
+  lora_path: "../sft/sft_output/20251225_125047/checkpoints/checkpoint-1150"
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: true
+  chat_template: null
+
+# LoRA Adapter Configuration
+lora:
+  r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  bias: "none"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  use_gradient_checkpointing: "unsloth"
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+
+# Training Configuration (maps to TRL GRPOConfig where applicable)
+training:
+  output_dir: "./grpo_output"
+
+  # Performance
+  per_device_train_batch_size: 6
+  gradient_accumulation_steps: 6
+
+  # Generation
+  num_generations: 4
+  max_prompt_length: 1024
+  max_completion_length: 512
+  temperature: 1.0
+
+  # Learning
+  learning_rate: 5e-6
+  weight_decay: 0.0
+  warmup_ratio: 0.1
+  lr_scheduler_type: "linear"
+  num_train_epochs: 1
+  # If > 0, overrides epoch-based training.
+  max_steps: -1
+
+  # KL penalty coefficient (critical for preventing divergence!)
+  # Higher = stronger penalty for diverging from reference model
+  # Default TRL is 0.04, but we use 0.1 for more stability
+  beta: 0.1
+
+  # Precision
+  fp16: false
+  bf16: true
+
+  # Optimizer
+  optim: "adamw_8bit"
+
+  # Logging / checkpointing
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+
+  # Reporting
+  report_to: "none" # or "wandb"
+
+  # GSPO toggle (sequence-level importance sampling)
+  use_gspo: false
+
+  # Optional escape hatch for advanced TRL args (passed to GRPOConfig if supported)
+  extra_args: {}
+
+# Dataset Configuration
+dataset:
+  dataset_name: null  # Not using HuggingFace
+  dataset_file: null
+  # Local projected environment-rollout dataset.
+  # This current smoke projection uses the first successful tool call as
+  # ground truth for the existing args/format reward stack.
+  local_file: "../../Datasets/grpo/vault_shared_seed_dynamic_roles_grpo_20260316.jsonl"
+  num_proc: 1
+  prompt_column: "prompt"
+
+# Schema Configuration
+# Defines how to parse tool calls and context from model output
+schema:
+  # Path to tool schema YAML (relative to repo root or absolute)
+  tool_schema_path: "../../Evaluator/config/tool_schema.yaml"
+
+# Rewards Configuration
+# - All rewards are YAML-driven (configs/rewards/*.yaml)
+# - Scoring compares model output against ground truth from dataset
+rewards:
+  # Reward components (loaded from configs/rewards/)
+  items:
+    # Primary reward: Full args comparison (context + tool + params)
+    - name: "args_match"
+      weight: 1.0
+      params: {}  # Uses ground_truth_args_json from dataset
+
+    # Secondary: Ensure valid JSON structure
+    - name: "json_structure"
+      weight: 0.3
+      params:
+        reward_value: 0.3
+
+    # Secondary: Ensure tool call format is correct
+    - name: "format"
+      weight: 0.2
+      params:
+        reward_value: 0.2
+
+  # Custom reward functions (optional)
+  custom:
+    enabled: false
+    module: null     # e.g. "my_project.rewards"
+    file: null       # e.g. "./my_rewards.py" (relative to Trainers/grpo/)
+    functions: []    # list of {name, weight, params}
+
+# Weights & Biases (optional)
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+
+seed: 42

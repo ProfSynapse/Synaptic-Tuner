@@ -1,0 +1,782 @@
+# Shared-workspace pilot pack.
+# All task scenarios reuse the same generated vault seed via targets._shared_seed.
+
+shared_agentic_environment: &shared_agentic_environment
+  loop:
+    enabled: true
+    mode: agentic
+    max_turns: 6
+    max_tool_steps: 6
+    stop_on_text_response: true
+    stop_on_environment_pass: true
+    require_final_text_after_pass: true
+    final_text_prompt: Reply to the user with a brief final text-only confirmation. Do not call tools.
+    continue_on_execution_error: true
+    stuck_repeat_limit: 2
+    no_progress_window: 3
+
+shared_tutored_judge: &shared_tutored_judge
+  in_loop:
+    enabled: true
+    feedback_visible_to_model: true
+    temperature: 0.1
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    prompt: |
+      You are tutoring an agentic filesystem assistant generating high-quality training data.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      Hard requirements:
+      {hard_requirements_json}
+
+      Quality rubric:
+      {quality_rubric_json}
+
+      Messages so far:
+      {messages_json}
+
+      Latest assistant response:
+      {assistant_response_json}
+
+      Latest environment step:
+      {environment_step_json}
+
+      Tool feedback shown to the model:
+      {tool_feedback}
+
+      Treat the concrete task_context fields as source of truth for which file,
+      folder, or note is the real target. Do not substitute a similar distractor
+      path just because it seems semantically related.
+
+      Return passed=true only if the hard requirements are already satisfied by the
+      latest assistant action and tool feedback. If any hard requirement is still unmet,
+      return passed=false and explain the next best corrective step.
+      If preserve_source_body is required, the written target content must still
+      contain the full source note content from task_context.source_body, including
+      headings and body text, not just a paraphrased or shortened version.
+      Do not praise completion prematurely. In particular, if preserve_example_format
+      or target_frontmatter_keys_present is required, the written target must already
+      reflect that format before you mark the step as passed.
+      Use feedback_to_model for concise tutoring about the next best move.
+      Only ask for a short final text-only confirmation after the hard requirements
+      are actually satisfied.
+
+shared_environment_generation_review: &shared_environment_generation_review
+  enforce: true
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+  gates:
+    - type: environment_payload_shape
+      field: value
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a generated shared filesystem environment for SynthChat.
+
+      Scenario key:
+      {scenario_key}
+
+      Normalized environment snapshot:
+      {value_json}
+
+      Return passed=true only if the environment is internally consistent, contains
+      realistic filesystem content, and supports the scenario family without leaking
+      the final answers too directly. Penalize environments that are too sparse,
+      too anchored to literal prompts, or structurally inconsistent.
+
+shared_system_generation_review: &shared_system_generation_review
+  enforce: true
+  gates:
+    - type: non_empty_text
+      field: text
+  judge:
+    enabled: true
+    max_retries: 3
+    temperature: 0.1
+    prompt: |
+      You are reviewing a generated system/workspace prompt for SynthChat.
+
+      Scenario key:
+      {scenario_key}
+
+      System text:
+      {system_text}
+
+      Task context:
+      {task_context_json}
+
+      Return passed=true only if the system prompt is coherent, does not leak the
+      hidden answer, and provides enough workspace/tool context for the assistant.
+
+shared_user_generation_review: &shared_user_generation_review
+  enforce: true
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+  gates:
+    - type: non_empty_text
+      field: text
+    - type: plain_text
+      field: text
+    - type: no_tool_names
+      field: text
+    - type: no_exact_paths_from_context
+      field: text
+      sources: [task_context]
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a generated user request for SynthChat.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      User text:
+      {user_text}
+
+      Return passed=true only if this sounds like a real human request, keeps the
+      right level of vagueness for the scenario, and does not leak exact internal
+      paths or hidden task parameters unless the scenario truly requires them.
+
+shared_final_review: &shared_final_review
+  enforce: true
+  gates:
+    - type: field_equals
+      field: environment_passed
+      value: true
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a completed SynthChat training example.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      Final environment result:
+      {environment_result_json}
+
+      Final assistant response:
+      {assistant_response_json}
+
+      Conversation trace:
+      {conversation_trace_json}
+
+      Hard requirements:
+      {hard_requirements_json}
+
+      Quality rubric:
+      {quality_rubric_json}
+
+      If environment_result.passed is true, treat the hard requirements as already
+      satisfied by the programmatic environment validator. Do not override that by
+      re-inferring stale file contents from earlier tool traces.
+
+      In that case, judge only whether this is still a high-quality training
+      example overall: the trajectory is coherent enough, the tutor feedback is
+      sensible, and the ending response matches the scenario expectations.
+
+      If environment_result.passed is false, then passed must be false.
+
+shared_assistant_generation: &shared_assistant_generation
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+
+scenarios:
+  sharedvault_workspace_seed:
+    type: helper
+    environment_mode: generated
+    system_context:
+      available_workspaces:
+        - id: ws_shared_vault
+          name: Shared Vault
+          description: One workspace reused across multiple filesystem workflows
+          root_folder: ""
+      selected_workspace:
+        id: default
+        name: Shared Vault
+      assistant_instructions: >-
+        This seed workspace should support note promotion, daily notes, triage,
+        config updates, folder cleanup, archive decisions, inbox organization,
+        ambiguity clarification, and confirmation-before-delete behavior.
+    environment_generation:
+      <<: *shared_environment_generation_review
+      schema: canonical_environment
+      prompt: |
+        Generate one shared vault workspace that will be reused across ten filesystem scenarios.
+
+        Requirements:
+        - Keep these core folders present:
+          Inbox, Projects/Alpha, Projects/Beta, Projects/ArchiveEmpty, Templates,
+          Journal/Daily, Ops, Settings, Docs/API, Topics/Meetings, Topics/Roadmaps, Temp/Logs.
+        - Do not hardcode a canonical set of note names. Generate role-based candidates instead.
+        - The workspace must include these role types:
+          - At least one promotable inbox note under Inbox/. It should be plain markdown with no YAML front matter and a realistic short title/path.
+          - At least one example project note under Projects/* with YAML front matter containing at least `title` and an active-like `status`.
+          - At least one daily note template under Templates/ with YAML front matter for a daily note containing at least `title` and `date`, and body sections `## Summary` and `## Tasks`.
+          - At least one project reference note directly under Projects/ that describes a project and can be linked from a daily note.
+          - At least two open issue notes under Inbox/ with YAML front matter. One should be rate-limit/API-throttling themed; another should be login/auth themed.
+          - At least two config-like files under Ops/. One should be production-like and contain an old internal `base_url` plus `retries: 3`. Another should be a staging or dev distractor with a different URL.
+          - At least one settings-style YAML file under Settings/ containing `database_url`, `feature_x_enabled`, and `max_connections`.
+          - At least two API notes under Docs/API/. One should clearly be deprecated; another should clearly be current.
+          - At least one meeting-like inbox note and at least one roadmap-like inbox note that can be organized into topic folders.
+          - At least one duplicated note basename across two folders so an ambiguous-reference scenario is possible.
+          - Temp/Logs must contain multiple log files.
+          - Projects/ArchiveEmpty must exist and stay empty.
+        - Add 4 to 8 extra distractor files or folders with realistic note or config content so different seeds are not clones.
+        - Vary the candidate filenames, note titles, bodies, and surrounding workspace flavor across seeds while preserving the role coverage above.
+        - Return environment.assertions as an empty list.
+        - Put any seed-specific metadata under task_context, for example seed_theme or distractor_paths.
+    prompts:
+      user: ""
+      assistant: ""
+
+  sharedvault_promote_inbox_note_with_example:
+    type: tool
+    tool: contentManager_write
+    expected_tools: [contentManager_read, contentManager_write, storageManager_archive]
+    environment_mode: provided
+    tags: [vault, workflow, frontmatter, retrieval, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: path_exists
+          path: "{task_target_note_path}"
+        - type: path_not_exists
+          path: "{task_source_note_path}"
+        - type: frontmatter_has_key
+          path: "{task_target_note_path}"
+          field: title
+        - type: file_contains
+          path: "{task_target_note_path}"
+          text: "{task_source_body}"
+    system_context:
+      assistant_instructions: >-
+        Inspect the example note, preserve the inbox body, and remove or archive
+        the original inbox note after promotion.
+    task_family:
+      kind: move_file
+      primitives: [search, read, move]
+      user_request_style:
+        vague_human_request: true
+        avoid_exact_source_path: true
+        avoid_exact_target_path: true
+      preserve_source_body: true
+      preserve_example_format: true
+      must_read_before_move: true
+      must_not_overwrite_existing: true
+      candidate_selector:
+        source:
+          path_prefix: Inbox/
+          require_plain_body: true
+          exclude_frontmatter_statuses: [open, triaged]
+          preferred_keywords: [idea, draft, task, note, plan, prototype]
+        example:
+          path_prefix: Projects/
+          require_frontmatter: true
+          preferred_keywords: [example, project, note]
+        destination:
+          path_prefix: Projects/
+          require_missing_target_name: true
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Can you move the note about {task_source_note_user_reference} into
+        {task_target_folder_user_reference}? Make sure the contents stay intact
+        and it matches the format used by the existing project notes.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools. Read the example note first, write the promoted note, then
+        archive or remove the original inbox note.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_create_daily_note_from_template:
+    type: tool
+    tool: contentManager_write
+    expected_tools: [searchManager_searchDirectory, contentManager_read, contentManager_write]
+    environment_mode: provided
+    tags: [vault, template, frontmatter, retrieval, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: path_exists
+          path: "{task_target_output_path}"
+        - type: frontmatter_has_keys
+          path: "{task_target_output_path}"
+          fields: "{task_required_frontmatter_keys}"
+        - type: file_contains
+          path: "{task_target_output_path}"
+          text: "## Summary"
+        - type: file_contains
+          path: "{task_target_output_path}"
+          text: "{task_target_link}"
+    task_family:
+      kind: daily_note_from_template
+      template_selector:
+        path_prefix: Templates/
+        require_frontmatter: true
+        must_contain_text: ["## Summary", "## Tasks"]
+        preferred_keywords: [daily, template]
+      link_selector:
+        path_prefix: Projects/
+        preferred_keywords: [project]
+        root_only: true
+        must_not_contain_text: [meeting, roadmap]
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        allow_exact_links: false
+        reference_mode: title_only
+        examples:
+          - "Please make today's daily note and include the usual project link."
+          - "Can you create today's note from the normal template and add the Project A reference?"
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Create the daily note for {task_target_date}, use the usual daily note template,
+        and include the project reference for {task_target_project_reference}.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with searchManager.searchDirectory, contentManager.read, then contentManager.write.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_triage_correct_note_after_search:
+    type: tool
+    tool: contentManager_update
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    environment_mode: provided
+    tags: [vault, retrieval, triage, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: frontmatter_field_equals
+          path: "{task_target_note_path}"
+          field: status
+          value: "{task_target_status_value}"
+        - type: frontmatter_field_equals
+          path: "{task_distractor_note_path}"
+          field: status
+          value: "{task_distractor_expected_status}"
+        - type: frontmatter_has_key
+          path: "{task_target_note_path}"
+          field: title
+    task_family:
+      kind: triage_note
+      new_status: triaged
+      distractor_status: open
+      note_selector:
+        target:
+          path_prefix: Inbox/
+          require_frontmatter: true
+          require_frontmatter_statuses: [open]
+          preferred_keywords: [rate, limit, throttle, api]
+          must_not_contain_text: [login, auth, password]
+        distractor:
+          path_prefix: Inbox/
+          require_frontmatter: true
+          require_frontmatter_statuses: [open]
+          preferred_keywords: [login, auth, password]
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        reference_mode: title_only
+        examples:
+          - "Can you find the note about the 429 rate limit issue and mark it as triaged?"
+          - "Please triage the note about the rate limit problem and leave the others alone."
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Write a natural user request asking the assistant to find the note about
+        {task_target_phrase} and mark it as triaged, leaving unrelated notes alone.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with searchManager.searchContent, contentManager.read, then contentManager.update.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_update_production_config_preserve_structure:
+    type: tool
+    tool: contentManager_update
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    environment_mode: provided
+    tags: [vault, config, retrieval, preservation, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: file_contains
+          path: "{task_target_path}"
+          text: "{task_new_value}"
+        - type: file_contains
+          path: "{task_distractor_path}"
+          text: "{task_distractor_required_text}"
+        - type: file_not_contains_any
+          path: "{task_target_path}"
+          texts: ["{task_old_value}"]
+    task_family:
+      kind: edit_file
+      primitives: [search, read, edit]
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        avoid_exact_target_path: true
+        reference_mode: title_only
+        examples:
+          - "Please update the production config to use the new production API URL while keeping the rest the same."
+          - "Can you switch the production config over to the new API endpoint without changing anything else?"
+      edit_mode: text_replace
+      preserve_structure: true
+      must_read_before_edit: true
+      candidate_selector:
+        target:
+          path_prefix: Ops/
+          must_contain_text: ["base_url:", "retries:"]
+          preferred_keywords: [prod, production]
+          must_not_contain_text: [staging, dev, sandbox]
+        distractors:
+          path_prefix: Ops/
+          must_contain_text: ["base_url:"]
+          preferred_keywords: [staging, dev]
+      new_value: https://api.prod.example.com
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Write a natural user request asking the assistant to update the production
+        config to use the new production API URL {task_new_value} while preserving
+        the rest of the note.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with search, read, then update.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_read_before_replace_settings_yaml:
+    type: tool
+    tool: contentManager_update
+    expected_tools: [contentManager_read, contentManager_update]
+    environment_mode: provided
+    tags: [vault, settings, preservation, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: file_contains
+          path: "{task_target_path}"
+          text: '{task_target_field}: "{task_new_value}"'
+        - type: file_contains_all
+          path: "{task_target_path}"
+          texts: "{task_preserved_lines}"
+        - type: file_not_contains_any
+          path: "{task_target_path}"
+          texts: ["{task_old_value}"]
+    task_family:
+      kind: edit_file
+      primitives: [read, edit]
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        avoid_exact_target_path: true
+        reference_mode: title_only
+        examples:
+          - "Please update the database URL in our settings to the new production connection string and leave the rest alone."
+      edit_mode: field_replace
+      preserve_other_fields: true
+      must_read_before_edit: true
+      field: database_url
+      candidate_selector:
+        target:
+          path_prefix: Settings/
+          must_contain_text: ["database_url:", "feature_x_enabled", "max_connections"]
+          preferred_keywords: [settings, config]
+      new_value: postgres://prod_user:prod_pass@prodhost/prod_db
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Write a natural user request asking the assistant to update
+        {task_target_field} in our settings to {task_new_value} while preserving
+        the rest of the configuration.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with contentManager.read followed by contentManager.update.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_archive_empty_folder_after_verification:
+    type: tool
+    tool: storageManager_archive
+    expected_tools: [storageManager_list, storageManager_archive]
+    environment_mode: provided
+    tags: [vault, destructive, verification, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: path_not_exists
+          path: "{task_target_empty_folder}"
+        - type: path_exists
+          path: "{task_protected_folder_1}"
+        - type: path_exists
+          path: "{task_protected_folder_2}"
+    task_family:
+      kind: archive_empty_folder
+      target_contains: ArchiveEmpty
+      protected_prefix: Projects/
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        avoid_exact_target_path: true
+        reference_mode: folder_purpose
+        examples:
+          - "If the ArchiveEmpty project folder is really empty, go ahead and archive it."
+          - "Can you clean up the ArchiveEmpty project folder if it's empty, but leave the other project folders alone?"
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Verify that {task_target_empty_folder_user_reference} is empty and archive it,
+        leaving the other project folders alone.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with storageManager.list first, then storageManager.archive.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_archive_only_deprecated_notes:
+    type: tool
+    tool: storageManager_archive
+    expected_tools: [searchManager_searchContent, contentManager_read, storageManager_archive]
+    environment_mode: provided
+    tags: [vault, destructive, retrieval, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: path_not_exists
+          path: "{task_deprecated_note_path}"
+        - type: path_exists
+          path: "{task_current_note_path}"
+    task_family:
+      kind: archive_deprecated_note
+      deprecation_query: deprecated endpoint
+      note_selector:
+        deprecated:
+          path_prefix: Docs/API/
+          required_keywords: [deprecated]
+          preferred_keywords: [endpoint, api]
+        current:
+          path_prefix: Docs/API/
+          required_keywords: [current]
+          preferred_keywords: [endpoint, api]
+      user_request_style:
+        vague_human_request: true
+        require_request_form: true
+        allow_exact_paths: false
+        reference_mode: title_only
+        examples:
+          - "Can you find the old deprecated API endpoint note and archive only that one?"
+          - "Please clean up the deprecated API note, but leave the current endpoint note alone."
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Write a natural user request asking the assistant to find the API note about
+        {task_deprecation_query} and archive only the deprecated note, leaving the
+        current endpoint note alone.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with search, read, then archive.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_continue_inbox_organization:
+    type: tool
+    tool: storageManager_move
+    expected_tools: [storageManager_move]
+    environment_mode: provided
+    tags: [vault, workflow, continuity, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: path_exists
+          path: "{task_meeting_target_path}"
+        - type: path_exists
+          path: "{task_roadmap_target_path}"
+        - type: path_not_exists
+          path: "{task_meeting_source_path}"
+        - type: path_not_exists
+          path: "{task_roadmap_source_path}"
+    task_family:
+      kind: organize_notes
+      meetings_dest_contains: Topics/Meetings
+      roadmaps_dest_contains: Topics/Roadmaps
+      note_selector:
+        meeting:
+          path_prefix: Inbox/
+          preferred_keywords: [meeting, notes, sync]
+        roadmap:
+          path_prefix: Inbox/
+          preferred_keywords: [roadmap, plan]
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        avoid_exact_source_path: true
+        avoid_exact_target_path: true
+        reference_mode: folder_purpose
+        examples:
+          - "Please file the meeting notes and roadmap ideas into the right topic folders."
+          - "Can you finish organizing the inbox by moving those notes where they belong?"
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Continue organizing the inbox by moving the {task_meeting_source_user_reference}
+        into {task_meetings_destination_user_reference} and the
+        {task_roadmap_source_user_reference} into {task_roadmaps_destination_user_reference}.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use useTools with storageManager.move for each note.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  sharedvault_clarify_ambiguous_note_reference:
+    type: behavioral
+    environment_mode: provided
+    tags: [vault, clarification, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions: []
+    task_family:
+      kind: ambiguous_reference
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Ask about the note called {task_ambiguous_reference} without specifying which project it belongs to.
+      assistant: |
+        Generate a plain text assistant response only.
+
+        Ask a short clarifying question and do not call tools.
+    assistant_generation:
+      <<: *shared_assistant_generation
+
+  sharedvault_confirm_before_bulk_delete:
+    type: behavioral
+    environment_mode: provided
+    tags: [vault, safety, confirmation, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions: []
+    task_family:
+      kind: confirm_bulk_delete
+      target_contains: Temp/Logs
+      user_request_style:
+        vague_human_request: true
+        allow_exact_paths: false
+        avoid_exact_target_path: true
+        reference_mode: folder_purpose
+        examples:
+          - "Please clear out the logs folder."
+          - "Can you delete the logs for me?"
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Ask to delete everything in {task_target_scope_user_reference}.
+      assistant: |
+        Generate a plain text assistant response only.
+
+        Ask for confirmation before taking any destructive action and do not call tools.
+    assistant_generation:
+      <<: *shared_assistant_generation

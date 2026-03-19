@@ -15,7 +15,7 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
@@ -23,8 +23,9 @@ from shared.llm import create_client
 from shared.environments import EnvironmentValidator
 from .utils.yaml_loader import load_yaml
 from .utils.docs_loader import DocsLoader, DocFile
+from .utils.logger import get_logger
 from .engine import ImprovementEngine
-from .generator import SynthChatGenerator, ScenarioLoader
+from .generator import SynthChatGenerator, ScenarioLoader, _extract_shared_seed_spec
 
 
 class StreamingResultWriter:
@@ -141,6 +142,7 @@ def create_llm_client(config: Dict, mode: str = "generation",
 
     # Create client using shared.llm factory
     client = create_client(config_defaults=config_defaults)
+    setattr(client, "default_max_tokens", llm_config.get("max_tokens"))
     return client
 
 
@@ -199,6 +201,7 @@ def generate_mode(args):
     # Load configuration
     config_dir = Path(args.config_dir or "SynthChat/config")
     settings = load_settings(config_dir)
+    logger = get_logger("synthchat_generate")
 
     scenarios_dir = Path(args.scenarios_dir or "SynthChat/scenarios")
     rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
@@ -219,6 +222,7 @@ def generate_mode(args):
         llm_client=improve_client,
         rubrics_dir=rubrics_dir,
         config_path=validation_config,
+        logger=logger,
         enable_interactions=settings["logging"]["save_interactions"]
     )
 
@@ -230,7 +234,8 @@ def generate_mode(args):
         llm_client=gen_client,
         engine=engine,
         environment_validator=environment_validator,
-        enable_stage_validation=settings["generation"]["stage_validation"]
+        enable_stage_validation=settings["generation"]["stage_validation"],
+        logger=logger,
     )
 
     # Load targets
@@ -241,14 +246,40 @@ def generate_mode(args):
         # Use default targets from settings
         targets = settings["defaults"]["targets"]
 
+    shared_seed_spec, targets = _extract_shared_seed_spec(targets)
+
     # Filter targets if specific scenarios requested
     if args.scenarios:
         targets = {k: v for k, v in targets.items() if k in args.scenarios}
+        if shared_seed_spec and shared_seed_spec.get("targets"):
+            shared_seed_spec = {
+                **shared_seed_spec,
+                "targets": [key for key in shared_seed_spec["targets"] if key in targets],
+            }
 
     print(f"\nGeneration targets:")
-    for scenario_key, count in targets.items():
-        print(f"  {scenario_key}: {count}")
-    print(f"Total: {sum(targets.values())} examples\n")
+    total_examples = 0
+    if shared_seed_spec:
+        shared_targets = set(shared_seed_spec.get("targets") or targets.keys())
+        print(
+            f"  [shared seed] scenario={shared_seed_spec['scenario']} "
+            f"seed_count={shared_seed_spec['seed_count']} targets={len(shared_targets)}"
+        )
+    for scenario_key, raw_target in targets.items():
+        target_spec = _normalize_target_spec(raw_target)
+        if shared_seed_spec and (not shared_seed_spec.get("targets") or scenario_key in set(shared_seed_spec.get("targets") or [])):
+            scenario_total = shared_seed_spec["seed_count"] * target_spec["rollouts_per_seed"]
+        else:
+            scenario_total = target_spec["seed_count"] * target_spec["rollouts_per_seed"]
+        total_examples += scenario_total
+        if target_spec["rollouts_per_seed"] == 1:
+            print(f"  {scenario_key}: {scenario_total}")
+        else:
+            print(
+                f"  {scenario_key}: {target_spec['seed_count']} seed(s) x "
+                f"{target_spec['rollouts_per_seed']} rollout(s) = {scenario_total}"
+            )
+    print(f"Total: {total_examples} examples\n")
 
     # Load docs if provided
     docs: List[DocFile] = []
@@ -277,19 +308,79 @@ def generate_mode(args):
             task_id = 0
             for doc in docs:
                 for rep in range(args.per_doc):
-                    for scenario_key, count in targets.items():
+                    shared_targets = set((shared_seed_spec or {}).get("targets") or [])
+                    if shared_seed_spec:
+                        shared_scenario = generator.scenario_loader.get_scenario(shared_seed_spec["scenario"])
+                        if not shared_scenario:
+                            raise ValueError(f"Shared seed scenario not found: {shared_seed_spec['scenario']}")
+                        for shared_seed_index in range(shared_seed_spec["seed_count"]):
+                            shared_seed_id = f"{shared_seed_spec['scenario']}:shared_seed:{shared_seed_index + 1}"
+                            shared_seed_bundle = generator.prepare_seed_bundle(
+                                scenario_key=shared_seed_spec["scenario"],
+                                seed_id=shared_seed_id,
+                                scenario=shared_scenario,
+                                randomize_params=True,
+                                doc_context=doc,
+                            )
+                            for scenario_key, raw_target in targets.items():
+                                if shared_targets and scenario_key not in shared_targets:
+                                    continue
+                                scenario = generator.scenario_loader.get_scenario(scenario_key)
+                                if not scenario:
+                                    print(f"Warning: Scenario not found: {scenario_key}")
+                                    continue
+                                target_spec = _normalize_target_spec(raw_target)
+                                for rollout_index in range(target_spec["rollouts_per_seed"]):
+                                    work_items.append((
+                                        scenario_key, scenario, max_iterations,
+                                        config_dir, scenarios_dir, rubrics_dir,
+                                        settings, args.provider, args.model, doc, task_id,
+                                        _serialize_environment_options(environment_validator),
+                                        shared_seed_bundle,
+                                        {
+                                            "seed_id": shared_seed_id,
+                                            "seed_index": shared_seed_index,
+                                            "seed_count": shared_seed_spec["seed_count"],
+                                            "rollout_index": rollout_index,
+                                            "rollouts_per_seed": target_spec["rollouts_per_seed"],
+                                            "shared_seed_source": shared_seed_spec["scenario"],
+                                            "shared_across_scenarios": True,
+                                        },
+                                    ))
+                                    task_id += 1
+                    for scenario_key, raw_target in targets.items():
+                        if shared_seed_spec and (not shared_seed_spec.get("targets") or scenario_key in set(shared_seed_spec.get("targets") or [])):
+                            continue
                         scenario = generator.scenario_loader.get_scenario(scenario_key)
                         if not scenario:
                             print(f"Warning: Scenario not found: {scenario_key}")
                             continue
-                        for _ in range(count):
-                            work_items.append((
-                                scenario_key, scenario, max_iterations,
-                                config_dir, scenarios_dir, rubrics_dir,
-                                settings, args.provider, args.model, doc, task_id,
-                                _serialize_environment_options(environment_validator)
-                            ))
-                            task_id += 1
+                        target_spec = _normalize_target_spec(raw_target)
+                        for seed_index in range(target_spec["seed_count"]):
+                            seed_id = f"{scenario_key}:seed:{seed_index + 1}"
+                            seed_bundle = generator.prepare_seed_bundle(
+                                scenario_key=scenario_key,
+                                seed_id=seed_id,
+                                scenario=scenario,
+                                randomize_params=True,
+                                doc_context=doc,
+                            )
+                            for rollout_index in range(target_spec["rollouts_per_seed"]):
+                                work_items.append((
+                                    scenario_key, scenario, max_iterations,
+                                    config_dir, scenarios_dir, rubrics_dir,
+                                    settings, args.provider, args.model, doc, task_id,
+                                    _serialize_environment_options(environment_validator),
+                                    seed_bundle,
+                                    {
+                                        "seed_id": seed_id,
+                                        "seed_index": seed_index,
+                                        "seed_count": target_spec["seed_count"],
+                                        "rollout_index": rollout_index,
+                                        "rollouts_per_seed": target_spec["rollouts_per_seed"],
+                                    },
+                                ))
+                                task_id += 1
 
             results.extend(_run_parallel_generation(work_items, num_workers, writer))
         elif docs:
@@ -304,10 +395,10 @@ def generate_mode(args):
                         targets=targets,
                         max_iterations=max_iterations,
                         randomize_params=True,
-                        doc_context=doc
+                        doc_context=doc,
+                        on_result=writer.write,
+                        shared_seed_spec=shared_seed_spec,
                     )
-                    for result in batch_results:
-                        writer.write(result)
                     results.extend(batch_results)
         elif num_workers > 1:
             # Parallel generation with multiple workers (no docs)
@@ -316,19 +407,77 @@ def generate_mode(args):
             # Build work items
             work_items = []
             task_id = 0
-            for scenario_key, count in targets.items():
+            shared_targets = set((shared_seed_spec or {}).get("targets") or [])
+            if shared_seed_spec:
+                shared_scenario = generator.scenario_loader.get_scenario(shared_seed_spec["scenario"])
+                if not shared_scenario:
+                    raise ValueError(f"Shared seed scenario not found: {shared_seed_spec['scenario']}")
+                for shared_seed_index in range(shared_seed_spec["seed_count"]):
+                    shared_seed_id = f"{shared_seed_spec['scenario']}:shared_seed:{shared_seed_index + 1}"
+                    shared_seed_bundle = generator.prepare_seed_bundle(
+                        scenario_key=shared_seed_spec["scenario"],
+                        seed_id=shared_seed_id,
+                        scenario=shared_scenario,
+                        randomize_params=True,
+                    )
+                    for scenario_key, raw_target in targets.items():
+                        if shared_targets and scenario_key not in shared_targets:
+                            continue
+                        scenario = generator.scenario_loader.get_scenario(scenario_key)
+                        if not scenario:
+                            print(f"Warning: Scenario not found: {scenario_key}")
+                            continue
+                        target_spec = _normalize_target_spec(raw_target)
+                        for rollout_index in range(target_spec["rollouts_per_seed"]):
+                            work_items.append((
+                                scenario_key, scenario, max_iterations,
+                                config_dir, scenarios_dir, rubrics_dir,
+                                settings, args.provider, args.model, None, task_id,
+                                _serialize_environment_options(environment_validator),
+                                shared_seed_bundle,
+                                {
+                                    "seed_id": shared_seed_id,
+                                    "seed_index": shared_seed_index,
+                                    "seed_count": shared_seed_spec["seed_count"],
+                                    "rollout_index": rollout_index,
+                                    "rollouts_per_seed": target_spec["rollouts_per_seed"],
+                                    "shared_seed_source": shared_seed_spec["scenario"],
+                                    "shared_across_scenarios": True,
+                                },
+                            ))
+                            task_id += 1
+            for scenario_key, raw_target in targets.items():
+                if shared_seed_spec and (not shared_seed_spec.get("targets") or scenario_key in set(shared_seed_spec.get("targets") or [])):
+                    continue
                 scenario = generator.scenario_loader.get_scenario(scenario_key)
                 if not scenario:
                     print(f"Warning: Scenario not found: {scenario_key}")
                     continue
-                for _ in range(count):
-                    work_items.append((
-                        scenario_key, scenario, max_iterations,
-                        config_dir, scenarios_dir, rubrics_dir,
-                        settings, args.provider, args.model, None, task_id,
-                        _serialize_environment_options(environment_validator)
-                    ))
-                    task_id += 1
+                target_spec = _normalize_target_spec(raw_target)
+                for seed_index in range(target_spec["seed_count"]):
+                    seed_id = f"{scenario_key}:seed:{seed_index + 1}"
+                    seed_bundle = generator.prepare_seed_bundle(
+                        scenario_key=scenario_key,
+                        seed_id=seed_id,
+                        scenario=scenario,
+                        randomize_params=True,
+                    )
+                    for rollout_index in range(target_spec["rollouts_per_seed"]):
+                        work_items.append((
+                            scenario_key, scenario, max_iterations,
+                            config_dir, scenarios_dir, rubrics_dir,
+                            settings, args.provider, args.model, None, task_id,
+                            _serialize_environment_options(environment_validator),
+                            seed_bundle,
+                            {
+                                "seed_id": seed_id,
+                                "seed_index": seed_index,
+                                "seed_count": target_spec["seed_count"],
+                                "rollout_index": rollout_index,
+                                "rollouts_per_seed": target_spec["rollouts_per_seed"],
+                            },
+                        ))
+                        task_id += 1
 
             results.extend(_run_parallel_generation(work_items, num_workers, writer))
         else:
@@ -336,11 +485,10 @@ def generate_mode(args):
             results = generator.generate_batch(
                 targets=targets,
                 max_iterations=max_iterations,
-                randomize_params=True
+                randomize_params=True,
+                on_result=writer.write,
+                shared_seed_spec=shared_seed_spec,
             )
-            # Stream sequential results that were accumulated by generate_batch
-            for result in results:
-                writer.write(result)
 
         print(f"\nStreamed {writer.count} examples to {output_file}")
 
@@ -670,6 +818,7 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
                               settings: Dict, provider: str = None, model: str = None,
                               environment_options: Optional[Dict] = None):
     """Create a new generator instance for a worker thread."""
+    logger = get_logger("synthchat_generate_worker")
     gen_client = create_llm_client(settings, mode="generation",
                                    provider_override=provider, model_override=model)
     improve_client = create_llm_client(settings, mode="improvement",
@@ -680,6 +829,7 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
         llm_client=improve_client,
         rubrics_dir=rubrics_dir,
         config_path=validation_config,
+        logger=logger,
         enable_interactions=settings["logging"]["save_interactions"]
     )
 
@@ -690,7 +840,8 @@ def _create_worker_generator(config_dir: Path, scenarios_dir: Path, rubrics_dir:
         llm_client=gen_client,
         engine=engine,
         environment_validator=_create_environment_validator_from_options(environment_options or {}),
-        enable_stage_validation=settings["generation"]["stage_validation"]
+        enable_stage_validation=settings["generation"]["stage_validation"],
+        logger=logger,
     )
     return generator
 
@@ -703,7 +854,7 @@ def _generate_single_example(args_tuple):
     """
     (scenario_key, scenario, max_iterations, config_dir, scenarios_dir,
      rubrics_dir, settings, provider, model, doc_context, task_id,
-     environment_options) = args_tuple
+     environment_options, seed_bundle, rollout_metadata) = args_tuple
 
     try:
         # Each worker creates its own generator (thread-safe LLM clients)
@@ -713,11 +864,38 @@ def _generate_single_example(args_tuple):
         )
 
         result = generator.generate_single(
-            scenario_key, scenario, max_iterations, True, doc_context
+            scenario_key,
+            scenario,
+            max_iterations,
+            True,
+            doc_context,
+            seed_bundle=seed_bundle,
+            rollout_metadata=rollout_metadata,
         )
         return result, None, task_id
     except Exception as e:
         return None, f"Task {task_id} error for {scenario_key}: {e}", task_id
+
+
+def _normalize_target_spec(raw_target: Any) -> Dict[str, int]:
+    if isinstance(raw_target, bool):
+        raise ValueError("Boolean target specs are not supported")
+    if isinstance(raw_target, int):
+        if raw_target < 0:
+            raise ValueError("Target counts must be non-negative")
+        return {"seed_count": raw_target, "rollouts_per_seed": 1}
+    if not isinstance(raw_target, dict):
+        raise ValueError(f"Unsupported target spec: {raw_target!r}")
+
+    count = raw_target.get("count")
+    seed_count = raw_target.get("seed_count", count if count is not None else 1)
+    rollouts_per_seed = raw_target.get("rollouts_per_seed", 1)
+
+    seed_count = int(seed_count)
+    rollouts_per_seed = int(rollouts_per_seed)
+    if seed_count < 0 or rollouts_per_seed < 0:
+        raise ValueError("Target specs must use non-negative integers")
+    return {"seed_count": seed_count, "rollouts_per_seed": rollouts_per_seed}
 
 
 def _generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> Path:

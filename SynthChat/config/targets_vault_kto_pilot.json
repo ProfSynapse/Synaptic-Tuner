@@ -1,0 +1,12 @@
+{
+  "envfs_promote_inbox_note_with_example": 1,
+  "envfs_create_daily_note_from_template": 1,
+  "envfs_triage_correct_note_after_search": 1,
+  "envfs_update_production_config_preserve_structure": 1,
+  "envfs_read_before_replace_settings_yaml": 1,
+  "envfs_archive_empty_folder_after_verification": 1,
+  "envfs_archive_only_deprecated_notes": 1,
+  "envfs_continue_inbox_organization": 1,
+  "envfs_clarify_ambiguous_note_reference": 1,
+  "envfs_confirm_before_bulk_delete": 1
+}

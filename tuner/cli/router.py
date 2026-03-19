@@ -7,6 +7,7 @@ Used by: Main entry point (cli/main.py)
 
 Routes top-level commands to their handlers:
   - train: TrainHandler (SFT, KTO, GRPO workflows)
+  - cloud: CloudTrainHandler (cloud GPU training via HF Jobs, Modal, RunPod)
   - eval: EvalHandler (model evaluation)
   - synthchat: SynthChatHandler (data generation and improvement)
   - modelops: ModelOpsHandler (run, merge, convert, upload)
@@ -72,6 +73,11 @@ def route_command(args: Namespace) -> int:
     try:
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
+        from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+        from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
+        from tuner.handlers.cloud_gym_handler import CloudGymHandler
+        from tuner.handlers.cloud_run_handler import CloudRunHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.ml_handler import MLHandler
@@ -106,7 +112,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, eval, synthchat, modelops, ml, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -140,14 +146,27 @@ def route_command(args: Namespace) -> int:
         handler = MLHandler(args=args)
         return handler.handle()
 
+    # Import cloud handler (conditional - may not have deps)
+    try:
+        from tuner.handlers.cloud_train_handler import CloudTrainHandler
+    except ImportError:
+        CloudTrainHandler = None
+
     # Map commands to handlers
     handlers = {
         'train': TrainHandler,
+        'cloud-pipeline': CloudPipelineHandler,
+        'cloud-run': CloudRunHandler,
         'eval': EvalHandler,
+        'cloud-eval': CloudEvalHandler,
+        'cloud-gym': CloudGymHandler,
+        'cloud-inspect': CloudInspectHandler,
         'synthchat': SynthChatHandler,
         'modelops': ModelOpsHandler,
         'ml': MLHandler,
     }
+    if CloudTrainHandler is not None:
+        handlers['cloud'] = CloudTrainHandler
 
     # Execute handler with args
     if command and command in handlers:

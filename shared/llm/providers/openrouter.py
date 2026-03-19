@@ -11,7 +11,13 @@ from ..exceptions import LLMConnectionError, LLMResponseError
 class OpenRouterClient(BaseLLMClient):
     """OpenRouter API client with structured output and provider routing support."""
 
-    def __init__(self, api_key: str, model: str, provider: Dict[str, Any] = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        provider: Dict[str, Any] = None,
+        timeout_seconds: float = 60.0,
+    ):
         """
         Initialize OpenRouter client.
 
@@ -28,6 +34,7 @@ class OpenRouterClient(BaseLLMClient):
         self.model = model
         self.provider = provider
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.timeout_seconds = float(timeout_seconds)
 
     @property
     def provider_name(self) -> str:
@@ -78,7 +85,24 @@ class OpenRouterClient(BaseLLMClient):
 
         try:
             data = self._make_request(payload)
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message.get("content")
+
+            if content is None:
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                raise LLMResponseError("Empty response from OpenRouter")
+
+            if not isinstance(content, str):
+                content = str(content)
+            if not content.strip():
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    return json.dumps({"content": None, "tool_calls": tool_calls})
+                raise LLMResponseError("Empty response from OpenRouter")
+
+            return content
 
         except Exception as e:
             raise LLMResponseError(f"OpenRouter chat request failed: {e}")
@@ -88,7 +112,7 @@ class OpenRouterClient(BaseLLMClient):
         messages: List[Dict[str, str]],
         schema: Dict[str, Any],
         temperature: float = 0.3,
-        max_tokens: int = 2048,
+        max_tokens: int | None = None,
         **kwargs
     ) -> Dict[str, Any]:
         """Send request with JSON schema for structured output."""
@@ -96,7 +120,6 @@ class OpenRouterClient(BaseLLMClient):
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -106,6 +129,8 @@ class OpenRouterClient(BaseLLMClient):
                 }
             }
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         # Add provider routing if configured
         if self.provider:
@@ -122,7 +147,10 @@ class OpenRouterClient(BaseLLMClient):
             return json.loads(content)
 
         except json.JSONDecodeError as e:
-            raise LLMResponseError(f"Failed to parse structured output: {e}")
+            raise LLMResponseError(
+                f"Failed to parse structured output: {e}\nResponse excerpt: {_truncate_response(content)}",
+                raw_response=content,
+            )
         except Exception as e:
             raise LLMResponseError(f"OpenRouter structured output failed: {e}")
 
@@ -140,7 +168,7 @@ class OpenRouterClient(BaseLLMClient):
                 self.api_url,
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=self.timeout_seconds,
             )
             response.raise_for_status()
             return response.json()
@@ -173,3 +201,11 @@ class OpenRouterClient(BaseLLMClient):
             # Print error for debugging
             print(f"    Connection test error: {e}")
             return False
+
+
+def _truncate_response(content: Any, limit: int = 1200) -> str:
+    """Return a compact single-line excerpt for debugging malformed structured output."""
+    text = str(content or "").replace("\r", "\\r").replace("\n", "\\n")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...<truncated>"

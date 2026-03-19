@@ -112,9 +112,20 @@ class MainMenuHandler(BaseHandler):
         # Import handlers here to avoid circular imports
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
+        from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
+        from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+        from tuner.handlers.cloud_gym_handler import CloudGymHandler
+        from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.ml_handler import MLHandler
+
+        # Cloud handler is optional (may not have cloud deps)
+        try:
+            from tuner.handlers.cloud_train_handler import CloudTrainHandler
+            has_cloud = True
+        except ImportError:
+            has_cloud = False
 
         # Step 1: Detect environment and load .env
         env = detect_environment()
@@ -123,9 +134,14 @@ class MainMenuHandler(BaseHandler):
         # Step 2: Build status info
         status_info = self._build_status_info(env, env_loaded)
 
-        # Step 3: Define menu options (4 top-level categories)
+        # Step 3: Define menu options
         menu_options = [
-            ("train", f"{BOX['star']} Training - Train models (SFT, KTO, GRPO)"),
+            ("train", f"{BOX['star']} Training - Train models locally (SFT, KTO, GRPO)"),
+            ("cloud", f"{BOX['bullet']} Cloud Training - Train on GPU cloud (HF Jobs, Modal, RunPod)"),
+            ("cloud-pipeline", f"{BOX['bullet']} Cloud Pipeline - Train then evaluate on HF Jobs"),
+            ("cloud-eval", f"{BOX['bullet']} Cloud Evaluation - Evaluate cloud runs on HF Jobs (vLLM)"),
+            ("cloud-gym", f"{BOX['bullet']} Cloud Gym - Run vault gym scenarios against a trained cloud run"),
+            ("cloud-inspect", f"{BOX['bullet']} Cloud Inspect - Review saved HF cloud evaluation results"),
             ("eval", f"{BOX['bullet']} Evaluation - Run benchmarks against a model"),
             ("synthchat", f"{BOX['bullet']} SynthChat - Generate + improve training data"),
             ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
@@ -135,11 +151,17 @@ class MainMenuHandler(BaseHandler):
         # Step 4: Create handler instances (pass args for consistency)
         handlers = {
             "train": TrainHandler(args=self.args),
+            "cloud-pipeline": CloudPipelineHandler(args=self.args),
             "eval": EvalHandler(args=self.args),
+            "cloud-eval": CloudEvalHandler(args=self.args),
+            "cloud-gym": CloudGymHandler(args=self.args),
+            "cloud-inspect": CloudInspectHandler(args=self.args),
             "synthchat": SynthChatHandler(args=self.args),
             "modelops": ModelOpsHandler(args=self.args),
             "ml": MLHandler(args=self.args),
         }
+        if has_cloud:
+            handlers["cloud"] = CloudTrainHandler(args=self.args)
 
         # Step 5: Main menu loop
         first_run = True

@@ -6,21 +6,26 @@ against a backend client and collects validation results.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
 from .behavior_validator import BehaviorIssue, BehaviorValidationResult, validate_behavior
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
-from .schema_validator import ValidationResult, ValidatorIssue, validate_assistant_response
+from .schema_validator import ToolCall, ValidationResult, ValidatorIssue, validate_assistant_response
 
 try:
     from shared.environments import EnvironmentValidationResult, EnvironmentValidator
 except ImportError:
     EnvironmentValidationResult = None
     EnvironmentValidator = None
+
+try:
+    from shared.agentic_loop import run_environment_episode
+except ImportError:
+    run_environment_episode = None
 
 try:
     from .judge_validator import JudgeValidationResult, JudgeValidator
@@ -54,6 +59,8 @@ class EvaluationRecord:
     behavior: Optional[BehaviorValidationResult] = None
     environment: Optional["EnvironmentValidationResult"] = None
     judge: Optional["JudgeValidationResult"] = None
+    scoring: Optional["PathScoringResult"] = None
+    conversation_trace: Optional[List[Dict[str, Any]]] = None
 
     @property
     def status(self) -> str:
@@ -137,6 +144,58 @@ class EvaluationRecord:
         """Check if judge validation passed (or not applicable)."""
         return self.judge is None or self.judge.passed
 
+    @property
+    def score(self) -> Optional[float]:
+        """Normalized config-driven score, if present."""
+        return self.scoring.normalized_score if self.scoring is not None else None
+
+
+@dataclass
+class PathScoreMatch:
+    """Match result for one configured scoring path."""
+
+    name: str
+    tier: str
+    score: float
+    matched: bool
+    reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "tier": self.tier,
+            "score": self.score,
+            "matched": self.matched,
+            "reasons": list(self.reasons),
+        }
+
+
+@dataclass
+class PathScoringResult:
+    """Aggregate score for a case with preferred/acceptable paths."""
+
+    max_score: float
+    awarded_score: float
+    matched_path: Optional[str] = None
+    matched_tier: Optional[str] = None
+    matches: List[PathScoreMatch] = field(default_factory=list)
+
+    @property
+    def normalized_score(self) -> float:
+        if self.max_score <= 0:
+            return 0.0
+        return self.awarded_score / self.max_score
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "max_score": self.max_score,
+            "awarded_score": self.awarded_score,
+            "normalized_score": self.normalized_score,
+            "matched_path": self.matched_path,
+            "matched_tier": self.matched_tier,
+            "matches": [match.to_dict() for match in self.matches],
+        }
+
 
 def evaluate_cases(
     cases: Sequence[PromptCase],
@@ -219,6 +278,20 @@ def _evaluate_single_case(
     if validate_context:
         eval_context = case.metadata.get("expected_context")
 
+    environment_config = case.metadata.get("environment") or {}
+    loop_cfg = environment_config.get("loop") if isinstance(environment_config.get("loop"), dict) else {}
+    loop_enabled = bool(environment_validator is not None and loop_cfg.get("enabled"))
+
+    if loop_enabled and environment_validator is not None:
+        return _evaluate_case_with_environment_loop(
+            case=case,
+            client=client,
+            eval_context=eval_context,
+            environment_validator=environment_validator,
+            judge_validator=judge_validator,
+            environment_config=environment_config,
+        )
+
     # Make request to backend
     try:
         response = client.chat(case.chat_messages())
@@ -256,7 +329,6 @@ def _evaluate_single_case(
     if environment_validator is not None:
         try:
             system_prompt = case.metadata.get("system", "")
-            environment_config = case.metadata.get("environment") or {}
             expected_for_env = case.expected_tools if environment_config.get("require_expected_tools") else None
             environment_result = environment_validator.validate_response(
                 system_prompt=system_prompt,
@@ -320,6 +392,14 @@ def _evaluate_single_case(
                 # Judge failure should not crash the evaluation
                 logger.error("Judge validation error for %s: %s", case.case_id, exc)
 
+    scoring_result = _run_path_scoring(
+        case=case,
+        validator_result=validator_result,
+        behavior_result=behavior_result,
+        environment_result=environment_result,
+        judge_result=judge_result,
+    )
+
     return EvaluationRecord(
         case=case,
         response_text=response.message,
@@ -328,8 +408,158 @@ def _evaluate_single_case(
         raw_response=response.raw,
         error=None,
         behavior=behavior_result,
+            environment=environment_result,
+            judge=judge_result,
+            scoring=scoring_result,
+            conversation_trace=_build_single_turn_trace(case, response.message),
+        )
+
+
+def _evaluate_case_with_environment_loop(
+    *,
+    case: PromptCase,
+    client: BackendClient,
+    eval_context: Optional[Dict[str, Any]],
+    environment_validator: "EnvironmentValidator",
+    judge_validator: "JudgeValidator" | None,
+    environment_config: Dict[str, Any],
+) -> EvaluationRecord:
+    """Evaluate a case with a persistent environment and multi-turn tool loop."""
+    loop_cfg = environment_config.get("loop") if isinstance(environment_config.get("loop"), dict) else {}
+    max_turns = int(loop_cfg.get("max_turns", 6) or 6)
+    max_tool_steps = int(loop_cfg.get("max_tool_steps", environment_config.get("max_steps", 0)) or 0)
+    stop_on_text_response = bool(loop_cfg.get("stop_on_text_response", True))
+    stop_on_environment_pass = bool(loop_cfg.get("stop_on_environment_pass", False))
+    require_final_text = bool(loop_cfg.get("require_final_text", False))
+    require_final_text_after_pass = bool(
+        loop_cfg.get("require_final_text_after_pass", require_final_text)
+    )
+    final_text_prompt = loop_cfg.get("final_text_prompt")
+    tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
+    continue_on_execution_error = bool(
+        loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
+    )
+    stuck_repeat_limit = int(loop_cfg.get("stuck_repeat_limit", 2) or 2)
+    no_progress_window = int(loop_cfg.get("no_progress_window", 3) or 3)
+
+    messages = case.chat_messages()
+    session = environment_validator.start_session(
+        system_prompt=case.metadata.get("system", ""),
+        environment_config=environment_config,
+    )
+
+    try:
+        episode = run_environment_episode(
+            initial_messages=messages,
+            session=session,
+            respond=lambda episode_messages, turn_index: client.chat(episode_messages),
+            validate=lambda message: validate_assistant_response(message, eval_context),
+            max_turns=max_turns,
+            max_tool_steps=max_tool_steps,
+            stop_on_text_response=stop_on_text_response,
+            stop_on_environment_pass=stop_on_environment_pass,
+            continue_on_execution_error=continue_on_execution_error,
+            stuck_repeat_limit=stuck_repeat_limit,
+            no_progress_window=no_progress_window,
+            tool_result_format=tool_result_format,
+            expected_tools=case.expected_tools,
+            require_expected_tools=bool(environment_config.get("require_expected_tools")),
+            stringify_response=_stringify_assistant_response,
+            require_final_text_after_pass=require_final_text_after_pass,
+            final_text_prompt=final_text_prompt,
+        )
+    finally:
+        session.close()
+
+    turn_validators = [turn.validation for turn in episode.turns]
+    turn_behaviors: List[BehaviorValidationResult] = []
+    for turn in episode.turns:
+        behavior_result = _run_behavior_validation(
+            case,
+            turn.response.message,
+            extracted_tool_names=[tc.name for tc in turn.validation.tool_calls],
+        )
+        if behavior_result is not None:
+            turn_behaviors.append(behavior_result)
+
+    final_response = episode.final_response
+    final_raw = episode.final_raw
+    final_latency = episode.total_latency_s
+    environment_result = episode.environment_result
+    conversation_trace = episode.conversation_trace
+
+    combined_validator = _combine_validation_results(turn_validators)
+    if combined_validator is not None:
+        _check_expected_tools(case, combined_validator)
+
+    combined_behavior = _combine_behavior_results(turn_behaviors)
+    if require_final_text and combined_validator is not None:
+        final_text = _extract_text_content(final_response)
+        if not final_text.strip():
+            if combined_behavior is None:
+                combined_behavior = BehaviorValidationResult(
+                    passed=False,
+                    issues=[],
+                    response_type_detected="empty",
+                )
+            combined_behavior.issues.append(
+                BehaviorIssue(
+                    check="final_text_required",
+                    expected=True,
+                    actual=False,
+                    passed=False,
+                    message="Loop expected a final text response but none was produced.",
+                )
+            )
+            combined_behavior.passed = False
+
+    judge_result = None
+    if judge_validator is not None and final_response is not None and combined_validator is not None:
+        judge_meta = case.metadata.get("judge", {})
+        per_case_mode = judge_meta.get("mode") if judge_meta else None
+        effective_mode = per_case_mode or judge_validator.default_judge_mode
+        pattern_passed = combined_validator is not None and combined_validator.passed
+        skip_judge = effective_mode == "and" and not pattern_passed
+        if not skip_judge:
+            try:
+                from shared.validation.parsing import parse_response
+
+                parsed = parse_response(final_response)
+                case_meta = {
+                    "system": case.metadata.get("system", ""),
+                    "user_prompt": case.question,
+                    "expected_tools": case.expected_tools or case.acceptable_tools or [],
+                    "pattern_passed": pattern_passed,
+                    "case_id": case.case_id,
+                }
+                judge_result = judge_validator.validate(
+                    parsed_response=parsed,
+                    case_metadata=case_meta,
+                    judge_mode=per_case_mode,
+                )
+            except Exception as exc:
+                logger.error("Judge validation error for %s: %s", case.case_id, exc)
+
+    scoring_result = _run_path_scoring(
+        case=case,
+        validator_result=combined_validator,
+        behavior_result=combined_behavior,
+        environment_result=environment_result,
+        judge_result=judge_result,
+    )
+
+    return EvaluationRecord(
+        case=case,
+        response_text=final_response,
+        validator=combined_validator,
+        latency_s=final_latency or None,
+        raw_response=final_raw,
+        error=None,
+        behavior=combined_behavior,
         environment=environment_result,
         judge=judge_result,
+        scoring=scoring_result,
+        conversation_trace=conversation_trace,
     )
 
 
@@ -376,6 +606,97 @@ def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) 
             )
 
 
+def _combine_validation_results(results: List[ValidationResult]) -> Optional[ValidationResult]:
+    if not results:
+        return None
+
+    combined_tool_calls: List[ToolCall] = []
+    combined_issues: List[ValidatorIssue] = []
+    combined_context: Dict[str, Any] = {"all_match": True}
+
+    for result in results:
+        combined_tool_calls.extend(result.tool_calls)
+        combined_issues.extend(result.issues)
+        if result.context_validation:
+            for key, value in result.context_validation.items():
+                if key == "all_match":
+                    combined_context["all_match"] = combined_context.get("all_match", True) and bool(value)
+                    continue
+                combined_context.setdefault(key, [])
+                if isinstance(value, list):
+                    combined_context[key].extend(value)
+
+    return ValidationResult(
+        passed=all(result.passed for result in results),
+        issues=combined_issues,
+        tool_calls=combined_tool_calls,
+        context_validation=combined_context if len(combined_context) > 1 else None,
+    )
+
+
+def _combine_behavior_results(results: List[BehaviorValidationResult]) -> Optional[BehaviorValidationResult]:
+    if not results:
+        return None
+
+    issues: List[BehaviorIssue] = []
+    for result in results:
+        issues.extend(result.issues)
+
+    return BehaviorValidationResult(
+        passed=all(result.passed for result in results),
+        issues=issues,
+        response_type_detected=results[-1].response_type_detected,
+    )
+
+
+def _stringify_assistant_response(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        content = response.get("content")
+        tool_calls = response.get("tool_calls") or []
+        parts: List[str] = []
+        if isinstance(content, str) and content.strip():
+            parts.append(content.strip())
+        if tool_calls:
+            parts.append(f"Tool calls: {tool_calls}")
+        return "\n\n".join(parts).strip() or str(response)
+    return str(response)
+
+
+def _extract_text_content(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        content = response.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
+
+
+def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, Any]]:
+    trace = []
+    for index, message in enumerate(case.chat_messages(), start=1):
+        trace.append(
+            {
+                "index": index,
+                "role": str(message.get("role", "")),
+                "kind": "prompt_message",
+                "content": message.get("content"),
+            }
+        )
+    trace.append(
+        {
+            "index": len(trace) + 1,
+            "role": "assistant",
+            "kind": "assistant_response",
+            "content": _stringify_assistant_response(response),
+            "raw": response,
+        }
+    )
+    return trace
+
+
 def _run_behavior_validation(
     case: PromptCase,
     response: Any,
@@ -420,3 +741,145 @@ def _run_behavior_validation(
                 message=f"Behavior validation error: {exc}"
             )]
         )
+
+
+def _run_path_scoring(
+    *,
+    case: PromptCase,
+    validator_result: Optional[ValidationResult],
+    behavior_result: Optional[BehaviorValidationResult],
+    environment_result: Optional["EnvironmentValidationResult"],
+    judge_result: Optional["JudgeValidationResult"],
+) -> Optional[PathScoringResult]:
+    scoring_cfg = case.metadata.get("scoring")
+    if not isinstance(scoring_cfg, dict):
+        return None
+
+    paths = scoring_cfg.get("paths")
+    if not isinstance(paths, list) or not paths:
+        return None
+
+    tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
+    matches: List[PathScoreMatch] = []
+    max_score = 0.0
+    best_score = 0.0
+    best_name = None
+    best_tier = None
+
+    for idx, path_cfg in enumerate(paths, start=1):
+        if not isinstance(path_cfg, dict):
+            continue
+
+        score_value = float(path_cfg.get("score", 0.0) or 0.0)
+        max_score = max(max_score, score_value)
+        matched, reasons = _matches_scoring_path(
+            path_cfg=path_cfg,
+            tool_names=tool_names,
+            validator_result=validator_result,
+            behavior_result=behavior_result,
+            environment_result=environment_result,
+            judge_result=judge_result,
+        )
+        name = str(path_cfg.get("name") or f"path_{idx}")
+        tier = str(path_cfg.get("tier") or "acceptable")
+        matches.append(
+            PathScoreMatch(
+                name=name,
+                tier=tier,
+                score=score_value,
+                matched=matched,
+                reasons=reasons,
+            )
+        )
+
+        if matched and score_value >= best_score:
+            best_score = score_value
+            best_name = name
+            best_tier = tier
+
+    return PathScoringResult(
+        max_score=max_score,
+        awarded_score=best_score,
+        matched_path=best_name,
+        matched_tier=best_tier,
+        matches=matches,
+    )
+
+
+def _matches_scoring_path(
+    *,
+    path_cfg: Dict[str, Any],
+    tool_names: List[str],
+    validator_result: Optional[ValidationResult],
+    behavior_result: Optional[BehaviorValidationResult],
+    environment_result: Optional["EnvironmentValidationResult"],
+    judge_result: Optional["JudgeValidationResult"],
+) -> tuple[bool, List[str]]:
+    reasons: List[str] = []
+
+    all_tools = _string_list(path_cfg.get("all_tools"))
+    if all_tools:
+        missing = [tool for tool in all_tools if tool not in tool_names]
+        if missing:
+            reasons.append(f"missing tools: {', '.join(missing)}")
+
+    any_tools = _string_list(path_cfg.get("any_tools"))
+    if any_tools and not any(tool in tool_names for tool in any_tools):
+        reasons.append(f"needs any of: {', '.join(any_tools)}")
+
+    ordered_tools = _string_list(path_cfg.get("ordered_tools"))
+    if ordered_tools and not _contains_subsequence(tool_names, ordered_tools):
+        reasons.append(f"ordered tools not matched: {', '.join(ordered_tools)}")
+
+    first_tool = str(path_cfg.get("first_tool", "")).strip()
+    if first_tool and (not tool_names or tool_names[0] != first_tool):
+        reasons.append(f"first tool should be {first_tool}")
+
+    first_tool_any_of = _string_list(path_cfg.get("first_tool_any_of"))
+    if first_tool_any_of and (not tool_names or tool_names[0] not in first_tool_any_of):
+        reasons.append(f"first tool should be one of: {', '.join(first_tool_any_of)}")
+
+    max_tool_calls = path_cfg.get("max_tool_calls")
+    if max_tool_calls is not None and len(tool_names) > int(max_tool_calls):
+        reasons.append(f"too many tool calls: {len(tool_names)} > {int(max_tool_calls)}")
+
+    min_tool_calls = path_cfg.get("min_tool_calls")
+    if min_tool_calls is not None and len(tool_names) < int(min_tool_calls):
+        reasons.append(f"too few tool calls: {len(tool_names)} < {int(min_tool_calls)}")
+
+    if path_cfg.get("require_schema_pass") and not (validator_result and validator_result.passed):
+        reasons.append("schema validation did not pass")
+
+    if path_cfg.get("require_behavior_pass") and not (behavior_result is None or behavior_result.passed):
+        reasons.append("behavior validation did not pass")
+
+    if path_cfg.get("require_environment_pass") and not (environment_result and environment_result.passed):
+        reasons.append("environment validation did not pass")
+
+    if path_cfg.get("require_judge_pass") and not (judge_result and judge_result.passed):
+        reasons.append("judge validation did not pass")
+
+    return len(reasons) == 0, reasons
+
+
+def _contains_subsequence(items: List[str], subsequence: List[str]) -> bool:
+    if not subsequence:
+        return True
+    pos = 0
+    for item in items:
+        if item == subsequence[pos]:
+            pos += 1
+            if pos == len(subsequence):
+                return True
+    return False
+
+
+def _string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        clean = value.strip()
+        return [clean] if clean else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []

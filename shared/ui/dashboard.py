@@ -19,7 +19,7 @@ from .widgets import sparkline
 @dataclass
 class TrainingMetrics:
     """Container for training metrics."""
-    epoch: int = 0
+    epoch: float = 0.0
     total_epochs: int = 1
     step: int = 0
     total_steps: int = 1
@@ -48,6 +48,7 @@ class TrainingMetrics:
     # Timing
     start_time: float = field(default_factory=time.time)
     steps_per_second: float = 0.0
+    best_loss_seen: Optional[float] = None
 
     @property
     def progress_pct(self) -> float:
@@ -78,9 +79,16 @@ class TrainingMetrics:
 
     @property
     def best_loss(self) -> float:
+        if self.best_loss_seen is not None:
+            return self.best_loss_seen
         if not self.loss_history:
             return self.loss
         return min(self.loss_history)
+
+    @property
+    def epoch_progress_str(self) -> str:
+        total_epochs = max(1, int(self.total_epochs))
+        return f"{self.epoch:.2f}/{total_epochs}"
 
 
 class LiveDashboard:
@@ -135,11 +143,18 @@ class LiveDashboard:
         self._live = None
         self._last_update_time = 0.0
         self._min_update_interval = 0.25  # Max 4 updates per second
+        self._trend_bucket_count = 40
+        self._history_counts: Dict[str, List[int]] = {
+            "loss_history": [],
+            "kl_history": [],
+            "margin_history": [],
+            "reward_history": [],
+        }
 
     def update(
         self,
         step: int = None,
-        epoch: int = None,
+        epoch: float = None,
         loss: float = None,
         learning_rate: float = None,
         # KTO metrics
@@ -166,7 +181,12 @@ class LiveDashboard:
 
         if loss is not None:
             self.metrics.loss = loss
-            self._append_history(self.metrics.loss_history, loss)
+            self.metrics.best_loss_seen = (
+                loss
+                if self.metrics.best_loss_seen is None
+                else min(self.metrics.best_loss_seen, loss)
+            )
+            self._append_history("loss_history", loss)
 
         if learning_rate is not None:
             self.metrics.learning_rate = learning_rate
@@ -174,16 +194,16 @@ class LiveDashboard:
         # KTO metrics
         if kl is not None:
             self.metrics.kl = kl
-            self._append_history(self.metrics.kl_history, kl)
+            self._append_history("kl_history", kl)
 
         if margin is not None:
             self.metrics.margin = margin
-            self._append_history(self.metrics.margin_history, margin)
+            self._append_history("margin_history", margin)
 
         # GRPO metrics
         if reward is not None:
             self.metrics.reward = reward
-            self._append_history(self.metrics.reward_history, reward)
+            self._append_history("reward_history", reward)
 
         if reward_std is not None:
             self.metrics.reward_std = reward_std
@@ -219,11 +239,43 @@ class LiveDashboard:
                 self._live.update(self._build_display())
                 self._last_update_time = now
 
-    def _append_history(self, history: List[float], value: float, max_len: int = 100):
-        """Append to history list, keeping max length."""
-        history.append(value)
-        if len(history) > max_len:
-            del history[:-max_len]
+    def _bucket_index_for_step(self, step: int) -> int:
+        """Map a training step into a fixed-width full-run trend bucket."""
+        total_steps = max(1, int(self.metrics.total_steps))
+        bucket_count = max(1, min(self._trend_bucket_count, total_steps))
+        clamped_step = max(0, min(int(step), total_steps))
+        return min(bucket_count - 1, int(clamped_step * bucket_count / total_steps))
+
+    def _append_history(self, history_name: str, value: float):
+        """
+        Update a compacted full-run history series.
+
+        The chart should show the whole run, not just the trailing window.
+        We therefore map each point into a fixed number of step buckets and
+        average repeated updates within the same bucket.
+        """
+        history = getattr(self.metrics, history_name)
+        counts = self._history_counts[history_name]
+        bucket_index = self._bucket_index_for_step(self.metrics.step)
+
+        while len(history) < bucket_index:
+            fill_value = history[-1] if history else value
+            history.append(fill_value)
+            counts.append(0)
+
+        if len(history) == bucket_index:
+            history.append(value)
+            counts.append(1)
+            return
+
+        count = counts[bucket_index]
+        if count <= 0:
+            history[bucket_index] = value
+            counts[bucket_index] = 1
+            return
+
+        history[bucket_index] = ((history[bucket_index] * count) + value) / (count + 1)
+        counts[bucket_index] = count + 1
 
     def _build_chart(self, title: str, history: List[float], width: int = 40, higher_is_better: bool = False) -> List:
         """Build a chart panel for the right column."""
@@ -262,10 +314,11 @@ class LiveDashboard:
         stats_text = Text()
         stats_text.append(f"\nMin: {min(history):.4f}", style="dim")
         stats_text.append(f"  Max: {max(history):.4f}", style="dim")
+        stats_text.append(f"  Avg: {sum(history) / len(history):.4f}", style="dim")
         if len(history) > 10:
-            # Show recent average
-            recent_avg = sum(history[-10:]) / 10
-            stats_text.append(f"  Avg(10): {recent_avg:.4f}", style="dim")
+            tail_size = min(10, len(history))
+            tail_avg = sum(history[-tail_size:]) / tail_size
+            stats_text.append(f"  Tail avg({tail_size}): {tail_avg:.4f}", style="dim")
         lines.append(stats_text)
 
         return lines
@@ -306,7 +359,7 @@ class LiveDashboard:
         metrics_table.add_column("Value", style="white")
 
         metrics_table.add_row("Progress", progress_bar)
-        metrics_table.add_row("Epoch", f"{m.epoch + 1}/{m.total_epochs}")
+        metrics_table.add_row("Epoch", m.epoch_progress_str)
         metrics_table.add_row("Step", f"{m.step:,}/{m.total_steps:,}")
         metrics_table.add_row("Loss", f"[bold]{m.loss:.4f}[/] (best: {m.best_loss:.4f})")
 
@@ -420,7 +473,7 @@ class LiveDashboard:
             f"  {self.title.upper()}",
             f"{'=' * 60}",
             f"  Progress: {'█' * int(m.progress_pct / 5)}{'░' * (20 - int(m.progress_pct / 5))} {m.progress_pct:.1f}%",
-            f"  Epoch: {m.epoch + 1}/{m.total_epochs}",
+            f"  Epoch: {m.epoch_progress_str}",
             f"  Step: {m.step:,}/{m.total_steps:,}",
             f"  Loss: {m.loss:.4f} (best: {m.best_loss:.4f})",
         ]
@@ -520,6 +573,12 @@ class LiveDashboard:
         try:
             data = json.loads(line)
 
+            # Update totals first so bucket placement uses the real run shape.
+            if 'total_steps' in data:
+                self.metrics.total_steps = data['total_steps']
+            if 'total_epochs' in data:
+                self.metrics.total_epochs = data['total_epochs']
+
             # Update metrics from log data
             self.update(
                 step=data.get('step'),
@@ -528,13 +587,8 @@ class LiveDashboard:
                 learning_rate=data.get('learning_rate'),
                 kl=data.get('kl'),
                 margin=data.get('rewards/margins'),
+                gpu_memory_gb=data.get('gpu_memory_gb') or data.get('gpu_memory_reserved_gb'),
             )
-
-            # Update totals if provided
-            if 'total_steps' in data:
-                self.metrics.total_steps = data['total_steps']
-            if 'total_epochs' in data:
-                self.metrics.total_epochs = data['total_epochs']
 
         except json.JSONDecodeError:
             # Not JSON, treat as log message
