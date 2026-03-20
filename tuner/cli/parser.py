@@ -79,8 +79,18 @@ Commands:
   ml          Traditional ML training (LightGBM, XGBoost, sklearn)
   status      System status overview (use --json for structured output)
   doctor      System diagnostics (use --fix to auto-fix issues)
+  flywheel    Data flywheel (self-improving training pipeline)
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
+
+Flywheel Subcommands:
+  flywheel status       Show flywheel system status
+  flywheel run-cycle    Execute flywheel cycle (--skip-retrain, --retrain-mode, --dry-run)
+  flywheel configure    Show flywheel configuration
+  flywheel readiness    Check retrain readiness
+  flywheel stage        Stage dataset version (no retrain)
+  flywheel logs         Show inference log statistics
+  flywheel versions     List staged dataset versions
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -112,7 +122,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list", "list-runs"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "status", "doctor", "list", "list-runs"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -153,6 +163,31 @@ Examples:
         "--config",
         dest="ml_config",
         help="Path to ML training config YAML (only used with 'ml train')"
+    )
+
+    # Flywheel-specific flags
+    parser.add_argument(
+        "--skip-retrain",
+        action="store_true",
+        dest="skip_retrain",
+        help="Stop after staging (flywheel run-cycle only)"
+    )
+    parser.add_argument(
+        "--retrain-mode",
+        choices=["gpu_mutex", "hot_swap", "cloud"],
+        dest="retrain_mode",
+        help="Override retrain mode (flywheel run-cycle only)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Show what would happen without executing (flywheel run-cycle only)"
+    )
+    parser.add_argument(
+        "--flywheel-config",
+        dest="flywheel_config",
+        help="Path to flywheel config YAML (flywheel commands only)"
     )
 
     # Cloud-specific flags

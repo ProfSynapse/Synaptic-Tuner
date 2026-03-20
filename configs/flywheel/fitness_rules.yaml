@@ -1,0 +1,35 @@
+# Fitness validation rules for the flywheel pipeline
+# Passed to FitnessEvaluator via FlywheelConfig.to_fitness_config()
+#
+# These rules validate tool-call responses captured by the logging proxy.
+# Non-tool-call responses are handled separately via text_response_policy
+# in the flywheel config (not scored by these rules).
+#
+# Format follows the shared/validation/validators/ convention:
+# Each rule has a type (json, xml, regex, yaml, code) and parameters.
+
+validations:
+  # Rule 1: Tool call must have a function name
+  - type: json
+    path: "tool_calls[0].function.name"
+    required: true
+    description: "Tool call must specify a function name"
+
+  # Rule 2: Tool call must have arguments
+  - type: json
+    path: "tool_calls[0].function.arguments"
+    required: true
+    description: "Tool call must include arguments"
+
+  # Rule 3: Arguments must be valid JSON (not empty string or malformed)
+  - type: json
+    path: "tool_calls[0].function.arguments"
+    is_json: true
+    description: "Tool call arguments must be valid JSON"
+
+# Scoring configuration
+scoring:
+  method: error_count
+  no_tool_call_score: 0.0
+  params:
+    max_errors_before_zero: 5

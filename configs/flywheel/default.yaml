@@ -1,0 +1,62 @@
+# Flywheel pipeline configuration
+# See shared/flywheel/config.py for field documentation
+
+# Scoring thresholds
+sft_threshold: 0.8
+kto_min_threshold: 0.3
+ambiguous_min: 0.4
+ambiguous_max: 0.7
+max_errors_before_zero: 5
+scoring_method: error_count
+
+# Non-tool-call handling
+# FitnessEvaluator scores non-tool-call responses as 0.0 (no schema to validate).
+# This policy controls how the tagger treats those responses:
+text_response_policy: skip       # "sft" | "kto" | "skip"
+
+# Fitness validation config
+# Without a fitness config, FitnessEvaluator scores everything 1.0.
+fitness_config_path: configs/flywheel/fitness_rules.yaml
+
+# GRPO
+grpo_enabled: true
+grpo_reward_scale: 1.0
+
+# Storage
+catalog_backend: sqlite
+catalog_path: .tracking/flywheel.db
+log_dir: inference_logs
+datasets_dir: Datasets/flywheel
+
+# Proxy
+proxy_port: 8080
+vllm_host: localhost
+vllm_port: 8000
+proxy_timeout_seconds: 120
+
+# vLLM
+vllm_adapter_name: current-adapter
+vllm_max_lora_rank: 64
+vllm_gpu_memory_utilization: 0.9
+vllm_enable_runtime_lora: true
+
+# Retrain
+retrain_mode: gpu_mutex
+retrain_trainer: auto
+min_new_examples: 500
+min_sft_examples: 100
+min_quality_score: 0.6
+
+# Log rotation
+log_retention_days: 30
+compress_after_days: 7
+
+# Inline validation rules (used if fitness_config_path is missing)
+# These ensure FitnessEvaluator does not trivially score everything 1.0
+validation_rules:
+  - type: json
+    path: "tool_calls[0].function.name"
+    required: true
+  - type: json
+    path: "tool_calls[0].function.arguments"
+    required: true
