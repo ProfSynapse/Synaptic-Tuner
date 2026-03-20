@@ -247,6 +247,13 @@ Backend Configuration:
         help="Disable live dashboard, use simple text output",
     )
     parser.add_argument("--progress-jsonl", help=argparse.SUPPRESS)
+
+    # Unified tracking: link evaluation to a training run
+    parser.add_argument(
+        "--training-run",
+        help="Training run ID to link this evaluation to (for unified tracking registry)",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -643,6 +650,30 @@ def main(argv: List[str] | None = None) -> int:
             with open(lineage_path, 'w', encoding='utf-8') as f:
                 json.dump(lineage, f, indent=2)
             print(f"\n✓ Evaluation lineage saved to: {lineage_path}")
+
+    # Register in unified experiment tracking registry (best-effort)
+    try:
+        from shared.experiment_tracking.adapters import eval_to_run_record
+        from shared.experiment_tracking.registry import RunRegistry
+
+        eval_lineage_for_reg = lineage or {
+            "model_evaluated": args.model,
+            "results_summary": {"overall_pass_rate": None},
+        }
+        eval_record = eval_to_run_record(
+            eval_lineage_for_reg,
+            str(config.output_path.parent),
+            parent_run_id=getattr(args, "training_run", None),
+        )
+        registry = RunRegistry()
+        registry.register_run(eval_record)
+        if getattr(args, "training_run", None):
+            registry.link_runs(eval_record.run_id, args.training_run, "parent")
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Unified tracking registration failed (non-fatal)", exc_info=True
+        )
 
     # Upload to HuggingFace if requested
     if args.upload_to_hf:
