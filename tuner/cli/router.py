@@ -137,6 +137,10 @@ def route_command(args: Namespace) -> int:
         handler = ListHandler(subcommand=list_subcommand, output_json=json_mode)
         return handler.handle()
 
+    # list-runs: query unified experiment tracking registry
+    if command == 'list-runs':
+        return _handle_list_runs(args, json_mode)
+
     # Special handling for ml command (has subcommand and --config)
     if command == 'ml':
         ml_sub = getattr(args, 'subcommand', None)
@@ -177,3 +181,73 @@ def route_command(args: Namespace) -> int:
         # No command = interactive menu
         handler = MainMenuHandler(args=args)
         return handler.handle()
+
+
+def _handle_list_runs(args: Namespace, json_mode: bool) -> int:
+    """Query the unified experiment tracking registry and display results.
+
+    Supports --json for structured output, and --run-type / --since / --until-date
+    for filtering.
+    """
+    try:
+        from shared.experiment_tracking import RunFilter, RunRegistry
+    except ImportError as exc:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"Error: experiment tracking module unavailable: {exc}")
+        return 1
+
+    registry = RunRegistry()
+
+    # Build filter from CLI args
+    run_type = getattr(args, "run_type", None)
+    since = getattr(args, "since", None)
+    until_date = getattr(args, "until_date", None)
+
+    run_filter = None
+    if run_type or since or until_date:
+        run_filter = RunFilter(
+            run_type=run_type,
+            since=since,
+            until=until_date,
+        )
+
+    records = registry.find_runs(run_filter)
+
+    if json_mode:
+        from dataclasses import asdict
+        output = {
+            "success": True,
+            "runs": [asdict(r) for r in records],
+            "count": len(records),
+            "timestamp": datetime.now().isoformat(),
+        }
+        print(json.dumps(output, indent=2))
+        return 0
+
+    if not records:
+        print("No tracked runs found in registry.")
+        print("Runs are registered automatically after SFT, KTO, ML training, and evaluations.")
+        return 0
+
+    # Table display
+    print(f"\nTracked Runs ({len(records)} total):")
+    print("-" * 100)
+    print(f"{'Type':<12} {'Name':<35} {'Status':<10} {'Model':<25} {'Metric':<15}")
+    print("-" * 100)
+
+    for record in records:
+        metric_str = ""
+        if record.primary_metric is not None:
+            metric_str = f"{record.primary_metric_name}={record.primary_metric:.4f}"
+
+        name_display = record.name[:33] + ".." if len(record.name) > 35 else record.name
+        model_display = (record.model_name or "")[:23]
+        if len(record.model_name or "") > 25:
+            model_display += ".."
+
+        print(f"{record.run_type:<12} {name_display:<35} {record.status:<10} {model_display:<25} {metric_str:<15}")
+
+    print("-" * 100)
+    return 0
