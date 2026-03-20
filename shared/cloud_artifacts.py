@@ -80,9 +80,27 @@ def build_run_paths(base_output_dir: Path, provider: str, method: str, timestamp
 
 
 def write_manifest(path: Path, payload: Dict[str, Any]) -> None:
-    """Write a manifest file using stable JSON formatting."""
+    """Write a manifest file using stable JSON formatting.
+
+    After writing, attempts to register the run in the unified experiment
+    tracking registry (best-effort — failure is logged, never raised).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    # Best-effort registration in unified tracking registry
+    try:
+        from shared.experiment_tracking.adapters import manifest_to_run_record
+        from shared.experiment_tracking.registry import RunRegistry
+
+        record = manifest_to_run_record(payload)
+        RunRegistry().register_run(record)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Unified tracking registration from manifest failed (non-fatal)",
+            exc_info=True,
+        )
 
 
 def build_manifest(

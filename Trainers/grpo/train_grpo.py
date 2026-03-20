@@ -378,6 +378,22 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print("\n[OK] Training complete!")
     print(f"  Final model: {final_model_path}")
     print(f"  Logs: {logs_dir}")
+
+    # ── Unified experiment tracking (best-effort) ──
+    try:
+        from shared.experiment_tracking.adapters import register_grpo_run
+
+        register_grpo_run(
+            logs_dir,
+            str(run_dir),
+            model_name=model_cfg["model_name"],
+            dataset_source=dataset_cfg.get("local_file") or dataset_cfg.get("dataset_name"),
+        )
+    except Exception as _exc:
+        logging.getLogger(__name__).warning(
+            "Unified tracking registration failed (non-fatal): %s", _exc
+        )
+
     return {"run_dir": str(run_dir), "final_model_dir": str(final_model_path)}
 
 

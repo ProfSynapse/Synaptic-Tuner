@@ -1,0 +1,19 @@
+{
+  "evaluation_timestamp": "2026-03-14T22:00:00+00:00",
+  "model_evaluated": "unsloth/Qwen2.5-7B-SFT-v1",
+  "test_config": {
+    "test_suites": ["tool_prompts", "behavior_prompts"],
+    "temperature": 0.0,
+    "max_tokens": 2048
+  },
+  "results_summary": {
+    "overall_pass_rate": 0.85,
+    "total_scenarios": 40,
+    "passed": 34,
+    "failed": 6
+  },
+  "performance": {
+    "avg_latency_ms": 450,
+    "total_runtime_seconds": 120
+  }
+}

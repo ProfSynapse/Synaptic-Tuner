@@ -1058,6 +1058,20 @@ def run(args: argparse.Namespace):
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
 
+    # Register in unified experiment tracking registry (best-effort)
+    try:
+        from shared.experiment_tracking.adapters import sft_lineage_to_run_record
+        from shared.experiment_tracking.registry import RunRegistry
+
+        is_cloud = getattr(args, "cloud_provider", None) is not None
+        record = sft_lineage_to_run_record(lineage, str(run_dir), cloud=is_cloud)
+        RunRegistry().register_run(record)
+        logging.getLogger(__name__).info("Run registered: %s", record.run_id)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Unified tracking registration failed (non-fatal): %s", exc
+        )
+
     if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
         sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
 

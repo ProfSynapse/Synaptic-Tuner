@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-03-14T18:00:00+00:00",
+  "model": {
+    "base_model": "unsloth/Qwen2.5-7B",
+    "max_seq_length": 8192,
+    "lora_r": 64,
+    "lora_alpha": 128
+  },
+  "dataset": {
+    "source": "Datasets/tools_datasets/thinking/agentManager/tools_v1.8.jsonl",
+    "num_examples": 2676,
+    "format": "chatml"
+  },
+  "hardware": {
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "gpu_memory_gb": 24.0,
+    "cuda_version": "12.1"
+  },
+  "training": {
+    "learning_rate": 0.0002,
+    "epochs": 3,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 2
+  },
+  "results": {
+    "final_loss": 0.4523,
+    "training_time_seconds": 7200,
+    "samples_per_second": 1.34
+  }
+}

@@ -2,11 +2,18 @@
 shared/experiment_tracking/
 
 Experiment tracking abstraction layer. Provides a unified interface for
-logging hyperparameters, metrics, and artifacts across different backends.
+logging hyperparameters, metrics, and artifacts across different backends,
+plus a centralized JSONL registry for cross-run discovery and linkage.
 
 Backends:
     - "local": Zero-dependency JSON file tracker (always available).
     - "mlflow": Full MLflow integration (requires pip install mlflow).
+
+Registry:
+    - RunRecord: Common schema for all run types.
+    - RunRegistry: Append-only JSONL index at {repo}/.tracking/registry.jsonl.
+    - RunFilter: Query filter for run discovery.
+    - Adapters: Bridge existing lineage/manifest formats to RunRecord.
 
 Usage:
     from shared.experiment_tracking import create_tracker
@@ -16,8 +23,16 @@ Usage:
     with tracker.start_run("run_001"):
         tracker.log_params({"learning_rate": 0.05})
         tracker.log_metrics({"accuracy": 0.91})
+
+    # Query runs
+    from shared.experiment_tracking import RunRegistry, RunFilter
+
+    registry = RunRegistry()
+    recent_sft = registry.find_runs(RunFilter(run_type="sft"))
 """
 from .local_tracker import LocalTracker
+from .registry import RunRegistry
+from .schema import RunFilter, RunRecord
 from .tracker import ExperimentTracker
 
 
@@ -58,5 +73,8 @@ def create_tracker(
 __all__ = [
     "ExperimentTracker",
     "LocalTracker",
+    "RunFilter",
+    "RunRecord",
+    "RunRegistry",
     "create_tracker",
 ]

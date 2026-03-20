@@ -80,6 +80,7 @@ Commands:
   status      System status overview (use --json for structured output)
   doctor      System diagnostics (use --fix to auto-fix issues)
   list        Discover available resources
+  list-runs   Query unified experiment tracking registry
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -111,7 +112,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "status", "doctor", "list", "list-runs"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -179,5 +180,10 @@ Examples:
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--job-config", help="Config-driven cloud job YAML (cloud-run workflow).")
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
+
+    # list-runs filters (unified tracking registry)
+    parser.add_argument("--run-type", help="Filter by run type: sft, kto, grpo, ml, evaluation, cloud_sft, cloud_kto, cloud_grpo (list-runs only)")
+    parser.add_argument("--since", help="Filter runs after this ISO 8601 date (list-runs only)")
+    parser.add_argument("--until-date", help="Filter runs before this ISO 8601 date (list-runs only)")
 
     return parser
