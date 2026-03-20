@@ -1,0 +1,21 @@
+# Dependencies for the enterprise data flywheel pipeline.
+#
+# Install: pip install -r requirements-flywheel.txt
+#
+# These are additive to the base requirements.txt.
+# Required by: shared/flywheel/, services/proxy/, tuner/handlers/flywheel_handler.py
+
+# Async SQLite for local log catalog
+aiosqlite>=0.20.0,<1.0
+
+# Async PostgreSQL for cloud/multi-tenant log catalog
+asyncpg>=0.29.0,<1.0
+
+# FastAPI for the logging proxy server (services/proxy/)
+fastapi>=0.115.0,<1.0
+
+# ASGI server for the logging proxy
+uvicorn[standard]>=0.32.0,<1.0
+
+# Async HTTP client for proxy forwarding to vLLM
+httpx>=0.27.0,<1.0

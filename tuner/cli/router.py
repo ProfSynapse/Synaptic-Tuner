@@ -85,6 +85,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.doctor_handler import DoctorHandler
         from tuner.handlers.list_handler import ListHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
+        from tuner.handlers.flywheel_handler import FlywheelHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         error_msg = f"Handlers not yet implemented: {e}"
@@ -112,7 +113,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, flywheel, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -148,6 +149,11 @@ def route_command(args: Namespace) -> int:
         if args is not None:
             args.ml_subcommand = ml_sub
         handler = MLHandler(args=args)
+        return handler.handle()
+
+    # Special handling for flywheel command (has subcommand)
+    if command == 'flywheel':
+        handler = FlywheelHandler(args=args)
         return handler.handle()
 
     # Import cloud handler (conditional - may not have deps)

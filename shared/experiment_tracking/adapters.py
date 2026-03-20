@@ -343,3 +343,50 @@ def register_grpo_run(
     run_id = RunRegistry().register_run(record)
     _adapters_logger.info("GRPO run registered in unified tracking: %s", run_id)
     return run_id
+
+
+def flywheel_cycle_to_run_record(
+    cycle_data: dict[str, Any],
+    output_dir: str,
+    *,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+) -> RunRecord:
+    """Convert flywheel cycle metadata to a RunRecord.
+
+    Args:
+        cycle_data: Dict with keys:
+            - version_id: Dataset version string (e.g., "v003")
+            - record_counts: {"sft": N, "kto_pos": N, "kto_neg": N, "grpo": N}
+            - filter_criteria: Tag thresholds used
+            - source_model_id: Model that generated the inference logs
+            - content_hash: SHA-256 of staged datasets
+        output_dir: Path to Datasets/flywheel/vN/
+        run_id: Optional pre-generated run ID.
+        parent_run_id: inference_log_batch run_id.
+
+    Returns:
+        RunRecord with run_type="flywheel_cycle"
+    """
+    version_id = cycle_data.get("version_id", "")
+    record_counts = cycle_data.get("record_counts", {})
+    total = sum(record_counts.values())
+
+    return RunRecord(
+        run_id=run_id or str(uuid.uuid4()),
+        run_type="flywheel_cycle",
+        name=f"Flywheel cycle {version_id} ({total} examples)",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        status="completed",
+        output_dir=output_dir,
+        parent_run_id=parent_run_id,
+        tags={
+            "method": "flywheel",
+            "version": version_id,
+            "content_hash": cycle_data.get("content_hash", ""),
+        },
+        model_name=cycle_data.get("source_model_id"),
+        dataset_source=f"flywheel/{version_id}",
+        primary_metric=float(total),
+        primary_metric_name="total_examples",
+    )
