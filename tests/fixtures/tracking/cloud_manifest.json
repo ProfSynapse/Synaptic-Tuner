@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-03-14T19:00:00+00:00",
+  "method": "sft",
+  "provider": "hf_jobs",
+  "artifact_backend": "hf_bucket",
+  "status": "completed",
+  "paths": {
+    "run_dir": "/runs/cloud_sft_20260314",
+    "model_dir": "/runs/cloud_sft_20260314/final_model",
+    "logs_dir": "/runs/cloud_sft_20260314/logs"
+  },
+  "config": {
+    "base_model": "unsloth/Qwen2.5-7B",
+    "dataset": "tools_v1.8.jsonl"
+  }
+}

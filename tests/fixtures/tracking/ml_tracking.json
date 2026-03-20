@@ -1,0 +1,23 @@
+{
+  "experiment": "iris_classification",
+  "run_name": "lightgbm_iris_001",
+  "started_at": "2026-03-14T15:30:00+00:00",
+  "ended_at": "2026-03-14T15:30:05+00:00",
+  "params": {
+    "algorithm": "lightgbm",
+    "task_type": "classification",
+    "n_estimators": 100,
+    "learning_rate": 0.05,
+    "max_depth": 6
+  },
+  "metrics": {
+    "accuracy": 0.9667,
+    "f1": 0.9665,
+    "precision": 0.9670,
+    "recall": 0.9667
+  },
+  "artifacts": [
+    "/output/model.joblib",
+    "/output/pipeline.joblib"
+  ]
+}

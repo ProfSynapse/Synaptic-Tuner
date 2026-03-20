@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-03-14T20:00:00+00:00",
+  "model": {
+    "base_model": "unsloth/Qwen2.5-7B-SFT-v1",
+    "max_seq_length": 8192,
+    "lora_r": 32,
+    "lora_alpha": 64
+  },
+  "dataset": {
+    "source": "Datasets/syngen_tools_11.18.25.jsonl",
+    "num_examples": 4649,
+    "format": "chatml",
+    "positive_ratio": 0.58
+  },
+  "hardware": {
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "gpu_memory_gb": 24.0,
+    "cuda_version": "12.1"
+  },
+  "training": {
+    "learning_rate": 2e-7,
+    "epochs": 1,
+    "batch_size": 4
+  },
+  "results": {
+    "final_loss": 0.6891,
+    "training_time_seconds": 3600
+  }
+}
