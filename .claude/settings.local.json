@@ -6,7 +6,12 @@
       "Skill(PACT:comPACT)",
       "Bash(git checkout:*)",
       "Bash(git rm:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(git -C /mnt/f/Code/Toolset-Training/.worktrees/feat/enterprise-data-flywheel diff --stat HEAD)",
+      "WebSearch",
+      "WebFetch(domain:docs.unsloth.ai)",
+      "WebFetch(domain:unsloth.ai)",
+      "WebFetch(domain:arxiv.org)"
     ]
   }
 }

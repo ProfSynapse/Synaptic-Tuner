@@ -122,7 +122,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "status", "doctor", "list", "list-runs"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -220,5 +220,15 @@ Examples:
     parser.add_argument("--run-type", help="Filter by run type: sft, kto, grpo, ml, evaluation, cloud_sft, cloud_kto, cloud_grpo (list-runs only)")
     parser.add_argument("--since", help="Filter runs after this ISO 8601 date (list-runs only)")
     parser.add_argument("--until-date", help="Filter runs before this ISO 8601 date (list-runs only)")
+
+    # Experiment pipeline flags
+    parser.add_argument("--experiment-id", help="Experiment ID for tracking")
+    parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
+    parser.add_argument("--model", help="Model path for inference")
+    parser.add_argument("--dataset-path", help="Path to jsonl dataset")
+    parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
+    parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
+    parser.add_argument("--base-model-name", help="Base model name for experiment")
+    parser.add_argument("--dataset-hash", help="Dataset hash for experiment")
 
     return parser

@@ -1,0 +1,40 @@
+name: Data Quality
+description: Evaluates the quality of a tool-calling training example including correctness, completeness, and instruction following.
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating the quality of a tool-calling conversation for an AI assistant.
+  We want to ensure the assistant uses tools correctly, completely fulfills the user request, and follows all specific instructions.
+  
+  **User Request:**
+  ```
+  {user_request}
+  ```
+  
+  **Assistant Response & Tool Calls:**
+  ```
+  {current_content}
+  ```
+
+  # INSTRUCTIONS
+  Evaluate the assistant based on the following three dimensions:
+  1. **Correctness**: Are the tool calls grammatically correct, using valid parameters, and avoiding hallucinated arguments?
+  2. **Completeness**: Does the model complete the user's request fully, using all necessary tools?
+  3. **Instruction Following**: Did the model follow specific constraints or instructions provided in the prompt?
+
+  # GUIDELINES
+  - Score 1.0: Excellent - perfect completion of the task, perfectly correct tools, followed all instructions.
+  - Score 0.7-0.9: Good - mostly correct, minor omissions.
+  - Score 0.4-0.6: Fair - partially correct but missing requirements or minor errors.
+  - Score 0.0-0.3: Poor - completely failed, hallucinations, or major syntax errors.
+
+output_schema:
+  type: object
+  properties:
+    data_quality_score:
+      type: number
+      description: The data quality score from 0.0 to 1.0.
+  required:
+    - data_quality_score

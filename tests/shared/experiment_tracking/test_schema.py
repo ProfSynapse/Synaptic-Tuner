@@ -149,6 +149,34 @@ class TestRunRecord:
         with pytest.raises(TypeError):
             RunRecord.from_dict(data)
 
+    def test_v2_fields_roundtrip(self):
+        """RunRecord with per_example_losses_path round-trips correctly."""
+        record = _make_record(
+            experiment_id="exp_123",
+            per_example_losses_path=".tracking/run-001/losses.jsonl"
+        )
+        import json
+        data = json.loads(record.to_json_line())
+        assert data["experiment_id"] == "exp_123"
+        assert data["per_example_losses_path"] == ".tracking/run-001/losses.jsonl"
+        
+        loaded = RunRecord.from_dict(data)
+        assert loaded.experiment_id == "exp_123"
+        assert loaded.per_example_losses_path == ".tracking/run-001/losses.jsonl"
+
+    def test_v1_record_loads_without_error(self):
+        """Old RunRecord (no per_example_losses_path/experiment_id) loads without error."""
+        data = {
+            "run_id": "run-004",
+            "run_type": "kto",
+            "name": "KTO run",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "status": "completed",
+            "output_dir": "/out",
+        }
+        loaded = RunRecord.from_dict(data)
+        assert loaded.experiment_id is None
+        assert loaded.per_example_losses_path is None
 
 # ===========================================================================
 # RunFilter

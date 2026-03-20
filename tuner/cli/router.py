@@ -156,6 +156,32 @@ def route_command(args: Namespace) -> int:
         handler = FlywheelHandler(args=args)
         return handler.handle()
 
+    # Experiment pipeline
+    if command == 'compare-runs':
+        import subprocess
+        import sys
+        from pathlib import Path
+        cmd = [sys.executable, str(Path("Tools/compare_runs.py"))]
+        if getattr(args, "experiment_id", None):
+            cmd.extend(["--experiment-id", args.experiment_id])
+        if getattr(args, "base_dir", None):
+            cmd.extend(["--base-dir", args.base_dir])
+        return subprocess.run(cmd).returncode
+        
+    if command == 'create-experiment':
+        from shared.experiment_tracking import create_experiment
+        if not getattr(args, "name", None):
+            args.name = f"experiment_{datetime.now().strftime('%Y%m%d')}"
+        exp = create_experiment(
+            name=getattr(args, "name", "Experiment"),
+            dataset_path=getattr(args, "dataset_path", ""),
+            dataset_hash=getattr(args, "dataset_hash", ""),
+            base_model_name=getattr(args, "base_model_name", "unsloth/phi-4"),
+            base_dir=getattr(args, "base_dir", ".tracking")
+        )
+        print(f"Created experiment: {exp.experiment_id}")
+        return 0
+
     # Import cloud handler (conditional - may not have deps)
     try:
         from tuner.handlers.cloud_train_handler import CloudTrainHandler

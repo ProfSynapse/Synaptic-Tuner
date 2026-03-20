@@ -18,8 +18,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Current schema version — bump when adding/removing fields.
-_CURRENT_SCHEMA_VERSION = 1
+_CURRENT_SCHEMA_VERSION = 2
 
+@dataclass
+class LossResult:
+    """Per-example loss result for a single sequence in a dataset."""
+    index: int                    # JSONL line index (0-based)
+    loss: float                   # Mean cross-entropy on completion tokens only
+    num_completion_tokens: int    # Non-masked token count
+    num_total_tokens: int         # Total tokenized sequence length
+    jsonl_hash: str               # First 8 chars of SHA-256 of raw JSONL line
 
 @dataclass
 class RunRecord:
@@ -53,6 +61,8 @@ class RunRecord:
     primary_metric: float | None = None
     primary_metric_name: str | None = None
     hardware: str | None = None
+    per_example_losses_path: str | None = None
+    experiment_id: str | None = None
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""

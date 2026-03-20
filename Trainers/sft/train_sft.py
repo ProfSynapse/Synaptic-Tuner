@@ -1058,6 +1058,45 @@ def run(args: argparse.Namespace):
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
 
+    # Post-training loss computation hook
+    compute_losses_flag = getattr(config.training, "compute_losses", False) or getattr(args, "compute_losses", False)
+    if compute_losses_flag:
+        print("\nComputing per-example losses on training dataset...")
+        try:
+            from shared.experiment_tracking import compute_per_example_losses, save_losses
+            
+            # Switch to eval mode
+            import torch
+            model.eval()
+            
+            # Unsloth for_inference to optimize inference speed
+            from unsloth import FastLanguageModel
+            FastLanguageModel.for_inference(model)
+            
+            dataset_path = config.data.train_dataset
+            if not Path(dataset_path).exists():
+                dataset_path = Path(_REPO_ROOT) / dataset_path
+                
+            losses = compute_per_example_losses(
+                model=model,
+                tokenizer=tokenizer,
+                dataset_path=dataset_path,
+                max_seq_length=config.training.max_seq_length,
+                completion_only=config.training.completion_only_loss,
+            )
+            
+            losses_path = logs_dir / "per_example_losses.jsonl"
+            save_losses(losses, losses_path)
+            
+            # Need to register this somewhere for adapters! 
+            # Handled below in adapter conversion by passing path, or we can just let 
+            # sft_lineage_to_run_record find it.
+            print(f"[OK] Saved per-example losses to {losses_path}")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to compute post-training losses: {e}")
+            logging.getLogger(__name__).exception("Failed to compute losses")
+            
     # Register in unified experiment tracking registry (best-effort)
     try:
         from shared.experiment_tracking.adapters import sft_lineage_to_run_record

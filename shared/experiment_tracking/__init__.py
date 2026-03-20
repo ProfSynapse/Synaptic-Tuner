@@ -32,8 +32,10 @@ Usage:
 """
 from .local_tracker import LocalTracker
 from .registry import RunRegistry
-from .schema import RunFilter, RunRecord
+from .schema import RunFilter, RunRecord, LossResult
 from .tracker import ExperimentTracker
+from .per_example_loss import compute_per_example_losses, save_losses, load_losses
+from .experiment import Experiment, create_experiment, load_experiment, save_experiment
 
 
 def create_tracker(
@@ -72,9 +74,11 @@ def create_tracker(
 
 __all__ = [
     "ExperimentTracker",
+    "LossResult",
     "LocalTracker",
     "RunFilter",
     "RunRecord",
     "RunRegistry",
+    "compute_per_example_losses",
     "create_tracker",
 ]

@@ -54,6 +54,7 @@ class RunPaths:
     final_model_dir: Path
     lineage_path: Path
     manifest_path: Path
+    per_example_losses_path: Path | None = None
 
 
 def normalize_hf_bucket_id(bucket_id: str) -> str:
@@ -134,6 +135,7 @@ def build_manifest(
             "logs_dir": str(run_paths.logs_dir),
             "final_model_dir": str(run_paths.final_model_dir),
             "training_lineage": str(run_paths.lineage_path),
+            "per_example_losses": str(run_paths.per_example_losses_path) if run_paths.per_example_losses_path else None,
         },
     }
 
