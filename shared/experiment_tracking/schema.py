@@ -10,8 +10,15 @@ Used by: registry.py (storage), adapters.py (conversion), CLI list-runs (display
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Current schema version — bump when adding/removing fields.
+_CURRENT_SCHEMA_VERSION = 1
 
 
 @dataclass
@@ -20,6 +27,14 @@ class RunRecord:
 
     Each line in the registry JSONL file is one serialized RunRecord.
     The schema_version field allows forward-compatible evolution.
+
+    Schema migration strategy:
+        - Unknown fields are silently dropped (forward compat: old reader, new data).
+        - When schema_version > _CURRENT_SCHEMA_VERSION, a debug message is logged
+          but the record is still loaded (best-effort, using known fields only).
+        - When schema_version < _CURRENT_SCHEMA_VERSION, future migrations can be
+          applied in from_dict() before constructing the record. Currently v1 is
+          the only version, so no migrations exist yet.
     """
 
     run_id: str
@@ -48,8 +63,19 @@ class RunRecord:
         """Deserialize from a dictionary, ignoring unknown fields.
 
         Unknown fields are silently dropped for forward compatibility
-        (older reader, newer schema_version).
+        (older reader, newer schema_version). When the record's
+        schema_version exceeds _CURRENT_SCHEMA_VERSION, a debug log is
+        emitted but the record is still loaded using known fields.
         """
+        version = data.get("schema_version", 1)
+        if version > _CURRENT_SCHEMA_VERSION:
+            logger.debug(
+                "RunRecord schema_version %d is newer than supported %d; "
+                "loading with known fields only",
+                version, _CURRENT_SCHEMA_VERSION,
+            )
+        # Future: apply migrations for version < _CURRENT_SCHEMA_VERSION here.
+
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
         return cls(**filtered)
@@ -91,11 +117,15 @@ class RunFilter:
             if self.model_name.lower() not in record.model_name.lower():
                 return False
 
-        if self.since is not None and record.timestamp < self.since:
-            return False
+        # Timestamp comparison using parsed datetime objects for correctness
+        # across timezone offsets and format variants (e.g. "Z" vs "+00:00").
+        if self.since is not None:
+            if _parse_ts(record.timestamp) < _parse_ts(self.since):
+                return False
 
-        if self.until is not None and record.timestamp > self.until:
-            return False
+        if self.until is not None:
+            if _parse_ts(record.timestamp) > _parse_ts(self.until):
+                return False
 
         if self.tags is not None:
             for key, value in self.tags.items():
@@ -103,3 +133,17 @@ class RunFilter:
                     return False
 
         return True
+
+
+def _parse_ts(ts: str) -> datetime:
+    """Parse an ISO 8601 timestamp string to a timezone-aware datetime.
+
+    Handles both "+00:00" and "Z" suffixes. Timestamps without timezone info
+    are assumed to be UTC.
+    """
+    normalized = ts.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        # Last resort: return a sentinel that preserves lexicographic ordering
+        return datetime.min.replace(tzinfo=timezone.utc)

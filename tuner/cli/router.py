@@ -240,7 +240,10 @@ def _handle_list_runs(args: Namespace, json_mode: bool) -> int:
     for record in records:
         metric_str = ""
         if record.primary_metric is not None:
-            metric_str = f"{record.primary_metric_name}={record.primary_metric:.4f}"
+            try:
+                metric_str = f"{record.primary_metric_name}={float(record.primary_metric):.4f}"
+            except (TypeError, ValueError):
+                metric_str = f"{record.primary_metric_name}={record.primary_metric}"
 
         name_display = record.name[:33] + ".." if len(record.name) > 35 else record.name
         model_display = (record.model_name or "")[:23]

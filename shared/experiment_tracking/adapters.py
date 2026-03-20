@@ -9,11 +9,63 @@ Used by: SFT/KTO/GRPO post-training hooks, cloud manifest hooks, Evaluator hooks
 """
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .schema import RunRecord
+
+_adapters_logger = logging.getLogger(__name__)
+
+
+def _training_lineage_to_run_record(
+    lineage: dict[str, Any],
+    run_dir: str,
+    method: str,
+    *,
+    run_id: str | None = None,
+    cloud: bool = False,
+) -> RunRecord:
+    """Shared helper for SFT/KTO lineage-to-RunRecord conversion.
+
+    Args:
+        lineage: Parsed content of training_lineage.json.
+        run_dir: Absolute path to the run output directory.
+        method: Training method ("sft" or "kto").
+        run_id: Optional pre-generated run ID. If None, a new UUID4 is created.
+        cloud: If True, prefixes run_type with "cloud_".
+
+    Returns:
+        A RunRecord populated from the training lineage.
+    """
+    results = lineage.get("results", {})
+    model_info = lineage.get("model", {})
+    dataset_info = lineage.get("dataset", {})
+    hardware_info = lineage.get("hardware", {})
+
+    final_loss = results.get("final_loss")
+    metric_name = "final_loss" if final_loss is not None else None
+
+    gpu_name = hardware_info.get("gpu_name", "")
+    hw_str = gpu_name if gpu_name else None
+
+    return RunRecord(
+        run_id=run_id or str(uuid.uuid4()),
+        run_type=f"cloud_{method}" if cloud else method,
+        name=f"{method.upper()} run {lineage.get('timestamp', '')}".strip(),
+        timestamp=lineage.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        status="completed",
+        output_dir=run_dir,
+        tags={"method": method, "provider": "cloud" if cloud else "local"},
+        model_name=model_info.get("base_model"),
+        dataset_source=dataset_info.get("source"),
+        primary_metric=final_loss,
+        primary_metric_name=metric_name,
+        hardware=hw_str,
+    )
 
 
 def sft_lineage_to_run_record(
@@ -23,43 +75,9 @@ def sft_lineage_to_run_record(
     run_id: str | None = None,
     cloud: bool = False,
 ) -> RunRecord:
-    """Convert an SFT training_lineage.json dict to a RunRecord.
-
-    Args:
-        lineage: Parsed content of training_lineage.json.
-        run_dir: Absolute path to the run output directory.
-        run_id: Optional pre-generated run ID. If None, a new UUID4 is created.
-        cloud: If True, sets run_type to "cloud_sft" instead of "sft".
-
-    Returns:
-        A RunRecord populated from the SFT lineage.
-    """
-    results = lineage.get("results", {})
-    model_info = lineage.get("model", {})
-    dataset_info = lineage.get("dataset", {})
-    hardware_info = lineage.get("hardware", {})
-
-    # Determine primary metric
-    final_loss = results.get("final_loss")
-    metric_name = "final_loss" if final_loss is not None else None
-
-    # Build hardware string from lineage
-    gpu_name = hardware_info.get("gpu_name", "")
-    hw_str = gpu_name if gpu_name else None
-
-    return RunRecord(
-        run_id=run_id or str(uuid.uuid4()),
-        run_type="cloud_sft" if cloud else "sft",
-        name=f"SFT run {lineage.get('timestamp', '')}".strip(),
-        timestamp=lineage.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        status="completed",
-        output_dir=run_dir,
-        tags={"method": "sft", "provider": "cloud" if cloud else "local"},
-        model_name=model_info.get("base_model"),
-        dataset_source=dataset_info.get("source"),
-        primary_metric=final_loss,
-        primary_metric_name=metric_name,
-        hardware=hw_str,
+    """Convert an SFT training_lineage.json dict to a RunRecord."""
+    return _training_lineage_to_run_record(
+        lineage, run_dir, "sft", run_id=run_id, cloud=cloud,
     )
 
 
@@ -70,41 +88,9 @@ def kto_lineage_to_run_record(
     run_id: str | None = None,
     cloud: bool = False,
 ) -> RunRecord:
-    """Convert a KTO training_lineage.json dict to a RunRecord.
-
-    Args:
-        lineage: Parsed content of training_lineage.json.
-        run_dir: Absolute path to the run output directory.
-        run_id: Optional pre-generated run ID. If None, a new UUID4 is created.
-        cloud: If True, sets run_type to "cloud_kto" instead of "kto".
-
-    Returns:
-        A RunRecord populated from the KTO lineage.
-    """
-    results = lineage.get("results", {})
-    model_info = lineage.get("model", {})
-    dataset_info = lineage.get("dataset", {})
-    hardware_info = lineage.get("hardware", {})
-
-    final_loss = results.get("final_loss")
-    metric_name = "final_loss" if final_loss is not None else None
-
-    gpu_name = hardware_info.get("gpu_name", "")
-    hw_str = gpu_name if gpu_name else None
-
-    return RunRecord(
-        run_id=run_id or str(uuid.uuid4()),
-        run_type="cloud_kto" if cloud else "kto",
-        name=f"KTO run {lineage.get('timestamp', '')}".strip(),
-        timestamp=lineage.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        status="completed",
-        output_dir=run_dir,
-        tags={"method": "kto", "provider": "cloud" if cloud else "local"},
-        model_name=model_info.get("base_model"),
-        dataset_source=dataset_info.get("source"),
-        primary_metric=final_loss,
-        primary_metric_name=metric_name,
-        hardware=hw_str,
+    """Convert a KTO training_lineage.json dict to a RunRecord."""
+    return _training_lineage_to_run_record(
+        lineage, run_dir, "kto", run_id=run_id, cloud=cloud,
     )
 
 
@@ -308,3 +294,52 @@ def eval_to_run_record(
         primary_metric=pass_rate,
         primary_metric_name="pass_rate",
     )
+
+
+def register_grpo_run(
+    log_dir: Path,
+    run_dir: str,
+    *,
+    model_name: str | None = None,
+    dataset_source: str | None = None,
+    cloud: bool = False,
+) -> str | None:
+    """Load GRPO training logs from disk and register in the unified registry.
+
+    Best-effort helper used by both train_grpo.py and train_env_grpo.py to
+    avoid duplicating the JSONL-read + register logic.
+
+    Args:
+        log_dir: Directory containing ``training_*.jsonl`` log files.
+        run_dir: Absolute path to the run output directory.
+        model_name: Model identifier (from YAML config or CLI).
+        dataset_source: Dataset path or HuggingFace identifier.
+        cloud: If True, sets run_type to ``"cloud_grpo"``.
+
+    Returns:
+        The registered run_id, or None if no log files were found.
+    """
+    from .registry import RunRegistry
+
+    log_dir = Path(log_dir)
+    log_files = sorted(log_dir.glob("training_*.jsonl")) if log_dir.exists() else []
+    if not log_files:
+        return None
+
+    entries: list[dict[str, Any]] = []
+    with open(log_files[-1], "r", encoding="utf-8") as f:
+        for raw_line in f:
+            raw_line = raw_line.strip()
+            if raw_line:
+                entries.append(json.loads(raw_line))
+
+    record = grpo_log_to_run_record(
+        entries,
+        run_dir,
+        model_name=model_name,
+        dataset_source=dataset_source,
+        cloud=cloud,
+    )
+    run_id = RunRegistry().register_run(record)
+    _adapters_logger.info("GRPO run registered in unified tracking: %s", run_id)
+    return run_id
