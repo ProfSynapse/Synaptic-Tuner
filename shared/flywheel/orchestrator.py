@@ -134,6 +134,15 @@ class FlywheelOrchestrator:
         except Exception as exc:
             logger.error("Cleaning failed: %s", exc)
 
+        # Short-circuit: if cleaning produced zero scored logs,
+        # downstream stages (tag, stage) will produce zero results.
+        if result.cleaning and result.cleaning.scored == 0:
+            logger.warning(
+                "Cleaning scored 0 logs (processed=%d, errors=%d); "
+                "downstream stages will produce empty results",
+                result.cleaning.total_processed, result.cleaning.errors,
+            )
+
         # Stage 2: Tag
         logger.info("Flywheel cycle: stage 2/4 - tagging")
         try:

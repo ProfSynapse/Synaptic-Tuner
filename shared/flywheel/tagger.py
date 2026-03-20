@@ -183,6 +183,12 @@ class AutoTagger:
             return "kto"
 
         # Tool-call path: tools WERE in the request
+        # Threshold bands:
+        #   score >= sft_threshold (0.8)      -> "sft"
+        #   kto_min (0.3) <= score < sft (0.8) -> "kto" (includes 0.3-0.4 sub-range)
+        #   score < kto_min (0.3)             -> "discard"
+        # Within kto band, GRPO-eligible logs may be tagged "grpo" instead,
+        # and the ambiguous sub-band (0.4-0.7) may be escalated to the LLM judge.
         cfg = self._config
         if score >= cfg.sft_threshold:
             return "sft"

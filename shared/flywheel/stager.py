@@ -20,6 +20,7 @@ from typing import Any
 
 from .catalog import DatasetVersion, InferenceLogRecord, LogCatalog, LogFilter
 from .config import FlywheelConfig
+from .utils import read_log_content
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,8 @@ class DatasetStager:
 
         result.version_id = version_id
         result.total_records = (
-            result.sft_count + result.kto_neg_count + result.grpo_count
+            result.sft_count + result.kto_pos_count
+            + result.kto_neg_count + result.grpo_count
         )
         result.file_paths = {k: str(v) for k, v in file_paths.items()}
         result.content_hash = content_hash
@@ -240,29 +242,39 @@ class DatasetStager:
         kto_logs: list[InferenceLogRecord],
         path: Path,
     ) -> tuple[int, int]:
-        """Write KTO training examples (interleaved positive/negative)."""
-        pos_count = 0
-        neg_count = 0
+        """Write KTO training examples with interleaved positive/negative pairs.
+
+        Per KTO_TRAINING_REFERENCE.md, KTO training requires interleaved
+        true/false examples. We zip positives and negatives, writing
+        alternating pairs. When one list is exhausted, remaining items
+        from the longer list are appended at the end.
+        """
+        pos_examples: list[dict] = []
+        neg_examples: list[dict] = []
+
+        for record in sft_logs:
+            content = self._read_log_content(record)
+            if not content:
+                continue
+            pos_examples.append(self._format_kto_example(record, content, label=True))
+
+        for record in kto_logs:
+            content = self._read_log_content(record)
+            if not content:
+                continue
+            neg_examples.append(self._format_kto_example(record, content, label=False))
+
+        # Interleave: alternate positive/negative, then append remainder
         with open(path, "w", encoding="utf-8") as f:
-            # Positive examples from SFT-quality logs
-            for record in sft_logs:
-                content = self._read_log_content(record)
-                if not content:
-                    continue
-                example = self._format_kto_example(record, content, label=True)
-                f.write(json.dumps(example, ensure_ascii=False) + "\n")
-                pos_count += 1
+            from itertools import zip_longest
 
-            # Negative examples from KTO-band logs
-            for record in kto_logs:
-                content = self._read_log_content(record)
-                if not content:
-                    continue
-                example = self._format_kto_example(record, content, label=False)
-                f.write(json.dumps(example, ensure_ascii=False) + "\n")
-                neg_count += 1
+            for pos, neg in zip_longest(pos_examples, neg_examples):
+                if pos is not None:
+                    f.write(json.dumps(pos, ensure_ascii=False) + "\n")
+                if neg is not None:
+                    f.write(json.dumps(neg, ensure_ascii=False) + "\n")
 
-        return pos_count, neg_count
+        return len(pos_examples), len(neg_examples)
 
     def _write_grpo(
         self, logs: list[InferenceLogRecord], path: Path,
@@ -320,19 +332,10 @@ class DatasetStager:
 
         return conversations
 
-    def _read_log_content(self, record: InferenceLogRecord) -> dict | None:
+    @staticmethod
+    def _read_log_content(record: InferenceLogRecord) -> dict | None:
         """Read full log content from the source JSONL file."""
-        source = Path(record.source_file)
-        if not source.exists():
-            return None
-        try:
-            with open(source, "r", encoding="utf-8") as f:
-                for i, line in enumerate(f):
-                    if i == record.line_number:
-                        return json.loads(line.strip())
-        except (json.JSONDecodeError, IOError):
-            pass
-        return None
+        return read_log_content(record)
 
     def _compute_content_hash(self, file_paths: dict[str, Path]) -> str:
         """SHA-256 hash of all staged dataset files."""

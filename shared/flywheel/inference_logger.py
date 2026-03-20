@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,34 @@ from .catalog import InferenceLogRecord, LogCatalog
 from .config import FlywheelConfig
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Credential / PII scrubber
+# ---------------------------------------------------------------------------
+
+_SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"sk-[a-zA-Z0-9]{20,}"), "[REDACTED_API_KEY]"),
+    (re.compile(r"Bearer [a-zA-Z0-9\-._~+/]+=*"), "Bearer [REDACTED]"),
+    (re.compile(r'"password"\s*:\s*"[^"]{4,}"'), '"password": "[REDACTED]"'),
+]
+
+
+def _scrub_credentials(text: str) -> str:
+    """Replace API keys, bearer tokens, and passwords in *text*."""
+    for pattern, replacement in _SCRUB_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _scrub_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a deep-copy of *messages* with credentials scrubbed from content."""
+    scrubbed: list[dict[str, Any]] = []
+    for msg in messages:
+        msg_copy = dict(msg)
+        if isinstance(msg_copy.get("content"), str):
+            msg_copy["content"] = _scrub_credentials(msg_copy["content"])
+        scrubbed.append(msg_copy)
+    return scrubbed
 
 
 class InferenceLogger:
@@ -154,12 +183,12 @@ class InferenceLogger:
             timestamp=datetime.now(timezone.utc).isoformat(),
             model_id=model_id,
             adapter_name=adapter_name,
-            messages=messages,
+            messages=_scrub_messages(messages),
             temperature=request.get("temperature", 0.7),
             max_tokens=request.get("max_tokens", 1024),
             tools=tools,
             tools_requested=tools_requested,
-            response_content=response_content,
+            response_content=_scrub_credentials(response_content),
             tool_calls=tool_calls_list,
             finish_reason=finish_reason,
             prompt_tokens=prompt_toks,

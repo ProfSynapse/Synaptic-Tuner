@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 
 from services.proxy.config import ProxyConfig
 
@@ -128,7 +129,26 @@ async def health(request: Request) -> dict:
     }
 
 
-@app.get("/flywheel/stats")
+_STATS_TOKEN = os.environ.get("FLYWHEEL_STATS_TOKEN", "")
+
+
+async def _check_stats_auth(
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Verify Bearer token for /flywheel/stats when FLYWHEEL_STATS_TOKEN is set.
+
+    If the env var is empty or unset, the endpoint is open (localhost dev mode).
+    """
+    if not _STATS_TOKEN:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer credential")
+    import hmac
+    if not hmac.compare_digest(authorization[7:], _STATS_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid credential")
+
+
+@app.get("/flywheel/stats", dependencies=[Depends(_check_stats_auth)])
 async def stats(request: Request) -> dict:
     """Return logging statistics (total logged, today's count, queue depth)."""
     return dict(request.app.state.stats)

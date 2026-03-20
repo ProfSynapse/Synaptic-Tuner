@@ -138,6 +138,7 @@ class LogCatalog(Protocol):
     async def insert_logs_batch(self, records: list[InferenceLogRecord]) -> int: ...
     async def find_logs(self, filters: LogFilter) -> list[InferenceLogRecord]: ...
     async def count_logs(self, filters: LogFilter) -> int: ...
+    async def avg_score(self, filters: LogFilter) -> float: ...
     async def update_score(
         self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],
     ) -> None: ...
@@ -281,6 +282,29 @@ class SQLiteLogCatalog:
         cursor = await self._conn.execute(sql, params)
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+    async def avg_score(self, filters: LogFilter) -> float:
+        """Average fitness_score for logs matching filters (ignoring NULLs)."""
+        # Build query without LIMIT so we average across all matching logs
+        no_limit = LogFilter(
+            since=filters.since, until=filters.until,
+            model_id=filters.model_id, tag=filters.tag,
+            min_score=filters.min_score, max_score=filters.max_score,
+            is_valid=filters.is_valid, has_tool_calls=filters.has_tool_calls,
+            unscored_only=filters.unscored_only,
+            untagged_only=filters.untagged_only,
+            unused_only=filters.unused_only,
+            dataset_version=filters.dataset_version,
+            limit=None,
+        )
+        sql, params = self._build_query(
+            "AVG(fitness_score)", no_limit,
+        )
+        # Replace ORDER BY clause — AVG doesn't need ordering
+        sql = sql.replace(" ORDER BY timestamp", "")
+        cursor = await self._conn.execute(sql, params)
+        row = await cursor.fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
 
     async def update_score(
         self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],
@@ -604,6 +628,25 @@ class PostgresLogCatalog:
         async with self._pool.acquire() as conn:
             row = await conn.fetchval(sql, *params)
         return row or 0
+
+    async def avg_score(self, filters: LogFilter) -> float:
+        """Average fitness_score for logs matching filters (ignoring NULLs)."""
+        no_limit = LogFilter(
+            since=filters.since, until=filters.until,
+            model_id=filters.model_id, tag=filters.tag,
+            min_score=filters.min_score, max_score=filters.max_score,
+            is_valid=filters.is_valid, has_tool_calls=filters.has_tool_calls,
+            unscored_only=filters.unscored_only,
+            untagged_only=filters.untagged_only,
+            unused_only=filters.unused_only,
+            dataset_version=filters.dataset_version,
+            limit=None,
+        )
+        sql, params = self._build_query("AVG(fitness_score)", no_limit)
+        sql = sql.replace(" ORDER BY timestamp", "")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchval(sql, *params)
+        return float(row) if row is not None else 0.0
 
     async def update_score(
         self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],

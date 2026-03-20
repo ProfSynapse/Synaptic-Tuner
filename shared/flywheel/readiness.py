@@ -79,16 +79,10 @@ class ReadinessChecker:
             LogFilter(tag="grpo", unused_only=True),
         )
 
-        # Compute average quality score of scored, unused logs
-        scored_logs = await self._catalog.find_logs(
-            LogFilter(unused_only=True, limit=1000),
+        # Compute average quality score via database aggregation
+        report.avg_quality_score = await self._catalog.avg_score(
+            LogFilter(unused_only=True),
         )
-        scored_with_score = [
-            r for r in scored_logs if r.fitness_score is not None
-        ]
-        if scored_with_score:
-            total_score = sum(r.fitness_score for r in scored_with_score)
-            report.avg_quality_score = total_score / len(scored_with_score)
 
         # Check days since last cycle
         latest_version = await self._catalog.get_latest_dataset_version()
@@ -120,7 +114,7 @@ class ReadinessChecker:
             )
 
         if (
-            scored_with_score
+            report.avg_quality_score > 0.0
             and report.avg_quality_score < cfg.min_quality_score
         ):
             ready = False

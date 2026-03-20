@@ -44,8 +44,6 @@ class TestReadinessChecker:
 
     async def test_ready_when_all_criteria_met(self):
         """Returns ready=True when enough examples, quality, and SFT count."""
-        scored_logs = [_make_record(f"r-{i}", fitness_score=0.8) for i in range(10)]
-
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[
             600,   # unused total
@@ -53,7 +51,7 @@ class TestReadinessChecker:
             100,   # estimated_kto
             50,    # estimated_grpo
         ])
-        catalog.find_logs = AsyncMock(return_value=scored_logs)
+        catalog.avg_score = AsyncMock(return_value=0.8)
         catalog.get_latest_dataset_version = AsyncMock(return_value=None)
 
         checker = self._make_checker(catalog, min_new_examples=500, min_sft_examples=100)
@@ -68,9 +66,7 @@ class TestReadinessChecker:
         """Returns ready=False when below min_new_examples."""
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[100, 50, 30, 10])
-        catalog.find_logs = AsyncMock(return_value=[
-            _make_record("x", fitness_score=0.9),
-        ])
+        catalog.avg_score = AsyncMock(return_value=0.9)
         catalog.get_latest_dataset_version = AsyncMock(return_value=None)
 
         checker = self._make_checker(catalog, min_new_examples=500)
@@ -88,9 +84,7 @@ class TestReadinessChecker:
             100,  # estimated_kto
             50,   # estimated_grpo
         ])
-        catalog.find_logs = AsyncMock(return_value=[
-            _make_record("x", fitness_score=0.9),
-        ])
+        catalog.avg_score = AsyncMock(return_value=0.9)
         catalog.get_latest_dataset_version = AsyncMock(return_value=None)
 
         checker = self._make_checker(catalog, min_new_examples=500, min_sft_examples=100)
@@ -101,11 +95,9 @@ class TestReadinessChecker:
 
     async def test_not_ready_low_quality(self):
         """Returns ready=False when average quality below threshold."""
-        low_quality_logs = [_make_record(f"lq-{i}", fitness_score=0.3) for i in range(5)]
-
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[600, 150, 100, 50])
-        catalog.find_logs = AsyncMock(return_value=low_quality_logs)
+        catalog.avg_score = AsyncMock(return_value=0.3)
         catalog.get_latest_dataset_version = AsyncMock(return_value=None)
 
         checker = self._make_checker(
@@ -130,9 +122,7 @@ class TestReadinessChecker:
 
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[600, 150, 100, 50])
-        catalog.find_logs = AsyncMock(return_value=[
-            _make_record("x", fitness_score=0.9),
-        ])
+        catalog.avg_score = AsyncMock(return_value=0.9)
         catalog.get_latest_dataset_version = AsyncMock(return_value=recent_version)
 
         checker = self._make_checker(
@@ -151,7 +141,7 @@ class TestReadinessChecker:
         """With no scored logs, quality check is skipped but count checks apply."""
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[600, 150, 100, 50])
-        catalog.find_logs = AsyncMock(return_value=[])  # no scored logs
+        catalog.avg_score = AsyncMock(return_value=0.0)  # no scored logs
         catalog.get_latest_dataset_version = AsyncMock(return_value=None)
 
         checker = self._make_checker(catalog, min_new_examples=500, min_sft_examples=100)
@@ -173,9 +163,7 @@ class TestReadinessChecker:
 
         catalog = AsyncMock()
         catalog.count_logs = AsyncMock(side_effect=[600, 150, 100, 50])
-        catalog.find_logs = AsyncMock(return_value=[
-            _make_record("x", fitness_score=0.9),
-        ])
+        catalog.avg_score = AsyncMock(return_value=0.9)
         catalog.get_latest_dataset_version = AsyncMock(return_value=recent_version)
 
         checker = self._make_checker(
