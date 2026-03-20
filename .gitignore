@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# Experiment tracking registry (local run data, not committed)
+.tracking/
+
 # Python
 __pycache__/
 *.py[cod]

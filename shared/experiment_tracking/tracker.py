@@ -80,3 +80,15 @@ class ExperimentTracker(ABC):
             local_path: Path to the file to log.
         """
         ...
+
+    def log_metadata(self, key: str, value: Any) -> None:
+        """Log arbitrary metadata for the current run.
+
+        Non-abstract convenience method with a default no-op implementation.
+        Subclasses may override to store metadata (e.g. in run tags or
+        the unified registry).
+
+        Args:
+            key: Metadata key.
+            value: Metadata value (should be JSON-serializable).
+        """
