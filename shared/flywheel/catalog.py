@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -469,9 +470,18 @@ class PostgresLogCatalog:
         pool_size: Connection pool size (default 10)
     """
 
+    # Strict allowlist for tenant_id to prevent SQL injection in schema names.
+    # Identifiers cannot be parameterized ($1) in Postgres, so we validate instead.
+    _TENANT_ID_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
     def __init__(
         self, dsn: str, tenant_id: str, pool_size: int = 10,
     ) -> None:
+        if not self._TENANT_ID_RE.match(tenant_id):
+            raise ValueError(
+                f"Invalid tenant_id: {tenant_id!r} "
+                "(must match ^[a-zA-Z0-9_]+$)"
+            )
         self._dsn = dsn
         self._tenant_id = tenant_id
         self._pool_size = pool_size

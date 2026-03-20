@@ -49,26 +49,34 @@ class FlywheelHandler(BaseHandler):
         config_path = getattr(self.args, "flywheel_config", None) if self.args else None
         return load_flywheel_config(config_path)
 
-    def _build_orchestrator(self, config: Any) -> Any:
-        """Construct a FlywheelOrchestrator with all pipeline components."""
+    async def _build_orchestrator_async(self, config: Any) -> Any:
+        """Construct a FlywheelOrchestrator with all pipeline components.
+
+        Async because create_catalog() requires await for DB initialization.
+        """
         from shared.flywheel.catalog import create_catalog
         from shared.flywheel.cleaner import DataCleaner
         from shared.flywheel.orchestrator import FlywheelOrchestrator
         from shared.flywheel.stager import DatasetStager
         from shared.flywheel.tagger import AutoTagger
 
-        catalog = create_catalog(config)
+        catalog = await create_catalog(
+            backend=config.catalog_backend,
+            path=config.catalog_path,
+            url=config.catalog_url,
+            tenant_id=config.tenant_id,
+        )
         return FlywheelOrchestrator(
             catalog=catalog, config=config,
             cleaner=DataCleaner(catalog=catalog, config=config),
-            tagger=AutoTagger(config=config),
+            tagger=AutoTagger(catalog=catalog, config=config),
             stager=DatasetStager(catalog=catalog, config=config),
         )
 
     def _get_orchestrator(self) -> tuple:
         """Load config and build orchestrator. Returns (config, orchestrator)."""
         config = self._load_config()
-        return config, self._build_orchestrator(config)
+        return config, asyncio.run(self._build_orchestrator_async(config))
 
     def handle(self) -> int:
         """Route to the appropriate flywheel subcommand handler."""
@@ -172,9 +180,9 @@ class FlywheelHandler(BaseHandler):
 
         self.output_info(f"Flywheel cycle completed in {result.total_duration_seconds:.1f}s")
         if result.cleaning:
-            print(f"  Cleaned:  {getattr(result.cleaning, 'processed', '?')} logs")
+            print(f"  Cleaned:  {result.cleaning.total_processed} logs ({result.cleaning.scored} scored)")
         if result.tagging:
-            print(f"  Tagged:   {getattr(result.tagging, 'tagged', '?')} examples")
+            print(f"  Tagged:   {result.tagging.total_processed} examples (sft={result.tagging.sft_count} kto={result.tagging.kto_count})")
         if result.staging:
             print(f"  Staged:   version {getattr(result.staging, 'version_id', '?')}")
         if result.training:

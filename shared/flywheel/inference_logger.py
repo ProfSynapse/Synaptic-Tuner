@@ -234,18 +234,27 @@ class InferenceLogger:
     async def _write_batch(
         self, log_file: Path, batch: list[InferenceLogRecord],
     ) -> None:
-        """Write a batch of records to a JSONL file."""
+        """Write a batch of records to a JSONL file.
+
+        File I/O is offloaded to a thread via asyncio.to_thread() to avoid
+        blocking the event loop. This is important as JSONL files grow over
+        a day's worth of inference logging.
+        """
         try:
-            # Count existing lines for line_number tracking
-            start_line = 0
-            if log_file.exists():
-                start_line = sum(1 for _ in open(log_file, "r", encoding="utf-8"))
-
-            with open(log_file, "a", encoding="utf-8") as f:
-                for i, record in enumerate(batch):
-                    record.source_file = str(log_file)
-                    record.line_number = start_line + i
-                    f.write(record.to_json() + "\n")
-
+            await asyncio.to_thread(self._write_batch_sync, log_file, batch)
         except Exception as exc:
             logger.error("Failed to write %d logs to %s: %s", len(batch), log_file, exc)
+
+    def _write_batch_sync(
+        self, log_file: Path, batch: list[InferenceLogRecord],
+    ) -> None:
+        """Synchronous file write, called from a thread pool."""
+        start_line = 0
+        if log_file.exists():
+            start_line = sum(1 for _ in open(log_file, "r", encoding="utf-8"))
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            for i, record in enumerate(batch):
+                record.source_file = str(log_file)
+                record.line_number = start_line + i
+                f.write(record.to_json() + "\n")
