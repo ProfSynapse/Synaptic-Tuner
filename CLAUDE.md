@@ -374,12 +374,33 @@ After agent reviews completed:
 - Synthesize findings and recommendations in `docs/review/` (note agreements and conflicts)
 - Execute `/PACT:pin-memory`
 
+## Pinned Context
+
+<!-- pinned: 2026-03-20 -->
+### Flywheel: vLLM LoRA Hot-Swap API
+Requires env var `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True` at server startup.
+Hot-swap endpoint: `POST /v1/load_lora_adapter` with body `{"lora_name": "...", "lora_path": "...", "load_inplace": true}`.
+`load_inplace=true` is critical — without it, the old adapter stays loaded until server restart.
+
+<!-- pinned: 2026-03-20 -->
+### Flywheel: FitnessEvaluator Requires fitness.yaml + Tool-Call Check
+`FitnessEvaluator` with empty/missing fitness.yaml scores everything 1.0 (pass). Must provide `configs/flywheel/fitness_rules.yaml`.
+Non-tool-call responses score 0.0 against tool schema — always check `tools_requested` flag on `InferenceLogRecord` before scoring. Route via `text_response_policy` config (options: sft/kto/skip).
+
+<!-- pinned: 2026-03-20 -->
+### Flywheel: KTO Dataset Must Be Interleaved
+`KTO_TRAINING_REFERENCE.md` requires alternating true/false examples. Stager uses `zip_longest` to interleave positives and negatives. If you modify `_write_kto`, preserve interleaving or KTO training quality degrades.
+
+<!-- pinned: 2026-03-20 -->
+### Flywheel: Proxy Port + Catalog Backend
+Logging proxy runs on `:8080` → forwards to vLLM `:8000`. Catalog backend: set `FLYWHEEL_CATALOG_BACKEND=sqlite|postgres`. Stats endpoint auth: `FLYWHEEL_STATS_TOKEN` env var (optional; if unset, stats are open for localhost dev).
+
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume a5318eed-9691-4bea-a18f-b6b7f619072c`
-- Team: `pact-a5318eed`
-- Started: 2026-03-14 17:30:01 UTC
+- Resume: `claude --resume 2f6b7d3b-2b85-4bbf-8e36-e30bfa5a25e2`
+- Team: `pact-2f6b7d3b`
+- Started: 2026-03-20 17:29:51 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -388,12 +409,18 @@ After agent reviews completed:
 ## Working Memory
 <!-- Auto-managed by pact-memory skill. Last 3 memories shown. Full history searchable via pact-memory skill. -->
 
-### 2026-03-14 17:50
-**Context**: Working on the Synthetic Conversations project (ML pipeline for LLM fine-tuning with SFT/KTO training). PR #62 was merged to fix cloud training dependency management across three backends: HuggingFace Jobs, RunPod, and Modal. The fix addressed a fragmented dependency specification problem where each cloud backend was independently managing its own Python package lists, leading to environment drift and incompatible torch/unsloth versions at runtime. The work was done on a feature branch and merged to main. The codebase uses unsloth for efficient fine-tuning and targets CUDA 12.8 with PyTorch 2.9.0.
-**Goal**: Establish a single source of truth for cloud training dependencies across all three backends (HF Jobs, RunPod, Modal), eliminating environment drift and ensuring reproducible training runs in cloud environments.
-**Decisions**: Use unsloth/unsloth Docker image (digest-pinned) for HF Jobs and RunPod backends, Single source of truth: project deps in cloud_config.yaml, backends read via load_project_deps() in base_cloud.py, Modal uses unsloth[cu128-torch270]==2025.7.8, trl==0.19.1, transformers==4.54.0 via pinned pip
-**Lessons**: PyTorch Docker images (e.g., pytorch/pytorch base images) do not include git by default — this causes failures when pip tries to install packages from git URLs or when any training code clones repos at startup. Always verify git availability or use images that bundle it (like unsloth/unsloth)., Unsloth pip install without version pinning pulls incompatible torch versions as transitive dependencies, overwriting the torch already in the environment. Always pin unsloth with its CUDA/torch variant suffix (e.g., unsloth[cu128-torch270]==2025.7.8) to prevent torch downgrade., RunPod was silently failing due to an old CUDA 11.8 image — the mismatch between the image CUDA version and the code assumptions was a hidden failure point that only surfaced at runtime. Always verify the CUDA version of the base image matches the CUDA version in dependency specs., Using a digest-pinned Docker image (unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update) for HF Jobs and RunPod provides reproducibility: the same image hash guarantees the same environment regardless of tag mutation., A hybrid strategy makes sense when backends have different constraints: Docker image for HF Jobs and RunPod (where container control is available), pinned pip packages for Modal (which has its own image building system).
-**Memory ID**: 1c172f3cec2054a15055ac0056cfd04f
+### 2026-03-20 17:28
+**Context**: Orchestration retrospective for the Enterprise Data Flywheel session (2026-03-20). This was a high-variety task (Novelty: 3, Scope: 4, Uncertainty: 2, Risk: 2 = 11, plan-mode -> orchestrate workflow). The session implemented a full PACT cycle: plan-mode produced an approved plan, then orchestrate ran PREPARE -> ARCHITECT -> CODE -> TEST phases. A session restart occurred mid-workflow requiring state recovery from task metadata and git history. The PR (#65) went through multi-agent review with 4+ reviewers (architect, test-engineer, backend-coder, security-engineer). The feature was substantial: 35 files, +8614 lines, spanning a new shared/flywheel/ pipeline package, FastAPI proxy, CLI integration, experiment tracking adapter, and comprehensive test suite.
+**Goal**: Capture orchestration calibration data for large cross-cutting features in the Toolset-Training project, informing future variety scoring and workflow selection for similar tasks.
+**Decisions**: Process HANDOFF review (Pass 1) at peer-review dispatch as the primary trigger
+**Lessons**: Large cross-cutting features (35+ files, 8000+ lines) that integrate with multiple existing systems (validation, judge, experiment tracking) score correctly at variety 11+ and benefit from the full plan-mode -> orchestrate workflow. The upfront planning consultation prevented rework during the CODE phase by aligning all specialists on integration points before implementation began., Session restarts mid-workflow are recoverable via TaskList + TaskGet + git log. Persisting state in task metadata (especially phase completion status and worktree path) is essential — without it, the orchestrator would need to re-derive the full workflow state from git history alone., PR reviewers (tasks #5-8, #10-12) may have their tasks deleted during wrap-up cleanup before the secretary can process their HANDOFFs. This is a known gap — reviewer insights are captured in PR comments (via gh) and docs/review/ rather than pact-memory. Consider processing reviewer HANDOFFs earlier in the workflow (immediately after review synthesis, before PR merge)., When the flywheel feature extended the existing experiment tracking adapters.py, the adapter pattern (flywheel_cycle_to_run_record) worked cleanly because the unified tracking system was designed with Open/Closed principle. This validates the prior decision (PR #64) to use a schema-versioned, adapter-based tracking design.
+**Memory ID**: 18d9f9b7272e3ee8ac2a20b531586f89
+
+### 2026-03-20 17:02
+**Summary**: Implemented the Enterprise Data Flywheel platform for the Toolset-Training project (PR #65).
+
+### 2026-03-20 15:28
+**Summary**: Implemented unified experiment tracking across all training systems in the Toolset-Training project.
 ---
 
 ## AI Assistant Quick Reference
@@ -489,10 +516,34 @@ Toolset-Training/
 │   ├── judge/                 # Reusable LLM-as-judge module (JudgeService, RubricLoader, InteractionLogger)
 │   ├── upload/                # Upload framework
 │   ├── utilities/             # Path, env, YAML loading utilities
+│   ├── experiment_tracking/   # Unified run registry (RunRecord, adapters for all trainer types)
+│   ├── flywheel/              # Enterprise Data Flywheel (inference logging → auto-retrain loop)
+│   │   ├── catalog.py         # LogCatalog Protocol + SQLite/Postgres impls + create_catalog()
+│   │   ├── config.py          # FlywheelConfig dataclass (thresholds, backends)
+│   │   ├── cleaner.py         # DataCleaner: FitnessEvaluator integration + PII stub
+│   │   ├── tagger.py          # AutoTagger: score-based SFT/KTO/GRPO routing + LLM judge
+│   │   ├── stager.py          # DatasetStager: versioned JSONL assembly + KTO interleaving
+│   │   ├── readiness.py       # ReadinessChecker: avg_score() via SQL AVG()
+│   │   ├── orchestrator.py    # FlywheelOrchestrator: GPU mutex + full pipeline
+│   │   ├── inference_logger.py # InferenceLogger: async JSONL capture + credential scrubbing
+│   │   └── utils.py           # Shared read_log_content() helper
 │   └── validation/            # Unified validation (used by SynthChat, Evaluator, Trainer)
 │       ├── parsing/           # Format-agnostic response parsing (Qwen/Mistral/ChatML)
 │       ├── validators/        # Config-driven validators (XML, JSON, YAML, regex, code)
 │       └── rubric/            # Rubric loading and caching
+│
+├── services/                  # Long-running services
+│   └── proxy/                 # OpenAI-compatible proxy :8080 → vLLM :8000
+│       ├── app.py             # FastAPI app: fire-and-forget logging, /flywheel/stats endpoint
+│       └── config.py          # ProxyConfig dataclass
+│
+├── configs/flywheel/          # Flywheel configuration
+│   ├── default.yaml           # Default FlywheelConfig
+│   └── fitness_rules.yaml     # Tool-call validation rules for FitnessEvaluator
+│
+├── tests/flywheel/            # Flywheel test suite (173 tests)
+│
+├── requirements-flywheel.txt  # Flywheel deps: aiosqlite, asyncpg, fastapi, uvicorn, httpx
 │
 └── web-ui/                    # Next.js dataset editor
     └── npm run dev            # Start dev server
