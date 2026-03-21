@@ -21,6 +21,19 @@ class Experiment:
     features_csv_path: str | None = None
     judge_scores_path: str | None = None
     status: str = "partial"
+    provider: str = ""
+    method: str = ""
+    objective: str = ""
+    spec_path: str | None = None
+    training_run_id: str | None = None
+    evaluation_run_id: str | None = None
+    loss_run_id: str | None = None
+    selected_run_id: str | None = None
+    artifact_roots: dict[str, str] = field(default_factory=dict)
+    derived_outputs: dict[str, str] = field(default_factory=dict)
+    stage_statuses: dict[str, str] = field(default_factory=dict)
+    hypothesis_context_path: str | None = None
+    next_run_candidates_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""
@@ -38,6 +51,10 @@ def create_experiment(
     dataset_path: str,
     dataset_hash: str,
     base_model_name: str,
+    provider: str = "",
+    method: str = "",
+    objective: str = "",
+    spec_path: str | None = None,
     base_dir: Path | str = ".tracking",
 ) -> Experiment:
     """Create a new experiment, write to disk, and return the metadata."""
@@ -52,6 +69,10 @@ def create_experiment(
         dataset_path=dataset_path,
         dataset_hash=dataset_hash,
         base_model_name=base_model_name,
+        provider=provider,
+        method=method,
+        objective=objective,
+        spec_path=spec_path,
     )
     
     exp_dir = Path(base_dir) / "experiments" / timestamp_id

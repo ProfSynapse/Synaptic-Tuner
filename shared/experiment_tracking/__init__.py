@@ -31,11 +31,15 @@ Usage:
     recent_sft = registry.find_runs(RunFilter(run_type="sft"))
 """
 from .local_tracker import LocalTracker
+from .analysis_bundle import write_analysis_bundle
+from .experiment_orchestrator import ExperimentOrchestrator, StageResult
+from .experiment_spec import ExperimentSpec, load_experiment_spec
 from .registry import RunRegistry
 from .schema import RunFilter, RunRecord, LossResult
 from .tracker import ExperimentTracker
 from .per_example_loss import compute_per_example_losses, save_losses, load_losses
 from .experiment import Experiment, create_experiment, load_experiment, save_experiment
+from .service import TrackingService
 
 
 def create_tracker(
@@ -74,11 +78,21 @@ def create_tracker(
 
 __all__ = [
     "ExperimentTracker",
+    "ExperimentOrchestrator",
+    "ExperimentSpec",
+    "Experiment",
     "LossResult",
     "LocalTracker",
     "RunFilter",
     "RunRecord",
     "RunRegistry",
+    "StageResult",
+    "TrackingService",
     "compute_per_example_losses",
     "create_tracker",
+    "create_experiment",
+    "load_experiment",
+    "load_experiment_spec",
+    "save_experiment",
+    "write_analysis_bundle",
 ]

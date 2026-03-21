@@ -104,6 +104,13 @@ class CloudEvalHandler(BaseHandler):
 
     def __init__(self, args: Optional[Namespace] = None):
         super().__init__(args=args)
+        self.last_job_id: Optional[str] = None
+        self.last_eval_prefix: Optional[str] = None
+        self.last_bucket_id: Optional[str] = None
+        self.last_results_uri: Optional[str] = None
+        self.last_eval_payload: Optional[Dict] = None
+        self.last_eval_summary: Optional[Dict[str, int]] = None
+        self.last_eval_lineage: Optional[Dict] = None
 
     @property
     def name(self) -> str:
@@ -393,6 +400,15 @@ class CloudEvalHandler(BaseHandler):
         payload = json.loads(results_path.read_text(encoding="utf-8"))
         return payload if isinstance(payload, dict) else None
 
+    def _load_eval_lineage(self, results_dir: Optional[Path]) -> Optional[Dict]:
+        if results_dir is None:
+            return None
+        lineage_path = Path(results_dir) / "evaluation_lineage.json"
+        if not lineage_path.exists():
+            return None
+        payload = json.loads(lineage_path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+
     def _print_eval_summary(self, summary: Optional[Dict[str, int]]) -> None:
         if not summary:
             return
@@ -520,6 +536,14 @@ class CloudEvalHandler(BaseHandler):
                 return
 
     def handle(self) -> int:
+        self.last_job_id = None
+        self.last_eval_prefix = None
+        self.last_bucket_id = None
+        self.last_results_uri = None
+        self.last_eval_payload = None
+        self.last_eval_summary = None
+        self.last_eval_lineage = None
+
         if self.json_mode:
             try:
                 huggingface_hub = self._validate_environment()
@@ -579,6 +603,9 @@ class CloudEvalHandler(BaseHandler):
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         eval_prefix = self._build_eval_prefix(selected_run["prefix"], timestamp)
+        self.last_eval_prefix = eval_prefix
+        self.last_bucket_id = bucket_id
+        self.last_results_uri = f"hf://buckets/{bucket_id}/{eval_prefix}"
         command = self._build_eval_command(
             bucket_id=bucket_id,
             run_prefix=selected_run["prefix"],
@@ -641,6 +668,7 @@ class CloudEvalHandler(BaseHandler):
             return 1
 
         job_id = submission.job_id
+        self.last_job_id = job_id
         job_url = submission.job_url
         print_info(f"Evaluation job submitted: {job_id}")
         if job_url:
@@ -680,6 +708,9 @@ class CloudEvalHandler(BaseHandler):
             print_info("Cloud evaluation completed successfully.")
             print_info(f"Results: hf://buckets/{bucket_id}/{eval_prefix}")
             payload = self._load_eval_payload(results_dir)
+            self.last_eval_payload = payload
+            self.last_eval_summary = self._load_eval_summary(results_dir)
+            self.last_eval_lineage = self._load_eval_lineage(results_dir)
             self._print_eval_summary(self._load_eval_summary(results_dir))
             self._print_eval_failure_preview(payload)
             self._handle_post_eval_actions(

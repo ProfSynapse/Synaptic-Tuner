@@ -50,6 +50,12 @@ class TestRunRecord:
         assert record.primary_metric is None
         assert record.primary_metric_name is None
         assert record.hardware is None
+        assert record.provider is None
+        assert record.artifact_backend is None
+        assert record.artifact_root is None
+        assert record.job_ref is None
+        assert record.source_commit is None
+        assert record.stage is None
 
     def test_tags_default_to_empty_dict(self):
         record = _make_record()
@@ -153,16 +159,28 @@ class TestRunRecord:
         """RunRecord with per_example_losses_path round-trips correctly."""
         record = _make_record(
             experiment_id="exp_123",
-            per_example_losses_path=".tracking/run-001/losses.jsonl"
+            per_example_losses_path=".tracking/run-001/losses.jsonl",
+            provider="hf_jobs",
+            artifact_backend="hf_bucket",
+            artifact_root="hf://buckets/test/runs/hf_jobs/sft/123",
+            job_ref="69bedcc825abd6f920b4db0c",
+            source_commit="81e6e14f",
+            stage="training",
         )
         import json
         data = json.loads(record.to_json_line())
         assert data["experiment_id"] == "exp_123"
         assert data["per_example_losses_path"] == ".tracking/run-001/losses.jsonl"
+        assert data["provider"] == "hf_jobs"
+        assert data["artifact_root"] == "hf://buckets/test/runs/hf_jobs/sft/123"
         
         loaded = RunRecord.from_dict(data)
         assert loaded.experiment_id == "exp_123"
         assert loaded.per_example_losses_path == ".tracking/run-001/losses.jsonl"
+        assert loaded.provider == "hf_jobs"
+        assert loaded.job_ref == "69bedcc825abd6f920b4db0c"
+        assert loaded.source_commit == "81e6e14f"
+        assert loaded.stage == "training"
 
     def test_v1_record_loads_without_error(self):
         """Old RunRecord (no per_example_losses_path/experiment_id) loads without error."""

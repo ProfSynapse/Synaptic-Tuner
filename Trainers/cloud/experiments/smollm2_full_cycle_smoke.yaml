@@ -1,0 +1,36 @@
+experiment:
+  name: smollm2-full-cycle-smoke
+  provider: hf_jobs
+  method: sft
+  objective: train_eval_loss_smoke
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
+  training:
+    model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+    gpu: a10g-small
+    cloud_image: unsloth/unsloth:latest
+    batch_size: 10
+    gradient_accumulation: 4
+    max_steps: 20
+    load_in_4bit: false
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: true
+    preset: quick
+  loss:
+    enabled: true
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv

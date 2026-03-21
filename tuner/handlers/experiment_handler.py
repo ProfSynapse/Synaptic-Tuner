@@ -1,0 +1,471 @@
+"""Run a provider-agnostic experiment lifecycle from a single config."""
+
+from __future__ import annotations
+
+import shlex
+import shutil
+import tempfile
+from argparse import Namespace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from shared.experiment_tracking import (
+    Experiment,
+    ExperimentOrchestrator,
+    ExperimentSpec,
+    StageResult,
+    TrackingService,
+    load_experiment_spec,
+    load_losses,
+)
+from shared.experiment_tracking.schema import RunRecord
+from shared.utilities.env import get_hf_token, load_env_file
+from tuner.backends.registry import TrainingBackendRegistry
+from tuner.cloud import (
+    CloudJobSpec,
+    HFJobExecutor,
+    RepoCheckoutSpec,
+    build_bash_command,
+    build_hf_job_secrets,
+    build_repo_checkout_steps,
+    load_huggingface_hub,
+)
+from tuner.core.exceptions import CloudProviderError
+from tuner.handlers.base import BaseHandler
+from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success
+
+
+class HFTrainingStageRunner:
+    """Run the training stage on HF Jobs and register its remote artifacts."""
+
+    def __init__(self, *, repo_root: Path):
+        self.repo_root = repo_root
+
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+        backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
+        is_valid, error = backend.validate_environment()
+        if not is_valid:
+            raise CloudProviderError(error or "HF Jobs environment validation failed.")
+
+        config = backend.load_config(spec.method)
+        config.model_name = spec.training.model_name
+        config.dataset_name = spec.dataset.source
+        config.dataset_file = spec.dataset.file
+        if spec.training.batch_size is not None:
+            config.batch_size = spec.training.batch_size
+        if spec.training.gradient_accumulation is not None:
+            config.gradient_accumulation_steps = spec.training.gradient_accumulation
+        if spec.training.learning_rate is not None:
+            config.learning_rate = spec.training.learning_rate
+        if spec.training.num_epochs is not None:
+            config.epochs = spec.training.num_epochs
+        if spec.training.max_steps is not None:
+            config.max_steps = spec.training.max_steps
+        if spec.training.max_seq_length is not None:
+            config.max_seq_length = spec.training.max_seq_length
+        if spec.training.load_in_4bit is not None:
+            config.load_in_4bit = spec.training.load_in_4bit
+        if spec.training.lora_target_modules:
+            config.lora_target_modules = list(spec.training.lora_target_modules)
+        if spec.training.gpu:
+            config.gpu_type = spec.training.gpu
+            config.hf_flavor = spec.training.gpu
+        if spec.training.timeout_hours is not None:
+            config.timeout_hours = spec.training.timeout_hours
+        if spec.training.cloud_image:
+            config.cloud_image = spec.training.cloud_image
+            config.cloud_image_profile = None
+        elif spec.training.image_profile:
+            from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
+
+            cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+            config.cloud_image, config.cloud_image_profile = resolve_cloud_image(
+                cloud_config_path,
+                requested_profile=spec.training.image_profile,
+                fallback_image=config.cloud_image,
+            )
+
+        backend.show_post_training_actions = False
+        exit_code = backend.execute(config, python_path="")
+
+        artifact_prefix = getattr(backend, "last_artifact_prefix", None)
+        bucket_id = getattr(backend, "last_bucket_id", None)
+        job_id = getattr(backend, "last_job_id", None)
+        artifact_root = (
+            f"hf://buckets/{bucket_id}/{artifact_prefix.strip('/')}"
+            if artifact_prefix and bucket_id
+            else None
+        )
+        status = "completed" if exit_code == 0 else "failed"
+        record = RunRecord(
+            run_id=f"{experiment.experiment_id}-training",
+            run_type=spec.method,
+            name=f"{spec.name} training",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=status,
+            output_dir=artifact_root or "",
+            model_name=spec.training.model_name,
+            dataset_source=spec.dataset.identifier,
+            provider=spec.provider,
+            artifact_backend="hf_bucket",
+            artifact_root=artifact_root,
+            job_ref=job_id,
+            source_commit=config.repo_commit,
+            stage="training",
+            hardware=config.hf_flavor or config.gpu_type,
+            tags={
+                "provider": spec.provider,
+                "artifact_prefix": artifact_prefix or "",
+                "bucket_id": bucket_id or "",
+                "image": config.cloud_image or "",
+            },
+        )
+        return StageResult(status=status, run_record=record, artifact_root=artifact_root)
+
+
+class HFEvalStageRunner:
+    """Run cloud evaluation against the freshly trained HF bucketed run."""
+
+    def __init__(self, *, repo_root: Path):
+        self.repo_root = repo_root
+
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+        if previous is None or previous.run_record is None:
+            raise CloudProviderError("Evaluation stage requires a completed training run.")
+        artifact_prefix = previous.run_record.tags.get("artifact_prefix", "")
+        bucket_id = previous.run_record.tags.get("bucket_id", "")
+        if not artifact_prefix or not bucket_id:
+            raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
+
+        args = Namespace(
+            json=False,
+            run=artifact_prefix,
+            method=spec.method,
+            bucket=bucket_id,
+            preset=spec.evaluation.preset,
+            scenario=list(spec.evaluation.scenarios),
+            tags=spec.evaluation.tags,
+            env_backend="none",
+            env_template=None,
+            env_tool_schema=None,
+            env_exec_config=None,
+            upload_to_hf=None,
+            update_model_card=False,
+            gpu=spec.evaluation.gpu,
+            timeout_hours=spec.evaluation.timeout_hours,
+            auto_confirm=True,
+        )
+        handler = CloudEvalHandler(args=args)
+        handler._repo_root = self.repo_root
+        exit_code = handler.handle()
+        status = "completed" if exit_code == 0 else "failed"
+        record = RunRecord(
+            run_id=f"{experiment.experiment_id}-evaluation",
+            run_type="evaluation",
+            name=f"{spec.name} evaluation",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=status,
+            output_dir=handler.last_results_uri or "",
+            model_name=spec.training.model_name,
+            dataset_source=spec.dataset.identifier,
+            provider=spec.provider,
+            artifact_backend="hf_bucket",
+            artifact_root=handler.last_results_uri,
+            job_ref=handler.last_job_id,
+            source_commit=previous.run_record.source_commit,
+            stage="evaluation",
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
+        return StageResult(
+            status=status,
+            run_record=record,
+            eval_payload=handler.last_eval_payload,
+            artifact_root=handler.last_results_uri,
+        )
+
+
+class HFLossStageRunner:
+    """Run remote per-example loss computation for a bucketed training run."""
+
+    def __init__(self, *, repo_root: Path):
+        self.repo_root = repo_root
+
+    def _build_command(
+        self,
+        *,
+        spec: ExperimentSpec,
+        training_run: RunRecord,
+        results_prefix: str,
+    ) -> str:
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        from tuner.backends.training.cloud.base_cloud import load_project_deps, resolve_repo_source
+
+        project_deps = load_project_deps(cloud_config_path)
+        repo_source = resolve_repo_source(self.repo_root)
+        checkout_steps = build_repo_checkout_steps(
+            RepoCheckoutSpec(
+                url=repo_source.url,
+                branch=repo_source.branch,
+                commit=repo_source.commit,
+            )
+        )
+
+        parts = [
+            f"python -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
+            "mkdir -p /tmp/hf-bucket-sync-site",
+            "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
+            "export HF_HUB_ENABLE_HF_TRANSFER=1",
+            *checkout_steps,
+        ]
+        loss_cmd = [
+            "python",
+            "-m",
+            "shared.experiment_tracking.cloud_loss_job",
+            "--bucket-id",
+            training_run.tags["bucket_id"],
+            "--run-prefix",
+            training_run.tags["artifact_prefix"],
+            "--dataset-name",
+            spec.dataset.source,
+            "--dataset-file",
+            spec.dataset.file,
+            "--results-prefix",
+            results_prefix,
+        ]
+        max_seq_length = spec.loss.max_seq_length or spec.training.max_seq_length
+        if max_seq_length is not None:
+            loss_cmd.extend(["--max-seq-length", str(max_seq_length)])
+        if not spec.loss.completion_only:
+            loss_cmd.append("--no-completion-only")
+        parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in loss_cmd))
+        return " && ".join(parts)
+
+    def _poll_job(self, huggingface_hub, *, job_id: str, timeout_hours: float) -> int:
+        import time
+
+        timeout_seconds = int(timeout_hours * 3600)
+        elapsed = 0
+        last_log_offset = 0
+        while elapsed < timeout_seconds:
+            job_info = huggingface_hub.inspect_job(job_id=job_id)
+            status_obj = getattr(job_info, "status", None)
+            status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
+            try:
+                logs = huggingface_hub.fetch_job_logs(job_id=job_id) or ""
+                if len(logs) > last_log_offset:
+                    print(logs[last_log_offset:], end="", flush=True)
+                    last_log_offset = len(logs)
+            except Exception:
+                pass
+            if status in ("completed", "COMPLETED"):
+                return 0
+            if status in ("error", "ERROR", "failed", "FAILED", "cancelled", "CANCELLED"):
+                return 1
+            time.sleep(30)
+            elapsed += 30
+        return 1
+
+    def _download_results(self, *, bucket_id: str, results_prefix: str) -> Optional[Path]:
+        try:
+            from huggingface_hub import sync_bucket
+        except ImportError:
+            return None
+
+        local_root = Path(tempfile.mkdtemp(prefix="experiment-loss-results-"))
+        try:
+            sync_bucket(
+                f"hf://buckets/{bucket_id}/{results_prefix.strip('/')}",
+                str(local_root),
+                token=get_hf_token(),
+            )
+        except Exception:
+            for child in local_root.iterdir():
+                if child.is_dir():
+                    import shutil
+
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+            local_root.rmdir()
+            return None
+        return local_root
+
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+        if previous is None or previous.run_record is None:
+            raise CloudProviderError("Loss stage requires a completed training run.")
+        training_run = previous.run_record
+        bucket_id = training_run.tags.get("bucket_id", "")
+        artifact_prefix = training_run.tags.get("artifact_prefix", "")
+        if not bucket_id or not artifact_prefix:
+            raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
+
+        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "inspect_job", "fetch_job_logs"))
+        results_prefix = f"{artifact_prefix.strip('/')}/analysis/loss"
+        command = self._build_command(spec=spec, training_run=training_run, results_prefix=results_prefix)
+        timeout_hours = spec.loss.timeout_hours or spec.training.timeout_hours or 4.0
+        flavor = spec.loss.gpu or spec.training.gpu or "a10g-small"
+        image = spec.training.cloud_image or training_run.tags.get("image") or ""
+        if not image:
+            backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
+            image = backend.load_config(spec.method).cloud_image
+
+        submission = HFJobExecutor(huggingface_hub).submit(
+            CloudJobSpec(
+                provider="hf_jobs",
+                image=image,
+                command=build_bash_command([command]),
+                flavor=flavor,
+                timeout_hours=timeout_hours,
+                secrets=build_hf_job_secrets(),
+                labels={
+                    "task": "per_example_loss",
+                    "provider": "hf_jobs",
+                    "experiment_id": experiment.experiment_id,
+                },
+            )
+        )
+
+        exit_code = self._poll_job(huggingface_hub, job_id=submission.job_id, timeout_hours=timeout_hours)
+        results_dir = self._download_results(bucket_id=bucket_id, results_prefix=results_prefix) if exit_code == 0 else None
+        losses_path = results_dir / "per_example_losses.jsonl" if results_dir else None
+        loss_results = load_losses(losses_path) if losses_path and losses_path.exists() else []
+        if results_dir is not None:
+            shutil.rmtree(results_dir, ignore_errors=True)
+        artifact_root = f"hf://buckets/{bucket_id}/{results_prefix}"
+        record = RunRecord(
+            run_id=f"{experiment.experiment_id}-loss",
+            run_type="loss",
+            name=f"{spec.name} per-example loss",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status="completed" if exit_code == 0 else "failed",
+            output_dir=artifact_root,
+            model_name=spec.training.model_name,
+            dataset_source=spec.dataset.identifier,
+            provider=spec.provider,
+            artifact_backend="hf_bucket",
+            artifact_root=artifact_root,
+            job_ref=submission.job_id,
+            source_commit=training_run.source_commit,
+            stage="loss",
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
+        return StageResult(
+            status="completed" if exit_code == 0 else "failed",
+            run_record=record,
+            loss_results=loss_results,
+            artifact_root=artifact_root,
+        )
+
+
+class ExperimentHandler(BaseHandler):
+    """Run train -> eval -> loss under one experiment config."""
+
+    @property
+    def name(self) -> str:
+        return "run-experiment"
+
+    def can_handle_direct_mode(self) -> bool:
+        return True
+
+    def _load_spec(self) -> tuple[ExperimentSpec, Path]:
+        spec_path = getattr(self.args, "experiment_spec", None) or getattr(self.args, "experiment_config", None)
+        if not spec_path:
+            raise CloudProviderError("run-experiment requires --experiment-spec <path>.")
+        path = Path(spec_path).expanduser().resolve()
+        if not path.exists():
+            raise CloudProviderError(f"Experiment spec not found: {path}")
+        return load_experiment_spec(path), path
+
+    def _print_plan(self, spec: ExperimentSpec) -> None:
+        print_config(
+            {
+                "Name": spec.name,
+                "Provider": spec.provider,
+                "Method": spec.method,
+                "Model": spec.training.model_name,
+                "Dataset": spec.dataset.identifier,
+                "Eval": "enabled" if spec.evaluation.enabled else "disabled",
+                "Loss": "enabled" if spec.loss.enabled else "disabled",
+                "Objective": spec.objective or "-",
+            },
+            "Experiment Plan",
+        )
+
+    def handle(self) -> int:
+        load_env_file()
+        try:
+            spec, spec_path = self._load_spec()
+            if spec.provider != "hf_jobs":
+                raise CloudProviderError(
+                    f"Provider '{spec.provider}' is not wired yet. Current implementation supports hf_jobs."
+                )
+        except Exception as exc:
+            if self.json_mode:
+                self.output_error(str(exc), code="EXPERIMENT_CONFIG_ERROR")
+                return 1
+            print_error(str(exc))
+            return 1
+
+        if not self.json_mode:
+            print_header("RUN EXPERIMENT", "Train, evaluate, score losses, and register one experiment")
+            self._print_plan(spec)
+            if not getattr(self.args, "auto_confirm", False) and not confirm("Start experiment with this configuration?"):
+                print_info("Experiment cancelled.")
+                return 0
+
+        orchestrator = ExperimentOrchestrator(
+            tracking_service=TrackingService(getattr(self.args, "base_dir", ".tracking")),
+            training_runner=HFTrainingStageRunner(repo_root=self.repo_root),
+            eval_runner=HFEvalStageRunner(repo_root=self.repo_root),
+            loss_runner=HFLossStageRunner(repo_root=self.repo_root),
+            base_dir=getattr(self.args, "base_dir", ".tracking"),
+        )
+
+        try:
+            experiment = orchestrator.run(spec, spec_path=str(spec_path))
+        except Exception as exc:
+            if self.json_mode:
+                self.output_error(str(exc), code="EXPERIMENT_RUN_ERROR")
+                return 1
+            print_error(f"Experiment failed: {exc}")
+            return 1
+
+        payload = {
+            "experiment_id": experiment.experiment_id,
+            "name": experiment.name,
+            "status": experiment.status,
+            "run_ids": experiment.run_ids,
+            "artifact_roots": experiment.artifact_roots,
+            "derived_outputs": experiment.derived_outputs,
+            "stage_statuses": experiment.stage_statuses,
+        }
+        if self.json_mode:
+            self.output(payload)
+            return 0
+
+        print_success(f"Experiment registered: {experiment.experiment_id}")
+        print_config(
+            {
+                "Status": experiment.status,
+                "Training Run": experiment.training_run_id or "-",
+                "Eval Run": experiment.evaluation_run_id or "-",
+                "Loss Run": experiment.loss_run_id or "-",
+                "Summary": experiment.derived_outputs.get("experiment_summary_json", "-"),
+                "Features CSV": experiment.derived_outputs.get("feature_dataset_csv", "-"),
+                "Hypothesis Context": experiment.derived_outputs.get("hypothesis_context_json", "-"),
+            },
+            "Experiment Outputs",
+        )
+        return 0

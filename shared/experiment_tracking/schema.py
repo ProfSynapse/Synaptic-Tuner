@@ -63,6 +63,12 @@ class RunRecord:
     hardware: str | None = None
     per_example_losses_path: str | None = None
     experiment_id: str | None = None
+    provider: str | None = None
+    artifact_backend: str | None = None
+    artifact_root: str | None = None
+    job_ref: str | None = None
+    source_commit: str | None = None
+    stage: str | None = None
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""

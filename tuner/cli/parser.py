@@ -74,6 +74,7 @@ Commands:
   cloud-eval  Cloud evaluation on HF Jobs using vLLM
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
+  run-experiment  Run train -> eval -> loss from one experiment config
   eval        Evaluate a model
   synthchat   Synthetic data generation and improvement
   modelops    Model operations (run, merge, convert, upload)
@@ -114,6 +115,7 @@ Examples:
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py cloud-jobs list
   python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
+  python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml --yes
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -127,7 +129,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-jobs", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-jobs", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "run-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -271,6 +273,7 @@ Examples:
 
     # Experiment pipeline flags
     parser.add_argument("--experiment-id", help="Experiment ID for tracking")
+    parser.add_argument("--experiment-spec", help="Path to experiment orchestration YAML (run-experiment only)")
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
     parser.add_argument("--model", help="Model path for inference")
     parser.add_argument("--dataset-path", help="Path to jsonl dataset")
