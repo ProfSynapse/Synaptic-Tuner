@@ -39,8 +39,52 @@ class ExperimentOrchestrator:
         self.loss_runner = loss_runner
         self.base_dir = base_dir
 
-    def run(self, spec: ExperimentSpec, *, spec_path: str | None = None) -> Experiment:
-        experiment = self.tracking_service.create_experiment(
+    def _restore_stage_result(self, experiment: Experiment, stage: str) -> Optional[StageResult]:
+        run_id = getattr(experiment, f"{stage}_run_id", None)
+        if run_id:
+            record = self.tracking_service.registry.get_run(run_id)
+            if record is not None:
+                return StageResult(
+                    status=record.status,
+                    run_record=record,
+                    artifact_root=record.artifact_root or record.output_dir,
+                )
+
+        details = experiment.stage_details.get(stage, {})
+        status = details.get("status")
+        if status not in {"completed", "failed"}:
+            return None
+
+        artifact_root = details.get("artifact_root", "")
+        record = RunRecord(
+            run_id=details.get("run_id") or f"{experiment.experiment_id}-{stage}",
+            run_type=details.get("run_type") or ("evaluation" if stage == "evaluation" else stage if stage != "training" else experiment.method),
+            name=f"{experiment.name} {stage}",
+            timestamp=details.get("updated_at") or experiment.created_at,
+            status=status,
+            output_dir=artifact_root,
+            model_name=experiment.base_model_name,
+            dataset_source=experiment.dataset_path,
+            provider=experiment.provider,
+            artifact_backend="hf_bucket" if artifact_root.startswith("hf://") else None,
+            artifact_root=artifact_root or None,
+            job_ref=details.get("job_ref"),
+            source_commit=details.get("source_commit"),
+            stage=stage,
+            tags=dict(details.get("tags", {})),
+        )
+        return StageResult(status=status, run_record=record, artifact_root=artifact_root or None)
+
+    def _resolve_or_create_experiment(
+        self,
+        spec: ExperimentSpec,
+        *,
+        spec_path: str | None = None,
+        experiment: Optional[Experiment] = None,
+    ) -> Experiment:
+        if experiment is not None:
+            return experiment
+        return self.tracking_service.create_experiment(
             name=spec.name,
             dataset_path=spec.dataset.identifier,
             dataset_hash=spec.dataset.hash,
@@ -50,8 +94,19 @@ class ExperimentOrchestrator:
             objective=spec.objective,
             spec_path=spec_path,
         )
-        self.tracking_service.mark_stage(experiment, "training", "running")
-        training = self.training_runner.run(spec, experiment)
+
+    def run(
+        self,
+        spec: ExperimentSpec,
+        *,
+        spec_path: str | None = None,
+        experiment: Optional[Experiment] = None,
+    ) -> Experiment:
+        experiment = self._resolve_or_create_experiment(spec, spec_path=spec_path, experiment=experiment)
+        training = self._restore_stage_result(experiment, "training")
+        if training is None:
+            self.tracking_service.mark_stage(experiment, "training", "running")
+            training = self.training_runner.run(spec, experiment)
         if training.run_record:
             self.tracking_service.attach_run(experiment, training.run_record, role="training")
         if training.artifact_root:
@@ -64,8 +119,10 @@ class ExperimentOrchestrator:
 
         eval_result: Optional[StageResult] = None
         if spec.evaluation.enabled and self.eval_runner is not None:
-            self.tracking_service.mark_stage(experiment, "evaluation", "running")
-            eval_result = self.eval_runner.run(spec, experiment, previous=training)
+            eval_result = self._restore_stage_result(experiment, "evaluation")
+            if eval_result is None:
+                self.tracking_service.mark_stage(experiment, "evaluation", "running")
+                eval_result = self.eval_runner.run(spec, experiment, previous=training)
             if eval_result.run_record:
                 self.tracking_service.attach_run(
                     experiment,
@@ -80,8 +137,10 @@ class ExperimentOrchestrator:
 
         loss_result: Optional[StageResult] = None
         if spec.loss.enabled and self.loss_runner is not None:
-            self.tracking_service.mark_stage(experiment, "loss", "running")
-            loss_result = self.loss_runner.run(spec, experiment, previous=training)
+            loss_result = self._restore_stage_result(experiment, "loss")
+            if loss_result is None:
+                self.tracking_service.mark_stage(experiment, "loss", "running")
+                loss_result = self.loss_runner.run(spec, experiment, previous=training)
             if loss_result.run_record:
                 self.tracking_service.attach_run(
                     experiment,

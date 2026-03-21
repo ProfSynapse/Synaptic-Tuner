@@ -40,10 +40,67 @@ from tuner.ui import confirm, print_config, print_error, print_header, print_inf
 class HFTrainingStageRunner:
     """Run the training stage on HF Jobs and register its remote artifacts."""
 
-    def __init__(self, *, repo_root: Path):
+    def __init__(self, *, repo_root: Path, tracking_service: TrackingService):
         self.repo_root = repo_root
+        self.tracking_service = tracking_service
+
+    def _planned_training_state(self, *, experiment: Experiment, config) -> tuple[str, str]:
+        timestamp = datetime.fromisoformat(experiment.created_at).astimezone(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        artifact_prefix = f"runs/{config.provider}/{config.method}/{timestamp}-{config.repo_commit[:8]}"
+        artifact_root = f"hf://buckets/{config.artifact_identifier}/{artifact_prefix}"
+        return artifact_prefix, artifact_root
+
+    def _bucket_has_path(self, *, bucket_id: str, prefix: str, suffix: str) -> bool:
+        huggingface_hub = load_huggingface_hub(require_apis=("HfApi",))
+        api = huggingface_hub.HfApi(token=get_hf_token())
+        target = f"{prefix.strip('/')}/{suffix}"
+        for item in api.list_bucket_tree(bucket_id, prefix=prefix.strip("/"), recursive=True, token=get_hf_token()):
+            if getattr(item, "path", "") == target:
+                return True
+        return False
+
+    def _recover_existing_training(self, *, experiment: Experiment) -> Optional[StageResult]:
+        details = experiment.stage_details.get("training", {})
+        status = details.get("status")
+        bucket_id = details.get("bucket_id") or details.get("tags", {}).get("bucket_id")
+        artifact_prefix = details.get("artifact_prefix") or details.get("tags", {}).get("artifact_prefix")
+        artifact_root = details.get("artifact_root")
+        if status not in {"running", "completed"} or not bucket_id or not artifact_prefix or not artifact_root:
+            return None
+        if self._bucket_has_path(bucket_id=bucket_id, prefix=artifact_prefix, suffix="training_lineage.json"):
+            self.tracking_service.update_stage_details(experiment, "training", status="completed")
+            return StageResult(
+                status="completed",
+                run_record=RunRecord(
+                    run_id=details.get("run_id") or f"{experiment.experiment_id}-training",
+                    run_type=experiment.method,
+                    name=f"{experiment.name} training",
+                    timestamp=details.get("updated_at") or experiment.created_at,
+                    status="completed",
+                    output_dir=artifact_root,
+                    model_name=experiment.base_model_name,
+                    dataset_source=experiment.dataset_path,
+                    provider=experiment.provider,
+                    artifact_backend="hf_bucket",
+                    artifact_root=artifact_root,
+                    job_ref=details.get("job_ref"),
+                    source_commit=details.get("source_commit"),
+                    stage="training",
+                    tags=dict(details.get("tags", {})),
+                ),
+                artifact_root=artifact_root,
+            )
+        if status == "running":
+            raise CloudProviderError(
+                f"Experiment {experiment.experiment_id} already has a running training stage at {artifact_root}. "
+                "Artifacts are not complete yet, so refusing to submit a duplicate training job."
+            )
+        return None
 
     def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+        recovered = self._recover_existing_training(experiment=experiment)
+        if recovered is not None:
+            return recovered
         backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
         is_valid, error = backend.validate_environment()
         if not is_valid:
@@ -87,18 +144,49 @@ class HFTrainingStageRunner:
                 fallback_image=config.cloud_image,
             )
 
+        artifact_prefix, artifact_root = self._planned_training_state(experiment=experiment, config=config)
+        self.tracking_service.update_stage_details(
+            experiment,
+            "training",
+            status="running",
+            artifact_root=artifact_root,
+            artifact_prefix=artifact_prefix,
+            bucket_id=config.artifact_identifier,
+            source_commit=config.repo_commit,
+            tags={
+                "provider": spec.provider,
+                "artifact_prefix": artifact_prefix,
+                "bucket_id": config.artifact_identifier or "",
+                "image": config.cloud_image or "",
+            },
+        )
+
         backend.show_post_training_actions = False
         exit_code = backend.execute(config, python_path="")
 
-        artifact_prefix = getattr(backend, "last_artifact_prefix", None)
+        artifact_prefix = getattr(backend, "last_artifact_prefix", None) or artifact_prefix
         bucket_id = getattr(backend, "last_bucket_id", None)
         job_id = getattr(backend, "last_job_id", None)
         artifact_root = (
             f"hf://buckets/{bucket_id}/{artifact_prefix.strip('/')}"
             if artifact_prefix and bucket_id
-            else None
+            else artifact_root
         )
         status = "completed" if exit_code == 0 else "failed"
+        self.tracking_service.update_stage_details(
+            experiment,
+            "training",
+            status=status,
+            artifact_root=artifact_root,
+            job_ref=job_id,
+            source_commit=config.repo_commit,
+            tags={
+                "provider": spec.provider,
+                "artifact_prefix": artifact_prefix or "",
+                "bucket_id": bucket_id or config.artifact_identifier or "",
+                "image": config.cloud_image or "",
+            },
+        )
         record = RunRecord(
             run_id=f"{experiment.experiment_id}-training",
             run_type=spec.method,
@@ -128,8 +216,9 @@ class HFTrainingStageRunner:
 class HFEvalStageRunner:
     """Run cloud evaluation against the freshly trained HF bucketed run."""
 
-    def __init__(self, *, repo_root: Path):
+    def __init__(self, *, repo_root: Path, tracking_service: TrackingService):
         self.repo_root = repo_root
+        self.tracking_service = tracking_service
 
     def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
         if previous is None or previous.run_record is None:
@@ -138,6 +227,17 @@ class HFEvalStageRunner:
         bucket_id = previous.run_record.tags.get("bucket_id", "")
         if not artifact_prefix or not bucket_id:
             raise CloudProviderError("Training stage did not capture the HF artifact prefix and bucket.")
+        self.tracking_service.update_stage_details(
+            experiment,
+            "evaluation",
+            status="running",
+            source_commit=previous.run_record.source_commit,
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
 
         args = Namespace(
             json=False,
@@ -161,6 +261,19 @@ class HFEvalStageRunner:
         handler._repo_root = self.repo_root
         exit_code = handler.handle()
         status = "completed" if exit_code == 0 else "failed"
+        self.tracking_service.update_stage_details(
+            experiment,
+            "evaluation",
+            status=status,
+            artifact_root=handler.last_results_uri,
+            job_ref=handler.last_job_id,
+            source_commit=previous.run_record.source_commit,
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
         record = RunRecord(
             run_id=f"{experiment.experiment_id}-evaluation",
             run_type="evaluation",
@@ -193,8 +306,9 @@ class HFEvalStageRunner:
 class HFLossStageRunner:
     """Run remote per-example loss computation for a bucketed training run."""
 
-    def __init__(self, *, repo_root: Path):
+    def __init__(self, *, repo_root: Path, tracking_service: TrackingService):
         self.repo_root = repo_root
+        self.tracking_service = tracking_service
 
     def _build_command(
         self,
@@ -298,7 +412,58 @@ class HFLossStageRunner:
             return None
         return local_root
 
+    def _recover_existing_loss(self, *, experiment: Experiment) -> Optional[StageResult]:
+        details = experiment.stage_details.get("loss", {})
+        status = details.get("status")
+        artifact_root = details.get("artifact_root")
+        bucket_id = details.get("bucket_id") or details.get("tags", {}).get("bucket_id")
+        artifact_prefix = details.get("artifact_prefix") or details.get("tags", {}).get("artifact_prefix")
+        if not artifact_root or not bucket_id or not artifact_prefix or status not in {"running", "completed"}:
+            return None
+
+        results_prefix = artifact_root.replace(f"hf://buckets/{bucket_id}/", "", 1)
+        results_dir = self._download_results(bucket_id=bucket_id, results_prefix=results_prefix)
+        losses_path = results_dir / "per_example_losses.jsonl" if results_dir else None
+        if losses_path and losses_path.exists():
+            loss_results = load_losses(losses_path)
+            if results_dir is not None:
+                shutil.rmtree(results_dir, ignore_errors=True)
+            self.tracking_service.update_stage_details(experiment, "loss", status="completed")
+            return StageResult(
+                status="completed",
+                run_record=RunRecord(
+                    run_id=details.get("run_id") or f"{experiment.experiment_id}-loss",
+                    run_type="loss",
+                    name=f"{experiment.name} per-example loss",
+                    timestamp=details.get("updated_at") or experiment.created_at,
+                    status="completed",
+                    output_dir=artifact_root,
+                    model_name=experiment.base_model_name,
+                    dataset_source=experiment.dataset_path,
+                    provider=experiment.provider,
+                    artifact_backend="hf_bucket",
+                    artifact_root=artifact_root,
+                    job_ref=details.get("job_ref"),
+                    source_commit=details.get("source_commit"),
+                    stage="loss",
+                    tags=dict(details.get("tags", {})),
+                ),
+                loss_results=loss_results,
+                artifact_root=artifact_root,
+            )
+        if results_dir is not None:
+            shutil.rmtree(results_dir, ignore_errors=True)
+        if status == "running":
+            raise CloudProviderError(
+                f"Experiment {experiment.experiment_id} already has a running loss stage at {artifact_root}. "
+                "Loss artifacts are not complete yet, so refusing to submit a duplicate loss job."
+            )
+        return None
+
     def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+        recovered = self._recover_existing_loss(experiment=experiment)
+        if recovered is not None:
+            return recovered
         if previous is None or previous.run_record is None:
             raise CloudProviderError("Loss stage requires a completed training run.")
         training_run = previous.run_record
@@ -332,6 +497,20 @@ class HFLossStageRunner:
                 },
             )
         )
+        artifact_root = f"hf://buckets/{bucket_id}/{results_prefix}"
+        self.tracking_service.update_stage_details(
+            experiment,
+            "loss",
+            status="running",
+            artifact_root=artifact_root,
+            job_ref=submission.job_id,
+            source_commit=training_run.source_commit,
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
 
         exit_code = self._poll_job(huggingface_hub, job_id=submission.job_id, timeout_hours=timeout_hours)
         results_dir = self._download_results(bucket_id=bucket_id, results_prefix=results_prefix) if exit_code == 0 else None
@@ -339,7 +518,19 @@ class HFLossStageRunner:
         loss_results = load_losses(losses_path) if losses_path and losses_path.exists() else []
         if results_dir is not None:
             shutil.rmtree(results_dir, ignore_errors=True)
-        artifact_root = f"hf://buckets/{bucket_id}/{results_prefix}"
+        self.tracking_service.update_stage_details(
+            experiment,
+            "loss",
+            status="completed" if exit_code == 0 else "failed",
+            artifact_root=artifact_root,
+            job_ref=submission.job_id,
+            source_commit=training_run.source_commit,
+            tags={
+                "provider": spec.provider,
+                "bucket_id": bucket_id,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
         record = RunRecord(
             run_id=f"{experiment.experiment_id}-loss",
             run_type="loss",
@@ -418,23 +609,32 @@ class ExperimentHandler(BaseHandler):
             print_error(str(exc))
             return 1
 
+        tracking_service = TrackingService(getattr(self.args, "base_dir", ".tracking"))
+        experiment = tracking_service.find_recoverable_experiment(
+            spec_path=str(spec_path),
+            provider=spec.provider,
+            method=spec.method,
+        )
+
         if not self.json_mode:
             print_header("RUN EXPERIMENT", "Train, evaluate, score losses, and register one experiment")
             self._print_plan(spec)
+            if experiment is not None:
+                print_info(f"Resuming experiment: {experiment.experiment_id}")
             if not getattr(self.args, "auto_confirm", False) and not confirm("Start experiment with this configuration?"):
                 print_info("Experiment cancelled.")
                 return 0
 
         orchestrator = ExperimentOrchestrator(
-            tracking_service=TrackingService(getattr(self.args, "base_dir", ".tracking")),
-            training_runner=HFTrainingStageRunner(repo_root=self.repo_root),
-            eval_runner=HFEvalStageRunner(repo_root=self.repo_root),
-            loss_runner=HFLossStageRunner(repo_root=self.repo_root),
+            tracking_service=tracking_service,
+            training_runner=HFTrainingStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
+            eval_runner=HFEvalStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
+            loss_runner=HFLossStageRunner(repo_root=self.repo_root, tracking_service=tracking_service),
             base_dir=getattr(self.args, "base_dir", ".tracking"),
         )
 
         try:
-            experiment = orchestrator.run(spec, spec_path=str(spec_path))
+            experiment = orchestrator.run(spec, spec_path=str(spec_path), experiment=experiment)
         except Exception as exc:
             if self.json_mode:
                 self.output_error(str(exc), code="EXPERIMENT_RUN_ERROR")

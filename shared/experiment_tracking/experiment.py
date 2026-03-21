@@ -32,6 +32,7 @@ class Experiment:
     artifact_roots: dict[str, str] = field(default_factory=dict)
     derived_outputs: dict[str, str] = field(default_factory=dict)
     stage_statuses: dict[str, str] = field(default_factory=dict)
+    stage_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     hypothesis_context_path: str | None = None
     next_run_candidates_path: str | None = None
 
