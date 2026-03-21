@@ -41,7 +41,7 @@ training:
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 2    # Effective batch = 4
   learning_rate: 2e-4
-  max_grad_norm: 1.0                # Gradient clipping
+  max_grad_norm: 1.0                # Gradient clipping (see Gradient Clipping below)
   lr_scheduler_type: "cosine"
 
   # SFT-specific
@@ -179,6 +179,22 @@ dataset:
   local_file: "../../Datasets/grpo_data.jsonl"
   prompt_column: "prompt"
 ```
+
+---
+
+## Gradient Clipping
+
+`max_grad_norm` clips gradients to prevent training instability and NaN loss.
+
+| Value | Behavior | When to Use |
+|-------|----------|-------------|
+| `1.0` (default) | Standard clipping — prevents explosion | Most training runs |
+| `0.5` | Aggressive clipping — more stable, slower learning | High learning rates, unstable early training |
+| `2.0` | Relaxed clipping — allows larger updates | Very low learning rates, conservative training |
+
+**Diagnosis:** If training logs show large gradient norms (>10) or loss spikes, reduce `max_grad_norm`. If training is very slow with no instability, try increasing it.
+
+The evolutionary training system also uses `max_grad_norm` to cap noise magnitude in gradient noise strategies.
 
 ---
 

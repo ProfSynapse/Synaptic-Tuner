@@ -22,6 +22,21 @@ python train_kto.py [options]
 | `--gpt-20b`, `--mistral-24b` | 20-24B models |
 | `--model-name MODEL` | Manual model override |
 
+### Complexity Tiers
+| Flag | Description |
+|------|-------------|
+| `--tier {quick,standard,thorough}` | Use preset complexity tier (overrides individual training params) |
+
+| Tier | LoRA Rank | LR | Epochs | Steps | Time | Use Case |
+|------|-----------|------|--------|-------|------|----------|
+| `quick` | r=8, alpha=16 | 5e-4 | 1 | 200 max | ~5 min | Rapid prototyping |
+| `standard` | r=64, alpha=128 | 1e-6 | 1 | — | ~30-60 min | Production training |
+| `thorough` | r=128, alpha=256 | 1e-4 | 3 | — | ~2-4 hrs | Maximum quality |
+
+Tier configs: `Trainers/kto/configs/tiers/{quick,standard,thorough}.yaml`
+
+Explicit CLI flags override tier defaults.
+
 ### KTO-Specific
 | Flag | Description | Default |
 |------|-------------|---------|
