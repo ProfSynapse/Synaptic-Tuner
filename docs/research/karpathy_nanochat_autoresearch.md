@@ -397,6 +397,14 @@ for name, grad in base_gradients.items():
 
 Option B is simpler and more likely to work. Option A is more principled but requires more implementation.
 
+### Why Muon + LoRA Is Fundamentally Mismatched
+
+Beyond practical concerns, there's a theoretical issue. LoRA decomposes weight updates into `A @ B` (two low-rank factor matrices). Muon applied to A and B separately is **not reparametrization-invariant** — orthogonalizing each factor independently skews the weight-space step and lets one factor dominate. Keller Jordan himself noted it's an "open question."
+
+**Riemannion** ([arXiv:2507.12142](https://arxiv.org/abs/2507.12142)) solves this properly via Riemannian optimization on the fixed-rank manifold — but it's a research prototype, not production-ready for our pipeline.
+
+Also: virtually all public checkpoints (Qwen, Llama, Mistral) are pretrained with AdamW. Fine-tuning with a different optimizer class degrades quality. PyTorch's `torch.optim.Muon` has an `adjust_lr_fn="match_rms_adamw"` mode that partially addresses this, but only for full fine-tuning.
+
 ### Recommendation
 
 **Don't integrate Muon as the optimizer for LoRA fine-tuning.** Keep AdamW 8-bit.
@@ -843,3 +851,5 @@ Phase 1 items can be done in parallel with no dependencies. Phase 2 is independe
 - [Deriving Muon — Jeremy Bernstein](https://jeremybernste.in/writing/deriving-muon)
 - [HuggingFace Muon tutorial](https://discuss.huggingface.co/t/tutorial-understanding-and-implementing-the-muon-optimizer/167717)
 - [PredNext: Muon for LLM Training](https://prednext.com/en/blog/optimizer-muon-2025/)
+- [Riemannion: LoRA + Riemannian Muon (arXiv:2507.12142)](https://arxiv.org/abs/2507.12142)
+- [MuonAll: Muon for all params including 1D (arXiv:2511.06086)](https://arxiv.org/abs/2511.06086)
