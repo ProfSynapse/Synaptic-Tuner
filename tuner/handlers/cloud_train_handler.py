@@ -246,6 +246,7 @@ class CloudTrainHandler(BaseHandler):
         # Step 6: Load configuration
         try:
             config = backend.load_config(method)
+            config = self._apply_training_overrides(config)
         except Exception as e:
             print_error(f"Failed to load configuration: {e}")
             return 1
@@ -276,6 +277,74 @@ class CloudTrainHandler(BaseHandler):
             print_error(f"Cloud training failed with exit code: {exit_code}")
 
         return exit_code
+
+    def _apply_training_overrides(self, config):
+        """Apply direct CLI overrides to a loaded cloud training config."""
+        args = self.args
+        if not args:
+            return config
+
+        train_model_name = getattr(args, "train_model_name", None)
+        if train_model_name:
+            config.model_name = train_model_name
+
+        train_dataset_name = getattr(args, "train_dataset_name", None)
+        if train_dataset_name:
+            config.dataset_name = train_dataset_name
+
+        train_dataset_file = getattr(args, "train_dataset_file", None)
+        if train_dataset_file:
+            config.dataset_file = train_dataset_file
+
+        train_batch_size = getattr(args, "train_batch_size", None)
+        if train_batch_size is not None:
+            config.batch_size = train_batch_size
+
+        train_gradient_accumulation = getattr(args, "train_gradient_accumulation", None)
+        if train_gradient_accumulation is not None:
+            config.gradient_accumulation_steps = train_gradient_accumulation
+
+        train_learning_rate = getattr(args, "train_learning_rate", None)
+        if train_learning_rate is not None:
+            config.learning_rate = train_learning_rate
+
+        train_num_epochs = getattr(args, "train_num_epochs", None)
+        if train_num_epochs is not None:
+            config.epochs = train_num_epochs
+
+        train_max_steps = getattr(args, "train_max_steps", None)
+        if train_max_steps is not None:
+            config.max_steps = train_max_steps
+
+        train_max_seq_length = getattr(args, "train_max_seq_length", None)
+        if train_max_seq_length is not None:
+            config.max_seq_length = train_max_seq_length
+
+        if getattr(args, "train_load_in_4bit", None) is not None:
+            config.load_in_4bit = args.train_load_in_4bit
+
+        train_lora_target_modules = getattr(args, "train_lora_target_modules", None)
+        if train_lora_target_modules:
+            config.lora_target_modules = [
+                module.strip()
+                for module in train_lora_target_modules.split(",")
+                if module.strip()
+            ]
+
+        train_gpu = getattr(args, "train_gpu", None)
+        if train_gpu:
+            config.gpu_type = train_gpu
+            if hasattr(config, "hf_flavor"):
+                config.hf_flavor = train_gpu
+
+        train_timeout_hours = getattr(args, "train_timeout_hours", None)
+        if train_timeout_hours is not None:
+            config.timeout_hours = train_timeout_hours
+
+        if config.dataset_name and config.dataset_file and "/" not in config.dataset_file:
+            config.dataset_file = f"{config.dataset_name}/{config.dataset_file}"
+
+        return config
 
     def _load_method_labels(self) -> Dict[str, str]:
         """
@@ -358,6 +427,14 @@ class CloudTrainHandler(BaseHandler):
         # Training params
         display["Epochs"] = str(config.epochs)
         display["Batch Size"] = str(config.batch_size)
+        if getattr(config, "gradient_accumulation_steps", None) is not None:
+            display["Grad Accum"] = str(config.gradient_accumulation_steps)
         display["Learning Rate"] = str(config.learning_rate)
+        if getattr(config, "max_steps", None) is not None:
+            display["Max Steps"] = str(config.max_steps)
+        if getattr(config, "max_seq_length", None) is not None:
+            display["Max Seq Len"] = str(config.max_seq_length)
+        if getattr(config, "load_in_4bit", None) is not None:
+            display["4-bit Load"] = "yes" if config.load_in_4bit else "no"
 
         return display

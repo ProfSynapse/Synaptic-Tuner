@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -253,3 +253,9 @@ class CloudTrainingConfig(TrainingConfig):
     repo_url: Optional[str] = None
     repo_branch: Optional[str] = None
     repo_commit: Optional[str] = None
+    dataset_name: Optional[str] = None
+    gradient_accumulation_steps: Optional[int] = None
+    max_steps: Optional[int] = None
+    max_seq_length: Optional[int] = None
+    load_in_4bit: Optional[bool] = None
+    lora_target_modules: Optional[List[str]] = field(default=None)

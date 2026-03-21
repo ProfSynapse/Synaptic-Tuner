@@ -21,6 +21,7 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 | Monitor training | `tail -f logs/training_latest.jsonl` |
 | Environment setup | `cd Trainers/rtx3090_sft && bash setup.sh` |
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
+| Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
 | Battle-of-models catalog | `python3 Trainers/scripts/battle_of_models.py list` |
 | Battle-of-models commands | `python3 Trainers/scripts/battle_of_models.py commands` |
@@ -54,8 +55,10 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 - Prefer repo CLIs and checked-in scripts over ad hoc `python - <<'PY'` runs.
 - For SynthChat generation, use `python3 -m SynthChat.run ...`.
 - For training/eval workflows, use `python tuner.py ...`.
-- For repeatable sweeps, prefer checked-in helper scripts such as `python3 Trainers/scripts/battle_of_models.py ...` over manually retyping `cloud-run` commands.
-- When changing SFT base models, prefer direct trainer flags like `--model-name`, `--no-load-in-4bit`, and `--lora-target-modules` instead of editing `configs/config.yaml` for one-off experiments.
+- For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`. `cloud-pipeline` is what keeps training artifacts in the standard `runs/hf_jobs/{method}/...` layout so downstream evaluation discovery works automatically.
+- For repeatable sweeps, prefer checked-in helper scripts such as `python3 Trainers/scripts/battle_of_models.py ...` over manually retyping cloud commands.
+- When changing SFT base models for cloud experiments, prefer top-level overrides like `--train-model-name`, `--train-batch-size`, `--train-max-steps`, `--train-no-load-in-4bit`, and `--train-lora-target-modules` instead of editing `configs/config.yaml` for one-off experiments.
+- Treat `cloud-run` as the escape hatch for special jobs, env-GRPO launchers, or custom bootstraps, not the default way to start model-comparison experiments.
 - Only drop to direct Python snippets for tiny local inspection or one-off parsing when there is no existing CLI/script path; do not use bare Python as the default way to launch real jobs or smoke tests.
 
 ## Progressive Reference
@@ -71,6 +74,7 @@ Load the specific reference you need:
 | **Dataset Formats** | Preparing datasets, format requirements per method | `reference/dataset-formats.md` |
 | **Training Config** | YAML config deep-dive, all settings explained | `reference/training-config.md` |
 | **Cloud Training** | Provider-native persistence, exact-commit rules, cloud smoke tests | `reference/cloud-training.md` |
+| **Cloud Experiments** | Canonical train→eval launches with `--train-*` overrides | `reference/cloud-experiment-launching.md` |
 | **Troubleshooting** | OOM errors, training instability, platform issues | `reference/troubleshooting.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |
 
@@ -114,8 +118,21 @@ python tuner.py cloud-run --job-config Trainers/cloud/jobs/synthchat_vault_kto_p
 **List the current battle-of-models sweep catalog:**
 ```bash
 python3 Trainers/scripts/battle_of_models.py list
-python3 Trainers/scripts/battle_of_models.py commands
-python3 Trainers/scripts/battle_of_models.py launch qwen35-2b smollm2-1p7b
+python3 Trainers/scripts/battle_of_models.py plan
+python3 Trainers/scripts/battle_of_models.py commands --smoke
+python3 Trainers/scripts/battle_of_models.py launch --smoke qwen35-2b
+```
+
+**Canonical one-off HF experiment with direct overrides:**
+```bash
+python tuner.py cloud-pipeline --method sft --preset full \
+  --train-model-name Qwen/Qwen3.5-2B \
+  --train-gpu a10g-small \
+  --train-batch-size 8 \
+  --train-gradient-accumulation 4 \
+  --train-no-load-in-4bit \
+  --train-lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj \
+  --yes
 ```
 
 **Cloud evaluation against latest HF run (vLLM, no GGUF):**
@@ -181,6 +198,7 @@ HF Jobs-specific cloud behavior:
 - bucket creation / identity checks should happen once up front; repeated `whoami` / `create_bucket` calls during log sync can hit HF rate limits
 - for post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`; it launches an HF Job, downloads the bucketed LoRA, runs direct Unsloth inference remotely, and syncs results back to the same bucket under `.../evaluations/vllm/...`
 - for the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`; it runs HF Jobs training first, then launches cloud eval against that exact run without making you reselect it
+- for SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment still lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`
 - to inspect a finished HF cloud evaluation run from the bucket, use `python tuner.py cloud-inspect --run latest --eval-run latest --method sft`
 - avoid trying to force vLLM into the Unsloth HF Jobs image for this path; direct Unsloth inference is the stable default unless you intentionally move evaluation to a dedicated vLLM runtime
 - if preset-based eval fails with missing scenario files, check `Evaluator/config/eval_run.yaml` before debugging the loader; stale preset filenames are an easy failure mode
@@ -257,3 +275,8 @@ HF Jobs-specific cloud behavior:
 - Cloud runs require a clean tracked worktree and a pushed commit; remote jobs clone the exact branch and commit you launched
 - For HF Jobs bucket troubleshooting, load `reference/cloud-training.md`
 - For the canonical environment-backed training flow, load `protocols/environment-backed-alignment-pipeline.md`
+- The full promotion ladder is:
+  SFT cloud-pipeline comparison
+  merge/publish the winner
+  KTO on the merged/published model
+  env-GRPO as the final online stage

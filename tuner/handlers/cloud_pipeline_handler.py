@@ -113,7 +113,9 @@ class CloudPipelineHandler(BaseHandler):
             if not method:
                 return 0
 
-            training_config = backend.load_config(method)
+            training_config = CloudTrainHandler(args=self.args)._apply_training_overrides(
+                backend.load_config(method)
+            )
             eval_preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
             eval_scenarios = CloudEvalHandler(args=self.args)._resolve_display_scenarios(
                 preset=eval_preset,

@@ -17,6 +17,7 @@ Requirements:
 
 import logging
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -204,9 +205,14 @@ class HFJobsBackend(ITrainingBackend):
             trainer_dir=trainer_dir,
             model_name=model_config.get("model_name", "Unknown"),
             dataset_file=dataset_config.get("local_file") or f"{dataset_config.get('dataset_name', '')}/{dataset_config.get('dataset_file', 'Unknown')}",
+            dataset_name=dataset_config.get("dataset_name"),
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
+            gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
+            max_seq_length=training_config.get("max_seq_length") or model_config.get("max_seq_length"),
+            load_in_4bit=model_config.get("load_in_4bit"),
+            lora_target_modules=model_config.get("target_modules") or config.get("lora", {}).get("target_modules"),
             provider="hf_jobs",
             gpu_type=flavor,
             timeout_hours=timeout_hours,
@@ -714,6 +720,36 @@ class HFJobsBackend(ITrainingBackend):
             f"{'--publish-final-model' if config.publish_final_model else ''} "
             f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}",
         ]
+
+        training_args: list[str] = []
+        if config.method == "sft" and config.model_name:
+            training_args.extend(["--model-name", config.model_name])
+        if config.dataset_name:
+            training_args.extend(["--dataset-name", config.dataset_name])
+        if config.dataset_file:
+            dataset_file_arg = config.dataset_file
+            if config.dataset_name and dataset_file_arg.startswith(f"{config.dataset_name}/"):
+                dataset_file_arg = dataset_file_arg[len(config.dataset_name) + 1 :]
+            training_args.extend(["--dataset-file", dataset_file_arg])
+        if config.batch_size is not None:
+            training_args.extend(["--batch-size", str(config.batch_size)])
+        if config.gradient_accumulation_steps is not None:
+            training_args.extend(["--gradient-accumulation", str(config.gradient_accumulation_steps)])
+        if config.learning_rate:
+            training_args.extend(["--learning-rate", str(config.learning_rate)])
+        if config.epochs is not None:
+            training_args.extend(["--num-epochs", str(config.epochs)])
+        if config.max_steps is not None:
+            training_args.extend(["--max-steps", str(config.max_steps)])
+        if config.max_seq_length is not None:
+            training_args.extend(["--max-seq-length", str(config.max_seq_length)])
+        if config.method == "sft" and config.load_in_4bit is not None:
+            training_args.append("--load-in-4bit" if config.load_in_4bit else "--no-load-in-4bit")
+        if config.method == "sft" and config.lora_target_modules:
+            training_args.extend(["--lora-target-modules", ",".join(config.lora_target_modules)])
+
+        if training_args:
+            parts[-1] = parts[-1] + " " + " ".join(shlex.quote(arg) for arg in training_args)
 
         return " && ".join(parts)
 
