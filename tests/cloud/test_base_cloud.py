@@ -21,6 +21,7 @@ from tuner.backends.training.cloud.base_cloud import (
     estimate_cost,
     get_gpu_display_name,
     load_cloud_config,
+    load_named_image_profiles,
     load_gpu_pricing,
     poll_until_done,
     resolve_repo_source,
@@ -64,6 +65,11 @@ class TestLoadCloudConfig:
         config_file.write_text("")
         result = load_cloud_config(config_file)
         assert result == {}
+
+    def test_load_named_image_profiles_supports_eval_profile_section(self, cloud_config_path):
+        profiles = load_named_image_profiles(cloud_config_path, "eval_image_profiles")
+        assert profiles["stable_unsloth"].startswith("unsloth/unsloth:")
+        assert profiles["fast_vllm"].startswith("vllm/vllm-openai:")
 
 
 # ---------------------------------------------------------------------------

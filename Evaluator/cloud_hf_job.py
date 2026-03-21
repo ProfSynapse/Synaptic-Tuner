@@ -1,5 +1,7 @@
 """
-Run a vLLM-backed evaluation inside a Hugging Face Job against a bucketed training run.
+Run a cloud evaluation inside a Hugging Face Job against a bucketed training run.
+
+The current stable path uses direct Unsloth-backed evaluation.
 """
 
 from __future__ import annotations

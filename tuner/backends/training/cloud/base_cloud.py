@@ -233,15 +233,29 @@ def load_cloud_document(cloud_config_path: Path) -> dict:
         return {}
 
 
-def load_cloud_image_profiles(cloud_config_path: Path) -> dict:
+def load_named_image_profiles(cloud_config_path: Path, profile_section: str = "docker_image_profiles") -> dict:
     """
     Load named Docker image profiles from cloud_config.yaml.
+
+    Args:
+        cloud_config_path: Path to cloud_config.yaml.
+        profile_section: Dependencies subsection containing named image profiles.
+
+    Returns:
+        Mapping of profile name to Docker image.
+    """
+    document = load_cloud_document(cloud_config_path)
+    return document.get("dependencies", {}).get(profile_section, {})
+
+
+def load_cloud_image_profiles(cloud_config_path: Path) -> dict:
+    """
+    Load named cloud training image profiles from cloud_config.yaml.
 
     Profiles live under ``dependencies.docker_image_profiles`` and let the
     CLI select between stable and newer official images without editing code.
     """
-    document = load_cloud_document(cloud_config_path)
-    return document.get("dependencies", {}).get("docker_image_profiles", {})
+    return load_named_image_profiles(cloud_config_path, "docker_image_profiles")
 
 
 def resolve_cloud_image(
@@ -251,6 +265,7 @@ def resolve_cloud_image(
     requested_profile: Optional[str] = None,
     default_profile: Optional[str] = None,
     fallback_image: Optional[str] = None,
+    profile_section: str = "docker_image_profiles",
 ) -> tuple[str, Optional[str]]:
     """
     Resolve the cloud training image from an explicit image or named profile.
@@ -264,7 +279,7 @@ def resolve_cloud_image(
     if explicit_image:
         return explicit_image, None
 
-    profiles = load_cloud_image_profiles(cloud_config_path)
+    profiles = load_named_image_profiles(cloud_config_path, profile_section)
     profile_name = requested_profile or default_profile
     if profile_name:
         image = profiles.get(profile_name)

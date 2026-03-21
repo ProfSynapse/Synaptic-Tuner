@@ -60,6 +60,15 @@ def repo_root(tmp_path):
 
     cloud_config = {
         "dependencies": {
+            "docker_image_profiles": {
+                "stable": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
+                "next": "unsloth/unsloth:2026.2.1-pt2.9.0-cu12.8-fixed-numba-numpy-error",
+            },
+            "eval_image_profiles": {
+                "stable_unsloth": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
+                "latest_unsloth": "unsloth/unsloth:latest",
+                "fast_vllm": "vllm/vllm-openai:v0.17.1",
+            },
             "docker_image": "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39",
             "project_pip_deps": [
                 "pyyaml",
@@ -106,6 +115,10 @@ def repo_root(tmp_path):
                 "artifact_backend": "hf_bucket",
                 "artifact_identifier": "toolset-training-artifacts",
                 "output_root": "/workspace/outputs",
+                "evaluation": {
+                    "runtime": "unsloth",
+                    "image_profile": "stable_unsloth",
+                },
             },
             "modal": {
                 "gpu": "L40S",

@@ -10,6 +10,7 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     handler._repo_root = repo_root
 
     command = handler._build_eval_command(
+        helper_module="Evaluator.cloud_hf_job",
         bucket_id="test-user/toolset-training-artifacts",
         run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
         eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
@@ -48,6 +49,7 @@ def test_build_eval_command_can_include_same_job_loss(repo_root):
     handler._repo_root = repo_root
 
     command = handler._build_eval_command(
+        helper_module="Evaluator.cloud_hf_job",
         bucket_id="test-user/toolset-training-artifacts",
         run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
         eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
@@ -125,6 +127,28 @@ def test_resolve_display_scenarios_uses_preset_when_no_explicit_scenarios(repo_r
     assert scenarios == ["tool_prompts.yaml", "behavior_prompts.yaml"]
 
 
+def test_resolve_eval_image_uses_eval_profile_defaults(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    image, profile = handler._resolve_eval_image()
+
+    assert profile == "stable_unsloth"
+    assert image.startswith("unsloth/unsloth:")
+
+
+def test_resolve_eval_helper_module_rejects_vllm_until_implemented(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    try:
+        handler._resolve_eval_helper_module("vllm")
+    except Exception as exc:
+        assert "not implemented yet" in str(exc)
+    else:
+        raise AssertionError("expected vllm runtime selection to fail until helper is implemented")
+
+
 def test_handle_submits_hf_eval_job(repo_root, clean_env):
     clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
     args = Namespace(
@@ -139,6 +163,18 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
         update_model_card=False,
         gpu=None,
         timeout_hours=2.0,
+        eval_runtime=None,
+        eval_image_profile=None,
+        eval_cloud_image=None,
+        with_loss=False,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=None,
+        loss_no_completion_only=False,
+        env_backend=None,
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
     )
     handler = CloudEvalHandler(args=args)
     handler._repo_root = repo_root
@@ -173,6 +209,7 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
         "HF_API_KEY": "hf_test_token_12345",
     }
     assert kwargs["flavor"] == "a10g-small"
+    assert kwargs["image"].startswith("unsloth/unsloth:")
     assert "Evaluator.cloud_hf_job" in kwargs["command"][2]
 
 

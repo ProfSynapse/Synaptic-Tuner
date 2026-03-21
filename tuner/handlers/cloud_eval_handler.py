@@ -1,8 +1,8 @@
 """
 Cloud evaluation workflow handler.
 
-Launches a Hugging Face Job that downloads a bucketed training run,
-starts vLLM remotely, and runs the evaluator against it.
+Launches a Hugging Face Job that downloads a bucketed training run
+and runs the evaluator against it using the selected cloud eval runtime.
 """
 
 from __future__ import annotations
@@ -128,6 +128,9 @@ class CloudEvalHandler(BaseHandler):
     def _hf_jobs_settings(self) -> dict:
         return self._load_cloud_config().get("hf_jobs", {})
 
+    def _hf_eval_settings(self) -> dict:
+        return self._hf_jobs_settings().get("evaluation", {})
+
     def _validate_environment(self):
         hf_token = get_hf_token()
         if not hf_token:
@@ -225,6 +228,7 @@ class CloudEvalHandler(BaseHandler):
     def _build_eval_command(
         self,
         *,
+        helper_module: str,
         bucket_id: str,
         run_prefix: str,
         eval_prefix: str,
@@ -269,7 +273,7 @@ class CloudEvalHandler(BaseHandler):
         eval_cmd = [
             "python",
             "-m",
-            "Evaluator.cloud_hf_job",
+            helper_module,
             "--bucket-id",
             bucket_id,
             "--run-prefix",
@@ -311,6 +315,38 @@ class CloudEvalHandler(BaseHandler):
 
         parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
         return " && ".join(parts)
+
+    def _resolve_eval_runtime(self) -> str:
+        requested_runtime = (getattr(self.args, "eval_runtime", None) or "").strip().lower()
+        default_runtime = str(self._hf_eval_settings().get("runtime", "unsloth")).strip().lower()
+        runtime = requested_runtime or default_runtime or "unsloth"
+        if runtime not in {"unsloth", "vllm"}:
+            raise CloudProviderError(f"Unknown eval runtime '{runtime}'. Supported runtimes: unsloth, vllm")
+        return runtime
+
+    def _resolve_eval_helper_module(self, runtime: str) -> str:
+        if runtime == "unsloth":
+            return "Evaluator.cloud_hf_job"
+        raise CloudProviderError(
+            "The dedicated vLLM cloud eval runtime is planned but not implemented yet. "
+            "Use --eval-runtime unsloth for now."
+        )
+
+    def _resolve_eval_image(self) -> tuple[str, Optional[str]]:
+        hf_settings = self._hf_jobs_settings()
+        eval_settings = self._hf_eval_settings()
+        explicit_image = getattr(self.args, "eval_cloud_image", None) or eval_settings.get("image")
+        requested_profile = getattr(self.args, "eval_image_profile", None)
+        default_profile = eval_settings.get("image_profile") or hf_settings.get("image_profile")
+        fallback_image = eval_settings.get("image") or hf_settings.get("image")
+        return resolve_cloud_image(
+            self._cloud_config_path(),
+            explicit_image=explicit_image,
+            requested_profile=requested_profile,
+            default_profile=default_profile,
+            fallback_image=fallback_image,
+            profile_section="eval_image_profiles",
+        )
 
     def _parse_dataset_identifier(self, dataset_identifier: str) -> tuple[str, str]:
         parts = [part for part in dataset_identifier.strip("/").split("/") if part]
@@ -632,7 +668,7 @@ class CloudEvalHandler(BaseHandler):
                 self.output_error(str(exc), code="CLOUD_EVAL_ERROR")
                 return 1
 
-        print_header("CLOUD EVALUATION", "Run vLLM evaluation on Hugging Face Jobs")
+        print_header("CLOUD EVALUATION", "Run cloud evaluation on Hugging Face Jobs")
 
         try:
             huggingface_hub = self._validate_environment()
@@ -663,6 +699,9 @@ class CloudEvalHandler(BaseHandler):
         update_model_card = bool(getattr(self.args, "update_model_card", False))
         flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
         timeout_hours = float(getattr(self.args, "timeout_hours", None) or 4.0)
+        eval_runtime = self._resolve_eval_runtime()
+        helper_module = self._resolve_eval_helper_module(eval_runtime)
+        eval_image, eval_image_profile = self._resolve_eval_image()
         with_loss = bool(getattr(self.args, "with_loss", False))
         loss_dataset_name = None
         loss_dataset_file = None
@@ -685,6 +724,7 @@ class CloudEvalHandler(BaseHandler):
         self.last_bucket_id = bucket_id
         self.last_results_uri = f"hf://buckets/{bucket_id}/{eval_prefix}"
         command = self._build_eval_command(
+            helper_module=helper_module,
             bucket_id=bucket_id,
             run_prefix=selected_run["prefix"],
             eval_prefix=eval_prefix,
@@ -709,6 +749,7 @@ class CloudEvalHandler(BaseHandler):
                 "Provider": "hf_jobs",
                 "Run": selected_run["prefix"],
                 "Bucket": bucket_id,
+                "Runtime": eval_runtime,
                 "Backend": "unsloth",
                 "Preset": preset or "-",
                 "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
@@ -717,6 +758,8 @@ class CloudEvalHandler(BaseHandler):
                 "With Loss": "yes" if with_loss else "no",
                 "GPU": flavor,
                 "Timeout": f"{timeout_hours:.1f}h",
+                "Image Profile": eval_image_profile or "-",
+                "Image": eval_image,
                 "Results": f"hf://buckets/{bucket_id}/{eval_prefix}",
             },
             "Cloud Evaluation Configuration",
@@ -727,11 +770,6 @@ class CloudEvalHandler(BaseHandler):
             return 0
 
         try:
-            eval_image, _ = resolve_cloud_image(
-                self._cloud_config_path(),
-                explicit_image=hf_settings.get("image"),
-                default_profile=hf_settings.get("image_profile"),
-            )
             submission = HFJobExecutor(huggingface_hub).submit(
                 CloudJobSpec(
                     provider="hf_jobs",

@@ -71,7 +71,7 @@ Commands:
   cloud-run   Config-driven HF cloud job
   cloud-jobs  Inspect or manage live HF Jobs
   cloud-pipeline Train on HF Jobs, then evaluate on HF Jobs
-  cloud-eval  Cloud evaluation on HF Jobs using vLLM
+  cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
   run-experiment  Run train -> eval -> loss from one experiment config
@@ -224,6 +224,19 @@ Examples:
     )
     parser.add_argument("--gpu", help="Override HF Jobs hardware flavor for cloud-eval/cloud-gym.")
     parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval/cloud-gym.")
+    parser.add_argument(
+        "--eval-runtime",
+        choices=["unsloth", "vllm"],
+        help="Select the cloud evaluation runtime. Default comes from Trainers/cloud/cloud_config.yaml.",
+    )
+    parser.add_argument(
+        "--eval-image-profile",
+        help="Override the cloud evaluation image profile for cloud-eval (for example: stable_unsloth, latest_unsloth, fast_vllm).",
+    )
+    parser.add_argument(
+        "--eval-cloud-image",
+        help="Override the exact cloud evaluation Docker image for cloud-eval.",
+    )
     parser.add_argument(
         "--with-loss",
         action="store_true",
