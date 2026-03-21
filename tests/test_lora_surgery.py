@@ -7,7 +7,6 @@ Purpose: Verify all surgery operations, config loading, and edge cases
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import os
@@ -24,7 +23,6 @@ import pytest
 torch = pytest.importorskip("torch")
 st = pytest.importorskip("safetensors.torch")
 
-from shared.eval_backend import EvalResult
 from shared.evolutionary.lora_surgery import (
     LoRASurgeon,
     OperationResult,
@@ -112,6 +110,12 @@ def tmp_other_adapter(tmp_path):
     return adapter_dir
 
 
+@dataclass
+class _FakeEvalResult:
+    """Minimal eval result with eval_score attribute."""
+    eval_score: float
+
+
 class FakeEvalBackend:
     """Fake eval backend that returns configurable scores."""
 
@@ -121,14 +125,14 @@ class FakeEvalBackend:
         self._call_count = 0
         self._calls = []
 
-    async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
+    async def run_eval(self, adapter_path: str, scenario: str) -> _FakeEvalResult:
         self._call_count += 1
         self._calls.append(adapter_path)
         # Return specific score if path matches a pattern, else default
         for pattern, score in self._scores.items():
             if pattern in adapter_path:
-                return EvalResult(eval_score=score)
-        return EvalResult(eval_score=self._default)
+                return _FakeEvalResult(eval_score=score)
+        return _FakeEvalResult(eval_score=self._default)
 
 
 class ImprovingEvalBackend:
@@ -139,12 +143,12 @@ class ImprovingEvalBackend:
         self._improvement = improvement
         self._call_count = 0
 
-    async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
+    async def run_eval(self, adapter_path: str, scenario: str) -> _FakeEvalResult:
         self._call_count += 1
         if "test_adapter" in adapter_path and "_surgery_work" not in adapter_path:
-            return EvalResult(eval_score=self._baseline)
+            return _FakeEvalResult(eval_score=self._baseline)
         # Variants get a small improvement
-        return EvalResult(eval_score=self._baseline + self._improvement)
+        return _FakeEvalResult(eval_score=self._baseline + self._improvement)
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +306,8 @@ class TestHelpers:
 # ---------------------------------------------------------------------------
 
 class TestAlphaSweep:
-    def test_modifies_adapter_config(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_modifies_adapter_config(self, tmp_adapter, tmp_path):
         """Alpha sweep should modify adapter_config.json, not weights."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -320,15 +325,14 @@ class TestAlphaSweep:
         )
 
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.alpha_sweep(tmp_adapter, 0.5)
-        )
+        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
 
         assert result.operation == "alpha_sweep"
         assert result.variants_tried >= 1
         assert "alpha_scores" in result.details
 
-    def test_skips_identical_alpha(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_skips_identical_alpha(self, tmp_adapter, tmp_path):
         """If multiplier produces same alpha, it should be skipped."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -338,14 +342,13 @@ class TestAlphaSweep:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.alpha_sweep(tmp_adapter, 0.5)
-        )
+        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
         assert result.variants_tried == 0
 
 
 class TestLayerScaling:
-    def test_applies_correct_multipliers(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_applies_correct_multipliers(self, tmp_adapter, tmp_path):
         """Layer scaling should scale layer weights by the given factor."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -355,15 +358,14 @@ class TestLayerScaling:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.layer_scaling(tmp_adapter, 0.5)
-        )
+        result = await surgeon.layer_scaling(tmp_adapter, 0.5)
 
         assert result.operation == "layer_scaling"
         assert result.variants_tried > 0
         assert "layer_scores" in result.details
 
-    def test_zero_scale_zeros_layer(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_zero_scale_zeros_layer(self, tmp_adapter, tmp_path):
         """Scaling a layer by 0 should zero all its weights."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -374,19 +376,18 @@ class TestLayerScaling:
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
         # After running, check that the variant with scale=0 has zeroed weights
-        asyncio.get_event_loop().run_until_complete(
-            surgeon.layer_scaling(tmp_adapter, 0.5)
-        )
+        await surgeon.layer_scaling(tmp_adapter, 0.5)
 
         # Check a variant directory
         variant_dir = os.path.join(config.output_dir, "_surgery_work", "layer0_scale0.0")
-        if os.path.exists(variant_dir):
-            weights = _load_all_weights(variant_dir)
-            for key, tensor in weights.items():
-                if "layers.0." in key:
-                    assert torch.allclose(tensor, torch.zeros_like(tensor))
+        assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
+        weights = _load_all_weights(variant_dir)
+        for key, tensor in weights.items():
+            if "layers.0." in key:
+                assert torch.allclose(tensor, torch.zeros_like(tensor))
 
-    def test_no_lora_layers(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_no_lora_layers(self, tmp_path):
         """Should handle adapter with no LoRA layer keys gracefully."""
         adapter_dir = str(tmp_path / "empty_adapter")
         os.makedirs(adapter_dir)
@@ -403,15 +404,14 @@ class TestLayerScaling:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(adapter_dir, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.layer_scaling(adapter_dir, 0.5)
-        )
+        result = await surgeon.layer_scaling(adapter_dir, 0.5)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "no_lora_layers_found"
 
 
 class TestModuleAblation:
-    def test_zeros_module_weights(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_zeros_module_weights(self, tmp_adapter, tmp_path):
         """Module ablation should zero all weights for a given module type."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -420,9 +420,7 @@ class TestModuleAblation:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.module_ablation(tmp_adapter, 0.5)
-        )
+        result = await surgeon.module_ablation(tmp_adapter, 0.5)
 
         assert result.operation == "module_ablation"
         assert result.variants_tried > 0
@@ -430,15 +428,16 @@ class TestModuleAblation:
 
         # Verify an ablated variant
         variant_dir = os.path.join(config.output_dir, "_surgery_work", "ablate_q_proj")
-        if os.path.exists(variant_dir):
-            weights = _load_all_weights(variant_dir)
-            for key, tensor in weights.items():
-                if ".q_proj." in key:
-                    assert torch.allclose(tensor, torch.zeros_like(tensor))
+        assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
+        weights = _load_all_weights(variant_dir)
+        for key, tensor in weights.items():
+            if ".q_proj." in key:
+                assert torch.allclose(tensor, torch.zeros_like(tensor))
 
 
 class TestCheckpointInterpolation:
-    def test_blends_at_correct_ratios(self, tmp_adapter, tmp_other_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_blends_at_correct_ratios(self, tmp_adapter, tmp_other_adapter, tmp_path):
         """Interpolation should blend weights at the specified ratio."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -449,15 +448,14 @@ class TestCheckpointInterpolation:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
-        )
+        result = await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
 
         assert result.operation == "checkpoint_interpolation"
         assert result.variants_tried == 1
         assert "blend_scores" in result.details
 
-    def test_blend_ratio_math(self, tmp_adapter, tmp_other_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_blend_ratio_math(self, tmp_adapter, tmp_other_adapter, tmp_path):
         """Verify that blend ratio=0.5 produces the average of two checkpoints."""
         weights_a = _load_all_weights(tmp_adapter)
         weights_b = _load_all_weights(tmp_other_adapter)
@@ -471,19 +469,18 @@ class TestCheckpointInterpolation:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        asyncio.get_event_loop().run_until_complete(
-            surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
-        )
+        await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
 
         variant_dir = os.path.join(config.output_dir, "_surgery_work", "blend_0.50")
-        if os.path.exists(variant_dir):
-            blended = _load_all_weights(variant_dir)
-            common_keys = set(weights_a.keys()) & set(weights_b.keys())
-            for key in list(common_keys)[:3]:
-                expected = 0.5 * weights_a[key] + 0.5 * weights_b[key]
-                assert torch.allclose(blended[key], expected, atol=1e-5)
+        assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
+        blended = _load_all_weights(variant_dir)
+        common_keys = set(weights_a.keys()) & set(weights_b.keys())
+        for key in list(common_keys)[:3]:
+            expected = 0.5 * weights_a[key] + 0.5 * weights_b[key]
+            assert torch.allclose(blended[key], expected, atol=1e-5)
 
-    def test_single_checkpoint_no_interpolation(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_single_checkpoint_no_interpolation(self, tmp_adapter, tmp_path):
         """Should skip if no other checkpoint is provided."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -493,9 +490,7 @@ class TestCheckpointInterpolation:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
-        )
+        result = await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "no_other_checkpoint"
 
@@ -523,7 +518,8 @@ class TestDAREDropRescale:
             mean_result, original.float(), atol=0.5
         ), "DARE expected value not preserved"
 
-    def test_operation_runs(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_operation_runs(self, tmp_adapter, tmp_path):
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -532,16 +528,15 @@ class TestDAREDropRescale:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.dare_drop_rescale(tmp_adapter, 0.5)
-        )
+        result = await surgeon.dare_drop_rescale(tmp_adapter, 0.5)
         assert result.operation == "dare_drop_rescale"
         assert result.variants_tried == 1
         assert "dare_scores" in result.details
 
 
 class TestSVDRankReduction:
-    def test_produces_correct_dimensions(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_produces_correct_dimensions(self, tmp_adapter, tmp_path):
         """SVD reduction should produce A/B matrices with reduced rank."""
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -551,25 +546,24 @@ class TestSVDRankReduction:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.svd_rank_reduction(tmp_adapter, 0.5)
-        )
+        result = await surgeon.svd_rank_reduction(tmp_adapter, 0.5)
 
         assert result.operation == "svd_rank_reduction"
         assert result.variants_tried == 1
 
         # Check dimensions in the variant
         variant_dir = os.path.join(config.output_dir, "_surgery_work", "svd_rank4")
-        if os.path.exists(variant_dir):
-            weights = _load_all_weights(variant_dir)
-            pairs = _find_lora_pairs(weights)
-            for prefix, (a_key, b_key) in pairs.items():
-                a_shape = weights[a_key].shape
-                b_shape = weights[b_key].shape
-                assert a_shape[0] == 4, f"Expected rank 4 for A, got {a_shape[0]}"
-                assert b_shape[1] == 4, f"Expected rank 4 for B, got {b_shape[1]}"
+        assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
+        weights = _load_all_weights(variant_dir)
+        pairs = _find_lora_pairs(weights)
+        for prefix, (a_key, b_key) in pairs.items():
+            a_shape = weights[a_key].shape
+            b_shape = weights[b_key].shape
+            assert a_shape[0] == 4, f"Expected rank 4 for A, got {a_shape[0]}"
+            assert b_shape[1] == 4, f"Expected rank 4 for B, got {b_shape[1]}"
 
-    def test_rank_too_small(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_rank_too_small(self, tmp_path):
         """Should skip if original rank is 1."""
         adapter_dir = str(tmp_path / "rank1_adapter")
         os.makedirs(adapter_dir)
@@ -585,15 +579,14 @@ class TestSVDRankReduction:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(adapter_dir, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.svd_rank_reduction(adapter_dir, 0.5)
-        )
+        result = await surgeon.svd_rank_reduction(adapter_dir, 0.5)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "rank_too_small"
 
 
 class TestAttentionMLPAblation:
-    def test_ablation_runs(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_ablation_runs(self, tmp_adapter, tmp_path):
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -601,9 +594,7 @@ class TestAttentionMLPAblation:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.attention_mlp_ablation(tmp_adapter, 0.5)
-        )
+        result = await surgeon.attention_mlp_ablation(tmp_adapter, 0.5)
 
         assert result.operation == "attention_mlp_ablation"
         assert result.variants_tried == 2  # attention + mlp
@@ -613,7 +604,8 @@ class TestAttentionMLPAblation:
 
 
 class TestMetricsWeightedMerge:
-    def test_insufficient_checkpoints(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_insufficient_checkpoints(self, tmp_adapter, tmp_path):
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -623,13 +615,12 @@ class TestMetricsWeightedMerge:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
-        )
+        result = await surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "insufficient_checkpoints_or_scores"
 
-    def test_merge_runs(self, tmp_adapter, tmp_other_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_merge_runs(self, tmp_adapter, tmp_other_adapter, tmp_path):
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -639,9 +630,7 @@ class TestMetricsWeightedMerge:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
-        )
+        result = await surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
         assert result.operation == "metrics_weighted_merge"
         assert result.variants_tried == 1
         assert "merge_weights" in result.details
@@ -652,7 +641,8 @@ class TestMetricsWeightedMerge:
 # ---------------------------------------------------------------------------
 
 class TestSurgeryLoop:
-    def test_keeps_improvements(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_keeps_improvements(self, tmp_adapter, tmp_path):
         """Surgery loop should keep operations that improve the score."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -668,7 +658,7 @@ class TestSurgeryLoop:
         backend = ImprovingEvalBackend(baseline=0.5, improvement=0.1)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        result = await surgeon.run_surgery()
 
         assert result.baseline_score == 0.5
         assert result.final_score > result.baseline_score
@@ -676,7 +666,8 @@ class TestSurgeryLoop:
         assert result.total_improvement > 0
         assert os.path.exists(result.best_adapter_path)
 
-    def test_rejects_regressions(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_rejects_regressions(self, tmp_adapter, tmp_path):
         """Surgery loop should reject operations that don't improve enough."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -692,14 +683,15 @@ class TestSurgeryLoop:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        result = await surgeon.run_surgery()
 
         assert result.baseline_score == 0.5
         assert result.final_score == 0.5
         assert len(result.operations_applied) == 0
         assert result.total_improvement == 0.0
 
-    def test_results_report_saved(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_results_report_saved(self, tmp_adapter, tmp_path):
         """Surgery should save a JSON report."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -712,7 +704,7 @@ class TestSurgeryLoop:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        await surgeon.run_surgery()
 
         report_path = os.path.join(output_dir, "surgery_report.json")
         assert os.path.exists(report_path)
@@ -724,7 +716,8 @@ class TestSurgeryLoop:
         assert "operations_applied" in report
         assert "duration_seconds" in report
 
-    def test_unknown_operation_skipped(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_unknown_operation_skipped(self, tmp_adapter, tmp_path):
         """Unknown operations should be skipped without error."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -738,7 +731,7 @@ class TestSurgeryLoop:
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
         # Should not raise
-        result = asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        result = await surgeon.run_surgery()
         assert result.baseline_score == 0.5
 
 
@@ -748,14 +741,15 @@ class TestOperationOrdering:
         config = SurgeryConfig()
         assert config.operations[0] == "alpha_sweep"
 
-    def test_operations_run_in_config_order(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_operations_run_in_config_order(self, tmp_adapter, tmp_path):
         """Operations should run in the order specified in config."""
         output_dir = str(tmp_path / "output")
 
         order_tracker = []
 
         class TrackingBackend:
-            async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
+            async def run_eval(self, adapter_path: str, scenario: str) -> _FakeEvalResult:
                 # Track which operation directory is being evaluated
                 if "_surgery_work" in adapter_path:
                     dirname = os.path.basename(adapter_path)
@@ -763,7 +757,7 @@ class TestOperationOrdering:
                         order_tracker.append("alpha_sweep")
                     elif dirname.startswith("ablate_"):
                         order_tracker.append("module_ablation")
-                return EvalResult(eval_score=0.5)
+                return _FakeEvalResult(eval_score=0.5)
 
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
@@ -775,7 +769,7 @@ class TestOperationOrdering:
         backend = TrackingBackend()
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        await surgeon.run_surgery()
 
         # Alpha sweep evaluations should come before module ablation evaluations
         if order_tracker:
@@ -791,7 +785,8 @@ class TestOperationOrdering:
 
 
 class TestEdgeCases:
-    def test_adapter_with_no_lora_layers(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_adapter_with_no_lora_layers(self, tmp_path):
         """Should handle adapter with no LoRA-patterned weight keys."""
         adapter_dir = str(tmp_path / "no_lora_adapter")
         os.makedirs(adapter_dir)
@@ -810,12 +805,13 @@ class TestEdgeCases:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(adapter_dir, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        result = await surgeon.run_surgery()
         # Should complete without errors
         assert result.baseline_score == 0.5
         assert len(result.operations_applied) == 0
 
-    def test_duration_tracked(self, tmp_adapter, tmp_path):
+    @pytest.mark.asyncio
+    async def test_duration_tracked(self, tmp_adapter, tmp_path):
         """Surgery result should track duration."""
         output_dir = str(tmp_path / "output")
         config = SurgeryConfig(
@@ -828,5 +824,5 @@ class TestEdgeCases:
         backend = FakeEvalBackend(default_score=0.5)
         surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = asyncio.get_event_loop().run_until_complete(surgeon.run_surgery())
+        result = await surgeon.run_surgery()
         assert result.duration_seconds >= 0
