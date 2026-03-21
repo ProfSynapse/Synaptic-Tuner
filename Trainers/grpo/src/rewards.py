@@ -581,19 +581,40 @@ def fitness_reward(
 def build_fitness_reward(config_path: str | None = None) -> Callable:
     """Build a TRL-compatible reward function from FitnessEvaluator.
 
+    The evaluator is created once here and reused by the returned closure,
+    avoiding repeated YAML parsing on every call during GRPO training.
+
     Args:
         config_path: Path to fitness rules YAML. Passed through to fitness_reward().
 
     Returns:
         Reward function with signature (completions, prompts=None, **kwargs) -> List[float]
     """
+    from shared.validation.fitness import FitnessEvaluator
+
+    if config_path is None:
+        config_path = "configs/flywheel/fitness_rules.yaml"
+
+    try:
+        cached_evaluator = FitnessEvaluator(config_path=config_path)
+    except Exception as e:
+        logger.warning("Failed to create FitnessEvaluator: %s — falling back to per-call", e)
+        cached_evaluator = None
 
     def _reward(completions, prompts=None, **kwargs):
         rewards = []
         for completion in completions:
             text = _coerce_to_text(completion)
-            score = fitness_reward(text, config_path=config_path)
-            rewards.append(score)
+            if cached_evaluator is not None:
+                try:
+                    result = cached_evaluator.evaluate(text)
+                    rewards.append(result.score)
+                except Exception as e:
+                    logger.warning("Fitness evaluation failed: %s", e)
+                    rewards.append(0.0)
+            else:
+                score = fitness_reward(text, config_path=config_path)
+                rewards.append(score)
         return rewards
 
     return _reward

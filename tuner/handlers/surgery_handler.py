@@ -112,25 +112,73 @@ class SurgeryHandler(BaseHandler):
             )
             return 1
 
+        # Require eval scenario
+        if not config.eval_scenario:
+            eval_scenario = getattr(self.args, "eval_scenario", None)
+            if eval_scenario:
+                config.eval_scenario = eval_scenario
+            else:
+                self.output_error(
+                    "An eval scenario is required for surgery. "
+                    "Provide --eval-scenario path/to/scenarios.yaml or set eval_scenario in surgery config.",
+                    code="MISSING_EVAL_SCENARIO",
+                )
+                return 1
+
         # Show config summary
         print(f"\n  Adapter: {config.adapter_path}")
+        print(f"  Eval scenario: {config.eval_scenario}")
+        print(f"  Eval backend: {config.eval_backend}")
         print(f"  Operations: {', '.join(config.operations)}")
         print(f"  Min improvement: {config.min_improvement}")
         print(f"  Output: {config.output_dir}\n")
 
-        self.output_info(
-            "Surgery configuration loaded. "
-            "To run, provide an EvalBackend implementation and call run_surgery()."
-        )
+        # Create eval backend and run surgery
+        try:
+            from shared.eval_backend import create_eval_backend
 
-        self.output(
-            {
-                "adapter_path": config.adapter_path,
-                "operations": config.operations,
-                "min_improvement": config.min_improvement,
-                "output_dir": config.output_dir,
-                "status": "ready",
-            },
-            "Surgery handler ready. Use programmatic API to execute surgery with an eval backend.",
-        )
-        return 0
+            eval_backend = create_eval_backend(
+                backend_type=config.eval_backend,
+                min_vram_gb=config.local_min_vram_gb,
+            )
+
+            surgeon = LoRASurgeon(
+                adapter_path=config.adapter_path,
+                eval_backend=eval_backend,
+                eval_scenario=config.eval_scenario,
+                config=config,
+            )
+
+            print("  Running surgery...")
+            result = asyncio.run(surgeon.run_surgery())
+
+            # Report results
+            print(f"\n  Baseline score: {result.baseline_score:.4f}")
+            print(f"  Final score:    {result.final_score:.4f}")
+            print(f"  Improvement:    {result.total_improvement:+.4f}")
+            print(f"  Duration:       {result.duration_seconds:.1f}s")
+            if result.operations_applied:
+                print(f"  Operations:     {len(result.operations_applied)} applied")
+                for op in result.operations_applied:
+                    print(f"    - {op.operation}: {op.improvement:+.4f} ({op.variants_tried} variants)")
+            print(f"  Best adapter:   {result.best_adapter_path}\n")
+
+            self.output(
+                {
+                    "baseline_score": result.baseline_score,
+                    "final_score": result.final_score,
+                    "improvement": result.total_improvement,
+                    "best_adapter_path": result.best_adapter_path,
+                    "operations_applied": len(result.operations_applied),
+                    "status": "completed",
+                },
+                f"Surgery complete. Improvement: {result.total_improvement:+.4f}",
+            )
+            return 0
+
+        except Exception as exc:
+            self.output_error(
+                f"Surgery failed: {exc}",
+                code="SURGERY_FAILED",
+            )
+            return 1

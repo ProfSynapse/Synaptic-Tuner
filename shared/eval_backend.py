@@ -118,17 +118,30 @@ class CloudEvalBackend:
     """Delegates evaluation to a cloud provider.
 
     Provider is injected, not hardcoded. Supports any CloudProvider implementation.
+    Enforces a timeout to prevent stuck jobs from blocking indefinitely.
     """
 
-    def __init__(self, provider: CloudProvider):
+    def __init__(self, provider: CloudProvider, timeout_seconds: int = 3600):
         self.provider = provider
+        self.timeout_seconds = timeout_seconds
 
     async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
-        """Upload adapter and run eval on cloud."""
+        """Upload adapter and run eval on cloud with timeout."""
+        import asyncio
+
         remote_path = await self.provider.upload_adapter(adapter_path)
         job_id = await self.provider.submit_eval_job(remote_path, scenario)
         logger.info(f"Submitted cloud eval job: {job_id}")
-        return await self.provider.wait_for_result(job_id)
+        try:
+            return await asyncio.wait_for(
+                self.provider.wait_for_result(job_id),
+                timeout=self.timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Cloud eval timed out after {self.timeout_seconds}s for job {job_id}. "
+                f"Increase timeout_seconds or check cloud provider status."
+            )
 
 
 def create_eval_backend(
