@@ -46,7 +46,12 @@ from tuner.ui import (
     print_info,
     print_menu,
 )
-from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps, resolve_repo_source
+from tuner.backends.training.cloud.base_cloud import (
+    load_cloud_config,
+    load_project_deps,
+    resolve_cloud_image,
+    resolve_repo_source,
+)
 from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
@@ -611,10 +616,15 @@ class CloudEvalHandler(BaseHandler):
             return 0
 
         try:
+            eval_image, _ = resolve_cloud_image(
+                self._cloud_config_path(),
+                explicit_image=hf_settings.get("image"),
+                default_profile=hf_settings.get("image_profile"),
+            )
             submission = HFJobExecutor(huggingface_hub).submit(
                 CloudJobSpec(
                     provider="hf_jobs",
-                    image=hf_settings.get("image"),
+                    image=eval_image,
                     command=build_bash_command([command]),
                     flavor=flavor,
                     timeout_hours=timeout_hours,
