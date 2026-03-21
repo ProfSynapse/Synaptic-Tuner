@@ -806,6 +806,305 @@ if args.tier:
 
 ---
 
+### Implementation 5: LoRA Weight Surgery (Eval-Guided Post-Training Optimization)
+
+**Goal**: Directly manipulate trained LoRA weights — scaling, pruning, interpolating, zeroing layers — and use the Evaluator as a fitness signal to find optimal weight configurations WITHOUT retraining.
+
+This is like autoresearch but operating on trained weights instead of training configs. The loop is:
+```
+Load LoRA weights → perturb → eval → keep/discard → repeat
+```
+
+No gradient computation, no training step. Just weight manipulation + forward pass evaluation. Orders of magnitude faster than retraining.
+
+**New files**:
+- `shared/evolutionary/lora_surgery.py` — LoRASurgeon class (core manipulation + eval loop)
+- `configs/lora_surgery.yaml` — default surgery configuration
+- `tests/test_lora_surgery.py` — tests
+
+**Modified files**:
+- `tuner.py` — add CLI entry point
+
+#### Background: LoRA Weight Structure
+
+Each target module has two matrices per layer:
+```
+model.layers.{i}.self_attn.{q,k,v,o}_proj.lora_{A,B}.weight
+model.layers.{i}.mlp.{gate,up,down}_proj.lora_{A,B}.weight
+```
+
+For Qwen2.5-7B with r=64: 32 layers × 7 modules × 2 matrices = 448 weight tensors.
+The effective contribution of each module is: `(lora_alpha / r) × (B @ A) = 2.0 × (B @ A)`.
+
+Stored in `adapter_model.safetensors` (~0.32 GB). Loaded via PEFT/Unsloth automatically.
+
+#### Surgery Operations
+
+**Operation 1: Layer-Level Scaling**
+Scale individual layers' LoRA contribution by a factor. Reveals which layers matter most.
+```python
+def scale_layer(self, layer_idx: int, scale: float):
+    """Scale all LoRA weights in a specific transformer layer.
+
+    scale=0.0 → effectively removes LoRA from this layer
+    scale=0.5 → halves this layer's LoRA contribution
+    scale=1.5 → amplifies this layer's LoRA contribution
+    """
+    for module in ["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"]:
+        key_a = f"model.layers.{layer_idx}.self_attn.{module}.lora_A.weight"
+        key_b = f"model.layers.{layer_idx}.self_attn.{module}.lora_B.weight"
+        # Also handle mlp keys
+        if key_a in self.weights:
+            self.weights[key_a] *= scale
+```
+
+**Operation 2: Module-Type Scaling**
+Scale all instances of a specific module type (e.g., all q_proj across all layers).
+```python
+def scale_module_type(self, module_name: str, scale: float):
+    """Scale all LoRA weights for a specific module type.
+
+    scale_module_type("v_proj", 0.0) → removes LoRA from all v_proj
+    Reveals whether attention vs MLP LoRA matters more.
+    """
+    for key in self.weights:
+        if f".{module_name}.lora_" in key:
+            self.weights[key] *= scale
+```
+
+**Operation 3: Checkpoint Interpolation (Model Soup)**
+Linearly interpolate between two LoRA checkpoints (e.g., step 200 vs step 500).
+```python
+def interpolate(self, weights_a: dict, weights_b: dict, alpha: float) -> dict:
+    """Interpolate between two LoRA weight sets.
+
+    alpha=0.0 → pure weights_a
+    alpha=1.0 → pure weights_b
+    alpha=0.5 → average (classic model soup)
+
+    Search over alpha to find optimal blend point.
+    """
+    result = {}
+    for key in weights_a:
+        result[key] = (1 - alpha) * weights_a[key] + alpha * weights_b[key]
+    return result
+```
+
+**Operation 4: DARE (Drop And REscale)**
+Randomly zero out a fraction of LoRA weights and rescale survivors. From the DARE paper — reduces interference when merging adapters, but also works as regularization on a single adapter.
+```python
+def dare(self, drop_rate: float = 0.1, seed: int = 42):
+    """DARE: randomly zero weights and rescale survivors.
+
+    If drop_rate=0.1: zero 10% of weights, multiply rest by 1/(1-0.1)
+    Acts as post-hoc regularization. Can improve generalization.
+    """
+    rng = torch.Generator().manual_seed(seed)
+    for key, tensor in self.weights.items():
+        mask = torch.bernoulli(torch.ones_like(tensor) * (1 - drop_rate),
+                              generator=rng)
+        self.weights[key] = tensor * mask / (1 - drop_rate)
+```
+
+**Operation 5: SVD Rank Reduction**
+Compress LoRA by reducing effective rank (keep top-k singular values).
+```python
+def reduce_rank(self, layer_idx: int, module: str, new_rank: int):
+    """Reduce effective rank of a specific LoRA module via SVD.
+
+    Given A (r × in) and B (out × r), compute:
+    effective = B @ A  (out × in)
+    U, S, V = SVD(effective)
+    new_A = V[:new_rank, :]     (new_rank × in)
+    new_B = U[:, :new_rank] * S[:new_rank]  (out × new_rank)
+
+    Preserves the most important directions while compressing.
+    NOTE: Changes adapter_config.json rank — requires save as new adapter.
+    """
+```
+
+**Operation 6: Attention vs MLP Ablation**
+Zero out all attention LoRA or all MLP LoRA to measure relative contribution.
+```python
+def ablate_attention(self):
+    """Zero all attention LoRA weights (q,k,v,o_proj). Keep MLP only."""
+
+def ablate_mlp(self):
+    """Zero all MLP LoRA weights (gate,up,down_proj). Keep attention only."""
+```
+
+#### The Surgery Loop (Eval-Guided)
+
+```python
+class LoRASurgeon:
+    def __init__(self, adapter_path: str, eval_config: str):
+        self.base_weights = load_safetensors(adapter_path)
+        self.adapter_config = load_json(adapter_path / "adapter_config.json")
+        self.eval_config = eval_config
+        self.baseline_score = None
+        self.results: list[SurgeryResult] = []
+
+    async def run_surgery_loop(self, operations: list[SurgeryOp]) -> SurgerySummary:
+        """Main loop: try operations, eval each, keep improvements."""
+
+        # 1. Establish baseline
+        self.baseline_score = await self._evaluate(self.base_weights)
+        logger.info(f"Baseline eval score: {self.baseline_score:.4f}")
+
+        best_weights = self.base_weights.copy()
+        best_score = self.baseline_score
+
+        for op in operations:
+            # 2. Apply operation to current best weights
+            candidate_weights = op.apply(best_weights.copy())
+
+            # 3. Save temporary adapter
+            temp_path = self._save_temp_adapter(candidate_weights)
+
+            # 4. Evaluate
+            score = await self._evaluate(candidate_weights)
+
+            # 5. Record result
+            result = SurgeryResult(
+                operation=op.name,
+                params=op.params,
+                score=score,
+                delta=score - best_score,
+                accepted=score > best_score,
+            )
+            self.results.append(result)
+
+            # 6. Keep or discard
+            if score > best_score:
+                best_weights = candidate_weights
+                best_score = score
+                logger.info(f"  {op.name}: IMPROVED {score:.4f} (+{score-best_score:.4f})")
+            else:
+                logger.info(f"  {op.name}: no improvement ({score:.4f})")
+
+            # 7. Cleanup temp adapter
+            self._cleanup_temp(temp_path)
+
+        # 8. Save winning weights
+        self._save_adapter(best_weights, "surgically_optimized/")
+
+        return SurgerySummary(
+            baseline_score=self.baseline_score,
+            final_score=best_score,
+            improvement=best_score - self.baseline_score,
+            operations_tried=len(self.results),
+            operations_accepted=sum(1 for r in self.results if r.accepted),
+        )
+
+    async def _evaluate(self, weights: dict) -> float:
+        """Save weights to temp adapter, run Evaluator, return pass rate."""
+        temp_path = self._save_temp_adapter(weights)
+
+        # Run evaluation subprocess
+        result = subprocess.run([
+            "python", "-m", "Evaluator.cli",
+            "--model", str(temp_path),
+            "--prompt-set", self.eval_config,
+            "--output-format", "json",
+        ], capture_output=True, text=True)
+
+        # Parse overall_pass_rate from output
+        eval_results = json.loads(result.stdout)
+        return eval_results["results_summary"]["overall_pass_rate"]
+```
+
+#### Default Surgery Configuration
+
+```yaml
+# configs/lora_surgery.yaml
+adapter_path: ""                  # Required — path to trained LoRA adapter
+eval_scenario: "Evaluator/config/scenarios/tool_prompts.yaml"
+
+# Operations to try (in order)
+operations:
+  # Phase 1: Layer importance discovery
+  - type: scale_layer
+    sweep:
+      layers: "all"               # Try each layer independently
+      scales: [0.0, 0.5, 1.5, 2.0]
+    description: "Find which layers matter"
+
+  # Phase 2: Module type ablation
+  - type: scale_module_type
+    sweep:
+      modules: ["q_proj", "k_proj", "v_proj", "o_proj",
+                 "gate_proj", "up_proj", "down_proj"]
+      scales: [0.0]              # Zero each module type
+    description: "Find which module types matter"
+
+  # Phase 3: Checkpoint interpolation (if multiple checkpoints available)
+  - type: interpolate
+    sweep:
+      checkpoint_a: "checkpoints/checkpoint-200"
+      checkpoint_b: "final_model"
+      alphas: [0.0, 0.25, 0.5, 0.75, 1.0]
+    description: "Find optimal blend between checkpoints"
+
+  # Phase 4: DARE regularization
+  - type: dare
+    sweep:
+      drop_rates: [0.05, 0.1, 0.15, 0.2]
+    description: "Post-hoc regularization via weight dropout"
+
+# Output
+output_dir: "experiments/surgery/"
+results_file: "surgery_results.tsv"
+```
+
+#### CLI Integration
+
+```bash
+# Discover which layers matter
+python tuner.py surgery --adapter final_model/ --operation layer-importance
+
+# Interpolate between checkpoints
+python tuner.py surgery --adapter final_model/ --operation interpolate \
+    --checkpoint-a checkpoints/checkpoint-200 \
+    --checkpoint-b final_model
+
+# Full surgery loop (all operations)
+python tuner.py surgery --adapter final_model/ --config configs/lora_surgery.yaml
+
+# Output: experiments/surgery/
+#   surgery_results.tsv    — all operations + scores
+#   layer_importance.png   — heatmap of layer contributions (optional)
+#   best_adapter/          — surgically optimized LoRA weights
+```
+
+#### Key Advantages Over Retraining
+
+| Aspect | Retraining | LoRA Surgery |
+|--------|-----------|--------------|
+| **Time per experiment** | 10-60 min | 1-3 min (eval only) |
+| **GPU needed** | Yes (training) | Yes (inference only) |
+| **VRAM** | 16-24 GB | 8-12 GB (inference) |
+| **Reversibility** | New checkpoint | Instant (just reload original weights) |
+| **Granularity** | Whole-model | Per-layer, per-module |
+| **Search space** | Hyperparameters | Weight space directly |
+
+#### What This Reveals
+
+The layer importance scan is particularly valuable because it answers:
+- **Which layers learned the most?** (zeroing them hurts eval the most)
+- **Which layers are dead weight?** (zeroing them has no impact)
+- **Is attention or MLP more important for tool-calling?** (ablation answers this)
+- **Did training overfit certain layers?** (reducing their scale might improve generalization)
+
+This data feeds back into Implementations 1-2: if we know layers 10-20 matter most, the evolutionary system can focus noise injection on those layers, and the experiment loop can test targeted LoRA configurations (e.g., higher rank for important layers).
+
+**Validation**: Run layer importance scan on existing trained LoRA adapter. Success criteria:
+- Identifies at least 3 layers where zeroing causes >5% eval drop
+- Identifies at least 3 layers where zeroing has <1% impact
+- Surgery loop finds a weight configuration that matches or beats baseline
+
+---
+
 ### Execution Order
 
 ```
@@ -815,12 +1114,28 @@ Phase 1 (Quick Wins — config changes + small code changes):
 
 Phase 2 (Medium effort — new components):
   └─ Implementation 3: FitnessEvaluator as GRPO reward
+  └─ Implementation 5: LoRA weight surgery
 
 Phase 3 (Larger feature — new subsystem):
   └─ Implementation 2: Autonomous experiment loop
 ```
 
-Phase 1 items can be done in parallel with no dependencies. Phase 2 is independent. Phase 3 benefits from Phase 1 (the experiment loop can test evolutionary vs non-evolutionary training).
+Phase 1 items can be done in parallel with no dependencies. Phase 2 items are independent of each other. Phase 3 benefits from Phase 1 (the experiment loop can test evolutionary vs non-evolutionary training) and Phase 2 (surgery findings inform experiment search space).
+
+**Full optimization stack when all implementations complete:**
+```
+Layer 0: LoRA Surgery (post-training, per-weight)
+  "Which weights matter? Can we improve by pruning/scaling?"
+  ↕ feeds insights into ↕
+Layer 1: Evolutionary Training (during training, per-step)
+  "Which gradient update is best this step?"
+  ↕ operates within ↕
+Layer 2: Experiment Loop (per-run, hyperparameter search)
+  "Which training config produces the best model?"
+  ↕ operates within ↕
+Layer 3: Flywheel (per-cycle, dataset optimization)
+  "What data should the next training run use?"
+```
 
 ---
 
