@@ -1,6 +1,6 @@
 ---
 name: fine-tuning
-description: Complete reference for the fine-tuning pipeline (SFT, KTO, GRPO). Covers training CLI flags, YAML configuration, model presets, dataset requirements, LoRA settings, training monitoring, and the full train workflow. Use when training models, configuring training runs, choosing hyperparameters, or troubleshooting training issues. This skill is about USING the training system via CLI and YAML — never modifying source code.
+description: Complete reference for the fine-tuning pipeline (SFT, KTO, GRPO), plus advanced optimization (complexity tiers, autonomous experiment loop, checkpoint evaluation, LoRA weight surgery). Covers training CLI flags, YAML configuration, model presets, dataset requirements, LoRA settings, training monitoring, hyperparameter search, and post-training optimization. Use when training models, configuring training runs, choosing hyperparameters, running surgery/experiment-loop, or troubleshooting training issues. This skill is about USING the training system via CLI and YAML — never modifying source code.
 allowed-tools: Read, Bash, Write, Grep, Glob
 ---
 
@@ -14,8 +14,11 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
 | SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
+| SFT quick iteration | `python train_sft.py --model-size 7b --tier quick` |
 | KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/rtx3090_grpo && python train_grpo.py` |
+| Experiment loop | `python tuner.py experiment-loop` |
+| LoRA surgery | `python tuner.py surgery` |
 | Dry run (test setup) | `python train_sft.py --model-size 7b --dry-run` |
 | Resume checkpoint | `python train_sft.py --resume-from-checkpoint PATH` |
 | Monitor training | `tail -f logs/training_latest.jsonl` |
@@ -29,7 +32,22 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 | **KTO** | Refine with preferences | 1e-6 | 1 | Interleaved True/False | Second — teaches WHICH is better |
 | **GRPO** | Optimize for rewards | 5e-6 | 1 | Prompts + ground truth | Third — optimizes for specific metrics |
 
-**Recommended pipeline:** SFT → KTO → GRPO (each builds on the previous)
+**Recommended pipeline:** SFT → KTO → GRPO → Surgery (each builds on the previous)
+
+## Complexity Tiers
+
+Use `--tier` to quickly set training intensity (SFT and KTO):
+
+| Tier | LoRA Rank | LR | Time | Use Case |
+|------|-----------|------|------|----------|
+| `quick` | r=8 | 5e-4 | ~5 min | Prototyping, idea validation |
+| `standard` | r=64 | 2e-4 | ~30-60 min | Production training |
+| `thorough` | r=128 | 1e-4 | ~2-4 hrs | Maximum quality |
+
+```bash
+python train_sft.py --model-size 7b --tier quick    # Fast iteration
+python train_sft.py --model-size 7b --tier thorough  # Best quality
+```
 
 ## Key Directories
 
@@ -51,15 +69,18 @@ Load the specific reference you need:
 | **Model Presets** | Choosing models, VRAM planning, LoRA settings | `reference/model-presets.md` |
 | **Dataset Formats** | Preparing datasets, format requirements per method | `reference/dataset-formats.md` |
 | **Training Config** | YAML config deep-dive, all settings explained | `reference/training-config.md` |
+| **Checkpoint Evaluation** | Best-checkpoint selection via eval, pre-filtering | `reference/checkpoint-evaluation.md` |
+| **Experiment Loop** | Autonomous hyperparameter search (LLM + LightGBM) | `reference/experiment-loop.md` |
+| **LoRA Surgery** | Eval-guided post-training weight optimization (8 ops) | `reference/lora-surgery.md` |
 | **Cloud Training** | Provider-native persistence, exact-commit rules, cloud smoke tests | `reference/cloud-training.md` |
 | **Troubleshooting** | OOM errors, training instability, platform issues | `reference/troubleshooting.md` |
 
 ## Common Patterns
 
-**Quick SFT test run:**
+**Quick SFT test run (using tier):**
 ```bash
 cd Trainers/rtx3090_sft
-python train_sft.py --model-size 3b --max-steps 50 --dry-run
+python train_sft.py --model-size 3b --tier quick --dry-run
 ```
 
 **KTO with local dataset:**
@@ -78,6 +99,16 @@ python train_grpo.py
 **Enable W&B logging:**
 ```bash
 python train_sft.py --model-size 7b --wandb --wandb-project my-project
+```
+
+**Autonomous hyperparameter search:**
+```bash
+python tuner.py experiment-loop --config configs/flywheel/experiment_loop.yaml
+```
+
+**Post-training LoRA surgery:**
+```bash
+python tuner.py surgery
 ```
 
 **Cloud smoke test:**
@@ -127,10 +158,15 @@ Optional final-model publishing to Hugging Face Hub is off by default and only u
 ## Tips
 
 - Always `--dry-run` first to verify setup without training
+- Use `--tier quick` for fast prototyping (~5 min), `--tier thorough` for best quality
 - Use `--model-size 3b` for fast iteration, `7b` for production
 - SFT with `packing: true` is 2.5-5x faster
 - KTO datasets MUST be interleaved True/False (auto-handled by data loader)
 - GRPO rewards are YAML-driven — edit `configs/rewards/` not Python
+- `fitness.yaml` reward uses FitnessEvaluator for structural validation
+- After training, run `tuner.py surgery` to optimize adapter weights
+- Use `tuner.py experiment-loop` to auto-search hyperparameters (LLM + LightGBM)
+- CheckpointEvaluator finds the actual best checkpoint (not just lowest loss)
 - Monitor `training_latest.jsonl` for real-time metrics
 - Keep VRAM headroom — reduce `--batch-size` if OOM
 - `training_lineage.json` tracks full provenance for reproducibility

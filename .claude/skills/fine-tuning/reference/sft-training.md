@@ -16,6 +16,21 @@ python train_sft.py [options]
 | `--model-size {3b,7b,13b,20b}` | Use preset configuration | — |
 | `--config PATH` | Load custom Python config file | — |
 
+### Complexity Tiers
+| Flag | Description |
+|------|-------------|
+| `--tier {quick,standard,thorough}` | Use preset complexity tier (overrides individual training params) |
+
+| Tier | LoRA Rank | LR | Epochs | Steps | Time | Use Case |
+|------|-----------|------|--------|-------|------|----------|
+| `quick` | r=8, alpha=16 | 5e-4 | 1 | 200 max | ~5 min | Rapid prototyping, idea validation |
+| `standard` | r=64, alpha=128 | 2e-4 | 1 | — | ~30-60 min | Production training |
+| `thorough` | r=128, alpha=256 | 1e-4 | 3 | — | ~2-4 hrs | Maximum quality, publication |
+
+Tier configs: `Trainers/sft/configs/tiers/{quick,standard,thorough}.yaml`
+
+Explicit CLI flags (e.g., `--learning-rate`) override tier defaults.
+
 ### Training Parameters
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -79,10 +94,11 @@ When `completion_only_loss: true` (default):
 
 1. **Setup environment**: `bash setup.sh` (creates conda env, installs deps)
 2. **Prepare dataset**: JSONL with `conversations` field, positive examples only
-3. **Test setup**: `python train_sft.py --model-size 7b --dry-run`
-4. **Train**: `python train_sft.py --model-size 7b`
-5. **Monitor**: Watch live dashboard or `tail -f logs/training_latest.jsonl`
-6. **Upload**: `python src/upload_to_hf.py ./final_model user/repo --save-method merged_16bit`
+3. **Test setup**: `python train_sft.py --model-size 7b --tier quick --dry-run`
+4. **Quick iteration**: `python train_sft.py --model-size 7b --tier quick` (~5 min)
+5. **Production run**: `python train_sft.py --model-size 7b --tier standard`
+6. **Monitor**: Watch live dashboard or `tail -f logs/training_latest.jsonl`
+7. **Upload**: `python src/upload_to_hf.py ./final_model user/repo --save-method merged_16bit`
 
 ---
 

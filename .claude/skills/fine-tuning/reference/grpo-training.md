@@ -80,6 +80,7 @@ All rewards are deterministic YAML rubrics in `configs/rewards/`:
 | `args_match.yaml` | 1.0 | Field-by-field comparison against ground truth |
 | `json_structure.yaml` | 0.3 | Valid JSON parsing |
 | `format.yaml` | 0.2 | Correct `useTools` wrapper format |
+| `fitness.yaml` | 0.3 | Structural fitness via FitnessEvaluator |
 | `context_completeness.yaml` | — | Context field presence |
 | `tool_selection.yaml` | — | Correct tool name |
 
@@ -96,6 +97,29 @@ In reward YAML files:
 - `proportional` — Score based on how many checks pass
 - `tiered` — Different scores for different levels
 - `weighted` — Weighted field mapping with per-field scores
+
+### Structural Fitness Reward (FitnessEvaluator)
+
+The `fitness.yaml` reward uses `FitnessEvaluator` from `shared/validation/fitness.py` to score structural correctness:
+
+```yaml
+# configs/rewards/fitness.yaml
+name: structural_fitness
+weight: 0.3
+type: fitness_evaluator
+config_path: "configs/flywheel/fitness_rules.yaml"
+```
+
+Checks performed:
+- Does the tool call parse correctly?
+- Is the JSON valid?
+- Are required fields present?
+
+This complements semantic rewards (`args_match`, `json_structure`) by validating the response structure against configurable rules in `fitness_rules.yaml`. Useful when training tool-calling models where structural correctness is critical.
+
+**Tuning weight:**
+- Higher weight (0.5+) when structural errors are common early in training
+- Lower weight (0.1-0.2) when the model already produces valid structure
 
 ### Adding Custom Rewards
 

@@ -86,6 +86,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.list_handler import ListHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
         from tuner.handlers.flywheel_handler import FlywheelHandler
+        from tuner.handlers.surgery_handler import SurgeryHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         error_msg = f"Handlers not yet implemented: {e}"
@@ -113,7 +114,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, flywheel, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -154,6 +155,15 @@ def route_command(args: Namespace) -> int:
     # Special handling for flywheel command (has subcommand)
     if command == 'flywheel':
         handler = FlywheelHandler(args=args)
+        return handler.handle()
+
+    # Autonomous experiment loop
+    if command == 'experiment-loop':
+        return _handle_experiment_loop(args, json_mode)
+
+    # Surgery command
+    if command == 'surgery':
+        handler = SurgeryHandler(args=args)
         return handler.handle()
 
     # Experiment pipeline
@@ -213,6 +223,79 @@ def route_command(args: Namespace) -> int:
         # No command = interactive menu
         handler = MainMenuHandler(args=args)
         return handler.handle()
+
+
+def _handle_experiment_loop(args: Namespace, json_mode: bool) -> int:
+    """Run the autonomous experiment loop."""
+    try:
+        from shared.flywheel.experiment_config import load_experiment_config
+        from shared.flywheel.experiment_loop import ExperimentLoop
+    except ImportError as exc:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"Error: experiment loop module unavailable: {exc}")
+        return 1
+
+    config_path = getattr(args, "experiment_loop_config", None)
+    config = load_experiment_config(config_path)
+
+    # Apply CLI overrides
+    max_exp = getattr(args, "max_experiments", None)
+    if max_exp is not None:
+        config.max_experiments = max_exp
+
+    dataset_path = getattr(args, "dataset_path", None)
+    if dataset_path:
+        config.dataset_path = dataset_path
+
+    issues = config.validate()
+    if issues:
+        msg = "Config validation failed:\n  " + "\n  ".join(issues)
+        if json_mode:
+            print(json.dumps({"success": False, "error": msg}, indent=2))
+        else:
+            print(f"Error: {msg}")
+        return 1
+
+    if not json_mode:
+        print(f"Starting experiment loop: {config.max_experiments} experiments")
+        print(f"  Strategy: {config.search_strategy}")
+        print(f"  Trainer: {config.trainer_type}")
+        print(f"  Output: {config.output_dir}")
+
+    try:
+        loop = ExperimentLoop(config)
+        results = loop.run()
+    except Exception as exc:
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"Error during experiment loop: {exc}")
+            import traceback
+            traceback.print_exc()
+        return 1
+
+    completed = [r for r in results if r.status == "completed"]
+    if json_mode:
+        from dataclasses import asdict
+        output = {
+            "success": True,
+            "total_experiments": len(results),
+            "completed": len(completed),
+            "best_score": loop.best_score,
+            "best_config": loop.best_config,
+            "timestamp": datetime.now().isoformat(),
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"\nExperiment loop complete.")
+        print(f"  Total: {len(results)}, Completed: {len(completed)}")
+        print(f"  Best score: {loop.best_score:.4f}")
+        if loop.best_config:
+            print(f"  Best config: {loop.best_config}")
+
+    return 0
 
 
 def _handle_list_runs(args: Namespace, json_mode: bool) -> int:

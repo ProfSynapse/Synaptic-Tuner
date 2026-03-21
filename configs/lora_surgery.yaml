@@ -1,0 +1,50 @@
+# LoRA Weight Surgery Configuration
+# ----------------------------------
+# Controls post-training weight surgery on LoRA adapters.
+# Each operation modifies the adapter weights and evaluates the result.
+# Only changes that improve the eval score by at least `min_improvement`
+# are kept.
+
+surgery:
+  # Minimum eval score improvement required to accept an operation
+  min_improvement: 0.005
+
+  # Evaluation backend: "local" for on-device inference
+  eval_backend: "local"
+
+  # Cloud provider for remote evaluation (used when eval_backend is "cloud")
+  cloud_provider: "hf_jobs"
+
+  # Operations to run, in order (cheapest first)
+  # Available: alpha_sweep, layer_scaling, module_ablation,
+  #            checkpoint_interpolation, dare_drop_rescale,
+  #            metrics_weighted_merge, svd_rank_reduction,
+  #            attention_mlp_ablation
+  operations:
+    - alpha_sweep
+    - layer_scaling
+    - module_ablation
+    - checkpoint_interpolation
+    - dare_drop_rescale
+    - svd_rank_reduction
+    - attention_mlp_ablation
+
+  # Alpha sweep: try these multipliers on the current lora_alpha
+  alpha_sweep:
+    multipliers: [0.5, 0.75, 1.25, 1.5, 2.0]
+
+  # Layer scaling: scale individual layer weights by these factors
+  layer_scaling:
+    scales: [0.0, 0.5, 0.75, 1.25, 1.5]
+
+  # DARE drop-and-rescale: randomly drop weights at these rates
+  dare:
+    drop_rates: [0.1, 0.2, 0.3, 0.5]
+
+  # Checkpoint interpolation: blend ratios (weight toward primary adapter)
+  checkpoint_interpolation:
+    blend_ratios: [0.25, 0.5, 0.75]
+
+  # SVD rank reduction: compress to these fractions of original rank
+  svd_rank_reduction:
+    rank_fractions: [0.25, 0.5, 0.75]

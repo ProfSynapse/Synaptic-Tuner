@@ -20,6 +20,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import logging
 import yaml
 
 # Import shared validation infrastructure
@@ -28,6 +29,8 @@ try:
 except ImportError:
     # Fallback for standalone testing
     StructureValidator = None
+
+logger = logging.getLogger(__name__)
 
 
 class RewardRubric:
@@ -544,6 +547,79 @@ def _coerce_rewards(result: Any, expected_len: int) -> List[float]:
         return [float(result)] * expected_len
 
 
+def fitness_reward(
+    model_output: str,
+    config_path: str | None = None,
+) -> float:
+    """Score model output using FitnessEvaluator for structural correctness.
+
+    Complements semantic reward rubrics:
+    - fitness_reward: Does the tool call parse? Is JSON valid? Required fields present?
+    - args_match reward: Are the field VALUES correct? Right tool selected?
+
+    Args:
+        model_output: Raw model output string
+        config_path: Path to fitness rules YAML. If None, uses default.
+
+    Returns:
+        Score from 0.0 to 1.0
+    """
+    from shared.validation.fitness import FitnessEvaluator
+
+    if config_path is None:
+        config_path = "configs/flywheel/fitness_rules.yaml"
+
+    try:
+        evaluator = FitnessEvaluator(config_path=config_path)
+        result = evaluator.evaluate(model_output)
+        return result.score
+    except Exception as e:
+        logger.warning("Fitness evaluation failed: %s", e)
+        return 0.0
+
+
+def build_fitness_reward(config_path: str | None = None) -> Callable:
+    """Build a TRL-compatible reward function from FitnessEvaluator.
+
+    The evaluator is created once here and reused by the returned closure,
+    avoiding repeated YAML parsing on every call during GRPO training.
+
+    Args:
+        config_path: Path to fitness rules YAML. Passed through to fitness_reward().
+
+    Returns:
+        Reward function with signature (completions, prompts=None, **kwargs) -> List[float]
+    """
+    from shared.validation.fitness import FitnessEvaluator
+
+    if config_path is None:
+        config_path = "configs/flywheel/fitness_rules.yaml"
+
+    try:
+        cached_evaluator = FitnessEvaluator(config_path=config_path)
+    except Exception as e:
+        logger.warning("Failed to create FitnessEvaluator: %s — falling back to per-call", e)
+        cached_evaluator = None
+
+    def _reward(completions, prompts=None, **kwargs):
+        rewards = []
+        for completion in completions:
+            text = _coerce_to_text(completion)
+            if cached_evaluator is not None:
+                try:
+                    result = cached_evaluator.evaluate(text)
+                    rewards.append(result.score)
+                except Exception as e:
+                    logger.warning("Fitness evaluation failed: %s", e)
+                    rewards.append(0.0)
+            else:
+                score = fitness_reward(text, config_path=config_path)
+                rewards.append(score)
+        return rewards
+
+    return _reward
+
+
 def build_rubric_reward(rubric: RewardRubric) -> Callable:
     """Build a reward function from a rubric."""
 
@@ -605,7 +681,13 @@ def build_combined_reward_function(
         if engine:
             rubric = engine.get_rubric(name)
             if rubric:
-                func = build_rubric_reward(rubric)
+                # Check if this is a fitness_evaluator type rubric
+                rubric_type = rubric.config.get("type")
+                if rubric_type == "fitness_evaluator":
+                    fitness_config_path = rubric.config.get("config_path")
+                    func = build_fitness_reward(config_path=fitness_config_path)
+                else:
+                    func = build_rubric_reward(rubric)
                 components.append((name, weight, func))
                 plan.append({
                     "type": "rubric",

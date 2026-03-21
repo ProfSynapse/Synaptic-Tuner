@@ -53,6 +53,7 @@ class CandidateGenerator:
             self.strategy = get_strategy(
                 name=config.strategy,
                 noise_scale=config.noise_scale,
+                max_grad_norm=config.max_grad_norm if config.max_grad_norm else 1.0,
                 scale_factors=config.scale_factors,
             )
 
@@ -128,6 +129,34 @@ class CandidateGenerator:
         else:
             # Default to best
             return max(evaluated, key=lambda c: c.fitness)
+
+    @staticmethod
+    def clip_gradients(
+        gradients: Dict[str, torch.Tensor],
+        max_norm: float = 1.0,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Clip per-parameter gradient norms before candidate generation.
+
+        This prevents evaluation instability when early-training gradient norms
+        are large (e.g., 100+). Each parameter's gradient is independently
+        clipped to have at most ``max_norm`` L2 norm while preserving direction.
+
+        Args:
+            gradients: Dict mapping parameter names to gradient tensors
+            max_norm: Maximum allowed L2 norm per parameter gradient
+
+        Returns:
+            Dict of clipped gradients (same keys, clipped values)
+        """
+        clipped = {}
+        for name, grad in gradients.items():
+            norm = grad.norm()
+            if norm > max_norm:
+                clipped[name] = grad * (max_norm / norm)
+            else:
+                clipped[name] = grad
+        return clipped
 
     @staticmethod
     def extract_gradients(model: torch.nn.Module) -> Dict[str, torch.Tensor]:

@@ -80,6 +80,8 @@ Commands:
   status      System status overview (use --json for structured output)
   doctor      System diagnostics (use --fix to auto-fix issues)
   flywheel    Data flywheel (self-improving training pipeline)
+  experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
+  surgery     LoRA weight surgery (eval-guided post-training optimization)
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
 
@@ -122,7 +124,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -190,6 +192,13 @@ Examples:
         help="Path to flywheel config YAML (flywheel commands only)"
     )
 
+    # Surgery-specific flags
+    parser.add_argument(
+        "--surgery-config",
+        dest="surgery_config",
+        help="Path to LoRA surgery config YAML (surgery command only)"
+    )
+
     # Cloud-specific flags
     parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
     parser.add_argument("--method", choices=["sft", "kto"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
@@ -215,6 +224,19 @@ Examples:
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--job-config", help="Config-driven cloud job YAML (cloud-run workflow).")
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
+
+    # Experiment loop flags
+    parser.add_argument(
+        "--experiment-config",
+        dest="experiment_loop_config",
+        help="Path to experiment loop config YAML (experiment-loop only)"
+    )
+    parser.add_argument(
+        "--max-experiments",
+        type=int,
+        dest="max_experiments",
+        help="Override max number of experiments (experiment-loop only)"
+    )
 
     # list-runs filters (unified tracking registry)
     parser.add_argument("--run-type", help="Filter by run type: sft, kto, grpo, ml, evaluation, cloud_sft, cloud_kto, cloud_grpo (list-runs only)")

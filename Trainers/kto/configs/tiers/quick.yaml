@@ -1,0 +1,10 @@
+# Quick tier: fast iteration for exploring ideas
+# ~5 minutes on consumer GPU, low quality but fast feedback
+r: 8
+lora_alpha: 16
+learning_rate: 5e-6
+num_train_epochs: 1
+max_steps: 200
+warmup_ratio: 0.1
+batch_size: 2
+gradient_accumulation_steps: 2
