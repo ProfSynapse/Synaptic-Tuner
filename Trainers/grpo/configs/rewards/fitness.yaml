@@ -1,0 +1,14 @@
+# Structural fitness reward — validates tool call structure
+# Complements semantic rewards (args_match, json_structure)
+#
+# Uses FitnessEvaluator from shared/validation/fitness.py
+# which runs config-driven structural checks:
+# - Does the tool call parse?
+# - Is JSON valid?
+# - Are required fields present?
+
+name: structural_fitness
+weight: 0.3
+type: fitness_evaluator
+config_path: "configs/flywheel/fitness_rules.yaml"
+description: "Structural correctness: tool call parses, JSON valid, required fields present"
