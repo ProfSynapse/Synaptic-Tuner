@@ -48,6 +48,12 @@ class BaseModelDiscovery:
 
     # Known base models (commented out in config but commonly used)
     KNOWN_BASE_MODELS = [
+        "Qwen/Qwen3.5-0.8B",
+        "Qwen/Qwen3.5-2B",
+        "Qwen/Qwen3.5-4B",
+        "Qwen/Qwen3.5-9B",
+        "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1",
         "unsloth/Qwen3-1.7B-unsloth-bnb-4bit",
         "unsloth/Qwen3-4B-unsloth-bnb-4bit",
         "unsloth/Qwen2.5-3B-Instruct-bnb-4bit",

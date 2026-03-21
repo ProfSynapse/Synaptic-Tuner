@@ -445,6 +445,8 @@ def parse_args(argv=None):
                        help="Model size preset (3b, 7b, 13b, or 20b)")
     parser.add_argument("--config", type=str,
                        help="Path to custom config file")
+    parser.add_argument("--model-name", type=str,
+                       help="Override Hugging Face model name/path")
 
     # Training parameters
     parser.add_argument("--batch-size", type=int,
@@ -459,6 +461,24 @@ def parse_args(argv=None):
                        help="Maximum training steps (overrides epochs)")
     parser.add_argument("--max-seq-length", type=int,
                        help="Override maximum sequence length")
+    parser.add_argument(
+        "--lora-target-modules",
+        type=str,
+        help="Comma-separated LoRA target modules override",
+    )
+    parser.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        dest="load_in_4bit",
+        help="Force 4-bit model loading",
+    )
+    parser.add_argument(
+        "--no-load-in-4bit",
+        action="store_false",
+        dest="load_in_4bit",
+        help="Disable 4-bit model loading",
+    )
+    parser.set_defaults(load_in_4bit=None)
 
     # Dataset parameters
     parser.add_argument("--dataset-name", type=str,
@@ -596,6 +616,16 @@ def run(args: argparse.Namespace):
     if args.max_seq_length:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
+    if args.model_name:
+        config.model.model_name = args.model_name
+    if args.load_in_4bit is not None:
+        config.model.load_in_4bit = args.load_in_4bit
+    if args.lora_target_modules:
+        config.lora.target_modules = [
+            module.strip()
+            for module in args.lora_target_modules.split(",")
+            if module.strip()
+        ]
 
     # Dataset overrides
     if args.dataset_name:
@@ -690,28 +720,32 @@ def run(args: argparse.Namespace):
         hf_token=args.hf_token
     )
 
-    # Apply proper chat template using Unsloth's get_chat_template
-    # This is CRITICAL for VL models and ensures special tokens are handled correctly
+    # Prefer the pretrained chat template when available; otherwise, apply a
+    # family-specific fallback via Unsloth.
     from unsloth.chat_templates import get_chat_template
 
     model_name_lower = config.model.model_name.lower()
-    if "qwen" in model_name_lower:
-        chat_template_name = "chatml"
-    elif "llama" in model_name_lower:
-        chat_template_name = "llama-3"
-    elif "mistral" in model_name_lower:
-        chat_template_name = "mistral"
-    elif "gemma" in model_name_lower:
-        chat_template_name = "gemma"
-    elif "phi" in model_name_lower:
-        chat_template_name = "phi-3"
-    elif "deepseek" in model_name_lower:
-        chat_template_name = "chatml"
+    if getattr(tokenizer, "chat_template", None):
+        chat_template_name = "pretrained"
+        print("✓ Using pretrained chat template from tokenizer")
     else:
-        chat_template_name = "chatml"  # Default fallback
+        if "qwen" in model_name_lower:
+            chat_template_name = "chatml"
+        elif "llama" in model_name_lower or "nemotron" in model_name_lower:
+            chat_template_name = "llama-3"
+        elif "mistral" in model_name_lower:
+            chat_template_name = "mistral"
+        elif "gemma" in model_name_lower:
+            chat_template_name = "gemma"
+        elif "phi" in model_name_lower:
+            chat_template_name = "phi-3"
+        elif "deepseek" in model_name_lower or "smollm" in model_name_lower:
+            chat_template_name = "chatml"
+        else:
+            chat_template_name = "chatml"
 
-    tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
-    print(f"✓ Applied {chat_template_name} chat template via Unsloth")
+        tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
+        print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
     # Load dataset (with preprocessing if packing is enabled)
     use_packing = config.training.packing

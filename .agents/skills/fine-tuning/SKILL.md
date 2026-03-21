@@ -22,6 +22,8 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 | Environment setup | `cd Trainers/rtx3090_sft && bash setup.sh` |
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
+| Battle-of-models catalog | `python3 Trainers/scripts/battle_of_models.py list` |
+| Battle-of-models commands | `python3 Trainers/scripts/battle_of_models.py commands` |
 
 ## Training Methods at a Glance
 
@@ -52,6 +54,8 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 - Prefer repo CLIs and checked-in scripts over ad hoc `python - <<'PY'` runs.
 - For SynthChat generation, use `python3 -m SynthChat.run ...`.
 - For training/eval workflows, use `python tuner.py ...`.
+- For repeatable sweeps, prefer checked-in helper scripts such as `python3 Trainers/scripts/battle_of_models.py ...` over manually retyping `cloud-run` commands.
+- When changing SFT base models, prefer direct trainer flags like `--model-name`, `--no-load-in-4bit`, and `--lora-target-modules` instead of editing `configs/config.yaml` for one-off experiments.
 - Only drop to direct Python snippets for tiny local inspection or one-off parsing when there is no existing CLI/script path; do not use bare Python as the default way to launch real jobs or smoke tests.
 
 ## Progressive Reference
@@ -105,6 +109,13 @@ python tuner.py cloud
 **Custom HF job from checked-in config:**
 ```bash
 python tuner.py cloud-run --job-config Trainers/cloud/jobs/synthchat_vault_kto_pilot.yaml
+```
+
+**List the current battle-of-models sweep catalog:**
+```bash
+python3 Trainers/scripts/battle_of_models.py list
+python3 Trainers/scripts/battle_of_models.py commands
+python3 Trainers/scripts/battle_of_models.py launch qwen35-2b smollm2-1p7b
 ```
 
 **Cloud evaluation against latest HF run (vLLM, no GGUF):**

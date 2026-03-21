@@ -1,0 +1,32 @@
+name: battle-of-models-smollm2-1p7b-sft
+description: Run SFT on the main tool-calling dataset with SmolLM2 1.7B Instruct for the battle-of-the-models sweep.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "a10g-small"
+  timeout_hours: 6
+  labels:
+    task: sft
+    experiment: battle_of_models
+    model: smollm2_1p7b
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  env:
+    PYTHONPATH: "{repo_dir}"
+  steps:
+    - "mkdir -p {output_dir}"
+    - "cd {repo_dir}/Trainers/sft && python train_sft.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket toolset-training-artifacts --artifact-prefix runs/hf_jobs/sft/{timestamp}-{commit8} --output-root {output_dir} --model-name HuggingFaceTB/SmolLM2-1.7B-Instruct --no-load-in-4bit --lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj --batch-size 10"
+
+artifacts:
+  bucket: "toolset-training-artifacts"
+  output_dir: "/workspace/outputs"
+  prefix: "runs/hf_jobs/custom/{job_name}/{timestamp}-{commit8}"
