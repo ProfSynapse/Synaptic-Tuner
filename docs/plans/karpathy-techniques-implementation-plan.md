@@ -179,22 +179,28 @@ evolutionary:
 - `Trainers/sft/train_sft.py` — add `--eval-checkpoints` flag, call after training
 - `Trainers/kto/train_kto.py` — same
 
+**New files** (additional):
+- `shared/eval_backend.py` — `EvalBackend` protocol + `LocalEvalBackend` + `CloudEvalBackend`
+
 **Core logic**:
 ```
 1. Discover checkpoints in run_dir/checkpoints/checkpoint-{step}/
-2. Sort by step, take last N
-3. Include final_model/
-4. Run Evaluator on each → overall_pass_rate
-5. Rank by score, copy best to run_dir/best_checkpoint/
-6. Write checkpoint_eval_results.tsv
+2. Read training log JSONL → extract per-checkpoint loss
+3. Sort by loss ascending, take top N (cheapest pre-filter)
+4. Always include final_model/ regardless of loss rank
+5. Run Evaluator on each via EvalBackend → user's configured metric
+6. Rank by eval score, copy best to run_dir/best_checkpoint/
+7. Write checkpoint_eval_results.tsv (step, loss, eval_score, rank)
 ```
 
 **Acceptance criteria**:
-- [ ] Correctly discovers and evaluates N checkpoints
+- [ ] Correctly discovers checkpoints and pre-filters by training loss
 - [ ] Identifies cases where final_model is NOT the best
-- [ ] Results TSV is parseable, ordered by score
+- [ ] Results TSV includes both training loss and eval score columns
 - [ ] Best checkpoint copy loads successfully for inference
 - [ ] Standalone CLI works independently of training
+- [ ] Works with both `--eval-backend local` and `--eval-backend cloud`
+- [ ] Local backend gates on GPU VRAM, errors with guidance if insufficient
 
 ---
 
@@ -493,8 +499,97 @@ Support:
 
 ---
 
+## Resolved Decisions
+
+### Decision 1: Eval Strategy — Full Eval, User-Configured Checkpoint Selection
+
+**Decision**: Run full eval (whatever scenarios the user has configured) on each checkpoint. No quick-eval shortcut — this system must be flexible for any use case, not just our tool-calling testing.
+
+**Checkpoint selection strategy**: The user configures how many checkpoints to evaluate. Instead of evaluating all checkpoints, select the **top N checkpoints by lowest training loss** from the saved checkpoints. This is a cheap pre-filter (just read the training log JSONL) that avoids wasting eval time on clearly-bad checkpoints.
+
+**Config**:
+```yaml
+checkpoint_eval:
+  eval_top_n: 5              # Evaluate the N checkpoints with lowest training loss
+  eval_scenario: ""           # User provides their own scenario path
+  include_final: true         # Always include final_model regardless of loss rank
+```
+
+**Implementation note**: Read `logs/training_latest.jsonl` to extract per-checkpoint loss, sort ascending, take top N, then run full eval on those. The eval scenario is user-provided — we don't hardcode `tool_prompts.yaml`. This keeps the system general-purpose.
+
+**Impact on plan**:
+- Implementation 1C (`CheckpointEvaluator`) adds loss-based pre-filtering
+- Implementation 3 (Experiment Loop) uses the same pattern — short training run → read final loss → if loss is promising, run full eval
+- Implementation 4 (Surgery) always runs full eval (weight perturbation, not training)
+
+---
+
+### Decision 2: GPU Strategy — Cloud-First, Local Hardware-Gated
+
+**Decision**: Design cloud-first. Local execution should work but must be gated on actual hardware capabilities.
+
+**Rationale**: Not everyone has an RTX 3090. The experiment loop and surgery need inference for eval — this maps naturally to cloud eval (already implemented via HF Jobs in `Trainers/cloud/`). Local should be a convenience option, not the assumed default.
+
+**Architecture**:
+
+```
+ExperimentLoop / LoRASurgeon
+    │
+    ├── eval_backend: "cloud"  (default)
+    │   └── Submit eval job to HF Jobs / cloud provider
+    │       └── Uses existing Trainers/cloud/ infrastructure
+    │       └── No local GPU needed for eval
+    │       └── Parallel eval possible (multiple checkpoints at once)
+    │
+    └── eval_backend: "local"  (opt-in, hardware-gated)
+        └── Check GPU capabilities at startup:
+            ├── nvidia-smi → detect GPU model + VRAM
+            ├── Minimum: 8 GB VRAM for inference-only eval
+            ├── Recommended: 16+ GB for concurrent training + eval
+            └── If insufficient: error with "use --eval-backend cloud"
+```
+
+**Hardware gating logic**:
+```python
+def check_local_eval_capability(model_size: str) -> bool:
+    """Check if local GPU can handle inference for eval."""
+    vram_gb = get_gpu_vram_gb()  # via nvidia-smi or torch.cuda
+    if vram_gb is None:
+        return False  # No GPU detected
+
+    # Minimum VRAM for inference (4-bit quantized)
+    min_vram = {
+        "3b": 4,
+        "7b": 8,
+        "14b": 16,
+        "20b": 24,
+    }
+    required = min_vram.get(model_size, 8)
+    return vram_gb >= required
+```
+
+**Config**:
+```yaml
+experiment_loop:
+  eval_backend: "cloud"          # "cloud" | "local"
+  cloud_provider: "hf_jobs"     # Reuses existing cloud training infra
+  local_min_vram_gb: 8          # Gate for local eval
+
+surgery:
+  eval_backend: "cloud"
+  cloud_provider: "hf_jobs"
+```
+
+**Impact on plan**:
+- Implementation 1C, 3, 4: All eval calls go through an `EvalBackend` abstraction
+- New interface: `EvalBackend.run_eval(adapter_path, scenario) → float`
+- Two implementations: `LocalEvalBackend` (direct inference) and `CloudEvalBackend` (HF Jobs)
+- `LocalEvalBackend` checks hardware before running, errors with guidance if insufficient
+
+---
+
 ## Open Questions
 
-1. **Eval scenario for automated scoring**: Should checkpoint eval / experiment loop / surgery use `tool_prompts.yaml` or a smaller "quick eval" scenario set for faster iteration?
-2. **GPU contention**: Experiment loop and surgery both need GPU for inference/eval. Should they coordinate via the flywheel's GPU mutex, or assume exclusive access?
+1. ~~**Eval scenario for automated scoring**~~ → RESOLVED (Decision 1)
+2. ~~**GPU contention**~~ → RESOLVED (Decision 2)
 3. **Experiment loop search strategy**: Start with random sampling. Add Bayesian optimization (e.g., Optuna) later if random isn't efficient enough?
