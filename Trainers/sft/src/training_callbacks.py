@@ -124,8 +124,9 @@ class MetricsTableCallback(TrainerCallback):
         steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0
         samples_per_sec = (state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps) / elapsed if elapsed > 0 else 0
         capacity_snapshot = capture_runtime_capacity_snapshot(torch)
-        if args.cloud_provider:
-            capacity_snapshot.setdefault("cloud_provider", args.cloud_provider)
+        cloud_provider = getattr(args, "cloud_provider", None)
+        if cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", cloud_provider)
         cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
         if cloud_gpu_type:
             capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)
@@ -462,8 +463,9 @@ class LiveDashboardCallback(TrainerCallback):
             state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps
         ) / elapsed if elapsed > 0 else 0.0
         capacity_snapshot = capture_runtime_capacity_snapshot(torch)
-        if args.cloud_provider:
-            capacity_snapshot.setdefault("cloud_provider", args.cloud_provider)
+        cloud_provider = getattr(args, "cloud_provider", None)
+        if cloud_provider:
+            capacity_snapshot.setdefault("cloud_provider", cloud_provider)
         cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
         if cloud_gpu_type:
             capacity_snapshot.setdefault("cloud_gpu_type", cloud_gpu_type)

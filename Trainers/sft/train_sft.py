@@ -1094,7 +1094,15 @@ def run(args: argparse.Namespace):
                 ),
             )
             if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
-                sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
+                try:
+                    sync_directory_to_hf_bucket(
+                        run_dir,
+                        args.artifact_bucket,
+                        args.artifact_prefix,
+                        token=args.hf_token,
+                    )
+                except Exception as sync_exc:
+                    print(f"[WARN] Failed to sync failed-run artifacts to HF bucket: {sync_exc}")
         raise
 
     training_end_time = time.time()
