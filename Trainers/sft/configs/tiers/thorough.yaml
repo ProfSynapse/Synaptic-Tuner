@@ -1,0 +1,9 @@
+# Thorough tier: maximum quality training
+# ~2-4 hours, best results on sufficient data
+r: 128
+lora_alpha: 256
+learning_rate: 1e-4
+num_train_epochs: 3
+warmup_ratio: 0.1
+batch_size: 4
+gradient_accumulation_steps: 8

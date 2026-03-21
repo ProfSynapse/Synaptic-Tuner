@@ -1,0 +1,9 @@
+# Standard tier: current production defaults
+# ~30-60 minutes, good quality
+r: 64
+lora_alpha: 128
+learning_rate: 1e-6
+num_train_epochs: 1
+warmup_ratio: 0.15
+batch_size: 2
+gradient_accumulation_steps: 4
