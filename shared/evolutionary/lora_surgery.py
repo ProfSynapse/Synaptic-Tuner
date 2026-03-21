@@ -33,7 +33,9 @@ import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional
+
+from shared.eval_backend import EvalBackend, EvalResult
 
 try:
     import torch
@@ -47,19 +49,6 @@ except ImportError:
     st_save_file = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Protocols
-# ---------------------------------------------------------------------------
-
-@runtime_checkable
-class EvalBackend(Protocol):
-    """Protocol for evaluation backends used by surgery operations."""
-
-    async def evaluate(self, adapter_path: str, scenario: str) -> float:
-        """Evaluate an adapter and return a score (higher is better)."""
-        ...
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +333,22 @@ class LoRASurgeon:
         self._work_dir = os.path.join(config.output_dir, "_surgery_work")
 
     # ------------------------------------------------------------------
+    # Context manager & cleanup
+    # ------------------------------------------------------------------
+
+    async def __aenter__(self) -> "LoRASurgeon":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        """Remove the temporary work directory created during surgery."""
+        if os.path.isdir(self._work_dir):
+            shutil.rmtree(self._work_dir)
+            logger.info("Cleaned up work directory: %s", self._work_dir)
+
+    # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
 
@@ -358,80 +363,83 @@ class LoRASurgeon:
         os.makedirs(self.config.output_dir, exist_ok=True)
         os.makedirs(self._work_dir, exist_ok=True)
 
-        baseline_score = await self._evaluate(self.adapter_path)
-        best_score = baseline_score
-        best_adapter = self.adapter_path
-        operations_applied: List[OperationResult] = []
+        try:
+            baseline_score = await self._evaluate(self.adapter_path)
+            best_score = baseline_score
+            best_adapter = self.adapter_path
+            operations_applied: List[OperationResult] = []
 
-        logger.info(
-            "Starting surgery on %s  baseline_score=%.4f",
-            self.adapter_path,
-            baseline_score,
-        )
+            logger.info(
+                "Starting surgery on %s  baseline_score=%.4f",
+                self.adapter_path,
+                baseline_score,
+            )
 
-        for operation_name in self.config.operations:
-            method_name = self._OPERATION_METHODS.get(operation_name)
-            if method_name is None:
-                logger.warning("Unknown operation: %s, skipping", operation_name)
-                continue
+            for operation_name in self.config.operations:
+                method_name = self._OPERATION_METHODS.get(operation_name)
+                if method_name is None:
+                    logger.warning("Unknown operation: %s, skipping", operation_name)
+                    continue
 
-            method = getattr(self, method_name, None)
-            if method is None:
-                logger.warning("Method not found for operation: %s", operation_name)
-                continue
+                method = getattr(self, method_name, None)
+                if method is None:
+                    logger.warning("Method not found for operation: %s", operation_name)
+                    continue
 
-            logger.info("Running operation: %s", operation_name)
+                logger.info("Running operation: %s", operation_name)
 
-            try:
-                result = await self._run_operation(
-                    method, operation_name, best_adapter, best_score
-                )
-            except Exception:
-                logger.exception("Operation %s failed", operation_name)
-                continue
+                try:
+                    result = await self._run_operation(
+                        method, operation_name, best_adapter, best_score
+                    )
+                except Exception:
+                    logger.exception("Operation %s failed", operation_name)
+                    continue
 
-            if result.improvement > self.config.min_improvement:
-                best_score = result.best_score
-                best_adapter = result.adapter_path
-                operations_applied.append(result)
-                logger.info(
-                    "Operation %s improved score: %.4f -> %.4f (+%.4f)",
-                    operation_name,
-                    best_score - result.improvement,
-                    best_score,
-                    result.improvement,
-                )
+                if result.improvement > self.config.min_improvement:
+                    best_score = result.best_score
+                    best_adapter = result.adapter_path
+                    operations_applied.append(result)
+                    logger.info(
+                        "Operation %s improved score: %.4f -> %.4f (+%.4f)",
+                        operation_name,
+                        best_score - result.improvement,
+                        best_score,
+                        result.improvement,
+                    )
+                else:
+                    logger.info(
+                        "Operation %s did not improve score (best=%.4f, improvement=%.4f < min=%.4f)",
+                        operation_name,
+                        result.best_score,
+                        result.improvement,
+                        self.config.min_improvement,
+                    )
+
+            # Copy best adapter to final output location
+            final_path = os.path.join(self.config.output_dir, "best_adapter")
+            if best_adapter != self.adapter_path:
+                _copy_adapter(best_adapter, final_path)
             else:
-                logger.info(
-                    "Operation %s did not improve score (best=%.4f, improvement=%.4f < min=%.4f)",
-                    operation_name,
-                    result.best_score,
-                    result.improvement,
-                    self.config.min_improvement,
-                )
+                _copy_adapter(self.adapter_path, final_path)
 
-        # Copy best adapter to final output location
-        final_path = os.path.join(self.config.output_dir, "best_adapter")
-        if best_adapter != self.adapter_path:
-            _copy_adapter(best_adapter, final_path)
-        else:
-            _copy_adapter(self.adapter_path, final_path)
+            duration = time.time() - start_time
 
-        duration = time.time() - start_time
+            surgery_result = SurgeryResult(
+                baseline_score=baseline_score,
+                final_score=best_score,
+                total_improvement=best_score - baseline_score,
+                operations_applied=operations_applied,
+                best_adapter_path=final_path,
+                duration_seconds=duration,
+            )
 
-        surgery_result = SurgeryResult(
-            baseline_score=baseline_score,
-            final_score=best_score,
-            total_improvement=best_score - baseline_score,
-            operations_applied=operations_applied,
-            best_adapter_path=final_path,
-            duration_seconds=duration,
-        )
+            # Save report
+            self._save_report(surgery_result)
 
-        # Save report
-        self._save_report(surgery_result)
-
-        return surgery_result
+            return surgery_result
+        finally:
+            self.cleanup()
 
     # ------------------------------------------------------------------
     # Operations
@@ -700,6 +708,16 @@ class LoRASurgeon:
         details: Dict[str, Any] = {"dare_scores": {}}
 
         for drop_rate in self.config.dare_drop_rates:
+            # Clamp drop_rate to [0.0, 0.99] to prevent division by zero
+            if drop_rate >= 1.0:
+                logger.warning(
+                    "DARE drop_rate %.2f >= 1.0 would cause division by zero, "
+                    "clamping to 0.99",
+                    drop_rate,
+                )
+                drop_rate = 0.99
+            drop_rate = max(0.0, drop_rate)
+
             variant_dir = os.path.join(
                 self._work_dir, f"dare_{drop_rate:.2f}"
             )
@@ -981,7 +999,8 @@ class LoRASurgeon:
 
     async def _evaluate(self, adapter_path: str) -> float:
         """Evaluate an adapter using the configured eval backend."""
-        return await self.eval_backend.evaluate(adapter_path, self.eval_scenario)
+        result = await self.eval_backend.run_eval(adapter_path, self.eval_scenario)
+        return result.eval_score
 
     async def _run_operation(
         self,

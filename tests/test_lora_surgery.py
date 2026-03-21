@@ -24,6 +24,7 @@ import pytest
 torch = pytest.importorskip("torch")
 st = pytest.importorskip("safetensors.torch")
 
+from shared.eval_backend import EvalResult
 from shared.evolutionary.lora_surgery import (
     LoRASurgeon,
     OperationResult,
@@ -120,14 +121,14 @@ class FakeEvalBackend:
         self._call_count = 0
         self._calls = []
 
-    async def evaluate(self, adapter_path: str, scenario: str) -> float:
+    async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
         self._call_count += 1
         self._calls.append(adapter_path)
         # Return specific score if path matches a pattern, else default
         for pattern, score in self._scores.items():
             if pattern in adapter_path:
-                return score
-        return self._default
+                return EvalResult(eval_score=score)
+        return EvalResult(eval_score=self._default)
 
 
 class ImprovingEvalBackend:
@@ -138,12 +139,12 @@ class ImprovingEvalBackend:
         self._improvement = improvement
         self._call_count = 0
 
-    async def evaluate(self, adapter_path: str, scenario: str) -> float:
+    async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
         self._call_count += 1
         if "test_adapter" in adapter_path and "_surgery_work" not in adapter_path:
-            return self._baseline
+            return EvalResult(eval_score=self._baseline)
         # Variants get a small improvement
-        return self._baseline + self._improvement
+        return EvalResult(eval_score=self._baseline + self._improvement)
 
 
 # ---------------------------------------------------------------------------
@@ -754,7 +755,7 @@ class TestOperationOrdering:
         order_tracker = []
 
         class TrackingBackend:
-            async def evaluate(self, adapter_path: str, scenario: str) -> float:
+            async def run_eval(self, adapter_path: str, scenario: str) -> EvalResult:
                 # Track which operation directory is being evaluated
                 if "_surgery_work" in adapter_path:
                     dirname = os.path.basename(adapter_path)
@@ -762,7 +763,7 @@ class TestOperationOrdering:
                         order_tracker.append("alpha_sweep")
                     elif dirname.startswith("ablate_"):
                         order_tracker.append("module_ablation")
-                return 0.5
+                return EvalResult(eval_score=0.5)
 
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
