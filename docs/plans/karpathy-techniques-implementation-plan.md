@@ -2,7 +2,7 @@
 
 > Generated from research session on 2026-03-21
 > Research doc: `docs/research/karpathy_nanochat_autoresearch.md`
-> Status: PENDING APPROVAL
+> Status: APPROVED → IN_PROGRESS
 
 <!-- Status Lifecycle:
      PENDING APPROVAL → APPROVED → IN_PROGRESS → IMPLEMENTED
