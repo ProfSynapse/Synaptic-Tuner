@@ -194,6 +194,22 @@ class EvolutionaryTrainerWrapper:
             logger.warning("No gradients computed, skipping evolutionary selection")
             return loss.detach()
 
+        # Clip gradients to prevent evaluation instability
+        if self.config.max_grad_norm is not None and self.config.max_grad_norm > 0:
+            base_gradients = CandidateGenerator.clip_gradients(
+                base_gradients, self.config.max_grad_norm
+            )
+
+        # Diagnostic logging for gradient norms
+        if self.config.log_candidates:
+            grad_norms = {name: grad.norm().item() for name, grad in base_gradients.items()}
+            avg_norm = sum(grad_norms.values()) / max(len(grad_norms), 1)
+            logger.info(
+                f"Step {self.current_step}: avg_grad_norm={avg_norm:.4f}, "
+                f"max_grad_norm={max(grad_norms.values()):.4f}, "
+                f"num_params={len(grad_norms)}"
+            )
+
         # Step 3: Generate candidates
         candidates = self.candidate_generator.generate(
             base_gradients,
