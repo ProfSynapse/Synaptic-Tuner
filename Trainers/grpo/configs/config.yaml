@@ -123,6 +123,13 @@ rewards:
       params:
         reward_value: 0.2
 
+    # Optional: Structural fitness via FitnessEvaluator
+    # Validates tool call parses, JSON valid, required fields present
+    # Complements semantic rewards above with structural checks
+    - name: "structural_fitness"
+      weight: 0.3
+      params: {}
+
   # Custom reward functions (optional)
   custom:
     enabled: false
