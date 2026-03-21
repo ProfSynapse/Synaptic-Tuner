@@ -101,6 +101,20 @@ def _sync_bucket(source_path: str, destination_path: str, token: Optional[str]) 
     )
 
 
+def _finalize_cloud_exit_code(exit_code: int, output_json: Path) -> int:
+    """Treat completed evaluations as successful cloud jobs even if test cases failed.
+
+    The evaluator CLI uses non-zero exit codes to signal quality failures
+    (for example, failing test cases). For cloud orchestration we only want
+    runtime/infrastructure failures to mark the HF job as ERROR. If the final
+    structured results exist, the evaluation completed and the cloud job should
+    be considered successful.
+    """
+    if exit_code == 0:
+        return 0
+    return 0 if output_json.exists() else exit_code
+
+
 class _PeriodicBucketSyncer:
     """Best-effort periodic sync for incremental evaluation progress."""
 
@@ -253,7 +267,13 @@ def main() -> int:
         token=hf_token,
     )
     print(f"Evaluation artifacts synced to: hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
-    return exit_code
+    final_exit_code = _finalize_cloud_exit_code(exit_code, output_json)
+    if final_exit_code == 0 and exit_code != 0:
+        print(
+            "Evaluation completed with failed cases, but final artifacts were written. "
+            "Returning success for cloud job status."
+        )
+    return final_exit_code
 
 
 if __name__ == "__main__":
