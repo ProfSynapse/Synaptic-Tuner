@@ -80,6 +80,7 @@ Commands:
   status      System status overview (use --json for structured output)
   doctor      System diagnostics (use --fix to auto-fix issues)
   flywheel    Data flywheel (self-improving training pipeline)
+  surgery     LoRA weight surgery (eval-guided post-training optimization)
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
 
@@ -122,7 +123,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -188,6 +189,13 @@ Examples:
         "--flywheel-config",
         dest="flywheel_config",
         help="Path to flywheel config YAML (flywheel commands only)"
+    )
+
+    # Surgery-specific flags
+    parser.add_argument(
+        "--surgery-config",
+        dest="surgery_config",
+        help="Path to LoRA surgery config YAML (surgery command only)"
     )
 
     # Cloud-specific flags
