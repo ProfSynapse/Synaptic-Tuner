@@ -145,6 +145,13 @@ class CloudEvaluationProgressWriter:
         append_progress_event(self.progress_log_path, {"event": "complete"})
         self.sync(force=True)
 
+    def write_failure(self, message: str) -> None:
+        append_progress_event(
+            self.progress_log_path,
+            {"event": "failure", "reason": _truncate_message(message, limit=200)},
+        )
+        self.sync(force=True)
+
     def sync(self, *, force: bool = False) -> None:
         if not force or self.sync_callback is None:
             return

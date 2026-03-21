@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -101,6 +102,59 @@ def simplify_issue_message(msg: str, display_config: Dict[str, Any]) -> str | No
                 return replacement
 
     return msg
+
+
+def _write_markdown(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _write_partial_outputs(
+    *,
+    records: List[Any],
+    metadata: Dict[str, Any],
+    output_path: Path | None,
+    markdown_path: Path | None,
+    model_name: str,
+    test_suite_name: str,
+    artifact_status: str,
+    failure_message: str | None = None,
+) -> None:
+    if output_path is None and markdown_path is None:
+        return
+
+    payload = build_run_payload(records, metadata=metadata)
+    payload["metadata"]["artifact_status"] = artifact_status
+    payload["metadata"]["partial_record_count"] = len(records)
+    if failure_message:
+        payload["metadata"]["failure_message"] = failure_message
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+    if markdown_path is not None:
+        _write_markdown(markdown_path, render_markdown(records, model_name, test_suite_name))
+
+
+def _write_failure_artifact(
+    path: Path | None,
+    *,
+    message: str,
+    partial_record_count: int,
+    partial_results_path: Path | None = None,
+) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "status": "failed",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "error": message,
+        "partial_record_count": partial_record_count,
+        "partial_results_path": str(partial_results_path) if partial_results_path else None,
+        "partial_results_available": bool(partial_results_path and partial_results_path.exists()),
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -247,6 +301,10 @@ Backend Configuration:
         help="Disable live dashboard, use simple text output",
     )
     parser.add_argument("--progress-jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--partial-output-json", help=argparse.SUPPRESS)
+    parser.add_argument("--partial-markdown", help=argparse.SUPPRESS)
+    parser.add_argument("--failure-json", help=argparse.SUPPRESS)
+    parser.add_argument("--partial-write-every", type=int, default=5, help=argparse.SUPPRESS)
 
     # Unified tracking: link evaluation to a training run
     parser.add_argument(
@@ -302,6 +360,10 @@ def main(argv: List[str] | None = None) -> int:
     # Resolve paths
     output_path = expand_path(args.output) if args.output else default_output_path()
     markdown_path = expand_path(args.markdown) if args.markdown else None
+    partial_output_path = expand_path(args.partial_output_json) if args.partial_output_json else None
+    partial_markdown_path = expand_path(args.partial_markdown) if args.partial_markdown else None
+    failure_path = expand_path(args.failure_json) if args.failure_json else None
+    partial_write_every = max(1, int(args.partial_write_every or 5))
     config_dir = expand_path(args.config_dir)
 
     # Require --scenario or --preset
@@ -398,6 +460,8 @@ def main(argv: List[str] | None = None) -> int:
             backend=args.backend,
             model=args.model,
         )
+
+    observed_records: List[Any] = []
 
     environment_validator = None
     if args.env_backend != "none":
@@ -506,6 +570,38 @@ def main(argv: List[str] | None = None) -> int:
             return
         progress_writer.write_record(record, issue_formatter=format_issue_for_display)
 
+    def build_current_metadata() -> Dict[str, Any]:
+        metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
+        if args.env_backend != "none":
+            metadata["environment"] = {
+                "backend": args.env_backend,
+                "template": args.env_template,
+                "timeout_seconds": args.env_timeout,
+                "tool_schema_path": args.env_tool_schema,
+                "execution_config_path": args.env_exec_config,
+            }
+        return metadata
+
+    def maybe_write_partial_snapshot(*, artifact_status: str = "partial", failure_message: str | None = None, force: bool = False) -> None:
+        if partial_output_path is None and partial_markdown_path is None:
+            return
+        if not force and len(observed_records) % partial_write_every != 0:
+            return
+        _write_partial_outputs(
+            records=observed_records,
+            metadata=build_current_metadata(),
+            output_path=partial_output_path,
+            markdown_path=partial_markdown_path,
+            model_name=args.model,
+            test_suite_name=str(prompt_path.name),
+            artifact_status=artifact_status,
+            failure_message=failure_message,
+        )
+
+    def on_record_partial(record):
+        observed_records.append(record)
+        maybe_write_partial_snapshot()
+
     # Fallback text-based callback (original implementation)
     def on_record_text(record):
         """Simple text output for each record."""
@@ -559,14 +655,28 @@ def main(argv: List[str] | None = None) -> int:
     callbacks = [on_record_dashboard] if use_dashboard else [on_record_text]
     if progress_writer is not None:
         callbacks.append(on_record_progress)
+    if partial_output_path is not None or partial_markdown_path is not None:
+        callbacks.append(on_record_partial)
 
     def on_record(record):
         for callback in callbacks:
             callback(record)
 
-    # Run evaluation with appropriate callback
-    if use_dashboard:
-        with dashboard:
+    try:
+        # Run evaluation with appropriate callback
+        if use_dashboard:
+            with dashboard:
+                records = evaluate_cases(
+                    selected_cases,
+                    client=client,
+                    dry_run=config.dry_run,
+                    validate_context=args.validate_context,
+                    environment_validator=environment_validator,
+                    judge_validator=judge_validator,
+                    on_record=on_record,
+                )
+        else:
+            print(f"\nRunning {len(selected_cases)} evaluations...\n")
             records = evaluate_cases(
                 selected_cases,
                 client=client,
@@ -576,30 +686,23 @@ def main(argv: List[str] | None = None) -> int:
                 judge_validator=judge_validator,
                 on_record=on_record,
             )
-    else:
-        print(f"\nRunning {len(selected_cases)} evaluations...\n")
-        records = evaluate_cases(
-            selected_cases,
-            client=client,
-            dry_run=config.dry_run,
-            validate_context=args.validate_context,
-            environment_validator=environment_validator,
-            judge_validator=judge_validator,
-            on_record=on_record,
+    except Exception as exc:
+        failure_message = f"{type(exc).__name__}: {exc}"
+        maybe_write_partial_snapshot(artifact_status="failed", failure_message=failure_message, force=True)
+        _write_failure_artifact(
+            failure_path,
+            message=failure_message,
+            partial_record_count=len(observed_records),
+            partial_results_path=partial_output_path,
         )
+        if progress_writer is not None:
+            progress_writer.write_failure(failure_message)
+        raise
 
     print()  # Blank line before summary
 
     # Build and save results
-    metadata = build_metadata(config, settings, total_cases, len(selected_cases), args.backend)
-    if environment_validator is not None:
-        metadata["environment"] = {
-            "backend": args.env_backend,
-            "template": args.env_template,
-            "timeout_seconds": args.env_timeout,
-            "tool_schema_path": args.env_tool_schema,
-            "execution_config_path": args.env_exec_config,
-        }
+    metadata = build_current_metadata()
     payload = build_run_payload(records, metadata=metadata)
     write_json(config.output_path, payload)
     print(f"Results saved to {config.output_path}")
@@ -617,7 +720,7 @@ def main(argv: List[str] | None = None) -> int:
         print(console_summary(records))
 
     if markdown_path:
-        markdown_path.write_text(render_markdown(records, args.model, str(prompt_path.name)), encoding="utf-8")
+        _write_markdown(markdown_path, render_markdown(records, args.model, str(prompt_path.name)))
 
     if progress_writer is not None:
         progress_writer.write_complete()

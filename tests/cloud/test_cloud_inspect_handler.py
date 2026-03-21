@@ -76,8 +76,48 @@ def test_handle_loads_and_reports_eval_results(repo_root, clean_env):
                 "_list_remote_runs",
                 return_value=[{"method": "sft", "slug": "20260315_010000-abc", "prefix": "runs/hf_jobs/sft/20260315_010000-abc"}],
             ):
+                    with patch.object(handler, "_list_eval_runs", return_value=[{"slug": "20260315_020000", "prefix": "runs/hf_jobs/sft/20260315_010000-abc/evaluations/vllm/20260315_020000"}]):
+                        with patch.object(handler, "_download_eval_artifacts", return_value={"payload": payload, "partial": False, "failure": None, "files": ["evaluation_results.json"]}):
+                            exit_code = handler.handle()
+
+    assert exit_code == 0
+
+
+def test_handle_accepts_partial_eval_artifacts(repo_root, clean_env):
+    clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+    args = Namespace(
+        json=False,
+        run="latest",
+        eval_run="latest",
+        method="sft",
+        bucket=None,
+    )
+    handler = CloudInspectHandler(args=args)
+    handler._repo_root = repo_root
+
+    payload = {
+        "summary": {"passed": 3, "warned": 0, "failed": 1, "total": 4, "request_errors": 0},
+        "records": [],
+    }
+
+    with patch.object(handler._cloud_eval, "_validate_environment", return_value=MagicMock()):
+        with patch.object(handler._cloud_eval, "_resolve_bucket_id", return_value="test-user/toolset-training-artifacts"):
+            with patch.object(
+                handler._cloud_eval,
+                "_list_remote_runs",
+                return_value=[{"method": "sft", "slug": "20260315_010000-abc", "prefix": "runs/hf_jobs/sft/20260315_010000-abc"}],
+            ):
                 with patch.object(handler, "_list_eval_runs", return_value=[{"slug": "20260315_020000", "prefix": "runs/hf_jobs/sft/20260315_010000-abc/evaluations/vllm/20260315_020000"}]):
-                    with patch.object(handler, "_download_eval_payload", return_value=payload):
+                    with patch.object(
+                        handler,
+                        "_download_eval_artifacts",
+                        return_value={
+                            "payload": payload,
+                            "partial": True,
+                            "failure": {"error": "RuntimeError: boom"},
+                            "files": ["evaluation_results.partial.json", "evaluation_failure.json"],
+                        },
+                    ):
                         exit_code = handler.handle()
 
     assert exit_code == 0

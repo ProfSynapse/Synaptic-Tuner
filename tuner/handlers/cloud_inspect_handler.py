@@ -80,11 +80,11 @@ class CloudInspectHandler(BaseHandler):
 
         raise RuntimeError(f"Cloud evaluation run not found: {requested_eval}")
 
-    def _download_eval_payload(self, bucket_id: str, eval_prefix: str) -> Optional[Dict]:
+    def _download_eval_artifacts(self, bucket_id: str, eval_prefix: str) -> Dict:
         try:
             from huggingface_hub import sync_bucket
         except ImportError:
-            return None
+            return {}
 
         local_root = Path(tempfile.mkdtemp(prefix="cloud-inspect-"))
         try:
@@ -93,9 +93,29 @@ class CloudInspectHandler(BaseHandler):
                 str(local_root),
             )
             results_path = local_root / "evaluation_results.json"
-            if not results_path.exists():
-                return None
-            return json.loads(results_path.read_text(encoding="utf-8"))
+            partial_results_path = local_root / "evaluation_results.partial.json"
+            failure_path = local_root / "evaluation_failure.json"
+            payload = None
+            partial = False
+            failure = None
+            if results_path.exists():
+                payload = json.loads(results_path.read_text(encoding="utf-8"))
+            elif partial_results_path.exists():
+                payload = json.loads(partial_results_path.read_text(encoding="utf-8"))
+                partial = True
+            if failure_path.exists():
+                failure = json.loads(failure_path.read_text(encoding="utf-8"))
+            files = sorted(
+                str(path.relative_to(local_root))
+                for path in local_root.rglob("*")
+                if path.is_file()
+            )
+            return {
+                "payload": payload,
+                "partial": partial,
+                "failure": failure,
+                "files": files,
+            }
         finally:
             shutil.rmtree(local_root, ignore_errors=True)
 
@@ -128,6 +148,11 @@ class CloudInspectHandler(BaseHandler):
                 seen.add(reason)
 
         return "\n".join(deduped) if deduped else "No failure reason captured."
+
+    def _extract_failure_reason(self, record: Dict) -> str:
+        """Backward-compatible singular alias used by older tests/callers."""
+        reasons = self._extract_failure_reasons(record)
+        return reasons.split("\n", 1)[0] if reasons else "No failure reason captured."
 
     def _print_failures(self, payload: Dict) -> None:
         records = payload.get("records") or []
@@ -174,20 +199,24 @@ class CloudInspectHandler(BaseHandler):
             selected_run = self._cloud_eval._select_run(runs, getattr(self.args, "run", None))
             eval_runs = self._list_eval_runs(huggingface_hub, bucket_id, selected_run["prefix"])
             selected_eval = self._select_eval_run(eval_runs, getattr(self.args, "eval_run", None))
-            payload = self._download_eval_payload(bucket_id, selected_eval["prefix"])
+            artifacts = self._download_eval_artifacts(bucket_id, selected_eval["prefix"])
+            payload = artifacts.get("payload")
             if not payload:
-                print_error("evaluation_results.json not found for the selected evaluation run.")
+                available = ", ".join(artifacts.get("files") or []) or "(no files)"
+                print_error(f"No structured evaluation results found for the selected run. Available files: {available}")
                 return 1
         except Exception as exc:
             print_error(str(exc))
             return 1
 
         summary = payload.get("summary") or {}
+        status_label = "partial" if artifacts.get("partial") else "final"
         print_config(
             {
                 "Bucket": bucket_id,
                 "Training Run": selected_run["prefix"],
                 "Evaluation Run": selected_eval["prefix"],
+                "Artifact Status": status_label,
                 "Passed": str(summary.get("passed", 0)),
                 "Warned": str(summary.get("warned", 0)),
                 "Failed": str(summary.get("failed", 0)),
@@ -196,6 +225,9 @@ class CloudInspectHandler(BaseHandler):
             },
             "Cloud Evaluation Summary",
         )
+        failure = artifacts.get("failure") or {}
+        if failure:
+            print_info(f"Failure artifact present: {failure.get('error', 'unknown error')}")
 
         self._print_failures(payload)
         return 0

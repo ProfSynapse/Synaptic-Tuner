@@ -1,6 +1,7 @@
+import json
 from types import SimpleNamespace
 
-from shared.cloud_eval_progress import EvaluationDashboardReplayer, extract_record_progress
+from shared.cloud_eval_progress import CloudEvaluationProgressWriter, EvaluationDashboardReplayer, extract_record_progress
 
 
 def test_extract_record_progress_uses_issue_formatter():
@@ -61,3 +62,17 @@ def test_dashboard_replayer_applies_meta_and_result_events():
             "behavior_passed": False,
         }
     ]
+
+
+def test_progress_writer_writes_failure_event(tmp_path):
+    path = tmp_path / "logs" / "eval_progress.jsonl"
+    sync_calls = []
+    writer = CloudEvaluationProgressWriter(path, sync_callback=lambda p: sync_calls.append(p))
+
+    writer.write_failure("runtime blew up badly")
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    payload = json.loads(lines[-1])
+    assert payload["event"] == "failure"
+    assert "runtime blew up badly" in payload["reason"]
+    assert sync_calls == [path.parent]

@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -163,6 +164,9 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
+    partial_output_json = results_dir / "evaluation_results.partial.json"
+    partial_output_md = results_dir / "evaluation_results.partial.md"
+    failure_json = results_dir / "evaluation_failure.json"
 
     # Download only the adapter payload needed for direct Unsloth LoRA evaluation.
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
@@ -184,6 +188,12 @@ def main() -> int:
         str(output_md),
         "--lineage",
         str(lineage_json),
+        "--partial-output-json",
+        str(partial_output_json),
+        "--partial-markdown",
+        str(partial_output_md),
+        "--failure-json",
+        str(failure_json),
     ]
 
     if args.preset:
@@ -208,9 +218,9 @@ def main() -> int:
     cli_args.extend(["--progress-jsonl", str(progress_log_path), "--no-dashboard"])
 
     progress_syncer = _PeriodicBucketSyncer(
-        progress_dir,
+        results_dir,
         args.bucket_id,
-        f"{args.eval_prefix}/logs",
+        args.eval_prefix,
         hf_token,
         interval_seconds=15,
     )
@@ -218,6 +228,21 @@ def main() -> int:
     try:
         progress_syncer.start()
         exit_code = evaluator_main(cli_args)
+    except Exception as exc:
+        traceback.print_exc()
+        failure_payload = {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        }
+        failure_json.write_text(json.dumps(failure_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        progress_syncer.sync_once()
+        _sync_bucket(
+            str(results_dir),
+            f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
+            token=hf_token,
+        )
+        return 1
     finally:
         progress_syncer.stop()
         progress_syncer.sync_once()
