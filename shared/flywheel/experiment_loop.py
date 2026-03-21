@@ -610,7 +610,7 @@ class ExperimentLoop:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600,  # 1 hour hard timeout
+                timeout=self.config.training_timeout_seconds,
             )
             if proc.returncode != 0:
                 logger.warning(
@@ -674,15 +674,39 @@ class ExperimentLoop:
         back to using inverted training loss as a proxy score.
         """
         try:
-            from shared.checkpoint_eval import CheckpointEvaluator
+            import asyncio
 
-            evaluator = CheckpointEvaluator()
-            score = evaluator.evaluate(
-                checkpoint_dir=str(run_dir),
-                scenario=self.config.eval_scenario,
-                backend=self.config.eval_backend,
+            from shared.checkpoint_eval import CheckpointEvaluator
+            from shared.eval_backend import create_eval_backend
+
+            backend = create_eval_backend(
+                backend_type=self.config.eval_backend,
+                min_vram_gb=self.config.local_min_vram_gb,
             )
-            return score
+            evaluator = CheckpointEvaluator(
+                run_dir=str(run_dir),
+                eval_backend=backend,
+                eval_scenario=self.config.eval_scenario,
+            )
+
+            # evaluate_checkpoints is async; run it in the current event loop
+            # or create one if none exists
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # Already in async context — create a new event loop in a thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    report = pool.submit(
+                        asyncio.run, evaluator.evaluate_checkpoints(top_n=5)
+                    ).result()
+            else:
+                report = asyncio.run(evaluator.evaluate_checkpoints(top_n=5))
+
+            return report.best.eval_score
         except ImportError:
             logger.debug(
                 "CheckpointEvaluator not available; "

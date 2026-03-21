@@ -181,10 +181,14 @@ class CheckpointEvaluator:
                 log_path = self.run_dir / "logs" / "training_latest.jsonl"
                 if log_path.exists():
                     try:
+                        last_line = None
                         with open(log_path) as f:
-                            lines = f.readlines()
-                        if lines:
-                            last_entry = json.loads(lines[-1].strip())
+                            for line in f:
+                                stripped = line.strip()
+                                if stripped:
+                                    last_line = stripped
+                        if last_line:
+                            last_entry = json.loads(last_line)
                             final_loss = last_entry.get("loss") or last_entry.get(
                                 "train_loss"
                             )
