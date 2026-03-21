@@ -806,6 +806,154 @@ if args.tier:
 
 ---
 
+### Implementation 4b: Best-Checkpoint Selection via Eval
+
+**Goal**: After training completes, automatically evaluate the last N checkpoints and select the best one — not just the final checkpoint.
+
+Training loss is a poor proxy for downstream task quality. A model with the lowest training loss may have overfit. The checkpoint that actually performs best on eval is often an earlier one. This is cheap to discover: just run the Evaluator on each saved checkpoint.
+
+**Files to modify**:
+- `Trainers/sft/train_sft.py` — add `--eval-checkpoints N` flag
+- `Trainers/kto/train_kto.py` — same
+- `tuner.py` — surface in CLI menu
+
+**New files**:
+- `shared/checkpoint_eval.py` — CheckpointEvaluator class
+
+**How it works**:
+
+```python
+# shared/checkpoint_eval.py
+class CheckpointEvaluator:
+    def __init__(self, run_dir: str, eval_scenario: str):
+        self.run_dir = Path(run_dir)
+        self.eval_scenario = eval_scenario
+
+    async def evaluate_checkpoints(
+        self,
+        last_n: int = 0,  # 0 = all checkpoints
+    ) -> CheckpointReport:
+        """Evaluate last N checkpoints + final_model, pick the best.
+
+        1. Discover checkpoints: run_dir/checkpoints/checkpoint-{step}/
+        2. Sort by step number
+        3. Take last N (or all)
+        4. Also include final_model/
+        5. Run Evaluator on each → get overall_pass_rate
+        6. Rank by eval score
+        7. Copy best to run_dir/best_checkpoint/
+        8. Write checkpoint_eval_results.tsv
+        """
+        checkpoints = self._discover_checkpoints()
+
+        if last_n > 0:
+            checkpoints = checkpoints[-last_n:]
+
+        # Always include final_model
+        final = self.run_dir / "final_model"
+        if final.exists() and final not in checkpoints:
+            checkpoints.append(final)
+
+        results = []
+        for ckpt in checkpoints:
+            score = await self._run_eval(ckpt)
+            results.append(CheckpointResult(
+                path=ckpt,
+                step=self._extract_step(ckpt),
+                eval_score=score,
+            ))
+
+        # Sort by score, pick best
+        results.sort(key=lambda r: r.eval_score, reverse=True)
+        best = results[0]
+
+        # Report
+        logger.info(f"Best checkpoint: {best.path} (score={best.eval_score:.4f})")
+        if best.path != final:
+            logger.info(f"  ⚠ Final model scored {results[-1].eval_score:.4f} — "
+                       f"earlier checkpoint is {best.eval_score - results[-1].eval_score:.4f} better")
+
+        # Copy best to best_checkpoint/
+        self._copy_best(best.path)
+
+        # Write results
+        self._write_tsv(results)
+
+        return CheckpointReport(
+            checkpoints_evaluated=len(results),
+            best_checkpoint=best,
+            final_model_rank=next(
+                i+1 for i, r in enumerate(results) if r.path == final
+            ),
+            results=results,
+        )
+
+    async def _run_eval(self, checkpoint_path: Path) -> float:
+        """Run Evaluator on a single checkpoint, return pass rate."""
+        result = subprocess.run([
+            "python", "-m", "Evaluator.cli",
+            "--model", str(checkpoint_path),
+            "--prompt-set", self.eval_scenario,
+            "--output-format", "json",
+        ], capture_output=True, text=True)
+        eval_results = json.loads(result.stdout)
+        return eval_results["results_summary"]["overall_pass_rate"]
+```
+
+**Integration with training**:
+
+```python
+# train_sft.py — after training completes
+if args.eval_checkpoints:
+    evaluator = CheckpointEvaluator(
+        run_dir=output_dir,
+        eval_scenario=args.eval_scenario or "Evaluator/config/scenarios/tool_prompts.yaml",
+    )
+    report = await evaluator.evaluate_checkpoints(last_n=args.eval_checkpoints)
+    logger.info(f"Best: step {report.best_checkpoint.step} "
+               f"(score={report.best_checkpoint.eval_score:.4f})")
+```
+
+**CLI usage**:
+```bash
+# Evaluate last 5 checkpoints after training
+python train_sft.py --config config.yaml --eval-checkpoints 5
+
+# Standalone: evaluate checkpoints from a previous run
+python -m shared.checkpoint_eval \
+    --run-dir sft_output_rtx3090/20260321_120000 \
+    --last-n 5 \
+    --eval-scenario Evaluator/config/scenarios/tool_prompts.yaml
+```
+
+**Output**:
+```
+experiments/checkpoint_eval/
+├── checkpoint_eval_results.tsv   # step | path | eval_score | rank
+└── best_checkpoint/              # Copy of the winning checkpoint
+```
+
+**Example output**:
+```
+Step    Path                              Score   Rank
+500     checkpoints/checkpoint-500/       0.82    1     ← BEST
+400     checkpoints/checkpoint-400/       0.79    2
+600     final_model/                      0.76    3     ← Final was 3rd!
+300     checkpoints/checkpoint-300/       0.74    4
+200     checkpoints/checkpoint-200/       0.68    5
+```
+
+**Why this matters**: In practice, final checkpoint ≠ best checkpoint. Training loss typically continues decreasing while eval quality peaks and then degrades (overfitting). This is a ~30-minute investment (5 checkpoints × ~5 min eval each) that can catch 5-10% eval quality sitting in an earlier checkpoint.
+
+**Feeds into surgery**: Once we know the best checkpoint AND the final checkpoint, checkpoint interpolation (Implementation 5, Operation 3) can search for an even better blend between them.
+
+**Validation**: Run on an existing training run with 5+ saved checkpoints. Success criteria:
+- Discovers that final_model is NOT always the best (expect this ~40% of the time)
+- Results TSV is parseable and ordered correctly
+- Best checkpoint copy is functional (can be loaded for inference)
+
+---
+
 ### Implementation 5: LoRA Weight Surgery (Eval-Guided Post-Training Optimization)
 
 **Goal**: Directly manipulate trained LoRA weights — scaling, pruning, interpolating, zeroing layers — and use the Evaluator as a fitness signal to find optimal weight configurations WITHOUT retraining.
@@ -1159,6 +1307,7 @@ This data feeds back into Implementations 1-2: if we know layers 10-20 matter mo
 Phase 1 (Quick Wins — config changes + small code changes):
   └─ Implementation 1: Fix evolutionary training
   └─ Implementation 4: Complexity tiers
+  └─ Implementation 4b: Best-checkpoint selection via eval
 
 Phase 2 (Medium effort — new components):
   └─ Implementation 3: FitnessEvaluator as GRPO reward
@@ -1168,7 +1317,9 @@ Phase 3 (Larger feature — new subsystem):
   └─ Implementation 2: Autonomous experiment loop
 ```
 
-Phase 1 items can be done in parallel with no dependencies. Phase 2 items are independent of each other. Phase 3 benefits from Phase 1 (the experiment loop can test evolutionary vs non-evolutionary training) and Phase 2 (surgery findings inform experiment search space).
+Phase 1 items can be done in parallel with no dependencies. 4b is the easiest win — just eval existing checkpoints. Phase 2 items are independent of each other. Phase 3 benefits from Phase 1 (the experiment loop can test evolutionary vs non-evolutionary training) and Phase 2 (surgery findings inform experiment search space).
+
+4b naturally feeds into Implementation 5: once you know the best and final checkpoints, checkpoint interpolation can search for an even better blend between them.
 
 **Full optimization stack when all implementations complete:**
 ```
