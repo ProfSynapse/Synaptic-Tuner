@@ -255,6 +255,156 @@ Our trainer configs already use YAML with all hyperparameters in one place. The 
 
 ---
 
+## Deep Dive: Evolutionary Training System (Existing)
+
+### Architecture
+
+Located in `shared/evolutionary/`, this is a **Gradient + Evolutionary Strategy hybrid** that intercepts SFT training steps:
+
+```
+shared/evolutionary/
+├── config.py                    # EvolutionaryConfig dataclass
+├── trainer_wrapper.py           # EvolutionaryTrainerWrapper (main, ~1154 lines)
+├── candidate_generator.py       # Candidate orchestration + selection
+└── strategies/
+    ├── base.py                  # GradientCandidate dataclass
+    ├── gradient_noise.py        # Gaussian noise on gradients
+    ├── scale_variation.py       # Uniform gradient scaling [0.5x, 1.0x, 1.5x, 2.0x]
+    └── combined.py              # Mix of both strategies
+```
+
+### How It Works (Per Training Step)
+
+1. Standard forward + backward pass → extract base gradients
+2. Generate N candidate gradient modifications (default: 4)
+3. For each candidate: temporarily apply gradients → forward pass on eval batch → compute validation loss → restore weights
+4. Select best candidate by fitness (`1/(1+val_loss)`)
+5. Replace `param.grad` with selected candidate's gradients
+6. Let optimizer apply the winning gradients
+
+### How It Patches Unsloth — It Doesn't
+
+The wrapper **does not patch Unsloth**. It replaces `SFTTrainer.training_step` at runtime:
+
+```python
+self._original_training_step = self.trainer.training_step
+self.trainer.training_step = evolutionary_training_step
+```
+
+Unsloth's custom CUDA kernels still run normally through `trainer.compute_loss()`. The wrapper only uses standard PyTorch operations (`param.grad`, `param.data.sub_()`, `param.data.copy_()`). No generation calls, no interference with Flash Attention or fused ops.
+
+**Compatibility chain**: Unsloth patches model → LoRA applied → SFTTrainer wraps model → Evolutionary wraps SFTTrainer's training_step method. Each layer is transparent to the one below.
+
+### Current Status: Disabled
+
+```yaml
+evolutionary:
+  enabled: false  # Disabled - high gradient norms, needs tuning
+```
+
+### Root Cause: High Gradient Norms
+
+During candidate evaluation, the wrapper temporarily applies gradients as an SGD-like step:
+```python
+param.data.sub_(lr * candidate.gradients[name])
+```
+
+With SFT defaults (`lr=2e-4`, `noise_scale=0.1`):
+- Early training gradient norms can be ~100+ for LoRA params
+- Noise magnitude: `randn * 0.1 * 100 = ~10` per param
+- Temporary weight shift pushes model far enough that val loss explodes
+- All candidates produce near-infinite loss → fitness scores meaningless
+
+### Proposed Fixes
+
+| Fix | Effort | Expected Impact |
+|-----|--------|-----------------|
+| Set `warmup_steps: 200-500` | Config change | HIGH — lets gradients stabilize before evolutionary selection |
+| Reduce `noise_scale: 0.01-0.05` | Config change | HIGH — directly reduces perturbation magnitude |
+| Use `scale_variation` strategy | Config change | MEDIUM — no noise, just explores LR scaling |
+| Gradient clipping before candidate generation | Small code change | MEDIUM — caps gradient magnitude before noise |
+| Use `min_fitness_improvement: 0.01` | Config change | LOW — prevents selecting candidates only marginally better |
+
+### Three Levels of Optimization (How They Stack)
+
+| Level | Scope | What Mutates | Metric | Frequency |
+|-------|-------|-------------|--------|-----------|
+| **Evolutionary** (existing) | Per training step | Gradient updates | Validation loss | Every step |
+| **Experiment Loop** (autoresearch-inspired) | Per training run | Config hyperparameters | Eval pass rate | Every ~10 min |
+| **Flywheel** (existing) | Per production cycle | Training dataset | Fitness score | Every N days |
+
+These are complementary, not competing. Evolutionary optimizes weight updates within a run, the experiment loop finds the best config for a run, and the flywheel optimizes what data future runs train on.
+
+---
+
+## Deep Dive: Muon Optimizer — Should We Integrate?
+
+### What Is Muon?
+
+**MomentUm Orthogonalized by Newton-Schulz** (by Keller Jordan, Oct 2024). Runs standard SGD with momentum, then orthogonalizes each 2D parameter's update to the nearest orthogonal matrix using 5 Newton-Schulz iterations. Now in PyTorch core as `torch.optim.Muon` (v2.9+).
+
+Key properties:
+- **Only for 2D (matrix) parameters** — embeddings, biases, scalars must use AdamW
+- **Gradient normalization built-in** — Newton-Schulz orthogonalization inherently normalizes gradient magnitudes
+- **50% less optimizer state memory** — 1 state (momentum) vs AdamW's 2 (m, v)
+- **muP-scaled LR** — shouldn't need retuning when scaling model size
+
+### Installation
+
+```bash
+# Native PyTorch (v2.9+)
+import torch.optim
+muon = torch.optim.Muon(params, lr=0.02)
+
+# Or standalone
+pip install git+https://github.com/KellerJordan/Muon
+```
+
+### Critical Finding: Muon Is NOT Recommended for LoRA Fine-Tuning
+
+Multiple sources confirm:
+
+1. **"Use Muon when building new capabilities, and standard optimizers when adjusting existing ones"** — Muon is designed for pretraining and full-parameter training at scale.
+
+2. **LoRA params are already small** — Muon's overhead (Newton-Schulz iterations, all_gather for distributed) isn't worth it for LoRA's low-rank matrices.
+
+3. **Optimizer mismatch degrades quality** — Fine-tuning a model pretrained with Muon using AdamW (or vice versa) "doesn't work very well."
+
+4. **Muon is for 2D hidden layer params only** — LoRA's A and B matrices ARE 2D, but they're low-rank by design. Orthogonalizing a rank-16 matrix is semantically different from orthogonalizing a full-rank weight matrix.
+
+### How Muon Could Help Our Gradient Norm Problem (Indirectly)
+
+Even though Muon isn't right for LoRA fine-tuning, its core insight — **gradient orthogonalization normalizes magnitudes** — is directly relevant to the evolutionary system's gradient norm instability:
+
+**Option A**: Add Newton-Schulz orthogonalization as a new evolutionary strategy:
+```python
+# strategies/orthogonal_noise.py
+# 1. Compute base gradient
+# 2. Orthogonalize via Newton-Schulz (normalizes magnitude)
+# 3. Add noise to orthogonalized gradient
+# 4. This prevents magnitude explosion while preserving direction
+```
+
+**Option B**: Add gradient norm clipping in the candidate generator before noise injection:
+```python
+# candidate_generator.py
+max_norm = config.get('max_grad_norm', 1.0)
+for name, grad in base_gradients.items():
+    norm = grad.norm()
+    if norm > max_norm:
+        base_gradients[name] = grad * (max_norm / norm)
+```
+
+Option B is simpler and more likely to work. Option A is more principled but requires more implementation.
+
+### Recommendation
+
+**Don't integrate Muon as the optimizer for LoRA fine-tuning.** Keep AdamW 8-bit.
+
+**Do borrow the gradient normalization concept** for the evolutionary system — either via explicit gradient clipping (simple) or Newton-Schulz orthogonalization as a strategy (principled).
+
+---
+
 ## Key Quotes
 
 > "You're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the program.md Markdown files." — Karpathy on autoresearch
@@ -267,9 +417,18 @@ Our trainer configs already use YAML with all hyperparameters in one place. The 
 
 ## Sources
 
+### Karpathy Projects
 - [github.com/karpathy/nanochat](https://github.com/karpathy/nanochat) (~49.7k stars)
 - [github.com/karpathy/autoresearch](https://github.com/karpathy/autoresearch) (~30.3k stars)
 - [Karpathy's nanochat Discussion #1](https://github.com/karpathy/nanochat/discussions/1)
 - [Karpathy's 2025 LLM Year in Review](https://karpathy.bearblog.dev/year-in-review-2025/)
 - [nanochat launch tweet](https://x.com/karpathy/status/1977755427569111362)
 - [autoresearch tweet](https://x.com/karpathy/status/2030371219518931079)
+
+### Muon Optimizer
+- [github.com/KellerJordan/Muon](https://github.com/KellerJordan/Muon) — Original implementation
+- [torch.optim.Muon](https://docs.pytorch.org/docs/stable/generated/torch.optim.Muon.html) — PyTorch 2.9+ native
+- [Keller Jordan's Muon blog post](https://kellerjordan.github.io/posts/muon/)
+- [Deriving Muon — Jeremy Bernstein](https://jeremybernste.in/writing/deriving-muon)
+- [HuggingFace Muon tutorial](https://discuss.huggingface.co/t/tutorial-understanding-and-implementing-the-muon-optimizer/167717)
+- [PredNext: Muon for LLM Training](https://prednext.com/en/blog/optimizer-muon-2025/)
