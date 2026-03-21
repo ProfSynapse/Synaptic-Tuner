@@ -6,6 +6,7 @@ against Ollama or LM Studio backends.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -157,6 +158,121 @@ def _write_failure_artifact(
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _resolve_loss_dataset_path(
+    *,
+    dataset_path: str | None,
+    dataset_name: str | None,
+    dataset_file: str | None,
+    token: str | None,
+) -> Path:
+    if dataset_path:
+        return expand_path(dataset_path)
+    if dataset_name and dataset_file:
+        from huggingface_hub import hf_hub_download
+
+        downloaded = hf_hub_download(
+            repo_id=dataset_name,
+            filename=dataset_file,
+            repo_type="dataset",
+            token=token,
+        )
+        return Path(downloaded)
+    raise ValueError("Loss computation requires --loss-dataset-path or both --loss-dataset-name and --loss-dataset-file.")
+
+
+def _write_loss_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _compute_optional_loss_outputs(
+    *,
+    args: argparse.Namespace,
+    client: Any,
+    training_run_id: str | None,
+) -> None:
+    if not (
+        args.loss_dataset_path
+        or (args.loss_dataset_name and args.loss_dataset_file)
+    ):
+        return
+
+    if args.backend != "unsloth":
+        raise RuntimeError("Optional dataset loss computation currently requires --backend unsloth.")
+
+    shared_client = getattr(client, "client", None)
+    model = getattr(shared_client, "_model", None)
+    tokenizer = getattr(shared_client, "_tokenizer", None)
+    if model is None or tokenizer is None:
+        raise RuntimeError("Unsloth model/tokenizer are not available for optional loss computation.")
+
+    from shared.experiment_tracking.per_example_loss import compute_per_example_losses, save_losses
+
+    hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+    dataset_path = _resolve_loss_dataset_path(
+        dataset_path=args.loss_dataset_path,
+        dataset_name=args.loss_dataset_name,
+        dataset_file=args.loss_dataset_file,
+        token=hf_token,
+    )
+    losses = compute_per_example_losses(
+        model=model,
+        tokenizer=tokenizer,
+        dataset_path=dataset_path,
+        max_seq_length=args.loss_max_seq_length or 2048,
+        completion_only=not args.loss_no_completion_only,
+    )
+
+    if args.loss_output_jsonl:
+        save_losses(losses, expand_path(args.loss_output_jsonl))
+
+    loss_rows = [
+        {
+            "training_run_id": training_run_id or "",
+            "index": item.index,
+            "loss": item.loss,
+            "num_completion_tokens": item.num_completion_tokens,
+            "num_total_tokens": item.num_total_tokens,
+            "jsonl_hash": item.jsonl_hash,
+        }
+        for item in losses
+    ]
+
+    if args.loss_feature_jsonl:
+        feature_jsonl = expand_path(args.loss_feature_jsonl)
+        feature_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        with feature_jsonl.open("w", encoding="utf-8") as handle:
+            for row in loss_rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    if args.loss_feature_csv:
+        _write_loss_rows(expand_path(args.loss_feature_csv), loss_rows)
+
+    if args.loss_high_loss_jsonl:
+        high_loss_path = expand_path(args.loss_high_loss_jsonl)
+        high_loss_path.parent.mkdir(parents=True, exist_ok=True)
+        with high_loss_path.open("w", encoding="utf-8") as handle:
+            for row in sorted(loss_rows, key=lambda row: row["loss"], reverse=True)[:25]:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    if args.loss_summary_json:
+        summary_path = expand_path(args.loss_summary_json)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "dataset_path": str(dataset_path),
+            "row_count": len(loss_rows),
+            "completion_only": not args.loss_no_completion_only,
+            "max_seq_length": args.loss_max_seq_length or 2048,
+        }
+        summary_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def parse_args(argv: List[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -305,6 +421,17 @@ Backend Configuration:
     parser.add_argument("--partial-markdown", help=argparse.SUPPRESS)
     parser.add_argument("--failure-json", help=argparse.SUPPRESS)
     parser.add_argument("--partial-write-every", type=int, default=5, help=argparse.SUPPRESS)
+    parser.add_argument("--with-loss", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-dataset-path", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-dataset-name", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-dataset-file", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-output-jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-feature-jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-feature-csv", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-high-loss-jsonl", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-summary-json", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-max-seq-length", type=int, default=2048, help=argparse.SUPPRESS)
+    parser.add_argument("--loss-no-completion-only", action="store_true", help=argparse.SUPPRESS)
 
     # Unified tracking: link evaluation to a training run
     parser.add_argument(
@@ -724,6 +851,13 @@ def main(argv: List[str] | None = None) -> int:
 
     if progress_writer is not None:
         progress_writer.write_complete()
+
+    if args.with_loss:
+        _compute_optional_loss_outputs(
+            args=args,
+            client=client,
+            training_run_id=getattr(args, "training_run", None),
+        )
 
     # Generate evaluation lineage if requested
     lineage = None

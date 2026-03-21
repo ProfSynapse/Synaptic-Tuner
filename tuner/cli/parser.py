@@ -224,6 +224,29 @@ Examples:
     )
     parser.add_argument("--gpu", help="Override HF Jobs hardware flavor for cloud-eval/cloud-gym.")
     parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval/cloud-gym.")
+    parser.add_argument(
+        "--with-loss",
+        action="store_true",
+        help="For cloud-eval, also compute per-example dataset loss in the same remote job when supported.",
+    )
+    parser.add_argument(
+        "--loss-dataset-name",
+        help="Override the Hugging Face dataset repo used for same-job loss computation during cloud-eval.",
+    )
+    parser.add_argument(
+        "--loss-dataset-file",
+        help="Override the dataset file used for same-job loss computation during cloud-eval.",
+    )
+    parser.add_argument(
+        "--loss-max-seq-length",
+        type=int,
+        help="Override max sequence length for same-job loss computation during cloud-eval.",
+    )
+    parser.add_argument(
+        "--loss-no-completion-only",
+        action="store_true",
+        help="Disable completion-only masking for same-job loss computation during cloud-eval.",
+    )
     parser.add_argument("--train-gpu", help="Override training GPU flavor for cloud/cloud-pipeline.")
     parser.add_argument("--train-timeout-hours", type=float, help="Override training timeout in hours for cloud/cloud-pipeline.")
     parser.add_argument("--train-image-profile", help="Override the cloud training image profile for cloud/cloud-pipeline (for example: stable, next).")

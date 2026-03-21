@@ -41,6 +41,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--env-exec-config")
     parser.add_argument("--upload-to-hf")
     parser.add_argument("--update-model-card", action="store_true")
+    parser.add_argument("--with-loss", action="store_true")
+    parser.add_argument("--loss-dataset-path")
+    parser.add_argument("--loss-dataset-name")
+    parser.add_argument("--loss-dataset-file")
+    parser.add_argument("--loss-max-seq-length", type=int, default=2048)
+    parser.add_argument("--loss-no-completion-only", action="store_true")
     return parser.parse_args()
 
 
@@ -181,6 +187,7 @@ def main() -> int:
     partial_output_json = results_dir / "evaluation_results.partial.json"
     partial_output_md = results_dir / "evaluation_results.partial.md"
     failure_json = results_dir / "evaluation_failure.json"
+    analysis_dir = results_dir / "analysis"
 
     # Download only the adapter payload needed for direct Unsloth LoRA evaluation.
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
@@ -229,6 +236,23 @@ def main() -> int:
         cli_args.extend(["--upload-to-hf", args.upload_to_hf, "--hf-token", hf_token])
         if args.update_model_card:
             cli_args.append("--update-model-card")
+    if args.with_loss:
+        cli_args.append("--with-loss")
+        if args.loss_dataset_path:
+            cli_args.extend(["--loss-dataset-path", args.loss_dataset_path])
+        if args.loss_dataset_name:
+            cli_args.extend(["--loss-dataset-name", args.loss_dataset_name])
+        if args.loss_dataset_file:
+            cli_args.extend(["--loss-dataset-file", args.loss_dataset_file])
+        cli_args.extend(["--loss-output-jsonl", str(analysis_dir / "per_example_losses.jsonl")])
+        cli_args.extend(["--loss-feature-jsonl", str(analysis_dir / "feature_dataset.jsonl")])
+        cli_args.extend(["--loss-feature-csv", str(analysis_dir / "feature_dataset.csv")])
+        cli_args.extend(["--loss-high-loss-jsonl", str(analysis_dir / "failure_slices" / "high_loss_examples.jsonl")])
+        cli_args.extend(["--loss-summary-json", str(analysis_dir / "loss_summary.json")])
+        if args.loss_max_seq_length:
+            cli_args.extend(["--loss-max-seq-length", str(args.loss_max_seq_length)])
+        if args.loss_no_completion_only:
+            cli_args.append("--loss-no-completion-only")
     cli_args.extend(["--progress-jsonl", str(progress_log_path), "--no-dashboard"])
 
     progress_syncer = _PeriodicBucketSyncer(

@@ -237,6 +237,11 @@ class CloudEvalHandler(BaseHandler):
         env_exec_config: Optional[str],
         upload_to_hf: Optional[str],
         update_model_card: bool,
+        with_loss: bool,
+        loss_dataset_name: Optional[str],
+        loss_dataset_file: Optional[str],
+        loss_max_seq_length: Optional[int],
+        loss_completion_only: bool,
     ) -> str:
         repo_source = resolve_repo_source(self.repo_root)
         cloud_config_path = self._cloud_config_path()
@@ -293,9 +298,67 @@ class CloudEvalHandler(BaseHandler):
             eval_cmd.extend(["--upload-to-hf", upload_to_hf])
         if update_model_card:
             eval_cmd.append("--update-model-card")
+        if with_loss:
+            eval_cmd.append("--with-loss")
+            if loss_dataset_name:
+                eval_cmd.extend(["--loss-dataset-name", loss_dataset_name])
+            if loss_dataset_file:
+                eval_cmd.extend(["--loss-dataset-file", loss_dataset_file])
+            if loss_max_seq_length is not None:
+                eval_cmd.extend(["--loss-max-seq-length", str(loss_max_seq_length)])
+            if not loss_completion_only:
+                eval_cmd.append("--loss-no-completion-only")
 
         parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
         return " && ".join(parts)
+
+    def _parse_dataset_identifier(self, dataset_identifier: str) -> tuple[str, str]:
+        parts = [part for part in dataset_identifier.strip("/").split("/") if part]
+        if len(parts) < 3:
+            raise CloudProviderError(
+                f"Could not parse dataset identifier '{dataset_identifier}'. "
+                "Expected '<namespace>/<dataset>/<file>'."
+            )
+        return "/".join(parts[:2]), "/".join(parts[2:])
+
+    def _resolve_loss_dataset(
+        self,
+        huggingface_hub,
+        *,
+        bucket_id: str,
+        run_prefix: str,
+    ) -> tuple[str, str]:
+        explicit_name = getattr(self.args, "loss_dataset_name", None)
+        explicit_file = getattr(self.args, "loss_dataset_file", None)
+        if explicit_name and explicit_file:
+            return explicit_name, explicit_file
+        if explicit_name or explicit_file:
+            raise CloudProviderError("Provide both --loss-dataset-name and --loss-dataset-file together.")
+
+        if not hasattr(huggingface_hub, "HfFileSystem"):
+            raise CloudProviderError(
+                "Cannot infer the training dataset for --with-loss because HfFileSystem is unavailable. "
+                "Provide --loss-dataset-name and --loss-dataset-file explicitly."
+            )
+
+        fs = huggingface_hub.HfFileSystem(token=get_hf_token())
+        lineage_path = f"hf://buckets/{bucket_id}/{run_prefix.strip('/')}/training_lineage.json"
+        try:
+            with fs.open(lineage_path, "r") as handle:
+                lineage = json.load(handle)
+        except Exception as exc:
+            raise CloudProviderError(
+                "Failed to read training_lineage.json to infer the loss dataset. "
+                "Provide --loss-dataset-name and --loss-dataset-file explicitly."
+            ) from exc
+
+        dataset_identifier = str((lineage.get("dataset") or {}).get("source", "")).strip()
+        if not dataset_identifier:
+            raise CloudProviderError(
+                "training_lineage.json is missing dataset.source. "
+                "Provide --loss-dataset-name and --loss-dataset-file explicitly."
+            )
+        return self._parse_dataset_identifier(dataset_identifier)
 
     def _poll_job(self, huggingface_hub, job_id: str, timeout_hours: float) -> int:
         timeout_seconds = int(timeout_hours * 3600)
@@ -600,6 +663,21 @@ class CloudEvalHandler(BaseHandler):
         update_model_card = bool(getattr(self.args, "update_model_card", False))
         flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
         timeout_hours = float(getattr(self.args, "timeout_hours", None) or 4.0)
+        with_loss = bool(getattr(self.args, "with_loss", False))
+        loss_dataset_name = None
+        loss_dataset_file = None
+        if with_loss:
+            try:
+                loss_dataset_name, loss_dataset_file = self._resolve_loss_dataset(
+                    huggingface_hub,
+                    bucket_id=bucket_id,
+                    run_prefix=selected_run["prefix"],
+                )
+            except Exception as exc:
+                print_error(str(exc))
+                return 1
+        loss_max_seq_length = getattr(self.args, "loss_max_seq_length", None)
+        loss_completion_only = not bool(getattr(self.args, "loss_no_completion_only", False))
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         eval_prefix = self._build_eval_prefix(selected_run["prefix"], timestamp)
@@ -619,6 +697,11 @@ class CloudEvalHandler(BaseHandler):
             env_exec_config=env_exec_config,
             upload_to_hf=upload_to_hf,
             update_model_card=update_model_card,
+            with_loss=with_loss,
+            loss_dataset_name=loss_dataset_name,
+            loss_dataset_file=loss_dataset_file,
+            loss_max_seq_length=loss_max_seq_length,
+            loss_completion_only=loss_completion_only,
         )
 
         print_config(
@@ -631,6 +714,7 @@ class CloudEvalHandler(BaseHandler):
                 "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
                 "Tags": tags or "-",
                 "Env Backend": env_backend,
+                "With Loss": "yes" if with_loss else "no",
                 "GPU": flavor,
                 "Timeout": f"{timeout_hours:.1f}h",
                 "Results": f"hf://buckets/{bucket_id}/{eval_prefix}",

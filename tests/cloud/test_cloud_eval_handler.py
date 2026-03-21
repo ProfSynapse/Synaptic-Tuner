@@ -22,6 +22,11 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
         env_exec_config=None,
         upload_to_hf=None,
         update_model_card=False,
+        with_loss=False,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=None,
+        loss_completion_only=True,
     )
 
     assert "Evaluator.cloud_hf_job" in command
@@ -36,6 +41,37 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "huggingface_hub>=1.5.0" in command
     assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
     assert "vllm==0.11.0" not in command
+
+
+def test_build_eval_command_can_include_same_job_loss(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    command = handler._build_eval_command(
+        bucket_id="test-user/toolset-training-artifacts",
+        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+        preset="full",
+        scenarios=None,
+        tags=None,
+        env_backend="none",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
+        upload_to_hf=None,
+        update_model_card=False,
+        with_loss=True,
+        loss_dataset_name="professorsynapse/claudesidian-synthetic-dataset",
+        loss_dataset_file="train.jsonl",
+        loss_max_seq_length=2048,
+        loss_completion_only=True,
+    )
+
+    assert "--with-loss" in command
+    assert "--loss-dataset-name" in command
+    assert "professorsynapse/claudesidian-synthetic-dataset" in command
+    assert "--loss-dataset-file" in command
+    assert "train.jsonl" in command
 
 
 def test_list_remote_runs_sorts_newest_first(repo_root, clean_env):
