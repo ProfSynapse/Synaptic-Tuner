@@ -49,7 +49,13 @@ from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
-from .base_cloud import load_cloud_config, load_project_deps, poll_until_done, resolve_repo_source
+from .base_cloud import (
+    load_cloud_config,
+    load_project_deps,
+    poll_until_done,
+    resolve_cloud_image,
+    resolve_repo_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +199,12 @@ class HFJobsBackend(ITrainingBackend):
 
         flavor = hf_config.get("flavor", DEFAULT_FLAVOR)
         timeout_str = hf_config.get("timeout", DEFAULT_TIMEOUT)
-        image = hf_config.get("image", DEFAULT_IMAGE)
+        image, image_profile = resolve_cloud_image(
+            cloud_config_path,
+            explicit_image=hf_config.get("image"),
+            default_profile=hf_config.get("image_profile"),
+            fallback_image=DEFAULT_IMAGE,
+        )
 
         # Parse timeout string (e.g., "4h" -> 4.0)
         timeout_hours = _parse_timeout(timeout_str)
@@ -217,6 +228,7 @@ class HFJobsBackend(ITrainingBackend):
             gpu_type=flavor,
             timeout_hours=timeout_hours,
             cloud_image=image,
+            cloud_image_profile=image_profile,
             push_to_hub=cloud_config.get("push_to_hub", False),
             hub_repo=cloud_config.get("hub_repo"),
             hf_flavor=flavor,

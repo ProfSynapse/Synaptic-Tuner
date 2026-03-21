@@ -57,7 +57,9 @@ Train language models with SFT (supervised), KTO (preference), and GRPO (reward 
 - For training/eval workflows, use `python tuner.py ...`.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`. `cloud-pipeline` is what keeps training artifacts in the standard `runs/hf_jobs/{method}/...` layout so downstream evaluation discovery works automatically.
 - For repeatable sweeps, prefer checked-in helper scripts such as `python3 Trainers/scripts/battle_of_models.py ...` over manually retyping cloud commands.
-- When changing SFT base models for cloud experiments, prefer top-level overrides like `--train-model-name`, `--train-batch-size`, `--train-max-steps`, `--train-no-load-in-4bit`, and `--train-lora-target-modules` instead of editing `configs/config.yaml` for one-off experiments.
+- When changing SFT base models or runtimes for cloud experiments, prefer top-level overrides like `--train-model-name`, `--train-image-profile`, `--train-cloud-image`, `--train-batch-size`, `--train-max-steps`, `--train-no-load-in-4bit`, and `--train-lora-target-modules` instead of editing `configs/config.yaml` for one-off experiments.
+- Use `--train-image-profile stable` for the current pinned Unsloth runtime and `--train-image-profile next` for newer official Unsloth Docker images when testing newer architectures such as Qwen3.5 or Ministral.
+- Treat `next` as experimental until a smoke run confirms the actual pulled image has the required architecture support; upstream docs can move ahead of a specific Docker tag.
 - Treat `cloud-run` as the escape hatch for special jobs, env-GRPO launchers, or custom bootstraps, not the default way to start model-comparison experiments.
 - Only drop to direct Python snippets for tiny local inspection or one-off parsing when there is no existing CLI/script path; do not use bare Python as the default way to launch real jobs or smoke tests.
 
@@ -121,12 +123,14 @@ python3 Trainers/scripts/battle_of_models.py list
 python3 Trainers/scripts/battle_of_models.py plan
 python3 Trainers/scripts/battle_of_models.py commands --smoke
 python3 Trainers/scripts/battle_of_models.py launch --smoke qwen35-2b
+python3 Trainers/scripts/battle_of_models.py commands --smoke qwen35-2b --image-profile next
 ```
 
 **Canonical one-off HF experiment with direct overrides:**
 ```bash
 python tuner.py cloud-pipeline --method sft --preset full \
   --train-model-name Qwen/Qwen3.5-2B \
+  --train-image-profile next \
   --train-gpu a10g-small \
   --train-batch-size 8 \
   --train-gradient-accumulation 4 \
@@ -199,6 +203,7 @@ HF Jobs-specific cloud behavior:
 - for post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`; it launches an HF Job, downloads the bucketed LoRA, runs direct Unsloth inference remotely, and syncs results back to the same bucket under `.../evaluations/vllm/...`
 - for the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`; it runs HF Jobs training first, then launches cloud eval against that exact run without making you reselect it
 - for SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment still lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`
+- when testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of pip-upgrading inside the old stable image; keep the stable/default profile untouched until the newer image has passed smoke runs for SFT and GRPO
 - to inspect a finished HF cloud evaluation run from the bucket, use `python tuner.py cloud-inspect --run latest --eval-run latest --method sft`
 - avoid trying to force vLLM into the Unsloth HF Jobs image for this path; direct Unsloth inference is the stable default unless you intentionally move evaluation to a dedicated vLLM runtime
 - if preset-based eval fails with missing scenario files, check `Evaluator/config/eval_run.yaml` before debugging the loader; stale preset filenames are an easy failure mode

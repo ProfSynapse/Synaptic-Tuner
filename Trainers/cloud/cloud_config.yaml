@@ -58,6 +58,9 @@ pricing:
 # Docker image provides unsloth + PyTorch + CUDA pre-installed.
 # Project-specific pip deps are installed on top at runtime.
 dependencies:
+  docker_image_profiles:
+    stable: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    next: "unsloth/unsloth:2026.2.1-pt2.9.0-cu12.8-fixed-numba-numpy-error"
   docker_image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
   project_pip_deps:
     - pyyaml
@@ -77,7 +80,7 @@ cloud:
   hf_jobs:
     flavor: a10g-small
     timeout: 4h
-    image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+    image_profile: stable
     python_version: "3.11"
     artifact_backend: hf_bucket
     # Bare names are fine; the launcher resolves them to the token's namespace and creates the bucket if needed.

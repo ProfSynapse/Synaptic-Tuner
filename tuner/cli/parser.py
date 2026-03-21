@@ -220,6 +220,8 @@ Examples:
     parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval/cloud-gym.")
     parser.add_argument("--train-gpu", help="Override training GPU flavor for cloud/cloud-pipeline.")
     parser.add_argument("--train-timeout-hours", type=float, help="Override training timeout in hours for cloud/cloud-pipeline.")
+    parser.add_argument("--train-image-profile", help="Override the cloud training image profile for cloud/cloud-pipeline (for example: stable, next).")
+    parser.add_argument("--train-cloud-image", help="Override the exact cloud training Docker image for cloud/cloud-pipeline.")
     parser.add_argument("--train-model-name", help="Override the base model for cloud/cloud-pipeline training.")
     parser.add_argument("--train-dataset-name", help="Override the Hugging Face dataset repo for cloud/cloud-pipeline training.")
     parser.add_argument("--train-dataset-file", help="Override the dataset file within the Hugging Face dataset repo.")

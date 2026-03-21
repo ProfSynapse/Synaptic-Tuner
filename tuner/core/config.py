@@ -240,6 +240,7 @@ class CloudTrainingConfig(TrainingConfig):
     gpu_type: str = ""
     timeout_hours: float = 4.0
     cloud_image: str = ""
+    cloud_image_profile: Optional[str] = None
     push_to_hub: bool = False
     hub_repo: Optional[str] = None
     hf_flavor: Optional[str] = None

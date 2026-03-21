@@ -21,6 +21,7 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -341,6 +342,20 @@ class CloudTrainHandler(BaseHandler):
         if train_timeout_hours is not None:
             config.timeout_hours = train_timeout_hours
 
+        train_cloud_image = getattr(args, "train_cloud_image", None)
+        if train_cloud_image:
+            config.cloud_image = train_cloud_image
+            config.cloud_image_profile = None
+
+        train_image_profile = getattr(args, "train_image_profile", None)
+        if train_image_profile:
+            cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+            config.cloud_image, config.cloud_image_profile = resolve_cloud_image(
+                cloud_config_path,
+                requested_profile=train_image_profile,
+                fallback_image=config.cloud_image,
+            )
+
         if config.dataset_name and config.dataset_file and "/" not in config.dataset_file:
             config.dataset_file = f"{config.dataset_name}/{config.dataset_file}"
 
@@ -417,6 +432,13 @@ class CloudTrainHandler(BaseHandler):
         # Timeout
         if hasattr(config, "timeout_hours"):
             display["Timeout"] = f"{config.timeout_hours:.0f} hours"
+
+        if getattr(config, "cloud_image_profile", None):
+            display["Image Profile"] = config.cloud_image_profile
+
+        if getattr(config, "cloud_image", None):
+            image = config.cloud_image
+            display["Image"] = image if len(image) <= 72 else f"{image[:69]}..."
 
         # Cost estimate
         if hasattr(config, "gpu_type") and hasattr(config, "timeout_hours"):

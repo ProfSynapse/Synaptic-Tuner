@@ -7,6 +7,7 @@ Use this reference when the goal is a real HF experiment, not a one-off custom j
 For SFT model comparisons on HF Jobs:
 - use `python tuner.py cloud-pipeline --method sft --preset full`
 - pass model and training changes via `--train-*` CLI overrides
+- prefer `--train-image-profile stable|next` over in-job package upgrades when the experiment needs a different Unsloth runtime
 - avoid `cloud-run` unless the job is genuinely custom
 
 This ensures:
@@ -17,6 +18,8 @@ This ensures:
 ## Useful Overrides
 
 - `--train-model-name`
+- `--train-image-profile`
+- `--train-cloud-image`
 - `--train-gpu`
 - `--train-timeout-hours`
 - `--train-batch-size`
@@ -33,6 +36,7 @@ This ensures:
 ```bash
 python tuner.py cloud-pipeline --method sft --preset full \
   --train-model-name Qwen/Qwen3.5-2B \
+  --train-image-profile next \
   --train-gpu a10g-small \
   --train-batch-size 8 \
   --train-gradient-accumulation 4 \
@@ -48,3 +52,10 @@ python tuner.py cloud-pipeline --method sft --preset full \
 3. Merge/publish the winning SFT artifact
 4. Run KTO from the merged/published model
 5. Run env-GRPO as the final online stage
+
+## Image Discipline
+
+- `stable` keeps the currently pinned Unsloth image used by existing HF Jobs runs
+- `next` is the opt-in path for newer official Unsloth Docker images when smoke-testing newer architectures
+- smoke-test `next` before trusting it for Qwen3.5 or Ministral; current upstream docs can get ahead of the exact image contents
+- prefer image-profile switches to ad hoc `pip install --upgrade transformers` in the training container

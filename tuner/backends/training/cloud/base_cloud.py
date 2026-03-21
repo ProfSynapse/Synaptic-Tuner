@@ -213,6 +213,74 @@ def load_cloud_config(cloud_config_path: Path) -> dict:
         return {}
 
 
+def load_cloud_document(cloud_config_path: Path) -> dict:
+    """
+    Load the full cloud_config.yaml document.
+
+    Args:
+        cloud_config_path: Path to cloud_config.yaml file
+
+    Returns:
+        Full YAML document as a dictionary, or {} on failure.
+    """
+    if not cloud_config_path.exists():
+        return {}
+    try:
+        with open(cloud_config_path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.warning("Failed to load cloud document %s: %s", cloud_config_path, e)
+        return {}
+
+
+def load_cloud_image_profiles(cloud_config_path: Path) -> dict:
+    """
+    Load named Docker image profiles from cloud_config.yaml.
+
+    Profiles live under ``dependencies.docker_image_profiles`` and let the
+    CLI select between stable and newer official images without editing code.
+    """
+    document = load_cloud_document(cloud_config_path)
+    return document.get("dependencies", {}).get("docker_image_profiles", {})
+
+
+def resolve_cloud_image(
+    cloud_config_path: Path,
+    *,
+    explicit_image: Optional[str] = None,
+    requested_profile: Optional[str] = None,
+    default_profile: Optional[str] = None,
+    fallback_image: Optional[str] = None,
+) -> tuple[str, Optional[str]]:
+    """
+    Resolve the cloud training image from an explicit image or named profile.
+
+    Precedence:
+    1. explicit image override
+    2. requested profile
+    3. provider default profile
+    4. fallback image
+    """
+    if explicit_image:
+        return explicit_image, None
+
+    profiles = load_cloud_image_profiles(cloud_config_path)
+    profile_name = requested_profile or default_profile
+    if profile_name:
+        image = profiles.get(profile_name)
+        if not image:
+            known = ", ".join(sorted(profiles)) or "(none configured)"
+            raise CloudProviderError(
+                f"Unknown cloud image profile '{profile_name}'. Available profiles: {known}"
+            )
+        return image, profile_name
+
+    if fallback_image:
+        return fallback_image, None
+
+    raise CloudProviderError("No cloud image configured.")
+
+
 # Fallback project deps if cloud_config.yaml is missing or has no deps section
 _DEFAULT_PROJECT_DEPS = ["pyyaml", "wandb", "hf_transfer", "python-dotenv", "rich"]
 
