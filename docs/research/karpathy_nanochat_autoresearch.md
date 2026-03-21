@@ -405,6 +405,417 @@ Option B is simpler and more likely to work. Option A is more principled but req
 
 ---
 
+## Implementation Plan
+
+### Top Recommendations (Ordered by Impact / Effort)
+
+| # | Recommendation | Source Insight | Effort | Impact |
+|---|---------------|----------------|--------|--------|
+| 1 | Fix evolutionary training (gradient norm stabilization) | Muon's gradient normalization + autoresearch's constrained experiments | Small | High |
+| 2 | Autonomous experiment loop for hyperparameter search | autoresearch's 3-file architecture | Medium | High |
+| 3 | Wire FitnessEvaluator as GRPO reward signal | nanochat's simplified RL + RLVR trend | Small | High |
+| 4 | Single-knob complexity tiers for training CLI | nanochat's `--depth` dial | Small | Medium |
+
+---
+
+### Implementation 1: Fix Evolutionary Training
+
+**Goal**: Get the existing evolutionary system working by solving gradient norm instability.
+
+**Files to modify**:
+- `shared/evolutionary/candidate_generator.py` — add gradient clipping before candidate generation
+- `shared/evolutionary/strategies/gradient_noise.py` — add per-parameter adaptive noise scaling
+- `Trainers/sft/configs/config.yaml` — tune evolutionary config defaults
+- `shared/evolutionary/trainer_wrapper.py` — add gradient norm logging for diagnostics
+
+**Step 1: Add gradient norm clipping to CandidateGenerator**
+```python
+# candidate_generator.py — new method
+@staticmethod
+def clip_gradients(
+    gradients: Dict[str, torch.Tensor],
+    max_norm: float = 1.0,
+) -> Dict[str, torch.Tensor]:
+    """Clip per-parameter gradient norms before candidate generation."""
+    clipped = {}
+    for name, grad in gradients.items():
+        norm = grad.norm()
+        if norm > max_norm:
+            clipped[name] = grad * (max_norm / norm)
+        else:
+            clipped[name] = grad
+    return clipped
+```
+
+Call `clip_gradients()` on `base_gradients` in `trainer_wrapper.py` before passing to `generate()`.
+
+**Step 2: Add adaptive noise scaling in GradientNoiseStrategy**
+```python
+# gradient_noise.py — modify generate_candidates()
+# Instead of: noise = randn * noise_scale * grad.norm()
+# Use: noise = randn * noise_scale * min(grad.norm(), max_grad_norm)
+# This caps the noise magnitude regardless of gradient size
+```
+
+**Step 3: Update config defaults**
+```yaml
+evolutionary:
+  enabled: true
+  candidates: 4
+  eval_batch_size: 2
+  validation_config: "configs/fitness/tool_calling.yaml"
+  strategy:
+    type: "gradient_noise"
+    params:
+      noise_scale: 0.03          # Was 0.1 — reduced 3x
+      max_grad_norm: 1.0         # NEW — clip before noise
+  selection:
+    method: "best"
+    min_improvement: 0.01        # Was 0.0 — require meaningful improvement
+  eval_frequency: 5              # Was 1 — reduce overhead, eval every 5 steps
+  warmup_steps: 200              # Was 0 — let model stabilize first
+```
+
+**Step 4: Add gradient norm logging**
+```python
+# trainer_wrapper.py — in _evolutionary_step()
+if self.config.log_candidates:
+    grad_norms = {name: grad.norm().item() for name, grad in base_gradients.items()}
+    avg_norm = sum(grad_norms.values()) / len(grad_norms)
+    logger.info(f"Step {self.current_step}: avg_grad_norm={avg_norm:.4f}, "
+                f"max_grad_norm={max(grad_norms.values()):.4f}")
+```
+
+**Step 5: Add unit tests**
+```
+tests/test_evolutionary/
+├── test_gradient_clipping.py     # Verify clipping caps norms correctly
+├── test_candidate_generation.py  # Verify noise magnitude stays bounded
+├── test_fitness_evaluation.py    # Verify fitness scores are meaningful
+└── test_trainer_wrapper.py       # End-to-end with mock trainer
+```
+
+**Validation**: Run a short SFT training (200 steps) with evolutionary enabled. Success criteria:
+- Gradient norms stay below `max_grad_norm` after clipping
+- Fitness scores distribute across [0.3, 1.0] (not all near 0.0)
+- Selected candidate fitness > baseline fitness in >50% of evolutionary steps
+- Training loss decreases comparably to non-evolutionary baseline
+
+---
+
+### Implementation 2: Autonomous Experiment Loop
+
+**Goal**: Implement an autoresearch-inspired loop that searches over training hyperparameters by running short experiments and keeping winning configs.
+
+**New files**:
+- `shared/flywheel/experiment_loop.py` — ExperimentLoop class (core loop logic)
+- `shared/flywheel/experiment_config.py` — ExperimentConfig dataclass
+- `configs/flywheel/experiment_loop.yaml` — default search space and constraints
+- `tests/flywheel/test_experiment_loop.py` — tests
+
+**Modified files**:
+- `shared/flywheel/orchestrator.py` — add `run_experiment_loop()` method
+- `tuner.py` — add CLI entry point
+- `Trainers/sft/configs/config.yaml` — ensure `max_steps` is overridable
+
+**Architecture** (maps to autoresearch's 3 primitives):
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ ExperimentLoop                                               │
+│                                                              │
+│  Editable Asset: configs/flywheel/experiment_loop.yaml       │
+│    └─ search_space: {lr: [...], lora_rank: [...], ...}       │
+│                                                              │
+│  Scalar Metric: overall_pass_rate (from Evaluator)           │
+│    └─ or: final_loss (from training run)                     │
+│                                                              │
+│  Time-Boxed Cycle: max_steps per experiment (e.g., 500)      │
+│    └─ wall-clock budget: configurable (default: 10 min)      │
+│                                                              │
+│  Loop:                                                       │
+│    1. Select next config (random / grid / Bayesian)          │
+│    2. Write temp config.yaml with overrides                  │
+│    3. Run training subprocess (max_steps=500)                │
+│    4. Run eval subprocess (Evaluator/cli.py)                 │
+│    5. Record result in results.tsv                           │
+│    6. If metric improved: save config as new baseline        │
+│    7. If metric declined: discard, revert to baseline        │
+│    8. Repeat until budget exhausted                          │
+│                                                              │
+│  Output:                                                     │
+│    results.tsv — all experiments with metrics                │
+│    best_config.yaml — winning configuration                  │
+│    experiment_log.jsonl — detailed logs for each run         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 1: ExperimentConfig dataclass**
+```python
+# shared/flywheel/experiment_config.py
+@dataclass
+class ExperimentConfig:
+    # Budget
+    max_experiments: int = 50
+    budget_minutes_per_experiment: int = 10
+    max_steps_per_experiment: int = 500
+
+    # Search space (each key maps to a list of values to try)
+    search_space: dict = field(default_factory=lambda: {
+        "learning_rate": [5e-5, 1e-4, 2e-4, 5e-4],
+        "r": [8, 16, 32, 64],
+        "lora_alpha": [16, 32, 64, 128],
+        "num_train_epochs": [1, 2],
+        "warmup_ratio": [0.02, 0.05, 0.1],
+    })
+
+    # Strategy
+    search_strategy: str = "random"  # "random", "grid", "bayesian"
+
+    # Metric
+    metric: str = "eval_pass_rate"  # "eval_pass_rate" | "final_loss"
+    metric_direction: str = "maximize"  # "maximize" | "minimize"
+
+    # Paths
+    base_config_path: str = "Trainers/sft/configs/config.yaml"
+    eval_scenario_path: str = "Evaluator/config/scenarios/tool_prompts.yaml"
+    results_path: str = "experiments/results.tsv"
+    dataset_path: str = ""  # Required — training dataset
+
+    # Training
+    trainer_type: str = "sft"  # "sft" | "kto" | "grpo"
+```
+
+**Step 2: ExperimentLoop core**
+```python
+# shared/flywheel/experiment_loop.py
+class ExperimentLoop:
+    def __init__(self, config: ExperimentConfig):
+        self.config = config
+        self.baseline_metric = None
+        self.best_config = None
+        self.results: list[ExperimentResult] = []
+
+    async def run(self) -> ExperimentSummary:
+        """Main loop — run experiments until budget exhausted."""
+        base_config = load_yaml(self.config.base_config_path)
+
+        for i in range(self.config.max_experiments):
+            # 1. Generate candidate config
+            overrides = self._sample_config()
+
+            # 2. Merge overrides into base config
+            experiment_config = deep_merge(base_config, overrides)
+            experiment_config["max_steps"] = self.config.max_steps_per_experiment
+
+            # 3. Write temp config
+            temp_config_path = f"experiments/run_{i:04d}/config.yaml"
+            write_yaml(temp_config_path, experiment_config)
+
+            # 4. Run training subprocess
+            training_result = await self._run_training(temp_config_path)
+
+            # 5. Run evaluation (if using eval_pass_rate)
+            if self.config.metric == "eval_pass_rate":
+                eval_result = await self._run_evaluation(training_result.model_path)
+                metric_value = eval_result.overall_pass_rate
+            else:
+                metric_value = training_result.final_loss
+
+            # 6. Record result
+            result = ExperimentResult(
+                run_id=i,
+                overrides=overrides,
+                metric=metric_value,
+                duration_seconds=training_result.duration,
+            )
+            self.results.append(result)
+            self._write_results_tsv(result)
+
+            # 7. Keep or discard
+            if self._is_improvement(metric_value):
+                self.baseline_metric = metric_value
+                self.best_config = experiment_config
+                logger.info(f"Run {i}: IMPROVED to {metric_value:.4f}")
+            else:
+                logger.info(f"Run {i}: no improvement ({metric_value:.4f})")
+
+        return ExperimentSummary(
+            total_experiments=len(self.results),
+            best_metric=self.baseline_metric,
+            best_config=self.best_config,
+            improvements_found=sum(1 for r in self.results if r.is_improvement),
+        )
+```
+
+**Step 3: CLI integration**
+```python
+# tuner.py — add to menu
+# [N] Experiment Loop (auto-tune hyperparameters)
+#   └─ Runs N short training experiments, keeps best config
+```
+
+**Step 4: Results tracking**
+```
+experiments/
+├── results.tsv           # Tab-separated: run_id, lr, rank, alpha, metric, duration, status
+├── best_config.yaml      # Winning configuration
+├── run_0001/
+│   ├── config.yaml       # Config used for this run
+│   ├── training.log      # Training output
+│   └── eval_results.json # Evaluation results (if applicable)
+├── run_0002/
+│   └── ...
+```
+
+**Validation**: Run experiment loop with 10 experiments, 200 steps each, on a small dataset. Success criteria:
+- At least 1 config outperforms baseline
+- Results.tsv is complete and parseable
+- Best config is reproducible (re-run produces similar metric)
+
+---
+
+### Implementation 3: FitnessEvaluator as GRPO Reward
+
+**Goal**: Combine the flywheel's structural fitness scoring with GRPO's semantic reward rubrics for a richer reward signal.
+
+**Files to modify**:
+- `Trainers/grpo/src/rewards.py` — add FitnessEvaluator as a reward component
+- `Trainers/grpo/configs/config.yaml` — add fitness reward weight
+- `Trainers/grpo/configs/rewards/fitness.yaml` — NEW reward rubric wrapping FitnessEvaluator
+
+**Step 1: Add fitness reward function**
+```python
+# Trainers/grpo/src/rewards.py — new function
+def fitness_reward(
+    model_output: str,
+    ground_truth: dict,
+    config_path: str = "configs/flywheel/fitness_rules.yaml",
+) -> float:
+    """Score model output using FitnessEvaluator (structural correctness).
+
+    Complements semantic reward rubrics:
+    - fitness_reward: Does the tool call parse? Is JSON valid? Required fields present?
+    - args_match reward: Are the field VALUES correct? Right tool selected?
+    """
+    from shared.validation import FitnessEvaluator
+    evaluator = FitnessEvaluator(config_path=config_path)
+    result = evaluator.evaluate(model_output)
+    return result.score  # 0.0-1.0
+```
+
+**Step 2: Register as reward component**
+```yaml
+# Trainers/grpo/configs/rewards/fitness.yaml
+name: structural_fitness
+weight: 0.3
+type: fitness_evaluator
+config_path: "configs/flywheel/fitness_rules.yaml"
+description: "Structural correctness: tool call parses, JSON valid, required fields"
+```
+
+**Step 3: Wire into reward computation**
+```python
+# Trainers/grpo/src/rewards.py — modify compute_rewards()
+# Add fitness_reward alongside existing reward rubrics:
+#   total_reward = (
+#       args_match_weight * args_match_score +    # semantic (existing)
+#       json_structure_weight * json_score +       # format (existing)
+#       fitness_weight * fitness_score             # structural (NEW)
+#   )
+```
+
+**Validation**: Run GRPO training for 50 steps with and without fitness reward. Compare:
+- Reward distribution (should be more informative with fitness component)
+- Tool call structural validity rate in generated outputs
+- Does adding fitness reward improve eval pass rate?
+
+---
+
+### Implementation 4: Single-Knob Complexity Tiers
+
+**Goal**: Add `--tier` presets to training CLI so users don't need to understand LoRA hyperparameters.
+
+**New files**:
+- `Trainers/sft/configs/tiers/quick.yaml`
+- `Trainers/sft/configs/tiers/standard.yaml`
+- `Trainers/sft/configs/tiers/thorough.yaml`
+- `Trainers/kto/configs/tiers/` — same structure
+
+**Modified files**:
+- `Trainers/sft/train_sft.py` — add `--tier` argument
+- `Trainers/kto/train_kto.py` — add `--tier` argument
+
+**Tier definitions**:
+
+```yaml
+# tiers/quick.yaml — Fast iteration, exploratory
+r: 8
+lora_alpha: 16
+learning_rate: 5e-4
+num_train_epochs: 1
+max_steps: 200
+warmup_ratio: 0.05
+batch_size: 8
+gradient_accumulation_steps: 2
+
+# tiers/standard.yaml — Current defaults, production quality
+r: 64
+lora_alpha: 128
+learning_rate: 2e-4
+num_train_epochs: 1
+warmup_ratio: 0.02
+batch_size: 8
+gradient_accumulation_steps: 4
+
+# tiers/thorough.yaml — Maximum quality, slow
+r: 128
+lora_alpha: 256
+learning_rate: 1e-4
+num_train_epochs: 3
+warmup_ratio: 0.1
+batch_size: 4
+gradient_accumulation_steps: 8
+```
+
+**Integration**:
+```python
+# train_sft.py — argument parsing
+parser.add_argument("--tier", choices=["quick", "standard", "thorough"],
+                    help="Preset complexity tier (overrides individual hyperparams)")
+
+# Config loading
+if args.tier:
+    tier_config = load_yaml(f"configs/tiers/{args.tier}.yaml")
+    config = deep_merge(config, tier_config)  # Tier overrides base
+```
+
+**Validation**: Run each tier on same small dataset, verify:
+- `quick` completes in <5 minutes
+- `standard` matches current defaults exactly
+- `thorough` produces better eval scores than `standard` (on sufficient data)
+
+---
+
+### Execution Order
+
+```
+Phase 1 (Quick Wins — config changes + small code changes):
+  └─ Implementation 1: Fix evolutionary training
+  └─ Implementation 4: Complexity tiers
+
+Phase 2 (Medium effort — new components):
+  └─ Implementation 3: FitnessEvaluator as GRPO reward
+
+Phase 3 (Larger feature — new subsystem):
+  └─ Implementation 2: Autonomous experiment loop
+```
+
+Phase 1 items can be done in parallel with no dependencies. Phase 2 is independent. Phase 3 benefits from Phase 1 (the experiment loop can test evolutionary vs non-evolutionary training).
+
+---
+
 ## Key Quotes
 
 > "You're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the program.md Markdown files." — Karpathy on autoresearch
