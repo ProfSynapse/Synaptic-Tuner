@@ -119,6 +119,7 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.ml_handler import MLHandler
+        from tuner.handlers.surgery_handler import SurgeryHandler
 
         # Cloud handler is optional (may not have cloud deps)
         try:
@@ -147,6 +148,7 @@ class MainMenuHandler(BaseHandler):
             ("modelops", f"{BOX['bullet']} Model Ops - Run, merge, convert, upload"),
             ("ml", f"{BOX['bullet']} ML Training - Traditional ML (LightGBM, XGBoost, sklearn)"),
             ("experiment-loop", f"{BOX['bullet']} Experiment Loop - Autonomous hyperparameter search"),
+            ("surgery", f"{BOX['bullet']} LoRA Surgery - Eval-guided weight optimization"),
         ]
 
         # Step 4: Create handler instances (pass args for consistency)
@@ -160,6 +162,7 @@ class MainMenuHandler(BaseHandler):
             "synthchat": SynthChatHandler(args=self.args),
             "modelops": ModelOpsHandler(args=self.args),
             "ml": MLHandler(args=self.args),
+            "surgery": SurgeryHandler(args=self.args),
         }
         if has_cloud:
             handlers["cloud"] = CloudTrainHandler(args=self.args)

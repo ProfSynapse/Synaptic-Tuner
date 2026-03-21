@@ -86,6 +86,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.list_handler import ListHandler
         from tuner.handlers.main_menu_handler import MainMenuHandler
         from tuner.handlers.flywheel_handler import FlywheelHandler
+        from tuner.handlers.surgery_handler import SurgeryHandler
     except ImportError as e:
         # Graceful degradation if handlers not yet implemented
         error_msg = f"Handlers not yet implemented: {e}"
@@ -113,7 +114,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, flywheel, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -159,6 +160,11 @@ def route_command(args: Namespace) -> int:
     # Autonomous experiment loop
     if command == 'experiment-loop':
         return _handle_experiment_loop(args, json_mode)
+
+    # Surgery command
+    if command == 'surgery':
+        handler = SurgeryHandler(args=args)
+        return handler.handle()
 
     # Experiment pipeline
     if command == 'compare-runs':

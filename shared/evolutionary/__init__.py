@@ -31,4 +31,15 @@ __all__ = [
     "EvolutionaryConfig",
     "CandidateGenerator",
     "EvolutionaryTrainerWrapper",
+    "LoRASurgeon",
+    "SurgeryConfig",
+    "SurgeryResult",
+    "OperationResult",
 ]
+
+# Lazy imports for surgery (requires torch + safetensors)
+def __getattr__(name):
+    if name in ("LoRASurgeon", "SurgeryConfig", "SurgeryResult", "OperationResult"):
+        from .lora_surgery import LoRASurgeon, SurgeryConfig, SurgeryResult, OperationResult
+        return locals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
