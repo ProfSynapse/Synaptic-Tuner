@@ -255,6 +255,11 @@ class HFEvalStageRunner:
             update_model_card=False,
             gpu=spec.evaluation.gpu,
             timeout_hours=spec.evaluation.timeout_hours,
+            with_loss=bool(spec.loss.enabled),
+            loss_dataset_name=spec.dataset.source if spec.loss.enabled else None,
+            loss_dataset_file=spec.dataset.file if spec.loss.enabled else None,
+            loss_max_seq_length=spec.loss.max_seq_length or spec.training.max_seq_length,
+            loss_no_completion_only=not spec.loss.completion_only,
             auto_confirm=True,
         )
         handler = CloudEvalHandler(args=args)
@@ -460,10 +465,70 @@ class HFLossStageRunner:
             )
         return None
 
+    def _recover_loss_from_evaluation(self, *, experiment: Experiment) -> Optional[StageResult]:
+        eval_details = experiment.stage_details.get("evaluation", {})
+        eval_status = eval_details.get("status")
+        eval_artifact_root = eval_details.get("artifact_root")
+        bucket_id = eval_details.get("bucket_id") or eval_details.get("tags", {}).get("bucket_id")
+        if eval_status != "completed" or not eval_artifact_root or not bucket_id:
+            return None
+
+        embedded_root = f"{eval_artifact_root.rstrip('/')}/analysis"
+        results_prefix = embedded_root.replace(f"hf://buckets/{bucket_id}/", "", 1)
+        results_dir = self._download_results(bucket_id=bucket_id, results_prefix=results_prefix)
+        losses_path = results_dir / "per_example_losses.jsonl" if results_dir else None
+        if losses_path and losses_path.exists():
+            loss_results = load_losses(losses_path)
+            if results_dir is not None:
+                shutil.rmtree(results_dir, ignore_errors=True)
+            self.tracking_service.update_stage_details(
+                experiment,
+                "loss",
+                status="completed",
+                artifact_root=embedded_root,
+                source_commit=eval_details.get("source_commit"),
+                tags={
+                    "provider": experiment.provider,
+                    "bucket_id": bucket_id,
+                    "artifact_prefix": eval_details.get("artifact_prefix") or eval_details.get("tags", {}).get("artifact_prefix", ""),
+                },
+            )
+            return StageResult(
+                status="completed",
+                run_record=RunRecord(
+                    run_id=f"{experiment.experiment_id}-loss",
+                    run_type="loss",
+                    name=f"{experiment.name} per-example loss",
+                    timestamp=eval_details.get("updated_at") or experiment.created_at,
+                    status="completed",
+                    output_dir=embedded_root,
+                    model_name=experiment.base_model_name,
+                    dataset_source=experiment.dataset_path,
+                    provider=experiment.provider,
+                    artifact_backend="hf_bucket",
+                    artifact_root=embedded_root,
+                    source_commit=eval_details.get("source_commit"),
+                    stage="loss",
+                    tags={
+                        "provider": experiment.provider,
+                        "bucket_id": bucket_id,
+                        "artifact_prefix": eval_details.get("artifact_prefix") or eval_details.get("tags", {}).get("artifact_prefix", ""),
+                    },
+                ),
+                loss_results=loss_results,
+                artifact_root=embedded_root,
+            )
+        if results_dir is not None:
+            shutil.rmtree(results_dir, ignore_errors=True)
+        return None
+
     def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
         recovered = self._recover_existing_loss(experiment=experiment)
         if recovered is not None:
             return recovered
+        recovered_from_eval = self._recover_loss_from_evaluation(experiment=experiment)
+        if recovered_from_eval is not None:
+            return recovered_from_eval
         if previous is None or previous.run_record is None:
             raise CloudProviderError("Loss stage requires a completed training run.")
         training_run = previous.run_record

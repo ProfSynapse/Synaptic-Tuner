@@ -9,7 +9,7 @@ from shared.experiment_tracking import Experiment, TrackingService
 from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.per_example_loss import save_losses
 from tuner.core.exceptions import CloudProviderError
-from tuner.handlers.experiment_handler import HFLossStageRunner, HFTrainingStageRunner, StageResult
+from tuner.handlers.experiment_handler import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner, StageResult
 
 
 def _experiment() -> Experiment:
@@ -139,4 +139,125 @@ def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: 
 
     assert result.status == "completed"
     assert len(result.loss_results) == 1
+    mock_submit.assert_not_called()
+
+
+def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    previous = StageResult(
+        status="completed",
+        run_record=RunRecord(
+            run_id="exp-training",
+            run_type="sft",
+            name="training",
+            timestamp="2026-03-21T19:15:36+00:00",
+            status="completed",
+            output_dir="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+            provider="hf_jobs",
+            artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+            source_commit="deadbeefcafebabe",
+            stage="training",
+            tags={
+                "provider": "hf_jobs",
+                "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+                "bucket_id": "test/toolset-training-artifacts",
+                "image": "unsloth/unsloth:latest",
+            },
+        ),
+    )
+
+    spec = type(
+        "Spec",
+        (),
+        {
+            "method": "sft",
+            "provider": "hf_jobs",
+            "dataset": type("Dataset", (), {"source": "professorsynapse/claudesidian-synthetic-dataset", "file": "train.jsonl", "identifier": "professorsynapse/claudesidian-synthetic-dataset/train.jsonl"})(),
+            "training": type("Training", (), {"model_name": "HuggingFaceTB/SmolLM2-1.7B-Instruct", "max_seq_length": 2048})(),
+            "evaluation": type("Evaluation", (), {"preset": "full", "scenarios": [], "tags": None, "gpu": None, "timeout_hours": None})(),
+            "loss": type("Loss", (), {"enabled": True, "max_seq_length": 2048, "completion_only": True})(),
+            "name": "resume-smoke",
+        },
+    )()
+
+    captured = {}
+
+    class _FakeCloudEvalHandler:
+        def __init__(self, args):
+            captured["args"] = args
+            self.last_results_uri = "hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef/evaluations/vllm/20260321_200000"
+            self.last_job_id = "eval-job-123"
+            self.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
+
+        def handle(self):
+            return 0
+
+    with patch("tuner.handlers.experiment_handler.CloudEvalHandler", _FakeCloudEvalHandler):
+        result = runner.run(spec=spec, experiment=experiment, previous=previous)
+
+    assert result.status == "completed"
+    assert captured["args"].with_loss is True
+    assert captured["args"].loss_dataset_name == "professorsynapse/claudesidian-synthetic-dataset"
+    assert captured["args"].loss_dataset_file == "train.jsonl"
+
+
+def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    service.update_stage_details(
+        experiment,
+        "evaluation",
+        status="completed",
+        artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef/evaluations/vllm/20260321_200000",
+        bucket_id="test/toolset-training-artifacts",
+        artifact_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+
+    losses_dir = tmp_path / "eval-analysis-results"
+    losses_dir.mkdir()
+    save_losses(
+        [LossResult(index=0, loss=0.15, num_completion_tokens=12, num_total_tokens=22, jsonl_hash="wxyz5678")],
+        losses_dir / "per_example_losses.jsonl",
+    )
+
+    runner = HFLossStageRunner(repo_root=repo_root, tracking_service=service)
+    previous = StageResult(
+        status="completed",
+        run_record=RunRecord(
+            run_id="exp-training",
+            run_type="sft",
+            name="training",
+            timestamp="2026-03-21T19:15:36+00:00",
+            status="completed",
+            output_dir="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+            provider="hf_jobs",
+            artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+            source_commit="deadbeefcafebabe",
+            stage="training",
+            tags={
+                "provider": "hf_jobs",
+                "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+                "bucket_id": "test/toolset-training-artifacts",
+                "image": "unsloth/unsloth:latest",
+            },
+        ),
+    )
+
+    with patch.object(runner, "_download_results", return_value=losses_dir):
+        with patch("tuner.handlers.experiment_handler.HFJobExecutor.submit") as mock_submit:
+            result = runner.run(spec=None, experiment=experiment, previous=previous)
+
+    assert result.status == "completed"
+    assert len(result.loss_results) == 1
+    assert result.artifact_root.endswith("/evaluations/vllm/20260321_200000/analysis")
     mock_submit.assert_not_called()
