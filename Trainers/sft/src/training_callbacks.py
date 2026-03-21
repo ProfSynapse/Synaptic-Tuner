@@ -46,6 +46,14 @@ def _append_final_training_summary(log_file: Path, *, step: int, total_steps: in
         f.write(json.dumps(entry) + "\n")
 
 
+def _resolve_cloud_provider(args: Any) -> Optional[str]:
+    """Resolve cloud provider metadata without assuming trainer args carry custom CLI fields."""
+    cloud_provider = os.environ.get("CLOUD_PROVIDER", "").strip()
+    if cloud_provider:
+        return cloud_provider
+    return getattr(args, "cloud_provider", None)
+
+
 class MetricsTableCallback(TrainerCallback):
     """
     Custom callback that prints training metrics in a nice table format.
@@ -124,7 +132,7 @@ class MetricsTableCallback(TrainerCallback):
         steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0
         samples_per_sec = (state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps) / elapsed if elapsed > 0 else 0
         capacity_snapshot = capture_runtime_capacity_snapshot(torch)
-        cloud_provider = getattr(args, "cloud_provider", None)
+        cloud_provider = _resolve_cloud_provider(args)
         if cloud_provider:
             capacity_snapshot.setdefault("cloud_provider", cloud_provider)
         cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
@@ -463,7 +471,7 @@ class LiveDashboardCallback(TrainerCallback):
             state.global_step * args.per_device_train_batch_size * args.gradient_accumulation_steps
         ) / elapsed if elapsed > 0 else 0.0
         capacity_snapshot = capture_runtime_capacity_snapshot(torch)
-        cloud_provider = getattr(args, "cloud_provider", None)
+        cloud_provider = _resolve_cloud_provider(args)
         if cloud_provider:
             capacity_snapshot.setdefault("cloud_provider", cloud_provider)
         cloud_gpu_type = os.environ.get("CLOUD_GPU_TYPE", "").strip()
