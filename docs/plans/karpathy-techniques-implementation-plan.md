@@ -592,4 +592,170 @@ surgery:
 
 1. ~~**Eval scenario for automated scoring**~~ → RESOLVED (Decision 1)
 2. ~~**GPU contention**~~ → RESOLVED (Decision 2)
-3. **Experiment loop search strategy**: Start with random sampling. Add Bayesian optimization (e.g., Optuna) later if random isn't efficient enough?
+3. ~~**Experiment loop search strategy**~~ → RESOLVED (Decision 3)
+
+### Decision 3: Search Strategy — LLM Reasoning + LightGBM Surrogate in Concert
+
+**Decision**: Dual-strategy approach. An LLM reasons about past results and proposes next configs (like autoresearch). Simultaneously, a LightGBM surrogate model learns to predict eval scores from hyperparameter configs and identifies promising regions of the search space. The two work in concert.
+
+**Why both?**
+- **LLM reasoning** excels at: structural insights ("rank 64→128 helped, try 256"), noticing patterns ("warmup matters more at high LR"), proposing novel combinations the surrogate can't extrapolate to
+- **LightGBM surrogate** excels at: quantitative prediction from tabular data, ranking 100s of candidate configs cheaply, identifying diminishing returns, feature importance (which hyperparams matter most)
+- Together: LLM proposes candidates informed by surrogate predictions, surrogate validates LLM intuitions with data
+
+**Existing infrastructure**: The `Trainers/ml/` pipeline already has LightGBM regression with feature engineering, sklearn Pipeline, and experiment tracking. We reuse it directly — no new ML code needed.
+
+**Architecture**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ExperimentLoop                                                  │
+│                                                                  │
+│  results.tsv ← accumulates after each experiment                │
+│  ┌──────────────────────┐   ┌──────────────────────┐           │
+│  │ LLM Advisor          │   │ LightGBM Surrogate   │           │
+│  │                      │   │                      │           │
+│  │ Input:               │   │ Input:               │           │
+│  │  - results.tsv       │   │  - results.tsv       │           │
+│  │  - search_space      │   │    (as training data) │           │
+│  │  - program.md        │   │                      │           │
+│  │                      │   │ Output:              │           │
+│  │ Output:              │   │  - predicted scores   │           │
+│  │  - proposed config   │   │    for all untried    │           │
+│  │  - reasoning         │   │    configs            │           │
+│  │                      │   │  - feature importance │           │
+│  └──────────┬───────────┘   └──────────┬───────────┘           │
+│             │                          │                        │
+│             └──────────┬───────────────┘                        │
+│                        ▼                                        │
+│              ┌─────────────────┐                                │
+│              │ Config Selector │                                │
+│              │                 │                                │
+│              │ Merge strategy: │                                │
+│              │  Phase 1 (N<10):│                                │
+│              │   LLM only     │                                │
+│              │  Phase 2 (N≥10):│                                │
+│              │   LLM proposes, │                                │
+│              │   surrogate    │                                │
+│              │   ranks/filters│                                │
+│              └─────────────────┘                                │
+│                        │                                        │
+│                        ▼                                        │
+│              Run experiment → append to results.tsv             │
+│              Retrain surrogate every K experiments              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Phase transitions**:
+- **Phase 1 (experiments 1-10)**: Random sampling + LLM reasoning. Not enough data for the surrogate model. LLM reads results.tsv and proposes configs. Random fills gaps.
+- **Phase 2 (experiments 10+)**: LLM + surrogate. Train LightGBM on results.tsv (hyperparams → eval_score). LLM proposes N candidate configs, surrogate predicts scores for each, top candidates are run. Surrogate retrained every 5 experiments.
+
+**LLM advisor implementation** (autoresearch-style):
+```python
+class LLMAdvisor:
+    def __init__(self, search_space: dict, program_md: str):
+        self.search_space = search_space
+        self.program_md = program_md  # Natural language instructions
+
+    async def propose_config(self, results_history: pd.DataFrame) -> dict:
+        """Ask LLM to propose next config based on results so far."""
+        prompt = f"""You are optimizing hyperparameters for LoRA fine-tuning.
+
+Search space:
+{yaml.dump(self.search_space)}
+
+Results so far (sorted by eval_score descending):
+{results_history.to_markdown()}
+
+Instructions:
+{self.program_md}
+
+Propose the next hyperparameter config to try. Return valid YAML.
+Explain your reasoning briefly."""
+
+        response = await llm_client.complete(prompt)
+        return yaml.safe_load(extract_yaml(response))
+```
+
+**LightGBM surrogate implementation** (reuses existing ML pipeline):
+```python
+class SurrogateModel:
+    def __init__(self, search_space: dict):
+        self.search_space = search_space
+        self.pipeline = None  # sklearn Pipeline with LightGBM
+
+    def fit(self, results: pd.DataFrame):
+        """Train surrogate on experiment history."""
+        from Trainers.ml.pipeline_builder import build_pipeline
+        from Trainers.ml.config import TrainingConfig
+
+        config = TrainingConfig(**{
+            "task": {"type": "regression", "target_column": "eval_score"},
+            "features": {"numeric": {
+                "columns": list(self.search_space.keys()),
+                "scaler": "standard",
+            }},
+            "algorithm": {"name": "lightgbm", "params": {
+                "n_estimators": 100,  # Small model, fast training
+                "num_leaves": 15,
+            }},
+        })
+        self.pipeline = build_pipeline(config)
+        X = results[list(self.search_space.keys())]
+        y = results["eval_score"]
+        self.pipeline.fit(X, y)
+
+    def predict_candidates(self, candidates: list[dict]) -> list[float]:
+        """Predict eval scores for candidate configs."""
+        df = pd.DataFrame(candidates)
+        return self.pipeline.predict(df).tolist()
+
+    def feature_importance(self) -> dict[str, float]:
+        """Which hyperparameters matter most?"""
+        lgbm = self.pipeline.named_steps["model"]
+        return dict(zip(
+            list(self.search_space.keys()),
+            lgbm.feature_importances_,
+        ))
+```
+
+**Concert mode** (LLM + surrogate together):
+```python
+async def select_next_config(self, results: pd.DataFrame) -> dict:
+    """Dual-strategy config selection."""
+    n = len(results)
+
+    if n < 10:
+        # Phase 1: LLM only (not enough data for surrogate)
+        return await self.llm_advisor.propose_config(results)
+
+    # Phase 2: LLM proposes, surrogate ranks
+    # Retrain surrogate periodically
+    if n % 5 == 0:
+        self.surrogate.fit(results)
+        importance = self.surrogate.feature_importance()
+        logger.info(f"Feature importance: {importance}")
+
+    # LLM proposes 5 candidates
+    candidates = []
+    for _ in range(5):
+        candidate = await self.llm_advisor.propose_config(results)
+        candidates.append(candidate)
+
+    # Surrogate predicts scores for each
+    predicted_scores = self.surrogate.predict_candidates(candidates)
+
+    # Pick the candidate with highest predicted score
+    best_idx = predicted_scores.index(max(predicted_scores))
+    logger.info(f"Surrogate predicted scores: {predicted_scores}")
+    logger.info(f"Selected candidate {best_idx} (predicted: {predicted_scores[best_idx]:.4f})")
+
+    return candidates[best_idx]
+```
+
+**Impact on plan**:
+- Implementation 3 (Experiment Loop) gets a `search_strategy: "llm_surrogate"` option
+- Uses `shared/llm/` for LLM calls (already exists — OpenRouter, LMStudio, Ollama)
+- Uses `Trainers/ml/pipeline_builder.py` for surrogate model (already exists)
+- `program.md` file in experiment config dir guides LLM behavior (autoresearch pattern)
+- Feature importance output reveals which hyperparams actually matter — feeds back into search space refinement
