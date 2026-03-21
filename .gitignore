@@ -144,3 +144,4 @@ docs/webllm_test.html
 Datasets/archive/
 Evaluator/config/scenarios/archive/
 docs/archive/
+.claude/worktrees/
