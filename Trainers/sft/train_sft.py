@@ -478,6 +478,11 @@ def parse_args(argv=None):
     parser.add_argument("--wandb-run-name", type=str,
                        help="W&B run name")
 
+    # Tier preset
+    parser.add_argument("--tier", choices=["quick", "standard", "thorough"],
+                       help="Preset complexity tier. Overrides individual LoRA/training hyperparams. "
+                            "Explicit flags still override tier defaults.")
+
     # Utility
     parser.add_argument("--dry-run", action="store_true",
                        help="Setup only, don't train")
@@ -549,6 +554,35 @@ def run(args: argparse.Namespace):
         # Default configuration (YAML)
         config = load_config()
         print("Using default YAML configuration")
+
+    # Apply tier preset (overrides base config, but explicit CLI flags override tier)
+    if args.tier:
+        import yaml as _yaml
+        tier_path = Path(__file__).parent / "configs" / "tiers" / f"{args.tier}.yaml"
+        if not tier_path.exists():
+            raise FileNotFoundError(f"Tier config not found: {tier_path}")
+        with open(tier_path) as f:
+            tier_config = _yaml.safe_load(f)
+
+        # Map tier keys to config attributes
+        _tier_config_map = {
+            "r": ("lora", "r"),
+            "lora_alpha": ("lora", "lora_alpha"),
+            "learning_rate": ("training", "learning_rate"),
+            "num_train_epochs": ("training", "num_train_epochs"),
+            "warmup_ratio": ("training", "warmup_ratio"),
+            "batch_size": ("training", "per_device_train_batch_size"),
+            "gradient_accumulation_steps": ("training", "gradient_accumulation_steps"),
+        }
+        for key, value in tier_config.items():
+            if key == "max_steps":
+                # max_steps is handled via args, not config
+                if args.max_steps is None:
+                    args.max_steps = value
+            elif key in _tier_config_map:
+                section, attr = _tier_config_map[key]
+                setattr(getattr(config, section), attr, value)
+        print(f"Applied '{args.tier}' tier preset: {tier_config}")
 
     # Apply CLI overrides
     if args.batch_size:
