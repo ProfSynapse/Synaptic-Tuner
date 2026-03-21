@@ -528,7 +528,7 @@ checkpoint_eval:
 
 **Decision**: Design cloud-first. Local execution should work but must be gated on actual hardware capabilities.
 
-**Rationale**: Not everyone has an RTX 3090. The experiment loop and surgery need inference for eval — this maps naturally to cloud eval (already implemented via HF Jobs in `Trainers/cloud/`). Local should be a convenience option, not the assumed default.
+**Rationale**: Not everyone has an RTX 3090. The experiment loop and surgery need inference for eval — this maps naturally to cloud eval (cloud training already supported via `Trainers/cloud/` with HF Jobs, Modal, and RunPod). Local should be a convenience option, not the assumed default. The `CloudProvider` adapter pattern ensures we're not locked into any single provider.
 
 **Architecture**:
 
@@ -536,8 +536,9 @@ checkpoint_eval:
 ExperimentLoop / LoRASurgeon
     │
     ├── eval_backend: "cloud"  (default)
-    │   └── Submit eval job to HF Jobs / cloud provider
-    │       └── Uses existing Trainers/cloud/ infrastructure
+    │   └── Submit eval job via CloudEvalBackend
+    │       └── Provider-agnostic: adapts to HF Jobs, Modal, RunPod, etc.
+    │       └── Uses CloudProvider protocol (same as Trainers/cloud/)
     │       └── No local GPU needed for eval
     │       └── Parallel eval possible (multiple checkpoints at once)
     │
@@ -548,6 +549,43 @@ ExperimentLoop / LoRASurgeon
             ├── Recommended: 16+ GB for concurrent training + eval
             └── If insufficient: error with "use --eval-backend cloud"
 ```
+
+**Provider-agnostic design** (critical — not HF-specific):
+
+```python
+# shared/eval_backend.py
+
+class EvalBackend(Protocol):
+    """Provider-agnostic eval interface."""
+    async def run_eval(self, adapter_path: str, scenario: str) -> float: ...
+
+class LocalEvalBackend:
+    """Direct inference on local GPU. Hardware-gated."""
+    def __init__(self, min_vram_gb: int = 8):
+        self._validate_hardware(min_vram_gb)
+
+    async def run_eval(self, adapter_path: str, scenario: str) -> float:
+        # Load model via Unsloth, run Evaluator directly
+        ...
+
+class CloudEvalBackend:
+    """Delegates to a CloudProvider. Provider is injected, not hardcoded."""
+    def __init__(self, provider: CloudProvider):
+        self.provider = provider  # HFJobsProvider, ModalProvider, RunPodProvider, etc.
+
+    async def run_eval(self, adapter_path: str, scenario: str) -> float:
+        job = await self.provider.submit_eval_job(adapter_path, scenario)
+        result = await self.provider.wait_for_result(job)
+        return result.eval_score
+
+class CloudProvider(Protocol):
+    """Adapter interface for cloud compute providers."""
+    async def submit_eval_job(self, adapter_path: str, scenario: str) -> JobHandle: ...
+    async def wait_for_result(self, job: JobHandle) -> JobResult: ...
+    async def upload_adapter(self, local_path: str) -> str: ...  # Returns remote path
+```
+
+This mirrors the flywheel's existing `cloud_provider` config pattern (`"hf_jobs" | "runpod" | "modal"`). New providers = new adapter class, zero changes to experiment loop or surgery code.
 
 **Hardware gating logic**:
 ```python
@@ -572,19 +610,20 @@ def check_local_eval_capability(model_size: str) -> bool:
 ```yaml
 experiment_loop:
   eval_backend: "cloud"          # "cloud" | "local"
-  cloud_provider: "hf_jobs"     # Reuses existing cloud training infra
+  cloud_provider: "hf_jobs"     # "hf_jobs" | "modal" | "runpod"
   local_min_vram_gb: 8          # Gate for local eval
 
 surgery:
   eval_backend: "cloud"
-  cloud_provider: "hf_jobs"
+  cloud_provider: "modal"       # Can differ from experiment_loop
 ```
 
 **Impact on plan**:
-- Implementation 1C, 3, 4: All eval calls go through an `EvalBackend` abstraction
-- New interface: `EvalBackend.run_eval(adapter_path, scenario) → float`
-- Two implementations: `LocalEvalBackend` (direct inference) and `CloudEvalBackend` (HF Jobs)
+- Implementation 1C, 3, 4: All eval calls go through `EvalBackend` protocol
+- `EvalBackend.run_eval(adapter_path, scenario) → float` — single interface
+- `CloudEvalBackend` delegates to a `CloudProvider` adapter (injected, not hardcoded)
 - `LocalEvalBackend` checks hardware before running, errors with guidance if insufficient
+- Adding a new cloud provider = implement `CloudProvider` protocol, register in config
 
 ---
 
