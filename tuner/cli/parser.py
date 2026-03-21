@@ -69,6 +69,7 @@ Commands:
   train       Training workflow (SFT, KTO, GRPO)
   cloud       Cloud training (HF Jobs, Modal, RunPod)
   cloud-run   Config-driven HF cloud job
+  cloud-jobs  Inspect or manage live HF Jobs
   cloud-pipeline Train on HF Jobs, then evaluate on HF Jobs
   cloud-eval  Cloud evaluation on HF Jobs using vLLM
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
@@ -111,6 +112,8 @@ Examples:
   python tuner.py status       # Show system status
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
+  python tuner.py cloud-jobs list
+  python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -124,13 +127,14 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-jobs", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
-    # Subcommand argument (shared positional for list and ml sub-commands)
+    # Subcommand argument (shared positional for list, ml, and cloud-jobs sub-commands)
     # When command is 'list': accepts datasets, models, runs, rubrics, scenarios
     # When command is 'ml': accepts train, list-configs
+    # When command is 'cloud-jobs': accepts list, show, logs, cancel
     parser.add_argument(
         "subcommand",
         nargs="?",
@@ -241,6 +245,11 @@ Examples:
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--job-config", help="Config-driven cloud job YAML (cloud-run workflow).")
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
+    parser.add_argument("--job", help="HF job reference for cloud-jobs show/logs/cancel. Accepts either <job-id> or <namespace>/<job-id>.")
+    parser.add_argument("--namespace", help="HF namespace override for cloud-jobs list/show/logs/cancel.")
+    parser.add_argument("--tail", type=int, default=200, help="Number of log lines to show for cloud-jobs logs (default: 200).")
+    parser.add_argument("--limit", type=int, default=20, help="Maximum jobs to show for cloud-jobs list (default: 20).")
+    parser.add_argument("--follow", action="store_true", help="Stream live logs for cloud-jobs logs.")
 
     # Experiment loop flags
     parser.add_argument(
