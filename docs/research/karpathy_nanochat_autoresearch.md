@@ -160,6 +160,101 @@ Clear boundaries make it trivial to parse tool calls during inference. The model
 
 ---
 
+## Integration Points in Our Codebase
+
+### P0: Autonomous Experiment Loop → FlywheelOrchestrator
+
+Karpathy's three design primitives map directly to our system:
+
+| Primitive | autoresearch | Our Equivalent |
+|-----------|-------------|----------------|
+| **Editable asset** | `train.py` (single file) | `Trainers/sft/configs/config.yaml` or `Trainers/kto/configs/config.yaml` |
+| **Scalar metric** | `val_bpb` | `overall_pass_rate` from `Evaluator/reporting.py` (0.0-1.0) |
+| **Time-boxed cycle** | 5-min wall-clock | `max_steps` in trainer config (e.g., 500 steps) |
+
+**Where it hooks in**:
+- `shared/flywheel/orchestrator.py` — `FlywheelOrchestrator.run_cycle()` already runs CLEAN→TAG→STAGE→RETRAIN. An experiment loop wraps this with config mutation + eval comparison.
+- `shared/experiment_tracking/adapters.py` — `eval_to_run_record()` extracts `overall_pass_rate` as `primary_metric`. This is our `val_bpb` equivalent.
+- `shared/flywheel/readiness.py` — `ReadinessChecker.check()` gates whether enough data exists. Experiment loop bypasses this (uses fixed dataset).
+
+**Config parameters to search over** (from actual config files):
+
+| Trainer | Parameter | Current Default | Search Range |
+|---------|-----------|-----------------|--------------|
+| SFT | `learning_rate` | 2e-4 | [5e-5, 1e-4, 2e-4, 5e-4] |
+| SFT | `r` (LoRA rank) | 64 | [8, 16, 32, 64, 128] |
+| SFT | `lora_alpha` | 128 | [r, 2*r] |
+| SFT | `num_train_epochs` | 1 | [1, 2, 3] |
+| SFT | `packing` | false | [true, false] |
+| SFT | `warmup_ratio` | 0.02 | [0.01, 0.02, 0.05, 0.1] |
+| KTO | `learning_rate` | 1e-6 | [2e-7, 5e-7, 1e-6, 5e-6] |
+| KTO | `beta` | 0.1 | [0.05, 0.1, 0.2, 0.5] |
+| GRPO | `num_generations` | 4 | [2, 4, 8] |
+| GRPO | `beta` | 0.1 | [0.01, 0.05, 0.1, 0.2] |
+| GRPO | `temperature` | 1.0 | [0.7, 0.8, 1.0, 1.2] |
+
+**Available scalar metrics for the feedback loop** (ranked by signal quality):
+1. `overall_pass_rate` — from `Evaluator/reporting.py` (primary)
+2. `avg_quality_score` — from `catalog.avg_score()` via `ReadinessReport`
+3. `judge_pass_rate` — from `JudgeService` per-rubric scores
+4. `final_loss` — from training run `RunRecord.primary_metric`
+5. `score_distribution` histogram — from `CleaningResult`
+
+---
+
+### P1: SFT Format Matching — VERIFIED: Already Correct (Default)
+
+Audited `Trainers/sft/train_sft.py` (lines 682-693):
+- **Default**: `packing: false` in `config.yaml` — each example padded individually to `max_seq_length` (2048)
+- **Optional**: `packing: true` concatenates examples for 2.5-5x faster training
+- **`completion_only_loss: true`** — loss computed only on assistant tokens
+
+**Finding**: Our default config matches nanochat's SFT approach (individual padding, no packing). The `packing: true` option exists for throughput but changes loss semantics. No action needed unless we're accidentally enabling packing.
+
+**Caution**: If packing is enabled for speed, we lose the exact test-time format matching that Karpathy recommends. Document this tradeoff in trainer README.
+
+---
+
+### P1: FitnessEvaluator as GRPO Reward Signal — Already Partially Wired
+
+The flywheel tagger (`shared/flywheel/tagger.py`) already routes logs to GRPO:
+- `_is_grpo_eligible()`: checks `tools_requested AND has_tool_calls AND is_valid`
+- `grpo_reward_scale` in `FlywheelConfig` scales `fitness_score → reward`
+- `DatasetStager._write_grpo()` formats as `{"conversations": [...], "reward": score * scale}`
+
+**What's missing**: The GRPO trainer (`Trainers/grpo/train_grpo.py`) uses its own reward rubrics (`Trainers/grpo/configs/rewards/*.yaml`) — field-level comparison against ground truth. The flywheel's `fitness_score` (schema validation pass/fail) is a coarser signal.
+
+**Integration opportunity**: Combine both signals:
+- `fitness_score` (0.0-1.0) from FitnessEvaluator → structural correctness
+- Reward rubric scores from `Trainers/grpo/src/rewards.py` → semantic correctness
+- Weighted sum = richer reward signal
+
+**Concrete files**:
+- `configs/flywheel/fitness_rules.yaml` — current: 3 JSON path validations (function.name, arguments exist, arguments valid JSON)
+- `Trainers/grpo/configs/rewards/args_match.yaml` — weight 1.0, checks context fields + tool selection
+- `Trainers/grpo/src/rewards.py` — reward computation with strategies: `equals`, `contains`, `key_overlap`
+
+---
+
+### P2: Single-Knob Complexity Tiers — Maps to Existing Config Structure
+
+Our trainer configs already use YAML with all hyperparameters in one place. The "depth dial" concept translates to LoRA complexity tiers:
+
+**Where it plugs in**: `Trainers/sft/configs/config.yaml` and `Trainers/kto/configs/config.yaml`
+
+```yaml
+# Proposed: tiers/ directory alongside config.yaml
+# tiers/quick.yaml  — r=8, alpha=16, lr=5e-4, epochs=1, max_steps=200
+# tiers/standard.yaml — r=64, alpha=128, lr=2e-4, epochs=1 (current default)
+# tiers/thorough.yaml — r=128, alpha=256, lr=1e-4, epochs=3
+```
+
+**CLI integration**: `python train_sft.py --tier quick` loads tier preset, overrides apply on top.
+
+**Note**: The evolutionary training system (`Trainers/sft/configs/config.yaml` lines 114-147) already exists but is disabled (`evolutionary.enabled: false`). This is complementary — evolutionary training mutates gradients per-step, while the experiment loop mutates configs per-run.
+
+---
+
 ## Key Quotes
 
 > "You're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the program.md Markdown files." — Karpathy on autoresearch
