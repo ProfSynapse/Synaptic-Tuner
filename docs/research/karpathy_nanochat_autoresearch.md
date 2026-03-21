@@ -1077,6 +1077,54 @@ python tuner.py surgery --adapter final_model/ --config configs/lora_surgery.yam
 #   best_adapter/          — surgically optimized LoRA weights
 ```
 
+**Operation 7: Alpha Sweep (Simplest Possible Surgery)**
+The LoRA update is scaled by `lora_alpha / r`. Reducing alpha post-training attenuates the entire LoRA signal — equivalent to linear interpolation between base model and fine-tuned model. If training overfit (loss < 0.2), multiply alpha by 0.5 as a first fix.
+```python
+def sweep_alpha(self, alphas: list[float]):
+    """Try different effective scaling factors.
+
+    Default: lora_alpha=128, r=64 → scale=2.0
+    alpha=64 → scale=1.0 (halved contribution)
+    alpha=192 → scale=3.0 (amplified contribution)
+
+    Just modifies adapter_config.json, no weight changes needed.
+    """
+    for alpha in alphas:
+        config = self.adapter_config.copy()
+        config["lora_alpha"] = alpha
+        self._save_temp_adapter(self.base_weights, config)
+        score = await self._evaluate(...)
+```
+
+**Operation 8: Metrics-Weighted Checkpoint Averaging (MWA)**
+Save N checkpoints during training, evaluate each, merge using eval scores as interpolation weights. From [arXiv:2504.18580](https://arxiv.org/pdf/2504.18580) — outperformed best single checkpoint by 2.62%.
+```python
+def metrics_weighted_average(self, checkpoints: list[str]) -> dict:
+    """Evaluate each checkpoint, merge weighted by eval score.
+
+    1. Load each checkpoint's LoRA weights
+    2. Evaluate each → get score_i
+    3. Normalize scores: weight_i = score_i / sum(scores)
+    4. Merged = sum(weight_i * weights_i)
+
+    Can also use PEFT's add_weighted_adapter() directly.
+    """
+```
+
+#### Research Backing
+
+| Technique | Paper | Key Finding |
+|-----------|-------|-------------|
+| **Layer pruning** | [LoRA-drop (COLING 2025)](https://arxiv.org/abs/2402.07721) | Retaining only ~50% of LoRA modules matches full performance |
+| **SVD compression** | [Post-hoc LoRA Compression](https://openreview.net/forum?id=Xg0u7lAIrs) | Many trained LoRAs have effective rank far below nominal |
+| **DARE** | [Language Models are Super Mario](https://arxiv.org/abs/2311.03099) | Can drop 90-99% of delta params with rescaling |
+| **TIES merging** | [TIES-Merging (Yadav et al.)](https://arxiv.org/abs/2306.01708) | Resolves parameter interference via trim + elect sign |
+| **Checkpoint MWA** | [Metrics-Weighted Averaging](https://arxiv.org/pdf/2504.18580) | Eval-weighted checkpoint merge beats best single by 2.62% |
+| **SLERP** | [Embedding Generalization](https://arxiv.org/html/2511.21703v1) | Preserves directional structure better than linear averaging |
+| **Alpha scaling** | [Unsloth LoRA Guide](https://unsloth.ai/docs/get-started/fine-tuning-llms-guide/lora-hyperparameters-guide) | Simplest post-training fix for overfitting |
+
+**Existing tooling**: HuggingFace PEFT supports TIES, DARE, linear merging via `add_weighted_adapter()`. [mergekit](https://github.com/arcee-ai/mergekit) supports SLERP, TIES, DARE, task arithmetic. We can leverage these rather than reimplementing.
+
 #### Key Advantages Over Retraining
 
 | Aspect | Retraining | LoRA Surgery |
