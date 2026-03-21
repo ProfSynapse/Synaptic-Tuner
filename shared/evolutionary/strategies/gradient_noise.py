@@ -26,6 +26,7 @@ class GradientNoiseStrategy(BaseStrategy):
         noise_scale: float = 0.1,
         include_pure: bool = True,
         adaptive_scale: bool = False,
+        max_grad_norm: float = 1.0,
     ):
         """
         Initialize noise strategy.
@@ -34,11 +35,16 @@ class GradientNoiseStrategy(BaseStrategy):
             noise_scale: Standard deviation of noise relative to gradient norm
             include_pure: Include the original gradient as one candidate
             adaptive_scale: Adapt noise scale based on gradient magnitude
+            max_grad_norm: Cap on gradient norm used for noise scaling.
+                When raw gradient norms exceed this value, noise magnitude
+                is based on max_grad_norm instead of the raw norm, preventing
+                oversized perturbations in early training.
         """
         super().__init__(name="gradient_noise")
         self.noise_scale = noise_scale
         self.include_pure = include_pure
         self.adaptive_scale = adaptive_scale
+        self.max_grad_norm = max_grad_norm
 
     def generate_candidates(
         self,
@@ -73,9 +79,13 @@ class GradientNoiseStrategy(BaseStrategy):
                 scale = self.noise_scale
 
             # Add noise to each gradient
+            # Cap noise magnitude using max_grad_norm to prevent oversized
+            # perturbations when raw gradient norms are large (early training)
             noisy_gradients = {}
             for name, grad in base_gradients.items():
-                noise = torch.randn_like(grad) * scale * grad.norm()
+                grad_norm = grad.norm()
+                capped_norm = min(grad_norm, self.max_grad_norm) if self.max_grad_norm > 0 else grad_norm
+                noise = torch.randn_like(grad) * scale * capped_norm
                 noisy_gradients[name] = grad + noise
 
             candidates.append(GradientCandidate(

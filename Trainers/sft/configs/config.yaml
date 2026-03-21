@@ -112,39 +112,25 @@ seed: 42
 # Gradient + ES Hybrid: Generate N gradient candidates, evaluate, apply best
 # ============================================================================
 evolutionary:
-  enabled: false  # Disabled - high gradient norms, needs tuning
-
-  # Number of gradient candidates to evaluate per step
+  enabled: false  # Keep disabled by default but fix the parameters
   candidates: 4
-
-  # Batch size for fitness evaluation (can be smaller than training batch)
   eval_batch_size: 2
-
-  # Validation config for fitness scoring
-  # Uses same format as validation rubrics
   validation_config: "configs/fitness/tool_calling.yaml"
-
-  # Strategy for generating gradient candidates
   strategy:
-    type: "gradient_noise"  # Options: gradient_noise, scale_variation, combined
+    type: "gradient_noise"
     params:
-      noise_scale: 0.1  # For gradient_noise: std dev relative to gradient norm
-      scale_factors: [0.5, 1.0, 1.5, 2.0]  # For scale_variation: multipliers
-
-  # Selection method for choosing best candidate
+      noise_scale: 0.03          # Was 0.1 — reduced to prevent oversized perturbations
+      max_grad_norm: 1.0         # Cap gradient norms before candidate generation
+      scale_factors: [0.5, 1.0, 1.5, 2.0]
   selection:
-    method: "best"  # Options: best, tournament, proportional
-    min_improvement: 0.0  # Only apply if improves fitness by this much
-
-  # Performance tuning
-  eval_frequency: 1  # Evaluate every N steps (1 = every step)
-  warmup_steps: 0  # Train normally for N steps before enabling evolutionary
-  cache_baseline: true  # Cache baseline fitness to avoid recomputing
-
-  # Logging
+    method: "best"
+    min_improvement: 0.01        # Was 0.0 — require meaningful improvement over baseline
+  eval_frequency: 5              # Was 1 — reduce overhead
+  warmup_steps: 200              # Was 0 — let model stabilize before evolutionary selection
+  cache_baseline: true
   logging:
-    candidates: true  # Log all candidate fitness scores
-    selected: true  # Log which candidate was selected
+    candidates: true
+    selected: true
 
 # Notes:
 # - This is optimized for RTX 3090 24GB VRAM

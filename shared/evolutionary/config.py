@@ -37,6 +37,11 @@ class EvolutionaryConfig:
     noise_scale: float = 0.1
     """Scale of noise to add to gradients (for gradient_noise strategy)."""
 
+    max_grad_norm: float = 1.0
+    """Maximum gradient norm for clipping before candidate generation.
+    Prevents evaluation instability when early-training gradient norms are large (100+).
+    Set to None or 0 to disable clipping."""
+
     scale_factors: List[float] = field(default_factory=lambda: [0.5, 1.0, 1.5, 2.0])
     """Gradient scaling factors to try (for scale_variation strategy)."""
 
@@ -75,6 +80,7 @@ class EvolutionaryConfig:
             validation_config_path=data.get("validation_config"),
             strategy=data.get("strategy", {}).get("type", "gradient_noise"),
             noise_scale=data.get("strategy", {}).get("params", {}).get("noise_scale", 0.1),
+            max_grad_norm=data.get("strategy", {}).get("params", {}).get("max_grad_norm", 1.0),
             scale_factors=data.get("strategy", {}).get("params", {}).get("scale_factors", [0.5, 1.0, 1.5, 2.0]),
             selection_method=data.get("selection", {}).get("method", "best"),
             min_fitness_improvement=data.get("selection", {}).get("min_improvement", 0.0),
@@ -96,6 +102,7 @@ class EvolutionaryConfig:
                 "type": self.strategy,
                 "params": {
                     "noise_scale": self.noise_scale,
+                    "max_grad_norm": self.max_grad_norm,
                     "scale_factors": self.scale_factors,
                 },
             },
