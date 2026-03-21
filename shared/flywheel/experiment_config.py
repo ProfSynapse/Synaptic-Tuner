@@ -32,6 +32,7 @@ class ExperimentConfig:
     # -- Loop limits --
     max_experiments: int = 20
     max_steps_per_experiment: int = 200
+    training_timeout_seconds: int = 7200
 
     # -- Trainer --
     trainer_type: str = "sft"
@@ -69,6 +70,20 @@ class ExperimentConfig:
             issues.append("max_experiments must be >= 1")
         if self.max_steps_per_experiment < 1:
             issues.append("max_steps_per_experiment must be >= 1")
+        if self.training_timeout_seconds < 60:
+            issues.append("training_timeout_seconds must be >= 60")
+        # Warn if timeout seems short for the configured max_steps
+        # Assume ~10s per step as a rough heuristic
+        estimated_min_seconds = self.max_steps_per_experiment * 10
+        if (
+            self.training_timeout_seconds < estimated_min_seconds
+            and self.training_timeout_seconds >= 60
+        ):
+            issues.append(
+                f"training_timeout_seconds ({self.training_timeout_seconds}s) "
+                f"may be too short for {self.max_steps_per_experiment} steps "
+                f"(estimated minimum: {estimated_min_seconds}s)"
+            )
         if self.trainer_type not in ("sft", "kto"):
             issues.append(
                 f"trainer_type must be 'sft' or 'kto', got '{self.trainer_type}'"
