@@ -357,8 +357,16 @@ def _rank_estimates(rows: list[StageEstimate], optimize_for: str) -> list[StageE
 
 
 def _stage_supports_flavor(*, stage: str, row: HardwareFlavor, spec: ExperimentSpec) -> tuple[bool, str]:
-    if row.gpus > 1:
-        return False, "multi-GPU flavors are not wired for this stage yet"
+    if row.gpus <= 1:
+        return True, ""
+    if stage == "loss":
+        return True, ""
+    if stage == "evaluation" and (spec.evaluation.runtime or "unsloth").strip().lower() == "vllm":
+        return True, ""
+    if stage == "training":
+        return False, "multi-GPU training is not wired for this stage yet"
+    if stage == "evaluation":
+        return False, "multi-GPU evaluation currently requires the vLLM runtime"
     return True, ""
 
 
@@ -444,12 +452,12 @@ def plan_stage_hardware(
         for row in filtered_rows:
             supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             feasible = memory_estimate <= _usable_vram_gb(row.vram_gb)
-            throughput = _gpu_speed_factor(row.gpu_model, stage=stage)
+            throughput = _gpu_speed_factor(row.gpu_model, stage=stage) * (max(row.gpus, 1) ** 0.85)
             hours = None
             if spec.evaluation.preset == "quick":
-                hours = 0.35 / max(throughput, 0.1)
+                hours = (0.35 / max(throughput, 0.1)) + (0.04 if row.gpus > 1 else 0.0)
             elif spec.evaluation.enabled:
-                hours = 0.9 / max(throughput, 0.1)
+                hours = (0.9 / max(throughput, 0.1)) + (0.05 if row.gpus > 1 else 0.0)
             cost = hours * row.price_hr if hours is not None else None
             if requested_gpu and row.flavor != requested_gpu:
                 feasible = False
@@ -486,8 +494,12 @@ def plan_stage_hardware(
         for row in filtered_rows:
             supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             feasible = memory_estimate <= _usable_vram_gb(row.vram_gb)
-            throughput = _gpu_speed_factor(row.gpu_model, stage=stage) * max(row.vram_gb / 24.0, 1.0) ** 0.35
-            hours = 0.75 / max(throughput, 0.1) if spec.loss.enabled else None
+            throughput = (
+                _gpu_speed_factor(row.gpu_model, stage=stage)
+                * max(row.vram_gb / 24.0, 1.0) ** 0.35
+                * (max(row.gpus, 1) ** 0.80)
+            )
+            hours = ((0.75 / max(throughput, 0.1)) + (0.08 if row.gpus > 1 else 0.0)) if spec.loss.enabled else None
             cost = hours * row.price_hr if hours is not None else None
             if feasible and not supported:
                 feasible = False

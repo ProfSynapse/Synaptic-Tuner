@@ -212,7 +212,7 @@ def test_experiment_handler_auto_hardware_populates_missing_stage_gpus(monkeypat
     assert returned_plans is plans
 
 
-def test_plan_hardware_rejects_multi_gpu_flavors_for_current_paths() -> None:
+def test_plan_hardware_keeps_training_single_gpu_but_allows_supported_multi_gpu_stages() -> None:
     spec = _spec()
     rows = [
         HardwareFlavor(
@@ -244,6 +244,6 @@ def test_plan_hardware_rejects_multi_gpu_flavors_for_current_paths() -> None:
     assert plans["training"].recommendation is not None
     assert plans["training"].recommendation.flavor == "a10g-small"
     assert plans["evaluation"].recommendation is not None
-    assert plans["evaluation"].recommendation.flavor == "a10g-small"
+    assert plans["evaluation"].recommendation.flavor == "h200x8"
     assert plans["loss"].recommendation is not None
-    assert plans["loss"].recommendation.flavor == "a10g-small"
+    assert plans["loss"].recommendation.flavor == "h200x8"

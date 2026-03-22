@@ -17,3 +17,22 @@ def test_start_vllm_server_defaults_to_v1_engine():
     env = mock_popen.call_args.kwargs["env"]
     assert env["TORCH_COMPILE_DISABLE"] == "1"
     assert env["VLLM_USE_V1"] == "1"
+
+
+def test_start_vllm_server_auto_detects_tensor_parallel_size():
+    process = MagicMock()
+
+    with patch("Evaluator.vllm_setup.subprocess.Popen", return_value=process) as mock_popen:
+        with patch("torch.cuda.is_available", return_value=True):
+            with patch("torch.cuda.device_count", return_value=4):
+                started = start_vllm_server(
+                    model="Qwen/Qwen3-4B",
+                    wait_for_ready=False,
+                    show_logs=False,
+                )
+
+    assert started is True
+    cmd = mock_popen.call_args.args[0]
+    assert "--tensor-parallel-size" in cmd
+    tp_index = cmd.index("--tensor-parallel-size")
+    assert cmd[tp_index + 1] == "4"

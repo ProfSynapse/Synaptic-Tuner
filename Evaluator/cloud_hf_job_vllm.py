@@ -23,8 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 from Evaluator.cli import main as evaluator_main
 from Evaluator.vllm_setup import start_vllm_server, stop_vllm_server
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
-from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses
-from shared.experiment_tracking.transformers_loss_loader import load_transformers_loss_model
+from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
 
 from .cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code
@@ -58,6 +57,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--vllm-port", type=int, default=8000)
     parser.add_argument("--vllm-timeout", type=int, default=600)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.85)
+    parser.add_argument("--vllm-tensor-parallel-size", type=int, default=0)
+    parser.add_argument("--loss-workers", type=int, default=0)
     return parser.parse_args()
 
 
@@ -167,22 +168,17 @@ def _compute_exact_loss_outputs(
         token=hf_token,
     )
 
-    model, tokenizer = load_transformers_loss_model(model_dir)
-    writer = IncrementalLossWriter(analysis_dir)
-
-    def _on_batch(_losses, batch_writer):
-        if batch_writer is None:
-            return
+    def _on_aggregate(_aggregate_root: Path) -> None:
         progress_syncer.sync_once()
 
-    losses = compute_per_example_losses(
-        model=model,
-        tokenizer=tokenizer,
+    losses = compute_per_example_losses_parallel(
+        model_dir=model_dir,
         dataset_path=dataset_path,
+        output_root=analysis_dir,
         max_seq_length=args.loss_max_seq_length or 2048,
         completion_only=not args.loss_no_completion_only,
-        writer=writer,
-        on_batch=_on_batch,
+        num_workers=(args.loss_workers or None),
+        on_aggregate=_on_aggregate,
     )
 
     feature_rows = [
@@ -276,6 +272,7 @@ def main() -> int:
             host=args.vllm_host,
             port=args.vllm_port,
             gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+            tensor_parallel_size=args.vllm_tensor_parallel_size,
             lora_modules={"finetuned": str(model_dir)},
             timeout=args.vllm_timeout,
             show_logs=True,

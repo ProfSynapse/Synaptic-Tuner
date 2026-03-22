@@ -338,6 +338,7 @@ def start_vllm_server(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
+    tensor_parallel_size: int = 0,
     lora_modules: Optional[dict] = None,
     wait_for_ready: bool = True,
     timeout: int = 120,
@@ -350,6 +351,7 @@ def start_vllm_server(
         host: Server host
         port: Server port
         gpu_memory_utilization: GPU memory fraction (0.0-1.0)
+        tensor_parallel_size: Number of GPUs to shard the model across. 0 means auto-detect.
         lora_modules: Dict of lora_name -> lora_path
         wait_for_ready: Wait for server to be ready
         timeout: Timeout in seconds for server startup
@@ -361,6 +363,18 @@ def start_vllm_server(
     global _server_process
 
     # Build command
+    resolved_tensor_parallel = int(tensor_parallel_size or 0)
+    if resolved_tensor_parallel <= 0:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                resolved_tensor_parallel = max(int(torch.cuda.device_count()), 1)
+            else:
+                resolved_tensor_parallel = 1
+        except Exception:
+            resolved_tensor_parallel = 1
+
     cmd = [
         sys.executable, "-m", "vllm.entrypoints.openai.api_server",
         "--model", model,
@@ -368,6 +382,8 @@ def start_vllm_server(
         "--port", str(port),
         "--gpu-memory-utilization", str(gpu_memory_utilization),
     ]
+    if resolved_tensor_parallel > 1:
+        cmd.extend(["--tensor-parallel-size", str(resolved_tensor_parallel)])
 
     # Add Mistral-specific tokenizer mode for proper [TOOL_CALLS] handling
     if "mistral" in model.lower():

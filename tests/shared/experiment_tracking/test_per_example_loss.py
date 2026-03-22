@@ -7,6 +7,7 @@ import torch
 
 from shared.experiment_tracking.per_example_loss import (
     IncrementalLossWriter,
+    aggregate_loss_worker_outputs,
     compute_per_example_losses,
     save_losses,
     load_losses,
@@ -229,3 +230,49 @@ def test_incremental_writer_finalize_merges_existing_shards(tmp_path):
     assert [item.index for item in merged] == [0, 1]
     summary = json.loads(writer.summary_path.read_text())
     assert summary["rows_written"] == 2
+
+
+def test_compute_losses_supports_dataset_sharding(fake_model, fake_tokenizer, sample_dataset_path):
+    shard0 = compute_per_example_losses(
+        model=fake_model,
+        tokenizer=fake_tokenizer,
+        dataset_path=sample_dataset_path,
+        max_seq_length=2048,
+        completion_only=True,
+        shard_index=0,
+        shard_count=2,
+    )
+    shard1 = compute_per_example_losses(
+        model=fake_model,
+        tokenizer=fake_tokenizer,
+        dataset_path=sample_dataset_path,
+        max_seq_length=2048,
+        completion_only=True,
+        shard_index=1,
+        shard_count=2,
+    )
+
+    combined = sorted(shard0 + shard1, key=lambda item: item.index)
+    assert [item.index for item in combined] == [0, 1, 2]
+
+
+def test_aggregate_loss_worker_outputs_merges_worker_artifacts(tmp_path):
+    root = tmp_path / "losses"
+    worker0 = root / "_workers" / "worker-00"
+    worker1 = root / "_workers" / "worker-01"
+    writer0 = IncrementalLossWriter(worker0, state_stride=2)
+    writer1 = IncrementalLossWriter(worker1, state_stride=2)
+
+    writer0.write_batch([LossResult(index=0, loss=0.1, num_completion_tokens=2, num_total_tokens=3, jsonl_hash="aaaa1111")])
+    writer1.write_batch([LossResult(index=1, loss=0.3, num_completion_tokens=2, num_total_tokens=3, jsonl_hash="bbbb2222")])
+    writer0.finalize()
+    writer1.finalize()
+
+    losses = aggregate_loss_worker_outputs(root, [worker0, worker1], finalize=True)
+
+    assert [item.index for item in losses] == [0, 1]
+    assert (root / "per_example_losses.jsonl").exists()
+    summary = json.loads((root / "loss_summary.json").read_text())
+    assert summary["rows_written"] == 2
+    partial = json.loads((root / "partial" / "loss_summary.partial.json").read_text())
+    assert partial["worker_count"] == 2

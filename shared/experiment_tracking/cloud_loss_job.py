@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-max-tokens", type=int, default=8192)
     parser.add_argument("--max-batch-size", type=int)
     parser.add_argument("--sync-every-batches", type=int, default=5)
+    parser.add_argument("--num-workers", type=int, help="Override number of parallel GPU workers for exact loss")
+    parser.add_argument("--aggregate-interval-seconds", type=float, default=5.0)
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
     return parser.parse_args()
 
@@ -101,21 +104,26 @@ def main() -> int:
     else:
         raise ValueError("Provide either --dataset-path or both --dataset-name and --dataset-file.")
 
-    print("Loading model and tokenizer with Transformers...")
-    from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses
-    from shared.experiment_tracking.transformers_loss_loader import load_transformers_loss_model
+    from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 
-    model, tokenizer = load_transformers_loss_model(model_dir)
     print("Computing per-example losses...")
-    writer = IncrementalLossWriter(results_dir)
+    last_synced_batch = -1
+    last_sync_time = 0.0
 
-    def _on_batch(_losses, batch_writer):
-        if batch_writer is None:
+    def _on_aggregate(aggregate_root: Path) -> None:
+        nonlocal last_synced_batch, last_sync_time
+        summary_path = aggregate_root / "partial" / "loss_summary.partial.json"
+        if not summary_path.exists():
+            return
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
             return
         if args.sync_every_batches <= 0:
             return
-        batch_count = int(batch_writer.state.get("batch_count", 0))
-        if batch_count % args.sync_every_batches != 0:
+        batch_count = int(summary.get("batch_count", 0))
+        should_sync = batch_count > 0 and batch_count != last_synced_batch and batch_count % args.sync_every_batches == 0
+        if not should_sync and (time.time() - last_sync_time) < max(args.aggregate_interval_seconds, 5.0) * 2:
             return
         destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
         print(f"Syncing partial loss artifacts after batch {batch_count} -> {destination_prefix}")
@@ -124,17 +132,20 @@ def main() -> int:
             f"hf://buckets/{args.bucket_id}/{destination_prefix}",
             token=hf_token,
         )
+        last_synced_batch = batch_count
+        last_sync_time = time.time()
 
-    losses = compute_per_example_losses(
-        model=model,
-        tokenizer=tokenizer,
+    losses = compute_per_example_losses_parallel(
+        model_dir=model_dir,
         dataset_path=str(dataset_path),
+        output_root=results_dir,
         max_seq_length=args.max_seq_length,
         completion_only=not args.no_completion_only,
         batch_max_tokens=args.batch_max_tokens,
         max_batch_size=args.max_batch_size,
-        writer=writer,
-        on_batch=_on_batch,
+        num_workers=args.num_workers,
+        on_aggregate=_on_aggregate,
+        aggregate_interval_seconds=args.aggregate_interval_seconds,
     )
     print(f"Computed {len(losses)} loss rows")
 

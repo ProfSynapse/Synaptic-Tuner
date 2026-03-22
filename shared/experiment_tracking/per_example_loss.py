@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import multiprocessing
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -158,10 +159,14 @@ def _iter_prepared_examples(
     max_seq_length: int,
     completion_only: bool,
     start_index: int = 0,
+    shard_index: int = 0,
+    shard_count: int = 1,
 ) -> Iterator[PreparedLossExample]:
     with dataset_path.open("r", encoding="utf-8") as handle:
         for index, line in enumerate(handle):
             if index < start_index:
+                continue
+            if shard_count > 1 and index % shard_count != shard_index:
                 continue
             line_hash = _hash_jsonl_line(line)
             try:
@@ -277,7 +282,7 @@ def _compute_batch_losses(
 class IncrementalLossWriter:
     """Persist loss shards and partial summaries as batches complete."""
 
-    def __init__(self, output_root: Path | str, *, top_k: int = 25) -> None:
+    def __init__(self, output_root: Path | str, *, top_k: int = 25, state_stride: int = 1) -> None:
         self.output_root = Path(output_root)
         self.shards_dir = self.output_root / "shards"
         self.partial_dir = self.output_root / "partial"
@@ -288,6 +293,7 @@ class IncrementalLossWriter:
         self.partial_high_loss_path = self.partial_dir / "high_loss_examples.partial.jsonl"
         self.manifest_path = self.manifests_dir / "loss_state.json"
         self.top_k = top_k
+        self.state_stride = max(int(state_stride), 1)
         self.state = self._load_manifest()
         self._top_loss_rows = self._load_top_loss_rows()
 
@@ -366,7 +372,7 @@ class IncrementalLossWriter:
 
         self.state["rows_written"] = int(self.state.get("rows_written", 0)) + len(losses)
         self.state["batch_count"] = int(self.state.get("batch_count", 0)) + 1
-        self.state["next_index"] = end_index + 1
+        self.state["next_index"] = end_index + self.state_stride
         self.state["loss_sum"] = float(self.state.get("loss_sum", 0.0)) + sum(item.loss for item in losses)
         self.state["completion_tokens"] = int(self.state.get("completion_tokens", 0)) + sum(
             item.num_completion_tokens for item in losses
@@ -425,6 +431,8 @@ def compute_per_example_losses(
     writer: IncrementalLossWriter | None = None,
     on_batch: Callable[[list[LossResult], IncrementalLossWriter | None], None] | None = None,
     adaptive_batching: bool = True,
+    shard_index: int = 0,
+    shard_count: int = 1,
 ) -> list[LossResult]:
     """Compute per-example loss for each record in a JSONL dataset.
 
@@ -455,6 +463,8 @@ def compute_per_example_losses(
         max_seq_length=max_seq_length,
         completion_only=completion_only,
         start_index=start_index,
+        shard_index=shard_index,
+        shard_count=shard_count,
     )
 
     pad_token_id = _pad_token_id(tokenizer)
@@ -502,6 +512,244 @@ def compute_per_example_losses(
     if writer is not None:
         writer.finalize()
     return results
+
+
+def _worker_output_root(output_root: Path, worker_index: int) -> Path:
+    return output_root / "_workers" / f"worker-{worker_index:02d}"
+
+
+def _load_loss_rows_from_path(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def aggregate_loss_worker_outputs(
+    output_root: Path | str,
+    worker_roots: list[Path | str],
+    *,
+    top_k: int = 25,
+    finalize: bool = False,
+) -> list[LossResult]:
+    root = Path(output_root)
+    worker_paths = [Path(path) for path in worker_roots]
+    manifests: list[dict[str, Any]] = []
+    top_rows: list[dict[str, Any]] = []
+    merged_rows: list[dict[str, Any]] = []
+
+    for worker_root in worker_paths:
+        manifest_path = worker_root / "manifests" / "loss_state.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            manifests.append(json.loads(manifest_path.read_text(encoding="utf-8")))
+        except Exception:
+            logger.warning("Failed to load worker loss manifest at %s", manifest_path)
+            continue
+        top_rows.extend(_load_loss_rows_from_path(worker_root / "partial" / "high_loss_examples.partial.jsonl"))
+        if finalize:
+            final_path = worker_root / "per_example_losses.jsonl"
+            if final_path.exists():
+                merged_rows.extend(_load_loss_rows_from_path(final_path))
+            else:
+                for shard_path in sorted((worker_root / "shards").glob("*.jsonl")):
+                    merged_rows.extend(_load_loss_rows_from_path(shard_path))
+
+    rows_written = sum(int(manifest.get("rows_written", 0)) for manifest in manifests)
+    batch_count = sum(int(manifest.get("batch_count", 0)) for manifest in manifests)
+    loss_sum = sum(float(manifest.get("loss_sum", 0.0)) for manifest in manifests)
+    completion_tokens = sum(int(manifest.get("completion_tokens", 0)) for manifest in manifests)
+    total_tokens = sum(int(manifest.get("total_tokens", 0)) for manifest in manifests)
+    max_loss_values = [manifest.get("max_loss") for manifest in manifests if manifest.get("max_loss") is not None]
+    top_rows = sorted(top_rows, key=lambda row: row["loss"], reverse=True)[:top_k]
+
+    partial_dir = root / "partial"
+    manifests_dir = root / "manifests"
+    partial_dir.mkdir(parents=True, exist_ok=True)
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+
+    summary = {
+        "rows_written": rows_written,
+        "batch_count": batch_count,
+        "worker_count": len(worker_paths),
+        "completed": finalize and bool(manifests) and all(bool(manifest.get("completed", False)) for manifest in manifests),
+        "mean_loss": (loss_sum / rows_written) if rows_written else 0.0,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "max_loss": max(max_loss_values) if max_loss_values else None,
+    }
+    _atomic_write_text(partial_dir / "loss_summary.partial.json", json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+    _write_jsonl_rows(partial_dir / "high_loss_examples.partial.jsonl", top_rows)
+
+    manifest_payload = {
+        "version": 2,
+        "completed": summary["completed"],
+        "rows_written": rows_written,
+        "batch_count": batch_count,
+        "loss_sum": loss_sum,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "max_loss": summary["max_loss"],
+        "workers": [str(path.relative_to(root)) if path.is_relative_to(root) else str(path) for path in worker_paths],
+    }
+    _atomic_write_text(manifests_dir / "loss_state.json", json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n")
+
+    if not finalize:
+        return []
+
+    merged_rows = sorted(merged_rows, key=lambda row: row["index"])
+    losses = [LossResult(**row) for row in merged_rows]
+    save_losses(losses, root / "per_example_losses.jsonl")
+    _atomic_write_text(root / "loss_summary.json", json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+    return losses
+
+
+def _loss_worker_entry(
+    *,
+    worker_index: int,
+    worker_count: int,
+    model_dir: str,
+    dataset_path: str,
+    output_root: str,
+    max_seq_length: int,
+    completion_only: bool,
+    batch_max_tokens: int,
+    max_batch_size: int | None,
+    adaptive_batching: bool,
+) -> None:
+    try:
+        from .transformers_loss_loader import load_transformers_loss_model
+
+        worker_root = _worker_output_root(Path(output_root), worker_index)
+        device = (
+            torch.device(f"cuda:{worker_index}")
+            if torch.cuda.is_available() and torch.cuda.device_count() > worker_index
+            else torch.device("cpu")
+        )
+        model, tokenizer = load_transformers_loss_model(model_dir, device=device)
+        writer = IncrementalLossWriter(worker_root, state_stride=worker_count)
+        compute_per_example_losses(
+            model=model,
+            tokenizer=tokenizer,
+            dataset_path=dataset_path,
+            max_seq_length=max_seq_length,
+            completion_only=completion_only,
+            device=device,
+            batch_max_tokens=batch_max_tokens,
+            max_batch_size=max_batch_size,
+            writer=writer,
+            adaptive_batching=adaptive_batching,
+            shard_index=worker_index,
+            shard_count=worker_count,
+        )
+    except Exception as exc:  # pragma: no cover - exercised through parent orchestration
+        worker_root = _worker_output_root(Path(output_root), worker_index)
+        worker_root.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(
+            worker_root / "error.json",
+            json.dumps({"worker_index": worker_index, "error": repr(exc)}, indent=2, ensure_ascii=False) + "\n",
+        )
+        raise
+
+
+def compute_per_example_losses_parallel(
+    *,
+    model_dir: Path | str,
+    dataset_path: Path | str,
+    output_root: Path | str,
+    max_seq_length: int = 2048,
+    completion_only: bool = True,
+    batch_max_tokens: int = 8192,
+    max_batch_size: int | None = None,
+    adaptive_batching: bool = True,
+    num_workers: int | None = None,
+    on_aggregate: Callable[[Path], None] | None = None,
+    aggregate_interval_seconds: float = 5.0,
+) -> list[LossResult]:
+    """Compute exact loss using one worker per visible GPU when beneficial."""
+    root = Path(output_root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    worker_count = max(int(num_workers or 0), 0) or max(available_gpus, 1)
+    if worker_count <= 1:
+        from .transformers_loss_loader import load_transformers_loss_model
+
+        model, tokenizer = load_transformers_loss_model(model_dir)
+        writer = IncrementalLossWriter(root)
+        losses = compute_per_example_losses(
+            model=model,
+            tokenizer=tokenizer,
+            dataset_path=dataset_path,
+            max_seq_length=max_seq_length,
+            completion_only=completion_only,
+            batch_max_tokens=batch_max_tokens,
+            max_batch_size=max_batch_size,
+            writer=writer,
+            on_batch=(lambda _losses, _writer: on_aggregate(root) if on_aggregate is not None else None),
+            adaptive_batching=adaptive_batching,
+        )
+        if on_aggregate is not None:
+            on_aggregate(root)
+        return losses
+
+    worker_roots = [_worker_output_root(root, worker_index) for worker_index in range(worker_count)]
+    ctx = multiprocessing.get_context("spawn")
+    processes: list[multiprocessing.Process] = []
+    for worker_index in range(worker_count):
+        process = ctx.Process(
+            target=_loss_worker_entry,
+            kwargs={
+                "worker_index": worker_index,
+                "worker_count": worker_count,
+                "model_dir": str(model_dir),
+                "dataset_path": str(dataset_path),
+                "output_root": str(root),
+                "max_seq_length": max_seq_length,
+                "completion_only": completion_only,
+                "batch_max_tokens": batch_max_tokens,
+                "max_batch_size": max_batch_size,
+                "adaptive_batching": adaptive_batching,
+            },
+        )
+        process.start()
+        processes.append(process)
+
+    try:
+        while any(process.is_alive() for process in processes):
+            aggregate_loss_worker_outputs(root, worker_roots, finalize=False)
+            if on_aggregate is not None:
+                on_aggregate(root)
+            time.sleep(max(aggregate_interval_seconds, 1.0))
+        for process in processes:
+            process.join()
+        aggregate_loss_worker_outputs(root, worker_roots, finalize=False)
+        if on_aggregate is not None:
+            on_aggregate(root)
+        failed_workers = [process.pid for process in processes if process.exitcode not in (0, None)]
+        if failed_workers:
+            errors: list[str] = []
+            for worker_root in worker_roots:
+                error_path = worker_root / "error.json"
+                if error_path.exists():
+                    errors.append(error_path.read_text(encoding="utf-8").strip())
+            detail = "; ".join(errors) if errors else f"worker pids={failed_workers}"
+            raise RuntimeError(f"Parallel loss computation failed: {detail}")
+        losses = aggregate_loss_worker_outputs(root, worker_roots, finalize=True)
+        if on_aggregate is not None:
+            on_aggregate(root)
+        return losses
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
 
 
 def save_losses(losses: list[LossResult], out_path: Path | str) -> None:
