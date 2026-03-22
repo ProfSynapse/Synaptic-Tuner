@@ -142,6 +142,36 @@ def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: 
     mock_submit.assert_not_called()
 
 
+def test_loss_stage_runner_allows_retry_when_running_stage_job_already_failed(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    service.update_stage_details(
+        experiment,
+        "loss",
+        status="running",
+        artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
+        bucket_id="test/toolset-training-artifacts",
+        artifact_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef",
+        job_ref="failed-loss-job",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+
+    runner = HFLossStageRunner(repo_root=repo_root, tracking_service=service)
+
+    with patch.object(runner, "_download_results", return_value=None):
+        with patch.object(runner, "_inspect_job_stage", return_value="error"):
+            result = runner._recover_existing_loss(experiment=experiment)
+
+    assert result is None
+    assert experiment.stage_details["loss"]["status"] == "failed"
+
+
 def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()

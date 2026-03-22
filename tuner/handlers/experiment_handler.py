@@ -417,12 +417,23 @@ class HFLossStageRunner:
             return None
         return local_root
 
+    def _inspect_job_stage(self, job_ref: str) -> Optional[str]:
+        try:
+            huggingface_hub = load_huggingface_hub(require_apis=("inspect_job",))
+            job_info = huggingface_hub.inspect_job(job_id=job_ref)
+        except Exception:
+            return None
+        status_obj = getattr(job_info, "status", None)
+        stage = status_obj.stage if status_obj and hasattr(status_obj, "stage") else status_obj
+        return str(stage).lower() if stage else None
+
     def _recover_existing_loss(self, *, experiment: Experiment) -> Optional[StageResult]:
         details = experiment.stage_details.get("loss", {})
         status = details.get("status")
         artifact_root = details.get("artifact_root")
         bucket_id = details.get("bucket_id") or details.get("tags", {}).get("bucket_id")
         artifact_prefix = details.get("artifact_prefix") or details.get("tags", {}).get("artifact_prefix")
+        job_ref = details.get("job_ref")
         if not artifact_root or not bucket_id or not artifact_prefix or status not in {"running", "completed"}:
             return None
 
@@ -459,6 +470,13 @@ class HFLossStageRunner:
         if results_dir is not None:
             shutil.rmtree(results_dir, ignore_errors=True)
         if status == "running":
+            job_stage = self._inspect_job_stage(job_ref) if job_ref else None
+            if job_stage in {"error", "failed", "cancelled", "canceled"}:
+                self.tracking_service.update_stage_details(experiment, "loss", status="failed")
+                return None
+            if job_stage == "completed":
+                self.tracking_service.update_stage_details(experiment, "loss", status="failed")
+                return None
             raise CloudProviderError(
                 f"Experiment {experiment.experiment_id} already has a running loss stage at {artifact_root}. "
                 "Loss artifacts are not complete yet, so refusing to submit a duplicate loss job."
