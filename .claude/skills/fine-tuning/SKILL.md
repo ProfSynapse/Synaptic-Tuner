@@ -20,6 +20,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | LoRA surgery | `python tuner.py surgery --surgery-config configs/lora_surgery.yaml` |
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
+| Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
+| Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Live HF job list | `python tuner.py cloud-jobs list` |
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
@@ -66,7 +68,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Prefer repo CLIs and checked-in scripts over ad hoc Python snippets.
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
+- For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
+- For finished experiment bundles and next-run suggestions, use `python tuner.py analyze-experiment ...`.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
@@ -155,6 +159,26 @@ python3 Trainers/scripts/battle_of_models.py launch --smoke qwen35-2b --image-pr
 python tuner.py cloud-pipeline --method sft --preset full
 ```
 
+**Full experiment with train → eval → exact loss → analysis:**
+```bash
+python tuner.py run-experiment \
+  --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml \
+  --yes
+```
+
+**Resume or slice the experiment pipeline:**
+```bash
+python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml --from-stage evaluation --yes
+python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml --only-stage loss --yes
+python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml --skip-stage analysis --skip-stage recommendation --yes
+```
+
+**Inspect the finished experiment bundle and next-run candidates:**
+```bash
+python tuner.py analyze-experiment --experiment-id latest
+python tuner.py analyze-experiment --experiment-id exp_20260321_221651 --json
+```
+
 **Environment-backed gym against latest trained adapter on HF:**
 ```bash
 python tuner.py cloud-gym --run latest --method sft
@@ -209,8 +233,13 @@ Provider-native storage defaults:
 - Pass `HF_TOKEN` into the cloud job explicitly; do not assume HF Jobs injects it automatically.
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `.
 - For post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`.
+- `run-experiment` now supports stage controls: `--only-stage`, `--from-stage`, and repeated `--skip-stage`.
+- Finished experiments now write `.tracking/experiments/<id>/analysis/` with:
+  `experiment_summary.json`, `run_matrix.csv`, `feature_dataset.{jsonl,csv}`, `next_run_candidates.json`, `draft_next_spec.yaml`.
 - For the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`.
 - `cloud-pipeline` is currently a two-job orchestration on HF Jobs, not a single remote composite job.
+- `run-experiment` is the higher-level experiment loop: training stays provider-native, eval can use `vllm`, and exact dataset loss runs afterward with `transformers`.
+- Use `evaluation.runtime: vllm` in experiment specs when you want the fast eval server path. The exact loss stage still uses a post-eval `transformers` forward pass.
 - Checkpoint-vs-checkpoint comparison is not automatic in smoke runs; you only get that if the trainer emitted multiple checkpoints and you intentionally run checkpoint evaluation / experiment-loop workflows.
 - For SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`.
 - When testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of upgrading packages in the old stable image.
