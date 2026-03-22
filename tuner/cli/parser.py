@@ -70,6 +70,7 @@ Commands:
   cloud       Cloud training (HF Jobs, Modal, RunPod)
   cloud-run   Config-driven HF cloud job
   cloud-jobs  Inspect or manage live HF Jobs
+  plan-hardware Blind hardware planning for experiment specs
   cloud-pipeline Train on HF Jobs, then evaluate on HF Jobs
   cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
@@ -115,6 +116,7 @@ Examples:
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py cloud-jobs list
+  python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml
   python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
   python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml --yes
   python tuner.py analyze-experiment --experiment-id latest
@@ -131,7 +133,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-jobs", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -312,6 +314,22 @@ Examples:
     # Experiment pipeline flags
     parser.add_argument("--experiment-id", help="Experiment ID for tracking")
     parser.add_argument("--experiment-spec", help="Path to experiment orchestration YAML (run-experiment only)")
+    parser.add_argument(
+        "--auto-hardware",
+        action="store_true",
+        help="Use the blind hardware planner to choose stage hardware when experiment specs omit explicit GPU flavors.",
+    )
+    parser.add_argument(
+        "--optimize-for",
+        choices=["balanced", "cost", "speed"],
+        default="balanced",
+        help="Optimization objective for hardware planning (plan-hardware / run-experiment auto-hardware).",
+    )
+    parser.add_argument(
+        "--max-hourly-price",
+        type=float,
+        help="Optional hourly price cap for hardware planning (plan-hardware / run-experiment auto-hardware).",
+    )
     parser.add_argument(
         "--only-stage",
         choices=["training", "evaluation", "loss", "analysis", "recommendation"],

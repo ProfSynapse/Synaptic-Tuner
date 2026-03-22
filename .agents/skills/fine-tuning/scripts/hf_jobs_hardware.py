@@ -4,23 +4,26 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, List, Optional
 
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_URL = "https://huggingface.co/api/jobs/hardware"
+from tuner.cloud.hardware_planner import (
+    DEFAULT_HF_HARDWARE_URL,
+    fetch_hardware_payload,
+    normalize_hardware_rows,
+)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="List Hugging Face Jobs hardware and pricing.")
-    parser.add_argument("--url", default=DEFAULT_URL, help="Hardware API URL.")
+    parser.add_argument("--url", default=DEFAULT_HF_HARDWARE_URL, help="Hardware API URL.")
     parser.add_argument("--json", action="store_true", help="Print raw API payload.")
     parser.add_argument("--job-config", help="Optional cloud job YAML to highlight the current flavor.")
     parser.add_argument(
@@ -32,70 +35,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--min-vram", type=float, default=0.0, help="Filter rows below this VRAM (GB).")
     parser.add_argument("--max-price", type=float, default=0.0, help="Filter rows above this hourly price.")
     return parser.parse_args(argv)
-
-
-def fetch_hardware_payload(url: str) -> Any:
-    headers = {"Accept": "application/json"}
-    token = (os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY") or "").strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def normalize_rows(payload: Any) -> List[Dict[str, Any]]:
-    candidates: Iterable[Any]
-    if isinstance(payload, list):
-        candidates = payload
-    elif isinstance(payload, dict):
-        for key in ("hardware", "flavors", "items", "data"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                candidates = value
-                break
-        else:
-            candidates = []
-    else:
-        candidates = []
-
-    rows: List[Dict[str, Any]] = []
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        row = {
-            "flavor": _first_str(item, "flavor", "id", "name", "sku"),
-            "gpu": _first_str(item, "gpu", "gpu_name", "accelerator", "label", "display_name"),
-            "gpus": _first_num(item, "gpus", "gpu_count", "count", "quantity", default=1),
-            "vram_gb": _first_num(
-                item,
-                "vram_gb",
-                "gpu_memory_gb",
-                "gpuMemoryGb",
-                "memory_gb",
-                "memoryGb",
-                "vram",
-                default=0.0,
-            ),
-            "price_hr": _first_num(
-                item,
-                "price_hr",
-                "hourly_price",
-                "hourlyPrice",
-                "hourlyPriceUsd",
-                "price",
-                "priceUsd",
-                default=0.0,
-            ),
-            "cpu": _first_num(item, "cpu", "cpus", "vcpu", "vcpus", default=0),
-            "ram_gb": _first_num(item, "ram_gb", "ramGb", "memory", default=0.0),
-            "raw": item,
-        }
-        if row["flavor"]:
-            rows.append(row)
-    return rows
-
 
 def load_job_flavor(job_config_path: Optional[str]) -> Optional[str]:
     if not job_config_path:
@@ -113,42 +52,42 @@ def load_job_flavor(job_config_path: Optional[str]) -> Optional[str]:
 
 
 def filter_and_sort_rows(
-    rows: List[Dict[str, Any]],
+    rows: list,
     *,
     min_vram: float,
     max_price: float,
     sort_by: str,
-) -> List[Dict[str, Any]]:
+) -> list:
     filtered = [
         row
         for row in rows
-        if float(row.get("vram_gb") or 0.0) >= min_vram
-        and (max_price <= 0.0 or float(row.get("price_hr") or 0.0) <= max_price)
+        if float(getattr(row, "vram_gb", 0.0) or 0.0) >= min_vram
+        and (max_price <= 0.0 or float(getattr(row, "price_hr", 0.0) or 0.0) <= max_price)
     ]
 
     if sort_by == "vram":
-        filtered.sort(key=lambda row: (float(row.get("vram_gb") or 0.0), str(row.get("flavor") or "")))
+        filtered.sort(key=lambda row: (float(getattr(row, "vram_gb", 0.0) or 0.0), str(getattr(row, "flavor", "") or "")))
     elif sort_by == "flavor":
-        filtered.sort(key=lambda row: str(row.get("flavor") or ""))
+        filtered.sort(key=lambda row: str(getattr(row, "flavor", "") or ""))
     else:
-        filtered.sort(key=lambda row: (float(row.get("price_hr") or 0.0), str(row.get("flavor") or "")))
+        filtered.sort(key=lambda row: (float(getattr(row, "price_hr", 0.0) or 0.0), str(getattr(row, "flavor", "") or "")))
     return filtered
 
 
-def print_table(rows: List[Dict[str, Any]], *, current_flavor: Optional[str]) -> None:
+def print_table(rows: list, *, current_flavor: Optional[str]) -> None:
     headers = ["Use", "Flavor", "GPU", "GPUs", "VRAM(GB)", "RAM(GB)", "Price/hr"]
     body: List[List[str]] = []
     for row in rows:
-        marker = "*" if current_flavor and row["flavor"] == current_flavor else ""
+        marker = "*" if current_flavor and row.flavor == current_flavor else ""
         body.append(
             [
                 marker,
-                str(row.get("flavor") or ""),
-                str(row.get("gpu") or ""),
-                _fmt_num(row.get("gpus")),
-                _fmt_num(row.get("vram_gb")),
-                _fmt_num(row.get("ram_gb")),
-                _fmt_price(row.get("price_hr")),
+                str(row.flavor or ""),
+                str(row.gpu_model or ""),
+                _fmt_num(row.gpus),
+                _fmt_num(row.vram_gb),
+                _fmt_num(row.ram_gb),
+                _fmt_price(row.price_hr),
             ]
         )
 
@@ -167,29 +106,6 @@ def print_table(rows: List[Dict[str, Any]], *, current_flavor: Optional[str]) ->
 
     if current_flavor:
         print(f"\n* current job flavor from config: {current_flavor}")
-
-
-def _first_str(item: Dict[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = item.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _first_num(item: Dict[str, Any], *keys: str, default: float) -> float:
-    for key in keys:
-        value = item.get(key)
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str):
-            stripped = value.strip().replace("$", "")
-            try:
-                return float(stripped)
-            except ValueError:
-                continue
-    return float(default)
-
 
 def _fmt_num(value: Any) -> str:
     if value is None:
@@ -217,10 +133,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     if args.json:
+        import json
+
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
-    rows = normalize_rows(payload)
+    rows = normalize_hardware_rows(payload)
     current_flavor = load_job_flavor(args.job_config)
     rows = filter_and_sort_rows(
         rows,

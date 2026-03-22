@@ -74,6 +74,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
         from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
+        from tuner.handlers.hardware_plan_handler import HardwarePlanHandler
         from tuner.handlers.cloud_eval_handler import CloudEvalHandler
         from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
         from tuner.handlers.cloud_jobs_handler import CloudJobsHandler
@@ -117,7 +118,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-jobs, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -207,6 +208,7 @@ def route_command(args: Namespace) -> int:
         'cloud-pipeline': CloudPipelineHandler,
         'cloud-run': CloudRunHandler,
         'cloud-jobs': CloudJobsHandler,
+        'plan-hardware': HardwarePlanHandler,
         'eval': EvalHandler,
         'cloud-eval': CloudEvalHandler,
         'cloud-gym': CloudGymHandler,

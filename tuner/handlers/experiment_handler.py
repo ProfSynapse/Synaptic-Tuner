@@ -20,6 +20,7 @@ from shared.experiment_tracking import (
     load_losses,
 )
 from shared.experiment_tracking.schema import RunRecord
+from tuner.cloud.hardware_planner import StagePlan, plan_experiment_hardware
 from shared.utilities.env import get_hf_token, load_env_file
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.cloud import (
@@ -706,6 +707,9 @@ class ExperimentHandler(BaseHandler):
                 "Method": spec.method,
                 "Model": spec.training.model_name,
                 "Dataset": spec.dataset.identifier,
+                "Train GPU": spec.training.gpu or "auto",
+                "Eval GPU": spec.evaluation.gpu or "auto",
+                "Loss GPU": spec.loss.gpu or "auto",
                 "Eval": "enabled" if spec.evaluation.enabled else "disabled",
                 "Loss": "enabled" if spec.loss.enabled else "disabled",
                 "Objective": spec.objective or "-",
@@ -734,11 +738,45 @@ class ExperimentHandler(BaseHandler):
             spec.execution.skip_stages = merged
         return spec
 
+    def _apply_auto_hardware(self, spec: ExperimentSpec) -> tuple[ExperimentSpec, dict[str, StagePlan]]:
+        plans = plan_experiment_hardware(
+            spec=spec,
+            optimize_for=getattr(self.args, "optimize_for", "balanced"),
+            max_hourly_price=getattr(self.args, "max_hourly_price", None),
+        )
+
+        training_plan = plans.get("training")
+        if spec.training.gpu is None and training_plan and training_plan.recommendation:
+            spec.training.gpu = training_plan.recommendation.flavor
+            if spec.training.batch_size is None and training_plan.recommendation.recommended_batch_size:
+                spec.training.batch_size = training_plan.recommendation.recommended_batch_size
+            if spec.training.gradient_accumulation is None and training_plan.recommendation.recommended_gradient_accumulation:
+                spec.training.gradient_accumulation = training_plan.recommendation.recommended_gradient_accumulation
+        if spec.training.gpu is None:
+            raise CloudProviderError("Auto-hardware could not find a feasible training GPU for this experiment.")
+
+        evaluation_plan = plans.get("evaluation")
+        if spec.evaluation.enabled and spec.evaluation.gpu is None and evaluation_plan and evaluation_plan.recommendation:
+            spec.evaluation.gpu = evaluation_plan.recommendation.flavor
+        if spec.evaluation.enabled and spec.evaluation.gpu is None:
+            raise CloudProviderError("Auto-hardware could not find a feasible evaluation GPU for this experiment.")
+
+        loss_plan = plans.get("loss")
+        if spec.loss.enabled and spec.loss.gpu is None and loss_plan and loss_plan.recommendation:
+            spec.loss.gpu = loss_plan.recommendation.flavor
+        if spec.loss.enabled and spec.loss.gpu is None:
+            raise CloudProviderError("Auto-hardware could not find a feasible loss GPU for this experiment.")
+
+        return spec, plans
+
     def handle(self) -> int:
         load_env_file()
+        hardware_plans: dict[str, StagePlan] = {}
         try:
             spec, spec_path = self._load_spec()
             spec = self._apply_stage_overrides(spec)
+            if getattr(self.args, "auto_hardware", False):
+                spec, hardware_plans = self._apply_auto_hardware(spec)
             issues = spec.validate()
             if issues:
                 raise CloudProviderError("Experiment stage selection invalid: " + "; ".join(issues))
@@ -763,6 +801,15 @@ class ExperimentHandler(BaseHandler):
         if not self.json_mode:
             print_header("RUN EXPERIMENT", "Train, evaluate, score losses, and register one experiment")
             self._print_plan(spec)
+            if hardware_plans:
+                for stage_name, plan in hardware_plans.items():
+                    recommendation = plan.recommendation
+                    if recommendation is None:
+                        continue
+                    print_info(
+                        f"Auto hardware ({stage_name}): {recommendation.flavor} "
+                        f"at ${recommendation.price_hr:.2f}/hr"
+                    )
             if experiment is not None:
                 print_info(f"Resuming experiment: {experiment.experiment_id}")
             if not getattr(self.args, "auto_confirm", False) and not confirm("Start experiment with this configuration?"):

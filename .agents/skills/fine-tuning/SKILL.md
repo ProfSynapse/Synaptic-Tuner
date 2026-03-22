@@ -21,6 +21,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
+| Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Live HF job list | `python tuner.py cloud-jobs list` |
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
@@ -69,6 +70,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
+- For blind stage hardware selection before launch, use `python tuner.py plan-hardware ...`.
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
 - For finished experiment bundles and next-run suggestions, use `python tuner.py analyze-experiment ...`.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
@@ -166,6 +168,22 @@ python tuner.py run-experiment \
   --yes
 ```
 
+**Blind hardware planning before launch:**
+```bash
+python tuner.py plan-hardware \
+  --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml \
+  --optimize-for balanced
+```
+
+**Run experiment with auto hardware selection:**
+```bash
+python tuner.py run-experiment \
+  --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml \
+  --auto-hardware \
+  --optimize-for cost \
+  --yes
+```
+
 **Resume or slice the experiment pipeline:**
 ```bash
 python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml --from-stage evaluation --yes
@@ -234,6 +252,8 @@ Provider-native storage defaults:
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `.
 - For post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`.
 - `run-experiment` now supports stage controls: `--only-stage`, `--from-stage`, and repeated `--skip-stage`.
+- `run-experiment --auto-hardware` uses a blind planner: model size, method, seq length, quantization, and live HF flavor pricing. It does not require prior telemetry.
+- `plan-hardware` is the inspection surface for that same planner.
 - Finished experiments now write `.tracking/experiments/<id>/analysis/` with:
   `experiment_summary.json`, `run_matrix.csv`, `feature_dataset.{jsonl,csv}`, `next_run_candidates.json`, `draft_next_spec.yaml`.
 - For the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`.

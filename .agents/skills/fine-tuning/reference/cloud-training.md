@@ -85,6 +85,41 @@ Notes:
 - the script queries `GET https://huggingface.co/api/jobs/hardware`
 - it uses `HF_TOKEN` or `HF_API_KEY` automatically when present
 - `--job-config` highlights the current flavor from a cloud job YAML
+- the script now uses a CA bundle automatically, so it should not need ad hoc SSL env vars on normal local setups
+
+## Blind Hardware Planning
+
+Use the planner when you want a back-of-the-envelope stage recommendation without relying on prior run telemetry:
+
+```bash
+python tuner.py plan-hardware \
+  --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full_v2.yaml \
+  --optimize-for balanced
+```
+
+Current planner inputs:
+- model name / parameter scale inferred from the spec
+- method (`sft`, `kto`, `grpo`)
+- seq length
+- 4-bit loading flag
+- target batch / effective batch
+- live HF Jobs hardware flavors and hourly pricing
+
+Current planner outputs:
+- recommended training / evaluation / loss flavor
+- recommended training microbatch and gradient accumulation when the spec leaves them unset
+- estimated memory footprint and headroom
+- relative speed-vs-cost ranking
+
+Use it automatically at launch:
+
+```bash
+python tuner.py run-experiment \
+  --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full_v2.yaml \
+  --auto-hardware \
+  --optimize-for cost \
+  --yes
+```
 
 ---
 

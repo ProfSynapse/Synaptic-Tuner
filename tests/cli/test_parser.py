@@ -42,3 +42,43 @@ def test_analyze_experiment_command_parses():
     assert args.command == "analyze-experiment"
     assert args.experiment_id == "latest"
     assert args.json is True
+
+
+def test_plan_hardware_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "plan-hardware",
+            "--experiment-spec",
+            "Trainers/cloud/experiments/example.yaml",
+            "--optimize-for",
+            "cost",
+            "--max-hourly-price",
+            "1.50",
+        ]
+    )
+
+    assert args.command == "plan-hardware"
+    assert args.experiment_spec == "Trainers/cloud/experiments/example.yaml"
+    assert args.optimize_for == "cost"
+    assert args.max_hourly_price == 1.50
+
+
+def test_run_experiment_auto_hardware_flags_parse():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "run-experiment",
+            "--experiment-spec",
+            "Trainers/cloud/experiments/example.yaml",
+            "--auto-hardware",
+            "--optimize-for",
+            "balanced",
+        ]
+    )
+
+    assert args.command == "run-experiment"
+    assert args.auto_hardware is True
+    assert args.optimize_for == "balanced"
