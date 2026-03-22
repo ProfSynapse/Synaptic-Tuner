@@ -75,6 +75,13 @@ class ExperimentOrchestrator:
         )
         return StageResult(status=status, run_record=record, artifact_root=artifact_root or None)
 
+    @staticmethod
+    def _should_rerun_failed_stage(stage: str, restored: Optional[StageResult]) -> bool:
+        """Allow lightweight post-training stages to be retried on resume."""
+        if restored is None or restored.status != "failed":
+            return False
+        return stage in {"evaluation", "loss"}
+
     def _resolve_or_create_experiment(
         self,
         spec: ExperimentSpec,
@@ -120,6 +127,8 @@ class ExperimentOrchestrator:
         eval_result: Optional[StageResult] = None
         if spec.evaluation.enabled and self.eval_runner is not None:
             eval_result = self._restore_stage_result(experiment, "evaluation")
+            if self._should_rerun_failed_stage("evaluation", eval_result):
+                eval_result = None
             if eval_result is None:
                 self.tracking_service.mark_stage(experiment, "evaluation", "running")
                 eval_result = self.eval_runner.run(spec, experiment, previous=training)
@@ -138,6 +147,8 @@ class ExperimentOrchestrator:
         loss_result: Optional[StageResult] = None
         if spec.loss.enabled and self.loss_runner is not None:
             loss_result = self._restore_stage_result(experiment, "loss")
+            if self._should_rerun_failed_stage("loss", loss_result):
+                loss_result = None
             if loss_result is None:
                 self.tracking_service.mark_stage(experiment, "loss", "running")
                 loss_result = self.loss_runner.run(spec, experiment, previous=training)

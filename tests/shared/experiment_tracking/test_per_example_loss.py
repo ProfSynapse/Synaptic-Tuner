@@ -138,3 +138,44 @@ def test_messages_or_conversations_keys(fake_model, fake_tokenizer, sample_datas
         completion_only=True,
     )
     assert len(losses) == 3
+
+
+def test_tool_call_messages_with_null_content_are_sanitized(fake_model, fake_tokenizer, tmp_path):
+    """Assistant tool-call messages with null content should not crash chat-template loss rendering."""
+    path = tmp_path / "tool_calls_dataset.jsonl"
+    examples = [
+        {
+            "messages": [
+                {"role": "system", "content": "System context"},
+                {"role": "user", "content": "Append a line to log.md"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "useTools",
+                                "arguments": "{\"context\": {\"sessionId\": \"s1\", \"workspaceId\": \"w1\"}, \"calls\": []}",
+                            },
+                        }
+                    ],
+                },
+            ]
+        }
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        for ex in examples:
+            f.write(json.dumps(ex) + "\n")
+
+    losses = compute_per_example_losses(
+        model=fake_model,
+        tokenizer=fake_tokenizer,
+        dataset_path=path,
+        max_seq_length=2048,
+        completion_only=True,
+    )
+
+    assert len(losses) == 1
+    assert losses[0].num_total_tokens > 0

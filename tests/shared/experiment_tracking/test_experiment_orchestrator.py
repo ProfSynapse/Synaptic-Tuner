@@ -176,3 +176,90 @@ def test_experiment_orchestrator_resumes_from_completed_training_stage(tmp_path:
     assert resumed.loss_run_id == "exp-loss"
     assert resumed.stage_statuses["training"] == "completed"
     assert resumed.stage_details["training"]["artifact_root"].startswith("hf://buckets/test/")
+
+
+def test_experiment_orchestrator_reruns_failed_loss_stage_on_resume(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment = service.create_experiment(
+        name="resume-loss",
+        dataset_path="repo/dataset/sample.jsonl",
+        dataset_hash="abc123",
+        base_model_name="Qwen/Qwen3-4B",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        spec_path="/tmp/spec.yaml",
+    )
+    service.update_stage_details(
+        experiment,
+        "training",
+        status="completed",
+        artifact_root="hf://buckets/test/runs/hf_jobs/sft/20260321_221651-deadbeef",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_221651-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+    service.update_stage_details(
+        experiment,
+        "evaluation",
+        status="completed",
+        artifact_root="hf://buckets/test/runs/hf_jobs/sft/20260321_221651-deadbeef/evaluations/vllm/20260321_230000",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_221651-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+    service.update_stage_details(
+        experiment,
+        "loss",
+        status="failed",
+        artifact_root="hf://buckets/test/runs/hf_jobs/sft/20260321_221651-deadbeef/analysis/loss",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_221651-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+
+    spec = ExperimentSpec(
+        name="resume-loss",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="Qwen/Qwen3-4B", max_steps=20),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True),
+        features=FeaturesStageSpec(enabled=True),
+    )
+
+    loss_runner = _StaticRunner(
+        StageResult(
+            status="completed",
+            run_record=_record(run_id="exp-loss-rerun", run_type="loss", stage="loss"),
+            loss_results=[LossResult(index=0, loss=0.2, num_completion_tokens=10, num_total_tokens=20, jsonl_hash="bbbb2222")],
+            artifact_root="/tmp/loss-rerun-artifacts",
+        )
+    )
+
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_FailIfCalledRunner(),
+        eval_runner=_FailIfCalledRunner(),
+        loss_runner=loss_runner,
+        base_dir=tmp_path,
+    )
+
+    resumed = orchestrator.run(spec, spec_path="/tmp/spec.yaml", experiment=experiment)
+
+    assert resumed.status == "completed"
+    assert resumed.training_run_id == f"{experiment.experiment_id}-training"
+    assert resumed.evaluation_run_id == f"{experiment.experiment_id}-evaluation"
+    assert resumed.loss_run_id == "exp-loss-rerun"
+    assert resumed.stage_statuses["loss"] == "completed"

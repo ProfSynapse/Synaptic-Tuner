@@ -23,6 +23,50 @@ def _hash_jsonl_line(line: str) -> str:
     """Returns the first 8 characters of the SHA-256 hash of a stripped JSONL line."""
     return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:8]
 
+
+def _render_tool_call_content(tool_calls: list[dict[str, Any]]) -> str:
+    """Render OpenAI-style tool_calls into text compatible with chat templates."""
+    rendered_parts: list[str] = []
+    for tool_call in tool_calls:
+        function_payload = tool_call.get("function") or {}
+        name = function_payload.get("name") or tool_call.get("name") or "unknown"
+        arguments = function_payload.get("arguments", tool_call.get("arguments", {}))
+        if isinstance(arguments, str):
+            try:
+                arguments_obj = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments_obj = arguments
+        else:
+            arguments_obj = arguments
+        rendered_parts.append(
+            "<tool_call>\n"
+            + json.dumps({"name": name, "arguments": arguments_obj}, ensure_ascii=False, indent=2)
+            + "\n</tool_call>"
+        )
+    return "\n".join(rendered_parts)
+
+
+def _sanitize_messages_for_chat_template(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize nullable/tool-call messages into plain text for tokenizer templates."""
+    sanitized: list[dict[str, Any]] = []
+    for message in messages:
+        normalized = dict(message)
+        content = normalized.get("content")
+        if content is None:
+            content = ""
+        elif not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False)
+
+        tool_calls = normalized.get("tool_calls") or []
+        if tool_calls:
+            tool_content = _render_tool_call_content(tool_calls)
+            content = f"{content}\n\n{tool_content}".strip() if content else tool_content
+
+        normalized["content"] = content
+        normalized.pop("tool_calls", None)
+        sanitized.append(normalized)
+    return sanitized
+
 def compute_per_example_losses(
     model: Any,
     tokenizer: Any,
@@ -67,6 +111,8 @@ def compute_per_example_losses(
             
         if not conv:
             continue
+
+        conv = _sanitize_messages_for_chat_template(conv)
 
         if completion_only:
             # Mask everything up to the assistant's response.
@@ -142,4 +188,3 @@ def load_losses(in_path: Path | str) -> list[LossResult]:
             # handle cases where index is string or anything
             results.append(LossResult(**data))
     return results
-
