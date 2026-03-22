@@ -1,12 +1,18 @@
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
-from shared.upload.dataset_publish import (
-    build_upload_targets,
-    infer_metadata_path,
-    publish_dataset,
-)
+
+def _load_skill_module():
+    path = Path(".agents/skills/dataset-publishing/scripts/publish_dataset_to_hf.py").resolve()
+    spec = importlib.util.spec_from_file_location("dataset_publishing_skill_script", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class FakeHfApi:
@@ -22,50 +28,55 @@ class FakeHfApi:
 
 
 def test_infer_metadata_path_finds_sidecar(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
     metadata = tmp_path / "sample.metadata.json"
     metadata.write_text("{}", encoding="utf-8")
 
-    assert infer_metadata_path(dataset) == metadata
+    assert module.infer_metadata_path(dataset) == metadata
 
 
 def test_infer_metadata_path_handles_dotted_dataset_names(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.v1.2.3.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
     metadata = tmp_path / "sample.v1.2.3.metadata.json"
     metadata.write_text("{}", encoding="utf-8")
 
-    assert infer_metadata_path(dataset) == metadata
+    assert module.infer_metadata_path(dataset) == metadata
 
 
 def test_build_upload_targets_includes_metadata_by_default(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
     metadata = tmp_path / "sample.metadata.json"
     metadata.write_text("{}", encoding="utf-8")
 
-    targets = build_upload_targets(dataset)
+    targets = module.build_upload_targets(dataset)
 
     assert [target.path_in_repo for target in targets] == ["sample.jsonl", "sample.metadata.json"]
 
 
 def test_build_upload_targets_can_skip_metadata(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
     metadata = tmp_path / "sample.metadata.json"
     metadata.write_text("{}", encoding="utf-8")
 
-    targets = build_upload_targets(dataset, include_metadata=False)
+    targets = module.build_upload_targets(dataset, include_metadata=False)
 
     assert [target.path_in_repo for target in targets] == ["sample.jsonl"]
 
 
 def test_publish_dataset_dry_run_does_not_touch_api(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
 
-    result = publish_dataset(
+    result = module.publish_dataset(
         dataset,
         "professorsynapse/test-dataset",
         include_metadata=False,
@@ -77,13 +88,14 @@ def test_publish_dataset_dry_run_does_not_touch_api(tmp_path):
 
 
 def test_publish_dataset_uploads_dataset_and_metadata(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
     metadata = tmp_path / "sample.metadata.json"
     metadata.write_text("{}", encoding="utf-8")
     api = FakeHfApi()
 
-    result = publish_dataset(
+    result = module.publish_dataset(
         dataset,
         "professorsynapse/test-dataset",
         api=api,
@@ -99,8 +111,9 @@ def test_publish_dataset_uploads_dataset_and_metadata(tmp_path):
 
 
 def test_publish_dataset_requires_repo_namespace(tmp_path):
+    module = _load_skill_module()
     dataset = tmp_path / "sample.jsonl"
     dataset.write_text('{"a": 1}\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="repo_id"):
-        publish_dataset(dataset, "badrepo", include_metadata=False, dry_run=True)
+        module.publish_dataset(dataset, "badrepo", include_metadata=False, dry_run=True)

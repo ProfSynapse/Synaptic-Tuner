@@ -63,16 +63,25 @@ See @~/.claude/protocols/algedonic.md for full protocol, trigger conditions, and
 3. **NEVER** add, change, or remove code yourself. **ALWAYS** delegate coding tasks to PACT specialist agents.
 4. Update `CLAUDE.md` after significant changes or discoveries (Execute `/PACT:pin-memory`)
 5. Follow phase-specific principles and delegate tasks to phase-specific specialist agents, in order to maintain code quality and systematic development
+6. For any fine-tuning, cloud training, evaluation, experiment analysis, model-selection, or dataset-publishing task, always begin by loading the repository's `fine-tuning` skill before doing anything else
+7. Before inventing a new script or one-off workaround to run a workflow, first check whether the repo already has a skill, CLI, or checked-in script that covers it
+8. If the capability does not exist, do not leave the solution as a throwaway script; update the relevant skill and add the reusable checked-in workflow so future agents use the proper path
 
 ## GUIDELINES
 
 ### Context Management
 - **ALWAYS** read `CLAUDE.md` at session start to understand project structure, current state, and navigation
+- For fine-tuning-domain work, **ALWAYS** load the `fine-tuning` skill first and treat it as the starting point for command discovery
 - Update `CLAUDE.md` when:
   - Adding new components or modules
   - Changing system architecture
   - Completing major features
   - Discovering important patterns or constraints
+
+### Tooling Discipline
+- Prefer existing repo CLIs, checked-in scripts, and documented skills over ad hoc Python, manual API probing, or temporary shell scripts
+- Before building anything new to "just get it running", search for an existing command or script first
+- If the repo is missing a needed capability, the correct follow-up is to add the reusable workflow and update the relevant skill so the next agent does not repeat the same improvisation
 
 ### Git Workflow
 - Create a feature branch before any new workstream begins
