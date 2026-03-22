@@ -17,6 +17,7 @@ Requirements:
 
 import logging
 import os
+import random
 import shlex
 import shutil
 import sys
@@ -129,6 +130,13 @@ class HFJobsBackend(ITrainingBackend):
     def name(self) -> str:
         """Backend identifier."""
         return "hf_jobs"
+
+    @staticmethod
+    def _new_run_timestamp() -> str:
+        """Return a launch timestamp with a short nonce to avoid same-second collisions."""
+        base = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        nonce = f"{random.randrange(0, 0x10000):04x}"
+        return f"{base}_{nonce}"
 
     def get_available_methods(self) -> List[str]:
         """
@@ -299,7 +307,7 @@ class HFJobsBackend(ITrainingBackend):
         if config.artifact_backend == "hf_bucket":
             self._ensure_hf_bucket(config, huggingface_hub)
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = self._new_run_timestamp()
         artifact_prefix = self._build_artifact_prefix(config, timestamp)
         self.last_artifact_prefix = artifact_prefix
         self.last_bucket_id = config.artifact_identifier
@@ -722,7 +730,7 @@ class HFJobsBackend(ITrainingBackend):
         if not config.artifact_identifier:
             raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
 
-        timestamp = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = timestamp or self._new_run_timestamp()
         artifact_prefix = self._build_artifact_prefix(config, timestamp)
 
         # Read project-specific deps from cloud_config.yaml (single source of truth)

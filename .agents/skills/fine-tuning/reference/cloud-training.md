@@ -71,6 +71,16 @@ Recommended first-pass checks:
 - `modal`: inspect the configured Modal Volume path
 - `runpod`: inspect the mounted RunPod Network Volume path
 
+For HF Jobs specifically, bucket-backed artifacts are the primary source of truth once they start appearing:
+- training: `logs/training_latest.jsonl`, `logs/stage_summary.json`, `training_lineage.json`
+- evaluation: `evaluation_results.json`, `evaluation_results.md`, `evaluation_lineage.json`, then `logs/eval_progress.jsonl`
+- loss: `loss_summary.json`, `per_example_losses.jsonl`, `partial/high_loss_examples.partial.jsonl`
+
+Use raw HF job logs mainly for:
+- bootstrap failures before the bucket prefix exists
+- dependency/runtime crashes before the first artifact sync
+- debugging low-level container issues
+
 ## HF Jobs Hardware Lookup
 
 Use the checked-in helper when you want the live HF Jobs hardware list and hourly pricing instead of guessing from memory:
@@ -120,6 +130,20 @@ python tuner.py run-experiment \
   --optimize-for cost \
   --yes
 ```
+
+For multi-spec benchmark launches, use the staggered launcher instead of submitting several `run-experiment` commands back-to-back:
+
+```bash
+python3 scripts/launch_experiment_batch.py \
+  Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_l40sx1_pruned.yaml \
+  Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_a100_large_pruned.yaml \
+  --auto-hardware \
+  --optimize-for cost \
+  --yes
+```
+
+Gotcha:
+- The launcher defaults to a 5-second stagger. Keep it on unless you have a specific reason to remove it; same-second submissions are harder to monitor and used to collide on timestamp-derived artifact prefixes.
 
 ---
 

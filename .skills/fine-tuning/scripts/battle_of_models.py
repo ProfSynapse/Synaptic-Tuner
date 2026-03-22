@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -194,6 +195,7 @@ def _launch(
     preset: str,
     image_profile_override: str | None,
     cloud_image_override: str | None,
+    stagger_seconds: float,
 ) -> int:
     if not models:
         print("No matching sweep models found.")
@@ -209,6 +211,9 @@ def _launch(
         )
         print(f"Launching {model.alias}: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+        if model != models[-1] and stagger_seconds > 0:
+            print(f"Waiting {stagger_seconds:g}s before the next submission...")
+            time.sleep(stagger_seconds)
     return 0
 
 
@@ -246,6 +251,7 @@ def main() -> int:
     launch_parser.add_argument("--preset", default="full", help="Evaluation preset to use with cloud-pipeline")
     launch_parser.add_argument("--image-profile", help="Force one image profile for every selected model")
     launch_parser.add_argument("--cloud-image", help="Force one exact Docker image for every selected model")
+    launch_parser.add_argument("--stagger-seconds", type=float, default=5.0, help="Seconds to wait between submissions. Default: 5.")
 
     subparsers.add_parser("plan", help="Print the promotion path through KTO and env-GRPO")
 
@@ -264,6 +270,7 @@ def main() -> int:
             preset=args.preset,
             image_profile_override=getattr(args, "image_profile", None),
             cloud_image_override=getattr(args, "cloud_image", None),
+            stagger_seconds=max(0.0, getattr(args, "stagger_seconds", 5.0)),
         )
     if args.command == "launch":
         return _launch(

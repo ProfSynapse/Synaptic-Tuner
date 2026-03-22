@@ -311,6 +311,15 @@ class TestHFJobsExecute:
 
 
 class TestBuildTrainingCommand:
+    def test_new_run_timestamp_includes_nonce(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        timestamp = backend._new_run_timestamp()
+        prefix, nonce = timestamp.rsplit("_", 1)
+
+        assert prefix.count("_") == 1
+        assert len(nonce) == 4
+        int(nonce, 16)
+
     def test_command_structure(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()

@@ -22,6 +22,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
+| Staggered experiment batch | `python3 scripts/launch_experiment_batch.py Trainers/cloud/experiments/<spec1>.yaml Trainers/cloud/experiments/<spec2>.yaml --yes` |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
@@ -72,11 +73,13 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
+- For multi-spec benchmark launches, prefer `python3 scripts/launch_experiment_batch.py ...` over back-to-back manual submissions. It defaults to a 5-second stagger.
 - For blind stage hardware selection before launch, use `python tuner.py plan-hardware ...`.
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
 - For finished experiment bundles and next-run suggestions, use `python tuner.py analyze-experiment ...`.
 - For loss-driven dataset cleanup, start with `python3 scripts/prune_dataset_from_loss.py ... --analyze-only`; only apply a pruning rule after checking which families are actually enriched in the high-loss slice.
 - Prefer the generic pruning strategies first (`loss_threshold`, `top_percent`). Use repo-specific presets only when the analysis output shows that exact family is genuinely overrepresented.
+- For in-flight cloud-run health checks, inspect the bucket-backed artifacts first (`training_latest.jsonl`, `stage_summary.json`, `training_lineage.json`, eval/loss partials). Use raw HF logs only as a fallback when the bucket prefix has not started writing yet.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
@@ -139,6 +142,8 @@ python tuner.py cloud-jobs list --limit 20
 python tuner.py cloud-jobs show --job professorsynapse/<job-id>
 python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
 ```
+Gotcha:
+- `cloud-jobs show` is useful, but for real progress checks prefer the bucket-backed artifacts once they exist. Early raw logs are often just bootstrap noise; the bucket tells you when training/eval/loss has actually started producing useful state.
 
 **Canonical one-off HF experiment with direct overrides:**
 ```bash
@@ -195,6 +200,19 @@ python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/qwen3
 python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_a100_large.yaml --optimize-for cost
 ```
 Use this when you want three comparable full-pipeline runs of the same model across increasing GPU tiers. Keep the GPU pinned in the spec, leave training batch/grad accumulation unset, and let `run-experiment --auto-hardware` fill the batch shape for that tier.
+Gotcha:
+- `--auto-hardware` can change `batch_size` and `gradient_accumulation` per hardware tier. When comparing speed/cost, always record the resolved training shape alongside the GPU flavor. Otherwise you can misread a faster run as “better hardware” when part of the gain came from a larger planner-selected batch.
+- When launching several experiment specs in one sweep, do not submit them back-to-back by hand. Use `python3 scripts/launch_experiment_batch.py ... --stagger-seconds 5`. That avoids same-second job submission races and keeps artifact prefixes easier to track.
+
+**Launch a staggered experiment-spec benchmark batch:**
+```bash
+python3 scripts/launch_experiment_batch.py \
+  Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_l40sx1_pruned.yaml \
+  Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_a100_large_pruned.yaml \
+  --auto-hardware \
+  --optimize-for cost \
+  --yes
+```
 
 **Resume or slice the experiment pipeline:**
 ```bash
@@ -302,6 +320,7 @@ Provider-native storage defaults:
 - `run-experiment` now supports stage controls: `--only-stage`, `--from-stage`, and repeated `--skip-stage`.
 - `run-experiment --auto-hardware` uses a blind planner: model size, method, seq length, quantization, and live HF flavor pricing. It does not require prior telemetry.
 - `plan-hardware` is the inspection surface for that same planner.
+- When using `--auto-hardware`, treat the resolved `batch_size` / `gradient_accumulation` as part of the experiment definition. Compare wall-clock and cost only after checking those resolved values.
 - Finished experiments now write `.tracking/experiments/<id>/analysis/` with:
   `experiment_summary.json`, `run_matrix.csv`, `feature_dataset.{jsonl,csv}`, `next_run_candidates.json`, `draft_next_spec.yaml`.
 - For the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`.
