@@ -46,3 +46,27 @@ def test_cloud_loss_job_uses_transformers_loader_for_exact_loss(tmp_path: Path):
     assert mock_compute.call_args.kwargs["num_workers"] == 2
     assert mock_sync_from_bucket.call_count == 1
     assert mock_sync_bucket.call_count >= 1
+
+
+def test_materialize_hf_dataset_downloads_plain_dataset_file(tmp_path: Path):
+    import shared.experiment_tracking.cloud_loss_job as cloud_loss_job
+
+    downloaded = tmp_path / "downloaded.jsonl"
+    downloaded.write_text('{"messages":[]}\n', encoding="utf-8")
+
+    with patch("huggingface_hub.hf_hub_download", return_value=str(downloaded)) as mock_download:
+        materialized = cloud_loss_job._materialize_hf_dataset(
+            "professorsynapse/claudesidian-synthetic-dataset",
+            "train.jsonl",
+            tmp_path / "out",
+            token="hf-token",
+        )
+
+    assert materialized.read_text(encoding="utf-8") == '{"messages":[]}\n'
+    assert materialized.name == "train.jsonl"
+    mock_download.assert_called_once_with(
+        repo_id="professorsynapse/claudesidian-synthetic-dataset",
+        filename="train.jsonl",
+        repo_type="dataset",
+        token="hf-token",
+    )

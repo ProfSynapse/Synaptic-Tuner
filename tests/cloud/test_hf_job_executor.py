@@ -24,10 +24,14 @@ def test_build_repo_checkout_steps_pins_exact_commit():
         )
     )
 
-    assert steps == [
-        "git clone --branch main --depth 1 https://github.com/test/repo.git /workspace/repo",
-        "cd /workspace/repo && git fetch --depth 1 origin abc12345def67890 && git checkout abc12345def67890",
-    ]
+    assert len(steps) == 2
+    assert "if command -v git" in steps[0]
+    assert "git clone --branch main --depth 1 https://github.com/test/repo.git /workspace/repo" in steps[0]
+    assert "https://github.com/test/repo/archive/abc12345def67890.tar.gz" in steps[0]
+    assert steps[1] == (
+        "if [ -d /workspace/repo/.git ]; then cd /workspace/repo && "
+        "git fetch --depth 1 origin abc12345def67890 && git checkout abc12345def67890; fi"
+    )
 
 
 def test_format_timeout_hours_normalizes_integers_and_floats():

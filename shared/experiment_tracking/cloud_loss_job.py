@@ -69,15 +69,19 @@ def _sync_from_bucket(bucket_id: str, remote_prefix: str, local_dir: Path, token
     _sync_bucket(f"hf://buckets/{bucket_id}/{remote_prefix.strip('/')}", str(local_dir), token)
 
 
-def _materialize_hf_dataset(dataset_name: str, dataset_file: str, output_root: Path) -> Path:
-    from datasets import load_dataset
+def _materialize_hf_dataset(dataset_name: str, dataset_file: str, output_root: Path, *, token: Optional[str]) -> Path:
+    from huggingface_hub import hf_hub_download
 
-    dataset = load_dataset(dataset_name, data_files=dataset_file, split="train")
-    dataset_path = output_root / "dataset.jsonl"
-    with dataset_path.open("w", encoding="utf-8") as handle:
-        for row in dataset:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return dataset_path
+    downloaded = hf_hub_download(
+        repo_id=dataset_name,
+        filename=dataset_file,
+        repo_type="dataset",
+        token=token,
+    )
+    target_path = output_root / Path(dataset_file).name
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(Path(downloaded).read_bytes())
+    return target_path
 
 def main() -> int:
     args = _parse_args()
@@ -100,7 +104,12 @@ def main() -> int:
             if not dataset_path.exists():
                 raise FileNotFoundError(f"Dataset not found: {args.dataset_path}")
     elif args.dataset_name and args.dataset_file:
-        dataset_path = _materialize_hf_dataset(args.dataset_name, args.dataset_file, output_root)
+        dataset_path = _materialize_hf_dataset(
+            args.dataset_name,
+            args.dataset_file,
+            output_root,
+            token=hf_token,
+        )
     else:
         raise ValueError("Provide either --dataset-path or both --dataset-name and --dataset-file.")
 

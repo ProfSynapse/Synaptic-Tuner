@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -118,10 +119,49 @@ def build_repo_checkout_steps(repo: RepoCheckoutSpec) -> List[str]:
     quoted_url = shlex.quote(repo.url)
     quoted_commit = shlex.quote(repo.commit)
     quoted_dir = shlex.quote(repo.clone_dir)
+    archive_url = _github_archive_url(repo.url, repo.commit)
+    if archive_url:
+        clone_or_download = (
+            f"if command -v git >/dev/null 2>&1; then "
+            f"git clone --branch {quoted_branch} --depth 1 {quoted_url} {quoted_dir}; "
+            f"else "
+            f"python -c \"import io, pathlib, shutil, tarfile, urllib.request; "
+            f"url={archive_url!r}; "
+            f"target=pathlib.Path({repo.clone_dir!r}); "
+            f"target.parent.mkdir(parents=True, exist_ok=True); "
+            f"data=urllib.request.urlopen(url).read(); "
+            f"tmp=target.parent / (target.name + '-tmp'); "
+            f"shutil.rmtree(tmp, ignore_errors=True); "
+            f"tmp.mkdir(parents=True, exist_ok=True); "
+            f"archive=tarfile.open(fileobj=io.BytesIO(data), mode='r:gz'); "
+            f"archive.extractall(tmp); "
+            f"entries=[p for p in tmp.iterdir() if p.is_dir()]; "
+            f"root=entries[0] if len(entries)==1 else tmp; "
+            f"shutil.rmtree(target, ignore_errors=True); "
+            f"shutil.move(str(root), str(target)); "
+            f"shutil.rmtree(tmp, ignore_errors=True)\"; "
+            f"fi"
+        )
+    else:
+        clone_or_download = f"git clone --branch {quoted_branch} --depth 1 {quoted_url} {quoted_dir}"
     return [
-        f"git clone --branch {quoted_branch} --depth 1 {quoted_url} {quoted_dir}",
-        f"cd {quoted_dir} && git fetch --depth 1 origin {quoted_commit} && git checkout {quoted_commit}",
+        clone_or_download,
+        f"if [ -d {quoted_dir}/.git ]; then cd {quoted_dir} && git fetch --depth 1 origin {quoted_commit} && git checkout {quoted_commit}; fi",
     ]
+
+
+def _github_archive_url(repo_url: str, commit: str) -> Optional[str]:
+    """Return a tarball URL for GitHub repos, or None when unsupported."""
+    cleaned = str(repo_url or "").strip()
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    parsed = urlparse(cleaned)
+    if parsed.scheme != "https" or parsed.netloc != "github.com":
+        return None
+    path = parsed.path.strip("/")
+    if path.count("/") != 1:
+        return None
+    return f"https://github.com/{path}/archive/{commit}.tar.gz"
 
 
 def build_bash_command(steps: Iterable[str]) -> List[str]:
