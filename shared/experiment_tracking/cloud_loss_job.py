@@ -101,17 +101,11 @@ def main() -> int:
     else:
         raise ValueError("Provide either --dataset-path or both --dataset-name and --dataset-file.")
 
-    print("Loading model and tokenizer...")
-    from unsloth import FastLanguageModel
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=str(model_dir),
-        max_seq_length=args.max_seq_length,
-        dtype=None,
-        load_in_4bit=False,
-    )
-    FastLanguageModel.for_inference(model)
-
+    print("Loading model and tokenizer with Transformers...")
     from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses
+    from shared.experiment_tracking.transformers_loss_loader import load_transformers_loss_model
+
+    model, tokenizer = load_transformers_loss_model(model_dir)
     print("Computing per-example losses...")
     writer = IncrementalLossWriter(results_dir)
 
