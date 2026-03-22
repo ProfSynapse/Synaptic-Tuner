@@ -327,10 +327,9 @@ class CloudEvalHandler(BaseHandler):
     def _resolve_eval_helper_module(self, runtime: str) -> str:
         if runtime == "unsloth":
             return "Evaluator.cloud_hf_job"
-        raise CloudProviderError(
-            "The dedicated vLLM cloud eval runtime is planned but not implemented yet. "
-            "Use --eval-runtime unsloth for now."
-        )
+        if runtime == "vllm":
+            return "Evaluator.cloud_hf_job_vllm"
+        raise CloudProviderError(f"Unknown eval runtime '{runtime}'.")
 
     def _resolve_eval_image(self) -> tuple[str, Optional[str]]:
         hf_settings = self._hf_jobs_settings()

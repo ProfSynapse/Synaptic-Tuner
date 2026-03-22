@@ -137,16 +137,11 @@ def test_resolve_eval_image_uses_eval_profile_defaults(repo_root):
     assert image.startswith("unsloth/unsloth:")
 
 
-def test_resolve_eval_helper_module_rejects_vllm_until_implemented(repo_root):
+def test_resolve_eval_helper_module_supports_vllm(repo_root):
     handler = CloudEvalHandler(args=Namespace())
     handler._repo_root = repo_root
 
-    try:
-        handler._resolve_eval_helper_module("vllm")
-    except Exception as exc:
-        assert "not implemented yet" in str(exc)
-    else:
-        raise AssertionError("expected vllm runtime selection to fail until helper is implemented")
+    assert handler._resolve_eval_helper_module("vllm") == "Evaluator.cloud_hf_job_vllm"
 
 
 def test_handle_submits_hf_eval_job(repo_root, clean_env):
