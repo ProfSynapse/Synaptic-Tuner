@@ -21,6 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from Evaluator.cli import main as evaluator_main
+from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
 from shared.utilities.env import get_hf_token
 
@@ -126,7 +127,15 @@ def _finalize_cloud_exit_code(exit_code: int, output_json: Path) -> int:
 class _PeriodicBucketSyncer:
     """Best-effort periodic sync for incremental evaluation progress."""
 
-    def __init__(self, local_dir: Path, bucket_id: str, remote_prefix: str, token: str, interval_seconds: int = 15):
+    def __init__(
+        self,
+        local_dir: Path,
+        bucket_id: str,
+        remote_prefix: str,
+        token: str,
+        interval_seconds: int = 15,
+        stage_logger: Optional[StageLogger] = None,
+    ):
         self.local_dir = Path(local_dir)
         self.bucket_id = bucket_id
         self.remote_prefix = remote_prefix.strip("/")
@@ -134,6 +143,7 @@ class _PeriodicBucketSyncer:
         self.interval_seconds = max(5, int(interval_seconds))
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
+        self.stage_logger = stage_logger
 
     def start(self) -> None:
         self._thread.start()
@@ -155,8 +165,19 @@ class _PeriodicBucketSyncer:
                 f"hf://buckets/{self.bucket_id}/{self.remote_prefix}",
                 token=self.token,
             )
+            if self.stage_logger is not None:
+                self.stage_logger.emit_sync(path=f"hf://buckets/{self.bucket_id}/{self.remote_prefix}")
         except Exception as exc:
             print(f"Progress sync warning: {exc}")
+            if self.stage_logger is not None:
+                self.stage_logger.emit(
+                    "artifacts_synced",
+                    message=f"Progress sync warning: {exc}",
+                    details={
+                        "last_sync_path": f"hf://buckets/{self.bucket_id}/{self.remote_prefix}",
+                        "sync_warning": str(exc),
+                    },
+                )
 
 
 def _log_runtime_versions() -> None:
@@ -186,13 +207,34 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
+    stage_logger = StageLogger(
+        progress_dir,
+        stage="evaluation",
+        provider="hf_jobs",
+        job_ref=detect_cloud_job_ref(),
+        run_prefix=args.run_prefix,
+        bucket_id=args.bucket_id,
+    )
+    apply_stage_logging_env(
+        stage="evaluation",
+        provider="hf_jobs",
+        run_prefix=args.run_prefix,
+        job_ref=stage_logger.job_ref,
+        bucket_id=args.bucket_id,
+    )
     partial_output_json = results_dir / "evaluation_results.partial.json"
     partial_output_md = results_dir / "evaluation_results.partial.md"
     failure_json = results_dir / "evaluation_failure.json"
     analysis_dir = results_dir / "analysis"
 
     # Download only the adapter payload needed for direct Unsloth LoRA evaluation.
+    stage_logger.emit("bootstrap_started", message="Cloud eval bootstrap started")
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
+    stage_logger.emit(
+        "artifacts_downloaded",
+        message="Downloaded final model artifacts",
+        details={"last_sync_path": f"hf://buckets/{args.bucket_id}/{args.run_prefix.strip('/')}/final_model"},
+    )
 
     output_json = results_dir / "evaluation_results.json"
     output_md = results_dir / "evaluation_results.md"
@@ -263,13 +305,16 @@ def main() -> int:
         args.eval_prefix,
         hf_token,
         interval_seconds=15,
+        stage_logger=stage_logger,
     )
 
     try:
+        stage_logger.emit("runtime_ready", message="Evaluation runtime ready", details={"backend": "unsloth"})
         progress_syncer.start()
         exit_code = evaluator_main(cli_args)
     except Exception as exc:
         traceback.print_exc()
+        stage_logger.emit_failure(exc, message="Evaluation job failed")
         failure_payload = {
             "status": "failed",
             "error": f"{type(exc).__name__}: {exc}",
@@ -298,8 +343,11 @@ def main() -> int:
         f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
         token=hf_token,
     )
-    print(f"Evaluation artifacts synced to: hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
     final_exit_code = _finalize_cloud_exit_code(exit_code, output_json)
+    stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
+    if final_exit_code == 0:
+        stage_logger.emit("completed", status="completed", message="Evaluation artifacts written successfully")
+    print(f"Evaluation artifacts synced to: hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
     if final_exit_code == 0 and exit_code != 0:
         print(
             "Evaluation completed with failed cases, but final artifacts were written. "

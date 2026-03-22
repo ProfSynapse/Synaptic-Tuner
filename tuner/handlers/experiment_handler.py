@@ -614,6 +614,8 @@ class HFLossStageRunner:
                     "task": "per_example_loss",
                     "provider": "hf_jobs",
                     "experiment_id": experiment.experiment_id,
+                    "bucket_id": bucket_id,
+                    "artifact_prefix": results_prefix,
                 },
             )
         )

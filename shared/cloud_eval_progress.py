@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from shared.cloud_stage_logging import CloudStageLogger, stage_logger_from_env
+
 
 EVAL_PROGRESS_LOG_FILENAME = "eval_progress.jsonl"
 
@@ -97,11 +99,17 @@ class CloudEvaluationProgressWriter:
         *,
         sync_callback: Optional[Callable[[Path], None]] = None,
         sync_every_events: int = 5,
+        stage_logger: Optional[CloudStageLogger] = None,
     ) -> None:
         self.progress_log_path = Path(progress_log_path)
         self.sync_callback = sync_callback
         self.sync_every_events = max(1, int(sync_every_events))
         self._event_count = 0
+        self.stage_logger = stage_logger or stage_logger_from_env(self.progress_log_path.parent)
+        self._counts = {"passed": 0, "warned": 0, "failed": 0, "total": 0}
+        self._total_tests = 0
+        self._backend: Optional[str] = None
+        self._model: Optional[str] = None
 
     @property
     def progress_dir(self) -> Path:
@@ -125,6 +133,20 @@ class CloudEvaluationProgressWriter:
                 "model": model,
             },
         )
+        self._total_tests = int(total_tests)
+        self._backend = backend
+        self._model = model
+        self.stage_logger.emit(
+            "work_started",
+            message="Evaluation started",
+            details={
+                "cases_done": 0,
+                "cases_total": self._total_tests,
+                "backend": backend,
+                "model": model,
+                "title": title,
+            },
+        )
         self.sync(force=True)
 
     def write_record(
@@ -133,9 +155,32 @@ class CloudEvaluationProgressWriter:
         *,
         issue_formatter: Optional[Callable[[str], Optional[str]]] = None,
     ) -> None:
-        append_progress_event(
-            self.progress_log_path,
-            extract_record_progress(record, issue_formatter=issue_formatter),
+        payload = extract_record_progress(record, issue_formatter=issue_formatter)
+        append_progress_event(self.progress_log_path, payload)
+        status = str(payload.get("status", "fail"))
+        self._counts["total"] += 1
+        if status == "pass":
+            self._counts["passed"] += 1
+        elif status == "warn":
+            self._counts["warned"] += 1
+        else:
+            self._counts["failed"] += 1
+        self.stage_logger.emit(
+            "progress",
+            message=f"Evaluated {payload.get('name', 'unnamed')}",
+            details={
+                "cases_done": self._counts["total"],
+                "cases_total": self._total_tests or self._counts["total"],
+                "passed": self._counts["passed"],
+                "warned": self._counts["warned"],
+                "failed": self._counts["failed"],
+                "current_case": payload.get("name"),
+                "current_status": status,
+                "latency": float(payload.get("latency", 0.0) or 0.0),
+                "reason": payload.get("reason"),
+                "backend": self._backend,
+                "model": self._model,
+            },
         )
         self._event_count += 1
         if self._event_count % self.sync_every_events == 0:
@@ -143,6 +188,21 @@ class CloudEvaluationProgressWriter:
 
     def write_complete(self) -> None:
         append_progress_event(self.progress_log_path, {"event": "complete"})
+        if self.stage_logger is not None:
+            self.stage_logger.emit(
+                "completed",
+                status="completed",
+                message="Evaluation completed",
+                details={
+                    "cases_done": self._counts["total"],
+                    "cases_total": self._total_tests or self._counts["total"],
+                    "passed": self._counts["passed"],
+                    "warned": self._counts["warned"],
+                    "failed": self._counts["failed"],
+                    "backend": self._backend,
+                    "model": self._model,
+                },
+            )
         self.sync(force=True)
 
     def write_failure(self, message: str) -> None:
@@ -150,12 +210,27 @@ class CloudEvaluationProgressWriter:
             self.progress_log_path,
             {"event": "failure", "reason": _truncate_message(message, limit=200)},
         )
+        if self.stage_logger is not None:
+            self.stage_logger.emit_failure(
+                message,
+                details={
+                    "cases_done": self._counts["total"],
+                    "cases_total": self._total_tests or self._counts["total"],
+                    "passed": self._counts["passed"],
+                    "warned": self._counts["warned"],
+                    "failed": self._counts["failed"],
+                    "backend": self._backend,
+                    "model": self._model,
+                },
+            )
         self.sync(force=True)
 
     def sync(self, *, force: bool = False) -> None:
         if not force or self.sync_callback is None:
             return
         self.sync_callback(self.progress_dir)
+        if self.stage_logger is not None:
+            self.stage_logger.emit_sync(path=str(self.progress_dir))
 
 
 class EvaluationDashboardReplayer:

@@ -1,3 +1,4 @@
+import json
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -35,17 +36,31 @@ def test_cloud_loss_job_uses_transformers_loader_for_exact_loss(tmp_path: Path):
         with patch.object(cloud_loss_job, "get_hf_token", return_value="hf-token"):
             with patch.object(cloud_loss_job, "_sync_from_bucket") as mock_sync_from_bucket:
                 with patch.object(cloud_loss_job, "_sync_bucket") as mock_sync_bucket:
+                    def _fake_compute(**kwargs):
+                        summary_path = Path(kwargs["output_root"]) / "partial" / "loss_summary.partial.json"
+                        summary_path.parent.mkdir(parents=True, exist_ok=True)
+                        summary_path.write_text(
+                            json.dumps({"rows_written": 1, "batch_count": 1, "mean_loss": 0.3}, ensure_ascii=False) + "\n",
+                            encoding="utf-8",
+                        )
+                        kwargs["on_aggregate"](Path(kwargs["output_root"]))
+                        return losses
+
                     with patch(
                         "shared.experiment_tracking.per_example_loss.compute_per_example_losses_parallel",
-                        return_value=losses,
+                        side_effect=_fake_compute,
                     ) as mock_compute:
-                        exit_code = cloud_loss_job.main()
+                            exit_code = cloud_loss_job.main()
 
     assert exit_code == 0
     mock_compute.assert_called_once()
     assert mock_compute.call_args.kwargs["num_workers"] == 2
     assert mock_sync_from_bucket.call_count == 1
     assert mock_sync_bucket.call_count >= 1
+    summary = json.loads((Path(args.output_root) / "results" / "logs" / "stage_summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "completed"
+    assert summary["details"]["rows_written"] == 1
+    assert summary["details"]["batch_count"] == 1
 
 
 def test_materialize_hf_dataset_downloads_plain_dataset_file(tmp_path: Path):

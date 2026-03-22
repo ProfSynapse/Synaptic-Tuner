@@ -785,6 +785,8 @@ class CloudEvalHandler(BaseHandler):
                         "task": "evaluation",
                         "provider": "hf_jobs",
                         "run_prefix": selected_run["prefix"].split("/")[-1],
+                        "bucket_id": bucket_id,
+                        "artifact_prefix": eval_prefix,
                     },
                 )
             )

@@ -300,6 +300,8 @@ class HFJobsBackend(ITrainingBackend):
                         "task": "training",
                         "method": config.method,
                         "provider": config.provider,
+                        "bucket_id": config.artifact_identifier,
+                        "artifact_prefix": artifact_prefix,
                     },
                 )
             )

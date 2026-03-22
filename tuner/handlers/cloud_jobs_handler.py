@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from argparse import Namespace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -78,6 +80,121 @@ class CloudJobsHandler(BaseHandler):
         job = hub.inspect_job(job_id=job_id, namespace=namespace, token=token)
         return self._normalize_job(job)
 
+    def _extract_command_text(self, job: Dict[str, Any]) -> str:
+        command = job.get("command") or []
+        if not command:
+            return ""
+        if len(command) >= 3 and str(command[1]).strip() in {"-c", "-lc"}:
+            return str(command[2])
+        return " ".join(str(part) for part in command)
+
+    def _find_cli_arg(self, tokens: List[str], *names: str) -> Optional[str]:
+        for index, token in enumerate(tokens):
+            for name in names:
+                if token == name and index + 1 < len(tokens):
+                    return tokens[index + 1]
+                if token.startswith(f"{name}="):
+                    return token.split("=", 1)[1]
+        return None
+
+    def _resolve_stage_artifact_root(self, job: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        labels = job.get("labels") or {}
+        bucket_id = (
+            labels.get("artifact_bucket")
+            or labels.get("bucket_id")
+            or labels.get("bucket")
+        )
+        prefix = (
+            labels.get("eval_prefix")
+            or labels.get("results_prefix")
+            or labels.get("artifact_prefix")
+        )
+        if bucket_id and prefix:
+            return {"bucket_id": str(bucket_id).strip("/"), "prefix": str(prefix).strip("/")}
+
+        command_text = self._extract_command_text(job)
+        if not command_text:
+            return None
+        try:
+            tokens = shlex.split(command_text)
+        except ValueError:
+            tokens = command_text.split()
+
+        bucket_id = bucket_id or self._find_cli_arg(tokens, "--bucket-id", "--artifact-bucket")
+        prefix = prefix or self._find_cli_arg(tokens, "--eval-prefix", "--results-prefix", "--artifact-prefix")
+        if not prefix:
+            prefix = self._find_cli_arg(tokens, "--run-prefix")
+        if not bucket_id or not prefix:
+            return None
+        return {"bucket_id": str(bucket_id).strip("/"), "prefix": str(prefix).strip("/")}
+
+    def _stage_summary_paths(self, artifact_root: Dict[str, str]) -> Dict[str, str]:
+        bucket_id = artifact_root["bucket_id"].strip("/")
+        prefix = artifact_root["prefix"].strip("/")
+        base_uri = f"hf://buckets/{bucket_id}/{prefix}"
+        return {
+            "bucket_id": bucket_id,
+            "prefix": prefix,
+            "artifact_uri": base_uri,
+            "summary_uri": f"{base_uri}/logs/stage_summary.json",
+            "events_uri": f"{base_uri}/logs/stage_events.jsonl",
+        }
+
+    def _load_stage_summary(self, hub, token: str, job: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, str]]]:
+        artifact_root = self._resolve_stage_artifact_root(job)
+        if artifact_root is None or not hasattr(hub, "HfFileSystem"):
+            return None, None
+
+        artifact_paths = self._stage_summary_paths(artifact_root)
+        try:
+            fs = hub.HfFileSystem(token=token)
+            with fs.open(artifact_paths["summary_uri"], "r") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return None, artifact_paths
+
+        if not isinstance(payload, dict):
+            return None, artifact_paths
+        return payload, artifact_paths
+
+    def _stringify_stage_summary_value(self, value: Any) -> str:
+        if value is None:
+            return "-"
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, sort_keys=True)
+        return str(value)
+
+    def _build_stage_summary_display(
+        self,
+        summary: Dict[str, Any],
+        artifact_paths: Optional[Dict[str, str]],
+    ) -> Dict[str, str]:
+        display: Dict[str, str] = {}
+        preferred_fields = [
+            ("Stage", summary.get("stage")),
+            ("Health", summary.get("health")),
+            ("Status", summary.get("status")),
+            ("Message", summary.get("message")),
+            ("Last Event", summary.get("last_event") or summary.get("event")),
+            ("Updated", summary.get("updated_at") or summary.get("timestamp")),
+        ]
+        for label, value in preferred_fields:
+            if value not in (None, "", []):
+                display[label] = self._stringify_stage_summary_value(value)
+
+        if artifact_paths:
+            display["Artifacts"] = artifact_paths["artifact_uri"]
+            display["Stage Summary"] = artifact_paths["summary_uri"]
+            display["Stage Events"] = artifact_paths["events_uri"]
+
+        consumed_keys = {"stage", "health", "status", "message", "last_event", "event", "updated_at", "timestamp"}
+        for key in sorted(summary):
+            if key in consumed_keys:
+                continue
+            label = key.replace("_", " ").title()
+            display[label] = self._stringify_stage_summary_value(summary.get(key))
+        return display
+
     def _fetch_logs(
         self,
         hub,
@@ -146,8 +263,25 @@ class CloudJobsHandler(BaseHandler):
 
             if subcommand == "show":
                 job = self._show_job(hub, token, job_id, resolved_namespace)
+                stage_summary, artifact_paths = self._load_stage_summary(hub, token, job)
                 if self.json_mode:
-                    self.output({"job": job, "namespace": resolved_namespace})
+                    payload: Dict[str, Any] = {
+                        "job": job,
+                        "namespace": resolved_namespace,
+                        "stage_summary": stage_summary,
+                    }
+                    if artifact_paths:
+                        payload["stage_artifacts"] = artifact_paths
+                    if stage_summary is None:
+                        payload["log_tail"] = self._fetch_logs(
+                            hub,
+                            token,
+                            job_id,
+                            resolved_namespace,
+                            tail=min(max(tail, 1), 40),
+                            follow=False,
+                        )
+                    self.output(payload)
                     return 0
                 print_header("CLOUD JOB", "Hugging Face Job Details")
                 print_config(
@@ -164,6 +298,27 @@ class CloudJobsHandler(BaseHandler):
                     },
                     "HF Job Summary",
                 )
+                if stage_summary is not None:
+                    print_config(
+                        self._build_stage_summary_display(stage_summary, artifact_paths),
+                        "Structured Stage Health",
+                    )
+                else:
+                    print_info("Structured stage summary not available; falling back to recent raw logs.")
+                    lines = self._fetch_logs(
+                        hub,
+                        token,
+                        job_id,
+                        resolved_namespace,
+                        tail=min(max(tail, 1), 40),
+                        follow=False,
+                    )
+                    if not lines:
+                        print_info("No logs returned.")
+                    else:
+                        print_info("Recent raw logs:")
+                        for line in lines:
+                            print(line)
                 if job.get("command"):
                     print_info("Command:")
                     print(job["command"][-1] if len(job["command"]) >= 3 else " ".join(job["command"]))

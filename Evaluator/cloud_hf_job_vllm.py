@@ -22,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from Evaluator.cli import main as evaluator_main
 from Evaluator.vllm_setup import start_vllm_server, stop_vllm_server
+from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
 from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
@@ -159,6 +160,7 @@ def _compute_exact_loss_outputs(
     results_dir: Path,
     hf_token: str,
     progress_syncer: _PeriodicBucketSyncer,
+    stage_logger: Optional[StageLogger] = None,
 ) -> None:
     analysis_dir = results_dir / "analysis"
     dataset_path = _resolve_loss_dataset_path(
@@ -169,6 +171,23 @@ def _compute_exact_loss_outputs(
     )
 
     def _on_aggregate(_aggregate_root: Path) -> None:
+        if stage_logger is not None:
+            summary_path = analysis_dir / "partial" / "loss_summary.partial.json"
+            if summary_path.exists():
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                except Exception:
+                    summary = {}
+                stage_logger.emit(
+                    "progress",
+                    message="Exact loss progress updated",
+                    details={
+                        "phase": "exact_loss",
+                        "examples_done": int(summary.get("rows_written", 0)),
+                        "rows_written": int(summary.get("rows_written", 0)),
+                        "batch_count": int(summary.get("batch_count", 0)),
+                    },
+                )
         progress_syncer.sync_once()
 
     losses = compute_per_example_losses_parallel(
@@ -245,12 +264,34 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
+    stage_logger = StageLogger(
+        progress_dir,
+        stage="evaluation",
+        provider="hf_jobs",
+        job_ref=detect_cloud_job_ref(),
+        run_prefix=args.run_prefix,
+        bucket_id=args.bucket_id,
+    )
+    apply_stage_logging_env(
+        stage="evaluation",
+        provider="hf_jobs",
+        run_prefix=args.run_prefix,
+        job_ref=stage_logger.job_ref,
+        bucket_id=args.bucket_id,
+    )
     partial_output_json = results_dir / "evaluation_results.partial.json"
     partial_output_md = results_dir / "evaluation_results.partial.md"
     failure_json = results_dir / "evaluation_failure.json"
 
+    stage_logger.emit("bootstrap_started", message="Cloud vLLM eval bootstrap started")
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
+    stage_logger.emit(
+        "artifacts_downloaded",
+        message="Downloaded final model artifacts",
+        details={"last_sync_path": f"hf://buckets/{args.bucket_id}/{args.run_prefix.strip('/')}/final_model"},
+    )
     base_model_name = _load_base_model_name(model_dir)
+    stage_logger.emit("model_loaded", message="Resolved base model for vLLM", details={"model": base_model_name, "backend": "vllm"})
 
     output_json = results_dir / "evaluation_results.json"
     output_md = results_dir / "evaluation_results.md"
@@ -262,11 +303,13 @@ def main() -> int:
         args.eval_prefix,
         hf_token,
         interval_seconds=15,
+        stage_logger=stage_logger,
     )
 
     server_started = False
     try:
         progress_syncer.start()
+        stage_logger.emit("runtime_ready", message="Starting vLLM runtime", details={"backend": "vllm"})
         server_started = start_vllm_server(
             model=base_model_name,
             host=args.vllm_host,
@@ -279,6 +322,7 @@ def main() -> int:
         )
         if not server_started:
             raise RuntimeError("Failed to start the vLLM server in the cloud eval job.")
+        stage_logger.emit("runtime_ready", message="vLLM server ready", details={"backend": "vllm"})
 
         cli_args = [
             "--backend",
@@ -330,6 +374,11 @@ def main() -> int:
 
         exit_code = evaluator_main(cli_args)
         if args.with_loss:
+            stage_logger.emit(
+                "work_started",
+                message="Starting exact loss pass",
+                details={"phase": "exact_loss", "examples_done": 0},
+            )
             stop_vllm_server()
             server_started = False
             _compute_exact_loss_outputs(
@@ -338,9 +387,11 @@ def main() -> int:
                 results_dir=results_dir,
                 hf_token=hf_token,
                 progress_syncer=progress_syncer,
+                stage_logger=stage_logger,
             )
     except Exception as exc:
         traceback.print_exc()
+        stage_logger.emit_failure(exc, message="vLLM evaluation job failed", traceback_text=traceback.format_exc())
         failure_payload = {
             "status": "failed",
             "error": f"{type(exc).__name__}: {exc}",
@@ -371,8 +422,11 @@ def main() -> int:
         f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
         token=hf_token,
     )
-    print(f"Evaluation artifacts synced to: hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
     final_exit_code = _finalize_cloud_exit_code(exit_code, output_json)
+    stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
+    if final_exit_code == 0:
+        stage_logger.emit("completed", status="completed", message="vLLM evaluation artifacts written successfully")
+    print(f"Evaluation artifacts synced to: hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}")
     if final_exit_code == 0 and exit_code != 0:
         print(
             "Evaluation completed with failed cases, but final artifacts were written. "

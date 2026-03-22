@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from shared.utilities.env import get_hf_token
+from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -93,9 +94,31 @@ def main() -> int:
     model_dir = output_root / "model"
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = results_dir / "logs"
+    stage_logger = StageLogger(
+        logs_dir,
+        stage="loss",
+        provider="hf_jobs",
+        job_ref=detect_cloud_job_ref(),
+        run_prefix=args.run_prefix.strip("/"),
+        bucket_id=args.bucket_id,
+    )
+    apply_stage_logging_env(
+        stage="loss",
+        provider="hf_jobs",
+        run_prefix=args.run_prefix.strip("/"),
+        job_ref=stage_logger.job_ref,
+        bucket_id=args.bucket_id,
+    )
 
     print(f"Downloading model from bucket: {args.run_prefix}/final_model")
+    stage_logger.emit("bootstrap_started", message="Cloud loss bootstrap started")
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
+    stage_logger.emit(
+        "artifacts_downloaded",
+        message="Downloaded final model artifacts",
+        details={"last_sync_path": f"hf://buckets/{args.bucket_id}/{args.run_prefix.strip('/')}/final_model"},
+    )
 
     if args.dataset_path:
         dataset_path = Path(_REPO_ROOT) / args.dataset_path
@@ -112,6 +135,7 @@ def main() -> int:
         )
     else:
         raise ValueError("Provide either --dataset-path or both --dataset-name and --dataset-file.")
+    stage_logger.emit("runtime_ready", message="Loss runtime ready", details={"dataset": str(dataset_path)})
 
     from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 
@@ -128,6 +152,16 @@ def main() -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
         except Exception:
             return
+        stage_logger.emit(
+            "progress",
+            message="Exact loss progress updated",
+            details={
+                "examples_done": int(summary.get("rows_written", 0)),
+                "rows_written": int(summary.get("rows_written", 0)),
+                "batch_count": int(summary.get("batch_count", 0)),
+                "mean_loss": float(summary.get("mean_loss", 0.0) or 0.0),
+            },
+        )
         if args.sync_every_batches <= 0:
             return
         batch_count = int(summary.get("batch_count", 0))
@@ -141,21 +175,26 @@ def main() -> int:
             f"hf://buckets/{args.bucket_id}/{destination_prefix}",
             token=hf_token,
         )
+        stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{destination_prefix}")
         last_synced_batch = batch_count
         last_sync_time = time.time()
 
-    losses = compute_per_example_losses_parallel(
-        model_dir=model_dir,
-        dataset_path=str(dataset_path),
-        output_root=results_dir,
-        max_seq_length=args.max_seq_length,
-        completion_only=not args.no_completion_only,
-        batch_max_tokens=args.batch_max_tokens,
-        max_batch_size=args.max_batch_size,
-        num_workers=args.num_workers,
-        on_aggregate=_on_aggregate,
-        aggregate_interval_seconds=args.aggregate_interval_seconds,
-    )
+    try:
+        losses = compute_per_example_losses_parallel(
+            model_dir=model_dir,
+            dataset_path=str(dataset_path),
+            output_root=results_dir,
+            max_seq_length=args.max_seq_length,
+            completion_only=not args.no_completion_only,
+            batch_max_tokens=args.batch_max_tokens,
+            max_batch_size=args.max_batch_size,
+            num_workers=args.num_workers,
+            on_aggregate=_on_aggregate,
+            aggregate_interval_seconds=args.aggregate_interval_seconds,
+        )
+    except Exception as exc:
+        stage_logger.emit_failure(exc, message="Loss computation failed")
+        raise
     print(f"Computed {len(losses)} loss rows")
 
     destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
@@ -164,6 +203,13 @@ def main() -> int:
         str(results_dir),
         f"hf://buckets/{args.bucket_id}/{destination_prefix}",
         token=hf_token,
+    )
+    stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{destination_prefix}")
+    stage_logger.emit(
+        "completed",
+        status="completed",
+        message="Loss computation completed",
+        details={"examples_done": len(losses), "rows_written": len(losses)},
     )
     print("Done computing losses in cloud.")
     return 0
