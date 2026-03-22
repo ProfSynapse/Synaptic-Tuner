@@ -19,7 +19,12 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from shared.utilities.env import get_hf_token
-from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
+from shared.cloud_stage_logging import (
+    StageLogger,
+    apply_stage_logging_env,
+    detect_cloud_job_ref,
+    normalize_failure,
+)
 from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
 
 def _parse_args() -> argparse.Namespace:
@@ -42,7 +47,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
     return parser.parse_args()
 
-def _sync_bucket(source_path: str, destination_path: str, token: Optional[str]) -> None:
+def _sync_bucket(
+    source_path: str,
+    destination_path: str,
+    token: Optional[str],
+    *,
+    strict: bool = True,
+) -> bool:
     helper_python = os.environ.get("HF_BUCKET_SYNC_PYTHON", "").strip() or sys.executable
     helper_pythonpath = os.environ.get("HF_BUCKET_SYNC_PYTHONPATH", "").strip()
     env = dict(os.environ)
@@ -56,16 +67,22 @@ def _sync_bucket(source_path: str, destination_path: str, token: Optional[str]) 
         existing_pythonpath = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = f"{helper_pythonpath}:{existing_pythonpath}" if existing_pythonpath else helper_pythonpath
 
-    subprocess.run(
-        [
-            helper_python,
-            str(_REPO_ROOT / "shared" / "hf_bucket_sync_helper.py"),
-            source_path,
-            destination_path,
-        ],
-        check=True,
-        env=env,
-    )
+    try:
+        subprocess.run(
+            [
+                helper_python,
+                str(_REPO_ROOT / "shared" / "hf_bucket_sync_helper.py"),
+                source_path,
+                destination_path,
+            ],
+            check=True,
+            env=env,
+        )
+    except subprocess.CalledProcessError:
+        if strict:
+            raise
+        return False
+    return True
 
 def _sync_from_bucket(bucket_id: str, remote_prefix: str, local_dir: Path, token: Optional[str]) -> None:
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -172,12 +189,27 @@ def main() -> int:
             return
         destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
         print(f"Syncing partial loss artifacts after batch {batch_count} -> {destination_prefix}")
-        _sync_bucket(
+        sync_ok = _sync_bucket(
             str(results_dir),
             f"hf://buckets/{args.bucket_id}/{destination_prefix}",
             token=hf_token,
+            strict=False,
         )
-        stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{destination_prefix}")
+        if sync_ok:
+            stage_logger.emit_sync(path=f"hf://buckets/{args.bucket_id}/{destination_prefix}")
+        else:
+            failure = normalize_failure(
+                "Periodic bucket sync failed; continuing loss computation with local artifacts."
+            )
+            stage_logger.emit(
+                "sync_degraded",
+                status="running",
+                message=failure["error_message"],
+                details={
+                    "last_sync_path": f"hf://buckets/{args.bucket_id}/{destination_prefix}",
+                    **failure,
+                },
+            )
         last_synced_batch = batch_count
         last_sync_time = time.time()
 
@@ -230,6 +262,12 @@ def main() -> int:
         status="completed",
         message="Loss computation completed",
         details={"examples_done": len(losses), "rows_written": len(losses)},
+    )
+    _sync_bucket(
+        str(results_dir),
+        f"hf://buckets/{args.bucket_id}/{destination_prefix}",
+        token=hf_token,
+        strict=False,
     )
     print("Done computing losses in cloud.")
     return 0
