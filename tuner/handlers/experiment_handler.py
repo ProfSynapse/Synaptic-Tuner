@@ -673,14 +673,39 @@ class ExperimentHandler(BaseHandler):
                 "Eval": "enabled" if spec.evaluation.enabled else "disabled",
                 "Loss": "enabled" if spec.loss.enabled else "disabled",
                 "Objective": spec.objective or "-",
+                "Stages": ", ".join(spec.execution.selected_stages()),
             },
             "Experiment Plan",
         )
+
+    def _apply_stage_overrides(self, spec: ExperimentSpec) -> ExperimentSpec:
+        only_stage = getattr(self.args, "only_stage", None)
+        from_stage = getattr(self.args, "from_stage", None)
+        skip_stages = getattr(self.args, "skip_stage", None) or []
+        if only_stage and from_stage:
+            raise CloudProviderError("--only-stage and --from-stage are mutually exclusive.")
+        if only_stage:
+            spec.execution.only_stage = only_stage
+            spec.execution.from_stage = None
+        elif from_stage:
+            spec.execution.from_stage = from_stage
+            spec.execution.only_stage = None
+        if skip_stages:
+            merged = list(spec.execution.skip_stages)
+            for stage in skip_stages:
+                if stage not in merged:
+                    merged.append(stage)
+            spec.execution.skip_stages = merged
+        return spec
 
     def handle(self) -> int:
         load_env_file()
         try:
             spec, spec_path = self._load_spec()
+            spec = self._apply_stage_overrides(spec)
+            issues = spec.validate()
+            if issues:
+                raise CloudProviderError("Experiment stage selection invalid: " + "; ".join(issues))
             if spec.provider != "hf_jobs":
                 raise CloudProviderError(
                     f"Provider '{spec.provider}' is not wired yet. Current implementation supports hf_jobs."

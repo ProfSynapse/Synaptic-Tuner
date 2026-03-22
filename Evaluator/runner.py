@@ -5,6 +5,7 @@ against a backend client and collects validation results.
 """
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -205,6 +206,8 @@ def evaluate_cases(
     validate_context: bool = False,
     environment_validator: "EnvironmentValidator" | None = None,
     judge_validator: "JudgeValidator" | None = None,
+    parallel: bool = False,
+    max_workers: int = 4,
 ) -> List[EvaluationRecord]:
     """Run evaluation for the provided prompts.
 
@@ -224,18 +227,51 @@ def evaluate_cases(
     """
     records: List[EvaluationRecord] = []
 
-    for case in cases:
-        record = _evaluate_single_case(
-            case,
-            client,
-            dry_run,
-            validate_context,
-            environment_validator=environment_validator,
-            judge_validator=judge_validator,
-        )
-        records.append(record)
-        if on_record:
-            on_record(record)
+    if not parallel or len(cases) <= 1:
+        for case in cases:
+            record = _evaluate_single_case(
+                case,
+                client,
+                dry_run,
+                validate_context,
+                environment_validator=environment_validator,
+                judge_validator=judge_validator,
+            )
+            records.append(record)
+            if on_record:
+                on_record(record)
+        return records
+
+    bounded_workers = max(1, min(int(max_workers or 1), len(cases)))
+    pending_by_index: Dict[int, EvaluationRecord] = {}
+    next_emit_index = 0
+
+    with ThreadPoolExecutor(max_workers=bounded_workers) as executor:
+        future_to_index: Dict[Future[EvaluationRecord], int] = {
+            executor.submit(
+                _evaluate_single_case,
+                case,
+                client,
+                dry_run,
+                validate_context,
+                environment_validator,
+                judge_validator,
+            ): index
+            for index, case in enumerate(cases)
+        }
+
+        while future_to_index:
+            done, _ = wait(tuple(future_to_index.keys()), return_when=FIRST_COMPLETED)
+            for future in done:
+                index = future_to_index.pop(future)
+                pending_by_index[index] = future.result()
+
+            while next_emit_index in pending_by_index:
+                record = pending_by_index.pop(next_emit_index)
+                records.append(record)
+                if on_record:
+                    on_record(record)
+                next_emit_index += 1
 
     return records
 

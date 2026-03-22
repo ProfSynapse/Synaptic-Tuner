@@ -33,7 +33,7 @@ Usage:
 from .local_tracker import LocalTracker
 from .analysis_bundle import write_analysis_bundle
 from .experiment_orchestrator import ExperimentOrchestrator, StageResult
-from .experiment_spec import ExperimentSpec, load_experiment_spec
+from .experiment_spec import ExecutionStageSpec, ExperimentSpec, load_experiment_spec
 from .registry import RunRegistry
 from .schema import RunFilter, RunRecord, LossResult
 from .tracker import ExperimentTracker
@@ -79,6 +79,7 @@ def create_tracker(
 __all__ = [
     "ExperimentTracker",
     "ExperimentOrchestrator",
+    "ExecutionStageSpec",
     "ExperimentSpec",
     "Experiment",
     "LossResult",

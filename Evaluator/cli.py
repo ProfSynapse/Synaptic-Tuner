@@ -60,7 +60,7 @@ from .config import (
     expand_path,
     parse_tags,
 )
-from .config_loader import load_yaml_scenarios
+from .config_loader import ConfigLoader, load_yaml_scenarios
 from .reporting import (
     build_run_payload,
     console_summary,
@@ -504,6 +504,10 @@ def main(argv: List[str] | None = None) -> int:
         print("Error: --scenario is required. Example: --scenario behavior_prompts.yaml", file=sys.stderr)
         return 1
 
+    # Load run config so execution defaults can come from eval_run.yaml/preset.
+    loader = ConfigLoader(config_dir)
+    run_config = loader.load_eval_run(args.preset)
+
     # Load from YAML config system
     tag_filter = parse_tags(args.tags) if args.tags else None
     selected_cases = load_yaml_scenarios(
@@ -560,6 +564,10 @@ def main(argv: List[str] | None = None) -> int:
         timeout=config.request_timeout,
         retries=config.retries,
     )
+
+    safe_parallel_backends = {"vllm", "lmstudio", "ollama", "openrouter", "mlc"}
+    eval_parallel = bool(run_config.parallel and args.backend in safe_parallel_backends and not args.dry_run)
+    eval_max_workers = max(1, int(run_config.max_workers or 1))
 
     # Determine if we should use the live dashboard
     use_dashboard = (
@@ -807,9 +815,13 @@ def main(argv: List[str] | None = None) -> int:
                     environment_validator=environment_validator,
                     judge_validator=judge_validator,
                     on_record=on_record,
+                    parallel=eval_parallel,
+                    max_workers=eval_max_workers,
                 )
         else:
             print(f"\nRunning {len(selected_cases)} evaluations...\n")
+            if run_config.parallel and not eval_parallel:
+                print(f"Parallel execution requested by config but disabled for backend '{args.backend}'.")
             records = evaluate_cases(
                 selected_cases,
                 client=client,
@@ -818,6 +830,8 @@ def main(argv: List[str] | None = None) -> int:
                 environment_validator=environment_validator,
                 judge_validator=judge_validator,
                 on_record=on_record,
+                parallel=eval_parallel,
+                max_workers=eval_max_workers,
             )
     except Exception as exc:
         failure_message = f"{type(exc).__name__}: {exc}"

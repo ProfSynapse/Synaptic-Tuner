@@ -5,7 +5,7 @@ from typing import Optional, Protocol
 
 from .analysis_bundle import write_analysis_bundle
 from .experiment import Experiment
-from .experiment_spec import ExperimentSpec
+from .experiment_spec import EXPERIMENT_STAGES, ExperimentSpec
 from .schema import LossResult, RunRecord
 from .service import TrackingService
 
@@ -82,6 +82,17 @@ class ExperimentOrchestrator:
             return False
         return stage in {"evaluation", "loss"}
 
+    @staticmethod
+    def _selected_stage_names(spec: ExperimentSpec) -> list[str]:
+        selected = spec.execution.selected_stages()
+        if not selected:
+            return list(EXPERIMENT_STAGES)
+        return selected
+
+    @staticmethod
+    def _stage_selected(spec: ExperimentSpec, stage: str) -> bool:
+        return stage in spec.execution.selected_stages()
+
     def _resolve_or_create_experiment(
         self,
         spec: ExperimentSpec,
@@ -110,10 +121,14 @@ class ExperimentOrchestrator:
         experiment: Optional[Experiment] = None,
     ) -> Experiment:
         experiment = self._resolve_or_create_experiment(spec, spec_path=spec_path, experiment=experiment)
+        selected_stages = self._selected_stage_names(spec)
+        run_analysis = "analysis" in selected_stages or "recommendation" in selected_stages
         training = self._restore_stage_result(experiment, "training")
-        if training is None:
+        if self._stage_selected(spec, "training") and training is None:
             self.tracking_service.mark_stage(experiment, "training", "running")
             training = self.training_runner.run(spec, experiment)
+        if training is None:
+            raise RuntimeError("Training stage is required for this experiment run and no completed training run exists.")
         if training.run_record:
             self.tracking_service.attach_run(experiment, training.run_record, role="training")
         if training.artifact_root:
@@ -125,7 +140,7 @@ class ExperimentOrchestrator:
             return experiment
 
         eval_result: Optional[StageResult] = None
-        if spec.evaluation.enabled and self.eval_runner is not None:
+        if spec.evaluation.enabled and self.eval_runner is not None and self._stage_selected(spec, "evaluation"):
             eval_result = self._restore_stage_result(experiment, "evaluation")
             if self._should_rerun_failed_stage("evaluation", eval_result):
                 eval_result = None
@@ -145,7 +160,7 @@ class ExperimentOrchestrator:
             self.tracking_service.mark_stage(experiment, "evaluation", eval_result.status)
 
         loss_result: Optional[StageResult] = None
-        if spec.loss.enabled and self.loss_runner is not None:
+        if spec.loss.enabled and self.loss_runner is not None and self._stage_selected(spec, "loss"):
             loss_result = self._restore_stage_result(experiment, "loss")
             if self._should_rerun_failed_stage("loss", loss_result):
                 loss_result = None
@@ -165,23 +180,24 @@ class ExperimentOrchestrator:
             self.tracking_service.mark_stage(experiment, "loss", loss_result.status)
 
         final_status = "completed"
-        for stage_name in ("evaluation", "loss"):
+        for stage_name in ("training", "evaluation", "loss"):
             stage_status = experiment.stage_statuses.get(stage_name)
             if stage_status and stage_status != "completed":
                 final_status = "partial"
         experiment.status = final_status
 
-        runs = [self.tracking_service.registry.get_run(run_id) for run_id in experiment.run_ids]
-        resolved_runs = [run for run in runs if run is not None]
-        analysis_outputs = write_analysis_bundle(
-            experiment=experiment,
-            runs=resolved_runs,
-            base_dir=self.base_dir,
-            eval_payload=eval_result.eval_payload if eval_result else None,
-            loss_results=loss_result.loss_results if loss_result else None,
-        )
-        for key, value in analysis_outputs.items():
-            self.tracking_service.set_derived_output(experiment, key, value)
+        if run_analysis:
+            runs = [self.tracking_service.registry.get_run(run_id) for run_id in experiment.run_ids]
+            resolved_runs = [run for run in runs if run is not None]
+            analysis_outputs = write_analysis_bundle(
+                experiment=experiment,
+                runs=resolved_runs,
+                base_dir=self.base_dir,
+                eval_payload=eval_result.eval_payload if eval_result else None,
+                loss_results=loss_result.loss_results if loss_result else None,
+            )
+            for key, value in analysis_outputs.items():
+                self.tracking_service.set_derived_output(experiment, key, value)
 
         self.tracking_service.save_experiment(experiment)
         return experiment

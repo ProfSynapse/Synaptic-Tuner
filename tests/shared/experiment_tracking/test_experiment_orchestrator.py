@@ -263,3 +263,70 @@ def test_experiment_orchestrator_reruns_failed_loss_stage_on_resume(tmp_path: Pa
     assert resumed.evaluation_run_id == f"{experiment.experiment_id}-evaluation"
     assert resumed.loss_run_id == "exp-loss-rerun"
     assert resumed.stage_statuses["loss"] == "completed"
+
+
+def test_experiment_orchestrator_only_stage_evaluation_reuses_training_and_skips_loss(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    experiment = service.create_experiment(
+        name="eval-only",
+        dataset_path="repo/dataset/sample.jsonl",
+        dataset_hash="abc123",
+        base_model_name="HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        spec_path="/tmp/spec.yaml",
+    )
+    service.update_stage_details(
+        experiment,
+        "training",
+        status="completed",
+        artifact_root="hf://buckets/test/runs/hf_jobs/sft/20260321_221651-deadbeef",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_221651-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+        },
+    )
+
+    spec = ExperimentSpec(
+        name="eval-only",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="HuggingFaceTB/SmolLM2-1.7B-Instruct", max_steps=20),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True),
+        features=FeaturesStageSpec(enabled=True),
+    )
+    spec.execution.only_stage = "evaluation"
+
+    eval_runner = _StaticRunner(
+        StageResult(
+            status="completed",
+            run_record=_record(run_id="exp-eval-only", run_type="evaluation", stage="evaluation"),
+            eval_payload={
+                "summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1},
+                "records": [{"case_id": "ok", "passed": True}],
+            },
+            artifact_root="/tmp/eval-only-artifacts",
+        )
+    )
+
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_FailIfCalledRunner(),
+        eval_runner=eval_runner,
+        loss_runner=_FailIfCalledRunner(),
+        base_dir=tmp_path,
+    )
+
+    resumed = orchestrator.run(spec, spec_path="/tmp/spec.yaml", experiment=experiment)
+
+    assert resumed.status == "completed"
+    assert resumed.training_run_id == f"{experiment.experiment_id}-training"
+    assert resumed.evaluation_run_id == "exp-eval-only"
+    assert resumed.loss_run_id is None
+    assert resumed.derived_outputs == {}

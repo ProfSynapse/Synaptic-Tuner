@@ -24,6 +24,8 @@ def test_load_experiment_spec_round_trip(tmp_path):
                 model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
                 gpu: a10g-small
                 max_steps: 20
+              execution:
+                from_stage: evaluation
               evaluation:
                 preset: quick
               loss:
@@ -40,8 +42,10 @@ def test_load_experiment_spec_round_trip(tmp_path):
     assert spec.method == "sft"
     assert spec.dataset.identifier == "professorsynapse/claudesidian-synthetic-dataset/sample.jsonl"
     assert spec.training.max_steps == 20
+    assert spec.execution.from_stage == "evaluation"
     assert spec.evaluation.preset == "quick"
     assert spec.loss.enabled is True
+    assert spec.execution.selected_stages() == ["evaluation", "loss", "analysis", "recommendation"]
 
 
 def test_load_experiment_spec_rejects_invalid_provider(tmp_path):
@@ -64,4 +68,30 @@ def test_load_experiment_spec_rejects_invalid_provider(tmp_path):
     )
 
     with pytest.raises(ValueError, match="unsupported provider"):
+        load_experiment_spec(spec_path)
+
+
+def test_load_experiment_spec_rejects_empty_execution_selection(tmp_path):
+    spec_path = tmp_path / "empty_execution.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: bad
+              provider: hf_jobs
+              method: sft
+              dataset:
+                source: repo/dataset
+                file: sample.jsonl
+              training:
+                model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+              execution:
+                only_stage: loss
+                skip_stages: [loss]
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="execution stage selection resolves to an empty set"):
         load_experiment_spec(spec_path)

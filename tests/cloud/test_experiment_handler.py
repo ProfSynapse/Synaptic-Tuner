@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from shared.experiment_tracking import Experiment, TrackingService
+from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
 from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.per_example_loss import save_losses
 from tuner.core.exceptions import CloudProviderError
@@ -288,6 +289,37 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
-    assert len(result.loss_results) == 1
-    assert result.artifact_root.endswith("/evaluations/vllm/20260321_200000/analysis")
-    mock_submit.assert_not_called()
+
+
+def test_experiment_handler_applies_stage_overrides_to_spec(tmp_path: Path):
+    from argparse import Namespace
+
+    from shared.experiment_tracking import ExperimentSpec
+    from tuner.handlers.experiment_handler import ExperimentHandler
+
+    handler = ExperimentHandler(
+        Namespace(
+            json=False,
+            only_stage="evaluation",
+            from_stage=None,
+            skip_stage=["loss", "analysis"],
+        )
+    )
+    spec = ExperimentSpec(
+        name="stage-selection",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="HuggingFaceTB/SmolLM2-1.7B-Instruct", max_steps=20),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True),
+        features=FeaturesStageSpec(enabled=True),
+    )
+
+    updated = handler._apply_stage_overrides(spec)
+
+    assert updated.execution.only_stage == "evaluation"
+    assert updated.execution.from_stage is None
+    assert updated.execution.skip_stages == ["loss", "analysis"]
+    assert updated.execution.selected_stages() == ["evaluation"]

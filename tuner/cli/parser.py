@@ -310,6 +310,22 @@ Examples:
     # Experiment pipeline flags
     parser.add_argument("--experiment-id", help="Experiment ID for tracking")
     parser.add_argument("--experiment-spec", help="Path to experiment orchestration YAML (run-experiment only)")
+    parser.add_argument(
+        "--only-stage",
+        choices=["training", "evaluation", "loss", "analysis", "recommendation"],
+        help="Run only the selected stage family for run-experiment.",
+    )
+    parser.add_argument(
+        "--from-stage",
+        choices=["training", "evaluation", "loss", "analysis", "recommendation"],
+        help="Run run-experiment starting from this stage and continue forward.",
+    )
+    parser.add_argument(
+        "--skip-stage",
+        action="append",
+        choices=["training", "evaluation", "loss", "analysis", "recommendation"],
+        help="Skip a stage in run-experiment. May be repeated.",
+    )
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
     parser.add_argument("--model", help="Model path for inference")
     parser.add_argument("--dataset-path", help="Path to jsonl dataset")

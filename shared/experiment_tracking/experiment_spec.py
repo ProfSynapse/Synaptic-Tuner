@@ -7,6 +7,9 @@ from typing import Any, List, Optional
 import yaml
 
 
+EXPERIMENT_STAGES = ("training", "evaluation", "loss", "analysis", "recommendation")
+
+
 @dataclass
 class DatasetSpec:
     source: str
@@ -63,6 +66,52 @@ class FeaturesStageSpec:
 
 
 @dataclass
+class ExecutionStageSpec:
+    stages: List[str] = field(default_factory=lambda: list(EXPERIMENT_STAGES))
+    from_stage: Optional[str] = None
+    only_stage: Optional[str] = None
+    skip_stages: List[str] = field(default_factory=list)
+
+    def validate(self) -> list[str]:
+        issues: list[str] = []
+        allowed = set(EXPERIMENT_STAGES)
+        selected = list(self.stages or list(EXPERIMENT_STAGES))
+        invalid = [stage for stage in selected if stage not in allowed]
+        if invalid:
+            issues.append(f"unsupported execution stage(s): {', '.join(sorted(set(invalid)))}")
+        if self.only_stage and self.only_stage not in allowed:
+            issues.append(f"unsupported execution.only_stage '{self.only_stage}'")
+        if self.from_stage and self.from_stage not in allowed:
+            issues.append(f"unsupported execution.from_stage '{self.from_stage}'")
+        invalid_skip = [stage for stage in self.skip_stages if stage not in allowed]
+        if invalid_skip:
+            issues.append(f"unsupported execution.skip_stages value(s): {', '.join(sorted(set(invalid_skip)))}")
+        if self.only_stage and self.from_stage:
+            issues.append("execution.only_stage and execution.from_stage are mutually exclusive")
+        if self.only_stage and self.only_stage in self.skip_stages:
+            issues.append("execution.only_stage cannot also appear in execution.skip_stages")
+        if not self.selected_stages():
+            issues.append("execution stage selection resolves to an empty set")
+        return issues
+
+    def selected_stages(self) -> list[str]:
+        selected = list(self.stages or list(EXPERIMENT_STAGES))
+        if self.only_stage:
+            selected = [self.only_stage]
+        elif self.from_stage:
+            if self.from_stage in selected:
+                start = selected.index(self.from_stage)
+                selected = selected[start:]
+            else:
+                selected = [self.from_stage]
+        selected = [stage for stage in selected if stage not in set(self.skip_stages)]
+        return [stage for stage in selected if stage in EXPERIMENT_STAGES]
+
+    def includes(self, stage: str) -> bool:
+        return stage in self.selected_stages()
+
+
+@dataclass
 class ExperimentSpec:
     name: str
     provider: str
@@ -70,6 +119,7 @@ class ExperimentSpec:
     dataset: DatasetSpec
     training: TrainingStageSpec
     objective: str = ""
+    execution: ExecutionStageSpec = field(default_factory=ExecutionStageSpec)
     evaluation: EvaluationStageSpec = field(default_factory=EvaluationStageSpec)
     loss: LossStageSpec = field(default_factory=LossStageSpec)
     features: FeaturesStageSpec = field(default_factory=FeaturesStageSpec)
@@ -86,6 +136,7 @@ class ExperimentSpec:
             issues.append("experiment.dataset.source is required")
         if not self.training.model_name:
             issues.append("experiment.training.model_name is required")
+        issues.extend(self.execution.validate())
         return issues
 
     @classmethod
@@ -93,6 +144,7 @@ class ExperimentSpec:
         payload = data.get("experiment", data)
         dataset = DatasetSpec(**payload["dataset"])
         training = TrainingStageSpec(**payload["training"])
+        execution = ExecutionStageSpec(**payload.get("execution", {}))
         evaluation = EvaluationStageSpec(**payload.get("evaluation", {}))
         loss = LossStageSpec(**payload.get("loss", {}))
         features = FeaturesStageSpec(**payload.get("features", {}))
@@ -103,6 +155,7 @@ class ExperimentSpec:
             objective=payload.get("objective", ""),
             dataset=dataset,
             training=training,
+            execution=execution,
             evaluation=evaluation,
             loss=loss,
             features=features,

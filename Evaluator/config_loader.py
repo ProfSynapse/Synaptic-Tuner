@@ -39,6 +39,8 @@ class EvalRunConfig:
     max_tokens: int = 2048
     seed: Optional[int] = None
     pass_threshold: float = 0.8
+    parallel: bool = False
+    max_workers: int = 4
 
 
 class ConfigLoader:
@@ -116,6 +118,8 @@ class ConfigLoader:
             max_tokens=inference.get("max_tokens", 2048),
             seed=inference.get("seed"),
             pass_threshold=run.get("scoring", {}).get("pass_threshold", 0.8),
+            parallel=bool(run.get("execution", {}).get("parallel", False)),
+            max_workers=int(run.get("execution", {}).get("max_workers", 4) or 4),
         )
 
     def load_scenario(self, scenario_path: str) -> ScenarioConfig:
