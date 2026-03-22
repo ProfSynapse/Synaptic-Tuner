@@ -21,10 +21,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+import yaml
+
 from shared.experiment_tracking.experiment_spec import ExperimentSpec
 
 
 DEFAULT_HF_HARDWARE_URL = "https://huggingface.co/api/jobs/hardware"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EVAL_CONFIG_DIR = _REPO_ROOT / "Evaluator" / "config"
 
 _CPU_RE = re.compile(r"(\d+(?:\.\d+)?)")
 _MEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([TGMK]?B)", re.IGNORECASE)
@@ -263,6 +267,60 @@ def estimate_loss_memory_gb(*, model_b: float, seq_len: int) -> float:
     return 5.0 + (2.2 * model_b) + (0.12 * model_b * max(seq_len, 1) / 2048.0)
 
 
+def _parse_tag_csv(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {part.strip() for part in str(value).split(",") if part.strip()}
+
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _resolve_eval_workload(spec: ExperimentSpec) -> tuple[int, int]:
+    eval_config_path = _EVAL_CONFIG_DIR / "eval_run.yaml"
+    if not eval_config_path.exists():
+        return 77, 2048
+
+    payload = _load_yaml(eval_config_path)
+    run_cfg = payload.get("run", {})
+    model_cfg = payload.get("model", {})
+    presets = payload.get("presets", {})
+
+    scenarios = list(spec.evaluation.scenarios) or list(run_cfg.get("scenarios", []) or [])
+    include_tags = _parse_tag_csv(spec.evaluation.tags)
+    exclude_tags = set(run_cfg.get("exclude_tags", []) or [])
+    max_tokens = int((((model_cfg.get("inference") or {}).get("max_tokens")) or 2048))
+
+    preset_name = (spec.evaluation.preset or "").strip()
+    if preset_name:
+        preset_cfg = presets.get(preset_name, {}) or {}
+        scenarios = list(preset_cfg.get("scenarios", scenarios) or scenarios)
+        preset_tags = set((preset_cfg.get("tag_filter") or []) or [])
+        if preset_tags:
+            include_tags = preset_tags
+        preset_max_tokens = (((preset_cfg.get("model") or {}).get("inference") or {}).get("max_tokens"))
+        if preset_max_tokens is not None:
+            max_tokens = int(preset_max_tokens)
+
+    case_count = 0
+    scenario_dir = _EVAL_CONFIG_DIR / "scenarios"
+    for scenario_name in scenarios:
+        scenario_path = scenario_dir / scenario_name
+        if not scenario_path.exists():
+            continue
+        scenario_payload = _load_yaml(scenario_path)
+        for test in scenario_payload.get("tests", []) or []:
+            tags = set(test.get("tags", []) or [])
+            if include_tags and not (tags & include_tags):
+                continue
+            if exclude_tags and (tags & exclude_tags):
+                continue
+            case_count += 1
+    return max(case_count, 1), max(max_tokens, 1)
+
+
 def _usable_vram_gb(vram_gb: float) -> float:
     return max((vram_gb * 0.9) - 1.0, 0.0)
 
@@ -370,6 +428,12 @@ def _stage_supports_flavor(*, stage: str, row: HardwareFlavor, spec: ExperimentS
     return True, ""
 
 
+def _matches_requested_flavor(requested_flavor: str | None, row: HardwareFlavor) -> bool:
+    if not requested_flavor:
+        return True
+    return row.flavor == requested_flavor
+
+
 def plan_stage_hardware(
     *,
     spec: ExperimentSpec,
@@ -387,6 +451,7 @@ def plan_stage_hardware(
 
     estimates: list[StageEstimate] = []
     if stage == "training":
+        requested_gpu = spec.training.gpu
         requested_batch = spec.training.batch_size
         target_effective = (spec.training.batch_size or 0) * (spec.training.gradient_accumulation or 0) or _default_effective_batch(spec.method)
         seq_len = spec.training.max_seq_length or 2048
@@ -411,12 +476,16 @@ def plan_stage_hardware(
             )
             cost = hours * row.price_hr if hours is not None else None
             headroom = _usable_vram_gb(row.vram_gb) - memory_estimate
+            if requested_gpu and not _matches_requested_flavor(requested_gpu, row):
+                feasible = False
             if feasible and (headroom < 1.5 or (grad_acc or 1) > 16):
                 feasible = False
             if feasible and not supported:
                 feasible = False
             if feasible:
                 reason = "fits estimated training footprint"
+            elif requested_gpu and not _matches_requested_flavor(requested_gpu, row):
+                reason = f"filtered out by requested GPU flavor '{requested_gpu}'"
             elif unsupported_reason:
                 reason = unsupported_reason
             elif headroom < 1.5:
@@ -449,15 +518,14 @@ def plan_stage_hardware(
         runtime = spec.evaluation.runtime or "unsloth"
         requested_gpu = spec.evaluation.gpu
         memory_estimate = estimate_eval_memory_gb(model_b=model_b, runtime=runtime)
+        case_count, max_tokens = _resolve_eval_workload(spec)
         for row in filtered_rows:
             supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             feasible = memory_estimate <= _usable_vram_gb(row.vram_gb)
             throughput = _gpu_speed_factor(row.gpu_model, stage=stage) * (max(row.gpus, 1) ** 0.85)
-            hours = None
-            if spec.evaluation.preset == "quick":
-                hours = (0.35 / max(throughput, 0.1)) + (0.04 if row.gpus > 1 else 0.0)
-            elif spec.evaluation.enabled:
-                hours = (0.9 / max(throughput, 0.1)) + (0.05 if row.gpus > 1 else 0.0)
+            workload_tokens = case_count * (450 + (0.55 * max_tokens))
+            startup_hours = 0.03 if row.gpus == 1 else 0.08
+            hours = (workload_tokens / (150000.0 * max(throughput, 0.1)) + startup_hours) if spec.evaluation.enabled else None
             cost = hours * row.price_hr if hours is not None else None
             if requested_gpu and row.flavor != requested_gpu:
                 feasible = False
@@ -489,6 +557,7 @@ def plan_stage_hardware(
                 )
             )
     elif stage == "loss":
+        requested_gpu = spec.loss.gpu
         seq_len = spec.loss.max_seq_length or spec.training.max_seq_length or 2048
         memory_estimate = estimate_loss_memory_gb(model_b=model_b, seq_len=seq_len)
         for row in filtered_rows:
@@ -501,6 +570,8 @@ def plan_stage_hardware(
             )
             hours = ((0.75 / max(throughput, 0.1)) + (0.08 if row.gpus > 1 else 0.0)) if spec.loss.enabled else None
             cost = hours * row.price_hr if hours is not None else None
+            if requested_gpu and not _matches_requested_flavor(requested_gpu, row):
+                feasible = False
             if feasible and not supported:
                 feasible = False
             headroom = _usable_vram_gb(row.vram_gb) - memory_estimate
@@ -513,7 +584,11 @@ def plan_stage_hardware(
                     reason=(
                         "fits exact loss scorer footprint"
                         if feasible
-                        else unsupported_reason or "estimated to exceed loss-stage VRAM headroom"
+                        else (
+                            f"filtered out by requested GPU flavor '{requested_gpu}'"
+                            if requested_gpu and not _matches_requested_flavor(requested_gpu, row)
+                            else unsupported_reason or "estimated to exceed loss-stage VRAM headroom"
+                        )
                     ),
                     gpu_model=row.gpu_model,
                     vram_gb=row.vram_gb,

@@ -212,6 +212,132 @@ def test_experiment_handler_auto_hardware_populates_missing_stage_gpus(monkeypat
     assert returned_plans is plans
 
 
+def test_experiment_handler_auto_hardware_fills_batch_shape_even_when_gpu_is_pinned(monkeypatch) -> None:
+    handler = ExperimentHandler(args=Namespace(optimize_for="balanced", max_hourly_price=None))
+    spec = _spec()
+    spec.training.gpu = "l4x1"
+
+    plans = {
+        "training": StagePlan(
+            stage="training",
+            optimize_for="balanced",
+            model_name=spec.training.model_name,
+            rows=[
+                StageEstimate(
+                    stage="training",
+                    flavor="l4x1",
+                    pretty_name="L4",
+                    feasible=True,
+                    reason="fits",
+                    gpu_model="L4",
+                    vram_gb=24.0,
+                    price_hr=0.8,
+                    recommended_batch_size=6,
+                    recommended_gradient_accumulation=5,
+                    estimated_memory_gb=21.0,
+                    estimated_headroom_gb=1.8,
+                    throughput_score=1.0,
+                    score_per_dollar=1.0,
+                    estimated_hours=None,
+                    estimated_cost=None,
+                )
+            ],
+        ),
+        "evaluation": StagePlan(
+            stage="evaluation",
+            optimize_for="balanced",
+            model_name=spec.training.model_name,
+            rows=[
+                StageEstimate(
+                    stage="evaluation",
+                    flavor="t4-small",
+                    pretty_name="T4",
+                    feasible=True,
+                    reason="fits",
+                    gpu_model="T4",
+                    vram_gb=16.0,
+                    price_hr=0.4,
+                    recommended_batch_size=None,
+                    recommended_gradient_accumulation=None,
+                    estimated_memory_gb=8.0,
+                    estimated_headroom_gb=4.0,
+                    throughput_score=1.0,
+                    score_per_dollar=1.0,
+                    estimated_hours=None,
+                    estimated_cost=None,
+                )
+            ],
+        ),
+        "loss": StagePlan(
+            stage="loss",
+            optimize_for="balanced",
+            model_name=spec.training.model_name,
+            rows=[
+                StageEstimate(
+                    stage="loss",
+                    flavor="t4-small",
+                    pretty_name="T4",
+                    feasible=True,
+                    reason="fits",
+                    gpu_model="T4",
+                    vram_gb=16.0,
+                    price_hr=0.4,
+                    recommended_batch_size=None,
+                    recommended_gradient_accumulation=None,
+                    estimated_memory_gb=8.0,
+                    estimated_headroom_gb=4.0,
+                    throughput_score=1.0,
+                    score_per_dollar=1.0,
+                    estimated_hours=None,
+                    estimated_cost=None,
+                )
+            ],
+        ),
+    }
+
+    monkeypatch.setattr("tuner.handlers.experiment_handler.plan_experiment_hardware", lambda **kwargs: plans)
+
+    updated_spec, _ = handler._apply_auto_hardware(spec)
+
+    assert updated_spec.training.gpu == "l4x1"
+    assert updated_spec.training.batch_size == 6
+    assert updated_spec.training.gradient_accumulation == 5
+
+
+def test_plan_hardware_respects_requested_training_gpu() -> None:
+    spec = _spec()
+    spec.training.gpu = "l4x1"
+    rows = [
+        HardwareFlavor(
+            flavor="l4x1",
+            pretty_name="1x Nvidia L4",
+            gpu_model="L4",
+            gpus=1,
+            vram_gb=24.0,
+            ram_gb=30.0,
+            cpu=8.0,
+            price_hr=0.8,
+            raw={},
+        ),
+        HardwareFlavor(
+            flavor="a100-large",
+            pretty_name="Nvidia A100 - large",
+            gpu_model="A100",
+            gpus=1,
+            vram_gb=80.0,
+            ram_gb=142.0,
+            cpu=32.0,
+            price_hr=2.5,
+            raw={},
+        ),
+    ]
+
+    plans = plan_experiment_hardware(spec=spec, optimize_for="cost", rows=rows)
+
+    assert plans["training"].recommendation is not None
+    assert plans["training"].recommendation.flavor == "l4x1"
+
+
 def test_plan_hardware_keeps_training_single_gpu_but_allows_supported_multi_gpu_stages() -> None:
     spec = _spec()
     rows = [

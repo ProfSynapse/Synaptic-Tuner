@@ -184,6 +184,14 @@ python tuner.py run-experiment \
   --yes
 ```
 
+**Prepare a fixed-tier GPU benchmark matrix for the same model:**
+```bash
+python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_l4x1.yaml --optimize-for cost
+python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_a10g_small.yaml --optimize-for cost
+python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_benchmark_a100_large.yaml --optimize-for cost
+```
+Use this when you want three comparable full-pipeline runs of the same model across increasing GPU tiers. Keep the GPU pinned in the spec, leave training batch/grad accumulation unset, and let `run-experiment --auto-hardware` fill the batch shape for that tier.
+
 **Resume or slice the experiment pipeline:**
 ```bash
 python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen3_4b_full_cycle_full.yaml --from-stage evaluation --yes

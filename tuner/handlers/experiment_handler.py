@@ -746,8 +746,9 @@ class ExperimentHandler(BaseHandler):
         )
 
         training_plan = plans.get("training")
-        if spec.training.gpu is None and training_plan and training_plan.recommendation:
-            spec.training.gpu = training_plan.recommendation.flavor
+        if training_plan and training_plan.recommendation:
+            if spec.training.gpu is None:
+                spec.training.gpu = training_plan.recommendation.flavor
             if spec.training.batch_size is None and training_plan.recommendation.recommended_batch_size:
                 spec.training.batch_size = training_plan.recommendation.recommended_batch_size
             if spec.training.gradient_accumulation is None and training_plan.recommendation.recommended_gradient_accumulation:
