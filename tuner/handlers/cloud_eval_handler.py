@@ -332,11 +332,14 @@ class CloudEvalHandler(BaseHandler):
         raise CloudProviderError(f"Unknown eval runtime '{runtime}'.")
 
     def _resolve_eval_image(self) -> tuple[str, Optional[str]]:
+        runtime = self._resolve_eval_runtime()
         hf_settings = self._hf_jobs_settings()
         eval_settings = self._hf_eval_settings()
         explicit_image = getattr(self.args, "eval_cloud_image", None) or eval_settings.get("image")
         requested_profile = getattr(self.args, "eval_image_profile", None)
-        default_profile = eval_settings.get("image_profile") or hf_settings.get("image_profile")
+        default_profile = getattr(self.args, "eval_image_profile", None) or eval_settings.get("image_profile") or hf_settings.get("image_profile")
+        if runtime == "vllm" and not explicit_image and not requested_profile:
+            default_profile = "fast_vllm"
         fallback_image = eval_settings.get("image") or hf_settings.get("image")
         return resolve_cloud_image(
             self._cloud_config_path(),

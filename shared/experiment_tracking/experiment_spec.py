@@ -46,6 +46,9 @@ class EvaluationStageSpec:
     preset: Optional[str] = "quick"
     scenarios: List[str] = field(default_factory=list)
     tags: Optional[str] = None
+    runtime: Optional[str] = None
+    image_profile: Optional[str] = None
+    cloud_image: Optional[str] = None
     gpu: Optional[str] = None
     timeout_hours: Optional[float] = None
 

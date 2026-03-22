@@ -208,7 +208,20 @@ def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_pat
             "provider": "hf_jobs",
             "dataset": type("Dataset", (), {"source": "professorsynapse/claudesidian-synthetic-dataset", "file": "train.jsonl", "identifier": "professorsynapse/claudesidian-synthetic-dataset/train.jsonl"})(),
             "training": type("Training", (), {"model_name": "HuggingFaceTB/SmolLM2-1.7B-Instruct", "max_seq_length": 2048})(),
-            "evaluation": type("Evaluation", (), {"preset": "full", "scenarios": [], "tags": None, "gpu": None, "timeout_hours": None})(),
+            "evaluation": type(
+                "Evaluation",
+                (),
+                {
+                    "preset": "full",
+                    "scenarios": [],
+                    "tags": None,
+                    "runtime": "vllm",
+                    "image_profile": "fast_vllm",
+                    "cloud_image": None,
+                    "gpu": None,
+                    "timeout_hours": None,
+                },
+            )(),
             "loss": type("Loss", (), {"enabled": True, "max_seq_length": 2048, "completion_only": True})(),
             "name": "resume-smoke",
         },
@@ -231,6 +244,8 @@ def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_pat
 
     assert result.status == "completed"
     assert captured["args"].with_loss is True
+    assert captured["args"].eval_runtime == "vllm"
+    assert captured["args"].eval_image_profile == "fast_vllm"
     assert captured["args"].loss_dataset_name == "professorsynapse/claudesidian-synthetic-dataset"
     assert captured["args"].loss_dataset_file == "train.jsonl"
 

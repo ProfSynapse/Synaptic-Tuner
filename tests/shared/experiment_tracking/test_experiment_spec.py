@@ -28,6 +28,8 @@ def test_load_experiment_spec_round_trip(tmp_path):
                 from_stage: evaluation
               evaluation:
                 preset: quick
+                runtime: vllm
+                image_profile: fast_vllm
               loss:
                 enabled: true
             """
@@ -44,6 +46,8 @@ def test_load_experiment_spec_round_trip(tmp_path):
     assert spec.training.max_steps == 20
     assert spec.execution.from_stage == "evaluation"
     assert spec.evaluation.preset == "quick"
+    assert spec.evaluation.runtime == "vllm"
+    assert spec.evaluation.image_profile == "fast_vllm"
     assert spec.loss.enabled is True
     assert spec.execution.selected_stages() == ["evaluation", "loss", "analysis", "recommendation"]
 
