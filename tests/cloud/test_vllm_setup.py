@@ -15,8 +15,10 @@ def test_start_vllm_server_defaults_to_v1_engine():
 
     assert started is True
     env = mock_popen.call_args.kwargs["env"]
+    cmd = mock_popen.call_args.args[0]
     assert env["TORCH_COMPILE_DISABLE"] == "1"
     assert env["VLLM_USE_V1"] == "1"
+    assert "--enforce-eager" in cmd
 
 
 def test_start_vllm_server_auto_detects_tensor_parallel_size():
@@ -36,3 +38,4 @@ def test_start_vllm_server_auto_detects_tensor_parallel_size():
     assert "--tensor-parallel-size" in cmd
     tp_index = cmd.index("--tensor-parallel-size")
     assert cmd[tp_index + 1] == "4"
+    assert "--enforce-eager" in cmd

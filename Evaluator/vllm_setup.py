@@ -340,6 +340,7 @@ def start_vllm_server(
     gpu_memory_utilization: float = DEFAULT_GPU_MEMORY_UTILIZATION,
     tensor_parallel_size: int = 0,
     lora_modules: Optional[dict] = None,
+    enforce_eager: bool = True,
     wait_for_ready: bool = True,
     timeout: int = 120,
     show_logs: bool = True,
@@ -353,6 +354,7 @@ def start_vllm_server(
         gpu_memory_utilization: GPU memory fraction (0.0-1.0)
         tensor_parallel_size: Number of GPUs to shard the model across. 0 means auto-detect.
         lora_modules: Dict of lora_name -> lora_path
+        enforce_eager: Disable vLLM compile/cudagraph startup paths for compatibility.
         wait_for_ready: Wait for server to be ready
         timeout: Timeout in seconds for server startup
         show_logs: Show live server logs during startup
@@ -384,6 +386,8 @@ def start_vllm_server(
     ]
     if resolved_tensor_parallel > 1:
         cmd.extend(["--tensor-parallel-size", str(resolved_tensor_parallel)])
+    if enforce_eager:
+        cmd.append("--enforce-eager")
 
     # Add Mistral-specific tokenizer mode for proper [TOOL_CALLS] handling
     if "mistral" in model.lower():
@@ -405,7 +409,10 @@ def start_vllm_server(
     # vLLM 0.11.0+ requires the V1 engine for the OpenAI API server path.
     # Allow callers to override explicitly, but default to the modern engine.
     env.setdefault("VLLM_USE_V1", "1")
-    print(f"[vLLM] Disabled torch.compile; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
+    if enforce_eager:
+        print(f"[vLLM] Enforcing eager mode; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
+    else:
+        print(f"[vLLM] Disabled torch.compile; using VLLM_USE_V1={env['VLLM_USE_V1']}\n")
 
     try:
         # Start server process with live output
