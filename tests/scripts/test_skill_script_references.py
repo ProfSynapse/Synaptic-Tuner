@@ -37,7 +37,6 @@ def test_canonical_skill_docs_do_not_reference_old_script_locations() -> None:
 
 def test_generalizable_skill_scripts_exist_in_canonical_tree() -> None:
     expected = [
-        REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "battle_of_models.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "hf_jobs_hardware.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "launch_experiment_batch.py",
         REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "prune_dataset_from_loss.py",
