@@ -368,6 +368,56 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
     assert result.status == "completed"
 
 
+def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    runner = HFLossStageRunner(repo_root=repo_root, tracking_service=service)
+    training_run = RunRecord(
+        run_id="exp-training",
+        run_type="sft",
+        name="training",
+        timestamp="2026-03-21T19:15:36+00:00",
+        status="completed",
+        output_dir="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+        provider="hf_jobs",
+        artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+        source_commit="deadbeefcafebabe",
+        stage="training",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+            "image": "unsloth/unsloth:latest",
+        },
+    )
+    spec = type(
+        "Spec",
+        (),
+        {
+            "dataset": type(
+                "Dataset",
+                (),
+                {
+                    "source": "professorsynapse/claudesidian-synthetic-dataset",
+                    "file": "train.jsonl",
+                },
+            )(),
+            "loss": type("Loss", (), {"max_seq_length": 2048, "completion_only": True})(),
+            "training": type("Training", (), {"max_seq_length": 2048})(),
+        },
+    )()
+
+    command = runner._build_command(
+        spec=spec,
+        training_run=training_run,
+        results_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
+    )
+
+    assert "$(command -v python3 || command -v python)" in command
+    assert "python3 -m shared.experiment_tracking.cloud_loss_job" in command
+    assert "--dataset-name professorsynapse/claudesidian-synthetic-dataset" in command
+    assert "--dataset-file train.jsonl" in command
+
+
 def test_experiment_handler_applies_stage_overrides_to_spec(tmp_path: Path):
     from argparse import Namespace
 

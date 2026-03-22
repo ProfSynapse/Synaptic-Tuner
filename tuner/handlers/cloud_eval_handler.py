@@ -259,19 +259,20 @@ class CloudEvalHandler(BaseHandler):
                 commit=repo_source.commit,
             )
         )
+        python_cmd = "$(command -v python3 || command -v python)"
 
         parts = [
             *checkout_steps,
-            f"cd /workspace/repo && python -m pip install --upgrade {quoted_project_deps}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_OVERLAY}",
-            f"cd /workspace/repo && python -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
-            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+            f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
 
         eval_cmd = [
-            "python",
+            "python3",
             "-m",
             helper_module,
             "--bucket-id",

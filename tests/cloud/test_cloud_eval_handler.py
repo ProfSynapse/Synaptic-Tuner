@@ -40,6 +40,8 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "--env-backend" in command
     assert "local" in command
     assert "huggingface_hub>=1.5.0" in command
+    assert "$(command -v python3 || command -v python)" in command
+    assert "python3 -m Evaluator.cloud_hf_job" in command
     assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
     assert "vllm==0.11.0" not in command
 

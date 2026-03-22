@@ -5,7 +5,7 @@ experiment:
   objective: reduce_overeager_tool_use_and_improve_clarification
   dataset:
     source: professorsynapse/claudesidian-synthetic-dataset
-    file: nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3.jsonl
+    file: nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3_pruned_highloss_candidates_03.22.26.jsonl
   training:
     model_name: Qwen/Qwen3-4B
     gpu: a10g-small

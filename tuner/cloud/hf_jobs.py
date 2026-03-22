@@ -120,12 +120,13 @@ def build_repo_checkout_steps(repo: RepoCheckoutSpec) -> List[str]:
     quoted_commit = shlex.quote(repo.commit)
     quoted_dir = shlex.quote(repo.clone_dir)
     archive_url = _github_archive_url(repo.url, repo.commit)
+    python_cmd = _shell_python_command()
     if archive_url:
         clone_or_download = (
             f"if command -v git >/dev/null 2>&1; then "
             f"git clone --branch {quoted_branch} --depth 1 {quoted_url} {quoted_dir}; "
             f"else "
-            f"python -c \"import io, pathlib, shutil, tarfile, urllib.request; "
+            f"{python_cmd} -c \"import io, pathlib, shutil, tarfile, urllib.request; "
             f"url={archive_url!r}; "
             f"target=pathlib.Path({repo.clone_dir!r}); "
             f"target.parent.mkdir(parents=True, exist_ok=True); "
@@ -162,6 +163,11 @@ def _github_archive_url(repo_url: str, commit: str) -> Optional[str]:
     if path.count("/") != 1:
         return None
     return f"https://github.com/{path}/archive/{commit}.tar.gz"
+
+
+def _shell_python_command() -> str:
+    """Resolve a Python interpreter path safely in HF job shell snippets."""
+    return '$(command -v python3 || command -v python)'
 
 
 def build_bash_command(steps: Iterable[str]) -> List[str]:

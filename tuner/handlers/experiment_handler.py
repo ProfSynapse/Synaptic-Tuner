@@ -373,16 +373,16 @@ class HFLossStageRunner:
         )
 
         parts = [
-            f"python -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
+            f"$(command -v python3 || command -v python) -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
             "mkdir -p /tmp/hf-bucket-sync-site",
-            "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
-            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             *checkout_steps,
         ]
         loss_cmd = [
-            "python",
+            "python3",
             "-m",
             "shared.experiment_tracking.cloud_loss_job",
             "--bucket-id",
