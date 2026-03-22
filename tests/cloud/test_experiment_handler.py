@@ -60,6 +60,39 @@ def test_training_stage_runner_recovers_completed_training_without_resubmitting(
     mock_get.assert_not_called()
 
 
+def test_training_stage_runner_resolves_bare_bucket_ids_during_recovery(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    service.update_stage_details(
+        experiment,
+        "training",
+        status="running",
+        artifact_root="hf://buckets/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+        artifact_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef",
+        bucket_id="toolset-training-artifacts",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+            "bucket_id": "toolset-training-artifacts",
+            "image": "unsloth/unsloth:latest",
+        },
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+        with patch.object(runner, "_bucket_has_path", return_value=True):
+            result = runner.run(spec=None, experiment=experiment)
+
+    assert result.status == "completed"
+    assert experiment.stage_details["training"]["bucket_id"] == "professorsynapse/toolset-training-artifacts"
+    assert experiment.stage_details["training"]["artifact_root"].startswith(
+        "hf://buckets/professorsynapse/toolset-training-artifacts/"
+    )
+
+
 def test_training_stage_runner_refuses_duplicate_submit_while_training_is_still_running(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
@@ -71,6 +104,7 @@ def test_training_stage_runner_refuses_duplicate_submit_while_training_is_still_
         artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
         artifact_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef",
         bucket_id="test/toolset-training-artifacts",
+        job_ref="live-training-job",
         tags={
             "provider": "hf_jobs",
             "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
@@ -83,6 +117,34 @@ def test_training_stage_runner_refuses_duplicate_submit_while_training_is_still_
     with patch.object(runner, "_bucket_has_path", return_value=False):
         with pytest.raises(CloudProviderError, match="refusing to submit a duplicate training job"):
             runner.run(spec=None, experiment=experiment)
+
+
+def test_training_stage_runner_allows_retry_when_running_stage_has_no_job_ref(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    service.update_stage_details(
+        experiment,
+        "training",
+        status="running",
+        artifact_root="hf://buckets/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef",
+        artifact_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef",
+        bucket_id="toolset-training-artifacts",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/sft/20260321_191536-deadbeef",
+            "bucket_id": "toolset-training-artifacts",
+        },
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+        with patch.object(runner, "_bucket_has_path", return_value=False):
+            result = runner._recover_existing_training(experiment=experiment)
+
+    assert result is None
+    assert experiment.stage_details["training"]["status"] == "failed"
 
 
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):

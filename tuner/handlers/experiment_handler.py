@@ -30,6 +30,7 @@ from tuner.cloud import (
     build_hf_job_secrets,
     build_repo_checkout_steps,
     load_huggingface_hub,
+    resolve_hf_bucket_id,
 )
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
@@ -43,6 +44,23 @@ class HFTrainingStageRunner:
     def __init__(self, *, repo_root: Path, tracking_service: TrackingService):
         self.repo_root = repo_root
         self.tracking_service = tracking_service
+
+    def _resolve_bucket_id(self, bucket_id: str) -> str:
+        normalized = str(bucket_id or "").strip()
+        if not normalized:
+            raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
+        if "/" in normalized:
+            return normalized
+        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket", "HfApi"))
+        hf_token = get_hf_token()
+        if not hf_token:
+            raise CloudProviderError("HF_TOKEN not set. Required for Hugging Face bucket resolution.")
+        return resolve_hf_bucket_id(
+            huggingface_hub,
+            normalized,
+            token=hf_token,
+            private=True,
+        )
 
     def _planned_training_state(self, *, experiment: Experiment, config) -> tuple[str, str]:
         timestamp = datetime.fromisoformat(experiment.created_at).astimezone(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -67,7 +85,18 @@ class HFTrainingStageRunner:
         artifact_root = details.get("artifact_root")
         if status not in {"running", "completed"} or not bucket_id or not artifact_prefix or not artifact_root:
             return None
-        if self._bucket_has_path(bucket_id=bucket_id, prefix=artifact_prefix, suffix="training_lineage.json"):
+        resolved_bucket_id = self._resolve_bucket_id(bucket_id)
+        if resolved_bucket_id != bucket_id:
+            artifact_root = artifact_root.replace(f"hf://buckets/{bucket_id}/", f"hf://buckets/{resolved_bucket_id}/", 1)
+            self.tracking_service.update_stage_details(
+                experiment,
+                "training",
+                bucket_id=resolved_bucket_id,
+                artifact_root=artifact_root,
+                tags={"bucket_id": resolved_bucket_id},
+            )
+            details = experiment.stage_details.get("training", {})
+        if self._bucket_has_path(bucket_id=resolved_bucket_id, prefix=artifact_prefix, suffix="training_lineage.json"):
             self.tracking_service.update_stage_details(experiment, "training", status="completed")
             return StageResult(
                 status="completed",
@@ -90,6 +119,9 @@ class HFTrainingStageRunner:
                 ),
                 artifact_root=artifact_root,
             )
+        if status == "running" and not details.get("job_ref"):
+            self.tracking_service.update_stage_details(experiment, "training", status="failed")
+            return None
         if status == "running":
             raise CloudProviderError(
                 f"Experiment {experiment.experiment_id} already has a running training stage at {artifact_root}. "
@@ -143,6 +175,7 @@ class HFTrainingStageRunner:
                 requested_profile=spec.training.image_profile,
                 fallback_image=config.cloud_image,
             )
+        config.artifact_identifier = self._resolve_bucket_id(config.artifact_identifier)
 
         artifact_prefix, artifact_root = self._planned_training_state(experiment=experiment, config=config)
         self.tracking_service.update_stage_details(
