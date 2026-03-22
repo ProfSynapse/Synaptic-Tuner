@@ -82,3 +82,12 @@ def test_run_experiment_auto_hardware_flags_parse():
     assert args.command == "run-experiment"
     assert args.auto_hardware is True
     assert args.optimize_for == "balanced"
+
+
+def test_cloud_method_flag_accepts_grpo():
+    parser = create_parser()
+
+    args = parser.parse_args(["cloud-pipeline", "--method", "grpo"])
+
+    assert args.command == "cloud-pipeline"
+    assert args.method == "grpo"

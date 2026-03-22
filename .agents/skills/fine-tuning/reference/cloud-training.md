@@ -1,6 +1,6 @@
 # Cloud Training Reference
 
-Cloud training uses the existing SFT and KTO trainers, but persistence and code sync behave differently from local runs.
+Cloud training uses the existing SFT and KTO trainers plus the env-backed GRPO path, but persistence and code sync behave differently from local runs.
 
 ---
 

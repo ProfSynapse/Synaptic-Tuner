@@ -107,7 +107,7 @@ def load_gpu_pricing(cloud_config_path: Optional[Path] = None) -> dict:
 
 
 # Supported training methods across all cloud backends
-SUPPORTED_METHODS = ("sft", "kto")
+SUPPORTED_METHODS = ("sft", "kto", "grpo")
 
 
 def validate_training_method(method: str, backend_name: str) -> None:

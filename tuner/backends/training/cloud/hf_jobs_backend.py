@@ -98,6 +98,33 @@ class HFJobsBackend(ITrainingBackend):
         self.last_bucket_id: Optional[str] = None
         self.last_job_id: Optional[str] = None
 
+    ENV_GRPO_CONFIG_NAME = "env_config.yaml"
+    ENV_GRPO_SCRIPT_NAME = "train_env_grpo.py"
+
+    @classmethod
+    def _config_filename_for_method(cls, method: str) -> str:
+        return cls.ENV_GRPO_CONFIG_NAME if method == "grpo" else "config.yaml"
+
+    @classmethod
+    def _script_name_for_method(cls, method: str) -> str:
+        return cls.ENV_GRPO_SCRIPT_NAME if method == "grpo" else f"train_{method}.py"
+
+    @staticmethod
+    def _dataset_display(dataset_config: dict) -> str:
+        local_file = dataset_config.get("local_file")
+        if local_file:
+            return str(local_file)
+
+        dataset_name = str(dataset_config.get("dataset_name") or "").strip()
+        dataset_file = str(dataset_config.get("dataset_file") or "").strip()
+        if dataset_name and dataset_file:
+            return f"{dataset_name}/{dataset_file}"
+        if dataset_file:
+            return dataset_file
+        if dataset_name:
+            return dataset_name
+        return "Unknown"
+
     @property
     def name(self) -> str:
         """Backend identifier."""
@@ -111,9 +138,9 @@ class HFJobsBackend(ITrainingBackend):
         the scripts run unchanged in the cloud environment.
 
         Returns:
-            List of method names: ['sft', 'kto']
+            List of method names: ['sft', 'kto', 'grpo']
         """
-        return ["sft", "kto"]
+        return ["sft", "kto", "grpo"]
 
     def validate_environment(self) -> Tuple[bool, str]:
         """
@@ -158,7 +185,7 @@ class HFJobsBackend(ITrainingBackend):
         then overlays cloud-specific settings from cloud_config.yaml.
 
         Args:
-            method: Training method ('sft' or 'kto')
+            method: Training method ('sft', 'kto', or 'grpo')
 
         Returns:
             CloudTrainingConfig with merged settings
@@ -174,7 +201,7 @@ class HFJobsBackend(ITrainingBackend):
 
         # Load standard training config
         trainer_dir = get_trainer_root(method, self.repo_root)
-        config_path = trainer_dir / "configs" / "config.yaml"
+        config_path = trainer_dir / "configs" / self._config_filename_for_method(method)
 
         if not config_path.exists():
             raise ConfigurationError(f"Training config not found: {config_path}")
@@ -215,13 +242,13 @@ class HFJobsBackend(ITrainingBackend):
             config_path=config_path,
             trainer_dir=trainer_dir,
             model_name=model_config.get("model_name", "Unknown"),
-            dataset_file=dataset_config.get("local_file") or f"{dataset_config.get('dataset_name', '')}/{dataset_config.get('dataset_file', 'Unknown')}",
+            dataset_file=self._dataset_display(dataset_config),
             dataset_name=dataset_config.get("dataset_name"),
             epochs=training_config.get("num_train_epochs", 1),
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
             gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
-            max_seq_length=training_config.get("max_seq_length") or model_config.get("max_seq_length"),
+            max_seq_length=training_config.get("max_seq_length") or training_config.get("max_prompt_length") or model_config.get("max_seq_length"),
             load_in_4bit=model_config.get("load_in_4bit"),
             lora_target_modules=model_config.get("target_modules") or config.get("lora", {}).get("target_modules"),
             provider="hf_jobs",
@@ -546,7 +573,8 @@ class HFJobsBackend(ITrainingBackend):
         final_model_dir = run_dir / "final_model"
         has_final_model = final_model_dir.exists() and any(final_model_dir.iterdir())
         has_lineage = (run_dir / "training_lineage.json").exists()
-        return has_final_model and has_lineage
+        has_grpo_logs = (run_dir / "logs" / "training_latest.jsonl").exists()
+        return has_final_model and (has_lineage or has_grpo_logs)
 
     def _download_completed_run(
         self,
@@ -708,35 +736,24 @@ class HFJobsBackend(ITrainingBackend):
             )
         )
 
+        python_cmd = "$(command -v python3 || command -v python)"
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
-            f"python -m pip install --upgrade {' '.join(project_deps)}",
+            f"{python_cmd} -m pip install --upgrade {' '.join(project_deps)}",
             "mkdir -p /tmp/hf-bucket-sync-site",
-            "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
-            "export HF_BUCKET_SYNC_PYTHON=$(command -v python)",
+            f"{python_cmd} -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             f"export CLOUD_PROVIDER={config.provider}",
             f"export CLOUD_GPU_TYPE={config.hf_flavor or config.gpu_type}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             *checkout_steps,
-            # Run training
-            f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}",
-            "python "
-            f"train_{config.method}.py "
-            f"--run-timestamp {timestamp} "
-            f"--output-root {config.artifact_mount_path} "
-            f"--cloud-provider {config.provider} "
-            f"--artifact-backend {config.artifact_backend} "
-            f"--artifact-bucket {config.artifact_identifier} "
-            f"--artifact-prefix {artifact_prefix} "
-            f"{'--publish-final-model' if config.publish_final_model else ''} "
-            f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}",
         ]
 
         training_args: list[str] = []
-        if config.method == "sft" and config.model_name:
+        if config.model_name:
             training_args.extend(["--model-name", config.model_name])
         if config.dataset_name:
             training_args.extend(["--dataset-name", config.dataset_name])
@@ -761,11 +778,78 @@ class HFJobsBackend(ITrainingBackend):
             training_args.append("--load-in-4bit" if config.load_in_4bit else "--no-load-in-4bit")
         if config.method == "sft" and config.lora_target_modules:
             training_args.extend(["--lora-target-modules", ",".join(config.lora_target_modules)])
-
+        training_args_str = ""
+        if config.method == "grpo":
+            output_dir = f"/workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}/env_grpo_output/{timestamp}"
+            training_args.extend(["--output-dir", output_dir])
         if training_args:
-            parts[-1] = parts[-1] + " " + " ".join(shlex.quote(arg) for arg in training_args)
+            training_args_str = " " + " ".join(shlex.quote(arg) for arg in training_args)
+
+        if config.method == "grpo":
+            parts.extend(
+                self._build_env_grpo_steps(
+                    config=config,
+                    timestamp=timestamp,
+                    artifact_prefix=artifact_prefix,
+                    python_cmd=python_cmd,
+                    training_args=training_args_str,
+                )
+            )
+        else:
+            parts.append(
+                f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)} && "
+                "python "
+                f"{self._script_name_for_method(config.method)} "
+                f"--run-timestamp {timestamp} "
+                f"--output-root {config.artifact_mount_path} "
+                f"--cloud-provider {config.provider} "
+                f"--artifact-backend {config.artifact_backend} "
+                f"--artifact-bucket {config.artifact_identifier} "
+                f"--artifact-prefix {artifact_prefix} "
+                f"{'--publish-final-model' if config.publish_final_model else ''} "
+                f"{f'--publish-target-repo {config.publish_target_repo}' if config.publish_target_repo else ''}"
+                f"{training_args_str}"
+            )
 
         return " && ".join(parts)
+
+    def _build_env_grpo_steps(
+        self,
+        *,
+        config: CloudTrainingConfig,
+        timestamp: str,
+        artifact_prefix: str,
+        python_cmd: str,
+        training_args: str,
+    ) -> list[str]:
+        with open(config.config_path, encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f) or {}
+
+        runtime_cfg = ((raw_config.get("env_training") or {}).get("runtime") or {})
+        venv_dir = str(runtime_cfg.get("isolated_venv_dir") or "/workspace/.venvs/grpo-openenv")
+        python_packages = list(runtime_cfg.get("python_packages") or [])
+        project_pip_deps = list(runtime_cfg.get("project_pip_deps") or [])
+        install_args = " ".join(shlex.quote(str(part)) for part in ["pip", "setuptools", "wheel", *project_pip_deps, *python_packages])
+        trainer_dir = f"/workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}"
+        output_dir = f"{trainer_dir}/env_grpo_output/{timestamp}"
+        remote_uri = self._build_remote_run_uri(config, artifact_prefix)
+
+        return [
+            "mkdir -p /tmp/grpo-openenv-bootstrap",
+            f"{python_cmd} -m pip install --upgrade --target /tmp/grpo-openenv-bootstrap virtualenv",
+            "export PYTHONPATH=/tmp/grpo-openenv-bootstrap:$PYTHONPATH",
+            f"{python_cmd} -m virtualenv --no-download {shlex.quote(venv_dir)}",
+            f". {shlex.quote(venv_dir)}/bin/activate",
+            f"python -m pip install --upgrade {install_args}",
+            f"cd {trainer_dir} && python {self.ENV_GRPO_SCRIPT_NAME} --config {trainer_dir}/configs/{self.ENV_GRPO_CONFIG_NAME}{training_args}",
+            (
+                f"if [ -d {shlex.quote(output_dir)} ]; then "
+                f"cd /workspace/repo && "
+                f"PYTHONPATH=/tmp/hf-bucket-sync-site:$PYTHONPATH python -m shared.hf_bucket_sync_helper "
+                f"{shlex.quote(output_dir)} {shlex.quote(remote_uri)}; "
+                "fi"
+            ),
+        ]
 
 
 def _parse_timeout(timeout_str: str) -> float:

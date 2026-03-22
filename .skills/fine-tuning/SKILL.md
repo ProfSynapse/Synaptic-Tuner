@@ -15,7 +15,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Interactive menu | `./run.sh` → Train |
 | SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
-| GRPO training | `cd Trainers/rtx3090_grpo && python train_grpo.py` |
+| GRPO training | `cd Trainers/grpo && python train_grpo.py` |
+| Env-backed GRPO | `cd Trainers/grpo && python train_env_grpo.py --config ./configs/env_config.yaml --dry-run` |
 | Experiment loop | `python tuner.py experiment-loop --experiment-config configs/flywheel/experiment_loop.yaml` |
 | LoRA surgery | `python tuner.py surgery --surgery-config configs/lora_surgery.yaml` |
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
@@ -54,7 +55,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 
 - `Trainers/rtx3090_sft/` — SFT trainer
 - `Trainers/rtx3090_kto/` — KTO trainer
-- `Trainers/rtx3090_grpo/` — GRPO trainer
+- `Trainers/grpo/` — GRPO and env-GRPO trainer
 - `Trainers/cloud/jobs/` — checked-in HF Jobs configs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -113,7 +114,7 @@ python train_kto.py --model-size 7b --local-file ../../Datasets/my_kto_data.json
 **GRPO continuing from SFT checkpoint:**
 ```bash
 # Edit configs/config.yaml to set model.lora_path to SFT checkpoint
-cd Trainers/rtx3090_grpo
+cd Trainers/grpo
 python train_grpo.py
 ```
 

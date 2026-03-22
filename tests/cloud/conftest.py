@@ -54,6 +54,53 @@ def repo_root(tmp_path):
         with open(trainer_dir / "config.yaml", "w") as f:
             yaml.dump(config, f)
 
+    grpo_dir = tmp_path / "Trainers" / "grpo" / "configs"
+    grpo_dir.mkdir(parents=True)
+    grpo_config = {
+        "model": {
+            "model_name": "professorsynapse/Nexus-Quark-L2.5.28",
+            "max_seq_length": 8192,
+        },
+        "dataset": {
+            "dataset_name": "professorsynapse/nexus-synthetic-data",
+            "dataset_file": "environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl",
+        },
+        "training": {
+            "output_dir": "./env_grpo_output",
+            "per_device_train_batch_size": 1,
+            "gradient_accumulation_steps": 1,
+            "num_generations": 4,
+            "max_prompt_length": 4096,
+            "max_completion_length": 1024,
+            "learning_rate": 5e-6,
+            "num_train_epochs": 1,
+            "logging_steps": 1,
+            "save_steps": 25,
+            "save_total_limit": 2,
+            "report_to": "none",
+        },
+        "env_training": {
+            "runtime": {
+                "isolated_venv_dir": "/workspace/.venvs/grpo-openenv",
+                "project_pip_deps": ["pyyaml", "python-dotenv", "rich", "datasets"],
+                "python_packages": [
+                    "huggingface_hub<1.0",
+                    "trl>=0.24.0",
+                    "transformers>=4.56.0",
+                    "accelerate>=1.6.0",
+                    "peft>=0.15.0",
+                    "git+https://github.com/meta-pytorch/OpenEnv.git",
+                ],
+            }
+        },
+        "rewards": {
+            "success_reward": 1.0,
+            "failure_penalty": -1.0,
+        },
+    }
+    with open(grpo_dir / "env_config.yaml", "w") as f:
+        yaml.dump(grpo_config, f)
+
     # Create cloud config directory and file
     cloud_dir = tmp_path / "Trainers" / "cloud"
     cloud_dir.mkdir(parents=True)

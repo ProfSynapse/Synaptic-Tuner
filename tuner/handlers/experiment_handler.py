@@ -78,6 +78,15 @@ class HFTrainingStageRunner:
                 return True
         return False
 
+    def _training_completion_suffixes(self, method: str) -> tuple[str, ...]:
+        if method == "grpo":
+            return (
+                "final_model/adapter_config.json",
+                "final_model/config.json",
+                "logs/training_latest.jsonl",
+            )
+        return ("training_lineage.json",)
+
     def _recover_existing_training(self, *, experiment: Experiment) -> Optional[StageResult]:
         details = experiment.stage_details.get("training", {})
         status = details.get("status")
@@ -97,7 +106,10 @@ class HFTrainingStageRunner:
                 tags={"bucket_id": resolved_bucket_id},
             )
             details = experiment.stage_details.get("training", {})
-        if self._bucket_has_path(bucket_id=resolved_bucket_id, prefix=artifact_prefix, suffix="training_lineage.json"):
+        if any(
+            self._bucket_has_path(bucket_id=resolved_bucket_id, prefix=artifact_prefix, suffix=suffix)
+            for suffix in self._training_completion_suffixes(experiment.method)
+        ):
             self.tracking_service.update_stage_details(experiment, "training", status="completed")
             return StageResult(
                 status="completed",

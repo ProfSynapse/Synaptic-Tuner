@@ -63,7 +63,7 @@ class TestHFJobsBackendProperties:
 
     def test_available_methods(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        assert backend.get_available_methods() == ["sft", "kto"]
+        assert backend.get_available_methods() == ["sft", "kto", "grpo"]
 
 
 class TestHFJobsValidateEnvironment:
@@ -145,6 +145,14 @@ class TestHFJobsLoadConfig:
         config = backend.load_config("kto")
         assert config.method == "kto"
         assert config.artifact_mount_path == "/workspace/outputs"
+
+    def test_loads_grpo_config(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = backend.load_config("grpo")
+        assert config.method == "grpo"
+        assert config.config_path.name == "env_config.yaml"
+        assert config.dataset_name == "professorsynapse/nexus-synthetic-data"
+        assert config.dataset_file == "professorsynapse/nexus-synthetic-data/environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl"
 
     def test_raises_on_unknown_method(self, repo_root):
         backend = HFJobsBackend(repo_root)
@@ -307,10 +315,10 @@ class TestBuildTrainingCommand:
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
-        assert "python -m pip install --upgrade" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade" in cmd
         assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
-        assert "python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer" in cmd
-        assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python)" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer" in cmd
+        assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)" in cmd
         assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
         assert "export CLOUD_PROVIDER=hf_jobs" in cmd
         assert "export CLOUD_GPU_TYPE=a10g-small" in cmd
@@ -328,6 +336,27 @@ class TestBuildTrainingCommand:
         config = _cloud_config(repo_url="")
         with pytest.raises(CloudProviderError, match="exact repo source metadata"):
             backend._build_training_command(config)
+
+    def test_grpo_command_uses_env_runtime_bootstrap_and_bucket_sync(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="grpo",
+            config_path=repo_root / "Trainers" / "grpo" / "configs" / "env_config.yaml",
+            trainer_dir=repo_root / "Trainers" / "grpo",
+            model_name="professorsynapse/Nexus-Quark-L2.5.28",
+            dataset_name="professorsynapse/nexus-synthetic-data",
+            dataset_file="professorsynapse/nexus-synthetic-data/environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl",
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260322_170000")
+
+        assert "$(command -v python3 || command -v python) -m virtualenv --no-download /workspace/.venvs/grpo-openenv" in cmd
+        assert "cd /workspace/repo/Trainers/grpo && python train_env_grpo.py --config /workspace/repo/Trainers/grpo/configs/env_config.yaml" in cmd
+        assert "--model-name professorsynapse/Nexus-Quark-L2.5.28" in cmd
+        assert "--dataset-name professorsynapse/nexus-synthetic-data" in cmd
+        assert "--dataset-file environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl" in cmd
+        assert "--output-dir /workspace/repo/Trainers/grpo/env_grpo_output/20260322_170000" in cmd
+        assert "python -m shared.hf_bucket_sync_helper /workspace/repo/Trainers/grpo/env_grpo_output/20260322_170000" in cmd
 
     def test_build_artifact_prefix(self, repo_root):
         backend = HFJobsBackend(repo_root)

@@ -211,7 +211,7 @@ Examples:
 
     # Cloud-specific flags
     parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
-    parser.add_argument("--method", choices=["sft", "kto"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
+    parser.add_argument("--method", choices=["sft", "kto", "grpo"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym.")
     parser.add_argument("--preset", help="Evaluation preset from Evaluator/config/eval_run.yaml (cloud-eval, cloud-pipeline).")
     parser.add_argument(

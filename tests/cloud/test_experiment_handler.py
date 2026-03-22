@@ -147,6 +147,40 @@ def test_training_stage_runner_allows_retry_when_running_stage_has_no_job_ref(tm
     assert experiment.stage_details["training"]["status"] == "failed"
 
 
+def test_training_stage_runner_recovers_grpo_training_from_final_model_artifact(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    experiment.method = "grpo"
+    service.save_experiment(experiment)
+    service.update_stage_details(
+        experiment,
+        "training",
+        status="running",
+        artifact_root="hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/grpo/20260321_191536-deadbeef",
+        artifact_prefix="runs/hf_jobs/grpo/20260321_191536-deadbeef",
+        bucket_id="test/toolset-training-artifacts",
+        source_commit="deadbeefcafebabe",
+        tags={
+            "provider": "hf_jobs",
+            "artifact_prefix": "runs/hf_jobs/grpo/20260321_191536-deadbeef",
+            "bucket_id": "test/toolset-training-artifacts",
+            "image": "unsloth/unsloth:latest",
+        },
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    def _fake_bucket_has_path(*, bucket_id: str, prefix: str, suffix: str) -> bool:
+        return suffix == "final_model/adapter_config.json"
+
+    with patch.object(runner, "_bucket_has_path", side_effect=_fake_bucket_has_path):
+        result = runner.run(spec=None, experiment=experiment)
+
+    assert result.status == "completed"
+    assert result.run_record is not None
+    assert result.run_record.artifact_root == experiment.stage_details["training"]["artifact_root"]
+
+
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()

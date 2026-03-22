@@ -13,6 +13,7 @@ import inspect
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -30,6 +31,7 @@ from src.env_dataset import (
 from src.env_rewards import build_env_reward_function
 from src.env_rollout import build_prompt_registry, build_rollout_func
 from src.env_runtime import build_cloud_bootstrap_commands, detect_openenv_runtime_support
+from src.training_callbacks import DASHBOARD_AVAILABLE, RICH_AVAILABLE, LiveDashboardCallback, MetricsTableCallback
 
 
 def load_config(config_path: str | None = None) -> Dict[str, Any]:
@@ -51,12 +53,48 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Print shell commands for the isolated cloud runtime bootstrap",
     )
     parser.add_argument("--max-examples", type=int, default=0, help="Limit dataset rows during validation")
+    parser.add_argument("--model-name", type=str, default=None, help="Override model.model_name")
+    parser.add_argument("--dataset-name", type=str, default=None, help="Override dataset.dataset_name")
+    parser.add_argument("--dataset-file", type=str, default=None, help="Override dataset.dataset_file")
+    parser.add_argument("--local-file", type=str, default=None, help="Override dataset.local_file")
+    parser.add_argument("--output-dir", type=str, default=None, help="Override the run output directory")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override training.per_device_train_batch_size")
+    parser.add_argument("--gradient-accumulation", type=int, default=None, help="Override training.gradient_accumulation_steps")
+    parser.add_argument("--learning-rate", type=float, default=None, help="Override training.learning_rate")
+    parser.add_argument("--num-epochs", type=int, default=None, help="Override training.num_train_epochs")
+    parser.add_argument("--max-steps", type=int, default=None, help="Override training.max_steps")
+    parser.add_argument("--max-seq-length", type=int, default=None, help="Override model.max_seq_length")
     return parser.parse_args(argv)
 
 
 def run(args: argparse.Namespace) -> Dict[str, Any]:
     config = load_config(args.config)
     os.environ.setdefault("HF_DATASETS_CACHE", "/tmp/hf_datasets_cache")
+
+    model_cfg = config.get("model") or {}
+    dataset_cfg = config.get("dataset") or {}
+    training_cfg = config.get("training") or {}
+
+    if args.model_name:
+        model_cfg["model_name"] = args.model_name
+    if args.dataset_name:
+        dataset_cfg["dataset_name"] = args.dataset_name
+    if args.dataset_file:
+        dataset_cfg["dataset_file"] = args.dataset_file
+    if args.local_file:
+        dataset_cfg["local_file"] = args.local_file
+    if args.batch_size is not None:
+        training_cfg["per_device_train_batch_size"] = args.batch_size
+    if args.gradient_accumulation is not None:
+        training_cfg["gradient_accumulation_steps"] = args.gradient_accumulation
+    if args.learning_rate is not None:
+        training_cfg["learning_rate"] = args.learning_rate
+    if args.num_epochs is not None:
+        training_cfg["num_train_epochs"] = args.num_epochs
+    if args.max_steps is not None:
+        training_cfg["max_steps"] = args.max_steps
+    if args.max_seq_length is not None:
+        model_cfg["max_seq_length"] = args.max_seq_length
 
     if args.print_cloud_bootstrap:
         runtime_cfg = ((config.get("env_training") or {}).get("runtime") or {})
@@ -70,7 +108,6 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         print("\n".join(commands))
         return {"bootstrap_commands": commands}
 
-    dataset_cfg = config.get("dataset") or {}
     env_cfg = config.get("env_training") or {}
     required_reviews = list((env_cfg.get("required_stage_reviews") or []))
     config_dir = Path(config["_config_path"]).parent if config.get("_config_path") else Path.cwd()
@@ -126,12 +163,37 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "Use the isolated cloud runtime printed by --print-cloud-bootstrap."
         )
 
-    model_name = str((config.get("model") or {}).get("model_name") or "").strip()
+    model_name = str(model_cfg.get("model_name") or "").strip()
     if not model_name or model_name == "REPLACE_WITH_BUCKETED_SFT_MODEL":
         raise RuntimeError("Set model.model_name in env_config.yaml to the published bucketed SFT model repo")
 
     from transformers import AutoTokenizer
     from trl import GRPOConfig, GRPOTrainer
+
+    output_root = Path(training_cfg.get("output_dir") or "./env_grpo_output").resolve()
+    run_dir = Path(args.output_dir).resolve() if args.output_dir else output_root / datetime.now().strftime("%Y%m%d_%H%M%S")
+    checkpoints_dir = run_dir / "checkpoints"
+    logs_dir = run_dir / "logs"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    print("\n" + "=" * 60)
+    print("ENV-GRPO TRAINING CONFIGURATION")
+    print("=" * 60)
+    print(f"Model: {model_name}")
+    print(f"Raw examples: {len(raw_dataset)}")
+    print(f"Filtered examples: {len(filtered_dataset)}")
+    print(f"Output: {run_dir}")
+    print(
+        "Batch: "
+        f"{training_cfg.get('per_device_train_batch_size', 1)} x "
+        f"{training_cfg.get('gradient_accumulation_steps', 1)}"
+    )
+    print(f"Generations per prompt: {training_cfg.get('num_generations', 4)}")
+    print(f"Max prompt len: {training_cfg.get('max_prompt_length', 4096)}")
+    print(f"Max completion len: {training_cfg.get('max_completion_length', 1024)}")
+    print(f"Learning rate: {training_cfg.get('learning_rate', 5e-6)}")
+    print("=" * 60 + "\n")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     formatted_dataset = formatted_dataset.map(
@@ -152,9 +214,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     )
     reward_func = build_env_reward_function(config.get("rewards") or {})
 
-    training_cfg = config.get("training") or {}
     grpo_kwargs = {
-        "output_dir": str(Path(training_cfg.get("output_dir") or "./env_grpo_output").resolve()),
+        "output_dir": str(checkpoints_dir),
         "per_device_train_batch_size": int(training_cfg.get("per_device_train_batch_size", 1)),
         "gradient_accumulation_steps": int(training_cfg.get("gradient_accumulation_steps", 1)),
         "num_generations": int(training_cfg.get("num_generations", 4)),
@@ -182,6 +243,22 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     allowed_grpo_args = set(inspect.signature(GRPOConfig.__init__).parameters) - {"self"}
     grpo_args = GRPOConfig(**{k: v for k, v in grpo_kwargs.items() if k in allowed_grpo_args})
 
+    use_dashboard = DASHBOARD_AVAILABLE and RICH_AVAILABLE
+    if use_dashboard:
+        callbacks = [
+            LiveDashboardCallback(
+                log_every_n_steps=int(training_cfg.get("logging_steps", 1)),
+                output_dir=str(run_dir),
+            )
+        ]
+    else:
+        callbacks = [
+            MetricsTableCallback(
+                log_every_n_steps=int(training_cfg.get("logging_steps", 1)),
+                output_dir=str(run_dir),
+            )
+        ]
+
     trainer = GRPOTrainer(
         model=model_name,
         processing_class=tokenizer,
@@ -189,8 +266,28 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         train_dataset=formatted_dataset,
         rollout_func=rollout_func,
         args=grpo_args,
+        callbacks=callbacks,
     )
+    if use_dashboard:
+        from transformers.trainer_callback import PrinterCallback
+
+        trainer.remove_callback(PrinterCallback)
+        print("✓ Using LiveDashboard for env-GRPO progress")
+
+    print("Starting env-GRPO training...\n")
     trainer.train()
+
+    final_model_dir = run_dir / "final_model"
+    final_model_dir.mkdir(parents=True, exist_ok=True)
+    trainer.save_model(str(final_model_dir))
+    try:
+        tokenizer.save_pretrained(str(final_model_dir))
+    except Exception:
+        pass
+
+    print("\n[OK] Env-GRPO training complete!")
+    print(f"  Final model: {final_model_dir}")
+    print(f"  Logs: {logs_dir}")
 
     # ── Unified experiment tracking (best-effort) ──
     import logging as _logging
@@ -198,11 +295,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     try:
         from shared.experiment_tracking.adapters import register_grpo_run
 
-        output_dir = Path(grpo_kwargs["output_dir"])
-        log_dir = output_dir / "logs"
         register_grpo_run(
-            log_dir,
-            str(output_dir),
+            logs_dir,
+            str(run_dir),
             model_name=model_name,
             dataset_source=dataset_cfg.get("local_file") or dataset_cfg.get("dataset_name"),
         )
@@ -211,7 +306,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "Unified tracking registration failed (non-fatal): %s", _exc
         )
 
-    return summary
+    return {
+        **summary,
+        "run_dir": str(run_dir),
+        "final_model_dir": str(final_model_dir),
+    }
 
 
 def main(argv=None) -> int:
