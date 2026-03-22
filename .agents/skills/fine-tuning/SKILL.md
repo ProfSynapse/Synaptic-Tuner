@@ -76,6 +76,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
 - For finished experiment bundles and next-run suggestions, use `python tuner.py analyze-experiment ...`.
 - For loss-driven dataset cleanup, start with `python3 scripts/prune_dataset_from_loss.py ... --analyze-only`; only apply a pruning rule after checking which families are actually enriched in the high-loss slice.
+- Prefer the generic pruning strategies first (`loss_threshold`, `top_percent`). Use repo-specific presets only when the analysis output shows that exact family is genuinely overrepresented.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
@@ -223,6 +224,15 @@ python3 scripts/prune_dataset_from_loss.py \
   --experiment-id exp_20260322_103122 \
   --strategy loss_threshold \
   --min-loss 2.0
+```
+
+**Apply a capped generic prune budget instead of a hard loss threshold:**
+```bash
+python3 scripts/prune_dataset_from_loss.py \
+  --dataset-path Datasets/synthchat/my_dataset.jsonl \
+  --experiment-id exp_20260322_103122 \
+  --strategy top_percent \
+  --top-percent 0.02
 ```
 
 **Apply the current repo-specific result-echo preset and publish in one step:**

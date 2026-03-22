@@ -12,6 +12,7 @@ from tuner.cloud import (
     build_repo_checkout_steps,
     format_timeout_hours,
     resolve_hf_bucket_id,
+    sanitize_hf_job_labels,
 )
 
 
@@ -76,6 +77,24 @@ def test_hf_job_executor_submits_shared_job_spec():
     assert kwargs["secrets"] == {"HF_TOKEN": "hf_test_token_12345"}
     assert kwargs["env"] == {"FOO": "bar"}
     assert kwargs["labels"] == {"task": "gym"}
+
+
+def test_sanitize_hf_job_labels_drops_invalid_bucket_like_values():
+    labels = sanitize_hf_job_labels(
+        {
+            "task": "training",
+            "provider": "hf_jobs",
+            "bucket_id": "professorsynapse/toolset-training-artifacts",
+            "artifact_prefix": "runs/hf_jobs/sft/20260322_103451-eafd2a89",
+            "run_prefix": "20260322_103451-eafd2a89",
+        }
+    )
+
+    assert labels == {
+        "task": "training",
+        "provider": "hf_jobs",
+        "run_prefix": "20260322_103451-eafd2a89",
+    }
 
 
 def test_resolve_hf_bucket_id_returns_namespaced_bucket():

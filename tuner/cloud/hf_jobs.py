@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import re
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
@@ -242,7 +243,9 @@ class HFJobExecutor:
         if spec.namespace:
             kwargs["namespace"] = spec.namespace
         if spec.labels:
-            kwargs["labels"] = spec.labels
+            sanitized_labels = sanitize_hf_job_labels(spec.labels)
+            if sanitized_labels:
+                kwargs["labels"] = sanitized_labels
 
         try:
             job = self.huggingface_hub.run_job(**kwargs)
@@ -258,3 +261,26 @@ class HFJobExecutor:
             job_url=getattr(job, "url", None),
             raw=job,
         )
+
+
+_HF_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def sanitize_hf_job_labels(labels: Dict[str, str]) -> Dict[str, str]:
+    """Drop label entries that do not conform to HF Jobs label validation rules.
+
+    We intentionally omit slash-heavy values like bucket ids or artifact prefixes here.
+    Downstream tooling can recover those from the submitted command args when needed.
+    """
+    sanitized: Dict[str, str] = {}
+    for raw_key, raw_value in labels.items():
+        key = str(raw_key).strip()
+        value = str(raw_value).strip()
+        if not key or not value:
+            continue
+        if not _HF_LABEL_PATTERN.fullmatch(key):
+            continue
+        if not _HF_LABEL_PATTERN.fullmatch(value):
+            continue
+        sanitized[key] = value
+    return sanitized

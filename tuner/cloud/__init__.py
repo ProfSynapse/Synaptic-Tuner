@@ -12,6 +12,7 @@ from .hf_jobs import (
     format_timeout_hours,
     load_huggingface_hub,
     resolve_hf_bucket_id,
+    sanitize_hf_job_labels,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "format_timeout_hours",
     "load_huggingface_hub",
     "resolve_hf_bucket_id",
+    "sanitize_hf_job_labels",
 ]

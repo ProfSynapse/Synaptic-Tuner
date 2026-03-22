@@ -132,6 +132,7 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
 - Pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets. Do not assume the container automatically receives your local token.
 - Normalize blank auth values to `None`. An empty `HF_TOKEN` or `HF_API_KEY` can produce `Authorization: Bearer ` and fail before the request is sent.
 - Resolve and, if needed, create the bucket once before training starts. During steady-state log sync, use the resolved bucket ID directly.
+- Keep HF job labels conservative. Do not put slash-heavy values like raw `bucket_id` or `artifact_prefix` into labels; HF Jobs can reject submission. Recover those values from command args or other metadata instead.
 - Polling and identity checks should be conservative. Frequent bucket creation attempts or repeated `whoami-v2` calls can hit Hugging Face rate limits.
 
 If the training process itself is healthy but uploads fail, inspect bucket auth and sync isolation before touching trainer code.
