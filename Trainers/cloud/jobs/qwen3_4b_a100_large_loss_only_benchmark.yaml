@@ -1,0 +1,31 @@
+name: qwen3-4b-a100-large-loss-only-benchmark
+description: Compute exact per-example loss on the finished Qwen3-4B A100 training run using single-GPU A100 hardware.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "a100-large"
+  namespace: "professorsynapse"
+  timeout_hours: 4
+  labels:
+    task: loss-only
+    benchmark: qwen3-4b-a100
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  env:
+    PYTHONPATH: "{repo_dir}"
+  steps:
+    - "mkdir -p /tmp/hf-bucket-sync-site"
+    - "cd {repo_dir} && python -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer"
+    - "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)"
+    - "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site"
+    - "export HF_HUB_ENABLE_HF_TRANSFER=1"
+    - "cd {repo_dir} && python -m shared.experiment_tracking.cloud_loss_job --bucket-id professorsynapse/toolset-training-artifacts --run-prefix runs/hf_jobs/sft/20260322_175554_413f-3da011d2 --dataset-name professorsynapse/claudesidian-synthetic-dataset --dataset-file nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3_pruned_highloss_candidates_03.22.26_pruned_result_echo_linesdelta_recommendations_03.22.26.jsonl --results-prefix runs/hf_jobs/sft/20260322_175554_413f-3da011d2/analysis/loss_only_a100_large --max-seq-length 2048"
