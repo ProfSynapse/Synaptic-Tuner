@@ -91,3 +91,64 @@ def test_cloud_method_flag_accepts_grpo():
 
     assert args.command == "cloud-pipeline"
     assert args.method == "grpo"
+
+
+def test_bucket_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "bucket",
+            "read",
+            "--path",
+            "runs/hf_jobs/sft/example/logs/training_latest.jsonl",
+            "--jsonl-latest",
+            "--pretty",
+        ]
+    )
+
+    assert args.command == "bucket"
+    assert args.subcommand == "read"
+    assert args.path == "runs/hf_jobs/sft/example/logs/training_latest.jsonl"
+    assert args.jsonl_latest is True
+    assert args.pretty is True
+
+
+def test_bucket_pull_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "bucket",
+            "pull",
+            "--path",
+            "runs/hf_jobs/sft/example/analysis/loss",
+            "--dest",
+            ".",
+        ]
+    )
+
+    assert args.command == "bucket"
+    assert args.subcommand == "pull"
+    assert args.path == "runs/hf_jobs/sft/example/analysis/loss"
+    assert args.dest == "."
+
+
+def test_bucket_push_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "bucket",
+            "push",
+            "--path",
+            "local/results.json",
+            "--dest",
+            "runs/manual_uploads/",
+        ]
+    )
+
+    assert args.command == "bucket"
+    assert args.subcommand == "push"
+    assert args.path == "local/results.json"
+    assert args.dest == "runs/manual_uploads/"

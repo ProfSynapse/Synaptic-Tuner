@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from shared.utilities.env import get_hf_token
 from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
+from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -180,6 +182,7 @@ def main() -> int:
         last_sync_time = time.time()
 
     try:
+        started_at = datetime.now(timezone.utc).isoformat()
         losses = compute_per_example_losses_parallel(
             model_dir=model_dir,
             dataset_path=str(dataset_path),
@@ -192,10 +195,27 @@ def main() -> int:
             on_aggregate=_on_aggregate,
             aggregate_interval_seconds=args.aggregate_interval_seconds,
         )
+        finished_at = datetime.now(timezone.utc).isoformat()
     except Exception as exc:
         stage_logger.emit_failure(exc, message="Loss computation failed")
         raise
     print(f"Computed {len(losses)} loss rows")
+
+    loss_lineage = build_loss_lineage(
+        dataset_path=dataset_path,
+        output_root=results_dir,
+        loss_results=losses,
+        completion_only=not args.no_completion_only,
+        max_seq_length=args.max_seq_length,
+        batch_max_tokens=args.batch_max_tokens,
+        max_batch_size=args.max_batch_size,
+        adaptive_batching=True,
+        runtime_backend="transformers",
+        worker_count=args.num_workers or None,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+    write_lineage_json(results_dir / "loss_lineage.json", loss_lineage)
 
     destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
     print(f"Syncing artifacts to bucket: {destination_prefix}")

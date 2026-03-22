@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .experiment import Experiment
+from .benchmark_ledger import upsert_benchmark_ledger
 from .recommendation_engine import build_recommendation_bundle, render_draft_next_spec
 from .schema import LossResult, RunRecord
 
@@ -50,6 +51,15 @@ def _run_row(record: RunRecord) -> dict[str, Any]:
     }
 
 
+def _artifact_path(record: RunRecord | None, suffix: str) -> str:
+    if record is None:
+        return ""
+    root = (record.artifact_root or record.output_dir or "").rstrip("/")
+    if not root:
+        return ""
+    return f"{root}/{suffix}"
+
+
 def write_analysis_bundle(
     *,
     experiment: Experiment,
@@ -61,6 +71,9 @@ def write_analysis_bundle(
     base_dir = Path(base_dir)
     analysis_dir = base_dir / "experiments" / experiment.experiment_id / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
+    training_run = next((run for run in runs if (run.stage or "") == "training"), None)
+    evaluation_run = next((run for run in runs if (run.stage or "") == "evaluation"), None)
+    loss_run = next((run for run in runs if (run.stage or "") == "loss"), None)
 
     summary_payload = {
         "experiment_id": experiment.experiment_id,
@@ -76,6 +89,11 @@ def write_analysis_bundle(
         "stage_statuses": experiment.stage_statuses,
         "artifact_roots": experiment.artifact_roots,
         "derived_outputs": experiment.derived_outputs,
+        "stage_lineages": {
+            "training_lineage": _artifact_path(training_run, "training_lineage.json"),
+            "evaluation_lineage": _artifact_path(evaluation_run, "evaluation_lineage.json"),
+            "loss_lineage": _artifact_path(loss_run, "loss_lineage.json"),
+        },
         "eval_summary": (eval_payload or {}).get("summary", {}),
     }
     summary_json = analysis_dir / "experiment_summary.json"
@@ -165,5 +183,15 @@ def write_analysis_bundle(
         },
     )
     outputs["hypothesis_context_json"] = str(hypothesis_context)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    benchmark_ledger_csv = upsert_benchmark_ledger(
+        repo_root=repo_root,
+        experiment=experiment,
+        runs=runs,
+        eval_payload=eval_payload,
+        loss_results=loss_results,
+    )
+    outputs["benchmark_ledger_csv"] = benchmark_ledger_csv
 
     return outputs

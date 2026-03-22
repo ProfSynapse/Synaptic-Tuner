@@ -288,6 +288,7 @@ class IncrementalLossWriter:
         self.partial_dir = self.output_root / "partial"
         self.manifests_dir = self.output_root / "manifests"
         self.final_losses_path = self.output_root / "per_example_losses.jsonl"
+        self.high_loss_path = self.output_root / "high_loss_examples.jsonl"
         self.summary_path = self.output_root / "loss_summary.json"
         self.partial_summary_path = self.partial_dir / "loss_summary.partial.json"
         self.partial_high_loss_path = self.partial_dir / "high_loss_examples.partial.jsonl"
@@ -408,6 +409,7 @@ class IncrementalLossWriter:
         self.state["completed"] = True
         self._persist_manifest()
         self._persist_partials()
+        _write_jsonl_rows(self.high_loss_path, self._top_loss_rows)
         summary_payload = json.loads(self.partial_summary_path.read_text(encoding="utf-8"))
         _atomic_write_text(self.summary_path, json.dumps(summary_payload, indent=2, ensure_ascii=False) + "\n")
 
@@ -606,6 +608,7 @@ def aggregate_loss_worker_outputs(
     merged_rows = sorted(merged_rows, key=lambda row: row["index"])
     losses = [LossResult(**row) for row in merged_rows]
     save_losses(losses, root / "per_example_losses.jsonl")
+    _write_jsonl_rows(root / "high_loss_examples.jsonl", top_rows)
     _atomic_write_text(root / "loss_summary.json", json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
     return losses
 

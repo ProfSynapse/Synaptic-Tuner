@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from shared.utilities import bucket_artifacts
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / ".skills" / "fine-tuning" / "scripts" / "read_bucket_artifact.py"
@@ -49,7 +51,7 @@ def test_read_artifact_raises_on_empty_jsonl(tmp_path: Path) -> None:
         MODULE.read_artifact(str(path), jsonl_latest=True)
 
 
-def test_open_path_uses_hf_filesystem_for_bucket_uris(monkeypatch) -> None:
+def test_read_artifact_uses_hf_filesystem_for_bucket_uris(monkeypatch) -> None:
     opened = {}
 
     class FakeFS:
@@ -62,11 +64,10 @@ def test_open_path_uses_hf_filesystem_for_bucket_uris(monkeypatch) -> None:
             opened["encoding"] = encoding
             return open(__file__, "r", encoding="utf-8")
 
-    monkeypatch.setattr(MODULE, "HfFileSystem", FakeFS)
+    monkeypatch.setattr(bucket_artifacts, "HfFileSystem", FakeFS)
     monkeypatch.setenv("HF_TOKEN", "hf_test_token")
 
-    with MODULE._open_path("hf://buckets/test/example.json") as handle:
-        handle.readline()
+    MODULE.read_artifact("hf://buckets/test/example.json")
 
     assert opened == {
         "token": "hf_test_token",

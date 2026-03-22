@@ -230,6 +230,8 @@ def test_incremental_writer_finalize_merges_existing_shards(tmp_path):
     assert [item.index for item in merged] == [0, 1]
     summary = json.loads(writer.summary_path.read_text())
     assert summary["rows_written"] == 2
+    high_loss_rows = [json.loads(line) for line in writer.high_loss_path.read_text().splitlines() if line.strip()]
+    assert high_loss_rows[0]["loss"] == 0.2
 
 
 def test_compute_losses_supports_dataset_sharding(fake_model, fake_tokenizer, sample_dataset_path):
@@ -272,6 +274,7 @@ def test_aggregate_loss_worker_outputs_merges_worker_artifacts(tmp_path):
 
     assert [item.index for item in losses] == [0, 1]
     assert (root / "per_example_losses.jsonl").exists()
+    assert (root / "high_loss_examples.jsonl").exists()
     summary = json.loads((root / "loss_summary.json").read_text())
     assert summary["rows_written"] == 2
     partial = json.loads((root / "partial" / "loss_summary.partial.json").read_text())

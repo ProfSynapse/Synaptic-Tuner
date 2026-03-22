@@ -122,6 +122,7 @@ from shared.cloud_artifacts import (
     write_manifest,
 )
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
+from shared.experiment_tracking.lineage_enrichment import enrich_training_lineage
 
 # Evolutionary training (optional)
 try:
@@ -406,7 +407,7 @@ def build_training_lineage(
             "eval_frequency": config.evolutionary.eval_frequency,
         }
 
-    return lineage
+    return enrich_training_lineage(lineage, args=args)
 
 
 def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:
@@ -1140,6 +1141,7 @@ def run(args: argparse.Namespace):
         print("\nComputing per-example losses on training dataset...")
         try:
             from shared.experiment_tracking import compute_per_example_losses, save_losses
+            from shared.experiment_tracking.lineage_enrichment import build_loss_lineage, write_json as write_lineage_json
             
             # Switch to eval mode
             import torch
@@ -1163,6 +1165,15 @@ def run(args: argparse.Namespace):
             
             losses_path = logs_dir / "per_example_losses.jsonl"
             save_losses(losses, losses_path)
+            loss_lineage = build_loss_lineage(
+                dataset_path=dataset_path,
+                output_root=logs_dir,
+                loss_results=losses,
+                completion_only=config.training.completion_only_loss,
+                max_seq_length=config.training.max_seq_length,
+                runtime_backend="unsloth",
+            )
+            write_lineage_json(logs_dir / "loss_lineage.json", loss_lineage)
             
             # Need to register this somewhere for adapters! 
             # Handled below in adapter conversion by passing path, or we can just let 

@@ -106,6 +106,7 @@ from shared.cloud_artifacts import (
     write_manifest,
 )
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
+from shared.experiment_tracking.lineage_enrichment import enrich_training_lineage
 
 
 def setup_wandb():
@@ -364,7 +365,7 @@ def build_training_lineage(
         lineage["results"]["training_time_seconds"] = round(training_time_seconds, 1)
         lineage["results"]["training_time_formatted"] = f"{training_time_seconds // 3600:.0f}h {(training_time_seconds % 3600) // 60:.0f}m {training_time_seconds % 60:.0f}s"
 
-    return lineage
+    return enrich_training_lineage(lineage, args=args)
 
 
 def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:

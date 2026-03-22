@@ -75,6 +75,7 @@ Commands:
   cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
+  bucket      Read, list, pull, or push local / HF bucket artifacts
   run-experiment  Run train -> eval -> loss from one experiment config
   analyze-experiment Inspect a finished experiment bundle and recommendations
   eval        Evaluate a model
@@ -116,6 +117,9 @@ Examples:
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py cloud-jobs list
+  python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
+  python tuner.py bucket pull --path runs/hf_jobs/sft/<run-prefix>/ --dest .
+  python tuner.py bucket push --path local/results.json --dest runs/manual_uploads/
   python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml
   python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
   python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml --yes
@@ -133,7 +137,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -212,7 +216,9 @@ Examples:
     # Cloud-specific flags
     parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
     parser.add_argument("--method", choices=["sft", "kto", "grpo"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
-    parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym.")
+    parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym/bucket.")
+    parser.add_argument("--path", help="Bucket-relative, hf://, or local path for bucket commands.")
+    parser.add_argument("--dest", help="Destination for bucket pull/push. Local dir for pull, remote bucket path for push.")
     parser.add_argument("--preset", help="Evaluation preset from Evaluator/config/eval_run.yaml (cloud-eval, cloud-pipeline).")
     parser.add_argument(
         "--scenario",
@@ -289,8 +295,13 @@ Examples:
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
     parser.add_argument("--job", help="HF job reference for cloud-jobs show/logs/cancel. Accepts either <job-id> or <namespace>/<job-id>.")
     parser.add_argument("--namespace", help="HF namespace override for cloud-jobs list/show/logs/cancel.")
-    parser.add_argument("--tail", type=int, default=200, help="Number of log lines to show for cloud-jobs logs (default: 200).")
-    parser.add_argument("--limit", type=int, default=20, help="Maximum jobs to show for cloud-jobs list (default: 20).")
+    parser.add_argument("--tail", type=int, default=200, help="Number of log lines to show for cloud-jobs logs or bucket read tail (default: 200).")
+    parser.add_argument("--limit", type=int, default=20, help="Maximum jobs or bucket entries to show (default: 20).")
+    parser.add_argument("--jsonl-latest", action="store_true", help="For bucket read, parse JSONL and print the latest record.")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output for bucket read.")
+    parser.add_argument("--recursive", action="store_true", help="For bucket list, recurse through directories.")
+    parser.add_argument("--files-only", action="store_true", help="For bucket list, show files only.")
+    parser.add_argument("--dirs-only", action="store_true", help="For bucket list, show directories only.")
     parser.add_argument("--follow", action="store_true", help="Stream live logs for cloud-jobs logs.")
 
     # Experiment loop flags

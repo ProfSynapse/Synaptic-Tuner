@@ -4,72 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
-from pathlib import Path
-from typing import Iterable, TextIO
-
-from huggingface_hub import HfFileSystem
-
-
-def _hf_token() -> str | None:
-    token = (os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY") or "").strip()
-    return token or None
-
-
-def _open_path(path: str) -> TextIO:
-    if path.startswith("hf://"):
-        fs = HfFileSystem(token=_hf_token())
-        return fs.open(path, "r", encoding="utf-8")
-    return open(Path(path), "r", encoding="utf-8")
-
-
-def _tail_lines(lines: Iterable[str], count: int) -> list[str]:
-    if count <= 0:
-        return list(lines)
-    buffer: list[str] = []
-    for line in lines:
-        buffer.append(line)
-        if len(buffer) > count:
-            buffer.pop(0)
-    return buffer
-
-
-def _latest_jsonl_record(lines: Iterable[str]) -> dict:
-    latest: dict | None = None
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            continue
-        latest = json.loads(line)
-    if latest is None:
-        raise ValueError("No JSONL records found.")
-    return latest
-
-
-def read_artifact(
-    path: str,
-    *,
-    tail: int | None = None,
-    jsonl_latest: bool = False,
-    pretty: bool = False,
-) -> str:
-    with _open_path(path) as handle:
-        if jsonl_latest:
-            record = _latest_jsonl_record(handle)
-            return json.dumps(record, indent=2 if pretty else None, sort_keys=pretty)
-
-        if tail is not None:
-            lines = _tail_lines(handle, tail)
-            return "".join(lines)
-
-        contents = handle.read()
-        if pretty:
-            try:
-                return json.dumps(json.loads(contents), indent=2, sort_keys=True)
-            except json.JSONDecodeError:
-                return contents
-        return contents
+from shared.utilities.bucket_artifacts import (
+    latest_jsonl_record as _latest_jsonl_record,
+    read_artifact,
+    tail_lines as _tail_lines,
+)
 
 
 def main() -> int:

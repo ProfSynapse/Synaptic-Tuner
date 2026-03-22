@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,11 @@ from Evaluator.cli import main as evaluator_main
 from Evaluator.vllm_setup import start_vllm_server, stop_vllm_server
 from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
+from shared.experiment_tracking.lineage_enrichment import (
+    build_loss_lineage,
+    enrich_evaluation_lineage,
+    write_json as write_lineage_json,
+)
 from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
 
@@ -190,6 +196,7 @@ def _compute_exact_loss_outputs(
                 )
         progress_syncer.sync_once()
 
+    loss_started_at = datetime.now(timezone.utc).isoformat()
     losses = compute_per_example_losses_parallel(
         model_dir=model_dir,
         dataset_path=dataset_path,
@@ -199,6 +206,7 @@ def _compute_exact_loss_outputs(
         num_workers=(args.loss_workers or None),
         on_aggregate=_on_aggregate,
     )
+    loss_finished_at = datetime.now(timezone.utc).isoformat()
 
     feature_rows = [
         {
@@ -235,6 +243,18 @@ def _compute_exact_loss_outputs(
         completion_only=not args.loss_no_completion_only,
         max_seq_length=args.loss_max_seq_length or 2048,
     )
+    loss_lineage = build_loss_lineage(
+        dataset_path=dataset_path,
+        output_root=analysis_dir,
+        loss_results=losses,
+        completion_only=not args.loss_no_completion_only,
+        max_seq_length=args.loss_max_seq_length or 2048,
+        runtime_backend="transformers",
+        worker_count=(args.loss_workers or None),
+        started_at=loss_started_at,
+        finished_at=loss_finished_at,
+    )
+    write_lineage_json(analysis_dir / "loss_lineage.json", loss_lineage)
     progress_syncer.sync_once()
 
 
@@ -310,6 +330,7 @@ def main() -> int:
     try:
         progress_syncer.start()
         stage_logger.emit("runtime_ready", message="Starting vLLM runtime", details={"backend": "vllm"})
+        eval_started_at = datetime.now(timezone.utc).isoformat()
         server_started = start_vllm_server(
             model=base_model_name,
             host=args.vllm_host,
@@ -373,6 +394,19 @@ def main() -> int:
                 cli_args.append("--update-model-card")
 
         exit_code = evaluator_main(cli_args)
+        eval_finished_at = datetime.now(timezone.utc).isoformat()
+        if lineage_json.exists():
+            lineage_payload = json.loads(lineage_json.read_text(encoding="utf-8"))
+            enriched = enrich_evaluation_lineage(
+                lineage_payload,
+                backend="vllm",
+                hardware_flavor=None,
+                started_at=eval_started_at,
+                finished_at=eval_finished_at,
+                tensor_parallel_size=args.vllm_tensor_parallel_size or None,
+                worker_count=args.loss_workers or None,
+            )
+            write_lineage_json(lineage_json, enriched)
         if args.with_loss:
             stage_logger.emit(
                 "work_started",

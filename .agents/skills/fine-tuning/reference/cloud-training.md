@@ -74,7 +74,27 @@ Recommended first-pass checks:
 For HF Jobs specifically, bucket-backed artifacts are the primary source of truth once they start appearing:
 - training: `logs/training_latest.jsonl`, `logs/stage_summary.json`, `training_lineage.json`
 - evaluation: `evaluation_results.json`, `evaluation_results.md`, `evaluation_lineage.json`, then `logs/eval_progress.jsonl`
-- loss: `loss_summary.json`, `per_example_losses.jsonl`, `partial/high_loss_examples.partial.jsonl`
+- loss: `loss_lineage.json`, `loss_summary.json`, `per_example_losses.jsonl`, `high_loss_examples.jsonl`
+
+Use the repo CLI for quick bucket reads/lists:
+```bash
+python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
+python tuner.py bucket list --path runs/hf_jobs/sft/<run-prefix>/ --limit 20
+python tuner.py bucket pull --path runs/hf_jobs/sft/<run-prefix>/analysis/loss/ --dest .
+python tuner.py bucket push --path local/notes.json --dest runs/manual_uploads/
+```
+
+Keep the checked-in benchmark ledger updated from finished runs:
+- [model_hardware_benchmark_ledger.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.md)
+- [model_hardware_benchmark_ledger.csv](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/docs/benchmarks/model_hardware_benchmark_ledger.csv)
+
+For `run-experiment`, the analysis bundle now appends or updates the ledger automatically using:
+- training lineage
+- evaluation summary
+- loss results when present
+- live HF hourly pricing when available
+
+The ledger is derived. The stage lineage artifacts remain the canonical source of truth for train/eval/loss metadata.
 
 Use raw HF job logs mainly for:
 - bootstrap failures before the bucket prefix exists

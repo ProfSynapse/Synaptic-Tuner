@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 from Evaluator.cli import main as evaluator_main
 from shared.cloud_stage_logging import StageLogger, apply_stage_logging_env, detect_cloud_job_ref
 from shared.cloud_eval_progress import EVAL_PROGRESS_LOG_FILENAME
+from shared.experiment_tracking.lineage_enrichment import enrich_evaluation_lineage, write_json as write_lineage_json
 from shared.utilities.env import get_hf_token
 
 
@@ -293,6 +295,7 @@ def main() -> int:
         cli_args.extend(["--loss-feature-csv", str(analysis_dir / "feature_dataset.csv")])
         cli_args.extend(["--loss-high-loss-jsonl", str(analysis_dir / "failure_slices" / "high_loss_examples.jsonl")])
         cli_args.extend(["--loss-summary-json", str(analysis_dir / "loss_summary.json")])
+        cli_args.extend(["--loss-lineage-json", str(analysis_dir / "loss_lineage.json")])
         if args.loss_max_seq_length:
             cli_args.extend(["--loss-max-seq-length", str(args.loss_max_seq_length)])
         if args.loss_no_completion_only:
@@ -311,7 +314,20 @@ def main() -> int:
     try:
         stage_logger.emit("runtime_ready", message="Evaluation runtime ready", details={"backend": "unsloth"})
         progress_syncer.start()
+        eval_started_at = datetime.now(timezone.utc).isoformat()
         exit_code = evaluator_main(cli_args)
+        eval_finished_at = datetime.now(timezone.utc).isoformat()
+        if lineage_json.exists():
+            lineage_payload = json.loads(lineage_json.read_text(encoding="utf-8"))
+            enriched = enrich_evaluation_lineage(
+                lineage_payload,
+                backend="unsloth",
+                hardware_flavor=None,
+                started_at=eval_started_at,
+                finished_at=eval_finished_at,
+                worker_count=1,
+            )
+            write_lineage_json(lineage_json, enriched)
     except Exception as exc:
         traceback.print_exc()
         stage_logger.emit_failure(exc, message="Evaluation job failed")

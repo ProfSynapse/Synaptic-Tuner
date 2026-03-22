@@ -71,6 +71,10 @@ from .reporting import (
 )
 from .runner import evaluate_cases
 from shared.cloud_eval_progress import CloudEvaluationProgressWriter, extract_record_progress
+from shared.experiment_tracking.lineage_enrichment import (
+    build_loss_lineage,
+    write_json as write_lineage_json,
+)
 from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
 
 
@@ -279,6 +283,24 @@ def _compute_optional_loss_outputs(
         }
         summary_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    if args.loss_lineage_json:
+        lineage_output_path = expand_path(args.loss_lineage_json)
+        loss_root = (
+            loss_output_path.parent
+            if loss_output_path and loss_output_path.name == "per_example_losses.jsonl"
+            else lineage_output_path.parent
+        )
+        lineage_payload = build_loss_lineage(
+            dataset_path=dataset_path,
+            output_root=loss_root,
+            loss_results=losses,
+            completion_only=not args.loss_no_completion_only,
+            max_seq_length=args.loss_max_seq_length or 2048,
+            runtime_backend="unsloth",
+            training_run_id=training_run_id,
+        )
+        write_lineage_json(lineage_output_path, lineage_payload)
+
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -437,6 +459,7 @@ Backend Configuration:
     parser.add_argument("--loss-feature-csv", help=argparse.SUPPRESS)
     parser.add_argument("--loss-high-loss-jsonl", help=argparse.SUPPRESS)
     parser.add_argument("--loss-summary-json", help=argparse.SUPPRESS)
+    parser.add_argument("--loss-lineage-json", help=argparse.SUPPRESS)
     parser.add_argument("--loss-max-seq-length", type=int, default=2048, help=argparse.SUPPRESS)
     parser.add_argument("--loss-no-completion-only", action="store_true", help=argparse.SUPPRESS)
 
