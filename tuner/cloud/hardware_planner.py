@@ -356,6 +356,12 @@ def _rank_estimates(rows: list[StageEstimate], optimize_for: str) -> list[StageE
     return feasible + infeasible
 
 
+def _stage_supports_flavor(*, stage: str, row: HardwareFlavor, spec: ExperimentSpec) -> tuple[bool, str]:
+    if row.gpus > 1:
+        return False, "multi-GPU flavors are not wired for this stage yet"
+    return True, ""
+
+
 def plan_stage_hardware(
     *,
     spec: ExperimentSpec,
@@ -377,6 +383,7 @@ def plan_stage_hardware(
         target_effective = (spec.training.batch_size or 0) * (spec.training.gradient_accumulation or 0) or _default_effective_batch(spec.method)
         seq_len = spec.training.max_seq_length or 2048
         for row in filtered_rows:
+            supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             batch_size, memory_estimate = _recommend_training_microbatch(
                 model_b=model_b,
                 seq_len=seq_len,
@@ -398,8 +405,12 @@ def plan_stage_hardware(
             headroom = _usable_vram_gb(row.vram_gb) - memory_estimate
             if feasible and (headroom < 1.5 or (grad_acc or 1) > 16):
                 feasible = False
+            if feasible and not supported:
+                feasible = False
             if feasible:
                 reason = "fits estimated training footprint"
+            elif unsupported_reason:
+                reason = unsupported_reason
             elif headroom < 1.5:
                 reason = "estimated VRAM headroom is too tight for stable training"
             elif (grad_acc or 1) > 16:
@@ -431,6 +442,7 @@ def plan_stage_hardware(
         requested_gpu = spec.evaluation.gpu
         memory_estimate = estimate_eval_memory_gb(model_b=model_b, runtime=runtime)
         for row in filtered_rows:
+            supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             feasible = memory_estimate <= _usable_vram_gb(row.vram_gb)
             throughput = _gpu_speed_factor(row.gpu_model, stage=stage)
             hours = None
@@ -441,6 +453,8 @@ def plan_stage_hardware(
             cost = hours * row.price_hr if hours is not None else None
             if requested_gpu and row.flavor != requested_gpu:
                 feasible = False
+            if feasible and not supported:
+                feasible = False
             headroom = _usable_vram_gb(row.vram_gb) - memory_estimate
             estimates.append(
                 StageEstimate(
@@ -448,7 +462,11 @@ def plan_stage_hardware(
                     flavor=row.flavor,
                     pretty_name=row.pretty_name,
                     feasible=feasible,
-                    reason="fits eval runtime footprint" if feasible else "estimated to exceed eval VRAM headroom",
+                    reason=(
+                        "fits eval runtime footprint"
+                        if feasible
+                        else unsupported_reason or "estimated to exceed eval VRAM headroom"
+                    ),
                     gpu_model=row.gpu_model,
                     vram_gb=row.vram_gb,
                     price_hr=row.price_hr,
@@ -466,10 +484,13 @@ def plan_stage_hardware(
         seq_len = spec.loss.max_seq_length or spec.training.max_seq_length or 2048
         memory_estimate = estimate_loss_memory_gb(model_b=model_b, seq_len=seq_len)
         for row in filtered_rows:
+            supported, unsupported_reason = _stage_supports_flavor(stage=stage, row=row, spec=spec)
             feasible = memory_estimate <= _usable_vram_gb(row.vram_gb)
             throughput = _gpu_speed_factor(row.gpu_model, stage=stage) * max(row.vram_gb / 24.0, 1.0) ** 0.35
             hours = 0.75 / max(throughput, 0.1) if spec.loss.enabled else None
             cost = hours * row.price_hr if hours is not None else None
+            if feasible and not supported:
+                feasible = False
             headroom = _usable_vram_gb(row.vram_gb) - memory_estimate
             estimates.append(
                 StageEstimate(
@@ -477,7 +498,11 @@ def plan_stage_hardware(
                     flavor=row.flavor,
                     pretty_name=row.pretty_name,
                     feasible=feasible,
-                    reason="fits exact loss scorer footprint" if feasible else "estimated to exceed loss-stage VRAM headroom",
+                    reason=(
+                        "fits exact loss scorer footprint"
+                        if feasible
+                        else unsupported_reason or "estimated to exceed loss-stage VRAM headroom"
+                    ),
                     gpu_model=row.gpu_model,
                     vram_gb=row.vram_gb,
                     price_hr=row.price_hr,

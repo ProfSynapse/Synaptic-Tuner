@@ -15,6 +15,7 @@ from tuner.cloud.hardware_planner import (
     StagePlan,
     _rank_estimates,
     normalize_hardware_rows,
+    plan_experiment_hardware,
     parse_model_params_billions,
 )
 from tuner.handlers.experiment_handler import ExperimentHandler
@@ -209,3 +210,40 @@ def test_experiment_handler_auto_hardware_populates_missing_stage_gpus(monkeypat
     assert updated_spec.evaluation.gpu == "l4x1"
     assert updated_spec.loss.gpu == "a10g-small"
     assert returned_plans is plans
+
+
+def test_plan_hardware_rejects_multi_gpu_flavors_for_current_paths() -> None:
+    spec = _spec()
+    rows = [
+        HardwareFlavor(
+            flavor="h200x8",
+            pretty_name="Nvidia H200 x8",
+            gpu_model="H200",
+            gpus=8,
+            vram_gb=1128.0,
+            ram_gb=2048.0,
+            cpu=512.0,
+            price_hr=40.0,
+            raw={},
+        ),
+        HardwareFlavor(
+            flavor="a10g-small",
+            pretty_name="Nvidia A10G - small",
+            gpu_model="A10G",
+            gpus=1,
+            vram_gb=24.0,
+            ram_gb=15.0,
+            cpu=8.0,
+            price_hr=1.0,
+            raw={},
+        ),
+    ]
+
+    plans = plan_experiment_hardware(spec=spec, optimize_for="speed", rows=rows)
+
+    assert plans["training"].recommendation is not None
+    assert plans["training"].recommendation.flavor == "a10g-small"
+    assert plans["evaluation"].recommendation is not None
+    assert plans["evaluation"].recommendation.flavor == "a10g-small"
+    assert plans["loss"].recommendation is not None
+    assert plans["loss"].recommendation.flavor == "a10g-small"
