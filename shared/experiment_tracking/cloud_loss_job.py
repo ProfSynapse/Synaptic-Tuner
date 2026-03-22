@@ -30,6 +30,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--results-prefix", help="Bucket prefix where loss artifacts should be uploaded")
     parser.add_argument("--output-root", default="/workspace/loss_outputs")
     parser.add_argument("--max-seq-length", type=int, default=2048)
+    parser.add_argument("--batch-max-tokens", type=int, default=8192)
+    parser.add_argument("--max-batch-size", type=int)
+    parser.add_argument("--sync-every-batches", type=int, default=5)
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
     return parser.parse_args()
 
@@ -108,19 +111,38 @@ def main() -> int:
     )
     FastLanguageModel.for_inference(model)
 
-    from shared.experiment_tracking.per_example_loss import compute_per_example_losses, save_losses
+    from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses
     print("Computing per-example losses...")
+    writer = IncrementalLossWriter(results_dir)
+
+    def _on_batch(_losses, batch_writer):
+        if batch_writer is None:
+            return
+        if args.sync_every_batches <= 0:
+            return
+        batch_count = int(batch_writer.state.get("batch_count", 0))
+        if batch_count % args.sync_every_batches != 0:
+            return
+        destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
+        print(f"Syncing partial loss artifacts after batch {batch_count} -> {destination_prefix}")
+        _sync_bucket(
+            str(results_dir),
+            f"hf://buckets/{args.bucket_id}/{destination_prefix}",
+            token=hf_token,
+        )
+
     losses = compute_per_example_losses(
         model=model,
         tokenizer=tokenizer,
         dataset_path=str(dataset_path),
         max_seq_length=args.max_seq_length,
         completion_only=not args.no_completion_only,
+        batch_max_tokens=args.batch_max_tokens,
+        max_batch_size=args.max_batch_size,
+        writer=writer,
+        on_batch=_on_batch,
     )
-
-    losses_path = results_dir / "per_example_losses.jsonl"
-    print(f"Saving losses to {losses_path}")
-    save_losses(losses, losses_path)
+    print(f"Computed {len(losses)} loss rows")
 
     destination_prefix = (args.results_prefix or args.run_prefix).strip("/")
     print(f"Syncing artifacts to bucket: {destination_prefix}")

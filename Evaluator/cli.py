@@ -212,7 +212,7 @@ def _compute_optional_loss_outputs(
     if model is None or tokenizer is None:
         raise RuntimeError("Unsloth model/tokenizer are not available for optional loss computation.")
 
-    from shared.experiment_tracking.per_example_loss import compute_per_example_losses, save_losses
+    from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses, save_losses
 
     hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
     dataset_path = _resolve_loss_dataset_path(
@@ -221,16 +221,22 @@ def _compute_optional_loss_outputs(
         dataset_file=args.loss_dataset_file,
         token=hf_token,
     )
+    writer = None
+    loss_output_path = expand_path(args.loss_output_jsonl) if args.loss_output_jsonl else None
+    if args.loss_output_jsonl:
+        if loss_output_path.name == "per_example_losses.jsonl":
+            writer = IncrementalLossWriter(loss_output_path.parent)
     losses = compute_per_example_losses(
         model=model,
         tokenizer=tokenizer,
         dataset_path=dataset_path,
         max_seq_length=args.loss_max_seq_length or 2048,
         completion_only=not args.loss_no_completion_only,
+        writer=writer,
     )
 
-    if args.loss_output_jsonl:
-        save_losses(losses, expand_path(args.loss_output_jsonl))
+    if loss_output_path and writer is None:
+        save_losses(losses, loss_output_path)
 
     loss_rows = [
         {
