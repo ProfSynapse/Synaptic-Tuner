@@ -71,6 +71,7 @@ from .reporting import (
 )
 from .runner import evaluate_cases
 from shared.cloud_eval_progress import CloudEvaluationProgressWriter, extract_record_progress
+from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
 
 
 def load_display_config(config_dir: Path) -> Dict[str, Any]:
@@ -567,7 +568,10 @@ def main(argv: List[str] | None = None) -> int:
 
     safe_parallel_backends = {"vllm", "lmstudio", "ollama", "openrouter", "mlc"}
     eval_parallel = bool(run_config.parallel and args.backend in safe_parallel_backends and not args.dry_run)
-    eval_max_workers = max(1, int(run_config.max_workers or 1))
+    eval_max_workers = recommend_eval_max_workers(
+        backend=args.backend,
+        requested_max_workers=int(run_config.max_workers or 0),
+    )
 
     # Determine if we should use the live dashboard
     use_dashboard = (

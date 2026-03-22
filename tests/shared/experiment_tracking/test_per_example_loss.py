@@ -193,6 +193,7 @@ def test_incremental_writer_creates_shards_and_final_output(fake_model, fake_tok
         completion_only=True,
         batch_max_tokens=4,
         writer=writer,
+        adaptive_batching=False,
     )
 
     assert len(losses) == 3

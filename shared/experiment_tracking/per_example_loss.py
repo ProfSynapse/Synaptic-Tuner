@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
@@ -22,6 +23,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from .runtime_autotune import AdaptiveTokenBudget, cuda_headroom_bytes
 from .schema import LossResult
 
 logger = logging.getLogger(__name__)
@@ -422,6 +424,7 @@ def compute_per_example_losses(
     max_batch_size: int | None = None,
     writer: IncrementalLossWriter | None = None,
     on_batch: Callable[[list[LossResult], IncrementalLossWriter | None], None] | None = None,
+    adaptive_batching: bool = True,
 ) -> list[LossResult]:
     """Compute per-example loss for each record in a JSONL dataset.
 
@@ -436,6 +439,7 @@ def compute_per_example_losses(
         max_batch_size: Optional hard cap on examples per microbatch.
         writer: Optional incremental shard writer.
         on_batch: Optional callback invoked after each completed batch write.
+        adaptive_batching: Dynamically adjust token budget using runtime telemetry.
 
     Returns:
         List of LossResult objects in dataset order.
@@ -454,22 +458,46 @@ def compute_per_example_losses(
     )
 
     pad_token_id = _pad_token_id(tokenizer)
+    controller = AdaptiveTokenBudget(initial_tokens=batch_max_tokens) if adaptive_batching else None
     results: list[LossResult] = []
-    for batch in tqdm(
-        _iter_batches(prepared_examples, max_batch_tokens=batch_max_tokens, max_batch_size=max_batch_size),
-        desc="Computing losses",
-    ):
+    pending_batch: list[PreparedLossExample] = []
+
+    def _flush_batch(batch: list[PreparedLossExample]) -> None:
+        if not batch:
+            return
+        nonlocal results
+        start_time = time.perf_counter()
         batch_losses = _compute_batch_losses(
             model=model,
             batch=batch,
             device=device,
             pad_token_id=pad_token_id,
         )
+        elapsed = time.perf_counter() - start_time
         if writer is not None:
             writer.write_batch(batch_losses)
         if on_batch is not None:
             on_batch(batch_losses, writer)
         results.extend(batch_losses)
+        if controller is not None:
+            controller.observe_success(
+                padded_batch_tokens=max(len(item.input_ids) for item in batch) * len(batch),
+                elapsed_seconds=elapsed,
+                headroom_bytes=cuda_headroom_bytes(device),
+            )
+
+    for example in tqdm(prepared_examples, desc="Preparing losses"):
+        active_limit = controller.current_tokens if controller is not None else batch_max_tokens
+        if pending_batch:
+            exceeds_tokens = _projected_batch_tokens(pending_batch, example) > active_limit
+            exceeds_batch_size = max_batch_size is not None and len(pending_batch) >= max_batch_size
+            if exceeds_tokens or exceeds_batch_size:
+                _flush_batch(pending_batch)
+                pending_batch = []
+        pending_batch.append(example)
+
+    if pending_batch:
+        _flush_batch(pending_batch)
 
     if writer is not None:
         writer.finalize()
