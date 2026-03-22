@@ -55,6 +55,10 @@ STRATEGIES = {
         "description": "Repo-specific preset: drop the broader result-echo family including Done./All./Open. recap rows with loss >= 2.0.",
         "default_min_loss": 2.0,
     },
+    "result_echo_long_recap": {
+        "description": "Repo-specific preset: drop result-echo rows with long assistant recap/narration and loss >= 2.0.",
+        "default_min_loss": 2.0,
+    },
     "result_echo_broad": {
         "description": "Repo-specific preset: drop any text_only result-echo example with loss >= 2.0.",
         "default_min_loss": 2.0,
@@ -175,6 +179,7 @@ def classify_example(row: dict[str, Any]) -> dict[str, bool]:
         "recommendations": "recommendations" in user_text,
         "batchresults": '"results"' in user_text,
         "opened": '"opened": true' in user_text,
+        "long_recap": len(assistant_text.split()) > 80,
         "doneish": assistant_text.startswith("Done.")
         or assistant_text.startswith("Done!")
         or assistant_text.startswith("All ")
@@ -275,6 +280,13 @@ def analyze_dataset_against_loss(
                 "reason": "High-loss slice is strongly enriched for text_only result-echo recap rows with linesDelta/recommendations.",
             }
         )
+    if any(item["feature"] == "long_recap" and item["enrichment"] and item["enrichment"] >= 2.0 for item in feature_report):
+        suggestions.append(
+            {
+                "strategy": "result_echo_long_recap",
+                "reason": "High-loss slice is strongly enriched for result-echo rows followed by long assistant recap/narration.",
+            }
+        )
     suggestions.append(
         {
             "strategy": "loss_threshold",
@@ -351,6 +363,12 @@ def evaluate_prune_decision(
         return PruneDecision(
             should_prune=match,
             reasons=reasons + [name for name in ("linesdelta", "recommendations", "roleplay", "doneish") if flags[name]],
+        )
+    if strategy == "result_echo_long_recap":
+        match = flags["long_recap"]
+        return PruneDecision(
+            should_prune=match,
+            reasons=reasons + [name for name in ("long_recap",) if flags[name]],
         )
     if strategy == "result_echo_broad":
         return PruneDecision(should_prune=True, reasons=reasons)

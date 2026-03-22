@@ -182,3 +182,54 @@ def test_prune_dataset_repo_specific_preset_removes_expected_rows(tmp_path):
 
     assert result.kept_rows == 1
     assert result.removed_rows == 1
+
+
+def test_prune_dataset_result_echo_long_recap_removes_only_long_result_rows(tmp_path):
+    module = _load_skill_module()
+    dataset = tmp_path / "dataset.jsonl"
+    loss_path = tmp_path / "losses.jsonl"
+    rows = [
+        {
+            "conversations": [
+                {"role": "user", "content": 'Result: {"success": true}'},
+                {"role": "assistant", "content": " ".join(["recap"] * 100)},
+            ],
+            "pattern": "text_only",
+            "label": True,
+        },
+        {
+            "conversations": [
+                {"role": "user", "content": 'Result: {"success": true}'},
+                {"role": "assistant", "content": "Short recap."},
+            ],
+            "pattern": "text_only",
+            "label": True,
+        },
+        {
+            "conversations": [
+                {"role": "user", "content": "Normal user request"},
+                {"role": "assistant", "content": " ".join(["recap"] * 100)},
+            ],
+            "pattern": "text_only",
+            "label": True,
+        },
+    ]
+    losses = [
+        {"index": 0, "loss": 2.5, "jsonl_hash": "a"},
+        {"index": 1, "loss": 2.5, "jsonl_hash": "b"},
+        {"index": 2, "loss": 2.5, "jsonl_hash": "c"},
+    ]
+    _write_jsonl(dataset, rows)
+    _write_jsonl(loss_path, losses)
+
+    result = module.prune_dataset(
+        dataset_path=dataset,
+        loss_source=str(loss_path),
+        strategy="result_echo_long_recap",
+        output_path=tmp_path / "filtered.jsonl",
+        removed_output_path=tmp_path / "removed.jsonl",
+        metadata_path=tmp_path / "filtered.metadata.json",
+    )
+
+    assert result.kept_rows == 2
+    assert result.removed_rows == 1
