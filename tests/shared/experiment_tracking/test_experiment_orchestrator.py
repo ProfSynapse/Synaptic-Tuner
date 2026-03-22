@@ -95,6 +95,7 @@ def test_experiment_orchestrator_runs_full_lifecycle(tmp_path: Path):
         "loss": "completed",
     }
     assert experiment.derived_outputs["feature_dataset_csv"].endswith("feature_dataset.csv")
+    assert experiment.derived_outputs["draft_next_spec_yaml"].endswith("draft_next_spec.yaml")
 
     summary_path = Path(experiment.derived_outputs["experiment_summary_json"])
     payload = json.loads(summary_path.read_text(encoding="utf-8"))

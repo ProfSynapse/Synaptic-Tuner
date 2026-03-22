@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from .experiment import Experiment
+from .recommendation_engine import build_recommendation_bundle, render_draft_next_spec
 from .schema import LossResult, RunRecord
 
 
@@ -48,52 +48,6 @@ def _run_row(record: RunRecord) -> dict[str, Any]:
         "job_ref": record.job_ref or "",
         "timestamp": record.timestamp,
     }
-
-
-def _next_run_candidates(experiment: Experiment, runs: list[RunRecord], eval_payload: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    training_run = next((run for run in runs if run.run_id == experiment.training_run_id), None)
-    total = int((eval_payload or {}).get("summary", {}).get("total", 0))
-    failed = int((eval_payload or {}).get("summary", {}).get("failed", 0))
-    passed = int((eval_payload or {}).get("summary", {}).get("passed", 0))
-
-    if training_run and training_run.primary_metric_name == "final_loss" and (training_run.primary_metric or 0) > 1.0:
-        candidates.append(
-            {
-                "rank": 1,
-                "hypothesis": "Training likely underfit or learning rate is too aggressive.",
-                "suggested_changes": {
-                    "train_learning_rate": 0.5,
-                    "operator": "multiply",
-                },
-                "why": f"Observed final_loss={training_run.primary_metric}",
-            }
-        )
-
-    if total > 0 and failed >= passed:
-        candidates.append(
-            {
-                "rank": len(candidates) + 1,
-                "hypothesis": "Evaluation failures dominate. The run may need more optimization steps before comparison.",
-                "suggested_changes": {
-                    "train_max_steps": 2.0,
-                    "operator": "multiply",
-                },
-                "why": f"Observed {failed} failed vs {passed} passed evaluation cases.",
-            }
-        )
-
-    if not candidates:
-        candidates.append(
-            {
-                "rank": 1,
-                "hypothesis": "Collect another comparable run before making an aggressive change.",
-                "suggested_changes": {"experiment": "rerun_with_small_lr_or_steps_delta"},
-                "why": "Current experiment does not yet have enough signal for a stronger hypothesis.",
-            }
-        )
-
-    return candidates
 
 
 def write_analysis_bundle(
@@ -184,10 +138,21 @@ def write_analysis_bundle(
         _write_jsonl(high_loss_path, high_loss)
         outputs["high_loss_examples_jsonl"] = str(high_loss_path)
 
-    candidates = _next_run_candidates(experiment, runs, eval_payload)
+    recommendation_bundle = build_recommendation_bundle(
+        experiment=experiment,
+        runs=runs,
+        eval_payload=eval_payload,
+        loss_results=loss_results,
+    )
+
+    candidates = recommendation_bundle["candidates"]
     next_run_candidates = analysis_dir / "next_run_candidates.json"
-    _write_json(next_run_candidates, {"candidates": candidates})
+    _write_json(next_run_candidates, recommendation_bundle)
     outputs["next_run_candidates_json"] = str(next_run_candidates)
+
+    draft_next_spec = analysis_dir / "draft_next_spec.yaml"
+    draft_next_spec.write_text(render_draft_next_spec(recommendation_bundle["draft_next_spec"]), encoding="utf-8")
+    outputs["draft_next_spec_yaml"] = str(draft_next_spec)
 
     hypothesis_context = analysis_dir / "hypothesis_context.json"
     _write_json(
@@ -196,6 +161,7 @@ def write_analysis_bundle(
             "experiment": summary_payload,
             "runs": run_rows,
             "top_candidates": candidates,
+            "recommendation_bundle": recommendation_bundle,
         },
     )
     outputs["hypothesis_context_json"] = str(hypothesis_context)

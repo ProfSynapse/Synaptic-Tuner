@@ -32,3 +32,13 @@ def test_run_experiment_stage_selection_flags_parse():
     assert args.experiment_spec == "Trainers/cloud/experiments/example.yaml"
     assert args.only_stage == "evaluation"
     assert args.skip_stage == ["loss", "analysis"]
+
+
+def test_analyze_experiment_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(["analyze-experiment", "--experiment-id", "latest", "--json"])
+
+    assert args.command == "analyze-experiment"
+    assert args.experiment_id == "latest"
+    assert args.json is True

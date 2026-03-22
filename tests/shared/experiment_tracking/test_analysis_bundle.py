@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from shared.experiment_tracking.analysis_bundle import write_analysis_bundle
 from shared.experiment_tracking.experiment import Experiment
 from shared.experiment_tracking.schema import LossResult, RunRecord
@@ -75,6 +77,7 @@ def test_write_analysis_bundle_materializes_summary_and_features(tmp_path: Path)
     assert Path(outputs["run_matrix_csv"]).exists()
     assert Path(outputs["feature_dataset_csv"]).exists()
     assert Path(outputs["hypothesis_context_json"]).exists()
+    assert Path(outputs["draft_next_spec_yaml"]).exists()
 
     summary_payload = json.loads(Path(outputs["experiment_summary_json"]).read_text(encoding="utf-8"))
     assert summary_payload["status"] == "completed"
@@ -82,5 +85,10 @@ def test_write_analysis_bundle_materializes_summary_and_features(tmp_path: Path)
 
     candidates_payload = json.loads(Path(outputs["next_run_candidates_json"]).read_text(encoding="utf-8"))
     assert candidates_payload["candidates"]
+    assert candidates_payload["summary"]["experiment_id"] == experiment.experiment_id
+    assert candidates_payload["candidates"][0]["signal"] in {"training_final_loss", "evaluation_failure_rate", "loss_spread"}
 
+    draft_spec_payload = yaml.safe_load(Path(outputs["draft_next_spec_yaml"]).read_text(encoding="utf-8"))
+    assert draft_spec_payload["experiment"]["recommendation"]["selected_candidate_rank"] == 1
+    assert draft_spec_payload["experiment"]["training"]["model_name"] == experiment.base_model_name
 
