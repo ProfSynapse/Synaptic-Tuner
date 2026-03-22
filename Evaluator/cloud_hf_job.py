@@ -282,7 +282,13 @@ def main() -> int:
             f"hf://buckets/{args.bucket_id}/{args.eval_prefix.strip('/')}",
             token=hf_token,
         )
-        return 1
+        final_exit_code = _finalize_cloud_exit_code(1, output_json)
+        if final_exit_code == 0:
+            print(
+                "Evaluation artifacts were written before optional post-processing failed. "
+                "Returning success for cloud job status."
+            )
+        return final_exit_code
     finally:
         progress_syncer.stop()
         progress_syncer.sync_once()
