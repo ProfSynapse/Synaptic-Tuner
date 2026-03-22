@@ -60,6 +60,7 @@ _HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
 _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
+    "peft",
     "huggingface_hub>=1.5.0",
     "hf_transfer",
 ]
