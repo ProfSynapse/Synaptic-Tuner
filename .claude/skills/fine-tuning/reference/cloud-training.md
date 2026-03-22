@@ -151,6 +151,8 @@ Gotcha:
 
 For `hf_jobs`, a few patterns matter enough to treat as hard rules:
 
+- Never cancel a live HF job, delete bucket data, or relaunch a cloud run unless the user explicitly approves that specific action first.
+- Do not infer approval for cancel/delete/relaunch from a request to inspect, check, monitor, compare, or switch focus.
 - The job runs from the exact pushed commit. If the remote logs show an older `HEAD`, you launched the wrong SHA and are debugging stale code.
 - Keep the main training interpreter compatible with Unsloth and Transformers. If bucket sync needs a newer `huggingface_hub`, install it in an isolated helper path or subprocess, not into the training runtime.
 - Pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets. Do not assume the container automatically receives your local token.
@@ -222,6 +224,7 @@ Current constraint:
 
 Anti-patterns:
 - Do not assume the Unsloth training image is also a stable vLLM-serving runtime. vLLM, Transformers, tokenizers, Triton, and CUDA can drift independently.
+- Do not assume multi-GPU HF flavors automatically give you tensor-parallel vLLM. Prequantized BitsAndBytes base models (for example `*-bnb-4bit`) cannot use vLLM tensor parallelism in this path, so multi-GPU eval may need to fall back to single-GPU generation while exact loss still uses all visible GPUs afterward.
 - Do not install a newer `huggingface_hub` into the main Unsloth eval interpreter just to satisfy bucket sync. Keep bucket sync in the helper subprocess path.
 - Do not trust preset names blindly. The `eval_run.yaml` preset filenames must match the actual files under `Evaluator/config/scenarios/`.
 

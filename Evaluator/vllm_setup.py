@@ -333,6 +333,11 @@ def discover_huggingface_models() -> List[str]:
 _server_process: Optional[subprocess.Popen] = None
 
 
+def _looks_like_prequant_bnb_model(model: str) -> bool:
+    normalized = (model or "").strip().lower()
+    return any(marker in normalized for marker in ("bnb", "bitsandbytes", "4bit"))
+
+
 def start_vllm_server(
     model: str,
     host: str = DEFAULT_HOST,
@@ -376,6 +381,14 @@ def start_vllm_server(
                 resolved_tensor_parallel = 1
         except Exception:
             resolved_tensor_parallel = 1
+
+    if resolved_tensor_parallel > 1 and _looks_like_prequant_bnb_model(model):
+        print(
+            "[vLLM] Detected a prequantized BitsAndBytes model. "
+            "Tensor parallelism is not supported for this runtime path; "
+            "falling back to single-GPU eval."
+        )
+        resolved_tensor_parallel = 1
 
     cmd = [
         sys.executable, "-m", "vllm.entrypoints.openai.api_server",

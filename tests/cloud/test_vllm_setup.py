@@ -39,3 +39,21 @@ def test_start_vllm_server_auto_detects_tensor_parallel_size():
     tp_index = cmd.index("--tensor-parallel-size")
     assert cmd[tp_index + 1] == "4"
     assert "--enforce-eager" in cmd
+
+
+def test_start_vllm_server_disables_tensor_parallel_for_prequant_bnb_models():
+    process = MagicMock()
+
+    with patch("Evaluator.vllm_setup.subprocess.Popen", return_value=process) as mock_popen:
+        with patch("torch.cuda.is_available", return_value=True):
+            with patch("torch.cuda.device_count", return_value=4):
+                started = start_vllm_server(
+                    model="unsloth/qwen3-4b-unsloth-bnb-4bit",
+                    wait_for_ready=False,
+                    show_logs=False,
+                )
+
+    assert started is True
+    cmd = mock_popen.call_args.args[0]
+    assert "--tensor-parallel-size" not in cmd
+    assert "--enforce-eager" in cmd

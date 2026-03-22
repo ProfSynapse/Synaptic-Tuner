@@ -67,6 +67,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 
 ## CLI Discipline
 
+- Never cancel a job, delete bucket artifacts, remove files, or relaunch a cost-incurring cloud run unless the user has explicitly approved that exact action in the current conversation.
+- Treat cancel/delete/relaunch as irreversible or materially destructive operator actions. Do not infer permission from surrounding context or from a user's broader goal.
 - Do not guess command names or flags from memory.
 - Before giving command guidance, check `tuner/cli/parser.py`, `tuner/cli/router.py`, or the real `--help` output.
 - Prefer repo CLIs and checked-in scripts over ad hoc Python snippets.
@@ -81,6 +83,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Prefer the generic pruning strategies first (`loss_threshold`, `top_percent`). Use repo-specific presets only when the analysis output shows that exact family is genuinely overrepresented.
 - For in-flight cloud-run health checks, inspect the bucket-backed artifacts first (`training_latest.jsonl`, `stage_summary.json`, `training_lineage.json`, eval/loss partials). Use raw HF logs only as a fallback when the bucket prefix has not started writing yet.
 - For quick bucket spot checks, use `python3 scripts/read_bucket_artifact.py ...` instead of manual `hf buckets cp` commands.
+- For vLLM eval on multi-GPU hardware, prequantized BitsAndBytes base models (for example `*-bnb-4bit`) cannot use tensor parallelism. Do not assume `x4` means vLLM will shard generation across all GPUs; in this path, eval may need to fall back to single-GPU while exact loss still fans out across all visible GPUs afterward.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
