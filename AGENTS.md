@@ -5,6 +5,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 ## Fine-Tuning Workflow Discipline
 
 - For any fine-tuning, cloud training, evaluation, experiment-loop, checkpoint-eval, model-selection, or dataset-publishing task, always begin by loading the `fine-tuning` skill first.
+- `.skills/` is the canonical skill source for this repo. `.agents/skills` and `.claude/skills` are synced copies and must match it exactly.
+- After changing canonical skills, run `python3 .skills/scripts/sync_skill_trees.py` and verify with `python3 .skills/scripts/sync_skill_trees.py --check`.
 - Before building a new script, helper, or one-off workflow to run something, first check whether the needed command, script, CLI surface, or skill guidance already exists in the repo.
 - Do not create throwaway scripts just to get a task done if an existing script, CLI, or skill can be used or extended.
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.

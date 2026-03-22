@@ -66,6 +66,7 @@ See @~/.claude/protocols/algedonic.md for full protocol, trigger conditions, and
 6. For any fine-tuning, cloud training, evaluation, experiment analysis, model-selection, or dataset-publishing task, always begin by loading the repository's `fine-tuning` skill before doing anything else
 7. Before inventing a new script or one-off workaround to run a workflow, first check whether the repo already has a skill, CLI, or checked-in script that covers it
 8. If the capability does not exist, do not leave the solution as a throwaway script; update the relevant skill and add the reusable checked-in workflow so future agents use the proper path
+9. Treat `.skills/` as the canonical skill source. `.agents/skills` and `.claude/skills` are generated mirrors and must be kept in sync with `python3 .skills/scripts/sync_skill_trees.py`
 
 ## GUIDELINES
 
@@ -82,6 +83,7 @@ See @~/.claude/protocols/algedonic.md for full protocol, trigger conditions, and
 - Prefer existing repo CLIs, checked-in scripts, and documented skills over ad hoc Python, manual API probing, or temporary shell scripts
 - Before building anything new to "just get it running", search for an existing command or script first
 - If the repo is missing a needed capability, the correct follow-up is to add the reusable workflow and update the relevant skill so the next agent does not repeat the same improvisation
+- After changing canonical skills under `.skills/`, sync both mirror trees and verify parity with `python3 .skills/scripts/sync_skill_trees.py --check`
 
 ### Git Workflow
 - Create a feature branch before any new workstream begins
