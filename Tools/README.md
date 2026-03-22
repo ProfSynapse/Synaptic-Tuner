@@ -16,7 +16,7 @@ Comprehensive validator for synthetic datasets in ChatML format.
 
 **Usage:**
 ```bash
-python tools/validate_syngen.py Datasets/syngen_tools_11.18.25.jsonl
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/syngen_tools_11.18.25.jsonl
 ```
 
 **Output:**
@@ -146,7 +146,7 @@ python Tools/selfplay_generator.py \
 Central schema definitions for all 47+ Claudesidian tools.
 
 **Used by:**
-- `validate_syngen.py` for parameter validation
+- `.skills/synethetic-data-generation/scripts/validate_syngen.py` for parameter validation
 - Training data generation
 - Model evaluation
 
@@ -173,7 +173,7 @@ Central schema definitions for all 47+ Claudesidian tools.
 
 ### Validate a dataset before training
 ```bash
-python tools/validate_syngen.py Datasets/syngen_tools_11.18.25.jsonl
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/syngen_tools_11.18.25.jsonl
 ```
 
 ### Analyze tool coverage
@@ -190,7 +190,7 @@ python tools/analyze_tool_coverage.py Datasets/syngen_tools_11.18.25.jsonl
 ./Tools/run_selfplay.sh --standard
 
 # Validate generated data
-python tools/validate_syngen.py Datasets/syngen_selfplay_*.jsonl
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/syngen_selfplay_*.jsonl
 ```
 
 ### Convert to MCP format
@@ -206,7 +206,7 @@ python tools/convert_to_mcp_format.py \
 ```
 Tools/
 ├── README.md                      # This file
-├── validate_syngen.py             # Dataset validator
+├── .skills/.../validate_syngen.py # Dataset validator
 ├── analyze_tool_coverage.py       # Coverage analysis
 ├── convert_to_mcp_format.py       # Format converter
 ├── selfplay_generator.py          # Self-play data generation

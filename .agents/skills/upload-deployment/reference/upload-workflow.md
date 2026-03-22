@@ -10,9 +10,8 @@ For cloud runs, provider-native storage is the default durable location. Treat H
 
 ### From SFT Trainer
 ```bash
-cd Trainers/rtx3090_sft
-python src/upload_to_hf.py \
-  ./sft_output_rtx3090/TIMESTAMP/final_model \
+python3 scripts/upload_model.py \
+  Trainers/sft/sft_output_rtx3090/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit \
   --create-gguf
@@ -20,9 +19,8 @@ python src/upload_to_hf.py \
 
 ### From KTO Trainer
 ```bash
-cd Trainers/rtx3090_kto
-python src/upload_to_hf.py \
-  ./kto_output_rtx3090/TIMESTAMP/final_model \
+python3 scripts/upload_model.py \
+  Trainers/kto/kto_output_rtx3090/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit
 ```
@@ -125,7 +123,7 @@ Or manually:
 cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b
 
 # 2. Upload
-python src/upload_to_hf.py ./sft_output/LATEST/final_model user/model \
+python3 scripts/upload_model.py Trainers/sft/sft_output/LATEST/final_model user/model \
   --save-method merged_16bit --create-gguf
 
 # 3. Evaluate

@@ -321,7 +321,7 @@ python Tools/selfplay_generator.py \
 Run the schema validator on every dataset before training:
 
 ```bash
-python tools/validate_syngen.py Datasets/tools_generated.jsonl
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/tools_generated.jsonl
 ```
 
 **What it checks:**

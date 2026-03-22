@@ -13,7 +13,7 @@ Validates JSONL files with the following structure:
 }
 
 Usage:
-    python tools/validate_syngen.py Synthetic\\ Conversations/syngen_toolset_v1.0.0.jsonl
+    python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Synthetic\\ Conversations/syngen_toolset_v1.0.0.jsonl
 """
 from __future__ import annotations
 
@@ -42,7 +42,8 @@ AGENT_LIST_RE = re.compile(r'\(id:\s*["\']([^"\']+)["\']\)')
 
 # Load tool schemas
 TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {}
-SCHEMAS_FILE = Path(__file__).parent / "tool_schemas.json"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCHEMAS_FILE = REPO_ROOT / "tools" / "tool_schemas.json"
 
 def load_tool_schemas() -> Dict[str, Dict[str, Any]]:
     """Load tool schemas from JSON file."""

@@ -197,7 +197,7 @@ python -m Evaluator.cli --model my-model --backend lmstudio \
 Quick JSONL structure check (no LLM needed):
 
 ```bash
-python tools/validate_syngen.py Datasets/your_dataset.jsonl
+python3 scripts/validate_syngen.py Datasets/your_dataset.jsonl
 ```
 
 Checks: valid JSON, conversation structure, tool schemas, parameter validation.

@@ -15,9 +15,9 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Upload |
-| Upload merged 16-bit | `python src/upload_to_hf.py MODEL_PATH user/repo --save-method merged_16bit` |
-| Upload with GGUF | `python src/upload_to_hf.py MODEL_PATH user/repo --save-method merged_16bit --create-gguf` |
-| Upload LoRA only | `python src/upload_to_hf.py MODEL_PATH user/repo --save-method lora_only` |
+| Upload merged 16-bit | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit` |
+| Upload with GGUF | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit --create-gguf` |
+| Upload LoRA only | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method lora` |
 | Merge LoRA manually | `./run.sh` → Merge LoRA |
 | Convert to GGUF only | `./run.sh` → Convert |
 | Full pipeline | `./run.sh` → Full Pipeline (Train → Upload → Eval) |
@@ -40,8 +40,7 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 
 ## Key Directories
 
-- `Trainers/rtx3090_sft/src/upload_to_hf.py` — SFT upload entry point
-- `Trainers/rtx3090_kto/src/upload_to_hf.py` — KTO upload entry point
+- `scripts/upload_model.py` — Generic upload entry point
 - `shared/upload/` — Upload orchestrator and strategies
 - `shared/upload/converters/` — GGUF and WebGPU converters
 - `shared/model_loading/` — Model loading and LoRA merge utilities
@@ -62,9 +61,8 @@ Load the specific reference you need:
 
 **Standard upload after SFT:**
 ```bash
-cd Trainers/rtx3090_sft
-python src/upload_to_hf.py \
-  ./sft_output_rtx3090/TIMESTAMP/final_model \
+python3 scripts/upload_model.py \
+  Trainers/sft/sft_output_rtx3090/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit \
   --create-gguf

@@ -189,7 +189,7 @@ def find_all_broken_lines(filepath):
     """Find all lines with ID mismatch errors."""
     import subprocess
     result = subprocess.run(
-        ["python", "tools/validate_syngen.py", filepath],
+        ["python3", ".skills/synethetic-data-generation/scripts/validate_syngen.py", filepath],
         capture_output=True, text=True, cwd="/home/user/Toolset-Training"
     )
 

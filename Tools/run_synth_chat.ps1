@@ -210,7 +210,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Output ""
     Write-Output "Next steps:"
     Write-Output "  1. Validate dataset:"
-    Write-Output "     python tools/validate_syngen.py $OUTPUT_FILE"
+    Write-Output "     python3 .skills/synethetic-data-generation/scripts/validate_syngen.py $OUTPUT_FILE"
     Write-Output ""
     Write-Output "  2. Train with KTO:"
     Write-Output "     cd Trainers/kto"

@@ -173,7 +173,7 @@ Always validate before training:
 
 ```bash
 # Structural validation
-python Tools/validate_syngen.py Datasets/my_dataset.jsonl
+python .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
 
 # Check KTO label balance
 python -c "

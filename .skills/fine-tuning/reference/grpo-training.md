@@ -173,7 +173,7 @@ training:
 2. Train SFT on 67% first
 3. Run GSPO on held-out 33%
 
-Use `tools/split_for_gspo.py` to split datasets.
+Use `scripts/split_for_gspo.py` to split datasets.
 
 ---
 

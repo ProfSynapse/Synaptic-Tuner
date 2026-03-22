@@ -184,7 +184,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "Next steps:"
     echo "  1. Validate dataset:"
-    echo "     python tools/validate_syngen.py $OUTPUT_FILE"
+    echo "     python3 .skills/synethetic-data-generation/scripts/validate_syngen.py $OUTPUT_FILE"
     echo ""
     echo "  2. Train with KTO:"
     echo "     cd Trainers/kto"

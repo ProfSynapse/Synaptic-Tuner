@@ -18,7 +18,7 @@ Generate, improve, validate, and evaluate synthetic training datasets via CLI an
 | Improve dataset | `python -m SynthChat.run improve -i FILE [options]` |
 | Validate dataset | `python -m SynthChat.run validate -i FILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
-| Structural check | `python tools/validate_syngen.py FILE` |
+| Structural check | `python3 scripts/validate_syngen.py FILE` |
 | JSONL → Markdown | `./scripts/jsonl_to_markdown.sh data.jsonl` |
 | Combine datasets | `./scripts/combine_datasets.sh -o out.jsonl FILE1 FILE2` |
 | Interactive menu | `./run.sh` |

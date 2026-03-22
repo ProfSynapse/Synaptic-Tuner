@@ -60,7 +60,7 @@ prompts:
 | **What needs human review** | Edge cases in tool selection logic | Voice accuracy, dialectical quality, specificity |
 | **Improvement mechanism** | Schema fix scripts + SynthChat improve | SynthChat improve with quality rubrics |
 | **Common structural errors** | Missing context fields, wrong tool name, empty `memory` | Generic headings, too many sections, third-person address |
-| **Validation command** | `python tools/validate_syngen.py FILE` | `python -m SynthChat.run validate -i FILE --rubrics essay_*` |
+| **Validation command** | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py FILE` | `python -m SynthChat.run validate -i FILE --rubrics essay_*` |
 
 ### Validation Confidence
 

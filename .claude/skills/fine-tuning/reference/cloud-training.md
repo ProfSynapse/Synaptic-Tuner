@@ -76,9 +76,9 @@ Recommended first-pass checks:
 Use the checked-in helper when you want the live HF Jobs hardware list and hourly pricing instead of guessing from memory:
 
 ```bash
-python3 Trainers/scripts/hf_jobs_hardware.py
-python3 Trainers/scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml
-python3 Trainers/scripts/hf_jobs_hardware.py --sort-by vram --min-vram 40
+python3 scripts/hf_jobs_hardware.py
+python3 scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml
+python3 scripts/hf_jobs_hardware.py --sort-by vram --min-vram 40
 ```
 
 Notes:

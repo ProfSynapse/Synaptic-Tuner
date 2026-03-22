@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Union
 import sys
 from pathlib import Path
 
-# Add tools directory to path
-tools_dir = Path(__file__).parent.parent / 'tools'
-if str(tools_dir) not in sys.path:
-    sys.path.insert(0, str(tools_dir))
+# Add canonical skill validator path to sys.path.
+validator_dir = Path(__file__).parent.parent / ".skills" / "synethetic-data-generation" / "scripts"
+if str(validator_dir) not in sys.path:
+    sys.path.insert(0, str(validator_dir))
 
 import validate_syngen as dataset_validator
 from shared.validation.parsing import parse_qwen_tool_calls

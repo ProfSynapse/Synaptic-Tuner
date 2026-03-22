@@ -145,7 +145,7 @@ Reduces LR midway through training to prevent instability.
 3. **Test setup**: `python train_kto.py --model-size 7b --dry-run`
 4. **Train**: `python train_kto.py --model-size 7b --local-file ../../Datasets/kto_data.jsonl`
 5. **Monitor margins**: Should steadily increase
-6. **Upload**: `python src/upload_to_hf.py ./final_model user/repo`
+6. **Upload**: `python3 .skills/upload-deployment/scripts/upload_model.py ./final_model user/repo`
 
 ---
 

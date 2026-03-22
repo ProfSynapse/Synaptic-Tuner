@@ -273,7 +273,7 @@ def main():
         for dataset in datasets:
             output_file = base_dir / dataset.replace("v1.1", "v1.2")
             if output_file.exists():
-                print(f"     python tools/validate_syngen.py {output_file}")
+                print(f"     python3 .skills/synethetic-data-generation/scripts/validate_syngen.py {output_file}")
     else:
         print(f"\n✗ {total_errors} errors occurred during processing")
 

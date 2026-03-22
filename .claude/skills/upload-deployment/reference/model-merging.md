@@ -32,7 +32,7 @@ LoRA adapters are lightweight (~100-500 MB) but require the base model to run. M
 When using `--save-method merged_16bit`, merging happens automatically:
 
 ```bash
-python src/upload_to_hf.py ./final_model user/repo --save-method merged_16bit
+python3 scripts/upload_model.py ./final_model user/repo --save-method merged_16bit
 ```
 
 ### Via Shared Utilities

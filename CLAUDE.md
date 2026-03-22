@@ -63,7 +63,7 @@ See @~/.claude/protocols/algedonic.md for full protocol, trigger conditions, and
 3. **NEVER** add, change, or remove code yourself. **ALWAYS** delegate coding tasks to PACT specialist agents.
 4. Update `CLAUDE.md` after significant changes or discoveries (Execute `/PACT:pin-memory`)
 5. Follow phase-specific principles and delegate tasks to phase-specific specialist agents, in order to maintain code quality and systematic development
-6. For any fine-tuning, cloud training, evaluation, experiment analysis, model-selection, or dataset-publishing task, always begin by loading the repository's `fine-tuning` skill before doing anything else
+6. For any task in this repo, begin by loading the most relevant canonical skill from `.skills/`; for fine-tuning, cloud training, evaluation, experiment analysis, model-selection, or dataset-publishing work, start with `fine-tuning`
 7. Before inventing a new script or one-off workaround to run a workflow, first check whether the repo already has a skill, CLI, or checked-in script that covers it
 8. If the capability does not exist, do not leave the solution as a throwaway script; update the relevant skill and add the reusable checked-in workflow so future agents use the proper path
 9. Treat `.skills/` as the canonical skill source. `.agents/skills` and `.claude/skills` are generated mirrors and must be kept in sync with `python3 .skills/scripts/sync_skill_trees.py`
@@ -72,7 +72,7 @@ See @~/.claude/protocols/algedonic.md for full protocol, trigger conditions, and
 
 ### Context Management
 - **ALWAYS** read `CLAUDE.md` at session start to understand project structure, current state, and navigation
-- For fine-tuning-domain work, **ALWAYS** load the `fine-tuning` skill first and treat it as the starting point for command discovery
+- For repo workflow questions, load the most relevant canonical skill from `.skills/`; for fine-tuning-domain work, `fine-tuning` is the default starting point for command discovery
 - Update `CLAUDE.md` when:
   - Adding new components or modules
   - Changing system architecture
@@ -596,7 +596,7 @@ python train_kto.py --model-size 7b
 **Direct Python:**
 ```bash
 cd Trainers/rtx3090_sft  # or rtx3090_kto
-python src/upload_to_hf.py \
+python3 .skills/upload-deployment/scripts/upload_model.py \
   ./sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model \
   username/model-name \
   --save-method merged_16bit \
@@ -680,7 +680,7 @@ SCHEMA VALIDATION RESULTS
 ### 5. Validating Datasets
 
 ```bash
-python Tools/validate_syngen.py Datasets/your_dataset.jsonl
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/your_dataset.jsonl
 ```
 
 ### 6. Evaluating Models
@@ -793,7 +793,7 @@ START: User wants to improve dataset quality
     |
     v
 [3] Validate dataset first:
-    Run: python Tools/validate_syngen.py <dataset_file>
+    Run: python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <dataset_file>
     |
     +-- VALIDATION FAILED --> Fix JSON/format errors first
     |
@@ -1034,7 +1034,7 @@ curl https://openrouter.ai/api/v1/models \
 **"Dataset validation failed"**
 ```bash
 # Run validation to see specific errors
-python Tools/validate_syngen.py <file>
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <file>
 
 # Common fixes:
 # - Check JSON syntax (missing commas, quotes)
@@ -1103,7 +1103,7 @@ What can be fully automated vs. what needs user input:
 | Environment setup | X | | `./setup_env.sh` |
 | Dependency install | X | | `./run.sh doctor --fix` |
 | List resources | X | | `./run.sh list *` |
-| Dataset validation | X | | `python Tools/validate_syngen.py` |
+| Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
 | System diagnostics | X | | `./run.sh doctor` |
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
 | Evaluation | | X | Needs model path, scenario set |
@@ -1182,7 +1182,7 @@ curl http://localhost:1234/v1/chat/completions \
 python -m SynthChat.services.rubric_runner --list
 
 # 3. Validate input file format
-python Tools/validate_syngen.py <input_file>
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py <input_file>
 
 # 4. Run with verbose logging
 python -m SynthChat.services.rubric_runner \
@@ -1204,7 +1204,7 @@ df -h
 ls -la <model_path>/
 
 # 4. Try upload with smaller chunks
-python src/upload_to_hf.py <model_path> <repo_name> \
+python3 .skills/upload-deployment/scripts/upload_model.py <model_path> <repo_name> \
   --save-method lora  # Upload just LoRA adapters first
 ```
 
@@ -1254,7 +1254,7 @@ touch Datasets/test_write && rm Datasets/test_write
 
 - Check script help: `python script.py --help`
 - Run dry runs: `python train_sft.py --dry-run`
-- Validate first: `python Tools/validate_syngen.py dataset.jsonl`
+- Validate first: `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py dataset.jsonl`
 
 ---
 

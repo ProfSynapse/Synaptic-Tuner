@@ -26,7 +26,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
-| Battle-of-models catalog | `python3 Trainers/scripts/battle_of_models.py list` |
+| Battle-of-models catalog | `python3 scripts/battle_of_models.py list` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
 
 ## Training Methods at a Glance
@@ -149,9 +149,9 @@ python tuner.py cloud-pipeline --method sft --preset full \
 
 **Battle-of-models helper:**
 ```bash
-python3 Trainers/scripts/battle_of_models.py list
-python3 Trainers/scripts/battle_of_models.py commands --smoke
-python3 Trainers/scripts/battle_of_models.py launch --smoke qwen35-2b --image-profile next
+python3 scripts/battle_of_models.py list
+python3 scripts/battle_of_models.py commands --smoke
+python3 scripts/battle_of_models.py launch --smoke qwen35-2b --image-profile next
 ```
 
 **Cloud training + eval in one flow:**

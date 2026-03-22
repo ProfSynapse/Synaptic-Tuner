@@ -98,7 +98,7 @@ When `completion_only_loss: true` (default):
 4. **Quick iteration**: `python train_sft.py --model-size 7b --tier quick` (~5 min)
 5. **Production run**: `python train_sft.py --model-size 7b --tier standard`
 6. **Monitor**: Watch live dashboard or `tail -f logs/training_latest.jsonl`
-7. **Upload**: `python src/upload_to_hf.py ./final_model user/repo --save-method merged_16bit`
+7. **Upload**: `python3 .skills/upload-deployment/scripts/upload_model.py ./final_model user/repo --save-method merged_16bit`
 
 ---
 
