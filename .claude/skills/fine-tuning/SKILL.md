@@ -26,6 +26,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
+| Read bucket artifact | `python3 scripts/read_bucket_artifact.py hf://buckets/<bucket>/<path>` |
 | Live HF job list | `python tuner.py cloud-jobs list` |
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
@@ -79,6 +80,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For loss-driven dataset cleanup, start with `python3 scripts/prune_dataset_from_loss.py ... --analyze-only`; only apply a pruning rule after checking which families are actually enriched in the high-loss slice.
 - Prefer the generic pruning strategies first (`loss_threshold`, `top_percent`). Use repo-specific presets only when the analysis output shows that exact family is genuinely overrepresented.
 - For in-flight cloud-run health checks, inspect the bucket-backed artifacts first (`training_latest.jsonl`, `stage_summary.json`, `training_lineage.json`, eval/loss partials). Use raw HF logs only as a fallback when the bucket prefix has not started writing yet.
+- For quick bucket spot checks, use `python3 scripts/read_bucket_artifact.py ...` instead of manual `hf buckets cp` commands.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
@@ -143,6 +145,25 @@ python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
 ```
 Gotcha:
 - `cloud-jobs show` is useful, but for real progress checks prefer the bucket-backed artifacts once they exist. Early raw logs are often just bootstrap noise; the bucket tells you when training/eval/loss has actually started producing useful state.
+
+**Read the latest training record from a bucket-backed run:**
+```bash
+python3 scripts/read_bucket_artifact.py \
+  hf://buckets/professorsynapse/toolset-training-artifacts/runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl \
+  --jsonl-latest \
+  --pretty
+```
+
+**Tail the structured progress log or summary artifact directly from the bucket:**
+```bash
+python3 scripts/read_bucket_artifact.py \
+  hf://buckets/professorsynapse/toolset-training-artifacts/runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl \
+  --tail 5
+
+python3 scripts/read_bucket_artifact.py \
+  hf://buckets/professorsynapse/toolset-training-artifacts/runs/hf_jobs/sft/<run-prefix>/logs/stage_summary.json \
+  --pretty
+```
 
 **Canonical one-off HF experiment with direct overrides:**
 ```bash
