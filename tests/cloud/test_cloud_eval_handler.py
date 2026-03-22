@@ -156,6 +156,18 @@ def test_resolve_eval_helper_module_supports_vllm(repo_root):
     assert handler._resolve_eval_helper_module("vllm") == "Evaluator.cloud_hf_job_vllm"
 
 
+def test_new_eval_timestamp_includes_nonce(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    timestamp = handler._new_eval_timestamp()
+    prefix, nonce = timestamp.rsplit("_", 1)
+
+    assert prefix.count("_") == 1
+    assert len(nonce) == 4
+    int(nonce, 16)
+
+
 def test_handle_submits_hf_eval_job(repo_root, clean_env):
     clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
     args = Namespace(

@@ -50,6 +50,11 @@ def test_tracking_service_creates_and_updates_experiment(tmp_path: Path):
     registry_lines = (tmp_path / "registry.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(registry_lines) == 1
     assert json.loads(registry_lines[0])["experiment_id"] == experiment.experiment_id
+    assert experiment.experiment_id.startswith("exp_")
+    prefix, nonce = experiment.experiment_id.rsplit("_", 1)
+    assert prefix.count("_") == 2
+    assert len(nonce) == 4
+    int(nonce, 16)
 
 
 def test_tracking_service_finds_latest_recoverable_experiment(tmp_path: Path):

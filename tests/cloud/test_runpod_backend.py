@@ -372,6 +372,8 @@ class TestBuildPodEnv:
             "CLOUD_REPO_BRANCH": "main",
             "CLOUD_REPO_COMMIT": "abc12345def67890",
             "CLOUD_ARTIFACT_IDENTIFIER": "runpod-vol-123",
+            "CLOUD_PROVIDER": "runpod",
+            "CLOUD_GPU_TYPE": "NVIDIA A100 SXM",
         }
 
     def test_only_includes_set_vars(self, repo_root, clean_env):

@@ -17,7 +17,6 @@ Requirements:
 
 import logging
 import os
-import random
 import shlex
 import shutil
 import sys
@@ -30,6 +29,7 @@ from typing import List, Optional, Tuple
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_hf_token
+from shared.utilities.unique_ids import unique_utc_timestamp
 from shared.utilities.paths import (
     get_canonical_trainer_dir_name,
     get_primary_training_output_dir,
@@ -134,9 +134,7 @@ class HFJobsBackend(ITrainingBackend):
     @staticmethod
     def _new_run_timestamp() -> str:
         """Return a launch timestamp with a short nonce to avoid same-second collisions."""
-        base = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        nonce = f"{random.randrange(0, 0x10000):04x}"
-        return f"{base}_{nonce}"
+        return unique_utc_timestamp()
 
     def get_available_methods(self) -> List[str]:
         """

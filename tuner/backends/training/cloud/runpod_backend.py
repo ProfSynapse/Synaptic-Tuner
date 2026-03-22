@@ -27,11 +27,12 @@ import logging
 import os
 import time
 import yaml
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
 from shared.utilities.paths import get_canonical_trainer_dir_name, get_trainer_root
+from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
@@ -358,7 +359,7 @@ class RunPodBackend(ITrainingBackend):
         Returns:
             Pod name string.
         """
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = unique_utc_timestamp(fmt="%Y%m%d-%H%M%S")
         return f"toolset-{method}-{timestamp}"
 
     def _build_pod_env(self, config: CloudTrainingConfig) -> dict:
@@ -423,7 +424,7 @@ class RunPodBackend(ITrainingBackend):
         """
         target_dir = "/workspace/repo"
         trainer_subdir = f"Trainers/{get_canonical_trainer_dir_name(config.method)}"
-        run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        run_timestamp = unique_utc_timestamp()
 
         if not config.repo_url or not config.repo_branch or not config.repo_commit:
             raise CloudProviderError("RunPod requires exact repo source metadata.")

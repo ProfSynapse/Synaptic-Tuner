@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import shlex
 from argparse import Namespace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import yaml
 
+from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps, resolve_repo_source
 from tuner.cloud import (
     CloudJobSpec,
@@ -100,6 +100,10 @@ class CloudRunHandler(BaseHandler):
             return {str(k): self._render_value(v, variables) for k, v in value.items()}
         return value
 
+    @staticmethod
+    def _new_job_timestamp() -> str:
+        return unique_utc_timestamp()
+
     def _compile_hf_job(self, config_path: Path, config: Dict[str, Any]) -> tuple[CloudJobSpec, Dict[str, Any]]:
         provider = str(config.get("provider", "hf_jobs")).strip().lower()
         if provider != "hf_jobs":
@@ -114,7 +118,7 @@ class CloudRunHandler(BaseHandler):
         run_cfg = config.get("run", {}) if isinstance(config.get("run"), dict) else {}
         artifacts_cfg = config.get("artifacts", {}) if isinstance(config.get("artifacts"), dict) else {}
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = self._new_job_timestamp()
         job_name = str(config.get("name") or config_path.stem).strip()
         repo_dir = str(repo_cfg.get("clone_dir", "/workspace/repo")).strip() or "/workspace/repo"
         output_dir = str(artifacts_cfg.get("output_dir", "/workspace/outputs")).strip() or "/workspace/outputs"

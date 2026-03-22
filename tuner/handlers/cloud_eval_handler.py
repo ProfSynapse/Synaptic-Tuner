@@ -13,12 +13,12 @@ import shutil
 import shlex
 import sys
 from argparse import Namespace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from shared.utilities.env import get_hf_token
 from shared.utilities.paths import get_primary_training_output_dir
+from shared.utilities.unique_ids import unique_utc_timestamp
 from Evaluator.config_loader import ConfigLoader
 from tuner.cloud import (
     CloudJobSpec,
@@ -206,6 +206,10 @@ class CloudEvalHandler(BaseHandler):
 
     def _build_eval_prefix(self, run_prefix: str, timestamp: str) -> str:
         return f"{run_prefix.strip('/')}/evaluations/vllm/{timestamp}"
+
+    @staticmethod
+    def _new_eval_timestamp() -> str:
+        return unique_utc_timestamp()
 
     def _resolve_display_scenarios(
         self,
@@ -721,7 +725,7 @@ class CloudEvalHandler(BaseHandler):
         loss_max_seq_length = getattr(self.args, "loss_max_seq_length", None)
         loss_completion_only = not bool(getattr(self.args, "loss_no_completion_only", False))
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = self._new_eval_timestamp()
         eval_prefix = self._build_eval_prefix(selected_run["prefix"], timestamp)
         self.last_eval_prefix = eval_prefix
         self.last_bucket_id = bucket_id

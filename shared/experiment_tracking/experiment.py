@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from shared.utilities.unique_ids import unique_prefixed_id
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -60,8 +62,7 @@ def create_experiment(
 ) -> Experiment:
     """Create a new experiment, write to disk, and return the metadata."""
     now = datetime.now(timezone.utc)
-    # create timestamp exp_YYYYMMDD_HHMMSS
-    timestamp_id = "exp_" + now.strftime("%Y%m%d_%H%M%S")
+    timestamp_id = unique_prefixed_id("exp_", now=now)
     
     experiment = Experiment(
         experiment_id=timestamp_id,
