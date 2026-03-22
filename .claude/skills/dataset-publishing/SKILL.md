@@ -6,8 +6,8 @@ allowed-tools: Read, Bash, Write, Grep, Glob
 
 # Dataset Publishing
 
-Publish a local dataset JSONL to a Hugging Face dataset repo with the checked-in script:
-`python3 tools/publish_dataset_to_hf.py`
+Publish a local dataset JSONL to a Hugging Face dataset repo with the skill-owned script:
+`python3 scripts/publish_dataset_to_hf.py`
 
 The script accepts:
 - `dataset_path`
@@ -21,11 +21,11 @@ It also auto-uploads a matching metadata sidecar if present:
 
 | Task | Command |
 |------|---------|
-| Dry-run a dataset upload | `python3 tools/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --dry-run` |
-| Upload dataset + sidecar | `python3 tools/publish_dataset_to_hf.py DATASET.jsonl namespace/repo` |
-| Upload under a new repo filename | `python3 tools/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --path-in-repo new_name.jsonl` |
-| Upload with explicit metadata file | `python3 tools/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --metadata-path DATASET.metadata.json` |
-| Skip metadata sidecar | `python3 tools/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --no-metadata` |
+| Dry-run a dataset upload | `python3 scripts/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --dry-run` |
+| Upload dataset + sidecar | `python3 scripts/publish_dataset_to_hf.py DATASET.jsonl namespace/repo` |
+| Upload under a new repo filename | `python3 scripts/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --path-in-repo new_name.jsonl` |
+| Upload with explicit metadata file | `python3 scripts/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --metadata-path DATASET.metadata.json` |
+| Skip metadata sidecar | `python3 scripts/publish_dataset_to_hf.py DATASET.jsonl namespace/repo --no-metadata` |
 
 ## Defaults
 
@@ -45,19 +45,19 @@ It also auto-uploads a matching metadata sidecar if present:
 
 **Upload a filtered SFT dataset:**
 ```bash
-python3 tools/publish_dataset_to_hf.py \
+python3 scripts/publish_dataset_to_hf.py \
   Datasets/synthchat/my_filtered_dataset.jsonl \
   professorsynapse/claudesidian-synthetic-dataset \
   --dry-run
 
-python3 tools/publish_dataset_to_hf.py \
+python3 scripts/publish_dataset_to_hf.py \
   Datasets/synthchat/my_filtered_dataset.jsonl \
   professorsynapse/claudesidian-synthetic-dataset
 ```
 
 **Rename on upload:**
 ```bash
-python3 tools/publish_dataset_to_hf.py \
+python3 scripts/publish_dataset_to_hf.py \
   Datasets/synthchat/my_filtered_dataset.jsonl \
   professorsynapse/claudesidian-synthetic-dataset \
   --path-in-repo nonthinking_tools_sft_filtered_03.22.26.jsonl
@@ -65,7 +65,7 @@ python3 tools/publish_dataset_to_hf.py \
 
 **Upload without a sidecar:**
 ```bash
-python3 tools/publish_dataset_to_hf.py \
+python3 scripts/publish_dataset_to_hf.py \
   Datasets/synthchat/my_filtered_dataset.jsonl \
   professorsynapse/claudesidian-synthetic-dataset \
   --no-metadata
