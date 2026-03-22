@@ -1,0 +1,39 @@
+experiment:
+  name: qwen3-4b-full-cycle-benchmark-a100-large-train-a100x4-eval-loss-pruned
+  provider: hf_jobs
+  method: sft
+  objective: benchmark_cost_speed_with_a100_large_training_and_a100x4_eval_loss_on_pruned_dataset
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: nonthinking_tools_sft_03.14.26_with_toolmanager_loop_no_gettools_privacy_v1.3_pruned_highloss_candidates_03.22.26_pruned_result_echo_linesdelta_recommendations_03.22.26.jsonl
+  training:
+    model_name: Qwen/Qwen3-4B
+    gpu: a100-large
+    image_profile: stable
+    learning_rate: 1.0e-4
+    num_epochs: 2
+    load_in_4bit: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: true
+    preset: full
+    runtime: vllm
+    image_profile: fast_vllm
+    gpu: a100x4
+  loss:
+    enabled: true
+    gpu: a100x4
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv

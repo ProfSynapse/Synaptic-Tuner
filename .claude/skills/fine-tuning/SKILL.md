@@ -24,6 +24,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
+| Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
 | Live HF job list | `python tuner.py cloud-jobs list` |
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
@@ -74,6 +75,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For blind stage hardware selection before launch, use `python tuner.py plan-hardware ...`.
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
 - For finished experiment bundles and next-run suggestions, use `python tuner.py analyze-experiment ...`.
+- For loss-driven dataset cleanup, start with `python3 scripts/prune_dataset_from_loss.py ... --analyze-only`; only apply a pruning rule after checking which families are actually enriched in the high-loss slice.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
 
@@ -205,6 +207,33 @@ python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/qwen
 python tuner.py analyze-experiment --experiment-id latest
 python tuner.py analyze-experiment --experiment-id exp_20260321_221651 --json
 ```
+
+**Analyze a dataset against finished per-example loss before pruning:**
+```bash
+python3 scripts/prune_dataset_from_loss.py \
+  --dataset-path Datasets/synthchat/my_dataset.jsonl \
+  --experiment-id exp_20260322_103122 \
+  --analyze-only
+```
+
+**Apply a generic pruning rule:**
+```bash
+python3 scripts/prune_dataset_from_loss.py \
+  --dataset-path Datasets/synthchat/my_dataset.jsonl \
+  --experiment-id exp_20260322_103122 \
+  --strategy loss_threshold \
+  --min-loss 2.0
+```
+
+**Apply the current repo-specific result-echo preset and publish in one step:**
+```bash
+python3 scripts/prune_dataset_from_loss.py \
+  --dataset-path Datasets/synthchat/my_dataset.jsonl \
+  --experiment-id exp_20260322_103122 \
+  --strategy result_echo_linesdelta_recommendations \
+  --publish-repo professorsynapse/claudesidian-synthetic-dataset
+```
+Use this only when the analysis report shows that `text_only` result-echo recap rows are genuinely overrepresented in the high-loss slice. Do not assume that family is always the right prune target.
 
 **Environment-backed gym against latest trained adapter on HF:**
 ```bash
