@@ -324,13 +324,39 @@ class CloudTrainHandler(BaseHandler):
         if getattr(args, "train_load_in_4bit", None) is not None:
             config.load_in_4bit = args.train_load_in_4bit
 
+        train_lora_r = getattr(args, "train_lora_r", None)
+        if train_lora_r is not None:
+            config.lora_r = train_lora_r
+
+        train_lora_alpha = getattr(args, "train_lora_alpha", None)
+        if train_lora_alpha is not None:
+            config.lora_alpha = train_lora_alpha
+
+        train_lora_dropout = getattr(args, "train_lora_dropout", None)
+        if train_lora_dropout is not None:
+            config.lora_dropout = train_lora_dropout
+
+        if getattr(args, "train_use_dora", False):
+            config.use_dora = True
+
+        if getattr(args, "train_use_rslora", False):
+            config.use_rslora = True
+
+        train_init_lora_weights = getattr(args, "train_init_lora_weights", None)
+        if train_init_lora_weights is not None:
+            config.init_lora_weights = train_init_lora_weights
+
         train_lora_target_modules = getattr(args, "train_lora_target_modules", None)
         if train_lora_target_modules:
-            config.lora_target_modules = [
-                module.strip()
-                for module in train_lora_target_modules.split(",")
-                if module.strip()
-            ]
+            normalized = train_lora_target_modules.strip()
+            if normalized == "all-linear":
+                config.lora_target_modules = normalized
+            else:
+                config.lora_target_modules = [
+                    module.strip()
+                    for module in normalized.split(",")
+                    if module.strip()
+                ]
 
         train_gpu = getattr(args, "train_gpu", None)
         if train_gpu:

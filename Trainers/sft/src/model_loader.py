@@ -109,11 +109,12 @@ def apply_lora_adapters(
     lora_alpha: int = 128,
     lora_dropout: float = 0.05,
     bias: str = "none",
-    target_modules: list = None,
+    target_modules: list[str] | str | None = None,
     use_gradient_checkpointing: str = "unsloth",
     random_state: int = 3407,
     use_rslora: bool = False,
     use_dora: bool = False,
+    init_lora_weights: Optional[str] = None,
 ):
     """
     Apply LoRA adapters to the model using Unsloth.
@@ -145,10 +146,16 @@ def apply_lora_adapters(
             "gate_proj", "up_proj", "down_proj"
         ]
 
-    print(f"Target modules: {', '.join(target_modules)}")
+    if isinstance(target_modules, str):
+        target_modules_display = target_modules
+    else:
+        target_modules_display = ", ".join(target_modules)
 
-    model = FastLanguageModel.get_peft_model(
-        model,
+    print(f"Target modules: {target_modules_display}")
+    if init_lora_weights is not None:
+        print(f"init_lora_weights: {init_lora_weights}")
+
+    peft_kwargs = dict(
         r=r,
         target_modules=target_modules,
         lora_alpha=lora_alpha,
@@ -158,6 +165,13 @@ def apply_lora_adapters(
         random_state=random_state,
         use_rslora=use_rslora,
         use_dora=use_dora,
+    )
+    if init_lora_weights is not None:
+        peft_kwargs["init_lora_weights"] = init_lora_weights
+
+    model = FastLanguageModel.get_peft_model(
+        model,
+        **peft_kwargs,
     )
 
     # Print trainable parameters

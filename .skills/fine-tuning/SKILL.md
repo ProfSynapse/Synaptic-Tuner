@@ -220,10 +220,26 @@ python tuner.py cloud-pipeline --method sft --preset full \
   --train-gpu a10g-small \
   --train-batch-size 8 \
   --train-gradient-accumulation 4 \
+  --train-lora-r 128 \
+  --train-lora-alpha 256 \
+  --train-use-rslora \
+  --train-use-dora \
   --train-no-load-in-4bit \
   --train-lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj \
   --yes
 ```
+For SFT experiments, the cloud and experiment surfaces now accept:
+- `--train-lora-r`
+- `--train-lora-alpha`
+- `--train-lora-dropout`
+- `--train-use-dora`
+- `--train-use-rslora`
+- `--train-init-lora-weights`
+- `--train-lora-target-modules`
+
+Gotcha:
+- `init_lora_weights=loftq` is the only research-style init currently wired for the stable Unsloth SFT path. EVA, PiSSA, and OLoRA still need a separate PEFT-first path.
+- `lora_target_modules: all-linear` is forwarded now, but the legacy Unsloth path is still the riskier runtime. Use an explicit module list for the stable baseline.
 
 **Cloud training + eval in one flow:**
 ```bash

@@ -45,11 +45,12 @@ class LoRAConfig:
     lora_alpha: int
     lora_dropout: float
     bias: str
-    target_modules: List[str]
+    target_modules: List[str] | str
     use_gradient_checkpointing: str
     random_state: int
     use_rslora: bool = False
     use_dora: bool = False
+    init_lora_weights: Optional[str] = None
 
 
 @dataclass

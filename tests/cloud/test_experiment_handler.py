@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.experiment_tracking import Experiment, TrackingService
+from shared.experiment_tracking import Experiment, ExperimentSpec, TrackingService
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
 from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.per_example_loss import save_losses
+from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.experiment_handler import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner, StageResult
 
@@ -179,6 +180,77 @@ def test_training_stage_runner_recovers_grpo_training_from_final_model_artifact(
     assert result.status == "completed"
     assert result.run_record is not None
     assert result.run_record.artifact_root == experiment.stage_details["training"]["artifact_root"]
+
+
+def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+
+    spec = ExperimentSpec(
+        name="lora-variant-smoke",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(
+            model_name="Qwen/Qwen3-4B",
+            max_steps=20,
+            lora_r=128,
+            lora_alpha=256,
+            lora_dropout=0.05,
+            use_dora=True,
+            use_rslora=True,
+            init_lora_weights="loftq",
+            lora_target_modules="all-linear",
+        ),
+        evaluation=EvaluationStageSpec(enabled=False),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    backend = MagicMock()
+    backend.validate_environment.return_value = (True, "")
+    backend.execute.return_value = 0
+    backend.load_config.return_value = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake/config.yaml"),
+        trainer_dir=Path("/fake/trainer"),
+        model_name="base",
+        dataset_file="dataset.jsonl",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a100-large",
+        timeout_hours=4.0,
+        cloud_image="unsloth/unsloth:latest",
+        hf_flavor="a100-large",
+        artifact_backend="hf_bucket",
+        artifact_identifier="professorsynapse/toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="deadbeefcafebabe",
+    )
+
+    with patch.object(runner, "_recover_existing_training", return_value=None):
+        with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+                result = runner.run(spec=spec, experiment=experiment)
+
+    assert result.status == "completed"
+    config = backend.execute.call_args.args[0]
+    assert config.lora_r == 128
+    assert config.lora_alpha == 256
+    assert config.lora_dropout == 0.05
+    assert config.use_dora is True
+    assert config.use_rslora is True
+    assert config.init_lora_weights == "loftq"
+    assert config.lora_target_modules == "all-linear"
 
 
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):

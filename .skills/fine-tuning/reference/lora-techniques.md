@@ -194,20 +194,34 @@ Researched from [unsloth/models/llama.py](https://github.com/unslothai/unsloth) 
 
 | Feature | SFT | KTO | GRPO |
 |---------|-----|-----|------|
-| `use_dora` | needs config_loader field | config field exists, needs model_loader passthrough | works |
-| `use_rslora` | needs config_loader field | config field exists, needs model_loader passthrough | works |
+| `use_dora` | works locally and through cloud experiment surfaces | works locally | works locally |
+| `use_rslora` | works locally and through cloud experiment surfaces | works locally | works locally |
 | `target_modules` list | works | works | works |
-| `target_modules: "all-linear"` | legacy Unsloth breaks | legacy Unsloth breaks | legacy Unsloth breaks |
-| `init_lora_weights: "loftq"` | needs wiring | needs wiring | needs wiring |
+| `target_modules: "all-linear"` | forwarded, but legacy Unsloth path is still fragile | legacy Unsloth path is still fragile | legacy Unsloth path is still fragile |
+| `init_lora_weights: "loftq"` | wired for SFT and cloud experiments | not yet surfaced | not yet surfaced |
 | `init_lora_weights: "pissa"/"eva"/"olora"` | blocked by Unsloth | blocked by Unsloth | blocked by Unsloth |
 
 ### What needs code changes to fully enable
 
-1. **SFT config_loader.py**: Add `use_dora: bool = False` and `use_rslora: bool = False` to `LoRAConfig` dataclass
-2. **SFT model_loader.py**: Pass `use_dora` and `use_rslora` to `FastLanguageModel.get_peft_model()` via kwargs
-3. **KTO model_loader.py**: Remove hardcoded `use_rslora=False`; add `use_dora` and `use_rslora` params; pass through
-4. **SFT/KTO train_*.py**: Add `use_dora`, `use_rslora`, `target_modules` to `_tier_config_map`
-5. **SFT/KTO train_*.py**: Add `--use-dora` and `--use-rslora` CLI flags
+1. **KTO/GRPO init methods**: add `init_lora_weights` surface where we want LoftQ or future PEFT-only init methods outside SFT
+2. **New Unsloth path for `all-linear`**: make the newer model path a deliberate, tested option before trusting regret-free configs by default
+3. **PEFT bypass path**: EVA, PiSSA, and OLoRA still need a separate non-Unsloth path because the current Unsloth allowlist blocks them
+4. **Tier presets for research variants**: if we want `--tier dora` or similar, add those tier definitions under the trainer configs instead of relying on raw overrides
+
+## Cloud / Experiment Status
+
+The SFT cloud and experiment stack now forwards these knobs end-to-end:
+- `lora_r`
+- `lora_alpha`
+- `lora_dropout`
+- `use_dora`
+- `use_rslora`
+- `init_lora_weights`
+- `lora_target_modules` including the raw `"all-linear"` string
+
+That means the normal paths are now viable for DoRA and rsLoRA experiments:
+- `python tuner.py cloud-pipeline --method sft ... --train-use-dora --train-use-rslora`
+- `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes`
 
 ### LoRA Surgery compatibility
 

@@ -84,6 +84,38 @@ def test_run_experiment_auto_hardware_flags_parse():
     assert args.optimize_for == "balanced"
 
 
+def test_cloud_training_lora_flags_parse():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "cloud-pipeline",
+            "--method",
+            "sft",
+            "--train-lora-r",
+            "128",
+            "--train-lora-alpha",
+            "256",
+            "--train-lora-dropout",
+            "0.05",
+            "--train-use-dora",
+            "--train-use-rslora",
+            "--train-init-lora-weights",
+            "loftq",
+            "--train-lora-target-modules",
+            "all-linear",
+        ]
+    )
+
+    assert args.train_lora_r == 128
+    assert args.train_lora_alpha == 256
+    assert args.train_lora_dropout == 0.05
+    assert args.train_use_dora is True
+    assert args.train_use_rslora is True
+    assert args.train_init_lora_weights == "loftq"
+    assert args.train_lora_target_modules == "all-linear"
+
+
 def test_cloud_method_flag_accepts_grpo():
     parser = create_parser()
 

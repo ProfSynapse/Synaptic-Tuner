@@ -39,6 +39,14 @@ from tuner.handlers.cloud_eval_handler import CloudEvalHandler
 from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success
 
 
+def _optional_backend_value(value) -> str | None:
+    """Return a backend metadata value only when it is a real non-empty string."""
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return None
+
+
 class HFTrainingStageRunner:
     """Run the training stage on HF Jobs and register its remote artifacts."""
 
@@ -169,8 +177,24 @@ class HFTrainingStageRunner:
             config.max_seq_length = spec.training.max_seq_length
         if spec.training.load_in_4bit is not None:
             config.load_in_4bit = spec.training.load_in_4bit
+        if spec.training.lora_r is not None:
+            config.lora_r = spec.training.lora_r
+        if spec.training.lora_alpha is not None:
+            config.lora_alpha = spec.training.lora_alpha
+        if spec.training.lora_dropout is not None:
+            config.lora_dropout = spec.training.lora_dropout
+        if spec.training.use_dora:
+            config.use_dora = True
+        if spec.training.use_rslora:
+            config.use_rslora = True
+        if spec.training.init_lora_weights is not None:
+            config.init_lora_weights = spec.training.init_lora_weights
         if spec.training.lora_target_modules:
-            config.lora_target_modules = list(spec.training.lora_target_modules)
+            config.lora_target_modules = (
+                list(spec.training.lora_target_modules)
+                if isinstance(spec.training.lora_target_modules, list)
+                else spec.training.lora_target_modules
+            )
         if spec.training.gpu:
             config.gpu_type = spec.training.gpu
             config.hf_flavor = spec.training.gpu
@@ -210,9 +234,9 @@ class HFTrainingStageRunner:
         backend.show_post_training_actions = False
         exit_code = backend.execute(config, python_path="")
 
-        artifact_prefix = getattr(backend, "last_artifact_prefix", None) or artifact_prefix
-        bucket_id = getattr(backend, "last_bucket_id", None)
-        job_id = getattr(backend, "last_job_id", None)
+        artifact_prefix = _optional_backend_value(getattr(backend, "last_artifact_prefix", None)) or artifact_prefix
+        bucket_id = _optional_backend_value(getattr(backend, "last_bucket_id", None))
+        job_id = _optional_backend_value(getattr(backend, "last_job_id", None))
         artifact_root = (
             f"hf://buckets/{bucket_id}/{artifact_prefix.strip('/')}"
             if artifact_prefix and bucket_id

@@ -204,6 +204,9 @@ MODEL_COMPATIBILITY_RULES = [
     (_is_lfm2_family, [_check_lfm2_4bit, _check_lfm2_lora_targets]),
 ]
 
+UNSLOTH_ALLOWED_INIT_LORA_WEIGHTS = {"gaussian", "loftq", "corda"}
+UNSLOTH_BLOCKED_INIT_LORA_WEIGHTS = {"pissa", "eva", "olora"}
+
 
 def validate_model_compatibility(config) -> None:
     """Validate configuration against known model-family compatibility rules.
@@ -226,6 +229,26 @@ def validate_model_compatibility(config) -> None:
             warning = check_fn(config)
             if warning:
                 warnings_found.append(warning)
+
+    init_lora_weights = getattr(config.lora, "init_lora_weights", None)
+    if init_lora_weights:
+        normalized = str(init_lora_weights).strip().lower()
+        if normalized in UNSLOTH_BLOCKED_INIT_LORA_WEIGHTS:
+            warnings_found.append(
+                f"init_lora_weights={init_lora_weights!r} is not supported by the current Unsloth path. "
+                "EVA, PiSSA, and OLoRA require bypassing Unsloth and using PEFT directly."
+            )
+        elif normalized not in UNSLOTH_ALLOWED_INIT_LORA_WEIGHTS and normalized not in {"true", "false"}:
+            warnings_found.append(
+                f"init_lora_weights={init_lora_weights!r} may not be accepted by Unsloth. "
+                "Expected one of gaussian, loftq, corda, true, or false."
+            )
+
+    if getattr(config.lora, "target_modules", None) == "all-linear":
+        warnings_found.append(
+            'target_modules="all-linear" requires the new Unsloth model path. '
+            "On the legacy path this may break; use an explicit module list if you want the stable path."
+        )
 
     if not warnings_found:
         return
@@ -462,6 +485,12 @@ def parse_args(argv=None):
                        help="Maximum training steps (overrides epochs)")
     parser.add_argument("--max-seq-length", type=int,
                        help="Override maximum sequence length")
+    parser.add_argument("--lora-r", type=int,
+                       help="Override LoRA rank")
+    parser.add_argument("--lora-alpha", type=int,
+                       help="Override LoRA alpha")
+    parser.add_argument("--lora-dropout", type=float,
+                       help="Override LoRA dropout")
     parser.add_argument(
         "--lora-target-modules",
         type=str,
@@ -471,6 +500,8 @@ def parse_args(argv=None):
                         help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
     parser.add_argument("--use-rslora", action="store_true",
                         help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
+    parser.add_argument("--init-lora-weights", type=str,
+                        help="Set init_lora_weights (for example: gaussian, loftq, corda, eva, pissa, olora).")
     parser.add_argument(
         "--load-in-4bit",
         action="store_true",
@@ -624,20 +655,32 @@ def run(args: argparse.Namespace):
     if args.max_seq_length:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
+    if args.lora_r is not None:
+        config.lora.r = args.lora_r
+    if args.lora_alpha is not None:
+        config.lora.lora_alpha = args.lora_alpha
+    if args.lora_dropout is not None:
+        config.lora.lora_dropout = args.lora_dropout
     if args.model_name:
         config.model.model_name = args.model_name
     if args.load_in_4bit is not None:
         config.model.load_in_4bit = args.load_in_4bit
     if args.lora_target_modules:
-        config.lora.target_modules = [
-            module.strip()
-            for module in args.lora_target_modules.split(",")
-            if module.strip()
-        ]
+        normalized_target_modules = args.lora_target_modules.strip()
+        if normalized_target_modules == "all-linear":
+            config.lora.target_modules = normalized_target_modules
+        else:
+            config.lora.target_modules = [
+                module.strip()
+                for module in normalized_target_modules.split(",")
+                if module.strip()
+            ]
     if args.use_dora:
         config.lora.use_dora = True
     if args.use_rslora:
         config.lora.use_rslora = True
+    if args.init_lora_weights is not None:
+        config.lora.init_lora_weights = args.init_lora_weights
 
     # Dataset overrides
     if args.dataset_name:
@@ -790,6 +833,7 @@ def run(args: argparse.Namespace):
         random_state=config.lora.random_state,
         use_rslora=config.lora.use_rslora,
         use_dora=config.lora.use_dora,
+        init_lora_weights=config.lora.init_lora_weights,
     )
 
     # Check initial GPU memory

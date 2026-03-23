@@ -256,6 +256,12 @@ class HFJobsBackend(ITrainingBackend):
             gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
             max_seq_length=training_config.get("max_seq_length") or training_config.get("max_prompt_length") or model_config.get("max_seq_length"),
             load_in_4bit=model_config.get("load_in_4bit"),
+            lora_r=config.get("lora", {}).get("r"),
+            lora_alpha=config.get("lora", {}).get("lora_alpha"),
+            lora_dropout=config.get("lora", {}).get("lora_dropout"),
+            use_dora=bool(config.get("lora", {}).get("use_dora", False)),
+            use_rslora=bool(config.get("lora", {}).get("use_rslora", False)),
+            init_lora_weights=config.get("lora", {}).get("init_lora_weights"),
             lora_target_modules=model_config.get("target_modules") or config.get("lora", {}).get("target_modules"),
             provider="hf_jobs",
             gpu_type=flavor,
@@ -782,8 +788,25 @@ class HFJobsBackend(ITrainingBackend):
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
         if config.method == "sft" and config.load_in_4bit is not None:
             training_args.append("--load-in-4bit" if config.load_in_4bit else "--no-load-in-4bit")
+        if config.method == "sft" and config.lora_r is not None:
+            training_args.extend(["--lora-r", str(config.lora_r)])
+        if config.method == "sft" and config.lora_alpha is not None:
+            training_args.extend(["--lora-alpha", str(config.lora_alpha)])
+        if config.method == "sft" and config.lora_dropout is not None:
+            training_args.extend(["--lora-dropout", str(config.lora_dropout)])
+        if config.method == "sft" and config.use_dora:
+            training_args.append("--use-dora")
+        if config.method == "sft" and config.use_rslora:
+            training_args.append("--use-rslora")
+        if config.method == "sft" and config.init_lora_weights is not None:
+            training_args.extend(["--init-lora-weights", str(config.init_lora_weights)])
         if config.method == "sft" and config.lora_target_modules:
-            training_args.extend(["--lora-target-modules", ",".join(config.lora_target_modules)])
+            target_modules_arg = (
+                config.lora_target_modules
+                if isinstance(config.lora_target_modules, str)
+                else ",".join(config.lora_target_modules)
+            )
+            training_args.extend(["--lora-target-modules", target_modules_arg])
         training_args_str = ""
         if config.method == "grpo":
             output_dir = f"/workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}/env_grpo_output/{timestamp}"

@@ -259,4 +259,10 @@ class CloudTrainingConfig(TrainingConfig):
     max_steps: Optional[int] = None
     max_seq_length: Optional[int] = None
     load_in_4bit: Optional[bool] = None
-    lora_target_modules: Optional[List[str]] = field(default=None)
+    lora_r: Optional[int] = None
+    lora_alpha: Optional[int] = None
+    lora_dropout: Optional[float] = None
+    use_dora: bool = False
+    use_rslora: bool = False
+    init_lora_weights: Optional[str] = None
+    lora_target_modules: Optional[List[str] | str] = field(default=None)

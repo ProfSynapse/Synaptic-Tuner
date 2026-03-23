@@ -28,6 +28,12 @@ This ensures:
 - `--train-num-epochs`
 - `--train-max-steps`
 - `--train-max-seq-length`
+- `--train-lora-r`
+- `--train-lora-alpha`
+- `--train-lora-dropout`
+- `--train-use-dora`
+- `--train-use-rslora`
+- `--train-init-lora-weights`
 - `--train-no-load-in-4bit`
 - `--train-lora-target-modules`
 
@@ -40,10 +46,32 @@ python tuner.py cloud-pipeline --method sft --preset full \
   --train-gpu a10g-small \
   --train-batch-size 8 \
   --train-gradient-accumulation 4 \
+  --train-lora-r 128 \
+  --train-lora-alpha 256 \
+  --train-use-rslora \
+  --train-use-dora \
   --train-no-load-in-4bit \
   --train-lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj \
   --yes
 ```
+
+## Experiment Spec Surface
+
+The same SFT LoRA controls are also available in `run-experiment` YAML under `training:`:
+
+```yaml
+training:
+  model_name: Qwen/Qwen3-4B
+  lora_r: 128
+  lora_alpha: 256
+  lora_dropout: 0.05
+  use_dora: true
+  use_rslora: true
+  init_lora_weights: loftq
+  lora_target_modules: all-linear
+```
+
+Use `"all-linear"` only when you intend to exercise the newer Unsloth model path. On the legacy path, keep an explicit module list for the stable baseline.
 
 ## Promotion Path
 

@@ -340,6 +340,28 @@ class TestBuildTrainingCommand:
         assert "--artifact-bucket toolset-training-artifacts" in cmd
         assert "--artifact-prefix runs/hf_jobs/sft/20260314_181946-abc12345" in cmd
 
+    def test_command_includes_lora_variant_overrides(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            lora_r=128,
+            lora_alpha=256,
+            lora_dropout=0.05,
+            use_dora=True,
+            use_rslora=True,
+            init_lora_weights="loftq",
+            lora_target_modules="all-linear",
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--lora-r 128" in cmd
+        assert "--lora-alpha 256" in cmd
+        assert "--lora-dropout 0.05" in cmd
+        assert "--use-dora" in cmd
+        assert "--use-rslora" in cmd
+        assert "--init-lora-weights loftq" in cmd
+        assert "--lora-target-modules all-linear" in cmd
+
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config(repo_url="")
