@@ -83,6 +83,16 @@ post_training:
 - `parallel` is the default and launches evaluation and exact loss as separate sibling jobs after training
 - `same_job` keeps the older embedded eval+loss path for smoke or fallback usage
 
+## A100 Packing Rule
+
+For `a100-large` experiments, the default should be aggressive packing, not conservative validation:
+
+- do not shrink batch just because the LoRA variant changed
+- use the best known packed batch shape from the nearest comparable run as the starting point
+- read `training_lineage.json` after the run and treat large reserved-VRAM headroom as underpacking
+- if the card still has tens of GB free, push batch harder next time
+- for this repo, a first-pass OOM on A100 is often a better signal than a slow run with half the card unused
+
 ## Promotion Path
 
 1. Run SFT comparisons through `cloud-pipeline`

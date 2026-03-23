@@ -98,6 +98,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For quick bucket spot checks, use `python tuner.py bucket read ...` or `python tuner.py bucket list ...` instead of manual `hf buckets cp` commands.
 - For local inspection or offline diffing, use `python tuner.py bucket pull ...` to sync a bucket-relative path into the current workspace while preserving its relative path.
 - For one-off uploads back into the HF artifact bucket, use `python tuner.py bucket push ...` instead of ad hoc `sync_bucket` snippets.
+- For `a100-large` or larger tiers, bias toward aggressive packing. Do not lower batch just because the adapter recipe changed. Start from the highest known-good packed shape for the same model family and only back off after a real OOM or clear instability signal.
+- Treat large unused VRAM on `a100-large` as a mistake, not a comfort margin. If `training_lineage.json` shows tens of GB of reserved headroom, the run is underpacked and the next iteration should push batch size harder even if that risks OOM.
 - For vLLM eval on multi-GPU hardware, prequantized BitsAndBytes base models (for example `*-bnb-4bit`) cannot use tensor parallelism. Do not assume `x4` means vLLM will shard generation across all GPUs; in this path, eval may need to fall back to single-GPU while exact loss still fans out across all visible GPUs afterward.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
@@ -408,6 +410,7 @@ Provider-native storage defaults:
 - `plan-hardware` is the inspection surface for that same planner.
 - When using `--auto-hardware`, treat the resolved `batch_size` / `gradient_accumulation` as part of the experiment definition. Compare wall-clock and cost only after checking those resolved values.
 - After training finishes, read `training_lineage.json` before declaring the hardware/batch shape “good enough.” If peak reserved VRAM is still far below device capacity, the run is underpacked and the next iteration should push batch utilization harder.
+- On `a100-large`, the default posture should be: push it until it breaks, then back off one notch. A large A100 headroom cushion is usually wasted iteration speed.
 - Finished experiments now write `.tracking/experiments/<id>/analysis/` with:
   `experiment_summary.json`, `run_matrix.csv`, `feature_dataset.{jsonl,csv}`, `next_run_candidates.json`, `draft_next_spec.yaml`.
 - For the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`.

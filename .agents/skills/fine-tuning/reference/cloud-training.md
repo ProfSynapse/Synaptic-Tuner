@@ -177,6 +177,11 @@ Gotcha:
   - if peak reserved VRAM is well below half of device memory or headroom is still tens of GB, the run is underpacked
   - for large-memory tiers like `a100-large`, that usually means you left training throughput on the table
   - increase microbatch or otherwise retune before treating the hardware choice as optimized
+- On `a100-large` and above, default to aggressive packing:
+  - do not reduce batch just because you switched to DoRA, rsLoRA, or another adapter variant
+  - start from the highest known-good packed shape for that model family
+  - accept that an exploratory OOM is preferable to quietly wasting half the card
+  - only back off after a real OOM or reproducible instability signal
 
 ---
 
