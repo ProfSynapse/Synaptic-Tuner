@@ -7,7 +7,11 @@
 # VRAM: Same as standard QLoRA
 # Ref: https://arxiv.org/abs/2310.08659
 #
-# COMPATIBILITY: Same Unsloth caveat — requires init_lora_weights passthrough.
+# UNSLOTH COMPAT:
+#   init_lora_weights="loftq" is in Unsloth's allowed list:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   This works natively with FastLanguageModel.get_peft_model().
+#   Also supports loftq_config={} kwarg for detailed LoftQ settings.
 # Pair with: load_in_4bit: true in model config
 
 r: 64

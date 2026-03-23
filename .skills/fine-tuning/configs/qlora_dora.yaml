@@ -6,6 +6,10 @@
 # Best for: Single GPU (RTX 3090/4090), 7B-13B models
 # VRAM: ~8-12GB for 7B (vs ~14GB without quantization)
 # Ref: https://letsdatascience.com/blog/fine-tuning-llms-with-lora-and-qlora-complete-guide
+#
+# UNSLOTH COMPAT:
+#   use_dora passes through via **kwargs to PEFT's LoraConfig. Works but
+#   Unsloth may not apply its fast kernels (see dora.yaml for details).
 
 r: 64
 lora_alpha: 128

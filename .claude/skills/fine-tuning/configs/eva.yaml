@@ -8,8 +8,12 @@
 # VRAM: Same as standard LoRA + small overhead for activation SVD at init
 # Paper: https://arxiv.org/abs/2410.07170
 #
-# COMPATIBILITY: Same Unsloth caveat as PiSSA — requires init_lora_weights
-#   passthrough. EVA additionally needs a small dataloader pass at init time
+# UNSLOTH COMPAT: BLOCKED
+#   Unsloth validates init_lora_weights against an allowlist:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   "eva" is NOT in the list and will raise ValueError.
+#   To use EVA you must bypass Unsloth and use PEFT's get_peft_model()
+#   directly. EVA additionally needs a small dataloader pass at init time
 #   (PEFT handles this automatically via get_eva_state_dict()).
 #
 # ADVANCED: Combine with DoRA for best results:
@@ -18,4 +22,4 @@
 
 r: 64
 lora_alpha: 128
-init_lora_weights: "eva"
+# init_lora_weights: "eva"  # BLOCKED by Unsloth — see note above

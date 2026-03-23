@@ -8,13 +8,29 @@
 # Paper: https://thinkingmachines.ai/blog/lora/
 #
 # NOTE: use_rslora is practically mandatory at r=256 to stabilize gradients.
-# NOTE: target_modules "all-linear" requires Unsloth/PEFT passthrough support.
-#       If unsupported, expand to explicit module list for your architecture.
+#
+# UNSLOTH COMPAT:
+#   use_rslora: Supported natively (fixed in PR #2539, May 2025).
+#   target_modules "all-linear": Only works on the NEW FastBaseModel path
+#     (env var UNSLOTH_USE_NEW_MODEL=1). On the legacy path, Unsloth iterates
+#     target_modules as a list, so the string "all-linear" would break.
+#     If using the legacy path, expand to an explicit module list below.
 
 r: 256
 lora_alpha: 16
 learning_rate: 2e-3
 use_rslora: true
+
+# "all-linear" requires UNSLOTH_USE_NEW_MODEL=1.
+# For legacy Unsloth, replace with your architecture's explicit module list, e.g.:
+#   target_modules:
+#     - q_proj
+#     - k_proj
+#     - v_proj
+#     - o_proj
+#     - gate_proj
+#     - up_proj
+#     - down_proj
 target_modules: "all-linear"
 
 # Conservative schedule for high-rank stability

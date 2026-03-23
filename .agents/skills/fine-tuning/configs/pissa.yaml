@@ -7,11 +7,14 @@
 # VRAM: Same as standard LoRA at equivalent rank
 # Paper: https://arxiv.org/abs/2404.02948
 #
-# COMPATIBILITY: Requires init_lora_weights passthrough in Unsloth's
-#   get_peft_model(). If Unsloth does not forward this kwarg, you must
-#   use PEFT's get_peft_model() directly (bypassing Unsloth optimizations).
-#   Test with a quick dry-run before committing to a full training run.
+# UNSLOTH COMPAT: BLOCKED
+#   Unsloth validates init_lora_weights against an allowlist:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   "pissa" is NOT in the list and will raise ValueError.
+#   To use PiSSA you must bypass Unsloth and use PEFT's get_peft_model()
+#   directly, losing Unsloth's speed optimizations.
+#   Tracked upstream: https://github.com/unslothai/unsloth/issues/3693
 
 r: 64
 lora_alpha: 128
-init_lora_weights: "pissa"
+# init_lora_weights: "pissa"  # BLOCKED by Unsloth — see note above

@@ -7,9 +7,13 @@
 # VRAM: Same as standard LoRA at equivalent rank
 # Paper: https://arxiv.org/abs/2406.01775
 #
-# COMPATIBILITY: Same Unsloth caveat as PiSSA/EVA — requires init_lora_weights
-#   passthrough in get_peft_model().
+# UNSLOTH COMPAT: BLOCKED
+#   Unsloth validates init_lora_weights against an allowlist:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   "olora" is NOT in the list and will raise ValueError.
+#   To use OLoRA you must bypass Unsloth and use PEFT's get_peft_model()
+#   directly, losing Unsloth's speed optimizations.
 
 r: 64
 lora_alpha: 128
-init_lora_weights: "olora"
+# init_lora_weights: "olora"  # BLOCKED by Unsloth — see note above

@@ -7,6 +7,13 @@
 #           at the same rank without changing other hyperparameters.
 # VRAM: ~1-2GB more than standard LoRA at same rank (magnitude params added)
 # Ref: https://arxiv.org/abs/2402.09353
+#
+# UNSLOTH COMPAT:
+#   use_dora is NOT an explicit parameter in Unsloth's get_peft_model().
+#   It passes through via **kwargs to PEFT's LoraConfig and works, but
+#   Unsloth will not apply its fast custom kernels — you may see a warning
+#   about non-standard config. Quality improvement still applies; you just
+#   lose some of Unsloth's speed optimizations.
 
 r: 64
 lora_alpha: 128
