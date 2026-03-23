@@ -1,5 +1,6 @@
 import json
 import logging
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,7 +8,13 @@ import pytest
 import pandas as pd
 
 from shared.experiment_tracking.experiment import Experiment, save_experiment
-from Tools.compare_runs import main as compare_runs_main
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+_SPEC = spec_from_file_location("compare_runs", REPO_ROOT / "Tools" / "compare_runs.py")
+_MODULE = module_from_spec(_SPEC)
+assert _SPEC and _SPEC.loader
+_SPEC.loader.exec_module(_MODULE)
+compare_runs_main = _MODULE.main
 
 def test_compare_runs_basic(tmp_path, fake_base_losses_path, sample_losses_a_path, sample_losses_b_path):
     """Join 3 loss files (base + 2 runs) → correct feature matrix shape and column names."""
