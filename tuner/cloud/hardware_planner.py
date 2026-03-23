@@ -16,6 +16,7 @@ import math
 import os
 import re
 import ssl
+import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -136,7 +137,7 @@ def _default_ssl_context() -> Optional[ssl.SSLContext]:
         return None
 
 
-def fetch_hardware_payload(url: str = DEFAULT_HF_HARDWARE_URL) -> Any:
+def fetch_hardware_payload(url: str = DEFAULT_HF_HARDWARE_URL, *, max_retries: int = 2) -> Any:
     headers = {"Accept": "application/json"}
     token = (os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY") or "").strip()
     if token:
@@ -144,8 +145,21 @@ def fetch_hardware_payload(url: str = DEFAULT_HF_HARDWARE_URL) -> Any:
 
     request = urllib.request.Request(url, headers=headers)
     ssl_context = _default_ssl_context()
-    with urllib.request.urlopen(request, timeout=30, context=ssl_context) as response:
-        return json.loads(response.read().decode("utf-8"))
+    last_error: Optional[Exception] = None
+    for attempt in range(max_retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=30, context=ssl_context) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                raise
+            last_error = exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = exc
+        if attempt < max_retries:
+            import time
+            time.sleep(2 ** attempt)
+    raise last_error  # type: ignore[misc]
 
 
 def normalize_hardware_rows(payload: Any) -> list[HardwareFlavor]:

@@ -399,8 +399,8 @@ class HFJobsBackend(ITrainingBackend):
                     return None  # Still running
 
             except Exception as e:
-                logger.warning("Status check failed: %s", e)
-                return None  # Retry on transient errors
+                # Let poll_until_done handle persistent vs transient classification
+                raise
 
         result = poll_until_done(
             check_status,
@@ -889,27 +889,31 @@ def _parse_timeout(timeout_str: str) -> float:
         timeout_str: Timeout string (e.g., '4h', '2.5h', '90m')
 
     Returns:
-        Timeout in hours as a float
+        Timeout in hours as a float (defaults to 4.0 on invalid input)
 
     Example:
         _parse_timeout('4h')   -> 4.0
         _parse_timeout('90m')  -> 1.5
         _parse_timeout('2.5h') -> 2.5
     """
-    timeout_str = str(timeout_str).strip().lower()
+    raw = str(timeout_str).strip().lower()
+    default = 4.0
 
-    if timeout_str.endswith("h"):
+    if raw.endswith("h"):
         try:
-            return float(timeout_str[:-1])
+            return float(raw[:-1])
         except ValueError:
-            return 4.0
-    elif timeout_str.endswith("m"):
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default
+    elif raw.endswith("m"):
         try:
-            return float(timeout_str[:-1]) / 60.0
+            return float(raw[:-1]) / 60.0
         except ValueError:
-            return 4.0
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default
     else:
         try:
-            return float(timeout_str)
+            return float(raw)
         except ValueError:
-            return 4.0
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default

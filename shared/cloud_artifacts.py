@@ -5,6 +5,7 @@ Cloud artifact helpers shared by training scripts and cloud backends.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from transformers import TrainerCallback
+
+_logger = logging.getLogger(__name__)
 
 
 _HF_BUCKET_CACHE: Dict[str, str] = {}
@@ -248,8 +251,30 @@ def sync_file_to_hf_bucket(local_path: Path, bucket_id: str, remote_path: str, t
     if not local_path.exists() or not local_path.is_file():
         return
 
-    remote_parent = remote_path.strip("/").rsplit("/", 1)[0]
-    sync_directory_to_hf_bucket(local_path.parent, bucket_id, remote_parent, token=token)
+    bucket_id = normalize_hf_bucket_id(bucket_id)
+    remote_path_stripped = remote_path.strip("/")
+    token = _normalize_token_value(token)
+    bucket_id = ensure_hf_bucket(bucket_id, token=token)
+
+    try:
+        from huggingface_hub import HfApi  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub HfApi is unavailable; install huggingface_hub>=1.5.0."
+        ) from exc
+
+    api = HfApi(token=token)
+    try:
+        api.upload_file(
+            path_or_fileobj=str(local_path),
+            path_in_repo=remote_path_stripped,
+            repo_id=bucket_id,
+            repo_type="bucket",
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"HF bucket file upload failed for {bucket_id}/{remote_path_stripped}: {exc}"
+        ) from exc
 
 
 def publish_final_model_to_hub(final_model_dir: Path, repo_id: str, token: str, private: bool = True) -> None:
@@ -305,4 +330,7 @@ class HFBucketSyncCallback(TrainerCallback):
         )
 
     def on_save(self, args, state, control, **kwargs):
-        sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)
+        try:
+            sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)
+        except Exception as exc:
+            _logger.warning("Bucket sync on checkpoint save failed (non-fatal): %s", exc)

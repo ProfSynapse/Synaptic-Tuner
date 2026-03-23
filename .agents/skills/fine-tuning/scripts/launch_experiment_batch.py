@@ -44,6 +44,7 @@ def launch_batch(
     yes: bool,
     dry_run: bool,
 ) -> int:
+    failures: list[tuple[str, str]] = []
     for index, experiment_spec in enumerate(experiment_specs):
         cmd = build_command(
             experiment_spec,
@@ -54,11 +55,19 @@ def launch_batch(
         )
         print(f"[{index + 1}/{len(experiment_specs)}] {' '.join(cmd)}")
         if not dry_run:
-            subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+            result = subprocess.run(cmd, cwd=REPO_ROOT)
+            if result.returncode != 0:
+                failures.append((experiment_spec, f"exit code {result.returncode}"))
+                print(f"  FAILED (exit code {result.returncode}), continuing batch...")
         if index < len(experiment_specs) - 1 and stagger_seconds > 0:
             print(f"Waiting {stagger_seconds:g}s before the next submission...")
             if not dry_run:
                 time.sleep(stagger_seconds)
+    if failures:
+        print(f"\n{len(failures)}/{len(experiment_specs)} experiment(s) failed:")
+        for spec, reason in failures:
+            print(f"  - {spec}: {reason}")
+        return 1
     return 0
 
 
