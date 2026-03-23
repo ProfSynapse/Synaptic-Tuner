@@ -592,6 +592,12 @@ def main():
         help="W&B run name"
     )
 
+    # LoRA technique variants
+    parser.add_argument("--use-dora", action="store_true",
+                        help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
+    parser.add_argument("--use-rslora", action="store_true",
+                        help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
+
     # Tier preset
     parser.add_argument(
         "--tier",
@@ -734,6 +740,9 @@ def main():
         _tier_config_map = {
             "r": ("lora", "r"),
             "lora_alpha": ("lora", "lora_alpha"),
+            "use_dora": ("lora", "use_dora"),
+            "use_rslora": ("lora", "use_rslora"),
+            "target_modules": ("lora", "target_modules"),
             "learning_rate": ("training", "learning_rate"),
             "num_train_epochs": ("training", "num_train_epochs"),
             "warmup_ratio": ("training", "warmup_ratio"),
@@ -749,6 +758,12 @@ def main():
                 section, attr = _tier_config_map[key]
                 setattr(getattr(config, section), attr, value)
         print(f"Applied '{args.tier}' tier preset: {tier_config}")
+
+    # Apply LoRA technique CLI overrides (after tier, so they take precedence)
+    if args.use_dora:
+        config.lora.use_dora = True
+    if args.use_rslora:
+        config.lora.use_rslora = True
 
     # Apply command-line overrides
     if args.model_name:
@@ -887,7 +902,9 @@ def main():
         bias=config.lora.bias,
         target_modules=config.lora.target_modules,
         use_gradient_checkpointing=config.lora.use_gradient_checkpointing,
-        random_state=config.lora.random_state
+        random_state=config.lora.random_state,
+        use_rslora=config.lora.use_rslora,
+        use_dora=config.lora.use_dora,
     )
 
     # Check initial GPU memory
