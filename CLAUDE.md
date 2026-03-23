@@ -409,9 +409,9 @@ Logging proxy runs on `:8080` → forwards to vLLM `:8000`. Catalog backend: set
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 2f6b7d3b-2b85-4bbf-8e36-e30bfa5a25e2`
-- Team: `pact-2f6b7d3b`
-- Started: 2026-03-20 17:29:51 UTC
+- Resume: `claude --resume ec84c73c-744c-4ea2-9ec5-b61c66728a5d`
+- Team: `pact-ec84c73c`
+- Started: 2026-03-23 10:30:50 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
