@@ -1,0 +1,22 @@
+# DoRA: Weight-Decomposed Low-Rank Adaptation
+# Separates magnitude and direction updates to better match full fine-tuning.
+# Drop-in improvement over standard LoRA — same rank, better quality.
+#
+# Use with: set use_dora: true in your trainer config.yaml
+# Best for: Any training method (SFT, KTO, GRPO) where you want better quality
+#           at the same rank without changing other hyperparameters.
+# VRAM: ~1-2GB more than standard LoRA at same rank (magnitude params added)
+# Ref: https://arxiv.org/abs/2402.09353
+#
+# UNSLOTH COMPAT:
+#   use_dora is NOT an explicit parameter in Unsloth's get_peft_model().
+#   It passes through via **kwargs to PEFT's LoraConfig and works, but
+#   Unsloth will not apply its fast custom kernels — you may see a warning
+#   about non-standard config. Quality improvement still applies; you just
+#   lose some of Unsloth's speed optimizations.
+
+r: 64
+lora_alpha: 128
+use_dora: true
+
+# All other settings inherit from base config

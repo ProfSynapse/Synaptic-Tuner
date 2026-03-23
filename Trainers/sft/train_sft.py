@@ -467,6 +467,10 @@ def parse_args(argv=None):
         type=str,
         help="Comma-separated LoRA target modules override",
     )
+    parser.add_argument("--use-dora", action="store_true",
+                        help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
+    parser.add_argument("--use-rslora", action="store_true",
+                        help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
     parser.add_argument(
         "--load-in-4bit",
         action="store_true",
@@ -594,6 +598,9 @@ def run(args: argparse.Namespace):
             "warmup_ratio": ("training", "warmup_ratio"),
             "batch_size": ("training", "per_device_train_batch_size"),
             "gradient_accumulation_steps": ("training", "gradient_accumulation_steps"),
+            "use_dora": ("lora", "use_dora"),
+            "use_rslora": ("lora", "use_rslora"),
+            "target_modules": ("lora", "target_modules"),
         }
         for key, value in tier_config.items():
             if key == "max_steps":
@@ -627,6 +634,10 @@ def run(args: argparse.Namespace):
             for module in args.lora_target_modules.split(",")
             if module.strip()
         ]
+    if args.use_dora:
+        config.lora.use_dora = True
+    if args.use_rslora:
+        config.lora.use_rslora = True
 
     # Dataset overrides
     if args.dataset_name:
@@ -776,7 +787,9 @@ def run(args: argparse.Namespace):
         bias=config.lora.bias,
         target_modules=config.lora.target_modules,
         use_gradient_checkpointing=config.lora.use_gradient_checkpointing,
-        random_state=config.lora.random_state
+        random_state=config.lora.random_state,
+        use_rslora=config.lora.use_rslora,
+        use_dora=config.lora.use_dora,
     )
 
     # Check initial GPU memory

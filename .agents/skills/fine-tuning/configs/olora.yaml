@@ -1,0 +1,19 @@
+# OLoRA: Orthonormal Low-Rank Adaptation
+# QR decomposition initialization — orthonormal bases for better optimization landscape.
+# Faster convergence than standard LoRA with minimal overhead.
+#
+# Use with: set init_lora_weights: "olora" in your trainer config.yaml
+# Best for: Fast convergence without data-dependent init (simpler than EVA)
+# VRAM: Same as standard LoRA at equivalent rank
+# Paper: https://arxiv.org/abs/2406.01775
+#
+# UNSLOTH COMPAT: BLOCKED
+#   Unsloth validates init_lora_weights against an allowlist:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   "olora" is NOT in the list and will raise ValueError.
+#   To use OLoRA you must bypass Unsloth and use PEFT's get_peft_model()
+#   directly, losing Unsloth's speed optimizations.
+
+r: 64
+lora_alpha: 128
+# init_lora_weights: "olora"  # BLOCKED by Unsloth — see note above

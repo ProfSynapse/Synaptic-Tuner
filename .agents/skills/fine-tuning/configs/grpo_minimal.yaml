@@ -1,0 +1,24 @@
+# Minimal LoRA for GRPO/RL tasks
+# LoRA Without Regret finding: rank-1 to 8 is remarkably effective for RL.
+# Low rank + all-linear targets gives best RL results at minimal compute.
+#
+# Use with: GRPO trainer config
+# Best for: Reasoning tasks, reward-driven optimization
+# VRAM: Very low — small adapter footprint
+# Ref: https://thinkingmachines.ai/blog/lora/
+#
+# UNSLOTH COMPAT:
+#   use_rslora: Supported natively (fixed May 2025).
+#   target_modules "all-linear": Only on new path (UNSLOTH_USE_NEW_MODEL=1).
+#   For legacy Unsloth, replace with explicit module list (see regret_free.yaml).
+
+r: 8
+lora_alpha: 16
+learning_rate: 5e-6
+use_rslora: true
+
+# "all-linear" requires UNSLOTH_USE_NEW_MODEL=1. See regret_free.yaml for fallback.
+target_modules: "all-linear"
+
+batch_size: 6
+gradient_accumulation_steps: 6

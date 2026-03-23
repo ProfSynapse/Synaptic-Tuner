@@ -48,6 +48,8 @@ class LoRAConfig:
     target_modules: List[str]
     use_gradient_checkpointing: str
     random_state: int
+    use_rslora: bool = False
+    use_dora: bool = False
 
 
 @dataclass
