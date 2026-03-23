@@ -1,0 +1,44 @@
+experiment:
+  name: qwen3-4b-toolcall-schema-a100-r2-dora
+  provider: hf_jobs
+  method: sft
+  objective: validate_dora_on_toolcall_schema_baseline
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: Qwen/Qwen3-4B
+    gpu: a100-large
+    image_profile: stable
+    batch_size: 16
+    gradient_accumulation: 2
+    learning_rate: 1.0e-4
+    num_epochs: 2
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    use_dora: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: true
+    preset: full
+    runtime: vllm
+    image_profile: fast_vllm
+    gpu: a100-large
+  loss:
+    enabled: true
+    gpu: a100-large
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv

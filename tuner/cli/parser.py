@@ -75,7 +75,7 @@ Commands:
   cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
-  bucket      Read, list, pull, or push local / HF bucket artifacts
+  bucket      Read, list, pull, push, or analyze local / HF bucket artifacts
   run-experiment  Run train -> eval -> loss from one experiment config
   analyze-experiment Inspect a finished experiment bundle and recommendations
   eval        Evaluate a model
@@ -117,6 +117,7 @@ Examples:
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
   python tuner.py cloud-jobs list
+  python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
   python tuner.py bucket pull --path runs/hf_jobs/sft/<run-prefix>/ --dest .
   python tuner.py bucket push --path local/results.json --dest runs/manual_uploads/
@@ -219,6 +220,8 @@ Examples:
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym/bucket.")
     parser.add_argument("--path", help="Bucket-relative, hf://, or local path for bucket commands.")
     parser.add_argument("--dest", help="Destination for bucket pull/push. Local dir for pull, remote bucket path for push.")
+    parser.add_argument("--eval-path", help="Explicit evaluation prefix or evaluation_lineage.json path for bucket analyze.")
+    parser.add_argument("--loss-path", help="Explicit loss prefix or loss_lineage.json path for bucket analyze.")
     parser.add_argument("--preset", help="Evaluation preset from Evaluator/config/eval_run.yaml (cloud-eval, cloud-pipeline).")
     parser.add_argument(
         "--scenario",

@@ -26,6 +26,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
+| Analyze bucket-backed run | `python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/` |
 | Read bucket artifact | `python tuner.py bucket read --path runs/.../logs/training_latest.jsonl --jsonl-latest --pretty` |
 | List bucket prefix | `python tuner.py bucket list --path runs/hf_jobs/sft/<run-prefix>/ --limit 20` |
 | Pull bucket prefix locally | `python tuner.py bucket pull --path runs/hf_jobs/sft/<run-prefix>/ --dest .` |
@@ -191,6 +192,9 @@ python tuner.py bucket read \
 
 **Tail the structured progress log or summary artifact directly from the bucket:**
 ```bash
+python tuner.py bucket analyze \
+  --path runs/hf_jobs/sft/<run-prefix>/
+
 python tuner.py bucket read \
   --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl \
   --tail 5
@@ -211,6 +215,11 @@ python tuner.py bucket push \
   --path local/analysis/notes.json \
   --dest runs/manual_uploads/
 ```
+
+Gotcha:
+- Use `bucket analyze` first when a run has finished. It summarizes `training_lineage.json`, the newest `evaluation_lineage.json`, and `loss_lineage.json` in one pass.
+- If the same training run has multiple eval reruns or alternate loss prefixes, pass `--eval-path` and/or `--loss-path` explicitly so the summary cannot attach to the wrong post-training artifacts.
+- If schema pass rate is strong but behavior pass rate is still weak, do not assume you need more tool-call syntax SFT. That pattern usually means the next bottleneck is text-only restraint, clarification, or verify-before-action behavior.
 
 **Canonical one-off HF experiment with direct overrides:**
 ```bash

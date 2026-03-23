@@ -78,10 +78,19 @@ For HF Jobs specifically, bucket-backed artifacts are the primary source of trut
 
 Use the repo CLI for quick bucket reads/lists:
 ```bash
+python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
 python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
 python tuner.py bucket list --path runs/hf_jobs/sft/<run-prefix>/ --limit 20
 python tuner.py bucket pull --path runs/hf_jobs/sft/<run-prefix>/analysis/loss/ --dest .
 python tuner.py bucket push --path local/notes.json --dest runs/manual_uploads/
+```
+
+When a training run has multiple eval reruns or alternate loss benchmarks:
+```bash
+python tuner.py bucket analyze \
+  --path runs/hf_jobs/sft/<run-prefix>/ \
+  --eval-path runs/hf_jobs/sft/<run-prefix>/evaluations/vllm/<eval-prefix>/ \
+  --loss-path runs/hf_jobs/sft/<run-prefix>/analysis/loss/
 ```
 
 Keep the checked-in benchmark ledger updated from finished runs:
