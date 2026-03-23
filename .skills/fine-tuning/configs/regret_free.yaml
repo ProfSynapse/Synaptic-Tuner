@@ -1,0 +1,24 @@
+# LoRA Without Regret (Schulman et al., Sep 2025)
+# Matches full fine-tuning quality at ~67% compute cost.
+# Three rules: all-linear targets, high rank, 10x higher LR.
+#
+# Use with: --tier regret-free (once wired) or manually merge into config.yaml
+# Best for: SFT when you want full-FT quality from LoRA
+# VRAM: ~14-18GB for 3B, ~20-24GB for 7B (high rank = more adapter params)
+# Paper: https://thinkingmachines.ai/blog/lora/
+#
+# NOTE: use_rslora is practically mandatory at r=256 to stabilize gradients.
+# NOTE: target_modules "all-linear" requires Unsloth/PEFT passthrough support.
+#       If unsupported, expand to explicit module list for your architecture.
+
+r: 256
+lora_alpha: 16
+learning_rate: 2e-3
+use_rslora: true
+target_modules: "all-linear"
+
+# Conservative schedule for high-rank stability
+warmup_ratio: 0.1
+num_train_epochs: 2
+batch_size: 2
+gradient_accumulation_steps: 8

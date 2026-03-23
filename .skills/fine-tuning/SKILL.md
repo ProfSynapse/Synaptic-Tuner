@@ -117,9 +117,27 @@ Load the specific reference you need:
 | **Cloud Experiments** | Canonical train→eval launches with `--train-*` overrides | `reference/cloud-experiment-launching.md` |
 | **Checkpoint Evaluation** | Best-checkpoint selection via eval | `reference/checkpoint-evaluation.md` |
 | **Experiment Loop** | Autonomous hyperparameter search (LLM + LightGBM) | `reference/experiment-loop.md` |
+| **LoRA Techniques** | LoRA variants, init methods, config recipes | `reference/lora-techniques.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |
+
+## LoRA Technique Configs
+
+Reference config templates for LoRA variants in `.skills/fine-tuning/configs/`:
+
+| Template | Technique | When to Use |
+|----------|-----------|-------------|
+| `regret_free.yaml` | High-rank + rsLoRA + all-linear | Full-FT quality from LoRA |
+| `dora.yaml` | DoRA (weight-decomposed) | Drop-in quality boost |
+| `qlora_dora.yaml` | QLoRA + DoRA | Single GPU, VRAM-limited |
+| `pissa.yaml` | PiSSA (SVD init) | Fast convergence |
+| `eva.yaml` | EVA (activation SVD init) | Small datasets |
+| `olora.yaml` | OLoRA (QR init) | Fast convergence, simpler than EVA |
+| `loftq.yaml` | LoftQ (quant-aware init) | Minimize 4-bit quality loss |
+| `grpo_minimal.yaml` | Minimal rank for RL | GRPO/reasoning tasks |
+
+See `reference/lora-techniques.md` for full details, integration status, and compatibility notes.
 
 ## Common Patterns
 
