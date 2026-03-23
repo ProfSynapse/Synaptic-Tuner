@@ -259,56 +259,10 @@ class CloudTrainingConfig(TrainingConfig):
     max_steps: Optional[int] = None
     max_seq_length: Optional[int] = None
     load_in_4bit: Optional[bool] = None
-    lora_target_modules: Optional[List[str]] = field(default=None)
-
-
-def apply_training_overrides(
-    config: CloudTrainingConfig,
-    *,
-    model_name: Optional[str] = None,
-    dataset_name: Optional[str] = None,
-    dataset_file: Optional[str] = None,
-    batch_size: Optional[int] = None,
-    gradient_accumulation: Optional[int] = None,
-    learning_rate: Optional[float] = None,
-    num_epochs: Optional[int] = None,
-    max_steps: Optional[int] = None,
-    max_seq_length: Optional[int] = None,
-    load_in_4bit: Optional[bool] = None,
-    lora_target_modules: Optional[List[str]] = None,
-    gpu: Optional[str] = None,
-    timeout_hours: Optional[float] = None,
-) -> None:
-    """Apply non-None training overrides to a CloudTrainingConfig.
-
-    Shared by experiment_handler (from ExperimentSpec) and cloud_train_handler
-    (from CLI args). Callers pass only the fields they want to override; None
-    values are skipped.
-    """
-    if model_name:
-        config.model_name = model_name
-    if dataset_name:
-        config.dataset_name = dataset_name
-    if dataset_file:
-        config.dataset_file = dataset_file
-    if batch_size is not None:
-        config.batch_size = batch_size
-    if gradient_accumulation is not None:
-        config.gradient_accumulation_steps = gradient_accumulation
-    if learning_rate is not None:
-        config.learning_rate = learning_rate
-    if num_epochs is not None:
-        config.epochs = num_epochs
-    if max_steps is not None:
-        config.max_steps = max_steps
-    if max_seq_length is not None:
-        config.max_seq_length = max_seq_length
-    if load_in_4bit is not None:
-        config.load_in_4bit = load_in_4bit
-    if lora_target_modules:
-        config.lora_target_modules = list(lora_target_modules)
-    if gpu:
-        config.gpu_type = gpu
-        config.hf_flavor = gpu
-    if timeout_hours is not None:
-        config.timeout_hours = timeout_hours
+    lora_r: Optional[int] = None
+    lora_alpha: Optional[int] = None
+    lora_dropout: Optional[float] = None
+    use_dora: bool = False
+    use_rslora: bool = False
+    init_lora_weights: Optional[str] = None
+    lora_target_modules: Optional[List[str] | str] = field(default=None)

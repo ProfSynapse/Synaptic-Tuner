@@ -35,7 +35,7 @@ class CloudPipelineHandler(BaseHandler):
                 )
             return requested_method
 
-        method_labels = CloudTrainHandler(args=self.args).load_method_labels()
+        method_labels = CloudTrainHandler(args=self.args)._load_method_labels()
         from tuner.ui import print_menu
 
         options = [(m, f"{BOX['bullet']} {method_labels.get(m, m.upper())}") for m in methods]
@@ -51,7 +51,7 @@ class CloudPipelineHandler(BaseHandler):
         eval_scenarios: Optional[list[str]],
         eval_tags: Optional[str],
     ) -> Dict[str, str]:
-        display = CloudTrainHandler(args=self.args).build_config_display(
+        display = CloudTrainHandler(args=self.args)._build_config_display(
             training_config,
             PROVIDER_INFO["hf_jobs"],
         )
@@ -113,7 +113,7 @@ class CloudPipelineHandler(BaseHandler):
             if not method:
                 return 0
 
-            training_config = CloudTrainHandler(args=self.args).apply_training_overrides(
+            training_config = CloudTrainHandler(args=self.args)._apply_training_overrides(
                 backend.load_config(method)
             )
             eval_preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)

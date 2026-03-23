@@ -52,7 +52,7 @@ def test_training_stage_runner_recovers_completed_training_without_resubmitting(
     runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
 
     with patch.object(runner, "_bucket_has_path", return_value=True):
-        with patch("tuner.handlers.hf_training_stage_runner.TrainingBackendRegistry.get") as mock_get:
+        with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get") as mock_get:
             result = runner.run(spec=None, experiment=experiment)
 
     assert result.status == "completed"
@@ -411,7 +411,7 @@ def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: 
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.hf_loss_stage_runner.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.experiment_handler.HFJobExecutor.submit") as mock_submit:
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
@@ -516,7 +516,7 @@ def test_eval_stage_runner_requests_same_job_loss_when_post_training_mode_is_sam
         def handle(self):
             return 0
 
-    with patch("tuner.handlers.hf_eval_stage_runner.CloudEvalHandler", _FakeCloudEvalHandler):
+    with patch("tuner.handlers.experiment_handler.CloudEvalHandler", _FakeCloudEvalHandler):
         result = runner.run(spec=spec, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
@@ -577,7 +577,7 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.hf_loss_stage_runner.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.experiment_handler.HFJobExecutor.submit") as mock_submit:
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
