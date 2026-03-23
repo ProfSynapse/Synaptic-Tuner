@@ -33,6 +33,8 @@ lora:
     - "w3"
   use_gradient_checkpointing: "unsloth"  # Unsloth's optimized version
   random_state: 3407
+  use_rslora: false
+  use_dora: false
 
 # SFT Training Configuration
 training:

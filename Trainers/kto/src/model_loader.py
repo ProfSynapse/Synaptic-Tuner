@@ -159,7 +159,9 @@ def apply_lora_adapters(
     bias: str = "none",
     target_modules: list = None,
     use_gradient_checkpointing: str = "unsloth",
-    random_state: int = 3407
+    random_state: int = 3407,
+    use_rslora: bool = False,
+    use_dora: bool = False
 ):
     """
     Apply LoRA adapters to the model using Unsloth.
@@ -173,6 +175,8 @@ def apply_lora_adapters(
         target_modules: Modules to apply LoRA to
         use_gradient_checkpointing: Gradient checkpointing mode
         random_state: Random seed
+        use_rslora: Enable rank-stabilized LoRA scaling (recommended at r>=128)
+        use_dora: Enable Weight-Decomposed LoRA (passes through to PEFT via kwargs)
 
     Returns:
         Model with LoRA adapters applied
@@ -183,6 +187,8 @@ def apply_lora_adapters(
     print(f"LoRA rank: {r}")
     print(f"LoRA alpha: {lora_alpha}")
     print(f"LoRA dropout: {lora_dropout}")
+    print(f"rsLoRA: {use_rslora}")
+    print(f"DoRA: {use_dora}")
     print(f"Gradient checkpointing: {use_gradient_checkpointing}")
 
     if target_modules is None:
@@ -202,7 +208,8 @@ def apply_lora_adapters(
         bias=bias,
         use_gradient_checkpointing=use_gradient_checkpointing,
         random_state=random_state,
-        use_rslora=False,  # Explicitly set to default value
+        use_rslora=use_rslora,
+        use_dora=use_dora,
     )
 
     # Print trainable parameters

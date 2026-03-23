@@ -111,7 +111,9 @@ def apply_lora_adapters(
     bias: str = "none",
     target_modules: list = None,
     use_gradient_checkpointing: str = "unsloth",
-    random_state: int = 3407
+    random_state: int = 3407,
+    use_rslora: bool = False,
+    use_dora: bool = False,
 ):
     """
     Apply LoRA adapters to the model using Unsloth.
@@ -154,6 +156,8 @@ def apply_lora_adapters(
         bias=bias,
         use_gradient_checkpointing=use_gradient_checkpointing,
         random_state=random_state,
+        use_rslora=use_rslora,
+        use_dora=use_dora,
     )
 
     # Print trainable parameters
