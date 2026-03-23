@@ -69,6 +69,16 @@ class LossStageSpec:
 
 
 @dataclass
+class PostTrainingSpec:
+    mode: str = "parallel"
+
+    def validate(self) -> list[str]:
+        if self.mode not in {"parallel", "same_job"}:
+            return [f"unsupported post_training.mode '{self.mode}'"]
+        return []
+
+
+@dataclass
 class FeaturesStageSpec:
     enabled: bool = True
     formats: List[str] = field(default_factory=lambda: ["jsonl", "csv"])
@@ -131,6 +141,7 @@ class ExperimentSpec:
     execution: ExecutionStageSpec = field(default_factory=ExecutionStageSpec)
     evaluation: EvaluationStageSpec = field(default_factory=EvaluationStageSpec)
     loss: LossStageSpec = field(default_factory=LossStageSpec)
+    post_training: PostTrainingSpec = field(default_factory=PostTrainingSpec)
     features: FeaturesStageSpec = field(default_factory=FeaturesStageSpec)
 
     def validate(self) -> list[str]:
@@ -146,6 +157,7 @@ class ExperimentSpec:
         if not self.training.model_name:
             issues.append("experiment.training.model_name is required")
         issues.extend(self.execution.validate())
+        issues.extend(self.post_training.validate())
         return issues
 
     @classmethod
@@ -156,6 +168,7 @@ class ExperimentSpec:
         execution = ExecutionStageSpec(**payload.get("execution", {}))
         evaluation = EvaluationStageSpec(**payload.get("evaluation", {}))
         loss = LossStageSpec(**payload.get("loss", {}))
+        post_training = PostTrainingSpec(**payload.get("post_training", {}))
         features = FeaturesStageSpec(**payload.get("features", {}))
         return cls(
             name=payload["name"],
@@ -167,6 +180,7 @@ class ExperimentSpec:
             execution=execution,
             evaluation=evaluation,
             loss=loss,
+            post_training=post_training,
             features=features,
         )
 

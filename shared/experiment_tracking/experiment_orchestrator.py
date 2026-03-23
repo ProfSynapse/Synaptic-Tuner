@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
@@ -38,6 +39,85 @@ class ExperimentOrchestrator:
         self.eval_runner = eval_runner
         self.loss_runner = loss_runner
         self.base_dir = base_dir
+
+    @staticmethod
+    def _should_run_stage(
+        *,
+        spec: ExperimentSpec,
+        stage_name: str,
+        enabled: bool,
+        runner: Optional[StageRunner],
+        restored: Optional[StageResult],
+    ) -> bool:
+        if not enabled or runner is None or not ExperimentOrchestrator._stage_selected(spec, stage_name):
+            return False
+        return restored is None
+
+    def _finalize_stage_result(
+        self,
+        *,
+        experiment: Experiment,
+        stage_name: str,
+        result: Optional[StageResult],
+        role: str,
+    ) -> Optional[StageResult]:
+        if result is None:
+            return None
+        if result.run_record:
+            relationship = "parent" if role == "evaluation" else "derived_from"
+            self.tracking_service.attach_run(
+                experiment,
+                result.run_record,
+                role=role,
+                relationship=relationship,
+                parent_run_id=experiment.training_run_id,
+            )
+        if result.artifact_root:
+            self.tracking_service.set_artifact_root(experiment, stage_name, result.artifact_root)
+        self.tracking_service.mark_stage(experiment, stage_name, result.status)
+        return result
+
+    def _run_parallel_post_training(
+        self,
+        *,
+        spec: ExperimentSpec,
+        experiment: Experiment,
+        training: StageResult,
+        eval_result: Optional[StageResult],
+        loss_result: Optional[StageResult],
+    ) -> tuple[Optional[StageResult], Optional[StageResult]]:
+        should_run_eval = self._should_run_stage(
+            spec=spec,
+            stage_name="evaluation",
+            enabled=spec.evaluation.enabled,
+            runner=self.eval_runner,
+            restored=eval_result,
+        )
+        should_run_loss = self._should_run_stage(
+            spec=spec,
+            stage_name="loss",
+            enabled=spec.loss.enabled,
+            runner=self.loss_runner,
+            restored=loss_result,
+        )
+        if not should_run_eval and not should_run_loss:
+            return eval_result, loss_result
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            eval_future = None
+            loss_future = None
+            if should_run_eval and self.eval_runner is not None:
+                self.tracking_service.mark_stage(experiment, "evaluation", "running")
+                eval_future = executor.submit(self.eval_runner.run, spec, experiment, training)
+            if should_run_loss and self.loss_runner is not None:
+                self.tracking_service.mark_stage(experiment, "loss", "running")
+                loss_future = executor.submit(self.loss_runner.run, spec, experiment, training)
+
+            if eval_future is not None:
+                eval_result = eval_future.result()
+            if loss_future is not None:
+                loss_result = loss_future.result()
+        return eval_result, loss_result
 
     def _restore_stage_result(self, experiment: Experiment, stage: str) -> Optional[StageResult]:
         run_id = getattr(experiment, f"{stage}_run_id", None)
@@ -144,40 +224,56 @@ class ExperimentOrchestrator:
             eval_result = self._restore_stage_result(experiment, "evaluation")
             if self._should_rerun_failed_stage("evaluation", eval_result):
                 eval_result = None
-            if eval_result is None:
-                self.tracking_service.mark_stage(experiment, "evaluation", "running")
-                eval_result = self.eval_runner.run(spec, experiment, previous=training)
-            if eval_result.run_record:
-                self.tracking_service.attach_run(
-                    experiment,
-                    eval_result.run_record,
-                    role="evaluation",
-                    relationship="parent",
-                    parent_run_id=experiment.training_run_id,
-                )
-            if eval_result.artifact_root:
-                self.tracking_service.set_artifact_root(experiment, "evaluation", eval_result.artifact_root)
-            self.tracking_service.mark_stage(experiment, "evaluation", eval_result.status)
 
         loss_result: Optional[StageResult] = None
         if spec.loss.enabled and self.loss_runner is not None and self._stage_selected(spec, "loss"):
             loss_result = self._restore_stage_result(experiment, "loss")
             if self._should_rerun_failed_stage("loss", loss_result):
                 loss_result = None
-            if loss_result is None:
+
+        if spec.post_training.mode == "parallel":
+            eval_result, loss_result = self._run_parallel_post_training(
+                spec=spec,
+                experiment=experiment,
+                training=training,
+                eval_result=eval_result,
+                loss_result=loss_result,
+            )
+        else:
+            if self._should_run_stage(
+                spec=spec,
+                stage_name="evaluation",
+                enabled=spec.evaluation.enabled,
+                runner=self.eval_runner,
+                restored=eval_result,
+            ):
+                self.tracking_service.mark_stage(experiment, "evaluation", "running")
+                eval_result = self.eval_runner.run(spec, experiment, previous=training)
+            if self._should_run_stage(
+                spec=spec,
+                stage_name="loss",
+                enabled=spec.loss.enabled,
+                runner=self.loss_runner,
+                restored=loss_result,
+            ):
                 self.tracking_service.mark_stage(experiment, "loss", "running")
                 loss_result = self.loss_runner.run(spec, experiment, previous=training)
-            if loss_result.run_record:
-                self.tracking_service.attach_run(
-                    experiment,
-                    loss_result.run_record,
-                    role="loss",
-                    relationship="derived_from",
-                    parent_run_id=experiment.training_run_id,
-                )
-            if loss_result.artifact_root:
-                self.tracking_service.set_artifact_root(experiment, "loss", loss_result.artifact_root)
-            self.tracking_service.mark_stage(experiment, "loss", loss_result.status)
+
+        if spec.evaluation.enabled and self.eval_runner is not None and self._stage_selected(spec, "evaluation"):
+            eval_result = self._finalize_stage_result(
+                experiment=experiment,
+                stage_name="evaluation",
+                result=eval_result,
+                role="evaluation",
+            )
+
+        if spec.loss.enabled and self.loss_runner is not None and self._stage_selected(spec, "loss"):
+            loss_result = self._finalize_stage_result(
+                experiment=experiment,
+                stage_name="loss",
+                result=loss_result,
+                role="loss",
+            )
 
         final_status = "completed"
         for stage_name in ("training", "evaluation", "loss"):

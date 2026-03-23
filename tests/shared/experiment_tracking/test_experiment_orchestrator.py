@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 from shared.experiment_tracking import ExperimentOrchestrator, ExperimentSpec, StageResult, TrackingService
@@ -19,6 +21,21 @@ class _StaticRunner:
 class _FailIfCalledRunner:
     def run(self, spec, experiment, previous=None):
         raise AssertionError("runner should not have been called")
+
+
+class _BarrierRunner:
+    def __init__(self, result: StageResult, barrier: threading.Barrier, events: list[tuple[str, float]], label: str):
+        self.result = result
+        self.barrier = barrier
+        self.events = events
+        self.label = label
+
+    def run(self, spec, experiment, previous=None):
+        self.events.append((f"{self.label}_start", time.perf_counter()))
+        self.barrier.wait(timeout=2.0)
+        time.sleep(0.05)
+        self.events.append((f"{self.label}_end", time.perf_counter()))
+        return self.result
 
 
 def _record(*, run_id: str, run_type: str, stage: str, status: str = "completed") -> RunRecord:
@@ -331,3 +348,66 @@ def test_experiment_orchestrator_only_stage_evaluation_reuses_training_and_skips
     assert resumed.evaluation_run_id == "exp-eval-only"
     assert resumed.loss_run_id is None
     assert resumed.derived_outputs == {}
+
+
+def test_experiment_orchestrator_runs_eval_and_loss_in_parallel_mode(tmp_path: Path):
+    spec = ExperimentSpec(
+        name="parallel-post-training",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="HuggingFaceTB/SmolLM2-1.7B-Instruct", max_steps=20),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True),
+        features=FeaturesStageSpec(enabled=True),
+    )
+    spec.post_training.mode = "parallel"
+
+    training_runner = _StaticRunner(
+        StageResult(
+            status="completed",
+            run_record=_record(run_id="exp-training", run_type="sft", stage="training"),
+            artifact_root="/tmp/train-artifacts",
+        )
+    )
+    barrier = threading.Barrier(2)
+    events: list[tuple[str, float]] = []
+    eval_runner = _BarrierRunner(
+        StageResult(
+            status="completed",
+            run_record=_record(run_id="exp-eval", run_type="evaluation", stage="evaluation"),
+            eval_payload={"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}},
+            artifact_root="/tmp/eval-artifacts",
+        ),
+        barrier=barrier,
+        events=events,
+        label="eval",
+    )
+    loss_runner = _BarrierRunner(
+        StageResult(
+            status="completed",
+            run_record=_record(run_id="exp-loss", run_type="loss", stage="loss"),
+            loss_results=[LossResult(index=0, loss=0.4, num_completion_tokens=10, num_total_tokens=20, jsonl_hash="aaaa1111")],
+            artifact_root="/tmp/loss-artifacts",
+        ),
+        barrier=barrier,
+        events=events,
+        label="loss",
+    )
+
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=TrackingService(tmp_path),
+        training_runner=training_runner,
+        eval_runner=eval_runner,
+        loss_runner=loss_runner,
+        base_dir=tmp_path,
+    )
+
+    experiment = orchestrator.run(spec, spec_path="/tmp/spec.yaml")
+
+    assert experiment.status == "completed"
+    event_times = dict(events)
+    assert "eval_start" in event_times
+    assert "loss_start" in event_times
+    assert abs(event_times["eval_start"] - event_times["loss_start"]) < 0.1

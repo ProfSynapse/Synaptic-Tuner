@@ -290,6 +290,12 @@ class HFEvalStageRunner:
         self.repo_root = repo_root
         self.tracking_service = tracking_service
 
+    @staticmethod
+    def _use_same_job_loss(spec: ExperimentSpec) -> bool:
+        post_training = getattr(spec, "post_training", None)
+        mode = getattr(post_training, "mode", "parallel")
+        return mode == "same_job" and bool(spec.loss.enabled)
+
     def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
         if previous is None or previous.run_record is None:
             raise CloudProviderError("Evaluation stage requires a completed training run.")
@@ -328,11 +334,11 @@ class HFEvalStageRunner:
             update_model_card=False,
             gpu=spec.evaluation.gpu,
             timeout_hours=spec.evaluation.timeout_hours,
-            with_loss=bool(spec.loss.enabled),
-            loss_dataset_name=spec.dataset.source if spec.loss.enabled else None,
-            loss_dataset_file=spec.dataset.file if spec.loss.enabled else None,
-            loss_max_seq_length=spec.loss.max_seq_length or spec.training.max_seq_length,
-            loss_no_completion_only=not spec.loss.completion_only,
+            with_loss=self._use_same_job_loss(spec),
+            loss_dataset_name=spec.dataset.source if self._use_same_job_loss(spec) else None,
+            loss_dataset_file=spec.dataset.file if self._use_same_job_loss(spec) else None,
+            loss_max_seq_length=(spec.loss.max_seq_length or spec.training.max_seq_length) if self._use_same_job_loss(spec) else None,
+            loss_no_completion_only=(not spec.loss.completion_only) if self._use_same_job_loss(spec) else False,
             auto_confirm=True,
         )
         handler = CloudEvalHandler(args=args)

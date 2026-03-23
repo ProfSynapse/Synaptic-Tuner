@@ -99,3 +99,54 @@ def test_load_experiment_spec_rejects_empty_execution_selection(tmp_path):
 
     with pytest.raises(ValueError, match="execution stage selection resolves to an empty set"):
         load_experiment_spec(spec_path)
+
+
+def test_load_experiment_spec_supports_parallel_post_training_mode(tmp_path):
+    spec_path = tmp_path / "parallel_post_training.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: parallel-post-training
+              provider: hf_jobs
+              method: sft
+              dataset:
+                source: repo/dataset
+                file: sample.jsonl
+              training:
+                model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+              post_training:
+                mode: parallel
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    spec = load_experiment_spec(spec_path)
+
+    assert spec.post_training.mode == "parallel"
+
+
+def test_load_experiment_spec_rejects_invalid_post_training_mode(tmp_path):
+    spec_path = tmp_path / "invalid_post_training.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: invalid-post-training
+              provider: hf_jobs
+              method: sft
+              dataset:
+                source: repo/dataset
+                file: sample.jsonl
+              training:
+                model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+              post_training:
+                mode: unsupported
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unsupported post_training.mode"):
+        load_experiment_spec(spec_path)

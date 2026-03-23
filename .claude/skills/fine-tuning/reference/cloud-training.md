@@ -164,6 +164,10 @@ python3 scripts/launch_experiment_batch.py \
 
 Gotcha:
 - The launcher defaults to a 5-second stagger. Keep it on unless you have a specific reason to remove it; same-second submissions are harder to monitor and used to collide on timestamp-derived artifact prefixes.
+- Do not treat large unused VRAM headroom as a success case on its own. Read `training_lineage.json` and check `capacity_profile`:
+  - if peak reserved VRAM is well below half of device memory or headroom is still tens of GB, the run is underpacked
+  - for large-memory tiers like `a100-large`, that usually means you left training throughput on the table
+  - increase microbatch or otherwise retune before treating the hardware choice as optimized
 
 ---
 
@@ -206,6 +210,12 @@ Saved files to inspect:
 - `evaluation_results.md` - human-readable report
 - `evaluation_lineage.json` - provenance / model-card material
 - `logs/eval_progress.jsonl` - incremental progress events used for the local cloud dashboard
+
+For experiment orchestration:
+- `run-experiment` now defaults to **parallel** post-training execution
+- evaluation and exact loss submit as separate sibling jobs after training completes
+- analysis waits for both selected post-training stages
+- use `post_training.mode: same_job` only when you intentionally want the older embedded eval+loss path for a smoke/fallback run
 
 Inspection workflow:
 1. Find the source training run under `runs/hf_jobs/{method}/{run_slug}/`

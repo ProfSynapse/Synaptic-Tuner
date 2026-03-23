@@ -73,6 +73,16 @@ training:
 
 Use `"all-linear"` only when you intend to exercise the newer Unsloth model path. On the legacy path, keep an explicit module list for the stable baseline.
 
+Post-training orchestration is also configurable in the experiment spec:
+
+```yaml
+post_training:
+  mode: parallel   # parallel | same_job
+```
+
+- `parallel` is the default and launches evaluation and exact loss as separate sibling jobs after training
+- `same_job` keeps the older embedded eval+loss path for smoke or fallback usage
+
 ## Promotion Path
 
 1. Run SFT comparisons through `cloud-pipeline`

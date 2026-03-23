@@ -398,12 +398,14 @@ Provider-native storage defaults:
 - `run-experiment --auto-hardware` uses a blind planner: model size, method, seq length, quantization, and live HF flavor pricing. It does not require prior telemetry.
 - `plan-hardware` is the inspection surface for that same planner.
 - When using `--auto-hardware`, treat the resolved `batch_size` / `gradient_accumulation` as part of the experiment definition. Compare wall-clock and cost only after checking those resolved values.
+- After training finishes, read `training_lineage.json` before declaring the hardware/batch shape “good enough.” If peak reserved VRAM is still far below device capacity, the run is underpacked and the next iteration should push batch utilization harder.
 - Finished experiments now write `.tracking/experiments/<id>/analysis/` with:
   `experiment_summary.json`, `run_matrix.csv`, `feature_dataset.{jsonl,csv}`, `next_run_candidates.json`, `draft_next_spec.yaml`.
 - For the common train-then-evaluate flow, prefer `python tuner.py cloud-pipeline --method sft --preset full`.
 - `cloud-pipeline` is currently a two-job orchestration on HF Jobs, not a single remote composite job.
-- `run-experiment` is the higher-level experiment loop: training stays provider-native, eval can use `vllm`, and exact dataset loss runs afterward with `transformers`.
+- `run-experiment` is the higher-level experiment loop: training stays provider-native, then evaluation and exact dataset loss run as separate sibling post-training jobs by default.
 - Use `evaluation.runtime: vllm` in experiment specs when you want the fast eval server path. The exact loss stage still uses a post-eval `transformers` forward pass.
+- If you explicitly want the older embedded path for a smoke run, set `post_training.mode: same_job` in the experiment spec. Default is `parallel`.
 - Checkpoint-vs-checkpoint comparison is not automatic in smoke runs; you only get that if the trainer emitted multiple checkpoints and you intentionally run checkpoint evaluation / experiment-loop workflows.
 - For SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`.
 - When testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of upgrading packages in the old stable image.

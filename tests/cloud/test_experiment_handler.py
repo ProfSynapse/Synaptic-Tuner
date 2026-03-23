@@ -253,6 +253,114 @@ def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_
     assert config.lora_target_modules == "all-linear"
 
 
+def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    spec = ExperimentSpec(
+        name="parallel-post-training",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="Qwen/Qwen3-4B", max_steps=20),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True),
+        features=FeaturesStageSpec(enabled=False),
+    )
+    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    training = StageResult(
+        status="completed",
+        run_record=RunRecord(
+            run_id="train-run",
+            run_type="sft",
+            name="train",
+            timestamp="2026-03-23T00:00:00+00:00",
+            status="completed",
+            output_dir="hf://buckets/test/runs/hf_jobs/sft/abc",
+            model_name="Qwen/Qwen3-4B",
+            dataset_source="repo/dataset/sample.jsonl",
+            provider="hf_jobs",
+            artifact_backend="hf_bucket",
+            artifact_root="hf://buckets/test/runs/hf_jobs/sft/abc",
+            source_commit="deadbeef",
+            stage="training",
+            tags={"bucket_id": "test/toolset-training-artifacts", "artifact_prefix": "runs/hf_jobs/sft/abc"},
+        ),
+    )
+
+    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+        mock_handler = MagicMock()
+        mock_handler.handle.return_value = 0
+        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
+        mock_handler.last_job_id = "eval-job"
+        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
+        mock_handler_cls.return_value = mock_handler
+
+        result = runner.run(spec=spec, experiment=experiment, previous=training)
+
+    assert result.status == "completed"
+    args = mock_handler_cls.call_args.kwargs["args"]
+    assert args.with_loss is False
+    assert args.loss_dataset_name is None
+    assert args.loss_dataset_file is None
+
+
+def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    spec = ExperimentSpec(
+        name="same-job-post-training",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_loss_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="Qwen/Qwen3-4B", max_steps=20, max_seq_length=2048),
+        evaluation=EvaluationStageSpec(enabled=True, preset="quick"),
+        loss=LossStageSpec(enabled=True, completion_only=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+    spec.post_training.mode = "same_job"
+    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    training = StageResult(
+        status="completed",
+        run_record=RunRecord(
+            run_id="train-run",
+            run_type="sft",
+            name="train",
+            timestamp="2026-03-23T00:00:00+00:00",
+            status="completed",
+            output_dir="hf://buckets/test/runs/hf_jobs/sft/abc",
+            model_name="Qwen/Qwen3-4B",
+            dataset_source="repo/dataset/sample.jsonl",
+            provider="hf_jobs",
+            artifact_backend="hf_bucket",
+            artifact_root="hf://buckets/test/runs/hf_jobs/sft/abc",
+            source_commit="deadbeef",
+            stage="training",
+            tags={"bucket_id": "test/toolset-training-artifacts", "artifact_prefix": "runs/hf_jobs/sft/abc"},
+        ),
+    )
+
+    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+        mock_handler = MagicMock()
+        mock_handler.handle.return_value = 0
+        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
+        mock_handler.last_job_id = "eval-job"
+        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
+        mock_handler_cls.return_value = mock_handler
+
+        result = runner.run(spec=spec, experiment=experiment, previous=training)
+
+    assert result.status == "completed"
+    args = mock_handler_cls.call_args.kwargs["args"]
+    assert args.with_loss is True
+    assert args.loss_dataset_name == "repo/dataset"
+    assert args.loss_dataset_file == "sample.jsonl"
+    assert args.loss_no_completion_only is True
+
+
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
@@ -341,7 +449,7 @@ def test_loss_stage_runner_allows_retry_when_running_stage_job_already_failed(tm
     assert experiment.stage_details["loss"]["status"] == "failed"
 
 
-def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_path: Path, repo_root):
+def test_eval_stage_runner_requests_same_job_loss_when_post_training_mode_is_same_job(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
     service.save_experiment(experiment)
@@ -391,6 +499,7 @@ def test_eval_stage_runner_requests_same_job_loss_when_spec_enables_loss(tmp_pat
                 },
             )(),
             "loss": type("Loss", (), {"enabled": True, "max_seq_length": 2048, "completion_only": True})(),
+            "post_training": type("PostTraining", (), {"mode": "same_job"})(),
             "name": "resume-smoke",
         },
     )()
