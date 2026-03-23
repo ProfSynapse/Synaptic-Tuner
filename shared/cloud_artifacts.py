@@ -331,6 +331,26 @@ class HFBucketSyncCallback(TrainerCallback):
 
     def on_save(self, args, state, control, **kwargs):
         try:
-            sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)
+            # Sync only the specific checkpoint directory, not the entire run_dir.
+            # Transformers saves checkpoints to {output_dir}/checkpoint-{global_step}/
+            checkpoint_dir = None
+            if args is not None and state is not None:
+                output_dir = Path(getattr(args, "output_dir", ""))
+                if output_dir.is_absolute():
+                    candidate = output_dir / f"checkpoint-{state.global_step}"
+                    if candidate.exists():
+                        checkpoint_dir = candidate
+
+            if checkpoint_dir is not None:
+                relative = checkpoint_dir.relative_to(self.run_dir)
+                sync_directory_to_hf_bucket(
+                    checkpoint_dir,
+                    self.bucket_id,
+                    f"{self.prefix}/{relative}",
+                    token=self.token,
+                )
+            else:
+                # Fallback: sync entire run_dir when checkpoint path cannot be resolved
+                sync_directory_to_hf_bucket(self.run_dir, self.bucket_id, self.prefix, token=self.token)
         except Exception as exc:
             _logger.warning("Bucket sync on checkpoint save failed (non-fatal): %s", exc)
