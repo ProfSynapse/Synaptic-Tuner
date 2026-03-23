@@ -265,12 +265,30 @@ class HFJobExecutor:
 
 _HF_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
+_LABEL_SLASH_REPLACEMENT = ".."
+
+
+def _encode_label_value(value: str) -> str:
+    """Encode a label value so it conforms to HF Jobs label validation rules.
+
+    Only encodes forward slashes (the primary invalid character in bucket IDs
+    and artifact prefixes).  Uses '..' as the replacement since single dots and
+    hyphens appear naturally in label values but consecutive dots do not.
+    """
+    return value.replace("/", _LABEL_SLASH_REPLACEMENT)
+
+
+def _decode_label_value(value: str) -> str:
+    """Reverse the encoding applied by _encode_label_value."""
+    return value.replace(_LABEL_SLASH_REPLACEMENT, "/")
+
 
 def sanitize_hf_job_labels(labels: Dict[str, str]) -> Dict[str, str]:
-    """Drop label entries that do not conform to HF Jobs label validation rules.
+    """Encode label entries to conform to HF Jobs label validation rules.
 
-    We intentionally omit slash-heavy values like bucket ids or artifact prefixes here.
-    Downstream tooling can recover those from the submitted command args when needed.
+    Values containing slashes (e.g. bucket ids, artifact prefixes) are encoded
+    so they pass HF validation while remaining recoverable via decode_hf_job_label().
+    Entries that cannot be made valid after encoding are dropped.
     """
     sanitized: Dict[str, str] = {}
     for raw_key, raw_value in labels.items():
@@ -280,7 +298,13 @@ def sanitize_hf_job_labels(labels: Dict[str, str]) -> Dict[str, str]:
             continue
         if not _HF_LABEL_PATTERN.fullmatch(key):
             continue
-        if not _HF_LABEL_PATTERN.fullmatch(value):
+        encoded = _encode_label_value(value)
+        if not _HF_LABEL_PATTERN.fullmatch(encoded):
             continue
-        sanitized[key] = value
+        sanitized[key] = encoded
     return sanitized
+
+
+def decode_hf_job_label(value: str) -> str:
+    """Decode a label value that was encoded by sanitize_hf_job_labels."""
+    return _decode_label_value(value)

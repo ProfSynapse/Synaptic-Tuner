@@ -49,6 +49,7 @@ from tuner.ui import BOX, RICH_AVAILABLE, print_config, print_info, print_menu, 
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
+from tuner.core.interfaces import ExecuteResult
 
 from .base_cloud import (
     load_cloud_config,
@@ -281,7 +282,7 @@ class HFJobsBackend(ITrainingBackend):
             repo_commit=repo_source.commit,
         )
 
-    def execute(self, config: TrainingConfig, python_path: str) -> int:
+    def execute(self, config: TrainingConfig, python_path: str) -> ExecuteResult:
         """
         Submit training job to HuggingFace Jobs and poll until completion.
 
@@ -294,7 +295,9 @@ class HFJobsBackend(ITrainingBackend):
             python_path: Not used for cloud execution (kept for interface compat)
 
         Returns:
-            Exit code (0 = success, 1 = failure)
+            ExecuteResult with exit_code, artifact_prefix, bucket_id, and
+            job_id.  Compares equal to ``int`` so callers that only check
+            ``result == 0`` continue to work unchanged.
         """
         huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
 
@@ -356,13 +359,22 @@ class HFJobsBackend(ITrainingBackend):
         except CloudProviderError as exc:
             raise CloudProviderError(f"Failed to submit HF Jobs training: {exc}") from exc
 
+        def _build_result(exit_code: int) -> ExecuteResult:
+            return ExecuteResult(
+                exit_code=exit_code,
+                artifact_prefix=self.last_artifact_prefix,
+                bucket_id=self.last_bucket_id,
+                job_id=self.last_job_id,
+            )
+
         if self._should_use_remote_dashboard(config):
-            return self._watch_job_with_remote_dashboard(
+            exit_code = self._watch_job_with_remote_dashboard(
                 config=config,
                 huggingface_hub=huggingface_hub,
                 job_id=job_id,
                 artifact_prefix=artifact_prefix,
             )
+            return _build_result(exit_code)
 
         # Poll until completion
         timeout_seconds = int(config.timeout_hours * 3600)
@@ -399,8 +411,8 @@ class HFJobsBackend(ITrainingBackend):
                     return None  # Still running
 
             except Exception as e:
-                logger.warning("Status check failed: %s", e)
-                return None  # Retry on transient errors
+                # Let poll_until_done handle persistent vs transient classification
+                raise
 
         result = poll_until_done(
             check_status,
@@ -412,7 +424,7 @@ class HFJobsBackend(ITrainingBackend):
 
         if result == "COMPLETED":
             print(f"  Job {job_id} completed successfully.")
-            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
+            return _build_result(self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix))
 
         recovered = self._recover_completed_run_from_bucket(
             config=config,
@@ -420,11 +432,11 @@ class HFJobsBackend(ITrainingBackend):
         )
         if recovered:
             print(f"  Job {job_id} appears complete based on synced artifacts.")
-            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
+            return _build_result(self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix))
 
         error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
         print(f"  Job {job_id} failed: {error_detail}")
-        return 1
+        return _build_result(1)
 
     def _should_use_remote_dashboard(self, config: CloudTrainingConfig) -> bool:
         """Only use the live remote dashboard for interactive HF bucket runs."""
@@ -889,27 +901,31 @@ def _parse_timeout(timeout_str: str) -> float:
         timeout_str: Timeout string (e.g., '4h', '2.5h', '90m')
 
     Returns:
-        Timeout in hours as a float
+        Timeout in hours as a float (defaults to 4.0 on invalid input)
 
     Example:
         _parse_timeout('4h')   -> 4.0
         _parse_timeout('90m')  -> 1.5
         _parse_timeout('2.5h') -> 2.5
     """
-    timeout_str = str(timeout_str).strip().lower()
+    raw = str(timeout_str).strip().lower()
+    default = 4.0
 
-    if timeout_str.endswith("h"):
+    if raw.endswith("h"):
         try:
-            return float(timeout_str[:-1])
+            return float(raw[:-1])
         except ValueError:
-            return 4.0
-    elif timeout_str.endswith("m"):
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default
+    elif raw.endswith("m"):
         try:
-            return float(timeout_str[:-1]) / 60.0
+            return float(raw[:-1]) / 60.0
         except ValueError:
-            return 4.0
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default
     else:
         try:
-            return float(timeout_str)
+            return float(raw)
         except ValueError:
-            return 4.0
+            logger.warning("Invalid timeout value '%s', defaulting to %.1fh", timeout_str, default)
+            return default

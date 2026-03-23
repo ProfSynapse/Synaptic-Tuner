@@ -49,6 +49,7 @@ from tuner.ui import (
 from tuner.backends.training.cloud.base_cloud import (
     load_cloud_config,
     load_project_deps,
+    poll_until_done,
     resolve_cloud_image,
     resolve_repo_source,
 )
@@ -212,7 +213,7 @@ class CloudEvalHandler(BaseHandler):
     def _new_eval_timestamp() -> str:
         return unique_utc_timestamp()
 
-    def _resolve_display_scenarios(
+    def resolve_display_scenarios(
         self,
         *,
         preset: Optional[str],
@@ -406,19 +407,13 @@ class CloudEvalHandler(BaseHandler):
 
     def _poll_job(self, huggingface_hub, job_id: str, timeout_hours: float) -> int:
         timeout_seconds = int(timeout_hours * 3600)
-        elapsed = 0
-        poll_interval = 30
         last_log_offset = 0
 
-        while elapsed < timeout_seconds:
-            try:
-                job_info = huggingface_hub.inspect_job(job_id=job_id)
-                status_obj = getattr(job_info, "status", None)
-                status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
-            except Exception as exc:
-                logger.warning("Status check failed: %s", exc)
-                status = "UNKNOWN"
-
+        def _check_status():
+            nonlocal last_log_offset
+            job_info = huggingface_hub.inspect_job(job_id=job_id)
+            status_obj = getattr(job_info, "status", None)
+            status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
             try:
                 logs = huggingface_hub.fetch_job_logs(job_id=job_id) or ""
                 if len(logs) > last_log_offset:
@@ -426,21 +421,18 @@ class CloudEvalHandler(BaseHandler):
                     last_log_offset = len(logs)
             except Exception:
                 pass
-
             if status in ("completed", "COMPLETED"):
-                return 0
+                return "COMPLETED"
             if status in ("error", "ERROR", "failed", "FAILED", "cancelled", "CANCELLED"):
-                print()
-                print(f"  Evaluation job {job_id} failed with status: {status}")
-                return 1
+                return f"ERROR: Job failed with status: {status}"
+            return None
 
-            import time
-
-            time.sleep(poll_interval)
-            elapsed += poll_interval
-
+        result = poll_until_done(_check_status, interval=30, timeout_seconds=timeout_seconds)
+        if result == "COMPLETED":
+            return 0
         print()
-        print(f"  Evaluation job {job_id} failed: Timeout exceeded")
+        error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
+        print(f"  Evaluation job {job_id} failed: {error_detail}")
         return 1
 
     def _should_use_live_dashboard(self) -> bool:
@@ -697,7 +689,7 @@ class CloudEvalHandler(BaseHandler):
 
         preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
         scenarios = getattr(self.args, "scenario", None)
-        display_scenarios = self._resolve_display_scenarios(preset=preset, scenarios=scenarios)
+        display_scenarios = self.resolve_display_scenarios(preset=preset, scenarios=scenarios)
         tags = getattr(self.args, "tags", None)
         env_backend = getattr(self.args, "env_backend", None) or "none"
         env_template = getattr(self.args, "env_template", None)

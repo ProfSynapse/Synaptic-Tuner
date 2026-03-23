@@ -18,10 +18,48 @@ Used by: All backends, handlers, and discovery services
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from tuner.core.config import TrainingConfig
+
+
+@dataclass
+class ExecuteResult:
+    """Structured result from a training backend ``execute()`` call.
+
+    Replaces the pattern of returning ``int`` and stashing artifact metadata on
+    ``self.last_*`` attributes.  Existing callers that only need the exit code
+    can compare directly with ``int`` via ``__eq__`` / ``__int__``.
+
+    Attributes:
+        exit_code: 0 for success, non-zero for failure.
+        artifact_prefix: Cloud artifact path prefix (e.g.
+            ``runs/hf_jobs/sft/20260322_103451-eafd2a89``).
+        bucket_id: Resolved bucket identifier, if applicable.
+        job_id: Provider job identifier, if applicable.
+        extras: Arbitrary provider-specific metadata.
+    """
+
+    exit_code: int = 1
+    artifact_prefix: Optional[str] = None
+    bucket_id: Optional[str] = None
+    job_id: Optional[str] = None
+    extras: Dict[str, Any] = field(default_factory=dict)
+
+    # Allow ``if result == 0:`` and ``return result`` where int is expected.
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, int):
+            return self.exit_code == other
+        return NotImplemented
+
+    def __int__(self) -> int:
+        return self.exit_code
+
+    def __bool__(self) -> bool:
+        """Truthy when the job *failed* (non-zero), matching ``int`` semantics."""
+        return self.exit_code != 0
 
 
 class ITrainingBackend(ABC):
@@ -350,3 +388,22 @@ class IDiscoveryService(ABC):
             models = model_discovery.discover(backend='ollama')
         """
         pass
+
+
+@runtime_checkable
+class CloudEvalResult(Protocol):
+    """Protocol for cloud evaluation handler post-execution state.
+
+    After calling ``handle()`` on a cloud evaluation handler, callers read
+    these attributes to build run records and update experiment tracking.
+    CloudEvalHandler and any future alternative must expose them.
+    """
+
+    last_job_id: Optional[str]
+    """HF Job identifier assigned during submission, or None on failure."""
+
+    last_results_uri: Optional[str]
+    """``hf://buckets/...`` URI pointing to evaluation artifacts, or None."""
+
+    last_eval_payload: Optional[Dict[str, Any]]
+    """Parsed evaluation results JSON downloaded after the job, or None."""

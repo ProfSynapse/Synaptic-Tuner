@@ -34,14 +34,21 @@ def test_build_command_includes_requested_flags() -> None:
     ]
 
 
+def _make_fake_run(launched, returncode=0):
+    class FakeResult:
+        def __init__(self, rc):
+            self.returncode = rc
+    def fake_run(cmd, cwd=None):
+        launched.append((cmd, cwd))
+        return FakeResult(returncode)
+    return fake_run
+
+
 def test_launch_batch_staggers_between_runs(monkeypatch) -> None:
     launched = []
     sleeps = []
 
-    def fake_run(cmd, cwd, check):
-        launched.append((cmd, cwd, check))
-
-    monkeypatch.setattr(MODULE.subprocess, "run", fake_run)
+    monkeypatch.setattr(MODULE.subprocess, "run", _make_fake_run(launched))
     monkeypatch.setattr(MODULE.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     exit_code = MODULE.launch_batch(
@@ -61,6 +68,27 @@ def test_launch_batch_staggers_between_runs(monkeypatch) -> None:
     assert exit_code == 0
     assert len(launched) == 3
     assert sleeps == [5.0, 5.0]
+
+
+def test_launch_batch_continues_on_failure_and_reports(monkeypatch) -> None:
+    launched = []
+    sleeps = []
+
+    monkeypatch.setattr(MODULE.subprocess, "run", _make_fake_run(launched, returncode=1))
+    monkeypatch.setattr(MODULE.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    exit_code = MODULE.launch_batch(
+        ["Trainers/cloud/experiments/one.yaml", "Trainers/cloud/experiments/two.yaml"],
+        stagger_seconds=0.0,
+        auto_hardware=False,
+        optimize_for=None,
+        price_cap=None,
+        yes=False,
+        dry_run=False,
+    )
+
+    assert exit_code == 1
+    assert len(launched) == 2  # both experiments attempted despite failure
 
 
 def test_launch_batch_dry_run_skips_sleep_and_subprocess(monkeypatch) -> None:

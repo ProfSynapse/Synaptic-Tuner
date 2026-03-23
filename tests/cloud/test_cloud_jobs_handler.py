@@ -45,6 +45,27 @@ def test_resolve_stage_artifact_root_from_eval_command(repo_root):
     }
 
 
+def test_resolve_stage_artifact_root_decodes_encoded_labels(repo_root):
+    """Labels encoded by sanitize_hf_job_labels are decoded when reading back."""
+    handler = CloudJobsHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    job = {
+        "command": ["bash", "-c", "echo placeholder"],
+        "labels": {
+            "bucket_id": "test-user..toolset-training-artifacts",
+            "artifact_prefix": "runs..hf_jobs..sft..20260322_111111-abc12345",
+        },
+    }
+
+    artifact_root = handler._resolve_stage_artifact_root(job)
+
+    assert artifact_root == {
+        "bucket_id": "test-user/toolset-training-artifacts",
+        "prefix": "runs/hf_jobs/sft/20260322_111111-abc12345",
+    }
+
+
 def test_handle_show_prefers_structured_stage_summary(repo_root, clean_env):
     clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
     args = Namespace(

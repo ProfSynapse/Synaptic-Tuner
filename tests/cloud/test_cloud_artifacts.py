@@ -62,7 +62,35 @@ def test_write_manifest_writes_stable_json(tmp_path):
     assert '"status": "completed"' in contents
 
 
-def test_hf_bucket_sync_callback_syncs_run_dir(tmp_path):
+def test_hf_bucket_sync_callback_syncs_checkpoint_dir(tmp_path):
+    run_dir = tmp_path / "run"
+    checkpoints_dir = run_dir / "checkpoints"
+    checkpoint_dir = checkpoints_dir / "checkpoint-100"
+    checkpoint_dir.mkdir(parents=True)
+
+    callback = HFBucketSyncCallback(
+        run_dir=run_dir,
+        bucket_id="toolset-training-artifacts",
+        prefix="runs/hf_jobs/sft/20260314_120000-abcdef12",
+        token="hf_test_token",
+    )
+
+    args = type("Args", (), {"output_dir": str(checkpoints_dir)})()
+    state = type("State", (), {"global_step": 100})()
+
+    with patch("shared.cloud_artifacts.sync_directory_to_hf_bucket") as mock_sync:
+        callback.on_save(args=args, state=state, control=None)
+
+    mock_sync.assert_called_once_with(
+        checkpoint_dir,
+        "toolset-training-artifacts",
+        "runs/hf_jobs/sft/20260314_120000-abcdef12/checkpoints/checkpoint-100",
+        token="hf_test_token",
+    )
+
+
+def test_hf_bucket_sync_callback_falls_back_to_run_dir(tmp_path):
+    """When args/state are None, falls back to syncing entire run_dir."""
     callback = HFBucketSyncCallback(
         run_dir=tmp_path / "run",
         bucket_id="toolset-training-artifacts",

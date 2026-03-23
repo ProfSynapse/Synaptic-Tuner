@@ -117,7 +117,7 @@ class CloudPipelineHandler(BaseHandler):
                 backend.load_config(method)
             )
             eval_preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
-            eval_scenarios = CloudEvalHandler(args=self.args)._resolve_display_scenarios(
+            eval_scenarios = CloudEvalHandler(args=self.args).resolve_display_scenarios(
                 preset=eval_preset,
                 scenarios=getattr(self.args, "scenario", None),
             )

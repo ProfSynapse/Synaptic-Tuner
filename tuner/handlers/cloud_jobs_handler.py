@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.utilities.env import get_hf_token, load_env_file
-from tuner.cloud import load_huggingface_hub
+from tuner.cloud import decode_hf_job_label, load_huggingface_hub
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.ui import BOX, confirm, print_config, print_error, print_header, print_info, print_success, print_table
@@ -109,8 +109,12 @@ class CloudJobsHandler(BaseHandler):
             or labels.get("results_prefix")
             or labels.get("artifact_prefix")
         )
+        if bucket_id:
+            bucket_id = decode_hf_job_label(str(bucket_id))
+        if prefix:
+            prefix = decode_hf_job_label(str(prefix))
         if bucket_id and prefix:
-            return {"bucket_id": str(bucket_id).strip("/"), "prefix": str(prefix).strip("/")}
+            return {"bucket_id": bucket_id.strip("/"), "prefix": prefix.strip("/")}
 
         command_text = self._extract_command_text(job)
         if not command_text:
