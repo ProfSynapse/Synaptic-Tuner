@@ -406,12 +406,19 @@ Non-tool-call responses score 0.0 against tool schema — always check `tools_re
 ### Flywheel: Proxy Port + Catalog Backend
 Logging proxy runs on `:8080` → forwards to vLLM `:8000`. Catalog backend: set `FLYWHEEL_CATALOG_BACKEND=sqlite|postgres`. Stats endpoint auth: `FLYWHEEL_STATS_TOKEN` env var (optional; if unset, stats are open for localhost dev).
 
+<!-- pinned: 2026-03-23 -->
+### Git: `--theirs` is INVERTED during rebase
+During `git rebase`, `--theirs` resolves to YOUR branch (the one being replayed), NOT the upstream. This is the OPPOSITE of merge semantics.
+- Rebase "ours" = upstream (origin/main) — use to accept upstream changes
+- Rebase "theirs" = your branch — use to accept your own changes
+To be unambiguous when accepting upstream: `git show origin/main:<file> > <file> && git add <file>`
+
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
 - Resume: `claude --resume ec84c73c-744c-4ea2-9ec5-b61c66728a5d`
 - Team: `pact-ec84c73c`
-- Started: 2026-03-23 10:30:50 UTC
+- Started: 2026-03-23 11:37:17 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -420,18 +427,19 @@ Logging proxy runs on `:8080` → forwards to vLLM `:8000`. Catalog backend: set
 ## Working Memory
 <!-- Auto-managed by pact-memory skill. Last 3 memories shown. Full history searchable via pact-memory skill. -->
 
-### 2026-03-20 17:28
-**Context**: Orchestration retrospective for the Enterprise Data Flywheel session (2026-03-20). This was a high-variety task (Novelty: 3, Scope: 4, Uncertainty: 2, Risk: 2 = 11, plan-mode -> orchestrate workflow). The session implemented a full PACT cycle: plan-mode produced an approved plan, then orchestrate ran PREPARE -> ARCHITECT -> CODE -> TEST phases. A session restart occurred mid-workflow requiring state recovery from task metadata and git history. The PR (#65) went through multi-agent review with 4+ reviewers (architect, test-engineer, backend-coder, security-engineer). The feature was substantial: 35 files, +8614 lines, spanning a new shared/flywheel/ pipeline package, FastAPI proxy, CLI integration, experiment tracking adapter, and comprehensive test suite.
-**Goal**: Capture orchestration calibration data for large cross-cutting features in the Toolset-Training project, informing future variety scoring and workflow selection for similar tasks.
-**Decisions**: Process HANDOFF review (Pass 1) at peer-review dispatch as the primary trigger
-**Lessons**: Large cross-cutting features (35+ files, 8000+ lines) that integrate with multiple existing systems (validation, judge, experiment tracking) score correctly at variety 11+ and benefit from the full plan-mode -> orchestrate workflow. The upfront planning consultation prevented rework during the CODE phase by aligning all specialists on integration points before implementation began., Session restarts mid-workflow are recoverable via TaskList + TaskGet + git log. Persisting state in task metadata (especially phase completion status and worktree path) is essential — without it, the orchestrator would need to re-derive the full workflow state from git history alone., PR reviewers (tasks #5-8, #10-12) may have their tasks deleted during wrap-up cleanup before the secretary can process their HANDOFFs. This is a known gap — reviewer insights are captured in PR comments (via gh) and docs/review/ rather than pact-memory. Consider processing reviewer HANDOFFs earlier in the workflow (immediately after review synthesis, before PR merge)., When the flywheel feature extended the existing experiment tracking adapters.py, the adapter pattern (flywheel_cycle_to_run_record) worked cleanly because the unified tracking system was designed with Open/Closed principle. This validates the prior decision (PR #64) to use a schema-versioned, adapter-based tracking design.
-**Memory ID**: 18d9f9b7272e3ee8ac2a20b531586f89
+### 2026-03-23 11:32
+**Context**: Orchestration retrospective for the PR #69 peer-review and remediation session (2026-03-23) on the Synthetic Conversations (Synaptic-Tuner) project. The session handled a large batch PR (~379 files, 64K+ insertions) covering cloud HF Jobs training/eval, hardware planner, experiment tracking, bucket handler, loss pipeline, and skills reorganization. Multi-agent review (4 reviewers: architect, test-engineer, backend-coder, devops-engineer) was followed by parallel remediation across 3 specialist types (backend-coder, test-engineer, devops-engineer) spanning 6 fix tasks (#7-#12). Task #11 required a follow-up task #12 after partial completion, and task #12 was assigned to a second backend-coder instance.
+**Goal**: Capture orchestration calibration data for large-batch PR review and remediation workflows, informing future variety scoring, specialist selection, and task sequencing.
+**Decisions**: Cap remediation tasks at ~5 distinct code changes per agent, Use 4-specialist review for batch PRs over 100 files
+**Lessons**: Large batch PRs (~379 files, 64K+ insertions) benefit from 4-specialist review (architect + test-engineer + domain coder + infra specialist). Each reviewer found distinct issues that others missed — the architect caught structural problems, test-engineer found coverage gaps, backend-coder found error handling issues, devops-engineer found cloud reliability gaps., Remediation from review findings naturally parallelizes across 3 tracks: code fixes (backend-coder), test additions (test-engineer), and infra reliability (devops-engineer). These can run concurrently when file sets don't overlap., Task #11 (9 backend refactors) was too large for a single agent — it completed ~5/9 items before context exhaustion, requiring task #12 as follow-up. For remediation tasks, cap at ~5 distinct code changes per agent to avoid partial completion., Sequential dependency between tasks #7 and #11 (shared files) was correctly identified at dispatch time, preventing merge conflicts. File-overlap analysis at task creation time is essential for remediation batches., The breadcrumb file contained 10 entries with temporal ordering that matched the expected dependency chain — reviewers completed first (10:39-10:43), then blocking fixes (10:47-10:48), then parallel remediation (10:53-11:28). This confirms the dispatch sequencing was correct., When a HANDOFF review pass fires before any agents have completed (task #6), the secretary correctly reports 'no pending HANDOFFs' and completes — the consolidation pass (Pass 2) is the safety net that catches everything.
+**Reasoning chains**: 9 refactors in one task → agent context exhaustion at ~5/9 → partial completion → follow-up task needed → overhead of handoff + fresh agent spawn → better to cap at 5 changes per task upfront, 4 review specialists each finding unique issues → confirms that domain-specific review lenses are non-redundant → 3-specialist minimum, 4+ for large PRs touching cloud infra
+**Memory ID**: 36161f92d89aea0288fda7a810416e12
 
-### 2026-03-20 17:02
-**Summary**: Implemented the Enterprise Data Flywheel platform for the Toolset-Training project (PR #65).
+### 2026-03-23 11:32
+**Summary**: During PR #69 review remediation for the Synthetic Conversations (Synaptic-Tuner) project, the test-engineer agent (task...
 
-### 2026-03-20 15:28
-**Summary**: Implemented unified experiment tracking across all training systems in the Toolset-Training project.
+### 2026-03-23 11:31
+**Summary**: PR #69 for the Synthetic Conversations project (Synaptic-Tuner) was a massive batch PR covering cloud HF Jobs training/e...
 ---
 
 ## AI Assistant Quick Reference
