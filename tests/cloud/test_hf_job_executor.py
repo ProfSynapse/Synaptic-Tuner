@@ -10,6 +10,7 @@ from tuner.cloud import (
     build_bash_command,
     build_hf_job_secrets,
     build_repo_checkout_steps,
+    decode_hf_job_label,
     format_timeout_hours,
     resolve_hf_bucket_id,
     sanitize_hf_job_labels,
@@ -79,7 +80,8 @@ def test_hf_job_executor_submits_shared_job_spec():
     assert kwargs["labels"] == {"task": "gym"}
 
 
-def test_sanitize_hf_job_labels_drops_invalid_bucket_like_values():
+def test_sanitize_hf_job_labels_encodes_slash_values():
+    """Labels containing slashes are encoded, not dropped."""
     labels = sanitize_hf_job_labels(
         {
             "task": "training",
@@ -93,8 +95,25 @@ def test_sanitize_hf_job_labels_drops_invalid_bucket_like_values():
     assert labels == {
         "task": "training",
         "provider": "hf_jobs",
+        "bucket_id": "professorsynapse..toolset-training-artifacts",
+        "artifact_prefix": "runs..hf_jobs..sft..20260322_103451-eafd2a89",
         "run_prefix": "20260322_103451-eafd2a89",
     }
+
+
+def test_decode_hf_job_label_roundtrip():
+    """Encoding then decoding recovers the original value."""
+    originals = [
+        "professorsynapse/toolset-training-artifacts",
+        "runs/hf_jobs/sft/20260322_103451-eafd2a89",
+        "simple-value",
+    ]
+    encoded = sanitize_hf_job_labels(
+        {f"k{i}": v for i, v in enumerate(originals)}
+    )
+    for key, enc_value in encoded.items():
+        idx = int(key[1:])
+        assert decode_hf_job_label(enc_value) == originals[idx]
 
 
 def test_resolve_hf_bucket_id_returns_namespaced_bucket():

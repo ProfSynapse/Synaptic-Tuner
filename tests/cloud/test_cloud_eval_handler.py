@@ -124,7 +124,7 @@ def test_resolve_display_scenarios_uses_preset_when_no_explicit_scenarios(repo_r
         )
         mock_loader_cls.return_value = mock_loader
 
-        scenarios = handler._resolve_display_scenarios(preset="full", scenarios=None)
+        scenarios = handler.resolve_display_scenarios(preset="full", scenarios=None)
 
     assert scenarios == ["tool_prompts.yaml", "behavior_prompts.yaml"]
 

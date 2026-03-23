@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
+from tuner.core.config import apply_training_overrides
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -231,7 +232,7 @@ class CloudTrainHandler(BaseHandler):
 
         # Step 5: Select training method
         methods = backend.get_available_methods()
-        method_labels = self._load_method_labels()
+        method_labels = self.load_method_labels()
         method_options = [
             (m, f"{BOX['bullet']} {method_labels.get(m, m.upper())}") for m in methods
         ]
@@ -247,14 +248,14 @@ class CloudTrainHandler(BaseHandler):
         # Step 6: Load configuration
         try:
             config = backend.load_config(method)
-            config = self._apply_training_overrides(config)
+            config = self.apply_training_overrides(config)
         except Exception as e:
             print_error(f"Failed to load configuration: {e}")
             return 1
 
         # Step 7: Display configuration with cost estimate
         info = PROVIDER_INFO[provider_choice]
-        config_display = self._build_config_display(config, info)
+        config_display = self.build_config_display(config, info)
         print_config(config_display, "Cloud Training Configuration")
 
         # Step 8: Confirm with user
@@ -279,95 +280,38 @@ class CloudTrainHandler(BaseHandler):
 
         return exit_code
 
-    def _apply_training_overrides(self, config):
+    def apply_training_overrides(self, config):
         """Apply direct CLI overrides to a loaded cloud training config."""
         args = self.args
         if not args:
             return config
 
-        train_model_name = getattr(args, "train_model_name", None)
-        if train_model_name:
-            config.model_name = train_model_name
+        # Parse lora_target_modules from comma-separated CLI string
+        lora_raw = getattr(args, "train_lora_target_modules", None)
+        lora_modules = (
+            [m.strip() for m in lora_raw.split(",") if m.strip()]
+            if lora_raw
+            else None
+        )
 
-        train_dataset_name = getattr(args, "train_dataset_name", None)
-        if train_dataset_name:
-            config.dataset_name = train_dataset_name
+        apply_training_overrides(
+            config,
+            model_name=getattr(args, "train_model_name", None),
+            dataset_name=getattr(args, "train_dataset_name", None),
+            dataset_file=getattr(args, "train_dataset_file", None),
+            batch_size=getattr(args, "train_batch_size", None),
+            gradient_accumulation=getattr(args, "train_gradient_accumulation", None),
+            learning_rate=getattr(args, "train_learning_rate", None),
+            num_epochs=getattr(args, "train_num_epochs", None),
+            max_steps=getattr(args, "train_max_steps", None),
+            max_seq_length=getattr(args, "train_max_seq_length", None),
+            load_in_4bit=getattr(args, "train_load_in_4bit", None),
+            lora_target_modules=lora_modules,
+            gpu=getattr(args, "train_gpu", None),
+            timeout_hours=getattr(args, "train_timeout_hours", None),
+        )
 
-        train_dataset_file = getattr(args, "train_dataset_file", None)
-        if train_dataset_file:
-            config.dataset_file = train_dataset_file
-
-        train_batch_size = getattr(args, "train_batch_size", None)
-        if train_batch_size is not None:
-            config.batch_size = train_batch_size
-
-        train_gradient_accumulation = getattr(args, "train_gradient_accumulation", None)
-        if train_gradient_accumulation is not None:
-            config.gradient_accumulation_steps = train_gradient_accumulation
-
-        train_learning_rate = getattr(args, "train_learning_rate", None)
-        if train_learning_rate is not None:
-            config.learning_rate = train_learning_rate
-
-        train_num_epochs = getattr(args, "train_num_epochs", None)
-        if train_num_epochs is not None:
-            config.epochs = train_num_epochs
-
-        train_max_steps = getattr(args, "train_max_steps", None)
-        if train_max_steps is not None:
-            config.max_steps = train_max_steps
-
-        train_max_seq_length = getattr(args, "train_max_seq_length", None)
-        if train_max_seq_length is not None:
-            config.max_seq_length = train_max_seq_length
-
-        if getattr(args, "train_load_in_4bit", None) is not None:
-            config.load_in_4bit = args.train_load_in_4bit
-
-        train_lora_r = getattr(args, "train_lora_r", None)
-        if train_lora_r is not None:
-            config.lora_r = train_lora_r
-
-        train_lora_alpha = getattr(args, "train_lora_alpha", None)
-        if train_lora_alpha is not None:
-            config.lora_alpha = train_lora_alpha
-
-        train_lora_dropout = getattr(args, "train_lora_dropout", None)
-        if train_lora_dropout is not None:
-            config.lora_dropout = train_lora_dropout
-
-        if getattr(args, "train_use_dora", False):
-            config.use_dora = True
-
-        if getattr(args, "train_use_rslora", False):
-            config.use_rslora = True
-
-        train_init_lora_weights = getattr(args, "train_init_lora_weights", None)
-        if train_init_lora_weights is not None:
-            config.init_lora_weights = train_init_lora_weights
-
-        train_lora_target_modules = getattr(args, "train_lora_target_modules", None)
-        if train_lora_target_modules:
-            normalized = train_lora_target_modules.strip()
-            if normalized == "all-linear":
-                config.lora_target_modules = normalized
-            else:
-                config.lora_target_modules = [
-                    module.strip()
-                    for module in normalized.split(",")
-                    if module.strip()
-                ]
-
-        train_gpu = getattr(args, "train_gpu", None)
-        if train_gpu:
-            config.gpu_type = train_gpu
-            if hasattr(config, "hf_flavor"):
-                config.hf_flavor = train_gpu
-
-        train_timeout_hours = getattr(args, "train_timeout_hours", None)
-        if train_timeout_hours is not None:
-            config.timeout_hours = train_timeout_hours
-
+        # Cloud image overrides (handler-specific: involves resolve_cloud_image)
         train_cloud_image = getattr(args, "train_cloud_image", None)
         if train_cloud_image:
             config.cloud_image = train_cloud_image
@@ -387,7 +331,7 @@ class CloudTrainHandler(BaseHandler):
 
         return config
 
-    def _load_method_labels(self) -> Dict[str, str]:
+    def load_method_labels(self) -> Dict[str, str]:
         """
         Load training method display labels.
 
@@ -415,7 +359,7 @@ class CloudTrainHandler(BaseHandler):
         config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         return load_gpu_tiers(config_path)
 
-    def _build_config_display(
+    def build_config_display(
         self, config, provider_info: Dict
     ) -> Dict[str, str]:
         """

@@ -213,7 +213,7 @@ class CloudEvalHandler(BaseHandler):
     def _new_eval_timestamp() -> str:
         return unique_utc_timestamp()
 
-    def _resolve_display_scenarios(
+    def resolve_display_scenarios(
         self,
         *,
         preset: Optional[str],
@@ -689,7 +689,7 @@ class CloudEvalHandler(BaseHandler):
 
         preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
         scenarios = getattr(self.args, "scenario", None)
-        display_scenarios = self._resolve_display_scenarios(preset=preset, scenarios=scenarios)
+        display_scenarios = self.resolve_display_scenarios(preset=preset, scenarios=scenarios)
         tags = getattr(self.args, "tags", None)
         env_backend = getattr(self.args, "env_backend", None) or "none"
         env_template = getattr(self.args, "env_template", None)

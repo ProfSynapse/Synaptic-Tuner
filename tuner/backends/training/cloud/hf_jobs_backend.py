@@ -49,6 +49,7 @@ from tuner.ui import BOX, RICH_AVAILABLE, print_config, print_info, print_menu, 
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
+from tuner.core.interfaces import ExecuteResult
 
 from .base_cloud import (
     load_cloud_config,
@@ -281,7 +282,7 @@ class HFJobsBackend(ITrainingBackend):
             repo_commit=repo_source.commit,
         )
 
-    def execute(self, config: TrainingConfig, python_path: str) -> int:
+    def execute(self, config: TrainingConfig, python_path: str) -> ExecuteResult:
         """
         Submit training job to HuggingFace Jobs and poll until completion.
 
@@ -294,7 +295,9 @@ class HFJobsBackend(ITrainingBackend):
             python_path: Not used for cloud execution (kept for interface compat)
 
         Returns:
-            Exit code (0 = success, 1 = failure)
+            ExecuteResult with exit_code, artifact_prefix, bucket_id, and
+            job_id.  Compares equal to ``int`` so callers that only check
+            ``result == 0`` continue to work unchanged.
         """
         huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
 
@@ -356,13 +359,22 @@ class HFJobsBackend(ITrainingBackend):
         except CloudProviderError as exc:
             raise CloudProviderError(f"Failed to submit HF Jobs training: {exc}") from exc
 
+        def _build_result(exit_code: int) -> ExecuteResult:
+            return ExecuteResult(
+                exit_code=exit_code,
+                artifact_prefix=self.last_artifact_prefix,
+                bucket_id=self.last_bucket_id,
+                job_id=self.last_job_id,
+            )
+
         if self._should_use_remote_dashboard(config):
-            return self._watch_job_with_remote_dashboard(
+            exit_code = self._watch_job_with_remote_dashboard(
                 config=config,
                 huggingface_hub=huggingface_hub,
                 job_id=job_id,
                 artifact_prefix=artifact_prefix,
             )
+            return _build_result(exit_code)
 
         # Poll until completion
         timeout_seconds = int(config.timeout_hours * 3600)
@@ -412,7 +424,7 @@ class HFJobsBackend(ITrainingBackend):
 
         if result == "COMPLETED":
             print(f"  Job {job_id} completed successfully.")
-            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
+            return _build_result(self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix))
 
         recovered = self._recover_completed_run_from_bucket(
             config=config,
@@ -420,11 +432,11 @@ class HFJobsBackend(ITrainingBackend):
         )
         if recovered:
             print(f"  Job {job_id} appears complete based on synced artifacts.")
-            return self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix)
+            return _build_result(self._finalize_completed_job(config=config, artifact_prefix=artifact_prefix))
 
         error_detail = result.replace("ERROR: ", "") if result.startswith("ERROR: ") else result
         print(f"  Job {job_id} failed: {error_detail}")
-        return 1
+        return _build_result(1)
 
     def _should_use_remote_dashboard(self, config: CloudTrainingConfig) -> bool:
         """Only use the live remote dashboard for interactive HF bucket runs."""
