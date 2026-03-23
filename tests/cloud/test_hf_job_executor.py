@@ -95,8 +95,8 @@ def test_sanitize_hf_job_labels_encodes_slash_values():
     assert labels == {
         "task": "training",
         "provider": "hf_jobs",
-        "bucket_id": "professorsynapse..toolset-training-artifacts",
-        "artifact_prefix": "runs..hf_jobs..sft..20260322_103451-eafd2a89",
+        "bucket_id": "professorsynapse=2F=toolset-training-artifacts",
+        "artifact_prefix": "runs=2F=hf_jobs=2F=sft=2F=20260322_103451-eafd2a89",
         "run_prefix": "20260322_103451-eafd2a89",
     }
 

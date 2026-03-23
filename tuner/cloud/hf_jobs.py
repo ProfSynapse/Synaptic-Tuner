@@ -263,17 +263,17 @@ class HFJobExecutor:
         )
 
 
-_HF_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+_HF_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9_=-]+$")
 
-_LABEL_SLASH_REPLACEMENT = ".."
+_LABEL_SLASH_REPLACEMENT = "=2F="
 
 
 def _encode_label_value(value: str) -> str:
     """Encode a label value so it conforms to HF Jobs label validation rules.
 
     Only encodes forward slashes (the primary invalid character in bucket IDs
-    and artifact prefixes).  Uses '..' as the replacement since single dots and
-    hyphens appear naturally in label values but consecutive dots do not.
+    and artifact prefixes). Uses '=2F=' as the replacement so the value stays
+    within HF's current label charset while remaining reversible.
     """
     return value.replace("/", _LABEL_SLASH_REPLACEMENT)
 
