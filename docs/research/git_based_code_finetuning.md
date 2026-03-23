@@ -27,51 +27,72 @@ Train a model to be a better coding agent by:
 - Each task: issue text + repo snapshot at the merge base → model must produce the correct patch
 - **SWE-bench Verified**: Human-validated subset (500 tasks) with confirmed test coverage
 
+**SWE-smith** (NeurIPS 2025 Spotlight) — most mature pipeline:
+- Given any Python codebase, constructs Docker-based execution environments
+- Synthesizes task instances using 4 strategies: LM-Modify (inject bugs), LM-Rewrite (reimplement functions), Procedural AST mutations (13 operators), PR Mirrors (real diffs)
+- **50,137 task instances from 128 GitHub repos** — far richer than raw (commit, diff) pairs
+- Each instance: broken code snapshot + NL issue description + execution env + tests
+- [GitHub](https://github.com/SWE-bench/SWE-smith) | [HF Dataset](https://huggingface.co/datasets/SWE-bench/SWE-smith)
+
+**R2E-Gym** (COLM 2025) — complementary approach:
+- **SWE-GEN** pipeline: generates executable training environments *without* human-written issues or tests
+- Uses automated test generation + "back-translation" (generating issue descriptions from diffs)
+- 8,100+ tasks across 13 repos
+- **DeepSWE found R2E-Gym's curated 4.5K tasks outperformed SWE-smith's 50K for GRPO** — quality > quantity
+- [GitHub](https://github.com/R2E-Gym/R2E-Gym)
+
+**SWE-rebench** (NeurIPS 2025):
+- Continuously-updating pipeline: 21,000+ interactive SWE tasks from diverse GitHub repos
+- Designed specifically for RL training
+- Nebius released [67,074 agent trajectories](https://nebius.com/blog/posts/openhands-trajectories-with-qwen3-coder-480b) on SWE-rebench
+
 **SWE-gym** (2024-2025):
 - Training environment companion to SWE-bench
 - 2,438 real GitHub issues with executable test environments
 - Docker-based: each task gets a pre-built container with the repo at the right commit
-- Pre-built validation: `run_tests.sh` per task that executes the relevant test suite
-- Used to train open-weight models that approach frontier performance on SWE-bench
-
-**R2E (Repo2Env)** (2024):
-- Automated pipeline to convert GitHub repos into executable environments
-- Handles dependency resolution, build systems, test framework detection
-- Designed specifically for creating RL training environments from repos
 
 **CommitPack / StarCoder2** (BigCode):
 - 4TB of permissively-licensed git commits across 350+ languages
 - (commit message, diff) pairs used for code instruction tuning
 - Filtered version "CommitPackFT" for higher-quality instruction-like commits
 
-**Key insight**: The community has validated that git history is a rich source of training signal. The harder problem is environment reproducibility, not data extraction.
+**Key insight**: Raw (commit message, diff) pairs are considered too noisy. The field has moved toward generating *executable environments* where the model's solution can be tested, not just compared textually to a ground-truth diff.
 
 ### 2.2 GRPO / RL for Code
 
-**DeepSeek-Coder-V2 & R1** demonstrated GRPO works for code:
+**DeepSWE** (Together AI + Agentica, 2025) — most impressive open result:
+- Starting from Qwen3-32B, using *only* GRPO on R2E-Gym environments
+- **42.2% Pass@1 on SWE-bench Verified** (59% with test-time scaling at Pass@16)
+- Just **200 RL steps** boosted score from 23% → 42%
+- Key finding: R2E-Gym worked best for RL — SWE-smith and SWE-Gym showed limited improvements
+- [Blog](https://www.together.ai/blog/deepswe)
+
+**MicroCoder-GRPO** (ICLR 2026) — GRPO optimizations for code:
+- Conditional truncation masking, diversity-determined temperature, removal of KL loss
+- 17.6% relative improvement on LiveCodeBench v6
+- 13,300 curated competitive programming problems → 3x larger gains than mainstream datasets in 300 steps
+
+**Self-Play SWE-RL (SSR)** — no human labels needed:
+- Single LLM agent trained via RL in self-play to iteratively inject and repair bugs of increasing complexity
+- +10.4 points on SWE-bench Verified with zero human-written issues or tests
+
+**DeepSeek-Coder-V2 & R1**:
 - Used GRPO with code execution feedback (test pass/fail) as reward
-- Achieved SOTA on code benchmarks with relatively modest RL training
-- Key: binary reward (tests pass or not) is sufficient — no need for fine-grained diff matching
+- Binary reward sufficient — no need for fine-grained diff matching
 
-**CodeRL** (Le et al., 2022):
-- RL from unit test feedback for code generation
-- Reward = fraction of tests passed (partial credit)
-- Showed RL substantially improves over SFT-only baselines
+**CodeRL** (ICML 2022) / **RLTF** (2023) / **StepCoder** (2024):
+- Progression from outcome-level → multi-granularity → curriculum RL for code
+- Key finding: partial credit via test fraction or step-level rewards helps training stability
 
-**RLTF (Reinforcement Learning from Test Feedback)** (2023):
-- Multi-granularity reward: line-level, function-level, test-level
-- Fine-grained credit assignment via test error localization
+**Reward signals ranked by effectiveness**:
 
-**StepCoder** (2024):
-- Curriculum RL for code generation
-- Starts with easier tasks, progressively harder
-- Uses Code Compiler feedback as reward signal
-
-**SWE-gym's RL Results** (2024-2025):
-- Applied GRPO directly to SWE-bench-style tasks
-- Models trained with RL on SWE-gym significantly outperform SFT-only
-- **Open-weight models achieved ~30%+ on SWE-bench Verified** using this approach
-- Process: SFT on successful trajectories → GRPO with test-pass reward
+| Signal | Type | Notes |
+|--------|------|-------|
+| Unit test pass/fail | Binary execution | Gold standard (DeepSWE, R2E-Gym) |
+| Process Reward Models | Step-level | CodePRM, DreamPRM-Code — score individual reasoning steps |
+| Execution-free verifiers | Model-based | SWE-RM: 62% SWE-bench Verified *without* running tests |
+| AST edit distance | Structural similarity | Partial credit for structurally close solutions |
+| Hybrid (exec + model) | Combined | R2E-Gym: combining both significantly outperforms either alone |
 
 ### 2.3 Agentic / Tool-Use Code Training
 
@@ -90,10 +111,18 @@ Train a model to be a better coding agent by:
 - Two-phase: fault localization → patch generation
 - Competitive with agent-based approaches at lower cost
 
+**OpenHands** (ICLR 2025) — leading open platform:
+- CodeAct architecture: actions are bash commands and file edits
+- Nebius released 67K trajectories; RFT checkpoints: 50.3% (30B), 61.7% (235B) on SWE-bench Verified
+- Pipeline: SFT on expert trajectories → rejection fine-tuning → GRPO RL
+
+**Harness coupling insight**: Frontier models are post-trained on their specific tool harnesses. OpenAI's Codex models are tightly coupled with `apply_patch`. This suggests the tool API design matters as much as the training data.
+
 **Training on Transcripts** (the approach you're describing):
 - **Emerging practice**: Companies are starting to use coding agent transcripts for fine-tuning
 - Claude Code / Codex / Cursor transcripts contain rich multi-turn tool-use trajectories
 - These are essentially expert demonstrations (SFT data) for agentic coding
+- **Practical path**: Generate your own trajectories using a strong model on SWE-smith/R2E-Gym tasks, then distill
 - **Key challenge**: transcripts include tool outputs (file contents, bash results) that are environment-specific — you need to either strip these or make them reproducible
 
 ### 2.4 Environment Sandboxing at Scale
@@ -275,22 +304,23 @@ Phase 3: Flywheel (Optional)
 
 | Size | Feasibility | Notes |
 |------|-------------|-------|
-| 1-3B | Good for RL training | Fast rollouts, many iterations. Limited ceiling. |
-| 7-8B | Sweet spot | SWE-gym showed strong results at this scale. Fits RTX 3090 with LoRA. |
-| 14B | Possible with LoRA | Slower rollouts but higher ceiling. |
-| 32B+ | SFT only (locally) | GRPO too expensive without multi-GPU or cloud. |
+| 1.5-4B | Research / experimentation | MicroCoder-GRPO experiments on Qwen3-1.7B and 4B |
+| 7-8B | Fast iteration, single GPU | Deepcoder-14B (60.6% LiveCodeBench). Fits RTX 3090 w/ LoRA. |
+| 14B | Strong practical choice | Deepcoder-14B trained with GRPO on rLLM framework |
+| 32B | Current sweet spot for SWE | DeepSWE (42.2%), SWE-agent-LM-32B (40.2%), OpenHands RFT (50.3%) |
+| 72B+ | Best results, multi-GPU | 39% SWE-bench with Qwen2.5-72B long-context RL |
 
-**Recommendation**: Start with 7-8B (Qwen2.5-Coder-7B or similar). This repo's existing GRPO config targets similar-sized models.
+**Recommendation**: Start with 7-8B (Qwen2.5-Coder-7B) for iteration speed. **Qwen2.5-Coder** is the dominant base model family across all recent SWE-agent work (Apache 2.0, 0.5B-32B). Scale to 32B for production quality.
 
 ### 5.2 Dataset Size
 
 | Phase | Examples Needed | Source |
 |-------|----------------|--------|
-| SFT warm-start | 1,000-5,000 trajectories | Transcripts + curated commits |
-| GRPO | 500-2,000 tasks with tests | Filtered git commits |
+| SFT warm-start | 5,000-50,000 trajectories | Transcripts + curated trajectories (SWE-smith scale) |
+| GRPO | 500-4,500 tasks with tests | R2E-Gym style curated tasks |
 | KTO refinement | 1,000-3,000 pairs | Generated from GRPO attempts (pass/fail) |
 
-**SWE-gym** used ~2,400 tasks and achieved strong results. You don't need millions of examples — hundreds of high-quality tasks with good test coverage outperform thousands of noisy ones.
+**Key data point**: DeepSWE used only 4,500 R2E-Gym tasks over 200 RL steps to jump from 23% → 42%. GRPO can work with surprisingly few examples when reward signals are clean. **Quality vastly outweighs quantity** — R2E-Gym's 4.5K beat SWE-smith's 50K for RL.
 
 ### 5.3 Environment Cost
 
@@ -314,7 +344,30 @@ Phase 3: Flywheel (Optional)
 
 ---
 
-## 6. Quick-Win: Transcript-First Approach
+## 6. Practical GRPO Recipe (from DeepSWE / MicroCoder / Swift docs)
+
+```yaml
+# Proven hyperparameters for code GRPO
+model: Qwen2.5-Coder-7B-Instruct  # or 32B for best results
+max_completion_length: 8192
+temperature: 1.2               # during generation (higher = more exploration)
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 64  # effective batch = 64
+num_generations: 8              # samples per query
+learning_rate: 1e-6
+beta: 0.04
+reward: binary_test_pass        # 0 or 1
+```
+
+**Key training insights from the literature**:
+- **MicroCoder**: Remove KL loss + high clipping ratios for code tasks
+- **DeepSWE**: 200 RL steps sufficient for massive gains
+- **Temperature**: Use 1.0-1.2 during generation for exploration, 0.0 at eval
+- **Scaling**: CPU is the bottleneck (running tests), not GPU. Use Kubernetes for parallel sandbox execution.
+
+---
+
+## 7. Quick-Win: Transcript-First Approach
 
 The fastest path to value:
 
@@ -328,7 +381,7 @@ This skips the hardest part (environment sandboxing) and gets you a coding-capab
 
 ---
 
-## 7. What Needs to Be Built
+## 8. What Needs to Be Built
 
 ### Must-Have (MVP)
 
@@ -357,7 +410,7 @@ This skips the hardest part (environment sandboxing) and gets you a coding-capab
 
 ---
 
-## 8. Open Questions
+## 9. Open Questions
 
 1. **Transcript format**: What exact format are your Claude Code / Codex transcripts in? This determines the parser complexity.
 2. **Target repos**: Which repos to mine for git commits? Your own projects, or popular OSS repos (like SWE-bench)?
@@ -367,15 +420,36 @@ This skips the hardest part (environment sandboxing) and gets you a coding-capab
 
 ---
 
-## 9. References
+## 10. References
 
-- **SWE-bench**: [swe-bench.github.io](https://swe-bench.github.io/) — Benchmark for real-world software engineering
-- **SWE-gym**: Training environment for SWE-bench-style RL
-- **SWE-agent**: [github.com/princeton-nlp/SWE-agent](https://github.com/princeton-nlp/SWE-agent) — Agent interface for code tasks
-- **CommitPack**: Large-scale git commit dataset from BigCode
+### Data Pipelines & Benchmarks
+- **SWE-bench**: [swe-bench.github.io](https://swe-bench.github.io/)
+- **SWE-smith**: [github.com/SWE-bench/SWE-smith](https://github.com/SWE-bench/SWE-smith) — 50K tasks, NeurIPS 2025 Spotlight
+- **R2E-Gym**: [github.com/R2E-Gym/R2E-Gym](https://github.com/R2E-Gym/R2E-Gym) — 8.1K tasks, COLM 2025
+- **SWE-rebench**: [openreview.net](https://openreview.net/forum?id=nMpJoVmRy1) — 21K tasks, NeurIPS 2025
+- **CommitPack**: 4TB git commits from BigCode/StarCoder2
+
+### RL / GRPO for Code
+- **DeepSWE**: [together.ai/blog/deepswe](https://www.together.ai/blog/deepswe) — 42.2% SWE-bench Verified with GRPO
+- **MicroCoder-GRPO**: [arxiv.org/abs/2603.07777](https://arxiv.org/abs/2603.07777) — ICLR 2026
+- **Self-Play SWE-RL**: [arxiv.org/abs/2512.18552](https://arxiv.org/abs/2512.18552) — No human labels needed
 - **CodeRL**: RL from unit test feedback (ICML 2022)
 - **RLTF**: Multi-granularity RL from test feedback (2023)
 - **StepCoder**: Curriculum RL for code (2024)
 - **DeepSeek-R1**: GRPO applied to code reasoning
-- **OpenHands**: [github.com/All-Hands-AI/OpenHands](https://github.com/All-Hands-AI/OpenHands) — Coding agent framework
-- **R2E**: Repo-to-Environment conversion pipeline
+
+### Agents & Frameworks
+- **OpenHands**: [github.com/All-Hands-AI/OpenHands](https://github.com/All-Hands-AI/OpenHands) — ICLR 2025
+- **SWE-agent**: [github.com/princeton-nlp/SWE-agent](https://github.com/princeton-nlp/SWE-agent)
+- **ScaleBox**: [github.com/icip-cas/ScaleBox](https://github.com/icip-cas/ScaleBox) — Distributed sandbox + RL
+- **rLLM**: [github.com/agentica-project/rLLM](https://github.com/agentica-project/rLLM) — Ray-based RL framework (Deepcoder-14B)
+
+### Reward Models
+- **SWE-RM**: [arxiv.org/pdf/2512.21919](https://www.arxiv.org/pdf/2512.21919) — Execution-free verifier, 62% SWE-bench
+- **CodePRM**: [ACL 2025](https://aclanthology.org/2025.findings-acl.428/) — Step-level process rewards
+
+### Tutorials & Guides
+- **GRPO Explainer**: [Cameron Wolfe](https://cameronrwolfe.substack.com/p/grpo)
+- **Swift GRPO Code Training**: [swift.readthedocs.io](https://swift.readthedocs.io/en/latest/BestPractices/GRPO-Code-Training.html)
+- **TRL GRPOTrainer**: [huggingface.co/docs/trl](https://huggingface.co/docs/trl/en/grpo_trainer)
+- **DeepLearning.AI GRPO Course**: [deeplearning.ai](https://www.deeplearning.ai/short-courses/reinforcement-fine-tuning-llms-grpo/)
