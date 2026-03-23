@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shlex
 import shutil
 import tempfile
@@ -33,6 +34,7 @@ from tuner.cloud import (
     load_huggingface_hub,
     resolve_hf_bucket_id,
 )
+from tuner.backends.training.cloud.base_cloud import poll_until_done
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler
@@ -447,12 +449,12 @@ class HFLossStageRunner:
         return " && ".join(parts)
 
     def _poll_job(self, huggingface_hub, *, job_id: str, timeout_hours: float) -> int:
-        import time
-
+        logger = logging.getLogger(__name__)
         timeout_seconds = int(timeout_hours * 3600)
-        elapsed = 0
         last_log_offset = 0
-        while elapsed < timeout_seconds:
+
+        def _check_status():
+            nonlocal last_log_offset
             job_info = huggingface_hub.inspect_job(job_id=job_id)
             status_obj = getattr(job_info, "status", None)
             status = status_obj.stage if status_obj and hasattr(status_obj, "stage") else str(status_obj or "UNKNOWN")
@@ -464,11 +466,14 @@ class HFLossStageRunner:
             except Exception:
                 pass
             if status in ("completed", "COMPLETED"):
-                return 0
+                return "COMPLETED"
             if status in ("error", "ERROR", "failed", "FAILED", "cancelled", "CANCELLED"):
-                return 1
-            time.sleep(30)
-            elapsed += 30
+                return f"ERROR: Job failed with status: {status}"
+            return None
+
+        result = poll_until_done(_check_status, interval=30, timeout_seconds=timeout_seconds)
+        if result == "COMPLETED":
+            return 0
         return 1
 
     def _download_results(self, *, bucket_id: str, results_prefix: str) -> Optional[Path]:

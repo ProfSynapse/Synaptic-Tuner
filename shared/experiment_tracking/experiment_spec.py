@@ -163,8 +163,20 @@ class ExperimentSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExperimentSpec":
         payload = data.get("experiment", data)
-        dataset = DatasetSpec(**payload["dataset"])
-        training = TrainingStageSpec(**payload["training"])
+        required_keys = ("name", "provider", "method", "dataset", "training")
+        missing = [key for key in required_keys if key not in payload]
+        if missing:
+            raise ValueError(
+                f"Experiment spec missing required field(s): {', '.join(missing)}"
+            )
+        try:
+            dataset = DatasetSpec(**payload["dataset"])
+        except TypeError as exc:
+            raise ValueError(f"Invalid experiment.dataset: {exc}") from exc
+        try:
+            training = TrainingStageSpec(**payload["training"])
+        except TypeError as exc:
+            raise ValueError(f"Invalid experiment.training: {exc}") from exc
         execution = ExecutionStageSpec(**payload.get("execution", {}))
         evaluation = EvaluationStageSpec(**payload.get("evaluation", {}))
         loss = LossStageSpec(**payload.get("loss", {}))
