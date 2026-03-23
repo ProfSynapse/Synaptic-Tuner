@@ -252,7 +252,7 @@ class TestCloudTrainHandler:
         handler = self._make_handler(args)
         mock_config = MagicMock()
         # Should not raise with no override attributes
-        result = handler._apply_training_overrides(mock_config)
+        result = handler.apply_training_overrides(mock_config)
         assert result is mock_config
 
     def test_apply_training_overrides_sets_values(self):
@@ -278,14 +278,14 @@ class TestCloudTrainHandler:
         mock_config = MagicMock()
         mock_config.dataset_name = None
         mock_config.dataset_file = None
-        handler._apply_training_overrides(mock_config)
+        handler.apply_training_overrides(mock_config)
         assert mock_config.model_name == "new-model"
         assert mock_config.batch_size == 8
 
     def test_method_labels(self):
         args = Namespace(json=True)
         handler = self._make_handler(args)
-        labels = handler._load_method_labels()
+        labels = handler.load_method_labels()
         assert "sft" in labels
         assert "kto" in labels
 
