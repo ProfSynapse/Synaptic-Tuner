@@ -1,0 +1,62 @@
+experiment:
+  name: qwen3-4b-toolcall-schema-a100-r2-evolutionary-antithetic-low-noise
+  provider: hf_jobs
+  method: sft
+  objective: evaluate_antithetic_evolutionary_low_noise_against_toolcall_schema_baseline
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: Qwen/Qwen3-4B
+    gpu: a100-large
+    image_profile: stable
+    batch_size: 24
+    gradient_accumulation: 2
+    learning_rate: 1.0e-4
+    num_epochs: 2
+    load_in_4bit: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    evolutionary:
+      enabled: true
+      candidates: 5
+      eval_batch_size: 2
+      validation_config: configs/fitness/tool_calling.yaml
+      strategy:
+        type: antithetic_noise
+        params:
+          noise_scale: 0.015
+          max_grad_norm: 1.0
+      selection:
+        method: best
+        min_improvement: 0.0
+        min_relative_improvement: 0.0001
+        noise_floor_epsilon: 0.000001
+      eval_frequency: 10
+      warmup_steps: 5
+      cache_baseline: true
+      logging:
+        candidates: true
+        selected: true
+  evaluation:
+    enabled: true
+    preset: full
+    runtime: vllm
+    image_profile: fast_vllm
+    gpu: a100-large
+  loss:
+    enabled: true
+    gpu: a100-large
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv
