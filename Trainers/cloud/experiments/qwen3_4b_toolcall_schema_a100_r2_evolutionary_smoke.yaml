@@ -13,7 +13,7 @@ experiment:
     batch_size: 24
     gradient_accumulation: 2
     learning_rate: 1.0e-4
-    max_steps: 60
+    max_steps: 20
     load_in_4bit: true
     lora_target_modules:
       - q_proj
@@ -42,7 +42,7 @@ experiment:
         method: best
         min_improvement: 0.01
       eval_frequency: 5
-      warmup_steps: 200
+      warmup_steps: 10
       cache_baseline: true
       logging:
         candidates: true
