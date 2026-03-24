@@ -1,5 +1,6 @@
 """Tests for EvolutionaryTrainerWrapper — init, train flow, evaluation, and state tracking."""
 
+import json
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
@@ -172,6 +173,18 @@ class TestEvolutionaryTrainerWrapperInit:
             eval_prompts=prompts,
         )
         assert wrapper.eval_prompts == prompts
+
+    def test_init_stores_events_path(self, tmp_path):
+        events_path = tmp_path / "logs" / "evolutionary_events.jsonl"
+        from shared.evolutionary.trainer_wrapper import EvolutionaryTrainerWrapper
+        wrapper = EvolutionaryTrainerWrapper(
+            trainer=FakeTrainer(),
+            config=_make_config(),
+            tokenizer=FakeTokenizer(),
+            events_path=events_path,
+        )
+        assert wrapper.events_path == events_path
+        assert events_path.parent.exists()
 
     def test_init_none_eval_prompts_defaults_to_empty(self):
         wrapper = _make_wrapper()
@@ -499,6 +512,20 @@ class TestStatsAndLogging:
         wrapper._log_candidates(candidates)
         assert len(wrapper.candidate_stats) == 1
 
+    def test_emit_event_writes_jsonl(self, tmp_path):
+        wrapper = _make_wrapper()
+        wrapper.events_path = tmp_path / "evolutionary_events.jsonl"
+        wrapper.current_step = 7
+
+        wrapper._emit_event("candidate_selected", {"selected_candidate_id": 2, "selected_fitness": 0.9})
+
+        lines = wrapper.events_path.read_text(encoding="utf-8").strip().splitlines()
+        payload = json.loads(lines[-1])
+        assert payload["event"] == "candidate_selected"
+        assert payload["step"] == 7
+        assert payload["selected_candidate_id"] == 2
+        assert payload["selected_fitness"] == 0.9
+
     def test_get_eval_prompts_returns_custom(self):
         """When eval_prompts provided, returns them directly."""
         from shared.evolutionary.trainer_wrapper import EvolutionaryTrainerWrapper
@@ -523,6 +550,12 @@ class TestStatsAndLogging:
         wrapper = _make_wrapper()
         wrapper.current_step = 10
         wrapper.best_fitness_history = [0.5, 0.6, 0.7]
+        wrapper.selection_events = 2
+        wrapper.baseline_kept_count = 1
+        wrapper.last_selected_candidate = {"step": 10, "id": 3}
         stats = wrapper.get_stats()
         assert stats["total_steps"] == 10
         assert len(stats["best_fitness_history"]) == 3
+        assert stats["selection_events"] == 2
+        assert stats["baseline_kept_count"] == 1
+        assert stats["last_selected_candidate"]["id"] == 3

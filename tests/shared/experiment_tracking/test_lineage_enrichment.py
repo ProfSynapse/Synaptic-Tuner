@@ -70,6 +70,30 @@ def test_enrich_training_lineage_adds_variant_and_planner(tmp_path: Path) -> Non
     assert payload["runtime"]["duration_seconds"] == 120.0
 
 
+def test_enrich_training_lineage_preserves_evolutionary_summary() -> None:
+    payload = lineage_enrichment.enrich_training_lineage(
+        {
+            "timestamp": "2026-03-24T16:20:35+00:00",
+            "dataset": {"source": "repo/my_dataset.jsonl"},
+            "training": {"effective_batch_size": 48},
+            "results": {"training_time_seconds": 195.1},
+            "hardware": {},
+            "evolutionary": {
+                "enabled": True,
+                "selection_events": 2,
+                "baseline_kept_count": 1,
+                "events_path": "/tmp/run/logs/evolutionary_events.jsonl",
+            },
+        },
+        args=SimpleNamespace(auto_hardware=False, optimize_for=None, hf_flavor="a100-large"),
+    )
+
+    assert payload["evolutionary"]["enabled"] is True
+    assert payload["evolutionary"]["selection_events"] == 2
+    assert payload["evolutionary"]["baseline_kept_count"] == 1
+    assert payload["evolutionary"]["events_path"].endswith("evolutionary_events.jsonl")
+
+
 def test_enrich_evaluation_lineage_adds_execution_and_runtime() -> None:
     payload = lineage_enrichment.enrich_evaluation_lineage(
         {"results_summary": {"overall_pass_rate": 55.0}},

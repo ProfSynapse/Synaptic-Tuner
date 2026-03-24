@@ -1,7 +1,10 @@
 """Evolutionary trainer wrapper for HuggingFace trainers."""
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
 from contextlib import contextmanager
 
@@ -53,6 +56,7 @@ class EvolutionaryTrainerWrapper:
         tokenizer,
         fitness_evaluator: Optional[FitnessEvaluator] = None,
         eval_prompts: Optional[List[str]] = None,
+        events_path: Optional[str | Path] = None,
     ):
         """
         Initialize evolutionary wrapper.
@@ -69,6 +73,9 @@ class EvolutionaryTrainerWrapper:
         self.config = config
         self.tokenizer = tokenizer
         self.eval_prompts = eval_prompts or []
+        self.events_path = Path(events_path) if events_path else None
+        if self.events_path:
+            self.events_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Create fitness evaluator
         if fitness_evaluator is not None:
@@ -92,6 +99,9 @@ class EvolutionaryTrainerWrapper:
         self.current_step = 0
         self.best_fitness_history: List[float] = []
         self.candidate_stats: List[Dict[str, Any]] = []
+        self.selection_events = 0
+        self.baseline_kept_count = 0
+        self.last_selected_candidate: Optional[Dict[str, Any]] = None
 
         # Store original training step
         self._original_training_step = None
@@ -104,6 +114,20 @@ class EvolutionaryTrainerWrapper:
         issues = config.validate()
         if issues:
             logger.warning(f"Evolutionary config issues: {issues}")
+
+    def _emit_event(self, event_type: str, payload: Optional[Dict[str, Any]] = None) -> None:
+        """Persist a structured evolutionary event for bucket-backed inspection."""
+        if not self.events_path:
+            return
+        event_payload = {
+            "event": event_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "step": self.current_step,
+        }
+        if payload:
+            event_payload.update(payload)
+        with self.events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event_payload, ensure_ascii=False) + "\n")
 
     def train(self, *args, **kwargs):
         """
@@ -119,6 +143,16 @@ class EvolutionaryTrainerWrapper:
         logger.info(f"Strategy: {self.config.strategy}, Selection: {self.config.selection_method}")
         if self.config.warmup_steps > 0:
             logger.info(f"Warmup: {self.config.warmup_steps} steps of standard training first")
+        self._emit_event(
+            "evolutionary_enabled",
+            {
+                "strategy": self.config.strategy,
+                "selection_method": self.config.selection_method,
+                "num_candidates": self.config.num_candidates,
+                "eval_frequency": self.config.eval_frequency,
+                "warmup_steps": self.config.warmup_steps,
+            },
+        )
 
         # Install the evolutionary training step
         self._install_evolutionary_step()
@@ -167,6 +201,12 @@ class EvolutionaryTrainerWrapper:
         if self.current_step <= self.config.warmup_steps:
             if self.current_step == self.config.warmup_steps:
                 logger.info(f"Warmup complete at step {self.current_step}, enabling evolutionary selection")
+                self._emit_event(
+                    "warmup_complete",
+                    {
+                        "warmup_steps": self.config.warmup_steps,
+                    },
+                )
             return self._original_training_step(model, inputs, num_items_in_batch)
 
         # Check if we should do evolutionary selection this step
@@ -224,9 +264,12 @@ class EvolutionaryTrainerWrapper:
 
         # Check minimum improvement
         baseline_fitness = candidates[0].fitness if candidates else 0.0
+        baseline_kept = False
         if (best_candidate.fitness - baseline_fitness) < self.config.min_fitness_improvement:
             # Use baseline gradient (no improvement found)
             best_candidate = candidates[0]
+            baseline_kept = True
+            self.baseline_kept_count += 1
 
         # Step 6: Apply best candidate's gradients
         CandidateGenerator.apply_gradients(model, best_candidate.gradients)
@@ -234,6 +277,39 @@ class EvolutionaryTrainerWrapper:
         # Logging
         if self.config.log_candidates:
             self._log_candidates(candidates)
+
+        fitnesses = [c.fitness for c in candidates]
+        candidate_payload = [
+            {
+                "id": c.id,
+                "description": c.description,
+                "fitness": c.fitness,
+                "metadata": dict(c.metadata),
+            }
+            for c in candidates
+        ]
+        self.selection_events += 1
+        self.last_selected_candidate = {
+            "step": self.current_step,
+            "id": best_candidate.id,
+            "description": best_candidate.description,
+            "fitness": best_candidate.fitness,
+            "used_baseline": baseline_kept,
+        }
+        self._emit_event(
+            "candidate_selected",
+            {
+                "candidate_count": len(candidates),
+                "baseline_fitness": baseline_fitness,
+                "selected_candidate_id": best_candidate.id,
+                "selected_description": best_candidate.description,
+                "selected_fitness": best_candidate.fitness,
+                "used_baseline": baseline_kept,
+                "min_improvement": self.config.min_fitness_improvement,
+                "candidate_fitnesses": fitnesses,
+                "candidates": candidate_payload,
+            },
+        )
 
         if self.config.log_selected:
             logger.info(
@@ -450,5 +526,9 @@ class EvolutionaryTrainerWrapper:
             "total_steps": self.current_step,
             "best_fitness_history": self.best_fitness_history,
             "candidate_stats": self.candidate_stats,
+            "selection_events": self.selection_events,
+            "baseline_kept_count": self.baseline_kept_count,
+            "last_selected_candidate": self.last_selected_candidate,
+            "events_path": str(self.events_path) if self.events_path else None,
             "config": self.config.to_dict(),
         }

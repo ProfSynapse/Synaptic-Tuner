@@ -327,7 +327,8 @@ def build_training_lineage(
     trainer,
     run_dir: Path,
     args: argparse.Namespace,
-    training_time_seconds: Optional[float] = None
+    training_time_seconds: Optional[float] = None,
+    evolutionary_stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build comprehensive training lineage for model cards and traceability.
 
@@ -429,6 +430,16 @@ def build_training_lineage(
             "selection_method": config.evolutionary.selection.method,
             "eval_frequency": config.evolutionary.eval_frequency,
         }
+        if evolutionary_stats:
+            lineage["evolutionary"].update(
+                {
+                    "selection_events": evolutionary_stats.get("selection_events", 0),
+                    "baseline_kept_count": evolutionary_stats.get("baseline_kept_count", 0),
+                    "last_selected_candidate": evolutionary_stats.get("last_selected_candidate"),
+                    "best_fitness_history": evolutionary_stats.get("best_fitness_history", []),
+                    "events_path": evolutionary_stats.get("events_path"),
+                }
+            )
 
     return enrich_training_lineage(lineage, args=args)
 
@@ -1175,6 +1186,7 @@ def run(args: argparse.Namespace):
                 trainer=trainer,
                 config=evo_config,
                 tokenizer=tokenizer,
+                events_path=logs_dir / "evolutionary_events.jsonl",
             )
             print(f"[OK] Evolutionary training enabled:")
             print(f"     Strategy: {config.evolutionary.strategy.type}")
@@ -1262,7 +1274,8 @@ def run(args: argparse.Namespace):
         trainer=trainer,
         run_dir=run_dir,
         args=args,
-        training_time_seconds=training_time_seconds
+        training_time_seconds=training_time_seconds,
+        evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
     )
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
