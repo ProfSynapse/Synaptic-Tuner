@@ -358,6 +358,66 @@ class CloudTrainHandler(BaseHandler):
                     if module.strip()
                 ]
 
+        if getattr(args, "train_evolutionary_enabled", False):
+            config.evolutionary_enabled = True
+
+        train_evolutionary_candidates = getattr(args, "train_evolutionary_candidates", None)
+        if train_evolutionary_candidates is not None:
+            config.evolutionary_candidates = train_evolutionary_candidates
+
+        train_evolutionary_eval_batch_size = getattr(args, "train_evolutionary_eval_batch_size", None)
+        if train_evolutionary_eval_batch_size is not None:
+            config.evolutionary_eval_batch_size = train_evolutionary_eval_batch_size
+
+        train_evolutionary_validation_config = getattr(args, "train_evolutionary_validation_config", None)
+        if train_evolutionary_validation_config is not None:
+            config.evolutionary_validation_config = train_evolutionary_validation_config
+
+        train_evolutionary_strategy = getattr(args, "train_evolutionary_strategy", None)
+        if train_evolutionary_strategy is not None:
+            config.evolutionary_strategy = train_evolutionary_strategy
+
+        train_evolutionary_noise_scale = getattr(args, "train_evolutionary_noise_scale", None)
+        if train_evolutionary_noise_scale is not None:
+            config.evolutionary_noise_scale = train_evolutionary_noise_scale
+
+        train_evolutionary_max_grad_norm = getattr(args, "train_evolutionary_max_grad_norm", None)
+        if train_evolutionary_max_grad_norm is not None:
+            config.evolutionary_max_grad_norm = train_evolutionary_max_grad_norm
+
+        train_evolutionary_scale_factors = getattr(args, "train_evolutionary_scale_factors", None)
+        if train_evolutionary_scale_factors:
+            config.evolutionary_scale_factors = [
+                float(value.strip())
+                for value in train_evolutionary_scale_factors.split(",")
+                if value.strip()
+            ]
+
+        train_evolutionary_selection_method = getattr(args, "train_evolutionary_selection_method", None)
+        if train_evolutionary_selection_method is not None:
+            config.evolutionary_selection_method = train_evolutionary_selection_method
+
+        train_evolutionary_min_improvement = getattr(args, "train_evolutionary_min_improvement", None)
+        if train_evolutionary_min_improvement is not None:
+            config.evolutionary_min_improvement = train_evolutionary_min_improvement
+
+        train_evolutionary_eval_frequency = getattr(args, "train_evolutionary_eval_frequency", None)
+        if train_evolutionary_eval_frequency is not None:
+            config.evolutionary_eval_frequency = train_evolutionary_eval_frequency
+
+        train_evolutionary_warmup_steps = getattr(args, "train_evolutionary_warmup_steps", None)
+        if train_evolutionary_warmup_steps is not None:
+            config.evolutionary_warmup_steps = train_evolutionary_warmup_steps
+
+        if getattr(args, "train_evolutionary_cache_baseline", None) is not None:
+            config.evolutionary_cache_baseline = args.train_evolutionary_cache_baseline
+
+        if getattr(args, "train_evolutionary_log_candidates", None) is not None:
+            config.evolutionary_log_candidates = args.train_evolutionary_log_candidates
+
+        if getattr(args, "train_evolutionary_log_selected", None) is not None:
+            config.evolutionary_log_selected = args.train_evolutionary_log_selected
+
         train_gpu = getattr(args, "train_gpu", None)
         if train_gpu:
             config.gpu_type = train_gpu

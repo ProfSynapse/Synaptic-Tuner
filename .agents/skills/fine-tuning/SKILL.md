@@ -22,6 +22,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
+| Evolutionary SFT smoke test | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<evolutionary-spec>.yaml --yes` |
 | Staggered experiment batch | `python3 scripts/launch_experiment_batch.py Trainers/cloud/experiments/<spec1>.yaml Trainers/cloud/experiments/<spec2>.yaml --yes` |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
@@ -88,6 +89,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
+- Evolutionary SFT is experimental but now first-class in the cloud experiment path. Prefer a checked-in experiment spec or `cloud-pipeline --train-evolutionary-*` overrides over editing trainer YAMLs by hand.
+- Use evolutionary training for technical validation or targeted experiments first. It adds significant per-step compute overhead, so smoke tests should usually cap `max_steps` before you commit to a long run.
 - For multi-spec benchmark launches, prefer `python3 scripts/launch_experiment_batch.py ...` over back-to-back manual submissions. It defaults to a 5-second stagger.
 - For blind stage hardware selection before launch, use `python tuner.py plan-hardware ...`.
 - For live HF status and traceback inspection, use `python tuner.py cloud-jobs ...`.
@@ -121,6 +124,7 @@ Load the specific reference you need:
 | **Checkpoint Evaluation** | Best-checkpoint selection via eval | `reference/checkpoint-evaluation.md` |
 | **Experiment Loop** | Autonomous hyperparameter search (LLM + LightGBM) | `reference/experiment-loop.md` |
 | **LoRA Techniques** | LoRA variants, init methods, config recipes | `reference/lora-techniques.md` |
+| **Evolutionary Config** | Experimental gradient-selection config schema and defaults | `reference/training-config.md` |
 | **LoRA Surgery** | Eval-guided post-training weight optimization | `reference/lora-surgery.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |
@@ -237,6 +241,26 @@ python tuner.py cloud-pipeline --method sft --preset full \
   --train-use-dora \
   --train-no-load-in-4bit \
   --train-lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj \
+  --yes
+
+python tuner.py cloud-pipeline --method sft \
+  --train-model-name Qwen/Qwen3-4B \
+  --train-gpu a100-large \
+  --train-batch-size 24 \
+  --train-gradient-accumulation 2 \
+  --train-learning-rate 1e-4 \
+  --train-max-steps 60 \
+  --train-evolutionary-enabled \
+  --train-evolutionary-candidates 4 \
+  --train-evolutionary-eval-batch-size 2 \
+  --train-evolutionary-validation-config configs/fitness/tool_calling.yaml \
+  --train-evolutionary-strategy gradient_noise \
+  --train-evolutionary-noise-scale 0.03 \
+  --train-evolutionary-max-grad-norm 1.0 \
+  --train-evolutionary-selection-method best \
+  --train-evolutionary-min-improvement 0.01 \
+  --train-evolutionary-eval-frequency 5 \
+  --train-evolutionary-warmup-steps 200 \
   --yes
 ```
 For SFT experiments, the cloud and experiment surfaces now accept:

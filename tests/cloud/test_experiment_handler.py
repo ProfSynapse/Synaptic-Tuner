@@ -253,6 +253,95 @@ def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_
     assert config.lora_target_modules == "all-linear"
 
 
+def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+
+    spec = ExperimentSpec(
+        name="evolutionary-smoke",
+        provider="hf_jobs",
+        method="sft",
+        objective="evolutionary_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(
+            model_name="Qwen/Qwen3-4B",
+            max_steps=20,
+        ),
+        evaluation=EvaluationStageSpec(enabled=False),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+    spec.training.evolutionary.enabled = True
+    spec.training.evolutionary.candidates = 4
+    spec.training.evolutionary.eval_batch_size = 2
+    spec.training.evolutionary.validation_config = "configs/fitness/tool_calling.yaml"
+    spec.training.evolutionary.strategy.type = "gradient_noise"
+    spec.training.evolutionary.strategy.params = {
+        "noise_scale": 0.03,
+        "max_grad_norm": 1.0,
+        "scale_factors": [0.5, 1.0, 1.5],
+    }
+    spec.training.evolutionary.selection.method = "best"
+    spec.training.evolutionary.selection.min_improvement = 0.01
+    spec.training.evolutionary.eval_frequency = 5
+    spec.training.evolutionary.warmup_steps = 200
+    spec.training.evolutionary.cache_baseline = True
+    spec.training.evolutionary.logging.candidates = False
+    spec.training.evolutionary.logging.selected = True
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    backend = MagicMock()
+    backend.validate_environment.return_value = (True, "")
+    backend.execute.return_value = 0
+    backend.load_config.return_value = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake/config.yaml"),
+        trainer_dir=Path("/fake/trainer"),
+        model_name="base",
+        dataset_file="dataset.jsonl",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a100-large",
+        timeout_hours=4.0,
+        cloud_image="unsloth/unsloth:latest",
+        hf_flavor="a100-large",
+        artifact_backend="hf_bucket",
+        artifact_identifier="professorsynapse/toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="deadbeefcafebabe",
+    )
+
+    with patch.object(runner, "_recover_existing_training", return_value=None):
+        with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+                result = runner.run(spec=spec, experiment=experiment)
+
+    assert result.status == "completed"
+    config = backend.execute.call_args.args[0]
+    assert config.evolutionary_enabled is True
+    assert config.evolutionary_candidates == 4
+    assert config.evolutionary_eval_batch_size == 2
+    assert config.evolutionary_validation_config == "configs/fitness/tool_calling.yaml"
+    assert config.evolutionary_strategy == "gradient_noise"
+    assert config.evolutionary_noise_scale == 0.03
+    assert config.evolutionary_max_grad_norm == 1.0
+    assert config.evolutionary_scale_factors == [0.5, 1.0, 1.5]
+    assert config.evolutionary_selection_method == "best"
+    assert config.evolutionary_min_improvement == 0.01
+    assert config.evolutionary_eval_frequency == 5
+    assert config.evolutionary_warmup_steps == 200
+    assert config.evolutionary_cache_baseline is True
+    assert config.evolutionary_log_candidates is False
+    assert config.evolutionary_log_selected is True
+
+
 def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()

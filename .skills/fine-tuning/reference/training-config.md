@@ -92,13 +92,35 @@ evolutionary:
   strategy:
     type: "gradient_noise"
     params:
-      noise_scale: 0.1
+      noise_scale: 0.03
+      max_grad_norm: 1.0
+      scale_factors: [0.5, 1.0, 1.5, 2.0]
   selection:
     method: "best"
-    min_improvement: 0.0
-  eval_frequency: 1
-  warmup_steps: 0
+    min_improvement: 0.01
+  eval_frequency: 5
+  warmup_steps: 200
   cache_baseline: true
+  logging:
+    candidates: true
+    selected: true
+```
+
+Cloud / experiment surfaces can now override the same settings without editing the trainer YAML:
+
+```bash
+python tuner.py cloud-pipeline --method sft \
+  --train-evolutionary-enabled \
+  --train-evolutionary-candidates 4 \
+  --train-evolutionary-eval-batch-size 2 \
+  --train-evolutionary-validation-config configs/fitness/tool_calling.yaml \
+  --train-evolutionary-strategy gradient_noise \
+  --train-evolutionary-noise-scale 0.03 \
+  --train-evolutionary-max-grad-norm 1.0 \
+  --train-evolutionary-selection-method best \
+  --train-evolutionary-min-improvement 0.01 \
+  --train-evolutionary-eval-frequency 5 \
+  --train-evolutionary-warmup-steps 200
 ```
 
 ---

@@ -127,6 +127,56 @@ def test_load_experiment_spec_supports_parallel_post_training_mode(tmp_path):
     assert spec.post_training.mode == "parallel"
 
 
+def test_load_experiment_spec_supports_nested_evolutionary_training(tmp_path):
+    spec_path = tmp_path / "evolutionary.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: evolutionary-smoke
+              provider: hf_jobs
+              method: sft
+              dataset:
+                source: repo/dataset
+                file: sample.jsonl
+              training:
+                model_name: Qwen/Qwen3-4B
+                evolutionary:
+                  enabled: true
+                  candidates: 4
+                  eval_batch_size: 2
+                  validation_config: configs/fitness/tool_calling.yaml
+                  strategy:
+                    type: gradient_noise
+                    params:
+                      noise_scale: 0.03
+                      max_grad_norm: 1.0
+                      scale_factors: [0.5, 1.0, 1.5]
+                  selection:
+                    method: best
+                    min_improvement: 0.01
+                  eval_frequency: 5
+                  warmup_steps: 200
+                  cache_baseline: true
+                  logging:
+                    candidates: false
+                    selected: true
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    spec = load_experiment_spec(spec_path)
+
+    assert spec.training.evolutionary.enabled is True
+    assert spec.training.evolutionary.candidates == 4
+    assert spec.training.evolutionary.validation_config == "configs/fitness/tool_calling.yaml"
+    assert spec.training.evolutionary.strategy.type == "gradient_noise"
+    assert spec.training.evolutionary.strategy.params["noise_scale"] == 0.03
+    assert spec.training.evolutionary.selection.method == "best"
+    assert spec.training.evolutionary.logging.candidates is False
+
+
 def test_load_experiment_spec_rejects_invalid_post_training_mode(tmp_path):
     spec_path = tmp_path / "invalid_post_training.yaml"
     spec_path.write_text(

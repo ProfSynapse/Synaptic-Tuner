@@ -116,6 +116,56 @@ def test_cloud_training_lora_flags_parse():
     assert args.train_lora_target_modules == "all-linear"
 
 
+def test_cloud_training_evolutionary_flags_parse():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "cloud-pipeline",
+            "--method",
+            "sft",
+            "--train-evolutionary-enabled",
+            "--train-evolutionary-candidates",
+            "4",
+            "--train-evolutionary-eval-batch-size",
+            "2",
+            "--train-evolutionary-validation-config",
+            "configs/fitness/tool_calling.yaml",
+            "--train-evolutionary-strategy",
+            "gradient_noise",
+            "--train-evolutionary-noise-scale",
+            "0.03",
+            "--train-evolutionary-max-grad-norm",
+            "1.0",
+            "--train-evolutionary-scale-factors",
+            "0.5,1.0,1.5",
+            "--train-evolutionary-selection-method",
+            "best",
+            "--train-evolutionary-min-improvement",
+            "0.01",
+            "--train-evolutionary-eval-frequency",
+            "5",
+            "--train-evolutionary-warmup-steps",
+            "200",
+            "--train-evolutionary-no-log-candidates",
+        ]
+    )
+
+    assert args.train_evolutionary_enabled is True
+    assert args.train_evolutionary_candidates == 4
+    assert args.train_evolutionary_eval_batch_size == 2
+    assert args.train_evolutionary_validation_config == "configs/fitness/tool_calling.yaml"
+    assert args.train_evolutionary_strategy == "gradient_noise"
+    assert args.train_evolutionary_noise_scale == 0.03
+    assert args.train_evolutionary_max_grad_norm == 1.0
+    assert args.train_evolutionary_scale_factors == "0.5,1.0,1.5"
+    assert args.train_evolutionary_selection_method == "best"
+    assert args.train_evolutionary_min_improvement == 0.01
+    assert args.train_evolutionary_eval_frequency == 5
+    assert args.train_evolutionary_warmup_steps == 200
+    assert args.train_evolutionary_log_candidates is False
+
+
 def test_cloud_method_flag_accepts_grpo():
     parser = create_parser()
 

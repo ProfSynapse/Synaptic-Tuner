@@ -502,6 +502,48 @@ def parse_args(argv=None):
                         help="Enable rsLoRA (rank-stabilized scaling). Recommended at r>=128.")
     parser.add_argument("--init-lora-weights", type=str,
                         help="Set init_lora_weights (for example: gaussian, loftq, corda, eva, pissa, olora).")
+    parser.add_argument("--evolutionary-enabled", action="store_true",
+                        help="Enable experimental evolutionary gradient selection.")
+    parser.add_argument("--evolutionary-candidates", type=int,
+                        help="Override evolutionary candidate count.")
+    parser.add_argument("--evolutionary-eval-batch-size", type=int,
+                        help="Override evolutionary fitness eval batch size.")
+    parser.add_argument("--evolutionary-validation-config", type=str,
+                        help="Override evolutionary validation config path.")
+    parser.add_argument("--evolutionary-strategy", choices=["gradient_noise", "scale_variation", "combined"],
+                        help="Override evolutionary candidate generation strategy.")
+    parser.add_argument("--evolutionary-noise-scale", type=float,
+                        help="Override evolutionary gradient noise scale.")
+    parser.add_argument("--evolutionary-max-grad-norm", type=float,
+                        help="Override evolutionary max gradient norm for candidate generation.")
+    parser.add_argument("--evolutionary-scale-factors", type=str,
+                        help="Comma-separated evolutionary scale factors.")
+    parser.add_argument("--evolutionary-selection-method", choices=["best", "tournament", "proportional"],
+                        help="Override evolutionary selection method.")
+    parser.add_argument("--evolutionary-min-improvement", type=float,
+                        help="Override evolutionary minimum fitness improvement.")
+    parser.add_argument("--evolutionary-eval-frequency", type=int,
+                        help="Override evolutionary evaluation frequency.")
+    parser.add_argument("--evolutionary-warmup-steps", type=int,
+                        help="Override evolutionary warmup steps.")
+    parser.add_argument("--evolutionary-cache-baseline", action="store_true", dest="evolutionary_cache_baseline",
+                        help="Enable evolutionary baseline caching.")
+    parser.add_argument("--evolutionary-no-cache-baseline", action="store_false", dest="evolutionary_cache_baseline",
+                        help="Disable evolutionary baseline caching.")
+    parser.add_argument("--evolutionary-log-candidates", action="store_true", dest="evolutionary_log_candidates",
+                        help="Enable evolutionary candidate logging.")
+    parser.add_argument("--evolutionary-no-log-candidates", action="store_false", dest="evolutionary_log_candidates",
+                        help="Disable evolutionary candidate logging.")
+    parser.add_argument("--evolutionary-log-selected", action="store_true", dest="evolutionary_log_selected",
+                        help="Enable evolutionary selection logging.")
+    parser.add_argument("--evolutionary-no-log-selected", action="store_false", dest="evolutionary_log_selected",
+                        help="Disable evolutionary selection logging.")
+    parser.set_defaults(
+        load_in_4bit=None,
+        evolutionary_cache_baseline=None,
+        evolutionary_log_candidates=None,
+        evolutionary_log_selected=None,
+    )
     parser.add_argument(
         "--load-in-4bit",
         action="store_true",
@@ -514,7 +556,6 @@ def parse_args(argv=None):
         dest="load_in_4bit",
         help="Disable 4-bit model loading",
     )
-    parser.set_defaults(load_in_4bit=None)
 
     # Dataset parameters
     parser.add_argument("--dataset-name", type=str,
@@ -681,6 +722,40 @@ def run(args: argparse.Namespace):
         config.lora.use_rslora = True
     if args.init_lora_weights is not None:
         config.lora.init_lora_weights = args.init_lora_weights
+    if args.evolutionary_enabled:
+        config.evolutionary.enabled = True
+    if args.evolutionary_candidates is not None:
+        config.evolutionary.candidates = args.evolutionary_candidates
+    if args.evolutionary_eval_batch_size is not None:
+        config.evolutionary.eval_batch_size = args.evolutionary_eval_batch_size
+    if args.evolutionary_validation_config is not None:
+        config.evolutionary.validation_config = args.evolutionary_validation_config
+    if args.evolutionary_strategy is not None:
+        config.evolutionary.strategy.type = args.evolutionary_strategy
+    if args.evolutionary_noise_scale is not None:
+        config.evolutionary.strategy.params["noise_scale"] = args.evolutionary_noise_scale
+    if args.evolutionary_max_grad_norm is not None:
+        config.evolutionary.strategy.params["max_grad_norm"] = args.evolutionary_max_grad_norm
+    if args.evolutionary_scale_factors:
+        config.evolutionary.strategy.params["scale_factors"] = [
+            float(value.strip())
+            for value in args.evolutionary_scale_factors.split(",")
+            if value.strip()
+        ]
+    if args.evolutionary_selection_method is not None:
+        config.evolutionary.selection.method = args.evolutionary_selection_method
+    if args.evolutionary_min_improvement is not None:
+        config.evolutionary.selection.min_improvement = args.evolutionary_min_improvement
+    if args.evolutionary_eval_frequency is not None:
+        config.evolutionary.eval_frequency = args.evolutionary_eval_frequency
+    if args.evolutionary_warmup_steps is not None:
+        config.evolutionary.warmup_steps = args.evolutionary_warmup_steps
+    if args.evolutionary_cache_baseline is not None:
+        config.evolutionary.cache_baseline = args.evolutionary_cache_baseline
+    if args.evolutionary_log_candidates is not None:
+        config.evolutionary.logging.candidates = args.evolutionary_log_candidates
+    if args.evolutionary_log_selected is not None:
+        config.evolutionary.logging.selected = args.evolutionary_log_selected
 
     # Dataset overrides
     if args.dataset_name:

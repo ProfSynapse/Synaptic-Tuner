@@ -44,6 +44,55 @@ class TrainingStageSpec:
     use_rslora: bool = False
     init_lora_weights: Optional[str] = None
     lora_target_modules: List[str] | str = field(default_factory=list)
+    evolutionary: "EvolutionaryStageSpec" = field(default_factory=lambda: EvolutionaryStageSpec())
+
+
+@dataclass
+class EvolutionaryStrategySpec:
+    type: str = "gradient_noise"
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvolutionarySelectionSpec:
+    method: str = "best"
+    min_improvement: float = 0.0
+
+
+@dataclass
+class EvolutionaryLoggingSpec:
+    candidates: bool = True
+    selected: bool = True
+
+
+@dataclass
+class EvolutionaryStageSpec:
+    enabled: bool = False
+    candidates: int = 4
+    eval_batch_size: int = 2
+    validation_config: Optional[str] = None
+    strategy: EvolutionaryStrategySpec = field(default_factory=EvolutionaryStrategySpec)
+    selection: EvolutionarySelectionSpec = field(default_factory=EvolutionarySelectionSpec)
+    eval_frequency: int = 1
+    warmup_steps: int = 0
+    cache_baseline: bool = True
+    logging: EvolutionaryLoggingSpec = field(default_factory=EvolutionaryLoggingSpec)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "EvolutionaryStageSpec":
+        payload = data or {}
+        return cls(
+            enabled=bool(payload.get("enabled", False)),
+            candidates=int(payload.get("candidates", 4)),
+            eval_batch_size=int(payload.get("eval_batch_size", 2)),
+            validation_config=payload.get("validation_config"),
+            strategy=EvolutionaryStrategySpec(**payload.get("strategy", {})),
+            selection=EvolutionarySelectionSpec(**payload.get("selection", {})),
+            eval_frequency=int(payload.get("eval_frequency", 1)),
+            warmup_steps=int(payload.get("warmup_steps", 0)),
+            cache_baseline=bool(payload.get("cache_baseline", True)),
+            logging=EvolutionaryLoggingSpec(**payload.get("logging", {})),
+        )
 
 
 @dataclass
@@ -173,8 +222,10 @@ class ExperimentSpec:
             dataset = DatasetSpec(**payload["dataset"])
         except TypeError as exc:
             raise ValueError(f"Invalid experiment.dataset: {exc}") from exc
+        training_payload = dict(payload["training"])
+        evolutionary = EvolutionaryStageSpec.from_dict(training_payload.pop("evolutionary", {}))
         try:
-            training = TrainingStageSpec(**payload["training"])
+            training = TrainingStageSpec(**training_payload, evolutionary=evolutionary)
         except TypeError as exc:
             raise ValueError(f"Invalid experiment.training: {exc}") from exc
         execution = ExecutionStageSpec(**payload.get("execution", {}))

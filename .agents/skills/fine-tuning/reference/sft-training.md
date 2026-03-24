@@ -124,4 +124,6 @@ Key sections:
 - `dataset` — source, filtering, split
 - `evolutionary` — experimental gradient evolution (disabled by default)
 
+For cloud runs, evolutionary SFT is now expressible through `run-experiment` specs or `cloud-pipeline --train-evolutionary-*` overrides. Keep the first run short and capped by `max_steps`; the wrapper adds real per-step overhead.
+
 See `reference/training-config.md` for full config documentation.

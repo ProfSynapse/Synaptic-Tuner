@@ -266,3 +266,18 @@ class CloudTrainingConfig(TrainingConfig):
     use_rslora: bool = False
     init_lora_weights: Optional[str] = None
     lora_target_modules: Optional[List[str] | str] = field(default=None)
+    evolutionary_enabled: bool = False
+    evolutionary_candidates: Optional[int] = None
+    evolutionary_eval_batch_size: Optional[int] = None
+    evolutionary_validation_config: Optional[str] = None
+    evolutionary_strategy: Optional[str] = None
+    evolutionary_noise_scale: Optional[float] = None
+    evolutionary_max_grad_norm: Optional[float] = None
+    evolutionary_scale_factors: Optional[List[float]] = field(default=None)
+    evolutionary_selection_method: Optional[str] = None
+    evolutionary_min_improvement: Optional[float] = None
+    evolutionary_eval_frequency: Optional[int] = None
+    evolutionary_warmup_steps: Optional[int] = None
+    evolutionary_cache_baseline: Optional[bool] = None
+    evolutionary_log_candidates: Optional[bool] = None
+    evolutionary_log_selected: Optional[bool] = None

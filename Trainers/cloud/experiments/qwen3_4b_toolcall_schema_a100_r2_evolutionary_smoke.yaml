@@ -1,0 +1,57 @@
+experiment:
+  name: qwen3-4b-toolcall-schema-a100-r2-evolutionary-smoke
+  provider: hf_jobs
+  method: sft
+  objective: validate_evolutionary_sft_cloud_path
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: Qwen/Qwen3-4B
+    gpu: a100-large
+    image_profile: stable
+    batch_size: 24
+    gradient_accumulation: 2
+    learning_rate: 1.0e-4
+    max_steps: 60
+    load_in_4bit: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    evolutionary:
+      enabled: true
+      candidates: 4
+      eval_batch_size: 2
+      validation_config: configs/fitness/tool_calling.yaml
+      strategy:
+        type: gradient_noise
+        params:
+          noise_scale: 0.03
+          max_grad_norm: 1.0
+          scale_factors:
+            - 0.5
+            - 1.0
+            - 1.5
+            - 2.0
+      selection:
+        method: best
+        min_improvement: 0.01
+      eval_frequency: 5
+      warmup_steps: 200
+      cache_baseline: true
+      logging:
+        candidates: true
+        selected: true
+  execution:
+    only_stage: training
+  evaluation:
+    enabled: false
+  loss:
+    enabled: false
+  features:
+    enabled: false

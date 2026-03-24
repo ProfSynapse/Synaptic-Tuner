@@ -195,6 +195,35 @@ class HFTrainingStageRunner:
                 if isinstance(spec.training.lora_target_modules, list)
                 else spec.training.lora_target_modules
             )
+        if spec.training.evolutionary.enabled:
+            config.evolutionary_enabled = True
+        if spec.training.evolutionary.candidates is not None:
+            config.evolutionary_candidates = spec.training.evolutionary.candidates
+        if spec.training.evolutionary.eval_batch_size is not None:
+            config.evolutionary_eval_batch_size = spec.training.evolutionary.eval_batch_size
+        if spec.training.evolutionary.validation_config is not None:
+            config.evolutionary_validation_config = spec.training.evolutionary.validation_config
+        if spec.training.evolutionary.strategy.type:
+            config.evolutionary_strategy = spec.training.evolutionary.strategy.type
+        if "noise_scale" in spec.training.evolutionary.strategy.params:
+            config.evolutionary_noise_scale = float(spec.training.evolutionary.strategy.params["noise_scale"])
+        if "max_grad_norm" in spec.training.evolutionary.strategy.params:
+            config.evolutionary_max_grad_norm = float(spec.training.evolutionary.strategy.params["max_grad_norm"])
+        if "scale_factors" in spec.training.evolutionary.strategy.params:
+            config.evolutionary_scale_factors = [
+                float(value) for value in spec.training.evolutionary.strategy.params["scale_factors"]
+            ]
+        if spec.training.evolutionary.selection.method:
+            config.evolutionary_selection_method = spec.training.evolutionary.selection.method
+        if spec.training.evolutionary.selection.min_improvement is not None:
+            config.evolutionary_min_improvement = spec.training.evolutionary.selection.min_improvement
+        if spec.training.evolutionary.eval_frequency is not None:
+            config.evolutionary_eval_frequency = spec.training.evolutionary.eval_frequency
+        if spec.training.evolutionary.warmup_steps is not None:
+            config.evolutionary_warmup_steps = spec.training.evolutionary.warmup_steps
+        config.evolutionary_cache_baseline = spec.training.evolutionary.cache_baseline
+        config.evolutionary_log_candidates = spec.training.evolutionary.logging.candidates
+        config.evolutionary_log_selected = spec.training.evolutionary.logging.selected
         if spec.training.gpu:
             config.gpu_type = spec.training.gpu
             config.hf_flavor = spec.training.gpu
