@@ -97,6 +97,7 @@ class EvolutionaryTrainerWrapper:
 
         # State tracking
         self.current_step = 0
+        self.current_micro_step = 0
         self.best_fitness_history: List[float] = []
         self.candidate_stats: List[Dict[str, Any]] = []
         self.selection_events = 0
@@ -128,6 +129,14 @@ class EvolutionaryTrainerWrapper:
             event_payload.update(payload)
         with self.events_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event_payload, ensure_ascii=False) + "\n")
+
+    def _gradient_accumulation_steps(self) -> int:
+        """Return the configured gradient accumulation factor."""
+        grad_acc = getattr(self.trainer.args, "gradient_accumulation_steps", 1)
+        try:
+            return max(1, int(grad_acc))
+        except (TypeError, ValueError):
+            return 1
 
     def train(self, *args, **kwargs):
         """
@@ -191,16 +200,26 @@ class EvolutionaryTrainerWrapper:
         3. Evaluate each candidate
         4. Apply best candidate's gradient
         """
-        self.current_step += 1
+        self.current_micro_step += 1
+        grad_acc = self._gradient_accumulation_steps()
+        optimizer_step = ((self.current_micro_step - 1) // grad_acc) + 1
+        at_optimizer_boundary = (self.current_micro_step % grad_acc) == 0
+        self.current_step = optimizer_step
 
         # Debug: Log first few steps and when evolutionary kicks in
-        if self.current_step <= 5 or self.current_step == self.config.warmup_steps + 1:
-            print(f"[EVO DEBUG] Step {self.current_step}, warmup_steps={self.config.warmup_steps}, in_warmup={self.current_step <= self.config.warmup_steps}")
+        if (
+            at_optimizer_boundary
+            and (optimizer_step <= 5 or optimizer_step == self.config.warmup_steps + 1)
+        ):
+            print(
+                f"[EVO DEBUG] Step {optimizer_step}, micro_step={self.current_micro_step}, "
+                f"warmup_steps={self.config.warmup_steps}, in_warmup={optimizer_step <= self.config.warmup_steps}"
+            )
 
         # Check if we're still in warmup phase
-        if self.current_step <= self.config.warmup_steps:
-            if self.current_step == self.config.warmup_steps:
-                logger.info(f"Warmup complete at step {self.current_step}, enabling evolutionary selection")
+        if optimizer_step <= self.config.warmup_steps:
+            if at_optimizer_boundary and optimizer_step == self.config.warmup_steps:
+                logger.info(f"Warmup complete at step {optimizer_step}, enabling evolutionary selection")
                 self._emit_event(
                     "warmup_complete",
                     {
@@ -209,8 +228,11 @@ class EvolutionaryTrainerWrapper:
                 )
             return self._original_training_step(model, inputs, num_items_in_batch)
 
+        if not at_optimizer_boundary:
+            return self._original_training_step(model, inputs, num_items_in_batch)
+
         # Check if we should do evolutionary selection this step
-        if self.current_step % self.config.eval_frequency != 0:
+        if optimizer_step % self.config.eval_frequency != 0:
             # Just do normal training step
             return self._original_training_step(model, inputs, num_items_in_batch)
 
@@ -253,7 +275,7 @@ class EvolutionaryTrainerWrapper:
         # Step 3: Generate candidates
         candidates = self.candidate_generator.generate(
             base_gradients,
-            step=self.current_step,
+            step=optimizer_step,
         )
 
         # Step 4: Evaluate each candidate
@@ -290,7 +312,7 @@ class EvolutionaryTrainerWrapper:
         ]
         self.selection_events += 1
         self.last_selected_candidate = {
-            "step": self.current_step,
+            "step": optimizer_step,
             "id": best_candidate.id,
             "description": best_candidate.description,
             "fitness": best_candidate.fitness,
@@ -313,7 +335,7 @@ class EvolutionaryTrainerWrapper:
 
         if self.config.log_selected:
             logger.info(
-                f"Step {self.current_step}: Selected candidate {best_candidate.id} "
+                f"Step {optimizer_step}: Selected candidate {best_candidate.id} "
                 f"({best_candidate.description}) with fitness {best_candidate.fitness:.4f}"
             )
 
@@ -524,6 +546,7 @@ class EvolutionaryTrainerWrapper:
         """Get training statistics."""
         return {
             "total_steps": self.current_step,
+            "total_micro_steps": self.current_micro_step,
             "best_fitness_history": self.best_fitness_history,
             "candidate_stats": self.candidate_stats,
             "selection_events": self.selection_events,

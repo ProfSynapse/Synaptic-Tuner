@@ -159,6 +159,7 @@ class TestEvolutionaryTrainerWrapperInit:
         """Initial state tracking is zeroed out."""
         wrapper = _make_wrapper()
         assert wrapper.current_step == 0
+        assert wrapper.current_micro_step == 0
         assert wrapper.best_fitness_history == []
         assert wrapper.candidate_stats == []
 
@@ -309,6 +310,7 @@ class TestEvolutionaryStep:
 
         assert original_called[0] == 5
         assert wrapper.current_step == 5
+        assert wrapper.current_micro_step == 5
 
     def test_eval_frequency_skips_evolutionary(self):
         """Non-evolutionary steps occur on non-matching eval_frequency."""
@@ -339,6 +341,27 @@ class TestEvolutionaryStep:
 
         wrapper._evolutionary_step(model, inputs)
         wrapper._evolutionary_step(model, inputs)
+        assert wrapper.current_step == 2
+        assert wrapper.current_micro_step == 2
+
+    def test_gradient_accumulation_uses_optimizer_step_semantics(self):
+        """With grad accumulation, current_step tracks optimizer steps, not microsteps."""
+        wrapper = _make_wrapper(warmup_steps=100)
+        wrapper.trainer.args.gradient_accumulation_steps = 2
+        wrapper._original_training_step = wrapper.trainer.training_step
+        model = wrapper.trainer.model
+        inputs = {"input_ids": torch.randint(0, 100, (1, 4))}
+
+        wrapper._evolutionary_step(model, inputs)
+        assert wrapper.current_micro_step == 1
+        assert wrapper.current_step == 1
+
+        wrapper._evolutionary_step(model, inputs)
+        assert wrapper.current_micro_step == 2
+        assert wrapper.current_step == 1
+
+        wrapper._evolutionary_step(model, inputs)
+        assert wrapper.current_micro_step == 3
         assert wrapper.current_step == 2
 
     def test_no_gradients_returns_loss(self):
@@ -485,6 +508,7 @@ class TestStatsAndLogging:
         assert "candidate_stats" in stats
         assert "config" in stats
         assert stats["total_steps"] == 0
+        assert stats["total_micro_steps"] == 0
 
     def test_log_candidates_records_stats(self):
         """_log_candidates appends to candidate_stats."""
@@ -549,12 +573,14 @@ class TestStatsAndLogging:
         """Stats reflect state after evolutionary steps."""
         wrapper = _make_wrapper()
         wrapper.current_step = 10
+        wrapper.current_micro_step = 20
         wrapper.best_fitness_history = [0.5, 0.6, 0.7]
         wrapper.selection_events = 2
         wrapper.baseline_kept_count = 1
         wrapper.last_selected_candidate = {"step": 10, "id": 3}
         stats = wrapper.get_stats()
         assert stats["total_steps"] == 10
+        assert stats["total_micro_steps"] == 20
         assert len(stats["best_fitness_history"]) == 3
         assert stats["selection_events"] == 2
         assert stats["baseline_kept_count"] == 1
