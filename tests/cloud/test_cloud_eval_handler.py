@@ -139,6 +139,18 @@ def test_resolve_eval_image_uses_eval_profile_defaults(repo_root):
     assert image.startswith("unsloth/unsloth:")
 
 
+def test_resolve_eval_image_maps_stable_alias_for_unsloth(repo_root):
+    handler = CloudEvalHandler(
+        args=Namespace(eval_runtime="unsloth", eval_cloud_image=None, eval_image_profile="stable")
+    )
+    handler._repo_root = repo_root
+
+    image, profile = handler._resolve_eval_image()
+
+    assert profile == "stable_unsloth"
+    assert image.startswith("unsloth/unsloth:")
+
+
 def test_resolve_eval_image_uses_fast_vllm_profile_for_vllm_runtime(repo_root):
     handler = CloudEvalHandler(args=Namespace(eval_runtime="vllm", eval_cloud_image=None, eval_image_profile=None))
     handler._repo_root = repo_root

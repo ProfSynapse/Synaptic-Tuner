@@ -345,6 +345,15 @@ class CloudEvalHandler(BaseHandler):
         explicit_image = getattr(self.args, "eval_cloud_image", None) or eval_settings.get("image")
         requested_profile = getattr(self.args, "eval_image_profile", None)
         default_profile = getattr(self.args, "eval_image_profile", None) or eval_settings.get("image_profile") or hf_settings.get("image_profile")
+        if runtime == "unsloth":
+            if requested_profile == "stable":
+                requested_profile = "stable_unsloth"
+            if default_profile == "stable":
+                default_profile = "stable_unsloth"
+            if requested_profile == "latest":
+                requested_profile = "latest_unsloth"
+            if default_profile == "latest":
+                default_profile = "latest_unsloth"
         if runtime == "vllm" and not explicit_image and not requested_profile:
             default_profile = "fast_vllm"
         fallback_image = eval_settings.get("image") or hf_settings.get("image")
