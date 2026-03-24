@@ -276,7 +276,7 @@ def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_
     spec.training.evolutionary.candidates = 4
     spec.training.evolutionary.eval_batch_size = 2
     spec.training.evolutionary.validation_config = "configs/fitness/tool_calling.yaml"
-    spec.training.evolutionary.strategy.type = "gradient_noise"
+    spec.training.evolutionary.strategy.type = "antithetic_noise"
     spec.training.evolutionary.strategy.params = {
         "noise_scale": 0.03,
         "max_grad_norm": 1.0,
@@ -284,6 +284,8 @@ def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_
     }
     spec.training.evolutionary.selection.method = "best"
     spec.training.evolutionary.selection.min_improvement = 0.01
+    spec.training.evolutionary.selection.min_relative_improvement = 0.0001
+    spec.training.evolutionary.selection.noise_floor_epsilon = 0.000001
     spec.training.evolutionary.eval_frequency = 5
     spec.training.evolutionary.warmup_steps = 200
     spec.training.evolutionary.cache_baseline = True
@@ -329,12 +331,14 @@ def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_
     assert config.evolutionary_candidates == 4
     assert config.evolutionary_eval_batch_size == 2
     assert config.evolutionary_validation_config == "configs/fitness/tool_calling.yaml"
-    assert config.evolutionary_strategy == "gradient_noise"
+    assert config.evolutionary_strategy == "antithetic_noise"
     assert config.evolutionary_noise_scale == 0.03
     assert config.evolutionary_max_grad_norm == 1.0
     assert config.evolutionary_scale_factors == [0.5, 1.0, 1.5]
     assert config.evolutionary_selection_method == "best"
     assert config.evolutionary_min_improvement == 0.01
+    assert config.evolutionary_min_relative_improvement == 0.0001
+    assert config.evolutionary_noise_floor_epsilon == 0.000001
     assert config.evolutionary_eval_frequency == 5
     assert config.evolutionary_warmup_steps == 200
     assert config.evolutionary_cache_baseline is True

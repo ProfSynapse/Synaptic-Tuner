@@ -401,6 +401,14 @@ class CloudTrainHandler(BaseHandler):
         if train_evolutionary_min_improvement is not None:
             config.evolutionary_min_improvement = train_evolutionary_min_improvement
 
+        train_evolutionary_min_relative_improvement = getattr(args, "train_evolutionary_min_relative_improvement", None)
+        if train_evolutionary_min_relative_improvement is not None:
+            config.evolutionary_min_relative_improvement = train_evolutionary_min_relative_improvement
+
+        train_evolutionary_noise_floor_epsilon = getattr(args, "train_evolutionary_noise_floor_epsilon", None)
+        if train_evolutionary_noise_floor_epsilon is not None:
+            config.evolutionary_noise_floor_epsilon = train_evolutionary_noise_floor_epsilon
+
         train_evolutionary_eval_frequency = getattr(args, "train_evolutionary_eval_frequency", None)
         if train_evolutionary_eval_frequency is not None:
             config.evolutionary_eval_frequency = train_evolutionary_eval_frequency

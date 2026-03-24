@@ -132,7 +132,7 @@ def test_cloud_training_evolutionary_flags_parse():
             "--train-evolutionary-validation-config",
             "configs/fitness/tool_calling.yaml",
             "--train-evolutionary-strategy",
-            "gradient_noise",
+            "antithetic_noise",
             "--train-evolutionary-noise-scale",
             "0.03",
             "--train-evolutionary-max-grad-norm",
@@ -143,6 +143,10 @@ def test_cloud_training_evolutionary_flags_parse():
             "best",
             "--train-evolutionary-min-improvement",
             "0.01",
+            "--train-evolutionary-min-relative-improvement",
+            "0.0001",
+            "--train-evolutionary-noise-floor-epsilon",
+            "0.000001",
             "--train-evolutionary-eval-frequency",
             "5",
             "--train-evolutionary-warmup-steps",
@@ -155,12 +159,14 @@ def test_cloud_training_evolutionary_flags_parse():
     assert args.train_evolutionary_candidates == 4
     assert args.train_evolutionary_eval_batch_size == 2
     assert args.train_evolutionary_validation_config == "configs/fitness/tool_calling.yaml"
-    assert args.train_evolutionary_strategy == "gradient_noise"
+    assert args.train_evolutionary_strategy == "antithetic_noise"
     assert args.train_evolutionary_noise_scale == 0.03
     assert args.train_evolutionary_max_grad_norm == 1.0
     assert args.train_evolutionary_scale_factors == "0.5,1.0,1.5"
     assert args.train_evolutionary_selection_method == "best"
     assert args.train_evolutionary_min_improvement == 0.01
+    assert args.train_evolutionary_min_relative_improvement == 0.0001
+    assert args.train_evolutionary_noise_floor_epsilon == 0.000001
     assert args.train_evolutionary_eval_frequency == 5
     assert args.train_evolutionary_warmup_steps == 200
     assert args.train_evolutionary_log_candidates is False

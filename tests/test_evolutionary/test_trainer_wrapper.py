@@ -385,6 +385,69 @@ class TestEvolutionaryStep:
 
         assert isinstance(result, torch.Tensor)
 
+    def test_relative_acceptance_threshold_can_choose_nonbaseline(self, tmp_path):
+        wrapper = _make_wrapper(
+            min_fitness_improvement=0.0,
+            min_relative_improvement=0.0001,
+            noise_floor_epsilon=1e-6,
+        )
+        wrapper.events_path = tmp_path / "evolutionary_events.jsonl"
+        model = wrapper.trainer.model
+        inputs = {"input_ids": torch.randint(0, 100, (1, 4))}
+
+        fake_loss = torch.tensor(1.0, requires_grad=True)
+        wrapper.trainer.compute_loss = lambda m, i: fake_loss
+
+        grads = {"weight": torch.ones_like(model.weight), "bias": torch.ones_like(model.bias)}
+        baseline = GradientCandidate(id=0, gradients=grads, description="baseline", fitness=0.5000)
+        winner = GradientCandidate(id=1, gradients=grads, description="winner", fitness=0.5002)
+
+        with patch(
+            "shared.evolutionary.candidate_generator.CandidateGenerator.extract_gradients",
+            return_value=grads,
+        ):
+            with patch.object(wrapper.candidate_generator, "generate", return_value=[baseline, winner]):
+                with patch.object(wrapper, "_evaluate_candidates", return_value=[baseline, winner]):
+                    wrapper._evolutionary_step(model, inputs)
+
+        assert wrapper.baseline_kept_count == 0
+        assert wrapper.last_selected_candidate["id"] == 1
+        payload = json.loads(wrapper.events_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert payload["accepted_nonbaseline"] is True
+        assert payload["required_margin"] > 0.0
+        assert payload["acceptance_margin"] > payload["required_margin"]
+
+    def test_absolute_threshold_can_force_baseline(self, tmp_path):
+        wrapper = _make_wrapper(
+            min_fitness_improvement=0.01,
+            min_relative_improvement=0.0,
+            noise_floor_epsilon=1e-6,
+        )
+        wrapper.events_path = tmp_path / "evolutionary_events.jsonl"
+        model = wrapper.trainer.model
+        inputs = {"input_ids": torch.randint(0, 100, (1, 4))}
+
+        fake_loss = torch.tensor(1.0, requires_grad=True)
+        wrapper.trainer.compute_loss = lambda m, i: fake_loss
+
+        grads = {"weight": torch.ones_like(model.weight), "bias": torch.ones_like(model.bias)}
+        baseline = GradientCandidate(id=0, gradients=grads, description="baseline", fitness=0.5000)
+        near_winner = GradientCandidate(id=1, gradients=grads, description="near_winner", fitness=0.5002)
+
+        with patch(
+            "shared.evolutionary.candidate_generator.CandidateGenerator.extract_gradients",
+            return_value=grads,
+        ):
+            with patch.object(wrapper.candidate_generator, "generate", return_value=[baseline, near_winner]):
+                with patch.object(wrapper, "_evaluate_candidates", return_value=[baseline, near_winner]):
+                    wrapper._evolutionary_step(model, inputs)
+
+        assert wrapper.baseline_kept_count == 1
+        assert wrapper.last_selected_candidate["id"] == 0
+        payload = json.loads(wrapper.events_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert payload["accepted_nonbaseline"] is False
+        assert payload["acceptance_margin"] < payload["required_margin"]
+
 
 # ---------------------------------------------------------------------------
 # Candidate evaluation tests
@@ -509,6 +572,8 @@ class TestStatsAndLogging:
         assert "config" in stats
         assert stats["total_steps"] == 0
         assert stats["total_micro_steps"] == 0
+        assert "accepted_nonbaseline_count" in stats
+        assert "acceptance_rate" in stats
 
     def test_log_candidates_records_stats(self):
         """_log_candidates appends to candidate_stats."""
@@ -584,4 +649,6 @@ class TestStatsAndLogging:
         assert len(stats["best_fitness_history"]) == 3
         assert stats["selection_events"] == 2
         assert stats["baseline_kept_count"] == 1
+        assert stats["accepted_nonbaseline_count"] == 1
+        assert stats["acceptance_rate"] == 0.5
         assert stats["last_selected_candidate"]["id"] == 3

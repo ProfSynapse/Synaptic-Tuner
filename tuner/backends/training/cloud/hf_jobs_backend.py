@@ -279,6 +279,8 @@ class HFJobsBackend(ITrainingBackend):
             evolutionary_scale_factors=evolutionary_params.get("scale_factors"),
             evolutionary_selection_method=evolutionary_selection.get("method"),
             evolutionary_min_improvement=evolutionary_selection.get("min_improvement"),
+            evolutionary_min_relative_improvement=evolutionary_selection.get("min_relative_improvement"),
+            evolutionary_noise_floor_epsilon=evolutionary_selection.get("noise_floor_epsilon"),
             evolutionary_eval_frequency=evolutionary_config.get("eval_frequency"),
             evolutionary_warmup_steps=evolutionary_config.get("warmup_steps"),
             evolutionary_cache_baseline=evolutionary_config.get("cache_baseline"),
@@ -859,6 +861,10 @@ class HFJobsBackend(ITrainingBackend):
             training_args.extend(["--evolutionary-selection-method", str(config.evolutionary_selection_method)])
         if config.method == "sft" and config.evolutionary_min_improvement is not None:
             training_args.extend(["--evolutionary-min-improvement", str(config.evolutionary_min_improvement)])
+        if config.method == "sft" and config.evolutionary_min_relative_improvement is not None:
+            training_args.extend(["--evolutionary-min-relative-improvement", str(config.evolutionary_min_relative_improvement)])
+        if config.method == "sft" and config.evolutionary_noise_floor_epsilon is not None:
+            training_args.extend(["--evolutionary-noise-floor-epsilon", str(config.evolutionary_noise_floor_epsilon)])
         if config.method == "sft" and config.evolutionary_eval_frequency is not None:
             training_args.extend(["--evolutionary-eval-frequency", str(config.evolutionary_eval_frequency)])
         if config.method == "sft" and config.evolutionary_warmup_steps is not None:

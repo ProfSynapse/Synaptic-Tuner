@@ -217,6 +217,10 @@ class HFTrainingStageRunner:
             config.evolutionary_selection_method = spec.training.evolutionary.selection.method
         if spec.training.evolutionary.selection.min_improvement is not None:
             config.evolutionary_min_improvement = spec.training.evolutionary.selection.min_improvement
+        if spec.training.evolutionary.selection.min_relative_improvement is not None:
+            config.evolutionary_min_relative_improvement = spec.training.evolutionary.selection.min_relative_improvement
+        if spec.training.evolutionary.selection.noise_floor_epsilon is not None:
+            config.evolutionary_noise_floor_epsilon = spec.training.evolutionary.selection.noise_floor_epsilon
         if spec.training.evolutionary.eval_frequency is not None:
             config.evolutionary_eval_frequency = spec.training.evolutionary.eval_frequency
         if spec.training.evolutionary.warmup_steps is not None:

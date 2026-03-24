@@ -1,0 +1,54 @@
+experiment:
+  name: qwen3-4b-toolcall-schema-a100-r2-evolutionary-antithetic-smoke
+  provider: hf_jobs
+  method: sft
+  objective: validate_evolutionary_antithetic_search
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: Qwen/Qwen3-4B
+    gpu: a100-large
+    image_profile: stable
+    batch_size: 24
+    gradient_accumulation: 2
+    learning_rate: 1.0e-4
+    max_steps: 30
+    load_in_4bit: true
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+    evolutionary:
+      enabled: true
+      candidates: 5
+      eval_batch_size: 2
+      validation_config: configs/fitness/tool_calling.yaml
+      strategy:
+        type: antithetic_noise
+        params:
+          noise_scale: 0.03
+          max_grad_norm: 1.0
+      selection:
+        method: best
+        min_improvement: 0.0
+        min_relative_improvement: 0.0001
+        noise_floor_epsilon: 0.000001
+      eval_frequency: 5
+      warmup_steps: 10
+      cache_baseline: true
+      logging:
+        candidates: true
+        selected: true
+  execution:
+    only_stage: training
+  evaluation:
+    enabled: false
+  loss:
+    enabled: false
+  features:
+    enabled: false

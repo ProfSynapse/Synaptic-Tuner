@@ -276,6 +276,8 @@ class CloudTrainingConfig(TrainingConfig):
     evolutionary_scale_factors: Optional[List[float]] = field(default=None)
     evolutionary_selection_method: Optional[str] = None
     evolutionary_min_improvement: Optional[float] = None
+    evolutionary_min_relative_improvement: Optional[float] = None
+    evolutionary_noise_floor_epsilon: Optional[float] = None
     evolutionary_eval_frequency: Optional[int] = None
     evolutionary_warmup_steps: Optional[int] = None
     evolutionary_cache_baseline: Optional[bool] = None

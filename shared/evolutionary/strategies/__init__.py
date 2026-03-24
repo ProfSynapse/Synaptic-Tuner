@@ -7,6 +7,7 @@ from the base computed gradient.
 
 from .base import BaseStrategy, GradientCandidate
 from .gradient_noise import GradientNoiseStrategy
+from .antithetic_noise import AntitheticNoiseStrategy
 from .scale_variation import ScaleVariationStrategy
 from .combined import CombinedStrategy
 
@@ -14,6 +15,7 @@ __all__ = [
     "BaseStrategy",
     "GradientCandidate",
     "GradientNoiseStrategy",
+    "AntitheticNoiseStrategy",
     "ScaleVariationStrategy",
     "CombinedStrategy",
 ]
@@ -24,7 +26,7 @@ def get_strategy(name: str, **kwargs) -> BaseStrategy:
     Factory function to get strategy by name.
 
     Args:
-        name: Strategy name ('gradient_noise', 'scale_variation', 'combined')
+        name: Strategy name ('gradient_noise', 'antithetic_noise', 'scale_variation', 'combined')
         **kwargs: Strategy-specific parameters
 
     Returns:
@@ -32,6 +34,7 @@ def get_strategy(name: str, **kwargs) -> BaseStrategy:
     """
     strategies = {
         "gradient_noise": GradientNoiseStrategy,
+        "antithetic_noise": AntitheticNoiseStrategy,
         "scale_variation": ScaleVariationStrategy,
         "combined": CombinedStrategy,
     }

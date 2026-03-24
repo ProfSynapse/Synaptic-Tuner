@@ -66,6 +66,21 @@ class TestCandidateGeneration:
             for name, grad in grads.items():
                 assert c.gradients[name].shape == grad.shape
 
+    def test_antithetic_noise_strategy_generates_mirrored_pairs(self):
+        gen = self._make_generator(strategy="antithetic_noise", num_candidates=5, noise_scale=0.2)
+        grads = self._sample_gradients()
+        candidates = gen.generate(grads, step=0)
+
+        assert len(candidates) == 5
+        assert candidates[0].metadata["variant"] == "pure"
+        assert candidates[1].metadata["variant"] == "plus"
+        assert candidates[2].metadata["variant"] == "minus"
+
+        for name in grads:
+            plus_delta = candidates[1].gradients[name] - grads[name]
+            minus_delta = candidates[2].gradients[name] - grads[name]
+            assert torch.allclose(plus_delta, -minus_delta)
+
 
 class TestCandidateSelection:
     """Verify select_best picks correctly from evaluated candidates."""

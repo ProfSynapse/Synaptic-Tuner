@@ -369,12 +369,14 @@ class TestBuildTrainingCommand:
             evolutionary_candidates=4,
             evolutionary_eval_batch_size=2,
             evolutionary_validation_config="configs/fitness/tool_calling.yaml",
-            evolutionary_strategy="gradient_noise",
+            evolutionary_strategy="antithetic_noise",
             evolutionary_noise_scale=0.03,
             evolutionary_max_grad_norm=1.0,
             evolutionary_scale_factors=[0.5, 1.0, 1.5],
             evolutionary_selection_method="best",
             evolutionary_min_improvement=0.01,
+            evolutionary_min_relative_improvement=0.0001,
+            evolutionary_noise_floor_epsilon=0.000001,
             evolutionary_eval_frequency=5,
             evolutionary_warmup_steps=200,
             evolutionary_cache_baseline=True,
@@ -388,12 +390,14 @@ class TestBuildTrainingCommand:
         assert "--evolutionary-candidates 4" in cmd
         assert "--evolutionary-eval-batch-size 2" in cmd
         assert "--evolutionary-validation-config configs/fitness/tool_calling.yaml" in cmd
-        assert "--evolutionary-strategy gradient_noise" in cmd
+        assert "--evolutionary-strategy antithetic_noise" in cmd
         assert "--evolutionary-noise-scale 0.03" in cmd
         assert "--evolutionary-max-grad-norm 1.0" in cmd
         assert "--evolutionary-scale-factors 0.5,1.0,1.5" in cmd
         assert "--evolutionary-selection-method best" in cmd
         assert "--evolutionary-min-improvement 0.01" in cmd
+        assert "--evolutionary-min-relative-improvement 0.0001" in cmd
+        assert "--evolutionary-noise-floor-epsilon 1e-06" in cmd
         assert "--evolutionary-eval-frequency 5" in cmd
         assert "--evolutionary-warmup-steps 200" in cmd
         assert "--evolutionary-cache-baseline" in cmd

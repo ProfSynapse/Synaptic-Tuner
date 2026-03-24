@@ -115,6 +115,8 @@ class EvolutionarySelectionConfig:
     """Evolutionary selection configuration."""
     method: str = "best"
     min_improvement: float = 0.0
+    min_relative_improvement: float = 0.0
+    noise_floor_epsilon: float = 1e-6
 
 
 @dataclass
@@ -231,6 +233,8 @@ def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
     selection_config = EvolutionarySelectionConfig(
         method=selection_data.get('method', 'best'),
         min_improvement=selection_data.get('min_improvement', 0.0),
+        min_relative_improvement=selection_data.get('min_relative_improvement', 0.0),
+        noise_floor_epsilon=selection_data.get('noise_floor_epsilon', 1e-6),
     )
 
     logging_data = evo_data.get('logging', {})

@@ -57,6 +57,8 @@ class EvolutionaryStrategySpec:
 class EvolutionarySelectionSpec:
     method: str = "best"
     min_improvement: float = 0.0
+    min_relative_improvement: float = 0.0
+    noise_floor_epsilon: float = 1e-6
 
 
 @dataclass

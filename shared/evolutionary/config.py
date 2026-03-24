@@ -52,6 +52,12 @@ class EvolutionaryConfig:
     min_fitness_improvement: float = 0.0
     """Only apply candidate if it improves fitness by at least this much over baseline."""
 
+    min_relative_improvement: float = 0.0
+    """Only apply candidate if it improves fitness by at least this fraction of baseline fitness."""
+
+    noise_floor_epsilon: float = 1e-6
+    """Minimum absolute margin required to treat a candidate as meaningfully better than baseline."""
+
     # Performance tuning
     eval_frequency: int = 1
     """Evaluate every N training steps (1 = every step, 2 = every other step)."""
@@ -84,6 +90,8 @@ class EvolutionaryConfig:
             scale_factors=data.get("strategy", {}).get("params", {}).get("scale_factors", [0.5, 1.0, 1.5, 2.0]),
             selection_method=data.get("selection", {}).get("method", "best"),
             min_fitness_improvement=data.get("selection", {}).get("min_improvement", 0.0),
+            min_relative_improvement=data.get("selection", {}).get("min_relative_improvement", 0.0),
+            noise_floor_epsilon=data.get("selection", {}).get("noise_floor_epsilon", 1e-6),
             eval_frequency=data.get("eval_frequency", 1),
             warmup_steps=data.get("warmup_steps", 0),
             cache_baseline=data.get("cache_baseline", True),
@@ -109,6 +117,8 @@ class EvolutionaryConfig:
             "selection": {
                 "method": self.selection_method,
                 "min_improvement": self.min_fitness_improvement,
+                "min_relative_improvement": self.min_relative_improvement,
+                "noise_floor_epsilon": self.noise_floor_epsilon,
             },
             "eval_frequency": self.eval_frequency,
             "warmup_steps": self.warmup_steps,
@@ -127,7 +137,7 @@ class EvolutionaryConfig:
             if self.num_candidates < 2:
                 issues.append("num_candidates must be >= 2 for evolutionary training")
 
-            if self.strategy not in ("gradient_noise", "scale_variation", "combined"):
+            if self.strategy not in ("gradient_noise", "antithetic_noise", "scale_variation", "combined"):
                 issues.append(f"Unknown strategy: {self.strategy}")
 
             if self.selection_method not in ("best", "tournament", "proportional"):

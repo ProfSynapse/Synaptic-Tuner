@@ -148,6 +148,8 @@ def convert_to_evo_config(config_evo) -> "EvoConfig":
         scale_factors=config_evo.strategy.params.get('scale_factors', [0.5, 1.0, 1.5, 2.0]),
         selection_method=config_evo.selection.method,
         min_fitness_improvement=config_evo.selection.min_improvement,
+        min_relative_improvement=config_evo.selection.min_relative_improvement,
+        noise_floor_epsilon=config_evo.selection.noise_floor_epsilon,
         eval_frequency=config_evo.eval_frequency,
         warmup_steps=config_evo.warmup_steps,
         cache_baseline=config_evo.cache_baseline,
@@ -435,6 +437,8 @@ def build_training_lineage(
                 {
                     "selection_events": evolutionary_stats.get("selection_events", 0),
                     "baseline_kept_count": evolutionary_stats.get("baseline_kept_count", 0),
+                    "accepted_nonbaseline_count": evolutionary_stats.get("accepted_nonbaseline_count", 0),
+                    "acceptance_rate": evolutionary_stats.get("acceptance_rate", 0.0),
                     "last_selected_candidate": evolutionary_stats.get("last_selected_candidate"),
                     "best_fitness_history": evolutionary_stats.get("best_fitness_history", []),
                     "events_path": evolutionary_stats.get("events_path"),
@@ -521,7 +525,7 @@ def parse_args(argv=None):
                         help="Override evolutionary fitness eval batch size.")
     parser.add_argument("--evolutionary-validation-config", type=str,
                         help="Override evolutionary validation config path.")
-    parser.add_argument("--evolutionary-strategy", choices=["gradient_noise", "scale_variation", "combined"],
+    parser.add_argument("--evolutionary-strategy", choices=["gradient_noise", "antithetic_noise", "scale_variation", "combined"],
                         help="Override evolutionary candidate generation strategy.")
     parser.add_argument("--evolutionary-noise-scale", type=float,
                         help="Override evolutionary gradient noise scale.")
@@ -533,6 +537,10 @@ def parse_args(argv=None):
                         help="Override evolutionary selection method.")
     parser.add_argument("--evolutionary-min-improvement", type=float,
                         help="Override evolutionary minimum fitness improvement.")
+    parser.add_argument("--evolutionary-min-relative-improvement", type=float,
+                        help="Override evolutionary minimum relative fitness improvement.")
+    parser.add_argument("--evolutionary-noise-floor-epsilon", type=float,
+                        help="Override evolutionary absolute acceptance floor.")
     parser.add_argument("--evolutionary-eval-frequency", type=int,
                         help="Override evolutionary evaluation frequency.")
     parser.add_argument("--evolutionary-warmup-steps", type=int,
@@ -757,6 +765,10 @@ def run(args: argparse.Namespace):
         config.evolutionary.selection.method = args.evolutionary_selection_method
     if args.evolutionary_min_improvement is not None:
         config.evolutionary.selection.min_improvement = args.evolutionary_min_improvement
+    if args.evolutionary_min_relative_improvement is not None:
+        config.evolutionary.selection.min_relative_improvement = args.evolutionary_min_relative_improvement
+    if args.evolutionary_noise_floor_epsilon is not None:
+        config.evolutionary.selection.noise_floor_epsilon = args.evolutionary_noise_floor_epsilon
     if args.evolutionary_eval_frequency is not None:
         config.evolutionary.eval_frequency = args.evolutionary_eval_frequency
     if args.evolutionary_warmup_steps is not None:

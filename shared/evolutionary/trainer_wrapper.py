@@ -286,8 +286,17 @@ class EvolutionaryTrainerWrapper:
 
         # Check minimum improvement
         baseline_fitness = candidates[0].fitness if candidates else 0.0
+        acceptance_margin = (best_candidate.fitness or 0.0) - baseline_fitness
+        relative_margin = 0.0
+        if baseline_fitness:
+            relative_margin = acceptance_margin / abs(baseline_fitness)
+        required_margin = max(
+            self.config.min_fitness_improvement,
+            abs(baseline_fitness) * self.config.min_relative_improvement,
+            self.config.noise_floor_epsilon,
+        )
         baseline_kept = False
-        if (best_candidate.fitness - baseline_fitness) < self.config.min_fitness_improvement:
+        if acceptance_margin < required_margin:
             # Use baseline gradient (no improvement found)
             best_candidate = candidates[0]
             baseline_kept = True
@@ -328,6 +337,13 @@ class EvolutionaryTrainerWrapper:
                 "selected_fitness": best_candidate.fitness,
                 "used_baseline": baseline_kept,
                 "min_improvement": self.config.min_fitness_improvement,
+                "min_relative_improvement": self.config.min_relative_improvement,
+                "noise_floor_epsilon": self.config.noise_floor_epsilon,
+                "acceptance_margin": acceptance_margin,
+                "relative_margin": relative_margin,
+                "required_margin": required_margin,
+                "accepted_nonbaseline": not baseline_kept,
+                "strategy_name": self.config.strategy,
                 "candidate_fitnesses": fitnesses,
                 "candidates": candidate_payload,
             },
@@ -551,6 +567,12 @@ class EvolutionaryTrainerWrapper:
             "candidate_stats": self.candidate_stats,
             "selection_events": self.selection_events,
             "baseline_kept_count": self.baseline_kept_count,
+            "accepted_nonbaseline_count": self.selection_events - self.baseline_kept_count,
+            "acceptance_rate": (
+                (self.selection_events - self.baseline_kept_count) / self.selection_events
+                if self.selection_events
+                else 0.0
+            ),
             "last_selected_candidate": self.last_selected_candidate,
             "events_path": str(self.events_path) if self.events_path else None,
             "config": self.config.to_dict(),
