@@ -1,0 +1,438 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  AGENTIC SEARCH — Scenario Template                            ║
+# ║                                                                ║
+# ║  BEFORE USING: Replace placeholder tool names with YOUR tools  ║
+# ║                                                                ║
+# ║  Placeholders:                                                 ║
+# ║    YOUR_SEARCH_TOOL  → e.g., grep, ripgrep, searchAPI, etc.   ║
+# ║    YOUR_READ_TOOL    → e.g., cat, readFile, fetchDoc, etc.    ║
+# ║    YOUR_LIST_TOOL    → e.g., ls, listFiles, dirList, etc.     ║
+# ║                                                                ║
+# ║  The three-stage pattern (search → read → answer) is the      ║
+# ║  constant. The actual tools are YOUR choice.                   ║
+# ║                                                                ║
+# ║  Run with --env-tool-schema and --env-exec-config to provide   ║
+# ║  your tool definitions.                                        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ---------------------------------------------------------------------------
+# Shared anchors — reused across all agentic search scenarios
+# ---------------------------------------------------------------------------
+
+shared_agentic_environment: &shared_agentic_environment
+  loop:
+    enabled: true
+    mode: agentic
+    max_turns: 6
+    max_tool_steps: 6
+    stop_on_text_response: true
+    require_final_text_after_pass: true
+    final_text_prompt: Reply to the user with a concise answer grounded in the documents you read. Do not call tools.
+    continue_on_execution_error: true
+    stuck_repeat_limit: 2
+    no_progress_window: 3
+
+shared_tutored_judge: &shared_tutored_judge
+  in_loop:
+    enabled: true
+    feedback_visible_to_model: true
+    temperature: 0.1
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    prompt: |
+      You are tutoring an agentic search assistant generating high-quality training data.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      Hard requirements:
+      {hard_requirements_json}
+
+      Quality rubric:
+      {quality_rubric_json}
+
+      Messages so far:
+      {messages_json}
+
+      Latest assistant response:
+      {assistant_response_json}
+
+      Latest environment step:
+      {environment_step_json}
+
+      Tool feedback shown to the model:
+      {tool_feedback}
+
+      Evaluate the assistant on three dimensions:
+      1. SEARCH QUALITY — Did it generate effective search terms that surface the
+         target documents without being so broad that distractors dominate?
+      2. SELECTIVE READ — Did it read the correct documents and skip irrelevant
+         results? Did it avoid reading every result indiscriminately?
+      3. ANSWER GROUNDEDNESS — Is the answer derived from document content only?
+         Flag any claim not traceable to a read document.
+
+      Treat task_context fields as the source of truth for which documents are
+      targets vs. distractors. Do not accept a distractor document as a valid
+      source even if its content seems related.
+
+      Return passed=true only if the hard requirements are already satisfied by
+      the latest assistant action and tool feedback. If any hard requirement is
+      still unmet, return passed=false and explain the next best corrective step.
+
+      Use feedback_to_model for concise tutoring about the next best move.
+      Only ask for a short final text-only answer after the hard requirements
+      are actually satisfied.
+
+shared_environment_generation_review: &shared_environment_generation_review
+  enforce: true
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+  gates:
+    - type: environment_payload_shape
+      field: value
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a generated knowledge base environment for agentic search training.
+
+      Scenario key:
+      {scenario_key}
+
+      Normalized environment snapshot:
+      {value_json}
+
+      Return passed=true only if the environment:
+      - Contains 15-20 documents across 3-5 distinct topic areas
+      - Has realistic document content (multi-paragraph, not just titles or stubs)
+      - Includes deliberate distractors: documents with overlapping keywords but
+        different topics that could mislead a naive search
+      - Spreads some answers across multiple files to support multi-hop retrieval
+      - Does not make target documents trivially identifiable by filename alone
+      - Is internally consistent (cross-references between docs are valid)
+
+      Penalize environments that are too sparse, have uniform document lengths,
+      or contain documents that are obviously fake (lorem ipsum, placeholder text).
+
+shared_user_generation_review: &shared_user_generation_review
+  enforce: true
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+  gates:
+    - type: non_empty_text
+      field: text
+    - type: plain_text
+      field: text
+    - type: no_tool_names
+      field: text
+    - type: no_exact_paths_from_context
+      field: text
+      sources: [task_context]
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a generated user question for agentic search training.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      User text:
+      {user_text}
+
+      Return passed=true only if:
+      - The question sounds like a real human asking for information
+      - It does NOT leak exact file paths, document IDs, or tool names
+      - It does NOT contain search terms that would trivially match only the
+        target document (the assistant must figure out effective search terms)
+      - It is specific enough that there IS a correct answer in the corpus
+      - For multi-hop scenarios, the question naturally requires synthesizing
+        information from multiple sources
+
+shared_final_review: &shared_final_review
+  enforce: true
+  gates:
+    - type: field_equals
+      field: environment_passed
+      value: true
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a completed agentic search training example.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      Final environment result:
+      {environment_result_json}
+
+      Final assistant response:
+      {assistant_response_json}
+
+      Conversation trace:
+      {conversation_trace_json}
+
+      Hard requirements:
+      {hard_requirements_json}
+
+      Quality rubric:
+      {quality_rubric_json}
+
+      If environment_result.passed is true, treat the hard requirements as already
+      satisfied by the programmatic environment validator. Do not override that by
+      re-inferring document contents from earlier tool traces.
+
+      In that case, judge only whether this is a high-quality training example:
+      - The search strategy was reasonable (not brute-force read-everything)
+      - The assistant selected the right documents and skipped distractors
+      - The final answer is grounded in document content with no hallucination
+      - The trajectory is coherent and the tutor feedback is sensible
+      - The ending response is a natural answer to the user question
+
+      If environment_result.passed is false, then passed must be false.
+
+shared_assistant_generation: &shared_assistant_generation
+  max_retries: 3
+  fallback_models:
+    - google/gemini-3.1-flash-lite-preview
+
+# ---------------------------------------------------------------------------
+# Scenarios
+# ---------------------------------------------------------------------------
+
+scenarios:
+
+  # =========================================================================
+  # SEED: Generate a realistic knowledge base for search scenarios
+  # =========================================================================
+  agentic_search_corpus_seed:
+    type: helper
+    environment_mode: generated
+    system_context:
+      available_workspaces:
+        - id: ws_search_corpus
+          name: Knowledge Base
+          description: A document corpus reused across agentic search workflows
+          root_folder: ""
+      selected_workspace:
+        id: default
+        name: Knowledge Base
+      assistant_instructions: >-
+        This seed corpus should support single-document retrieval, multi-hop
+        retrieval across documents, keyword-based search with distractors,
+        selective reading from mixed results, and grounded answer generation.
+    environment_generation:
+      <<: *shared_environment_generation_review
+      schema: canonical_environment
+      prompt: |
+        Generate one shared knowledge base that will be reused across agentic search scenarios.
+
+        Requirements:
+        - Create 15-20 documents organized across 3-5 topic areas as top-level folders.
+          Example topic areas: Engineering, Operations, Product, Research, Policies.
+          Choose your own realistic topic names and vary them across seeds.
+        - Each document must have realistic multi-paragraph content (3-8 paragraphs).
+          Think internal wiki pages, runbooks, design docs, meeting summaries, or
+          policy documents. Do not generate stubs, placeholder text, or lorem ipsum.
+        - Deliberate DISTRACTORS are critical:
+          - At least 3 documents must share keywords with a target document but
+            cover a different topic. For example, a doc about "rate limiting in
+            the CDN layer" vs. "rate limiting in the payment API" — same keyword
+            "rate limiting", different answers.
+          - At least 2 documents must have similar titles but different content.
+        - MULTI-HOP support:
+          - At least 2 answers must require combining information from 2+ documents.
+            For example, Document A says "the migration deadline is in Q3" and
+            Document B says "Q3 runs July-September" — answering "when is the
+            migration deadline?" requires both.
+          - Cross-references between documents are encouraged (e.g., "see the
+            deployment runbook for details").
+        - Include a mix of document types:
+          - Narrative docs (design docs, postmortems, meeting notes)
+          - Structured docs (runbooks with numbered steps, config references)
+          - Short docs (1-2 paragraphs) and long docs (6-8 paragraphs)
+        - Add 3-5 extra distractor files with plausible but tangential content so
+          different seeds are not clones.
+        - Vary filenames, topics, writing styles, and organizational structure
+          across seeds while preserving the role coverage above.
+        - Return environment.assertions as an empty list.
+        - Put seed-specific metadata under task_context: seed_theme,
+          distractor_paths, multi_hop_pairs, and topic_areas.
+    prompts:
+      user: ""
+      assistant: ""
+
+  # =========================================================================
+  # STAGE 1+2+3: Search, selectively read, and answer from documents
+  # =========================================================================
+  agentic_search_find_and_answer:
+    type: tool
+    tool: YOUR_SEARCH_TOOL
+    expected_tools: [YOUR_SEARCH_TOOL, YOUR_READ_TOOL]
+    environment_mode: provided
+    tags: [agentic_search, retrieval, grounding, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: file_was_read
+          path: "{task_target_doc_path}"
+        - type: file_not_read
+          path: "{task_primary_distractor_path}"
+        - type: response_contains_text
+          text: "{task_expected_answer_fragment}"
+        - type: response_not_contains_text
+          text: "{task_hallucination_canary}"
+    system_context:
+      assistant_instructions: >-
+        You have access to a knowledge base via search and read tools. When the
+        user asks a question, search for relevant documents, read the most
+        promising results, and answer using ONLY the content you read. If the
+        documents do not contain enough information, say so rather than guessing.
+    task_family:
+      kind: search_and_answer
+      primitives: [search, read]
+      user_request_style:
+        vague_human_request: true
+        avoid_exact_paths: true
+        avoid_search_terms: true
+        reference_mode: natural_question
+        examples:
+          - "What's our policy on handling third-party API outages?"
+          - "How do we handle database failovers in production?"
+          - "What was decided about the authentication redesign?"
+      candidate_selector:
+        target:
+          min_content_length: 200
+          preferred_keywords_from: task_context
+          must_contain_answer: true
+        distractors:
+          share_keywords_with_target: true
+          different_topic: true
+          min_count: 2
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Ask a natural question about {task_question_topic} that can be answered
+        from the knowledge base. Do not mention file names, paths, or tool names.
+        Phrase it the way a colleague would ask over chat.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        First use YOUR_SEARCH_TOOL to find relevant documents, then use YOUR_READ_TOOL
+        to read the most promising results. Skip documents that are clearly irrelevant
+        based on search result summaries. After reading, provide a grounded answer.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
+
+  # =========================================================================
+  # MULTI-HOP: Answer requires combining info from 2+ documents
+  # =========================================================================
+  agentic_search_multi_hop:
+    type: tool
+    tool: YOUR_SEARCH_TOOL
+    expected_tools: [YOUR_SEARCH_TOOL, YOUR_READ_TOOL]
+    environment_mode: provided
+    tags: [agentic_search, multi_hop, retrieval, grounding, shared_seed]
+    system_template: mocked_workspace_vault
+    judge: *shared_tutored_judge
+    user_generation: *shared_user_generation_review
+    final_judge: *shared_final_review
+    environment:
+      <<: *shared_agentic_environment
+      assertions:
+        - type: file_was_read
+          path: "{task_target_doc_1_path}"
+        - type: file_was_read
+          path: "{task_target_doc_2_path}"
+        - type: file_not_read
+          path: "{task_primary_distractor_path}"
+        - type: response_contains_text
+          text: "{task_expected_combined_answer_fragment}"
+        - type: response_not_contains_text
+          text: "{task_hallucination_canary}"
+        - type: response_contains_text
+          text: "{task_doc_1_contribution}"
+        - type: response_contains_text
+          text: "{task_doc_2_contribution}"
+    system_context:
+      assistant_instructions: >-
+        You have access to a knowledge base via search and read tools. When the
+        user asks a question, search for relevant documents, read the most
+        promising results, and answer using ONLY the content you read. Some
+        questions require combining information from multiple documents. If the
+        documents do not contain enough information, say so rather than guessing.
+    task_family:
+      kind: multi_hop_search
+      primitives: [search, read]
+      min_source_docs: 2
+      user_request_style:
+        vague_human_request: true
+        avoid_exact_paths: true
+        avoid_search_terms: true
+        reference_mode: natural_question
+        requires_synthesis: true
+        examples:
+          - "When exactly is the migration deadline and what needs to be done before then?"
+          - "Which team owns the rate limiter and what's their on-call rotation?"
+          - "What's the budget impact of the infrastructure changes planned for next quarter?"
+      candidate_selector:
+        target_pair:
+          doc_1:
+            contains_partial_answer: true
+            preferred_keywords_from: task_context
+          doc_2:
+            contains_complementary_answer: true
+            cross_references_doc_1: preferred
+        distractors:
+          share_keywords_with_targets: true
+          different_topic: true
+          min_count: 2
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Ask a natural question about {task_question_topic} that requires combining
+        information from at least two different documents. The question should sound
+        like a single coherent inquiry, not two separate questions joined together.
+        Do not mention file names, paths, or tool names.
+      assistant: |
+        Generate assistant response as valid JSON text only.
+
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        Use YOUR_SEARCH_TOOL to find relevant documents. You may need multiple searches
+        with different terms. Use YOUR_READ_TOOL to read documents that look relevant.
+        Synthesize information from multiple documents into a single coherent answer.
+        Cite which documents contributed which facts when the answer draws from
+        multiple sources.
+    assistant_generation:
+      <<: *shared_assistant_generation
+      schema: use_tools_response
