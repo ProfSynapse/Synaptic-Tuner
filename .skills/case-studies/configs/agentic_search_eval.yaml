@@ -2,29 +2,28 @@
 # AGENTIC SEARCH EVALUATION — TEMPLATE
 # ============================================================
 #
-# TOOL-AGNOSTIC: This template uses placeholder tool names.
-# You MUST customize before running:
+# TOOL-AGNOSTIC: Replace YOUR_SEARCH_TOOL / YOUR_READ_TOOL
+# with your actual tools before running.
 #
-#   1. Replace YOUR_SEARCH_TOOL with your actual search tool
-#      (e.g., searchManager_searchContent, rag_search, etc.)
+# TWO EVALUATION MODES:
 #
-#   2. Replace YOUR_READ_TOOL with your actual document-read tool
-#      (e.g., contentManager_read, doc_reader, etc.)
+#   STATIC MODE (no --env-backend flag)
+#     Corpus embedded in system prompt. Tests whether the model
+#     knows HOW to search/read/answer. Quick, no extra setup.
+#     Run: python -m Evaluator.cli --preset agentic_search
 #
-#   3. If using environment-backed evaluation, supply:
-#        --env-tool-schema <path>    (tool JSON schemas)
-#        --env-exec-config <path>    (execution backend config)
-#
-#   4. Adapt the embedded corpus in each system prompt to your
-#      domain if desired. The default corpus is domain-neutral.
-#
-# Each test embeds a small self-contained corpus (3-5 short docs)
-# inside the system prompt so scenarios are portable and do not
-# require an external document store.
+#   RUNTIME MODE (--env-backend local)
+#     Real files in an isolated temp filesystem. Tool calls are
+#     ACTUALLY EXECUTED — search returns real matches, read
+#     returns real content. Tests real search-find-answer ability.
+#     Run: python -m Evaluator.cli --preset agentic_search_runtime \
+#       --env-backend local \
+#       --env-tool-schema path/to/your_tool_schema.yaml \
+#       --env-exec-config path/to/your_exec_config.yaml
 #
 # Tags: agentic_search, search_quality, grounding, multi_hop,
-#        distractor_resistance, no_answer
-# ID convention: AS_<description>
+#        distractor_resistance, no_answer, runtime
+# ID conventions: AS_* (static), ASR_* (runtime)
 # ============================================================
 
 name: Agentic Search Evaluation
@@ -615,38 +614,368 @@ tests:
       Including S3 in the answer is a failure. The s3-deep-dive doc is
       a distractor.
 
+  # ================================================================
+  # RUNTIME MODE TESTS (ASR_*)
+  #
+  # These tests use fixture-based filesystems and agentic loops.
+  # The model's tool calls are ACTUALLY EXECUTED against real files.
+  # The system prompt does NOT contain the corpus — the model must
+  # discover content by searching and reading.
+  #
+  # Requires: --env-backend local --env-tool-schema --env-exec-config
+  # ================================================================
+
+  # ------------------------------------------------------------------
+  # R1. Runtime: Single-doc lookup
+  # ------------------------------------------------------------------
+  - id: ASR_single_doc_lookup
+    question: "What is the maximum batch size supported by the data loader?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/config-reference.md
+            body: |
+              # Data Loader Configuration Reference
+              The data loader supports batch sizes from 1 to 512. The default
+              batch size is 32. Set `batch_size` in loader.yaml to override.
+              Larger batch sizes require proportionally more GPU memory.
+          - path: docs/quickstart-guide.md
+            body: |
+              # Quick Start Guide
+              Install dependencies with `pip install -r requirements.txt`.
+              Run `python main.py` to start. See config-reference for tuning.
+          - path: docs/changelog-v2.md
+            body: |
+              # Changelog v2.0
+              Added streaming mode. Fixed memory leak in tokenizer.
+              Bumped minimum Python version to 3.10.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_single_doc_lookup. Model must actually search
+      and read files to find the answer (512). No corpus in system prompt.
+
+  # ------------------------------------------------------------------
+  # R2. Runtime: Multi-hop reasoning
+  # ------------------------------------------------------------------
+  - id: ASR_multi_hop_reasoning
+    question: "Which team owns the service that handles payment retries?"
+    tags:
+      - agentic_search
+      - multi_hop
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/service-catalog.md
+            body: |
+              # Service Catalog
+              billing-service: Handles invoicing, payment processing, and
+              retry logic for failed transactions. Owner: see team-directory.
+              auth-service: SSO and token management. Owner: Platform team.
+              notification-service: Email and push alerts. Owner: Comms team.
+          - path: docs/team-directory.md
+            body: |
+              # Team Directory
+              Platform team: auth-service, infra-gateway.
+              Payments team: billing-service, refund-engine.
+              Comms team: notification-service, template-renderer.
+          - path: docs/oncall-schedule.md
+            body: |
+              # On-Call Schedule — Q1
+              Week 1: Platform team. Week 2: Payments team.
+              Week 3: Comms team. Week 4: rotate.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_multi_hop_reasoning. Model must search for
+      payment retries → find billing-service → search for team owner →
+      find Payments team. Requires reading 2 documents minimum.
+
+  # ------------------------------------------------------------------
+  # R3. Runtime: Distractor resistance
+  # ------------------------------------------------------------------
+  - id: ASR_distractor_resistance
+    question: "What is the default timeout for the API gateway?"
+    tags:
+      - agentic_search
+      - distractor_resistance
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/gateway-config.md
+            body: |
+              # API Gateway Configuration
+              The gateway forwards requests to backend services. Default
+              timeout: 30 seconds. Override with `gateway.timeout_ms` in
+              gateway.yaml. Health-check interval: 10 seconds.
+          - path: docs/client-sdk-timeouts.md
+            body: |
+              # Client SDK — Timeout Settings
+              The Python client SDK has a default request timeout of 60 seconds.
+              Set `client_timeout` to adjust. The retry timeout is 120 seconds.
+              These are CLIENT-SIDE values and do not affect the gateway.
+          - path: docs/database-pool.md
+            body: |
+              # Database Connection Pool
+              Connection timeout: 5 seconds. Query timeout: 15 seconds.
+              Pool size: 20 connections. Idle timeout: 300 seconds.
+          - path: docs/monitoring-alerts.md
+            body: |
+              # Monitoring & Alerts
+              Alert on gateway timeout > 30s. Alert on DB timeout > 15s.
+              Alert on client error rate > 5%. Dashboard: /ops/metrics.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_distractor_resistance. Four files mention
+      "timeout" — model must find gateway-config.md specifically and
+      answer 30 seconds, not confuse with client 60s or DB 5s values.
+
+  # ------------------------------------------------------------------
+  # R4. Runtime: No-answer detection
+  # ------------------------------------------------------------------
+  - id: ASR_no_answer_detection
+    question: "What is the company's policy on remote work for contractors?"
+    tags:
+      - agentic_search
+      - no_answer
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+      - TEXT_ONLY
+    expected_response_type: text_only
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/remote-work-policy.md
+            body: |
+              # Remote Work Policy — Full-Time Employees
+              Full-time employees may work remotely up to 3 days per week.
+              Manager approval required for fully remote arrangements.
+              Equipment stipend: $500/year. VPN required for all remote access.
+          - path: docs/contractor-onboarding.md
+            body: |
+              # Contractor Onboarding Guide
+              Contractors receive a company laptop and badge access.
+              NDA must be signed before day one. Billing cycle: net-30.
+              Contact procurement@company.com for equipment issues.
+          - path: docs/benefits-summary.md
+            body: |
+              # Benefits Summary — 2025
+              Health insurance, 401k match, PTO policy, parental leave.
+              Applies to full-time employees only.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_no_answer_detection. Remote-work policy covers
+      FTEs only. Contractor onboarding doesn't mention remote work. Model
+      should search, read, and conclude the info isn't in the corpus.
+
+  # ------------------------------------------------------------------
+  # R5. Runtime: Multi-step refinement
+  # ------------------------------------------------------------------
+  - id: ASR_multi_step_refinement
+    question: "What environment variables does the email notification service need?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/service-overview.md
+            body: |
+              # Microservices Overview
+              The platform runs 12 microservices. Each has its own config.
+              Common env vars: DATABASE_URL, LOG_LEVEL, SERVICE_PORT.
+              Service-specific vars documented in each service's config doc.
+          - path: docs/email-service-config.md
+            body: |
+              # Email Notification Service — Configuration
+              Required environment variables:
+                SMTP_HOST: Mail server hostname
+                SMTP_PORT: Mail server port (default: 587)
+                SMTP_USER: Authentication username
+                SMTP_PASS: Authentication password
+                FROM_ADDRESS: Default sender address
+                TEMPLATE_DIR: Path to email templates
+              Optional: RATE_LIMIT_PER_HOUR (default: 1000).
+          - path: docs/push-service-config.md
+            body: |
+              # Push Notification Service — Configuration
+              Required: FIREBASE_KEY, APNS_CERT_PATH, DEVICE_REGISTRY_URL.
+              Optional: BATCH_SIZE (default: 100), RETRY_COUNT (default: 3).
+          - path: docs/sms-service-config.md
+            body: |
+              # SMS Notification Service — Configuration
+              Required: TWILIO_SID, TWILIO_AUTH, TWILIO_FROM_NUMBER.
+              Optional: MAX_SMS_LENGTH (default: 160).
+          - path: docs/deploy-runbook.md
+            body: |
+              # Deployment Runbook
+              Step 1: Pull latest images. Step 2: Run migrations.
+              Step 3: Set env vars per service config docs. Step 4: Deploy.
+              Rollback: revert to previous image tag.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_multi_step_refinement. Broad search for
+      "environment variables" hits many files. Model should narrow to
+      "email service" or "email notification config" to find the right
+      doc. Answer: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+      FROM_ADDRESS, TEMPLATE_DIR (required) + RATE_LIMIT_PER_HOUR.
+
 # ============================================================
 # PRESET CONFIGURATION
 # ============================================================
 #
-# Add the following block to Evaluator/config/eval_run.yaml
-# under the existing `presets:` key:
+# Add these blocks to Evaluator/config/eval_run.yaml under `presets:`:
 #
+#   # Static mode — corpus in system prompt, quick behavioral check
 #   agentic_search:
-#     description: "RAG agent: search -> select -> answer from docs"
+#     description: "RAG agent: search -> select -> answer (static corpus)"
 #     scenarios:
 #       - agentic_search_prompts.yaml
 #     tag_filter:
 #       - agentic_search
+#     exclude_tags:
+#       - runtime
 #     scoring:
 #       pass_threshold: 0.8
 #       weights:
 #         tool_correct: 1.0
 #         behavior_pass: 0.5
 #         response_type_match: 0.3
-#     category_thresholds:
-#       multi_hop: 0.70
-#       distractor_resistance: 0.85
-#       grounding: 0.80
-#       no_answer: 0.90
 #
-# Then copy (or symlink) this scenario file into:
-#   Evaluator/config/scenarios/agentic_search_prompts.yaml
+#   # Runtime mode — real filesystem, actual tool execution
+#   agentic_search_runtime:
+#     description: "RAG agent: live search -> read -> answer (runtime env)"
+#     scenarios:
+#       - agentic_search_prompts.yaml
+#     tag_filter:
+#       - runtime
+#     scoring:
+#       pass_threshold: 0.8
 #
-# Run with:
-#   python -m Evaluator.cli --preset agentic_search
+# Copy this file to: Evaluator/config/scenarios/agentic_search_prompts.yaml
 #
-# Or with environment backend:
-#   python -m Evaluator.cli --preset agentic_search \
-#     --env-tool-schema <path> --env-exec-config <path>
+# Static:  python -m Evaluator.cli --preset agentic_search
+# Runtime: python -m Evaluator.cli --preset agentic_search_runtime \
+#            --env-backend local \
+#            --env-tool-schema <path> --env-exec-config <path>
 # ============================================================
