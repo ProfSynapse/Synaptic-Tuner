@@ -623,6 +623,22 @@ tests:
   # discover content by searching and reading.
   #
   # Requires: --env-backend local --env-tool-schema --env-exec-config
+  #
+  # ⚠️  DATA CONTAMINATION WARNING
+  #
+  # These fixture documents and questions MUST NOT overlap with your
+  # training data. If the model saw these exact docs or questions
+  # during training, evaluation measures memorization, not capability.
+  #
+  # Best practices:
+  #   - Use a held-out document set that was never in training
+  #   - Or generate fresh questions from the fixture environment
+  #     (e.g., have a teacher model write questions about the fixture
+  #     docs, then use those questions here)
+  #   - Never reuse SynthChat-generated training corpora as eval
+  #     fixtures — write new content or use a different domain
+  #   - The fixture docs below are EXAMPLES — replace them with
+  #     your own held-out content before trusting eval results
   # ================================================================
 
   # ------------------------------------------------------------------

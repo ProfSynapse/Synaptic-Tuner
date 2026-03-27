@@ -295,8 +295,9 @@ presets:
     tags: [search, grounding, rag]
 ```
 
-### Run Evaluation
+### Two Evaluation Modes
 
+**Static mode** — corpus in the system prompt, quick behavioral check:
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
@@ -305,6 +306,21 @@ python -m Evaluator.cli \
   --output Evaluator/results/agentic_search_v1.json \
   --markdown Evaluator/results/agentic_search_v1.md
 ```
+
+**Runtime mode** — real files, actual tool execution via agentic loop:
+```bash
+python -m Evaluator.cli \
+  --backend unsloth \
+  --model ./Trainers/rtx3090_sft/sft_output_rtx3090/TIMESTAMP/final_model \
+  --preset agentic_search_runtime \
+  --env-backend local \
+  --env-tool-schema path/to/your_tool_schema.yaml \
+  --env-exec-config path/to/your_exec_rules.yaml \
+  --output Evaluator/results/agentic_search_runtime_v1.json \
+  --markdown Evaluator/results/agentic_search_runtime_v1.md
+```
+
+> **Do not train to the test.** The runtime eval fixtures (documents and questions) must NOT overlap with your training data. If the model saw these exact docs during SynthChat generation, the eval measures memorization, not capability. Use a held-out document set, or generate fresh questions from the fixture environment with a teacher model. The example fixtures in the template are placeholders — replace them with your own held-out content before trusting results.
 
 ### Key Metrics
 
