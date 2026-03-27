@@ -1,0 +1,207 @@
+# ============================================================================
+# PivotRL GRPO Configuration for RTX 3090
+#
+# Extends the base GRPO config with pivot profiling: a data-selection stage
+# that identifies high-variance (state, action) pairs from an SFT dataset
+# and uses only those "pivot" examples for GRPO training.
+#
+# Usage:
+#   python train_grpo.py --config ./configs/pivot_config.yaml
+#   python train_grpo.py --config ./configs/pivot_config.yaml --pivot-profile-only
+# ============================================================================
+
+# Model Configuration (same as base config)
+model:
+  model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
+  lora_path: "../sft/sft_output/20251225_125047/checkpoints/checkpoint-1150"
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: true
+  chat_template: null
+
+# LoRA Adapter Configuration (same as base config)
+lora:
+  r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  bias: "none"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  use_gradient_checkpointing: "unsloth"
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+
+# Training Configuration
+training:
+  output_dir: "./grpo_output"
+
+  per_device_train_batch_size: 6
+  gradient_accumulation_steps: 6
+
+  # Generation
+  num_generations: 4
+  max_prompt_length: 1024
+  max_completion_length: 512
+  temperature: 1.0
+
+  # Learning
+  learning_rate: 5e-6
+  weight_decay: 0.0
+  warmup_ratio: 0.1
+  lr_scheduler_type: "linear"
+  num_train_epochs: 1
+  max_steps: -1
+
+  beta: 0.1
+
+  # Precision
+  fp16: false
+  bf16: true
+
+  # Optimizer
+  optim: "adamw_8bit"
+
+  # Logging / checkpointing
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+
+  report_to: "none"
+
+  use_gspo: false
+
+  extra_args: {}
+
+# Dataset Configuration
+# When pivot.enabled is true, the dataset.local_file is used as the SFT source
+# for profiling (unless pivot.sft_source overrides it). After profiling, the
+# trainer swaps in the filtered pivot dataset automatically.
+dataset:
+  dataset_name: null
+  dataset_file: null
+  local_file: "../../Datasets/grpo/vault_shared_seed_dynamic_roles_grpo_20260316.jsonl"
+  num_proc: 1
+  prompt_column: "prompt"
+
+# Schema Configuration
+schema:
+  tool_schema_path: "../../Evaluator/config/tool_schema.yaml"
+
+# ============================================================================
+# Pivot Profiling Configuration
+#
+# When enabled, the trainer runs a profiling step BEFORE training:
+#   1. Extract (state, action) candidates from the SFT dataset
+#   2. Generate N rollouts per candidate with the frozen model
+#   3. Score rollouts with the reward function
+#   4. Filter for high-variance "pivot" candidates
+#   5. Use only pivot candidates as the GRPO training set
+#
+# This focuses training compute on examples where the model is uncertain,
+# maximizing the learning signal per gradient step.
+# ============================================================================
+pivot:
+  enabled: true
+
+  # SFT JSONL file to profile. If null, uses dataset.local_file.
+  sft_source: null
+
+  # Path to a pre-profiled pivot dataset. If set, skip profiling entirely
+  # and use this file directly (useful for resuming or sharing profiles).
+  profiled_file: null
+
+  # Profiling generation parameters
+  profiling:
+    # Number of rollouts per candidate (higher = more accurate variance estimate)
+    n_rollouts: 8
+    # Sampling temperature for rollouts (1.0 = standard, higher = more diverse)
+    temperature: 1.0
+    # Max tokens per rollout completion
+    max_completion_length: 512
+    # Batch size for generation (tune to fit GPU memory)
+    batch_size: 16
+
+  # Filtering thresholds for selecting pivots
+  filtering:
+    # Minimum reward standard deviation to qualify as a pivot.
+    # Lower = more candidates; higher = stricter (only truly uncertain turns).
+    variance_threshold: 0.1
+    # Minimum number of pivot candidates to accept. If fewer are found,
+    # a warning is logged (consider lowering variance_threshold).
+    min_candidates: 50
+    # Maximum number of pivots to keep (null = no cap).
+    # Pivots are sorted by variance descending, so this keeps the most uncertain.
+    max_candidates: null
+    # Optional [min, max] band filter on mean reward.
+    # Use to exclude examples that are trivially easy (high mean) or
+    # hopelessly broken (low mean). null = no band filter.
+    mean_reward_range: null
+
+  # Cache settings for profiling results
+  cache:
+    # Enable caching to avoid re-profiling unchanged datasets
+    enabled: true
+    # Cache directory (null = default: Datasets/grpo/.pivot_cache/)
+    cache_dir: null
+
+# ============================================================================
+# Rewards Configuration
+#
+# Includes the base reward stack plus functional_equivalence for PivotRL.
+# The functional_equivalence reward uses the custom functional_verifier
+# to check whether the model's tool call is functionally equivalent to
+# the ground truth, even if the exact arguments differ.
+# ============================================================================
+rewards:
+  items:
+    # Primary reward: Full args comparison (context + tool + params)
+    - name: "args_match"
+      weight: 1.0
+      params: {}
+
+    # Secondary: Ensure valid JSON structure
+    - name: "json_structure"
+      weight: 0.3
+      params:
+        reward_value: 0.3
+
+    # Secondary: Ensure tool call format is correct
+    - name: "format"
+      weight: 0.2
+      params:
+        reward_value: 0.2
+
+    # Structural fitness via FitnessEvaluator
+    - name: "structural_fitness"
+      weight: 0.3
+      params: {}
+
+    # PivotRL: Functional equivalence check.
+    # Rewards tool calls that produce the same effect as the ground truth,
+    # even when exact argument values differ (e.g. different valid IDs).
+    - name: "functional_equivalence"
+      weight: 0.5
+      params: {}
+
+  # Custom reward: functional verifier (loaded from file)
+  custom:
+    enabled: true
+    module: null
+    file: "./src/functional_verifier.py"
+    functions: []
+
+# Weights & Biases (optional)
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+
+seed: 42

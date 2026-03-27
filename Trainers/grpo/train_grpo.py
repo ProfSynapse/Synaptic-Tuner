@@ -78,6 +78,8 @@ logging.getLogger("transformers.trainer_callback").setLevel(logging.WARNING)
 import transformers
 transformers.logging.set_verbosity_warning()
 
+logger = logging.getLogger(__name__)
+
 
 def load_config(config_path: str | None = None) -> dict:
     """Load YAML config as plain dict."""
@@ -192,6 +194,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--dataset-file", type=str, default=None, help="Override dataset.dataset_file")
     p.add_argument("--local-file", type=str, default=None, help="Override dataset.local_file")
     p.add_argument("--use-gspo", action="store_true", help="Override training.use_gspo=true")
+    p.add_argument("--pivot-profile-only", action="store_true",
+                    help="Run pivot profiling only, save dataset, and exit without training")
     return p.parse_args(argv)
 
 
@@ -234,16 +238,6 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"Training run directory: {run_dir}")
     print(f"  Checkpoints: {checkpoints_dir}")
     print(f"  Logs: {logs_dir}\n")
-
-    # Load dataset (raw, then formatted after chat template applied)
-    local_file = dataset_cfg.get('local_file')
-    raw_dataset = load_raw_dataset(
-        dataset_name=dataset_cfg.get('dataset_name') if not local_file else None,
-        data_files=dataset_cfg.get('dataset_file') if not local_file else None,
-        local_file=local_file,
-        num_proc=dataset_cfg.get('num_proc', 1),
-    )
-    print_dataset_samples(raw_dataset, num_samples=2)
 
     # Load model + tokenizer/processor
     lora_path = model_cfg.get('lora_path')
@@ -292,15 +286,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     )
     check_gpu_memory()
 
-    # Format dataset for GRPO (prompt -> string using chat template)
-    formatted_dataset = format_dataset_for_grpo(
-        raw_dataset,
-        tokenizer=tokenizer,
-        prompt_column=dataset_cfg.get('prompt_column', 'prompt'),
-        num_proc=dataset_cfg.get('num_proc', 1),
-    )
-
-    # Rewards
+    # Rewards (built before dataset loading so pivot profiling can use them)
     reward_fn, reward_plan = build_combined_reward_function(
         rewards_config=rewards_cfg,
         base_dir=Path(__file__).parent,
@@ -308,6 +294,81 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print("\nReward configuration:")
     for item in reward_plan:
         print(f"  - {item['type']}: {item['name']} (weight={item['weight']})")
+
+    # ── Pivot profiling (optional, controlled by pivot.enabled in config) ──
+    pivot_cfg = config.get("pivot", {})
+    if pivot_cfg.get("enabled", False):
+        if pivot_cfg.get("profiled_file"):
+            # Use pre-profiled dataset directly — skip profiling
+            logger.info("Using pre-profiled pivot dataset: %s", pivot_cfg["profiled_file"])
+            dataset_cfg["local_file"] = pivot_cfg["profiled_file"]
+        else:
+            from src.pivot_profiler import profile_pivots  # noqa: E402 — lazy import
+
+            sft_source = pivot_cfg.get("sft_source") or dataset_cfg.get("local_file")
+            if not sft_source:
+                raise ValueError("pivot.sft_source or dataset.local_file required for pivot profiling")
+
+            # Flatten nested pivot sub-sections into the dict profile_pivots expects
+            profiling = pivot_cfg.get("profiling", {})
+            filtering = pivot_cfg.get("filtering", {})
+            cache = pivot_cfg.get("cache", {})
+            flat_pivot_cfg = {
+                "n_rollouts": profiling.get("n_rollouts", 8),
+                "temperature": profiling.get("temperature", 1.0),
+                "max_completion_length": profiling.get("max_completion_length", 512),
+                "batch_size": profiling.get("batch_size", 16),
+                "variance_threshold": filtering.get("variance_threshold", 0.1),
+                "min_candidates": filtering.get("min_candidates", 50),
+                "max_candidates": filtering.get("max_candidates"),
+                "mean_reward_range": filtering.get("mean_reward_range"),
+            }
+            if cache.get("enabled", True) and cache.get("cache_dir"):
+                flat_pivot_cfg["cache_dir"] = cache["cache_dir"]
+
+            pivot_dataset = profile_pivots(
+                sft_file=Path(sft_source),
+                model=model,
+                tokenizer=tokenizer,
+                reward_fn=reward_fn,
+                pivot_config=flat_pivot_cfg,
+            )
+
+            # Save pivot dataset to run directory
+            import json as _json  # noqa: E402 — scoped import for pivot serialization
+
+            pivot_path = run_dir / "pivot_dataset.jsonl"
+            pivot_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(pivot_path, "w", encoding="utf-8") as f:
+                for example in pivot_dataset:
+                    f.write(_json.dumps(example, ensure_ascii=False) + "\n")
+
+            logger.info("Pivot profiling complete: %d examples saved to %s", len(pivot_dataset), pivot_path)
+
+            if args.pivot_profile_only:
+                logger.info("--pivot-profile-only: exiting without training")
+                return {"run_dir": str(run_dir), "pivot_dataset": str(pivot_path), "pivot_profile_only": True}
+
+            # Swap the dataset source so the normal loader picks up the pivot set
+            dataset_cfg["local_file"] = str(pivot_path)
+
+    # Load dataset (raw, then formatted after chat template applied)
+    local_file = dataset_cfg.get('local_file')
+    raw_dataset = load_raw_dataset(
+        dataset_name=dataset_cfg.get('dataset_name') if not local_file else None,
+        data_files=dataset_cfg.get('dataset_file') if not local_file else None,
+        local_file=local_file,
+        num_proc=dataset_cfg.get('num_proc', 1),
+    )
+    print_dataset_samples(raw_dataset, num_samples=2)
+
+    # Format dataset for GRPO (prompt -> string using chat template)
+    formatted_dataset = format_dataset_for_grpo(
+        raw_dataset,
+        tokenizer=tokenizer,
+        prompt_column=dataset_cfg.get('prompt_column', 'prompt'),
+        num_proc=dataset_cfg.get('num_proc', 1),
+    )
 
     # Training args
     training_args = _build_grpo_config(config, checkpoints_dir=checkpoints_dir)

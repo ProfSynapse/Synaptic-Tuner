@@ -1,0 +1,14 @@
+# Functional Equivalence Reward
+# Rewards tool calls that are functionally equivalent to ground truth,
+# even if string representation differs (arg order, type coercion, etc.)
+
+name: functional_equivalence
+description: >
+  Accepts tool calls that produce the same functional outcome as the
+  ground truth, with normalization for argument ordering, type coercion,
+  whitespace, and path separators.
+
+type: custom
+module_file: "../src/functional_verifier.py"
+function_name: "functional_equivalence_reward"
+default_weight: 0.5

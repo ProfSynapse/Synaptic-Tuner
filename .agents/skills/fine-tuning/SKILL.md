@@ -16,6 +16,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/grpo && python train_grpo.py` |
+| Pivot-profile GRPO dataset | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml --pivot-profile-only` |
+| GRPO with pivot filtering | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml` |
 | Env-backed GRPO | `cd Trainers/grpo && python train_env_grpo.py --config ./configs/env_config.yaml --dry-run` |
 | Experiment loop | `python tuner.py experiment-loop --experiment-config configs/flywheel/experiment_loop.yaml` |
 | LoRA surgery | `python tuner.py surgery --surgery-config configs/lora_surgery.yaml` |
