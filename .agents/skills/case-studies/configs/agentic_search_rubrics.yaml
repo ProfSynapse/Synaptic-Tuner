@@ -1,0 +1,463 @@
+# =============================================================================
+# AGENTIC SEARCH RUBRICS — TEMPLATE BUNDLE
+# =============================================================================
+#
+# PURPOSE
+#   Three rubric definitions for evaluating agentic search quality in training
+#   examples where a model must: (1) choose search terms, (2) select documents
+#   to read, and (3) produce a grounded answer from what it read.
+#
+# HOW TO USE
+#   1. Copy the rubric you need into SynthChat/rubrics/<rubric_name>.yaml
+#   2. Customize the judge/improver prompts for your domain and tool schema
+#   3. Run:  python -m SynthChat.services.rubric_runner --list
+#      to confirm your rubric is detected
+#
+# TOOL AGNOSTICISM
+#   These rubrics are intentionally generic. They evaluate BEHAVIOR — what was
+#   searched for, what was opened, what was claimed — not the names or schemas
+#   of specific tools. Whether your pipeline uses searchManager, a RAG
+#   retriever, grep, an MCP tool, or any other search interface, the quality
+#   criteria are the same:
+#
+#     - Did the search terms target the right vocabulary?
+#     - Did the model read the right documents?
+#     - Is the final answer faithful to what the documents actually say?
+#
+#   When you copy a rubric into SynthChat/rubrics/, replace the generic
+#   references (e.g., "search actions", "read actions") with your tool-
+#   specific field names if you want structural validations to fire.
+#
+# AVAILABLE TEMPLATE VARIABLES (for judge/improver prompts)
+#   {current_content}       — The content being evaluated (scoped by rubric scope)
+#   {system_prompt}         — Full system prompt from the training example
+#   {user_request}          — The user's message / question
+#   {assistant_response}    — The assistant's full response
+#   {feedback}              — Judge feedback (improver prompts only)
+#   {thinking_content}      — Thinking block content (if present)
+#   {original_tool_calls}   — Raw tool calls JSON (if present)
+#
+# =============================================================================
+
+
+# =============================================================================
+# RUBRIC 1: search_term_quality
+# =============================================================================
+
+name: Search Term Quality
+description: >
+  Evaluates whether the search terms the model chose would actually surface
+  the target documents in a keyword or grep-style search. Penalizes terms
+  that are too broad, too narrow, or that parrot the user's exact phrasing
+  when the underlying documents use different vocabulary.
+scope: tool_calls
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating the SEARCH TERMS an assistant chose when answering a
+  user question. The assistant issued one or more search actions before
+  reading documents. Your job is to judge whether those search terms would
+  realistically surface the documents that contain the answer.
+
+  **Tool Calls (containing search actions):**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt (describes available documents/corpus):**
+  ```
+  {system_prompt}
+  ```
+
+  # INSTRUCTIONS
+  Examine every search term or query string the assistant used and evaluate
+  along these dimensions:
+
+  1. **Vocabulary match**: Do the search terms use words and phrases that
+     are likely to appear in the target documents? Domain-specific jargon,
+     abbreviations, and canonical names score higher than generic synonyms.
+
+  2. **Specificity**: Are the terms specific enough to filter out irrelevant
+     results? A single common word like "config" is too broad; a phrase like
+     "training learning rate schedule" is appropriately targeted.
+
+  3. **Coverage**: If the answer spans multiple topics or documents, did the
+     assistant issue enough distinct searches to cover the needed ground?
+
+  4. **Avoiding echo**: Did the assistant blindly copy the user's exact
+     question as a search query? Good search reformulates the question into
+     terms the documents are likely to contain. For example, if the user asks
+     "How do I make the model learn faster?" a good search uses terms like
+     "learning_rate" or "lr_scheduler", not "make model learn faster".
+
+  5. **Iteration awareness**: If the first search returned poor results and
+     the assistant searched again, did it adjust terms meaningfully or just
+     repeat the same query?
+
+  # SCORING
+  - **1.0** = Terms are well-chosen: domain-appropriate vocabulary, specific
+    enough to filter noise, cover the needed topics, reformulated from user
+    phrasing into document vocabulary
+  - **0.7-0.9** = Mostly good terms with minor issues (slightly too broad,
+    one redundant search, partial echo of user phrasing)
+  - **0.4-0.6** = Terms are mediocre: overly generic, echo user phrasing
+    without reformulation, or miss an important topic
+  - **0.0-0.3** = Terms are poor: would not surface target docs, completely
+    wrong vocabulary, or no search was performed at all
+
+  # FORMAT
+  Return JSON: {"searchtermquality_score": 0.0-1.0}
+
+improver_prompt: |
+  # CONTEXT
+  You are improving the search terms an assistant used when answering a
+  user question. The judge found issues with the original search terms.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt (describes available documents/corpus):**
+  ```
+  {system_prompt}
+  ```
+
+  **Judge Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # INSTRUCTIONS
+  Generate improved tool calls where:
+  1. Search terms use vocabulary that matches the target documents, not the
+     user's exact phrasing
+  2. Terms are specific enough to filter irrelevant results but not so
+     narrow that they miss relevant documents
+  3. Multiple searches cover all topics needed to answer the question
+  4. If the system prompt describes the corpus structure (folders, file
+     names, tags), use that knowledge to craft targeted queries
+
+  Preserve the original tool call structure and format. Only change the
+  search query strings and add/remove search actions as needed.
+
+  Output ONLY the improved tool calls.
+
+output_schema:
+  type: object
+  properties:
+    searchtermquality_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - searchtermquality_score
+
+validations:
+  # Verify that at least one tool call exists (the model should be searching)
+  - match: 'tool_calls|function|calls'
+    type: regex
+    error: "No tool calls detected — the assistant should issue search actions before answering"
+
+
+# =============================================================================
+# RUBRIC 2: doc_selection
+# =============================================================================
+
+---
+name: Document Selection
+description: >
+  Evaluates whether the model selected the right documents to read after
+  searching. Penalizes reading too few documents (incomplete answer), reading
+  too many (inefficient), skipping relevant results, or falling for distractor
+  documents that match keywords but are irrelevant.
+scope: tool_calls
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating which documents the assistant chose to READ (open, fetch,
+  or retrieve full content) after performing search actions. Your job is to
+  judge whether the selection was appropriate for answering the user's question.
+
+  **Tool Calls (containing search and read actions):**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt (describes available documents/corpus):**
+  ```
+  {system_prompt}
+  ```
+
+  **Assistant Response:**
+  ```
+  {assistant_response}
+  ```
+
+  # INSTRUCTIONS
+  Examine the sequence of tool calls to identify which documents were read
+  (opened, fetched, retrieved) and evaluate along these dimensions:
+
+  1. **Relevance**: Did the assistant read documents that actually contain
+     information needed to answer the question? Cross-reference the user's
+     question, the system prompt's description of available content, and what
+     the assistant ultimately said in its response.
+
+  2. **Distractor avoidance**: Did the assistant skip documents that share
+     keywords with the question but contain irrelevant content? For example,
+     a file called "training_logs.md" might match a search for "training"
+     but be irrelevant if the user asked about training configuration.
+
+  3. **Sufficiency**: Did the assistant read ENOUGH documents to fully answer
+     the question? If the answer requires information from three documents
+     and only one was read, that is insufficient.
+
+  4. **Efficiency**: Did the assistant avoid reading everything blindly? If
+     10 results were returned and only 2 are relevant, reading all 10 is
+     wasteful. Reading 2-3 targeted documents is efficient.
+
+  5. **Progressive narrowing**: If the assistant read one document and then
+     decided to read more, was that decision reasonable based on what the
+     first document contained?
+
+  # SCORING
+  - **1.0** = Read exactly the right documents: all relevant docs included,
+    distractors skipped, efficient selection
+  - **0.7-0.9** = Good selection with minor issues (one unnecessary read,
+    or one mildly relevant doc skipped)
+  - **0.4-0.6** = Mediocre selection: missed an important document, read
+    several distractors, or read everything without filtering
+  - **0.0-0.3** = Poor selection: missed the key document entirely, read
+    only distractors, or did not read any documents at all
+
+  # FORMAT
+  Return JSON: {"docselection_score": 0.0-1.0}
+
+improver_prompt: |
+  # CONTEXT
+  You are improving the document selection in an assistant's tool call
+  sequence. The judge found issues with which documents were read.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt (describes available documents/corpus):**
+  ```
+  {system_prompt}
+  ```
+
+  **Assistant Response:**
+  ```
+  {assistant_response}
+  ```
+
+  **Judge Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # INSTRUCTIONS
+  Generate improved tool calls where:
+  1. The assistant reads documents that contain information needed to answer
+     the question (check the system prompt for clues about document content)
+  2. Distractor documents with misleading names are skipped
+  3. The selection is sufficient — enough documents are read to fully answer
+     the question
+  4. The selection is efficient — no unnecessary reads of clearly irrelevant
+     documents
+  5. Search actions remain the same (or are only adjusted if the original
+     searches could not have surfaced the right documents)
+
+  Preserve the original tool call structure and format. Add or remove read
+  actions as needed, and reorder if the sequence matters.
+
+  Output ONLY the improved tool calls.
+
+output_schema:
+  type: object
+  properties:
+    docselection_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - docselection_score
+
+validations:
+  # Verify that at least one read/fetch action exists
+  - match: 'tool_calls|function|calls'
+    type: regex
+    error: "No tool calls detected — the assistant should read documents before answering"
+
+
+# =============================================================================
+# RUBRIC 3: groundedness
+# =============================================================================
+
+---
+name: Groundedness
+description: >
+  Evaluates whether the assistant's final answer is faithful to the content
+  of the documents it read. Penalizes fabricated claims, meaning-altering
+  paraphrases, and failure to acknowledge when documents do not cover a topic.
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  # CONTEXT
+  You are evaluating whether the assistant's response is GROUNDED in the
+  documents it read. Every factual claim in the response should be traceable
+  to a specific passage in the retrieved content. The assistant should not
+  invent information, and should explicitly say when it cannot find something.
+
+  **Assistant Response:**
+  ```
+  {current_content}
+  ```
+
+  **Tool Calls (showing what was searched and read):**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **Thinking Block (if present):**
+  ```
+  {thinking_content}
+  ```
+
+  # INSTRUCTIONS
+  Evaluate the response along these dimensions:
+
+  1. **Traceability**: Can every factual claim (names, numbers, dates,
+     procedures, configurations) be traced back to a specific passage in the
+     documents the assistant read? Claims that appear in the response but not
+     in any read document are hallucinations.
+
+  2. **No added information**: Does the response avoid introducing facts,
+     details, or context not present in the documents? General knowledge
+     framing ("This is a common pattern...") is acceptable; specific claims
+     ("The default learning rate is 2e-4") must come from the documents.
+
+  3. **Faithful paraphrasing**: When the response paraphrases document
+     content rather than quoting it, does the paraphrase preserve the
+     original meaning? Watch for subtle meaning shifts — e.g., changing
+     "recommended" to "required", or "up to 10" to "exactly 10".
+
+  4. **Appropriate uncertainty**: When the documents do not cover part of
+     the user's question, does the response acknowledge this gap? Phrases
+     like "I could not find information about X in the documents" are good.
+     Silently making up an answer is bad. Confidently stating something the
+     documents do not support is the worst case.
+
+  5. **No over-generalization**: Does the response avoid broadening specific
+     claims from the documents? If a document says "Feature X works with
+     model Y," the response should not claim "Feature X works with all
+     models" unless the document supports that.
+
+  # SCORING
+  - **1.0** = Every claim is traceable to the documents, gaps are
+    acknowledged, paraphrasing is faithful, no added information
+  - **0.7-0.9** = Mostly grounded with minor issues (one slightly loose
+    paraphrase, a minor added detail that is broadly correct)
+  - **0.4-0.6** = Several ungrounded claims, or one significant fabrication,
+    or fails to acknowledge a gap in document coverage
+  - **0.0-0.3** = Major fabrications: invents key facts, contradicts the
+    documents, or confidently answers questions the documents do not address
+
+  # FORMAT
+  Return JSON: {"groundedness_score": 0.0-1.0}
+
+improver_prompt: |
+  # CONTEXT
+  You are improving an assistant's response to ensure it is grounded in the
+  documents that were read. The judge found issues with faithfulness.
+
+  **Current Response:**
+  ```
+  {current_content}
+  ```
+
+  **Tool Calls (showing what was searched and read):**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **User Question:**
+  ```
+  {user_request}
+  ```
+
+  **System Prompt:**
+  ```
+  {system_prompt}
+  ```
+
+  **Judge Feedback:**
+  ```
+  {feedback}
+  ```
+
+  # INSTRUCTIONS
+  Generate an improved response where:
+  1. Every factual claim can be traced to a passage in the read documents
+  2. Remove or correct any claims not supported by the documents
+  3. Where the documents do not cover part of the user's question, explicitly
+     state that: "I was not able to find information about [topic] in the
+     available documents"
+  4. Preserve the helpful structure and tone of the original response
+  5. If the original response paraphrased something in a way that changed
+     its meaning, fix the paraphrase to be faithful to the source
+  6. Do not add new information from outside the documents — only use what
+     the assistant actually retrieved
+
+  Output ONLY the improved response text.
+
+output_schema:
+  type: object
+  properties:
+    groundedness_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - groundedness_score
+
+validations:
+  # Verify the response is not empty
+  - match: '\S+'
+    type: regex
+    error: "Response is empty — the assistant must provide an answer after reading documents"
