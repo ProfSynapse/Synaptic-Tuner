@@ -202,6 +202,98 @@ Use `scripts/split_for_gspo.py` to split datasets.
 
 ---
 
+## PivotRL (Variance-Gated Data Selection)
+
+PivotRL profiles SFT trajectory turns to find "pivots" — turns where the model shows mixed success and failure across multiple rollouts. These high-variance turns sit at the model's decision boundary: sometimes the model gets them right, sometimes wrong. Standard GRPO wastes compute on turns the model already handles consistently (low variance) or never gets right (zero reward). Pivots provide the strongest gradient signal because the model can learn from the contrast within each group.
+
+Training only on pivot-filtered data achieves ~4x compute reduction with comparable accuracy (per NVIDIA's PivotRL paper, arXiv:2603.21383). This matters especially on RTX 3090 where rollout generation is the bottleneck. The profiling step can run overnight, and the resulting pivot dataset trains much faster than the full SFT source.
+
+The functional equivalence reward component ships alongside PivotRL, replacing brittle string matching with normalized tool-call comparison. This handles argument reordering, type coercion (string `"true"` → bool), path separator normalization, and whitespace differences — scoring functionally identical tool calls as equivalent even when their string representations differ.
+
+### When to Use
+
+- **SFT → GRPO refinement**: You have SFT trajectories and want GRPO to sharpen the model on its weakest points
+- **Compute-limited training**: RTX 3090 — pivot filtering reduces the number of examples that need rollouts
+- **OOD degradation from SFT**: Standard SFT can overfit to in-distribution patterns; PivotRL-style GRPO preserves out-of-distribution capabilities by focusing on decision-boundary turns
+
+### Quick Start
+
+```bash
+# Step 1: Profile SFT data to find pivots (can run overnight)
+cd Trainers/grpo
+python train_grpo.py --config configs/pivot_config.yaml --pivot-profile-only
+
+# Step 2: Train on pivot-filtered data
+python train_grpo.py --config configs/pivot_config.yaml
+```
+
+Profiling results are cached to `Datasets/grpo/.pivot_cache/`. Changed rewards or SFT data invalidate the cache automatically (key = file hash + model name + reward config hash).
+
+### Config Reference
+
+Add the `pivot:` section to any GRPO config YAML. Omit it or set `enabled: false` for standard GRPO — zero behavior change.
+
+```yaml
+pivot:
+  enabled: true
+  sft_source: null              # SFT JSONL to profile (null = use dataset.local_file)
+  profiled_file: null           # Pre-profiled pivot dataset (skip profiling if set)
+  profiling:
+    n_rollouts: 8               # Rollouts per candidate turn (4-16 recommended)
+    temperature: 1.0            # Sampling temperature during profiling
+    max_completion_length: 512  # Max tokens per rollout
+    batch_size: 16              # Inference batch size
+  filtering:
+    variance_threshold: 0.1     # Min reward std to qualify as pivot (0.05-0.2 typical)
+    min_candidates: 50          # Warning if fewer pivots found
+    max_candidates: null        # Optional cap
+    mean_reward_range: null     # Optional [min, max] band (e.g., [0.2, 0.8])
+  cache:
+    enabled: true
+    cache_dir: null             # Default: Datasets/grpo/.pivot_cache/
+```
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `sft_source` | `null` | Falls back to `dataset.local_file` |
+| `profiled_file` | `null` | Point at a pre-profiled JSONL to skip profiling entirely |
+| `n_rollouts` | 8 | Higher = more accurate variance estimate, slower profiling |
+| `variance_threshold` | 0.1 | Lower = more pivots (lenient), higher = fewer pivots (strict) |
+| `min_candidates` | 50 | Logs a warning if fewer pivots pass the filter |
+| `max_candidates` | `null` | Optional hard cap, takes highest-variance first |
+| `mean_reward_range` | `null` | Optional band filter, e.g. `[0.2, 0.8]` to exclude trivial/impossible turns |
+
+### Functional Equivalence Reward
+
+Added via the `rewards` section or as a standalone YAML in `configs/rewards/functional_equivalence.yaml`:
+
+```yaml
+name: functional_equivalence
+type: custom
+module_file: "../src/functional_verifier.py"
+function_name: "functional_equivalence_reward"
+default_weight: 0.5
+```
+
+Normalization handles: argument key reordering, type coercion (`"true"` → `true`, `"42"` → `42`), path separator normalization (`\` → `/`), and whitespace stripping. Scoring: 1.0 (fully equivalent), partial (same tool, partial arg match), 0.0 (wrong tool or unparseable).
+
+### Key Metrics to Watch
+
+| Metric | What to Check | Action |
+|--------|---------------|--------|
+| **Pivot coverage** | % of SFT turns that qualified as pivots | 10-40% is typical |
+| **Variance distribution** | Check profiling output log for reward std stats | Bimodal = good signal |
+| **Filtered count** | Total pivots after filtering | Too few → lower `variance_threshold`; too many → raise it |
+| **Mean reward band** | Distribution of pivot mean rewards | All near 0.0 or 1.0 = threshold too low |
+
+### Relationship to Other Systems
+
+- **Loss pipeline** (`prune_dataset_from_loss.py`): Post-hoc difficulty analysis after training. PivotRL does pre-training difficulty analysis. Complementary — chain them: PivotRL for data selection → loss analysis after training for next-iteration cleanup.
+- **Evolutionary model** (`shared/evolutionary/`): Same generate-score-select pattern at the weight-update level. PivotRL applies it at the data-selection level.
+- **Env-GRPO** (`train_env_grpo.py`): Architectural precedent for config-activated mode. PivotRL follows the same pattern: separate config preset, conditional branch in trainer.
+
+---
+
 ## Platform Note
 
 GRPO requires **WSL/Linux only** — native Windows is not supported.
