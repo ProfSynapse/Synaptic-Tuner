@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-31
 **Status:** Research / Proposal
-**Context:** Identifying how open-source mechanistic interpretability tools could integrate into our fine-tuning → evaluation → improvement cycle.
+**Context:** Identifying how open-source mechanistic interpretability tools could integrate into a **generalizable** fine-tuning → evaluation → improvement cycle — applicable to any training objective (tool-calling, essay writing, code generation, agentic behavior, domain adaptation, etc.).
 
 ---
 
@@ -37,7 +37,7 @@ This document maps the open-source landscape to our pipeline and proposes concre
 - **What:** Trace computational circuits in models using cross-layer transcoders. Produces attribution graphs showing how features connect.
 - **Model support:** Gemma-2-2B, Llama-3.1-1B, Qwen3-4B (expanding).
 - **Status:** Active (2025). Open-sourced by Anthropic Fellows.
-- **Integration potential:** **MEDIUM-HIGH** — Compare circuits before/after fine-tuning to see if tool-calling circuits are forming correctly.
+- **Integration potential:** **MEDIUM-HIGH** — Compare circuits before/after fine-tuning to see if task-relevant circuits are forming correctly (e.g., reasoning chains for essay writing, structured output circuits for tool-calling, domain knowledge retrieval for specialized models).
 
 #### pyvene
 - **Repo:** [stanfordnlp/pyvene](https://github.com/stanfordnlp/pyvene)
@@ -84,12 +84,12 @@ This document maps the open-source landscape to our pipeline and proposes concre
 #### Representation Engineering / Activation Steering
 - **What:** Find linear directions in activation space that correspond to concepts (honesty, tool-use, refusal). Steer by adding vectors at inference.
 - **Key advances (2026):** CAST (conditional steering, ICLR 2025), SAE-guided steering, Steering Vector Fields.
-- **Integration potential:** **HIGH for steering** — Could steer fine-tuned models at inference time without retraining.
+- **Integration potential:** **HIGH for steering** — Could steer fine-tuned models at inference time without retraining. Applicable to any behavioral dimension: formality, verbosity, safety, domain focus, reasoning depth, etc.
 
 #### Activation Patching / Causal Tracing
 - **What:** Replace activations from one forward pass with another to identify causally important components.
 - **Tools:** Built into TransformerLens, pyvene, NNsight.
-- **Integration potential:** **HIGH** — Compare which components are causally important for tool-calling in base vs. fine-tuned model.
+- **Integration potential:** **HIGH** — Compare which components are causally important for the target task behavior in base vs. fine-tuned model.
 
 ---
 
@@ -105,7 +105,7 @@ This document maps the open-source landscape to our pipeline and proposes concre
 3. Compare internal activations at key layers using SAELens or TransformerLens
 4. Report: which features activated/deactivated, which circuits changed
 
-**Why:** Current pipeline only knows training loss went down. This tells you *what the model actually learned* — did it learn the right tool-calling circuits, or did it learn a shortcut?
+**Why:** Current pipeline only knows training loss went down. This tells you *what the model actually learned* — did it learn the intended task representations, or did it learn a shortcut? This applies regardless of training objective: tool-calling, essay style, code generation, domain knowledge, etc.
 
 **Key research backing:**
 - LoRA creates **distributed circuits**, not isolated neurons (Lee, 2025)
@@ -129,14 +129,15 @@ ExperimentSpec.yaml:
 
 **What it does:**
 1. For each eval prompt, capture intermediate activations
-2. Check if the model is using the "right" internal features (e.g., tool-selection features active when tool-calling is expected)
+2. Check if the model is using the "right" internal features for the task (e.g., domain knowledge features active during domain-specific queries, reasoning features active during multi-step problems, structured output features active when format compliance is expected)
 3. Add interp-based metrics alongside schema/behavior/judge validation
 
-**Why:** A model can produce correct outputs for wrong reasons (shortcut learning). Activation analysis catches this.
+**Why:** A model can produce correct outputs for wrong reasons (shortcut learning). This is task-agnostic — whether the model is writing essays, calling tools, generating code, or answering domain questions, activation analysis reveals whether it's using genuine task-relevant representations or surface-level pattern matching.
 
 **New validator:** `InterpretabilityValidator`
-- Checks: Are tool-calling features active? Is the reasoning circuit engaged?
-- Output: `interp_score` (0.0–1.0) based on feature activation alignment
+- Checks: Are task-relevant features active? Is the expected reasoning circuit engaged? Are any safety/alignment features unexpectedly suppressed?
+- Output: `interp_score` (0.0–1.0) based on feature activation alignment with a task-specific reference profile
+- The reference profile is built per fine-tuning objective: compare feature activations on high-quality vs. low-quality outputs from the training data itself
 
 ### 2.3 Flywheel Feature Drift Detection (EXTEND EXISTING)
 
@@ -145,9 +146,9 @@ ExperimentSpec.yaml:
 **What it does:**
 1. Periodically run SAE analysis on inference logs
 2. Track feature activation distributions over time
-3. Alert when features drift (model forgetting tool-calling capabilities, developing shortcuts)
+3. Alert when features drift — model losing trained capabilities, developing shortcuts, or degrading on specific behavioral dimensions
 
-**Why:** The flywheel hot-swaps LoRA adapters. Feature drift detection catches degradation that loss metrics miss.
+**Why:** The flywheel hot-swaps LoRA adapters. Feature drift detection catches degradation that loss metrics miss. This is especially important for multi-objective fine-tunes (e.g., domain knowledge + safety + style) where one capability can silently regress while aggregate metrics look fine.
 
 ### 2.4 Guided LoRA Placement (NEW CAPABILITY)
 
@@ -167,23 +168,31 @@ ExperimentSpec.yaml:
 **Where:** New module `shared/steering/` or integrate with vLLM proxy.
 
 **What it does:**
-1. When eval identifies a specific failure mode (e.g., model refuses tool calls, hallucinates parameters)
-2. Extract a steering vector that corrects the behavior
+1. When eval identifies a specific failure mode (any task — wrong tone, missed reasoning steps, format violations, hallucinations, safety regressions)
+2. Extract a steering vector that corrects the behavior by contrasting successful vs. failed activations
 3. Apply at inference time via the vLLM proxy, without retraining
 
-**Why:** Faster iteration than retraining. Conditional Activation Steering (CAST, ICLR 2025) only steers when the problematic pattern is detected.
+**Why:** Faster iteration than retraining. Conditional Activation Steering (CAST, ICLR 2025) only steers when the problematic pattern is detected — zero overhead on well-behaved inputs.
 
-**Practical example:** If the fine-tuned model occasionally fails to call tools when it should, extract a "tool-calling" direction from successful vs. failed examples and inject it at inference time.
+**Practical examples across fine-tuning objectives:**
+- **Code generation:** Model occasionally produces insecure code → steer toward "security-aware" direction
+- **Essay writing:** Model drifts toward verbose, unfocused responses → steer toward "conciseness" direction
+- **Domain adaptation:** Model hallucinates domain-specific facts → steer toward "factual grounding" direction
+- **Agentic behavior:** Model skips planning steps → steer toward "deliberate reasoning" direction
+- **Any task:** Safety features suppressed after fine-tuning → steer to restore safety baseline
 
-### 2.6 SynthChat Quality Signal (EXTEND EXISTING)
+### 2.6 Synthetic Data Quality Signal (EXTEND EXISTING)
 
-**Where:** Extend `SynthChat/services/core/validation_service.py`.
+**Where:** Extend `SynthChat/services/core/validation_service.py` or any synthetic data generation pipeline.
 
 **What it does:**
-1. For synthetic training examples, check if the teacher model's response activates the expected features in a reference model
+1. For synthetic training examples (from any generation pipeline), check if the teacher model's response activates the expected features in a reference model
 2. Flag synthetic examples where the internal representation doesn't match expectations (even if the output looks correct)
+3. Prioritize training examples that activate deep task-relevant features over those that merely surface-match the expected format
 
-**Why:** Current SynthChat validation is output-level (schema, rubric, judge). Interp adds representation-level quality signal.
+**Why:** Current validation is output-level (schema, rubric, judge). Interp adds representation-level quality signal. This matters for any fine-tuning objective — a synthetic essay that "looks good" but activates shallow pattern-matching features will teach the model shortcuts, not genuine reasoning.
+
+**Task-agnostic approach:** Build a "reference activation profile" from known high-quality examples for any task. Score new synthetic examples by cosine similarity of their SAE feature vectors to this profile.
 
 ---
 
@@ -195,7 +204,7 @@ ExperimentSpec.yaml:
    - `activation_extractor.py` — Extract activations from base and fine-tuned models
    - `feature_diff.py` — Compare SAE feature activations before/after training
    - `report.py` — Generate human-readable interp reports
-3. **Create diagnostic prompt set** (`configs/interp/diagnostic_prompts.yaml`) covering tool-calling, reasoning, and refusal scenarios
+3. **Create diagnostic prompt set framework** (`configs/interp/diagnostic_prompts.yaml`) — task-agnostic template with examples for common fine-tuning objectives (instruction following, reasoning, domain knowledge, structured output, safety)
 4. **Wire into experiment handler** as optional post-training stage
 
 ### Phase 2: Evaluation Integration (Medium effort)
@@ -206,7 +215,7 @@ ExperimentSpec.yaml:
 ### Phase 3: Advanced (Higher effort, higher payoff)
 8. **Mechanistically-guided LoRA placement**
 9. **Activation steering via proxy**
-10. **SynthChat representation-level validation**
+10. **Synthetic data representation-level validation**
 
 ---
 
@@ -218,24 +227,36 @@ ExperimentSpec.yaml:
 - Circuit tracing: GPU-intensive but one-time per analysis
 
 ### Model Compatibility
-Our pipeline primarily trains Mistral/Llama/Qwen models with Unsloth. Compatibility:
+The pipeline supports any HuggingFace-compatible model (Mistral, Llama, Qwen, Gemma, etc.) via Unsloth. Tool compatibility:
 - **TransformerLens v3:** Supports Llama, Qwen, Mistral, Gemma ✓
 - **SAELens:** Works with any HuggingFace model ✓
 - **pyvene:** Works with any PyTorch model ✓
+- **NNsight + NNterp:** Any HuggingFace model, 50+ architecture variants ✓
 - **Circuit Tracer:** Currently Gemma-2, Llama-3.1, Qwen3 only ⚠️
 
+### Task Agnosticism
+These tools are inherently task-agnostic — they operate on model activations, not task-specific outputs. The same SAE diff pipeline works whether you're fine-tuning for:
+- Tool-calling (structured output features)
+- Essay/creative writing (style, coherence, reasoning features)
+- Code generation (correctness, security features)
+- Domain adaptation (knowledge retrieval features)
+- Safety alignment (refusal, honesty features)
+- Agentic behavior (planning, tool selection features)
+
+The only task-specific component is the **diagnostic prompt set**, which should be tailored to the training objective to probe the features you expect to change.
+
 ### Goodhart's Law Warning
-Research (Oct 2025 toxicity probe paper) warns: **when interpretability metrics become training targets, they may cease to be reliable.** We should use interp signals for *diagnostics and monitoring*, not as direct training loss terms. Keep interp as an independent observer, not an optimizer.
+Research (Oct 2025 toxicity probe paper) warns: **when interpretability metrics become training targets, they may cease to be reliable.** Use interp signals for *diagnostics and monitoring*, not as direct training loss terms. Keep interp as an independent observer, not an optimizer. This applies to any fine-tuning objective.
 
 ### Practical Starting Point
 The lowest-friction entry is:
-1. Install SAELens
-2. Use pre-trained SAEs (Gemma Scope 2 or SAELens pretrained)
+1. Install SAELens (or NNsight for zero-conversion extraction)
+2. Use pre-trained SAEs if available for your model family (Gemma Scope 2, SAELens pretrained, Goodfire open SAEs)
 3. Run `encode()` on activations from eval prompts, before and after fine-tuning
 4. Diff the feature activation vectors
-5. Report which features changed most
+5. Report which features changed most — map to human-readable descriptions via auto-interp
 
-This gives immediate insight with minimal engineering.
+This gives immediate insight with minimal engineering, regardless of training objective.
 
 ---
 
