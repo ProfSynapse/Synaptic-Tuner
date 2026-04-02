@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
 from shared.experiment_tracking import (
     Experiment,
     ExperimentSpec,
@@ -78,7 +76,7 @@ class HFTrainingStageRunner:
             )
         return ("training_lineage.json",)
 
-    def _recover_existing_training(self, *, experiment: Experiment) -> Optional[StageResult]:
+    def _recover_existing_training(self, *, experiment: Experiment) -> StageResult | None:
         details = experiment.stage_details.get("training", {})
         status = details.get("status")
         bucket_id = details.get("bucket_id") or details.get("tags", {}).get("bucket_id")
@@ -133,7 +131,7 @@ class HFTrainingStageRunner:
             )
         return None
 
-    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: StageResult | None = None) -> StageResult:
         recovered = self._recover_existing_training(experiment=experiment)
         if recovered is not None:
             return recovered

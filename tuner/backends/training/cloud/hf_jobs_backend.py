@@ -84,6 +84,14 @@ class HFJobsBackend(
     - t4-small: T4 16GB (~$0.40/hr)
     - a10g-small: A10G 24GB (~$1.10/hr)
     - a100-large: A100 80GB (~$2.50/hr)
+
+    Mixin dependencies (cross-mixin method calls):
+    - HFCommandBuilderMixin  -> HFBucketOpsMixin._build_remote_run_uri
+    - HFJobWatcherMixin      -> HFBucketOpsMixin._recover_completed_run_from_bucket
+    - HFJobWatcherMixin      -> HFPostTrainingMixin._finalize_completed_job
+    - HFPostTrainingMixin    -> HFBucketOpsMixin._build_remote_run_uri,
+                                ._local_download_run_dir, ._download_completed_run
+    All mixins expect self.repo_root (set by __init__).
     """
 
     def __init__(self, repo_root: Path):

@@ -11,8 +11,6 @@ from __future__ import annotations
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
 from shared.experiment_tracking import (
     Experiment,
     ExperimentSpec,
@@ -37,7 +35,7 @@ class HFEvalStageRunner:
         mode = getattr(post_training, "mode", "parallel")
         return mode == "same_job" and bool(spec.loss.enabled)
 
-    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: StageResult | None = None) -> StageResult:
         if previous is None or previous.run_record is None:
             raise CloudProviderError("Evaluation stage requires a completed training run.")
         artifact_prefix = previous.run_record.tags.get("artifact_prefix", "")

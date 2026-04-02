@@ -12,7 +12,6 @@ from pathlib import Path
 from shared.experiment_tracking import (
     ExperimentOrchestrator,
     ExperimentSpec,
-    StageResult,
     TrackingService,
     load_experiment_spec,
 )

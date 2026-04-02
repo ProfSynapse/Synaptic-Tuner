@@ -12,7 +12,6 @@ script invocation, and GRPO virtual-env bootstrapping.
 
 import shlex
 import yaml
-from typing import List
 
 from shared.utilities.paths import get_canonical_trainer_dir_name
 from shared.utilities.unique_ids import unique_utc_timestamp

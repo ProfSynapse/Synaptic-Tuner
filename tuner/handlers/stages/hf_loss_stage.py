@@ -13,8 +13,6 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
 from shared.experiment_tracking import (
     Experiment,
     ExperimentSpec,
@@ -126,7 +124,7 @@ class HFLossStageRunner:
             elapsed += 30
         return 1
 
-    def _download_results(self, *, bucket_id: str, results_prefix: str) -> Optional[Path]:
+    def _download_results(self, *, bucket_id: str, results_prefix: str) -> Path | None:
         try:
             from huggingface_hub import sync_bucket
         except ImportError:
@@ -142,16 +140,14 @@ class HFLossStageRunner:
         except Exception:
             for child in local_root.iterdir():
                 if child.is_dir():
-                    import shutil as _shutil
-
-                    _shutil.rmtree(child, ignore_errors=True)
+                    shutil.rmtree(child, ignore_errors=True)
                 else:
                     child.unlink(missing_ok=True)
             local_root.rmdir()
             return None
         return local_root
 
-    def _inspect_job_stage(self, job_ref: str) -> Optional[str]:
+    def _inspect_job_stage(self, job_ref: str) -> str | None:
         try:
             huggingface_hub = load_huggingface_hub(require_apis=("inspect_job",))
             job_info = huggingface_hub.inspect_job(job_id=job_ref)
@@ -161,7 +157,7 @@ class HFLossStageRunner:
         stage = status_obj.stage if status_obj and hasattr(status_obj, "stage") else status_obj
         return str(stage).lower() if stage else None
 
-    def _recover_existing_loss(self, *, experiment: Experiment) -> Optional[StageResult]:
+    def _recover_existing_loss(self, *, experiment: Experiment) -> StageResult | None:
         details = experiment.stage_details.get("loss", {})
         status = details.get("status")
         artifact_root = details.get("artifact_root")
@@ -217,7 +213,7 @@ class HFLossStageRunner:
             )
         return None
 
-    def _recover_loss_from_evaluation(self, *, experiment: Experiment) -> Optional[StageResult]:
+    def _recover_loss_from_evaluation(self, *, experiment: Experiment) -> StageResult | None:
         eval_details = experiment.stage_details.get("evaluation", {})
         eval_status = eval_details.get("status")
         eval_artifact_root = eval_details.get("artifact_root")
@@ -274,7 +270,7 @@ class HFLossStageRunner:
             shutil.rmtree(results_dir, ignore_errors=True)
         return None
 
-    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: Optional[StageResult] = None) -> StageResult:
+    def run(self, spec: ExperimentSpec, experiment: Experiment, previous: StageResult | None = None) -> StageResult:
         recovered = self._recover_existing_loss(experiment=experiment)
         if recovered is not None:
             return recovered
