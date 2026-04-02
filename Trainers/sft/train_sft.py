@@ -975,6 +975,7 @@ def run(args: argparse.Namespace):
         "seed": config.seed,
         "dataset_kwargs": {"add_special_tokens": False},
         "dataset_text_field": "text",
+        "remove_unused_columns": False,
         # Disable tqdm when using dashboard (they conflict)
         "disable_tqdm": use_dashboard,
         # Suppress metrics dict logging (our callback handles display)
