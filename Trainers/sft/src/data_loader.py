@@ -1,6 +1,5 @@
 """
 Data loading and preprocessing for SFT training.
-SFT uses conversational format natively - much simpler than KTO!
 """
 
 from typing import Optional, Tuple, Any
@@ -79,7 +78,8 @@ def load_and_prepare_dataset(
         split_dataset: Whether to create train/val split
         filter_desirable: Filter for label=True examples only (if dataset has labels)
         tokenizer: Tokenizer for applying chat template (required if apply_chat_template=True)
-        apply_chat_template: If True, preprocesses dataset with chat template for packing support
+        apply_chat_template: If True, preprocesses dataset into a canonical `text`
+            column using the active chat template
 
     Returns:
         Tuple of (train_dataset, eval_dataset or None)
@@ -123,12 +123,14 @@ def load_and_prepare_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
-    # Apply chat template preprocessing if requested (enables packing)
+    # Apply chat template preprocessing when requested. This produces a stable
+    # `text` dataset shape that works across newer TRL/Unsloth stacks for both
+    # packed and non-packed SFT runs.
     if apply_chat_template:
         if tokenizer is None:
             raise ValueError("tokenizer is required when apply_chat_template=True")
 
-        print("\nApplying chat template for packing support...")
+        print("\nApplying chat template preprocessing...")
         messages_key = "messages" if "messages" in raw_datasets.column_names else "conversations"
 
         def format_example(example):
@@ -145,11 +147,12 @@ def load_and_prepare_dataset(
         raw_datasets = raw_datasets.map(
             format_example,
             num_proc=num_proc,
+            remove_columns=raw_datasets.column_names,
             desc="Applying chat template"
         )
-        print(f"Added 'text' column with formatted conversations")
+        print("Converted dataset to canonical 'text' format")
     else:
-        print("\nSFT uses conversational format natively - no preprocessing needed!")
+        print("\nKeeping raw conversational dataset format")
 
     train_dataset = raw_datasets
 

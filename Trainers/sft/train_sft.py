@@ -900,7 +900,9 @@ def run(args: argparse.Namespace):
         tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
         print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
-    # Load dataset (with preprocessing if packing is enabled)
+    # Preprocess conversations into a canonical `text` column for SFT. This is
+    # more robust than relying on raw `messages` passthrough across newer
+    # TRL/Unsloth versions.
     use_packing = config.training.packing
     train_dataset, eval_dataset = load_and_prepare_dataset(
         dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
@@ -910,8 +912,8 @@ def run(args: argparse.Namespace):
         test_size=config.dataset.test_size,
         split_dataset=args.split_dataset or config.dataset.split_dataset,
         filter_desirable=config.dataset.filter_desirable,
-        tokenizer=tokenizer if use_packing else None,
-        apply_chat_template=use_packing  # Preprocess for packing support
+        tokenizer=tokenizer,
+        apply_chat_template=True,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
@@ -936,93 +938,6 @@ def run(args: argparse.Namespace):
 
     # Check initial GPU memory
     check_gpu_memory()
-
-    import json
-
-    def render_tool_calls_to_content(tool_calls):
-        """Convert tool_calls array to text content for chat template."""
-        if not tool_calls:
-            return ""
-
-        rendered_parts = []
-        for tc in tool_calls:
-            # Handle OpenAI nested format: {"function": {"name": ..., "arguments": ...}}
-            if "function" in tc and tc["function"]:
-                func = tc["function"]
-                name = func.get("name", "")
-                args = func.get("arguments", "{}")
-            else:
-                # Handle flat format: {"name": ..., "arguments": ...}
-                name = tc.get("name", "")
-                args = tc.get("arguments", "{}")
-
-            # Parse arguments if it's a string
-            if isinstance(args, str):
-                try:
-                    args_obj = json.loads(args)
-                except:
-                    args_obj = args
-            else:
-                args_obj = args
-
-            tool_call_obj = {"name": name, "arguments": args_obj}
-            rendered_parts.append(
-                f"<tool_call>\n{json.dumps(tool_call_obj, indent=2)}\n</tool_call>"
-            )
-
-        return "\n".join(rendered_parts)
-
-    def sanitize_conversations(conversations):
-        """Ensure all message fields are properly set and tool_calls are rendered to content."""
-        sanitized = []
-        for msg in conversations:
-            new_msg = dict(msg)
-
-            # Get existing content (or empty string if None)
-            content = new_msg.get("content") or ""
-
-            # If there are tool_calls, render them to content
-            if "tool_calls" in new_msg and new_msg["tool_calls"]:
-                tool_content = render_tool_calls_to_content(new_msg["tool_calls"])
-                if tool_content:
-                    content = f"{content}\n\n{tool_content}" if content else tool_content
-
-            new_msg["content"] = content
-
-            # Remove tool_calls since we've rendered them to content
-            if "tool_calls" in new_msg:
-                del new_msg["tool_calls"]
-
-            sanitized.append(new_msg)
-        return sanitized
-
-    def format_chat_template(batch):
-        """Apply the model chat template to each example for TRL's SFTTrainer."""
-        messages_key = "messages" if "messages" in batch else "conversations"
-        conversations = batch.get(messages_key)
-        if conversations is None:
-            raise ValueError("Dataset must contain 'messages' or 'conversations' columns")
-
-        # TRL calls formatting_func with batched examples; handle both batched and single-example shapes
-        if isinstance(conversations, dict):
-            conversations = [conversations]
-        elif len(conversations) > 0 and isinstance(conversations[0], dict):
-            conversations = [conversations]
-
-        formatted = []
-        for msgs in conversations:
-            if not isinstance(msgs, list):
-                raise ValueError(f"Expected list of messages, got {type(msgs)}")
-            # Sanitize conversations to handle None content and tool_calls
-            sanitized_msgs = sanitize_conversations(msgs)
-            formatted.append(
-                tokenizer.apply_chat_template(
-                    sanitized_msgs,
-                    tokenize=False,
-                    add_generation_prompt=False,
-                )
-            )
-        return formatted
 
     # Initialize callbacks based on UI mode (need to know this before configuring trainer)
     # Dashboard is the default if available, use --no-dashboard to disable
@@ -1059,15 +974,12 @@ def run(args: argparse.Namespace):
         "run_name": config.wandb_run_name if config.use_wandb else None,
         "seed": config.seed,
         "dataset_kwargs": {"add_special_tokens": False},
+        "dataset_text_field": "text",
         # Disable tqdm when using dashboard (they conflict)
         "disable_tqdm": use_dashboard,
         # Suppress metrics dict logging (our callback handles display)
         "log_level": "warning" if use_dashboard else "info",
     }
-
-    # When packing is enabled, use preprocessed 'text' column
-    if use_packing:
-        sft_config_kwargs["dataset_text_field"] = "text"
 
     training_args = SFTConfig(**sft_config_kwargs)
 
@@ -1171,11 +1083,6 @@ def run(args: argparse.Namespace):
         "eval_dataset": eval_dataset,
         "callbacks": callbacks,
     }
-
-    # Only use formatting_func when packing is disabled
-    # When packing is enabled, we use the preprocessed 'text' column instead
-    if not use_packing:
-        trainer_kwargs["formatting_func"] = format_chat_template
 
     trainer = SFTTrainer(**trainer_kwargs)
 

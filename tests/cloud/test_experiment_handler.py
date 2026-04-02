@@ -312,6 +312,80 @@ def test_training_stage_runner_forwards_stage_pip_packages_to_cloud_config(tmp_p
     assert config.pip_packages == ["unsloth==2026.4.2", "transformers==5.3.0"]
 
 
+def test_training_stage_runner_does_not_forward_evolutionary_defaults_when_disabled(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+
+    spec = ExperimentSpec(
+        name="non-evolutionary-smoke",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_only",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(
+            model_name="Qwen/Qwen3-4B",
+            max_steps=20,
+        ),
+        evaluation=EvaluationStageSpec(enabled=False),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    backend = MagicMock()
+    backend.validate_environment.return_value = (True, "")
+    backend.execute.return_value = 0
+    backend.load_config.return_value = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake/config.yaml"),
+        trainer_dir=Path("/fake/trainer"),
+        model_name="base",
+        dataset_file="dataset.jsonl",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a100-large",
+        timeout_hours=4.0,
+        cloud_image="unsloth/unsloth:latest",
+        hf_flavor="a100-large",
+        artifact_backend="hf_bucket",
+        artifact_identifier="professorsynapse/toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="deadbeefcafebabe",
+    )
+
+    with patch.object(runner, "_recover_existing_training", return_value=None):
+        with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+                result = runner.run(spec=spec, experiment=experiment)
+
+    assert result.status == "completed"
+    config = backend.execute.call_args.args[0]
+    assert config.evolutionary_enabled is False
+    assert config.evolutionary_candidates is None
+    assert config.evolutionary_eval_batch_size is None
+    assert config.evolutionary_validation_config is None
+    assert config.evolutionary_strategy is None
+    assert config.evolutionary_noise_scale is None
+    assert config.evolutionary_max_grad_norm is None
+    assert config.evolutionary_scale_factors is None
+    assert config.evolutionary_selection_method is None
+    assert config.evolutionary_min_improvement is None
+    assert config.evolutionary_min_relative_improvement is None
+    assert config.evolutionary_noise_floor_epsilon is None
+    assert config.evolutionary_eval_frequency is None
+    assert config.evolutionary_warmup_steps is None
+    assert config.evolutionary_cache_baseline is None
+    assert config.evolutionary_log_candidates is None
+    assert config.evolutionary_log_selected is None
+
+
 def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
