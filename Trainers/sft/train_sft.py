@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -1079,11 +1080,15 @@ def run(args: argparse.Namespace):
     trainer_kwargs = {
         "model": model,
         "args": training_args,
-        "tokenizer": tokenizer,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
         "callbacks": callbacks,
     }
+    trainer_signature = inspect.signature(SFTTrainer.__init__)
+    if "processing_class" in trainer_signature.parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    else:
+        trainer_kwargs["tokenizer"] = tokenizer
 
     trainer = SFTTrainer(**trainer_kwargs)
 
