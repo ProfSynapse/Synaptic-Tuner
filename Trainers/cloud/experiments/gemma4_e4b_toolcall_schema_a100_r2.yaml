@@ -9,7 +9,7 @@ experiment:
   training:
     model_name: google/gemma-4-E4B-it
     gpu: a100-large
-    image_profile: next
+    cloud_image: unsloth/unsloth:latest
     batch_size: 24
     gradient_accumulation: 2
     learning_rate: 1.0e-4
