@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch multiple experiment specs with a stagger between submissions."""
+"""Launch multiple experiment specs concurrently with a stagger between submissions."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ def launch_batch(
     dry_run: bool,
 ) -> int:
     failures: list[tuple[str, str]] = []
+    launched: list[tuple[str, subprocess.Popen[bytes]]] = []
     for index, experiment_spec in enumerate(experiment_specs):
         cmd = build_command(
             experiment_spec,
@@ -55,14 +56,23 @@ def launch_batch(
         )
         print(f"[{index + 1}/{len(experiment_specs)}] {' '.join(cmd)}")
         if not dry_run:
-            result = subprocess.run(cmd, cwd=REPO_ROOT)
-            if result.returncode != 0:
-                failures.append((experiment_spec, f"exit code {result.returncode}"))
-                print(f"  FAILED (exit code {result.returncode}), continuing batch...")
+            try:
+                process = subprocess.Popen(cmd, cwd=REPO_ROOT)
+            except OSError as exc:
+                failures.append((experiment_spec, str(exc)))
+                print(f"  FAILED TO LAUNCH ({exc}), continuing batch...")
+            else:
+                launched.append((experiment_spec, process))
+                print(f"  launched pid={process.pid}")
         if index < len(experiment_specs) - 1 and stagger_seconds > 0:
             print(f"Waiting {stagger_seconds:g}s before the next submission...")
             if not dry_run:
                 time.sleep(stagger_seconds)
+    for experiment_spec, process in launched:
+        returncode = process.wait()
+        if returncode != 0:
+            failures.append((experiment_spec, f"exit code {returncode}"))
+            print(f"  FAILED (exit code {returncode})")
     if failures:
         print(f"\n{len(failures)}/{len(experiment_specs)} experiment(s) failed:")
         for spec, reason in failures:

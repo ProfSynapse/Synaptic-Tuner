@@ -340,6 +340,20 @@ class TestBuildTrainingCommand:
         assert "--artifact-bucket toolset-training-artifacts" in cmd
         assert "--artifact-prefix runs/hf_jobs/sft/20260314_181946-abc12345" in cmd
 
+    def test_command_installs_stage_pip_packages(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            pip_packages=[
+                "unsloth==2026.4.2",
+                "unsloth-zoo==2026.4.2",
+                "transformers==5.3.0",
+            ]
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "pip install --upgrade unsloth==2026.4.2 unsloth-zoo==2026.4.2 transformers==5.3.0" in cmd
+
     def test_command_includes_lora_variant_overrides(self, repo_root):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config(

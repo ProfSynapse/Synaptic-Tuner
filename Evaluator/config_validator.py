@@ -1,8 +1,9 @@
 """Config-driven validation system.
 
-This module provides a generic validator that reads all validation rules
-from YAML config files. No tool names, behaviors, or response types are
-hardcoded in Python.
+Location: Evaluator/config_validator.py
+Summary: Generic validator that reads validation rules from YAML config files.
+         Check logic uses a declarative CheckDescriptor registry with a generic
+         runner, rather than individual _check_* methods per check type.
 
 Usage:
     validator = ConfigDrivenValidator(config_dir="Evaluator/config")
@@ -74,6 +75,402 @@ class ValidationResult:
         }
 
 
+@dataclass
+class CheckDescriptor:
+    """Declarative descriptor for a single validation check.
+
+    Each descriptor captures the check name and a run function that
+    encapsulates the extract-predicate-issue logic. The run function
+    signature matches the old _check_* methods:
+        run(parsed, params, issues, check_name) -> None
+    """
+    name: str
+    run: Callable[[ParsedResponse, Dict[str, Any], List[ValidationIssue], str], None]
+
+
+# =========================================================
+# CHECK RUNNER FUNCTIONS
+# =========================================================
+# Each function implements one "shape" of check logic.
+# These replace the individual _check_* methods.
+
+
+def _run_tool_called(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check if a specific tool was called."""
+    tool = params.get("tool", "")
+    called = {tc.name for tc in parsed.tool_calls}
+    if tool not in called:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Tool '{tool}' was not called",
+            expected=tool, actual=list(called),
+        ))
+
+
+def _run_any_tool_called(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check if any of the specified tools was called."""
+    tools = params.get("tools", [])
+    if isinstance(tools, str):
+        tools = [t.strip() for t in tools.split(",")]
+    called = {tc.name for tc in parsed.tool_calls}
+    if not called.intersection(set(tools)):
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"None of tools {tools} were called",
+            expected=tools, actual=list(called),
+        ))
+
+
+def _run_all_tools_called(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check if all specified tools were called."""
+    tools = params.get("tools", [])
+    if isinstance(tools, str):
+        tools = [t.strip() for t in tools.split(",")]
+    called = {tc.name for tc in parsed.tool_calls}
+    missing = set(tools) - called
+    if missing:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Tools not called: {list(missing)}",
+            expected=tools, actual=list(called),
+        ))
+
+
+def _run_tool_not_called(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check that a tool was NOT called."""
+    tool = params.get("tool", "")
+    called = {tc.name for tc in parsed.tool_calls}
+    if tool in called:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Tool '{tool}' should not be called",
+            expected=f"not {tool}", actual=list(called),
+        ))
+
+
+def _run_tool_count(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check number of tool calls against min/max bounds."""
+    count = len(parsed.tool_calls)
+    min_count = params.get("min")
+    max_count = params.get("max")
+    if min_count is not None and count < min_count:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Too few tool calls: {count} < {min_count}",
+            expected=f">= {min_count}", actual=count,
+        ))
+    if max_count is not None and count > max_count:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Too many tool calls: {count} > {max_count}",
+            expected=f"<= {max_count}", actual=count,
+        ))
+
+
+def _run_tool_params_present(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check tool has required params."""
+    tool = params.get("tool", "")
+    required = params.get("required_params", [])
+    for tc in parsed.tool_calls:
+        if tc.name == tool:
+            missing = [p for p in required if p not in tc.params]
+            if missing:
+                issues.append(ValidationIssue(
+                    level="error", check=check_name,
+                    message=f"Missing params in {tool}: {missing}",
+                    expected=required, actual=list(tc.params.keys()),
+                ))
+            return
+
+
+def _run_tool_sequence(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check tool call ordering (composite: first_any_of + not_first)."""
+    if not parsed.tool_calls:
+        issues.append(ValidationIssue(
+            level="error", check=check_name, message="No tool calls",
+        ))
+        return
+
+    first_tool = parsed.tool_calls[0].name
+    first_any_of = params.get("first_any_of", [])
+    not_first = params.get("not_first", [])
+
+    if first_any_of and first_tool not in first_any_of:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"First tool should be one of {first_any_of}",
+            expected=first_any_of, actual=first_tool,
+        ))
+    if not_first and first_tool in not_first:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Tool '{first_tool}' should not be first",
+            expected=f"not in {not_first}", actual=first_tool,
+        ))
+
+
+def _run_fields_present(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check fields exist in tool call context or params."""
+    location = params.get("in", "context")
+    fields = params.get("fields", [])
+    for tc in parsed.tool_calls:
+        if location == "context":
+            obj = tc.context
+        elif location == "params":
+            obj = tc.params
+        else:
+            obj = {}
+        missing = [f for f in fields if f not in obj]
+        if missing:
+            issues.append(ValidationIssue(
+                level="error", check=check_name,
+                message=f"Missing {location} fields: {missing}",
+                expected=fields, actual=list(obj.keys()),
+            ))
+
+
+def _run_fields_min_length(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check field values meet minimum length."""
+    location = params.get("in", "context")
+    field_mins = params.get("fields", {})
+    for tc in parsed.tool_calls:
+        obj = tc.context if location == "context" else tc.params
+        for fld, min_len in field_mins.items():
+            value = obj.get(fld, "")
+            if len(str(value)) < min_len:
+                issues.append(ValidationIssue(
+                    level="error", check=check_name,
+                    message=f"Field '{fld}' too short: {len(str(value))} < {min_len}",
+                    expected=f">= {min_len}", actual=len(str(value)),
+                ))
+
+
+def _run_field_equals(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check field equals expected value."""
+    location = params.get("in", "context")
+    fld = params.get("field", "")
+    expected = params.get("value", "")
+    for tc in parsed.tool_calls:
+        obj = tc.context if location == "context" else tc.params
+        actual = obj.get(fld)
+        if actual != expected:
+            issues.append(ValidationIssue(
+                level="error", check=check_name,
+                message=f"Field '{fld}' mismatch",
+                expected=expected, actual=actual,
+            ))
+
+
+def _run_text_contains(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text contains a substring (case-insensitive)."""
+    text = params.get("text", "")
+    if text.lower() not in parsed.text_content.lower():
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text does not contain '{text}'",
+            expected=text, actual=parsed.text_content[:100] + "...",
+        ))
+
+
+def _run_text_contains_any(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text contains any of the specified patterns."""
+    patterns = params.get("patterns", [])
+    text_lower = parsed.text_content.lower()
+    if not any(p.lower() in text_lower for p in patterns):
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text does not contain any of {patterns}",
+            expected=f"any of {patterns}",
+            actual=parsed.text_content[:100] + "...",
+        ))
+
+
+def _run_text_not_contains(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text does NOT contain any forbidden patterns."""
+    patterns = params.get("patterns", [])
+    text_lower = parsed.text_content.lower()
+    found = [p for p in patterns if p.lower() in text_lower]
+    if found:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text contains forbidden patterns: {found}",
+            expected=f"none of {patterns}", actual=found,
+        ))
+
+
+def _run_text_matches(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text matches a regex pattern."""
+    pattern = params.get("pattern", "")
+    if not re.search(pattern, parsed.text_content):
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text does not match pattern '{pattern}'",
+            expected=pattern, actual=parsed.text_content[:100] + "...",
+        ))
+
+
+def _run_text_min_length(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text meets minimum length."""
+    min_len = params.get("min", 0)
+    actual_len = len(parsed.text_content.strip())
+    if actual_len < min_len:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text too short: {actual_len} < {min_len}",
+            expected=f">= {min_len}", actual=actual_len,
+        ))
+
+
+def _run_text_max_length(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check text is under maximum length."""
+    max_len = params.get("max", float('inf'))
+    actual_len = len(parsed.text_content.strip())
+    if actual_len > max_len:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Text too long: {actual_len} > {max_len}",
+            expected=f"<= {max_len}", actual=actual_len,
+        ))
+
+
+def _run_batch_structure(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check batch operation has minimum number of tool calls."""
+    min_calls = params.get("min_calls", 2)
+    if len(parsed.tool_calls) < min_calls:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message=f"Batch should have >= {min_calls} calls",
+            expected=f">= {min_calls}", actual=len(parsed.tool_calls),
+        ))
+
+
+def _run_batch_strategy(
+    parsed: ParsedResponse,
+    params: Dict[str, Any],
+    issues: List[ValidationIssue],
+    check_name: str,
+) -> None:
+    """Check batch uses specific strategy."""
+    expected_strategy = params.get("strategy", "serial")
+    if parsed.batch_strategy and parsed.batch_strategy != expected_strategy:
+        issues.append(ValidationIssue(
+            level="error", check=check_name,
+            message="Batch strategy mismatch",
+            expected=expected_strategy, actual=parsed.batch_strategy,
+        ))
+
+
+# Registry of all check descriptors, built once at module level.
+# Each entry maps a check type name to its runner function.
+CHECK_REGISTRY: Dict[str, CheckDescriptor] = {
+    desc.name: desc for desc in [
+        CheckDescriptor("tool_called", _run_tool_called),
+        CheckDescriptor("any_tool_called", _run_any_tool_called),
+        CheckDescriptor("all_tools_called", _run_all_tools_called),
+        CheckDescriptor("tool_not_called", _run_tool_not_called),
+        CheckDescriptor("tool_count", _run_tool_count),
+        CheckDescriptor("tool_params_present", _run_tool_params_present),
+        CheckDescriptor("tool_sequence", _run_tool_sequence),
+        CheckDescriptor("fields_present", _run_fields_present),
+        CheckDescriptor("fields_min_length", _run_fields_min_length),
+        CheckDescriptor("field_equals", _run_field_equals),
+        CheckDescriptor("text_contains", _run_text_contains),
+        CheckDescriptor("text_contains_any", _run_text_contains_any),
+        CheckDescriptor("text_not_contains", _run_text_not_contains),
+        CheckDescriptor("text_matches", _run_text_matches),
+        CheckDescriptor("text_min_length", _run_text_min_length),
+        CheckDescriptor("text_max_length", _run_text_max_length),
+        CheckDescriptor("batch_structure", _run_batch_structure),
+        CheckDescriptor("batch_strategy", _run_batch_strategy),
+    ]
+}
+
+
 class ConfigDrivenValidator:
     """Validates responses based on YAML configuration files."""
 
@@ -102,26 +499,9 @@ class ConfigDrivenValidator:
             return yaml.safe_load(f) or {}
 
     def _register_checks(self) -> None:
-        """Register all check functions by name."""
+        """Register check functions by name from the module-level registry."""
         self.check_functions: Dict[str, Callable] = {
-            "tool_called": self._check_tool_called,
-            "any_tool_called": self._check_any_tool_called,
-            "all_tools_called": self._check_all_tools_called,
-            "tool_not_called": self._check_tool_not_called,
-            "tool_count": self._check_tool_count,
-            "tool_params_present": self._check_tool_params_present,
-            "tool_sequence": self._check_tool_sequence,
-            "fields_present": self._check_fields_present,
-            "fields_min_length": self._check_fields_min_length,
-            "field_equals": self._check_field_equals,
-            "text_contains": self._check_text_contains,
-            "text_contains_any": self._check_text_contains_any,
-            "text_not_contains": self._check_text_not_contains,
-            "text_matches": self._check_text_matches,
-            "text_min_length": self._check_text_min_length,
-            "text_max_length": self._check_text_max_length,
-            "batch_structure": self._check_batch_structure,
-            "batch_strategy": self._check_batch_strategy,
+            name: desc.run for name, desc in CHECK_REGISTRY.items()
         }
 
     # =========================================================
@@ -643,423 +1023,6 @@ class ConfigDrivenValidator:
                 level="warn",
                 check=f"behavior:{behavior}",
                 message=f"Unknown check type '{check_type}'",
-            ))
-
-    # =========================================================
-    # CHECK IMPLEMENTATIONS
-    # =========================================================
-
-    def _check_tool_called(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check if a specific tool was called."""
-        tool = params.get("tool", "")
-        called = {tc.name for tc in parsed.tool_calls}
-
-        if tool not in called:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Tool '{tool}' was not called",
-                expected=tool,
-                actual=list(called),
-            ))
-
-    def _check_any_tool_called(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check if any of specified tools was called."""
-        tools = params.get("tools", [])
-        if isinstance(tools, str):
-            tools = [t.strip() for t in tools.split(",")]
-
-        called = {tc.name for tc in parsed.tool_calls}
-
-        if not called.intersection(set(tools)):
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"None of tools {tools} were called",
-                expected=tools,
-                actual=list(called),
-            ))
-
-    def _check_all_tools_called(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check if all specified tools were called."""
-        tools = params.get("tools", [])
-        if isinstance(tools, str):
-            tools = [t.strip() for t in tools.split(",")]
-
-        called = {tc.name for tc in parsed.tool_calls}
-        missing = set(tools) - called
-
-        if missing:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Tools not called: {list(missing)}",
-                expected=tools,
-                actual=list(called),
-            ))
-
-    def _check_tool_not_called(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check that a tool was NOT called."""
-        tool = params.get("tool", "")
-        called = {tc.name for tc in parsed.tool_calls}
-
-        if tool in called:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Tool '{tool}' should not be called",
-                expected=f"not {tool}",
-                actual=list(called),
-            ))
-
-    def _check_tool_count(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check number of tool calls."""
-        count = len(parsed.tool_calls)
-        min_count = params.get("min")
-        max_count = params.get("max")
-
-        if min_count is not None and count < min_count:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Too few tool calls: {count} < {min_count}",
-                expected=f">= {min_count}",
-                actual=count,
-            ))
-
-        if max_count is not None and count > max_count:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Too many tool calls: {count} > {max_count}",
-                expected=f"<= {max_count}",
-                actual=count,
-            ))
-
-    def _check_tool_params_present(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check tool has required params."""
-        tool = params.get("tool", "")
-        required = params.get("required_params", [])
-
-        for tc in parsed.tool_calls:
-            if tc.name == tool:
-                missing = [p for p in required if p not in tc.params]
-                if missing:
-                    issues.append(ValidationIssue(
-                        level="error",
-                        check=check_name,
-                        message=f"Missing params in {tool}: {missing}",
-                        expected=required,
-                        actual=list(tc.params.keys()),
-                    ))
-                return
-
-    def _check_tool_sequence(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check tool call ordering."""
-        if not parsed.tool_calls:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message="No tool calls",
-            ))
-            return
-
-        first_tool = parsed.tool_calls[0].name
-        first_any_of = params.get("first_any_of", [])
-        not_first = params.get("not_first", [])
-
-        if first_any_of and first_tool not in first_any_of:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"First tool should be one of {first_any_of}",
-                expected=first_any_of,
-                actual=first_tool,
-            ))
-
-        if not_first and first_tool in not_first:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Tool '{first_tool}' should not be first",
-                expected=f"not in {not_first}",
-                actual=first_tool,
-            ))
-
-    def _check_fields_present(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check fields exist in object."""
-        location = params.get("in", "context")
-        fields = params.get("fields", [])
-
-        for tc in parsed.tool_calls:
-            if location == "context":
-                obj = tc.context
-            elif location == "params":
-                obj = tc.params
-            else:
-                obj = {}
-
-            missing = [f for f in fields if f not in obj]
-            if missing:
-                issues.append(ValidationIssue(
-                    level="error",
-                    check=check_name,
-                    message=f"Missing {location} fields: {missing}",
-                    expected=fields,
-                    actual=list(obj.keys()),
-                ))
-
-    def _check_fields_min_length(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check field values have min length."""
-        location = params.get("in", "context")
-        field_mins = params.get("fields", {})
-
-        for tc in parsed.tool_calls:
-            obj = tc.context if location == "context" else tc.params
-
-            for field, min_len in field_mins.items():
-                value = obj.get(field, "")
-                if len(str(value)) < min_len:
-                    issues.append(ValidationIssue(
-                        level="error",
-                        check=check_name,
-                        message=f"Field '{field}' too short: {len(str(value))} < {min_len}",
-                        expected=f">= {min_len}",
-                        actual=len(str(value)),
-                    ))
-
-    def _check_field_equals(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check field equals expected value."""
-        location = params.get("in", "context")
-        field = params.get("field", "")
-        expected = params.get("value", "")
-
-        for tc in parsed.tool_calls:
-            obj = tc.context if location == "context" else tc.params
-            actual = obj.get(field)
-
-            if actual != expected:
-                issues.append(ValidationIssue(
-                    level="error",
-                    check=check_name,
-                    message=f"Field '{field}' mismatch",
-                    expected=expected,
-                    actual=actual,
-                ))
-
-    def _check_text_contains(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text contains substring."""
-        text = params.get("text", "")
-        if text.lower() not in parsed.text_content.lower():
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text does not contain '{text}'",
-                expected=text,
-                actual=parsed.text_content[:100] + "...",
-            ))
-
-    def _check_text_contains_any(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text contains any of patterns."""
-        patterns = params.get("patterns", [])
-        text_lower = parsed.text_content.lower()
-
-        if not any(p.lower() in text_lower for p in patterns):
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text does not contain any of {patterns}",
-                expected=f"any of {patterns}",
-                actual=parsed.text_content[:100] + "...",
-            ))
-
-    def _check_text_not_contains(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text does NOT contain patterns."""
-        patterns = params.get("patterns", [])
-        text_lower = parsed.text_content.lower()
-
-        found = [p for p in patterns if p.lower() in text_lower]
-        if found:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text contains forbidden patterns: {found}",
-                expected=f"none of {patterns}",
-                actual=found,
-            ))
-
-    def _check_text_matches(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text matches regex."""
-        pattern = params.get("pattern", "")
-        if not re.search(pattern, parsed.text_content):
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text does not match pattern '{pattern}'",
-                expected=pattern,
-                actual=parsed.text_content[:100] + "...",
-            ))
-
-    def _check_text_min_length(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text meets min length."""
-        min_len = params.get("min", 0)
-        actual_len = len(parsed.text_content.strip())
-
-        if actual_len < min_len:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text too short: {actual_len} < {min_len}",
-                expected=f">= {min_len}",
-                actual=actual_len,
-            ))
-
-    def _check_text_max_length(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check text under max length."""
-        max_len = params.get("max", float('inf'))
-        actual_len = len(parsed.text_content.strip())
-
-        if actual_len > max_len:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Text too long: {actual_len} > {max_len}",
-                expected=f"<= {max_len}",
-                actual=actual_len,
-            ))
-
-    def _check_batch_structure(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check batch operation structure."""
-        min_calls = params.get("min_calls", 2)
-
-        if len(parsed.tool_calls) < min_calls:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Batch should have >= {min_calls} calls",
-                expected=f">= {min_calls}",
-                actual=len(parsed.tool_calls),
-            ))
-
-    def _check_batch_strategy(
-        self,
-        parsed: ParsedResponse,
-        params: Dict[str, Any],
-        issues: List[ValidationIssue],
-        check_name: str,
-    ) -> None:
-        """Check batch uses specific strategy."""
-        expected_strategy = params.get("strategy", "serial")
-
-        if parsed.batch_strategy and parsed.batch_strategy != expected_strategy:
-            issues.append(ValidationIssue(
-                level="error",
-                check=check_name,
-                message=f"Batch strategy mismatch",
-                expected=expected_strategy,
-                actual=parsed.batch_strategy,
             ))
 
 

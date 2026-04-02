@@ -106,8 +106,30 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For `a100-large` or larger tiers, bias toward aggressive packing. Do not lower batch just because the adapter recipe changed. Start from the highest known-good packed shape for the same model family and only back off after a real OOM or clear instability signal.
 - Treat large unused VRAM on `a100-large` as a mistake, not a comfort margin. If `training_lineage.json` shows tens of GB of reserved headroom, the run is underpacked and the next iteration should push batch size harder even if that risks OOM.
 - For vLLM eval on multi-GPU hardware, prequantized BitsAndBytes base models (for example `*-bnb-4bit`) cannot use tensor parallelism. Do not assume `x4` means vLLM will shard generation across all GPUs; in this path, eval may need to fall back to single-GPU while exact loss still fans out across all visible GPUs afterward.
+- For experiment specs in this repo, set `evaluation.runtime: vllm` and `evaluation.image_profile: fast_vllm` by default. Do not silently switch an experiment to `unsloth` eval just because the model family is new. If vLLM compatibility is uncertain, verify current official support and ask the user before deviating from the vLLM path.
+- When the user says "latest run" or "latest experiment", distinguish `latest attempt` from `latest completed baseline`. Check `.tracking/experiments/*/experiment.json` sorted by `created_at` first, then state explicitly which interpretation you are using before copying hyperparameters forward.
+- When choosing an A100 packed shape, prefer the nearest latest attempt that actually exercised the hardware over an older completed baseline that clearly underpacked the card.
+- If `run-experiment` refuses to launch because the tracked worktree is dirty, prefer creating a clean temporary git worktree and launching from there over asking the user to stash or cleaning their checkout.
+- If a cloud run fails before bucket artifacts appear, treat it as a bootstrap/runtime problem first. Inspect `cloud-jobs logs` before changing training hyperparameters.
+- For newly released architectures or day-zero model launches, verify official Docker Hub tags for `unsloth/unsloth` and `vllm/vllm-openai` before trusting the repo's pinned image profiles. As of 2026-04-02, Docker Hub shows `unsloth/unsloth:latest` updated 1 day ago and `vllm/vllm-openai:latest` / `v0.17.1` updated about 17 hours ago.
+- If a named training image profile is broken, prefer an explicit `training.cloud_image` override to a currently verified official image tag over changing unrelated parts of the experiment such as evaluation backend.
+- If a run needs newer package versions but the right base image is otherwise close, use stage-local experiment-spec `pip_packages` pins under `training:`, `evaluation:`, or `loss:` instead of a one-off helper script or a repo-global image pin.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
 - For tabular post-hoc models, use `python tuner.py ml ...` and the configs under `Trainers/ml/configs/templates/`.
+
+## Research Note Lifecycle
+
+Use [`.skills/research-reporting/SKILL.md`](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.skills/research-reporting/SKILL.md) alongside this skill whenever the user wants experiment tracking, research summaries, or reusable post-run analysis.
+
+- When a training run or experiment is launched, create the research note immediately rather than waiting for all stages to finish.
+- The initial note should capture config intent from `experiment.json` and `spec_path`, with `stage_statuses` set from the current known state and metrics left `null` or empty where evidence does not exist yet.
+- After training finishes, update the same note with training provenance from `training_lineage.json` or `stage_details.training`.
+- After evaluation finishes, update the same note with evaluation metrics and observed failure patterns.
+- After loss finishes, update the same note with loss metrics, high-loss hashes, and any dataset-review signals.
+- After analysis/recommendation finishes, update the same note with hypotheses, selected candidate rank, and recommended next action.
+- Do not fork separate notes per stage unless the user explicitly asks for per-stage notes. Default is one note per experiment, updated over time.
+- Treat the note as a living artifact for the run: launch state, in-flight updates, and final postmortem should all land in the same document.
+- If a stage has not run yet or failed, preserve the section and leave missing values explicit instead of inventing placeholders.
 
 ## Progressive Reference
 
@@ -444,6 +466,7 @@ Provider-native storage defaults:
 - `run-experiment` is the higher-level experiment loop: training stays provider-native, then evaluation and exact dataset loss run as separate sibling post-training jobs by default.
 - Use `evaluation.runtime: vllm` in experiment specs when you want the fast eval server path. The exact loss stage still uses a post-eval `transformers` forward pass.
 - If you explicitly want the older embedded path for a smoke run, set `post_training.mode: same_job` in the experiment spec. Default is `parallel`.
+- For `cloud-eval --with-loss` or `post_training.mode: same_job`, stage-local overlay packages such as `peft` must be on the evaluator process `PYTHONPATH`, not only the bucket-sync helper path. If exact loss says a package is "required" even though the command installed it into `/tmp/hf-eval-site`, inspect the runtime `PYTHONPATH` export first.
 - Checkpoint-vs-checkpoint comparison is not automatic in smoke runs; you only get that if the trainer emitted multiple checkpoints and you intentionally run checkpoint evaluation / experiment-loop workflows.
 - For SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`.
 - When testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of upgrading packages in the old stable image.

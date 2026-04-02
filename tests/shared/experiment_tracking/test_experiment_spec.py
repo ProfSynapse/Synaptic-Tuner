@@ -23,6 +23,9 @@ def test_load_experiment_spec_round_trip(tmp_path):
               training:
                 model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
                 gpu: a10g-small
+                pip_packages:
+                  - unsloth==2026.4.2
+                  - transformers==5.3.0
                 max_steps: 20
               execution:
                 from_stage: evaluation
@@ -30,8 +33,12 @@ def test_load_experiment_spec_round_trip(tmp_path):
                 preset: quick
                 runtime: vllm
                 image_profile: fast_vllm
+                pip_packages:
+                  - vllm==0.12.0
               loss:
                 enabled: true
+                pip_packages:
+                  - transformers==5.3.0
             """
         ),
         encoding="utf-8",
@@ -44,11 +51,14 @@ def test_load_experiment_spec_round_trip(tmp_path):
     assert spec.method == "sft"
     assert spec.dataset.identifier == "professorsynapse/claudesidian-synthetic-dataset/sample.jsonl"
     assert spec.training.max_steps == 20
+    assert spec.training.pip_packages == ["unsloth==2026.4.2", "transformers==5.3.0"]
     assert spec.execution.from_stage == "evaluation"
     assert spec.evaluation.preset == "quick"
     assert spec.evaluation.runtime == "vllm"
     assert spec.evaluation.image_profile == "fast_vllm"
+    assert spec.evaluation.pip_packages == ["vllm==0.12.0"]
     assert spec.loss.enabled is True
+    assert spec.loss.pip_packages == ["transformers==5.3.0"]
     assert spec.execution.selected_stages() == ["evaluation", "loss", "analysis", "recommendation"]
 
 

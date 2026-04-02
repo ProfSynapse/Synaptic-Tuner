@@ -8,6 +8,7 @@ For SFT model comparisons on HF Jobs:
 - use `python tuner.py cloud-pipeline --method sft --preset full`
 - pass model and training changes via `--train-*` CLI overrides
 - prefer `--train-image-profile stable|next` over in-job package upgrades when the experiment needs a different Unsloth runtime
+- for experiment evaluation in this repo, keep the eval runtime on `vllm` unless the user explicitly approves a fallback
 - avoid `cloud-run` unless the job is genuinely custom
 
 This ensures:
@@ -73,6 +74,38 @@ training:
 
 Use `"all-linear"` only when you intend to exercise the newer Unsloth model path. On the legacy path, keep an explicit module list for the stable baseline.
 
+For day-zero model launches or runtime compatibility fixes, the experiment spec can also pin stage-local pip packages without changing the global cloud image profile:
+
+```yaml
+training:
+  model_name: google/gemma-4-E4B-it
+  cloud_image: unsloth/unsloth:latest
+  pip_packages:
+    - unsloth==2026.4.2
+    - unsloth-zoo==2026.4.2
+    - transformers==5.3.0
+
+evaluation:
+  runtime: vllm
+  image_profile: fast_vllm
+  pip_packages:
+    - vllm==0.12.0
+```
+
+These entries are passed straight to `python -m pip install --upgrade ...` inside the stage job. Keep them scoped to the specific run that needs them instead of mutating the repo-wide default image pin.
+
+For experiment evaluation, prefer an explicit `vllm` stanza:
+
+```yaml
+evaluation:
+  enabled: true
+  preset: full
+  runtime: vllm
+  image_profile: fast_vllm
+```
+
+Do not silently swap this to `unsloth` because a model family is new. If vLLM support is uncertain, verify current official support and image freshness first, then ask the user before deviating from the vLLM path.
+
 Post-training orchestration is also configurable in the experiment spec:
 
 ```yaml
@@ -107,3 +140,12 @@ For `a100-large` experiments, the default should be aggressive packing, not cons
 - `next` is the opt-in path for newer official Unsloth Docker images when smoke-testing newer architectures
 - smoke-test `next` before trusting it for Qwen3.5 or Ministral; current upstream docs can get ahead of the exact image contents
 - prefer image-profile switches to ad hoc `pip install --upgrade transformers` in the training container
+- if a named image profile fails during bootstrap before model load, inspect HF job logs first and treat it as an image/runtime problem, not a training-config problem
+- if the profile itself is broken, prefer an explicit `training.cloud_image` override to a currently verified official tag rather than changing evaluation backend
+- if the image is close but still too old for a just-released model, prefer stage-local `pip_packages` pins in the experiment spec over inventing a one-off helper script or silently changing unrelated stages
+- for newly released architectures, verify the latest official `unsloth/unsloth` and `vllm/vllm-openai` tags on Docker Hub before relying on stale local pins; as of 2026-04-02, `unsloth/unsloth:latest` was updated 1 day ago and `vllm/vllm-openai:latest` / `v0.17.1` about 17 hours ago
+
+## Run Selection Guardrails
+
+- When the user asks to mirror the "latest" experiment, check whether they mean the latest attempt or the latest completed baseline.
+- For A100 packing, a newer failed smoke run can still be the right source for batch shape if it exercised the hardware more realistically than an older underpacked completed run.

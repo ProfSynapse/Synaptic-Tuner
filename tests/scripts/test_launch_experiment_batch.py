@@ -34,21 +34,34 @@ def test_build_command_includes_requested_flags() -> None:
     ]
 
 
-def _make_fake_run(launched, returncode=0):
-    class FakeResult:
-        def __init__(self, rc):
-            self.returncode = rc
-    def fake_run(cmd, cwd=None):
-        launched.append((cmd, cwd))
-        return FakeResult(returncode)
-    return fake_run
+def _make_fake_popen(events, returncodes=None):
+    if returncodes is None:
+        returncodes = []
+
+    class FakeProcess:
+        def __init__(self, cmd, cwd, index):
+            self.cmd = cmd
+            self.cwd = cwd
+            self.pid = 1000 + index
+            self._returncode = returncodes[index] if index < len(returncodes) else 0
+
+        def wait(self):
+            events.append(("wait", self.cmd, self.cwd))
+            return self._returncode
+
+    def fake_popen(cmd, cwd=None):
+        index = sum(1 for event in events if event[0] == "launch")
+        events.append(("launch", cmd, cwd))
+        return FakeProcess(cmd, cwd, index)
+
+    return fake_popen
 
 
-def test_launch_batch_staggers_between_runs(monkeypatch) -> None:
-    launched = []
+def test_launch_batch_staggers_and_launches_before_waiting(monkeypatch) -> None:
+    events = []
     sleeps = []
 
-    monkeypatch.setattr(MODULE.subprocess, "run", _make_fake_run(launched))
+    monkeypatch.setattr(MODULE.subprocess, "Popen", _make_fake_popen(events))
     monkeypatch.setattr(MODULE.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     exit_code = MODULE.launch_batch(
@@ -66,15 +79,16 @@ def test_launch_batch_staggers_between_runs(monkeypatch) -> None:
     )
 
     assert exit_code == 0
-    assert len(launched) == 3
+    assert [event[0] for event in events] == ["launch", "launch", "launch", "wait", "wait", "wait"]
     assert sleeps == [5.0, 5.0]
+    assert all(event[2] == MODULE.REPO_ROOT for event in events)
 
 
 def test_launch_batch_continues_on_failure_and_reports(monkeypatch) -> None:
-    launched = []
+    events = []
     sleeps = []
 
-    monkeypatch.setattr(MODULE.subprocess, "run", _make_fake_run(launched, returncode=1))
+    monkeypatch.setattr(MODULE.subprocess, "Popen", _make_fake_popen(events, returncodes=[1, 1]))
     monkeypatch.setattr(MODULE.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     exit_code = MODULE.launch_batch(
@@ -88,14 +102,14 @@ def test_launch_batch_continues_on_failure_and_reports(monkeypatch) -> None:
     )
 
     assert exit_code == 1
-    assert len(launched) == 2  # both experiments attempted despite failure
+    assert [event[0] for event in events] == ["launch", "launch", "wait", "wait"]
 
 
 def test_launch_batch_dry_run_skips_sleep_and_subprocess(monkeypatch) -> None:
     launched = []
     sleeps = []
 
-    monkeypatch.setattr(MODULE.subprocess, "run", lambda *args, **kwargs: launched.append((args, kwargs)))
+    monkeypatch.setattr(MODULE.subprocess, "Popen", lambda *args, **kwargs: launched.append((args, kwargs)))
     monkeypatch.setattr(MODULE.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     exit_code = MODULE.launch_batch(

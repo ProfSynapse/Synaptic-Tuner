@@ -241,6 +241,7 @@ class CloudEvalHandler(BaseHandler):
         preset: Optional[str],
         scenarios: Optional[List[str]],
         tags: Optional[str],
+        pip_packages: Optional[List[str]],
         env_backend: Optional[str],
         env_template: Optional[str],
         env_tool_schema: Optional[str],
@@ -272,10 +273,14 @@ class CloudEvalHandler(BaseHandler):
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_OVERLAY}",
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+            f"export PYTHONPATH={_HF_EVAL_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
+        if pip_packages:
+            quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in pip_packages)
+            parts.append(f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_pip_packages}")
 
         eval_cmd = [
             "python3",
@@ -740,6 +745,7 @@ class CloudEvalHandler(BaseHandler):
             preset=preset,
             scenarios=scenarios,
             tags=tags,
+            pip_packages=getattr(self.args, "eval_pip_packages", None),
             env_backend=env_backend,
             env_template=env_template,
             env_tool_schema=env_tool_schema,

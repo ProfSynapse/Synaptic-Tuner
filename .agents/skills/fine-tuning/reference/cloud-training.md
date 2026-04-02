@@ -231,6 +231,11 @@ For experiment orchestration:
 - analysis waits for both selected post-training stages
 - use `post_training.mode: same_job` only when you intentionally want the older embedded eval+loss path for a smoke/fallback run
 
+Same-job exact-loss gotcha:
+- `cloud-eval --with-loss` and `post_training.mode: same_job` install stage-local helper packages such as `peft` into an overlay path.
+- Those packages must be available on the evaluator process `PYTHONPATH`, not just the bucket-sync helper subprocess path.
+- If embedded exact loss fails with `peft is required to load LoRA adapter checkpoints for exact loss scoring`, inspect the runtime `PYTHONPATH` wiring before debugging dataset or model artifacts.
+
 Inspection workflow:
 1. Find the source training run under `runs/hf_jobs/{method}/{run_slug}/`
 2. Open the newest directory under `evaluations/vllm/`

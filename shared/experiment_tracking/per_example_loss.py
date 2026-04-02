@@ -24,6 +24,8 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
+from shared.sft_preprocessing import materialize_sft_example
+
 from .runtime_autotune import AdaptiveTokenBudget, cuda_headroom_bytes
 from .schema import LossResult
 
@@ -58,50 +60,6 @@ def _hash_jsonl_line(line: str) -> str:
     return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:8]
 
 
-def _render_tool_call_content(tool_calls: list[dict[str, Any]]) -> str:
-    """Render OpenAI-style tool_calls into text compatible with chat templates."""
-    rendered_parts: list[str] = []
-    for tool_call in tool_calls:
-        function_payload = tool_call.get("function") or {}
-        name = function_payload.get("name") or tool_call.get("name") or "unknown"
-        arguments = function_payload.get("arguments", tool_call.get("arguments", {}))
-        if isinstance(arguments, str):
-            try:
-                arguments_obj = json.loads(arguments)
-            except json.JSONDecodeError:
-                arguments_obj = arguments
-        else:
-            arguments_obj = arguments
-        rendered_parts.append(
-            "<tool_call>\n"
-            + json.dumps({"name": name, "arguments": arguments_obj}, ensure_ascii=False, indent=2)
-            + "\n</tool_call>"
-        )
-    return "\n".join(rendered_parts)
-
-
-def _sanitize_messages_for_chat_template(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize nullable/tool-call messages into plain text for tokenizer templates."""
-    sanitized: list[dict[str, Any]] = []
-    for message in messages:
-        normalized = dict(message)
-        content = normalized.get("content")
-        if content is None:
-            content = ""
-        elif not isinstance(content, str):
-            content = json.dumps(content, ensure_ascii=False)
-
-        tool_calls = normalized.get("tool_calls") or []
-        if tool_calls:
-            tool_content = _render_tool_call_content(tool_calls)
-            content = f"{content}\n\n{tool_content}".strip() if content else tool_content
-
-        normalized["content"] = content
-        normalized.pop("tool_calls", None)
-        sanitized.append(normalized)
-    return sanitized
-
-
 def _prepare_loss_example(
     *,
     tokenizer: Any,
@@ -111,44 +69,22 @@ def _prepare_loss_example(
     max_seq_length: int,
     completion_only: bool,
 ) -> Optional[PreparedLossExample]:
-    conv = record.get("conversations", [])
-    if not conv:
-        conv = record.get("messages", [])
-    if not conv:
-        return None
-
-    conv = _sanitize_messages_for_chat_template(conv)
-
-    if completion_only and len(conv) > 0 and conv[-1].get("role") == "assistant":
-        prompt_messages = conv[:-1]
-        prompt_str = tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True)
-        prompt_tokens = tokenizer.encode(prompt_str, add_special_tokens=False)
-
-        full_str = tokenizer.apply_chat_template(conv, tokenize=False, add_generation_prompt=False)
-        full_tokens = tokenizer.encode(full_str, add_special_tokens=False)
-
-        input_ids = list(full_tokens[:max_seq_length])
-        labels = list(input_ids)
-
-        mask_len = min(len(prompt_tokens), len(labels))
-        for j in range(mask_len):
-            if labels[j] == prompt_tokens[j]:
-                labels[j] = -100
-            else:
-                break
-    else:
-        full_str = tokenizer.apply_chat_template(conv, tokenize=False, add_generation_prompt=False)
-        input_ids = tokenizer.encode(full_str, add_special_tokens=False)[:max_seq_length]
-        labels = list(input_ids)
-
-    if not input_ids:
+    try:
+        prepared = materialize_sft_example(
+            tokenizer=tokenizer,
+            record=record,
+            max_seq_length=max_seq_length,
+            assistant_only_loss=completion_only,
+            source_hash=line_hash,
+        )
+    except ValueError:
         return None
 
     return PreparedLossExample(
         index=index,
         jsonl_hash=line_hash,
-        input_ids=list(input_ids),
-        labels=labels,
+        input_ids=list(prepared.input_ids),
+        labels=list(prepared.labels),
     )
 
 

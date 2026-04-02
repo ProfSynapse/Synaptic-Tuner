@@ -91,7 +91,8 @@ from unsloth import is_bfloat16_supported
 import transformers
 transformers.logging.set_verbosity_warning()
 
-from trl import SFTConfig, SFTTrainer
+from transformers import Trainer
+from trl import SFTConfig
 
 from configs.config_loader import (
     get_3b_config,
@@ -100,7 +101,7 @@ from configs.config_loader import (
     get_20b_config,
     load_config,
 )
-from src.data_loader import load_and_prepare_dataset, print_dataset_samples
+from src.data_loader import load_and_prepare_tokenized_dataset, print_dataset_samples
 from src.model_loader import (
     load_model_and_tokenizer,
     apply_lora_adapters,
@@ -322,6 +323,40 @@ def extract_previous_log_entries(checkpoint_path: str):
     return entries if entries else None
 
 
+def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dict[str, torch.Tensor]:
+    """Pad explicit tokenized SFT rows into a trainer-ready batch."""
+    if not features:
+        raise ValueError("Cannot collate an empty SFT batch.")
+
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = getattr(tokenizer, "eos_token_id", 0) or 0
+
+    max_len = max(len(feature["input_ids"]) for feature in features)
+    input_ids: list[list[int]] = []
+    attention_mask: list[list[int]] = []
+    labels: list[list[int]] = []
+
+    for feature in features:
+        feature_input_ids = list(feature["input_ids"])
+        feature_attention_mask = list(feature["attention_mask"])
+        feature_labels = list(feature["labels"])
+        pad_len = max_len - len(feature_input_ids)
+        if pad_len > 0:
+            feature_input_ids = feature_input_ids + [pad_token_id] * pad_len
+            feature_attention_mask = feature_attention_mask + [0] * pad_len
+            feature_labels = feature_labels + [-100] * pad_len
+        input_ids.append(feature_input_ids)
+        attention_mask.append(feature_attention_mask)
+        labels.append(feature_labels)
+
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
+
+
 def build_training_lineage(
     config,
     train_dataset,
@@ -331,6 +366,7 @@ def build_training_lineage(
     args: argparse.Namespace,
     training_time_seconds: Optional[float] = None,
     evolutionary_stats: Optional[Dict[str, Any]] = None,
+    preprocessing_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build comprehensive training lineage for model cards and traceability.
 
@@ -406,6 +442,9 @@ def build_training_lineage(
 
         "results": {},
     }
+
+    if preprocessing_metadata:
+        lineage["dataset"]["preprocessing"] = dict(preprocessing_metadata)
 
     # Add training results if available
     if hasattr(trainer, 'state') and trainer.state is not None:
@@ -900,9 +939,19 @@ def run(args: argparse.Namespace):
         tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
         print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
-    # Load dataset (with preprocessing if packing is enabled)
-    use_packing = config.training.packing
-    train_dataset, eval_dataset = load_and_prepare_dataset(
+    loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
+    preprocessing_metadata = {
+        "contract_version": 1,
+        "dataset_representation": "tokenized",
+        "loss_mask_mode": loss_mask_mode,
+        "tool_call_mode": "render_text",
+        "chat_template_source": chat_template_name,
+        "packing": False,
+    }
+
+    # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
+    # depend on implicit TRL/Unsloth dataset preparation behavior.
+    train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
         dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
         data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
         local_file=config.dataset.local_file,
@@ -910,8 +959,9 @@ def run(args: argparse.Namespace):
         test_size=config.dataset.test_size,
         split_dataset=args.split_dataset or config.dataset.split_dataset,
         filter_desirable=config.dataset.filter_desirable,
-        tokenizer=tokenizer if use_packing else None,
-        apply_chat_template=use_packing  # Preprocess for packing support
+        tokenizer=tokenizer,
+        max_seq_length=config.training.max_seq_length,
+        loss_mask_mode=loss_mask_mode,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
@@ -937,93 +987,6 @@ def run(args: argparse.Namespace):
     # Check initial GPU memory
     check_gpu_memory()
 
-    import json
-
-    def render_tool_calls_to_content(tool_calls):
-        """Convert tool_calls array to text content for chat template."""
-        if not tool_calls:
-            return ""
-
-        rendered_parts = []
-        for tc in tool_calls:
-            # Handle OpenAI nested format: {"function": {"name": ..., "arguments": ...}}
-            if "function" in tc and tc["function"]:
-                func = tc["function"]
-                name = func.get("name", "")
-                args = func.get("arguments", "{}")
-            else:
-                # Handle flat format: {"name": ..., "arguments": ...}
-                name = tc.get("name", "")
-                args = tc.get("arguments", "{}")
-
-            # Parse arguments if it's a string
-            if isinstance(args, str):
-                try:
-                    args_obj = json.loads(args)
-                except:
-                    args_obj = args
-            else:
-                args_obj = args
-
-            tool_call_obj = {"name": name, "arguments": args_obj}
-            rendered_parts.append(
-                f"<tool_call>\n{json.dumps(tool_call_obj, indent=2)}\n</tool_call>"
-            )
-
-        return "\n".join(rendered_parts)
-
-    def sanitize_conversations(conversations):
-        """Ensure all message fields are properly set and tool_calls are rendered to content."""
-        sanitized = []
-        for msg in conversations:
-            new_msg = dict(msg)
-
-            # Get existing content (or empty string if None)
-            content = new_msg.get("content") or ""
-
-            # If there are tool_calls, render them to content
-            if "tool_calls" in new_msg and new_msg["tool_calls"]:
-                tool_content = render_tool_calls_to_content(new_msg["tool_calls"])
-                if tool_content:
-                    content = f"{content}\n\n{tool_content}" if content else tool_content
-
-            new_msg["content"] = content
-
-            # Remove tool_calls since we've rendered them to content
-            if "tool_calls" in new_msg:
-                del new_msg["tool_calls"]
-
-            sanitized.append(new_msg)
-        return sanitized
-
-    def format_chat_template(batch):
-        """Apply the model chat template to each example for TRL's SFTTrainer."""
-        messages_key = "messages" if "messages" in batch else "conversations"
-        conversations = batch.get(messages_key)
-        if conversations is None:
-            raise ValueError("Dataset must contain 'messages' or 'conversations' columns")
-
-        # TRL calls formatting_func with batched examples; handle both batched and single-example shapes
-        if isinstance(conversations, dict):
-            conversations = [conversations]
-        elif len(conversations) > 0 and isinstance(conversations[0], dict):
-            conversations = [conversations]
-
-        formatted = []
-        for msgs in conversations:
-            if not isinstance(msgs, list):
-                raise ValueError(f"Expected list of messages, got {type(msgs)}")
-            # Sanitize conversations to handle None content and tool_calls
-            sanitized_msgs = sanitize_conversations(msgs)
-            formatted.append(
-                tokenizer.apply_chat_template(
-                    sanitized_msgs,
-                    tokenize=False,
-                    add_generation_prompt=False,
-                )
-            )
-        return formatted
-
     # Initialize callbacks based on UI mode (need to know this before configuring trainer)
     # Dashboard is the default if available, use --no-dashboard to disable
     use_dashboard = DASHBOARD_AVAILABLE and not getattr(args, 'no_dashboard', False)
@@ -1040,7 +1003,7 @@ def run(args: argparse.Namespace):
         "max_grad_norm": config.training.max_grad_norm,
         "lr_scheduler_type": config.training.lr_scheduler_type,
         "max_seq_length": config.training.max_seq_length,
-        "packing": use_packing,
+        "packing": False,
         "gradient_checkpointing": config.training.gradient_checkpointing,
         "optim": config.training.optim,
         "fp16": not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
@@ -1058,16 +1021,12 @@ def run(args: argparse.Namespace):
         "report_to": "wandb" if config.use_wandb else "none",
         "run_name": config.wandb_run_name if config.use_wandb else None,
         "seed": config.seed,
-        "dataset_kwargs": {"add_special_tokens": False},
+        "remove_unused_columns": False,
         # Disable tqdm when using dashboard (they conflict)
         "disable_tqdm": use_dashboard,
         # Suppress metrics dict logging (our callback handles display)
         "log_level": "warning" if use_dashboard else "info",
     }
-
-    # When packing is enabled, use preprocessed 'text' column
-    if use_packing:
-        sft_config_kwargs["dataset_text_field"] = "text"
 
     training_args = SFTConfig(**sft_config_kwargs)
 
@@ -1095,7 +1054,7 @@ def run(args: argparse.Namespace):
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
     print(f"\nSFT-specific:")
-    print(f"  Packing: {config.training.packing}")
+    print("  Packing: False (explicit tokenized dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
     print(f"\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
@@ -1161,23 +1120,16 @@ def run(args: argparse.Namespace):
         # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
         logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 
-    # Initialize SFT Trainer (NO ref_model needed!)
-    print("Initializing SFT Trainer...")
+    print("Initializing trainer on explicit tokenized dataset...")
     trainer_kwargs = {
         "model": model,
         "args": training_args,
-        "tokenizer": tokenizer,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
         "callbacks": callbacks,
+        "data_collator": lambda features: collate_prepared_sft_batch(features, tokenizer),
     }
-
-    # Only use formatting_func when packing is disabled
-    # When packing is enabled, we use the preprocessed 'text' column instead
-    if not use_packing:
-        trainer_kwargs["formatting_func"] = format_chat_template
-
-    trainer = SFTTrainer(**trainer_kwargs)
+    trainer = Trainer(**trainer_kwargs)
 
     # Remove PrinterCallback to stop the {'loss': ...} dict spam
     # Our LiveDashboardCallback or MetricsTableCallback handles display instead
@@ -1185,7 +1137,7 @@ def run(args: argparse.Namespace):
         from transformers.trainer_callback import PrinterCallback
         trainer.remove_callback(PrinterCallback)
 
-    print("[OK] SFT trainer initialized with metrics tracking")
+    print("[OK] Trainer initialized with explicit tokenized dataset contract")
 
     # Check if evolutionary training is enabled
     evo_wrapper = None
@@ -1288,6 +1240,7 @@ def run(args: argparse.Namespace):
         args=args,
         training_time_seconds=training_time_seconds,
         evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
+        preprocessing_metadata=preprocessing_metadata,
     )
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)

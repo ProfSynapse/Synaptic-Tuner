@@ -1,7 +1,7 @@
 """
 Evaluation handler for testing model performance.
 
-Location: /mnt/f/Code/Toolset-Training/tuner/handlers/eval_handler.py
+Location: tuner/handlers/eval_handler.py
 Purpose: Orchestrate evaluation workflow - select backend, model, and prompt set
 Used by: Router when handling 'eval' command or main menu selection
 
@@ -20,9 +20,10 @@ Supports --json flag for AI-parseable output. In JSON mode:
 """
 
 from argparse import Namespace
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import EvaluationBackendRegistry
@@ -175,294 +176,257 @@ class EvalHandler(BaseHandler):
         discovery = PromptSetDiscovery(repo_root=self.repo_root)
         return discovery.discover_all()
 
-    def _display_models_table(self, backend: str, models: List[str]) -> None:
-        """
-        Display available models in a table.
+    # -- Generic table display infrastructure ----------------------------------
 
-        Args:
-            backend: Backend name for table title
-            models: List of model names
+    @dataclass
+    class _ColumnSpec:
+        """Specification for a single table column."""
+        header: str
+        style: str = "white"
+        width: Optional[int] = None
+        justify: str = "left"
+
+    @dataclass
+    class _TableSpec:
+        """Specification for a display table."""
+        title: str
+        columns: List[Any] = field(default_factory=list)   # List[_ColumnSpec]
+        row_extractor: Callable[[int, Any], List[str]] = lambda i, x: [str(x)]
+        plain_formatter: Callable[[int, Any], str] = lambda i, x: str(x)
+
+    def _display_table(self, items: List[Any], spec: "_TableSpec") -> None:
+        """
+        Generic table renderer that handles both Rich and plain-text output.
+
+        Renders *items* according to *spec*. In Rich mode, produces a bordered
+        table with an auto-numbered ``#`` column followed by the columns listed
+        in the spec.  In plain-text mode, prints a numbered list using the
+        spec's plain_formatter.
         """
         if RICH_AVAILABLE:
             from rich.table import Table
             from rich import box as rich_box
 
             table = Table(
-                title=f"Available {backend.title()} Models",
+                title=spec.title,
                 box=rich_box.ROUNDED,
                 border_style=COLORS["cello"],
             )
             table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Model", style="white")
+            for col in spec.columns:
+                table.add_column(
+                    col.header, style=col.style,
+                    width=col.width, justify=col.justify,
+                )
 
-            for i, m in enumerate(models, 1):
-                table.add_row(str(i), m)
+            for i, item in enumerate(items, 1):
+                row = spec.row_extractor(i, item)
+                table.add_row(str(i), *row)
 
             console.print()
             console.print(table)
             console.print()
         else:
-            print(f"\nAvailable {backend} models:")
-            for i, m in enumerate(models, 1):
-                print(f"  [{i}] {m}")
+            print(f"\n{spec.title}:")
+            for i, item in enumerate(items, 1):
+                print(f"  [{i}] {spec.plain_formatter(i, item)}")
             print()
+
+    # -- Thin wrappers that build a TableSpec and delegate ---------------------
+
+    def _display_models_table(self, backend: str, models: List[str]) -> None:
+        """Display available models in a table."""
+        spec = self._TableSpec(
+            title=f"Available {backend.title()} Models",
+            columns=[self._ColumnSpec("Model")],
+            row_extractor=lambda i, m: [m],
+            plain_formatter=lambda i, m: m,
+        )
+        self._display_table(models, spec)
 
     def _display_gguf_models_table(self, backend, models: List[str]) -> None:
-        """
-        Display available GGUF models with detailed info.
+        """Display available GGUF models with detailed info."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title="Available GGUF Models",
+            columns=[
+                C("Name"), C("Quant", style=COLORS["purple"]),
+                C("Size", style="dim", justify="right"), C("Type", style=COLORS["aqua"]),
+            ],
+            row_extractor=lambda i, mp: self._gguf_row(backend, mp),
+            plain_formatter=lambda i, mp: self._gguf_plain(backend, mp),
+        )
+        self._display_table(models, spec)
 
-        Args:
-            backend: LlamaCppBackend instance (for get_model_info)
-            models: List of GGUF file paths
-        """
-        from pathlib import Path
+    @staticmethod
+    def _gguf_row(backend, model_path: str) -> List[str]:
+        info = backend.get_model_info(model_path)
+        return [
+            info.get("name", Path(model_path).stem),
+            info.get("quantization") or "-",
+            f"{info.get('size_gb', 0):.1f}GB",
+            info.get("trainer_type", "-").upper(),
+        ]
 
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
-
-            table = Table(
-                title="Available GGUF Models",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Name", style="white")
-            table.add_column("Quant", style=COLORS["purple"])
-            table.add_column("Size", style="dim", justify="right")
-            table.add_column("Type", style=COLORS["aqua"])
-
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                name = info.get("name", Path(model_path).stem)
-                quant = info.get("quantization") or "-"
-                size = f"{info.get('size_gb', 0):.1f}GB"
-                trainer = info.get("trainer_type", "-").upper()
-
-                table.add_row(str(i), name, quant, size, trainer)
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print("\nAvailable GGUF models:")
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                name = info.get("name", Path(model_path).stem)
-                quant = info.get("quantization") or ""
-                size = info.get("size_gb", 0)
-                quant_str = f" ({quant})" if quant else ""
-                print(f"  [{i}] {name}{quant_str} [{size:.1f}GB]")
-            print()
+    @staticmethod
+    def _gguf_plain(backend, model_path: str) -> str:
+        info = backend.get_model_info(model_path)
+        name = info.get("name", Path(model_path).stem)
+        quant = info.get("quantization") or ""
+        size = info.get("size_gb", 0)
+        quant_str = f" ({quant})" if quant else ""
+        return f"{name}{quant_str} [{size:.1f}GB]"
 
     def _display_lora_models_table(self, backend, models: List[str]) -> None:
-        """
-        Display available LoRA adapters with detailed info.
+        """Display available LoRA adapters with detailed info."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title="Available LoRA Adapters",
+            columns=[
+                C("Run"), C("Base Model", style=COLORS["aqua"]),
+                C("Type", style=COLORS["purple"]),
+                C("Size", style="dim", justify="right"),
+            ],
+            row_extractor=lambda i, mp: self._lora_row(backend, mp),
+            plain_formatter=lambda i, mp: self._lora_plain(backend, mp),
+        )
+        self._display_table(models, spec)
 
-        Args:
-            backend: UnslothBackend instance (for get_model_info)
-            models: List of adapter directory paths
-        """
-        from pathlib import Path
+    @staticmethod
+    def _lora_row(backend, model_path: str) -> List[str]:
+        info = backend.get_model_info(model_path)
+        return [
+            info.get("timestamp", "unknown"),
+            info.get("base_model_short", "unknown"),
+            info.get("trainer_type", "-").upper(),
+            f"{info.get('size_mb', 0):.0f}MB" if info.get("size_mb") else "-",
+        ]
 
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
-
-            table = Table(
-                title="Available LoRA Adapters",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Run", style="white")
-            table.add_column("Base Model", style=COLORS["aqua"])
-            table.add_column("Type", style=COLORS["purple"])
-            table.add_column("Size", style="dim", justify="right")
-
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                timestamp = info.get("timestamp", "unknown")
-                base = info.get("base_model_short", "unknown")
-                trainer = info.get("trainer_type", "-").upper()
-                size = f"{info.get('size_mb', 0):.0f}MB" if info.get('size_mb') else "-"
-
-                table.add_row(str(i), timestamp, base, trainer, size)
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print("\nAvailable LoRA adapters:")
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                timestamp = info.get("timestamp", "unknown")
-                base = info.get("base_model_short", "unknown")
-                trainer = info.get("trainer_type", "-").upper()
-                print(f"  [{i}] {timestamp} ({base}) [{trainer}]")
-            print()
+    @staticmethod
+    def _lora_plain(backend, model_path: str) -> str:
+        info = backend.get_model_info(model_path)
+        return (
+            f"{info.get('timestamp', 'unknown')} "
+            f"({info.get('base_model_short', 'unknown')}) "
+            f"[{info.get('trainer_type', '-').upper()}]"
+        )
 
     def _display_mlc_models_table(self, backend, models: List[str]) -> None:
-        """
-        Display available MLC/WebGPU models with detailed info.
+        """Display available MLC/WebGPU models with detailed info."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title="Available MLC/WebGPU Models",
+            columns=[
+                C("Name"), C("Arch", style=COLORS["aqua"]),
+                C("Quant", style=COLORS["purple"]), C("Type", style="dim"),
+            ],
+            row_extractor=lambda i, mp: self._mlc_row(backend, mp),
+            plain_formatter=lambda i, mp: self._mlc_plain(backend, mp),
+        )
+        self._display_table(models, spec)
 
-        Args:
-            backend: MLCBackend instance (for get_model_info)
-            models: List of MLC model directory paths
-        """
-        from pathlib import Path
+    @staticmethod
+    def _mlc_row(backend, model_path: str) -> List[str]:
+        info = backend.get_model_info(model_path)
+        return [
+            info.get("name", Path(model_path).name),
+            info.get("architecture") or "-",
+            info.get("quantization") or "-",
+            info.get("trainer_type", "-").upper(),
+        ]
 
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
-
-            table = Table(
-                title="Available MLC/WebGPU Models",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Name", style="white")
-            table.add_column("Arch", style=COLORS["aqua"])
-            table.add_column("Quant", style=COLORS["purple"])
-            table.add_column("Type", style="dim")
-
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                name = info.get("name", Path(model_path).name)
-                arch = info.get("architecture") or "-"
-                quant = info.get("quantization") or "-"
-                trainer = info.get("trainer_type", "-").upper()
-
-                table.add_row(str(i), name, arch, quant, trainer)
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print("\nAvailable MLC/WebGPU models:")
-            for i, model_path in enumerate(models, 1):
-                info = backend.get_model_info(model_path)
-                name = info.get("name", Path(model_path).name)
-                quant = info.get("quantization") or ""
-                quant_str = f" ({quant})" if quant else ""
-                print(f"  [{i}] {name}{quant_str}")
-            print()
+    @staticmethod
+    def _mlc_plain(backend, model_path: str) -> str:
+        info = backend.get_model_info(model_path)
+        name = info.get("name", Path(model_path).name)
+        quant = info.get("quantization") or ""
+        quant_str = f" ({quant})" if quant else ""
+        return f"{name}{quant_str}"
 
     def _display_training_runs_table(self, runs: List[Path], trainer_type: str) -> None:
-        """
-        Display available training runs in a table.
+        """Display available training runs in a table."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title=f"Available {trainer_type.upper()} Training Runs",
+            columns=[
+                C("Run"), C("Has Final", style=COLORS["aqua"], justify="center"),
+                C("Checkpoints", style=COLORS["purple"], justify="right"),
+            ],
+            row_extractor=lambda i, rp: self._training_run_row(rp),
+            plain_formatter=lambda i, rp: self._training_run_plain(rp),
+        )
+        self._display_table(runs, spec)
 
-        Args:
-            runs: List of training run directory paths
-            trainer_type: Type of trainer ('sft' or 'kto')
-        """
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
+    @staticmethod
+    def _training_run_row(run_path: Path) -> List[str]:
+        has_final = "\u2713" if (run_path / "final_model").exists() else "-"
+        checkpoints_dir = run_path / "checkpoints"
+        cp_count = 0
+        if checkpoints_dir.exists():
+            cp_count = len(list(checkpoints_dir.glob("checkpoint-*")))
+        return [run_path.name, has_final, str(cp_count)]
 
-            table = Table(
-                title=f"Available {trainer_type.upper()} Training Runs",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Run", style="white")
-            table.add_column("Has Final", style=COLORS["aqua"], justify="center")
-            table.add_column("Checkpoints", style=COLORS["purple"], justify="right")
-
-            for i, run_path in enumerate(runs, 1):
-                timestamp = run_path.name
-                has_final = "✓" if (run_path / "final_model").exists() else "-"
-
-                # Count checkpoints
-                checkpoints_dir = run_path / "checkpoints"
-                checkpoint_count = 0
-                if checkpoints_dir.exists():
-                    checkpoint_count = len(list(checkpoints_dir.glob("checkpoint-*")))
-
-                table.add_row(str(i), timestamp, has_final, str(checkpoint_count))
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print(f"\nAvailable {trainer_type.upper()} training runs:")
-            for i, run_path in enumerate(runs, 1):
-                timestamp = run_path.name
-                has_final = "(final)" if (run_path / "final_model").exists() else ""
-                print(f"  [{i}] {timestamp} {has_final}")
-            print()
+    @staticmethod
+    def _training_run_plain(run_path: Path) -> str:
+        has_final = "(final)" if (run_path / "final_model").exists() else ""
+        return f"{run_path.name} {has_final}"
 
     def _display_checkpoints_table(self, checkpoints: List, trainer_type: str) -> None:
-        """
-        Display available checkpoints with metrics in a table.
+        """Display available checkpoints with metrics in a table."""
+        C = self._ColumnSpec
+        columns = [
+            C("Checkpoint"), C("Step", style=COLORS["aqua"], justify="right"),
+            C("Loss", style=COLORS["purple"], justify="right"),
+        ]
+        if trainer_type == "kto":
+            columns += [
+                C("KL", style="dim", justify="right"),
+                C("Margin", style="dim", justify="right"),
+            ]
+        elif trainer_type == "grpo":
+            columns.append(C("Reward", style="dim", justify="right"))
+        columns.append(C("Epoch", style="dim", justify="right"))
 
-        Args:
-            checkpoints: List of CheckpointInfo objects
-            trainer_type: Type of trainer ('sft' or 'kto') for metric display
-        """
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
+        def row_extractor(_i: int, cp: Any) -> List[str]:
+            return self._checkpoint_row(cp, trainer_type)
 
-            table = Table(
-                title="Available Checkpoints",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Checkpoint", style="white")
-            table.add_column("Step", style=COLORS["aqua"], justify="right")
-            table.add_column("Loss", style=COLORS["purple"], justify="right")
-            if trainer_type == "kto":
-                table.add_column("KL", style="dim", justify="right")
-                table.add_column("Margin", style="dim", justify="right")
-            elif trainer_type == "grpo":
-                table.add_column("Reward", style="dim", justify="right")
-            table.add_column("Epoch", style="dim", justify="right")
+        spec = self._TableSpec(
+            title="Available Checkpoints",
+            columns=columns,
+            row_extractor=row_extractor,
+            plain_formatter=lambda i, cp: self._checkpoint_plain(cp),
+        )
+        self._display_table(checkpoints, spec)
 
-            for i, cp in enumerate(checkpoints, 1):
-                if cp.is_final:
-                    name = "final_model ★"
-                    step_str = "-"
-                else:
-                    name = f"checkpoint-{cp.step}"
-                    step_str = str(cp.step)
+    @staticmethod
+    def _checkpoint_row(cp: Any, trainer_type: str) -> List[str]:
+        name = "final_model \u2605" if cp.is_final else f"checkpoint-{cp.step}"
+        step_str = "-" if cp.is_final else str(cp.step)
+        loss = cp.metrics.get("loss")
+        loss_str = f"{loss:.4f}" if loss is not None else "-"
+        epoch = cp.metrics.get("epoch")
+        epoch_str = f"{epoch:.2f}" if epoch is not None else "-"
 
-                loss = cp.metrics.get("loss")
-                loss_str = f"{loss:.4f}" if loss is not None else "-"
+        row = [name, step_str, loss_str]
+        if trainer_type == "kto":
+            kl = cp.metrics.get("kl")
+            margin = cp.metrics.get("rewards/margins")
+            row += [
+                f"{kl:.4f}" if kl is not None else "-",
+                f"{margin:.4f}" if margin is not None else "-",
+            ]
+        elif trainer_type == "grpo":
+            reward = cp.metrics.get("reward") or cp.metrics.get("rewards/mean")
+            row.append(f"{reward:.4f}" if reward is not None else "-")
+        row.append(epoch_str)
+        return row
 
-                epoch = cp.metrics.get("epoch")
-                epoch_str = f"{epoch:.2f}" if epoch is not None else "-"
-
-                if trainer_type == "kto":
-                    kl = cp.metrics.get("kl")
-                    kl_str = f"{kl:.4f}" if kl is not None else "-"
-                    margin = cp.metrics.get("rewards/margins")
-                    margin_str = f"{margin:.4f}" if margin is not None else "-"
-                    table.add_row(str(i), name, step_str, loss_str, kl_str, margin_str, epoch_str)
-                elif trainer_type == "grpo":
-                    reward = cp.metrics.get("reward") or cp.metrics.get("rewards/mean")
-                    reward_str = f"{reward:.4f}" if reward is not None else "-"
-                    table.add_row(str(i), name, step_str, loss_str, reward_str, epoch_str)
-                else:
-                    table.add_row(str(i), name, step_str, loss_str, epoch_str)
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print("\nAvailable checkpoints:")
-            for i, cp in enumerate(checkpoints, 1):
-                if cp.is_final:
-                    name = "final_model"
-                else:
-                    name = f"checkpoint-{cp.step}"
-                loss = cp.metrics.get("loss", "N/A")
-                loss_str = f"loss={loss:.4f}" if isinstance(loss, (int, float)) else f"loss={loss}"
-                print(f"  [{i}] {name} ({loss_str})")
-            print()
+    @staticmethod
+    def _checkpoint_plain(cp: Any) -> str:
+        name = "final_model" if cp.is_final else f"checkpoint-{cp.step}"
+        loss = cp.metrics.get("loss", "N/A")
+        loss_str = f"loss={loss:.4f}" if isinstance(loss, (int, float)) else f"loss={loss}"
+        return f"{name} ({loss_str})"
 
     def _select_unsloth_model(self) -> Tuple[str, str]:
         """
@@ -544,37 +508,20 @@ class EvalHandler(BaseHandler):
         return str(selected_checkpoint.path), trainer_type
 
     def _display_scenarios_table(self, scenarios) -> None:
-        """
-        Display available YAML scenarios in a table.
-
-        Args:
-            scenarios: List of PromptSetInfo objects
-        """
-        if RICH_AVAILABLE:
-            from rich.table import Table
-            from rich import box as rich_box
-
-            table = Table(
-                title="Available Test Scenarios",
-                box=rich_box.ROUNDED,
-                border_style=COLORS["cello"],
-            )
-            table.add_column("#", style=COLORS["orange"], width=4, justify="center")
-            table.add_column("Name", style="white")
-            table.add_column("Description", style="dim")
-            table.add_column("Tests", style=COLORS["aqua"], justify="right")
-
-            for i, info in enumerate(scenarios, 1):
-                table.add_row(str(i), info.name, info.description, str(info.count))
-
-            console.print()
-            console.print(table)
-            console.print()
-        else:
-            print("\nAvailable test scenarios:")
-            for i, info in enumerate(scenarios, 1):
-                print(f"  [{i}] {info.name} ({info.count} tests) - {info.description}")
-            print()
+        """Display available YAML scenarios in a table."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title="Available Test Scenarios",
+            columns=[
+                C("Name"), C("Description", style="dim"),
+                C("Tests", style=COLORS["aqua"], justify="right"),
+            ],
+            row_extractor=lambda i, info: [info.name, info.description, str(info.count)],
+            plain_formatter=lambda i, info: (
+                f"{info.name} ({info.count} tests) - {info.description}"
+            ),
+        )
+        self._display_table(scenarios, spec)
 
     def handle(self) -> int:
         """

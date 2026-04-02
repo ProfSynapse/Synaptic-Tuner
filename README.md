@@ -37,11 +37,47 @@ Synaptic Tuner handles the full pipeline in one repo, and it's designed to be **
 
 Skills are written as Markdown — they work with any AI coding tool that supports project-level instructions. Claude Code is the reference integration, but the knowledge transfers to Cursor, Windsurf, Cline, Roo Code, and others. There's also a full interactive CLI and Colab notebooks if you prefer working without an agent.
 
+## Cloud Workflow
+
+Cloud training is now a first-class path, not an afterthought. The canonical Hugging Face Jobs flow is:
+
+```bash
+python tuner.py cloud-pipeline --method sft --preset full
+```
+
+That launches training on HF Jobs, saves artifacts to provider-native storage, and hands the exact finished run into cloud evaluation automatically. For full experiment orchestration, use:
+
+```bash
+python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes
+```
+
+That path can run train -> evaluation -> exact loss -> analysis -> recommendation from one checked-in experiment spec.
+
+**Cloud surfaces built into the repo:**
+- `cloud-pipeline` for the standard HF Jobs train-then-evaluate workflow
+- `run-experiment` for full cloud experiment bundles and comparisons
+- `cloud-eval` to re-evaluate an existing bucket-backed run on remote GPU
+- `cloud-jobs` to inspect live HF Jobs status and logs
+- `bucket` to analyze, read, list, pull, and push bucket-backed artifacts
+- `plan-hardware` for blind hardware planning using live HF Jobs flavors and pricing
+- `cloud-gym` to run the vault gym against a trained cloud run
+
+## Recent Updates
+
+- HF Jobs is now the canonical cloud path for train + evaluate, with `cloud-pipeline` handling the common workflow end-to-end.
+- Cloud evaluation writes structured artifacts back into the source run, including `evaluation_results.json`, `evaluation_results.md`, and `evaluation_lineage.json`.
+- Bucket-backed progress is a first-class UX: training and evaluation stream JSONL progress that the local dashboard can replay.
+- `run-experiment` now supports fuller cloud orchestration, including post-training evaluation and exact-loss stages as separate sibling jobs by default.
+- `plan-hardware` and `scripts/hf_jobs_hardware.py` make hardware selection less guessy by using the live HF Jobs hardware surface.
+- Evolutionary SFT is now supported in the cloud experiment path through checked-in specs and `cloud-pipeline --train-*` overrides.
+
 ## Quick Start
 
 | Path | How |
 |------|-----|
 | **Claude Code (recommended)** | Open repo in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and tell it what you want |
+| **HF Jobs cloud train + eval** | `python tuner.py cloud-pipeline --method sft --preset full` |
+| **Full cloud experiment bundle** | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
 | **Interactive CLI** | `./run.sh` (Linux/WSL) or `.\run.ps1` (PowerShell) |
 | **Beginner (no GPU)** | `Trainers/notebooks/sft_colab_beginner.ipynb` in Google Colab |
 
@@ -58,6 +94,9 @@ This repo is built to be operated by Claude Code. It has skills covering the ent
 | Generate training data | *"Generate 50 examples of the search scenario"* | `synthetic-data-generation` |
 | Write scenarios/rubrics | *"Write a new scenario for content operations"* | `synthetic-data-generation` |
 | Train a model | *"Train a 7B model on my dataset"* | `fine-tuning` |
+| Run HF Jobs train + eval | *"Launch the canonical cloud pipeline for this SFT run"* | `fine-tuning` |
+| Run a full cloud experiment | *"Run this experiment spec with eval and exact loss"* | `fine-tuning` |
+| Inspect live cloud jobs | *"Show me the latest HF Jobs status and logs"* | `fine-tuning` |
 | Evaluate a model | *"Compare my fine-tuned model against the base"* | `evaluation` |
 | Upload to HuggingFace | *"Upload with GGUF quantizations"* | `upload-deployment` |
 | Full pipeline | *"Train, evaluate, and upload if it looks good"* | All skills |
@@ -66,7 +105,7 @@ Skills use progressive disclosure — lean SKILL.md files auto-load, detailed re
 
 ## Using with Other AI Coding Tools
 
-The skills in `.agents/skills/` are plain Markdown — they work with any AI coding tool. Most platforms use `AGENTS.md` as their entrypoint (Claude Code uses `CLAUDE.md`). Copy the skill files to your platform's rules directory, or use the universal `.skills/` folder at your project root:
+The canonical skills live in `.skills/`, with synced copies in `.agents/skills/` for agent tooling. They are plain Markdown, so they work with any AI coding tool. Most platforms use `AGENTS.md` as their entrypoint (Claude Code uses `CLAUDE.md`). Copy the skill files to your platform's rules directory, or use the universal `.skills/` folder at your project root:
 
 | Platform | Where to put skills |
 |----------|-------------------|
@@ -86,7 +125,7 @@ Most platforms auto-discover Markdown in their rules directory. For tools that u
 ## The Pipeline
 
 ```
-SynthChat (env-backed data)  →  SFT  →  merge/publish Nexus model  →  KTO  →  env-GRPO  →  Evaluate  →  Upload/Deploy
+SynthChat (env-backed data)  →  SFT (local or HF Jobs)  →  cloud eval / exact loss  →  merge/publish Nexus model  →  KTO  →  env-GRPO  →  Upload/Deploy
 ```
 
 | Stage | Tool | Key Config |
@@ -94,6 +133,11 @@ SynthChat (env-backed data)  →  SFT  →  merge/publish Nexus model  →  KTO 
 | **Generate env-backed data** | `python3 -m SynthChat.run generate` | `SynthChat/scenarios/`, `SynthChat/config/settings.yaml`, `SynthChat/config/targets_*.json` |
 | **Project datasets** | `python3 SynthChat/scripts/project_rollout_datasets.py` | `Datasets/environment_rollouts/`, `Datasets/kto/`, `Datasets/grpo/` |
 | **Train SFT** | `python tuner.py train` → `sft` | `Trainers/sft/configs/config.yaml` |
+| **Canonical HF SFT + eval** | `python tuner.py cloud-pipeline --method sft --preset full` | HF Jobs + bucket-backed run artifacts |
+| **Full cloud experiment** | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` | Experiment spec + parallel post-training stages |
+| **Inspect live HF jobs** | `python tuner.py cloud-jobs list` / `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` | Live HF Jobs status + raw logs |
+| **Inspect bucket-backed artifacts** | `python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/` | `training_lineage.json`, eval artifacts, loss artifacts |
+| **Blind hardware planning** | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` | Live HF Jobs hardware + pricing |
 | **Train KTO** | `python tuner.py train` → `kto` | `Trainers/kto/configs/config.yaml` |
 | **Train env-GRPO** | `python tuner.py train` → `grpo` | `Trainers/grpo/configs/env_config.yaml` |
 | **Cloud env-GRPO** | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml` | HF Jobs config + `Trainers/grpo/configs/env_config.yaml` |
@@ -105,7 +149,7 @@ SynthChat (env-backed data)  →  SFT  →  merge/publish Nexus model  →  KTO 
 - `Trainers/grpo/configs/config.yaml` is the older static projected-dataset GRPO path.
 - `Trainers/grpo/configs/env_config.yaml` is the current environment-backed multi-step GRPO path.
 - Local NVIDIA `train -> grpo` now routes to the env-backed trainer and will bootstrap the isolated GRPO runtime if it is missing.
-- The canonical alignment flow is documented in [.agents/skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.agents/skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
+- The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
 
 ## Dataset Format
 
@@ -140,7 +184,8 @@ Synaptic-Tuner/
 ├── Datasets/               # Training data + canonical environment rollouts
 ├── shared/                 # Shared infra (LLM client, upload, validation, UI)
 ├── tuner/                  # Unified CLI (used by run.sh)
-├── .agents/skills/         # Project skills and protocols
+├── .skills/                # Canonical project skills and protocols
+├── .agents/skills/         # Synced skill copy for agent tooling
 └── CLAUDE.md               # Project-wide dev guide
 ```
 
@@ -148,7 +193,7 @@ Synaptic-Tuner/
 
 ```bash
 # .env in repo root (auto-loaded by CLI)
-HF_TOKEN=hf_...                       # HuggingFace (required for uploads)
+HF_TOKEN=hf_...                       # HuggingFace (required for cloud jobs, buckets, uploads)
 OPENROUTER_API_KEY=sk-or-...          # OpenRouter (for generation/improvement)
 WANDB_API_KEY=...                     # Weights & Biases (optional)
 LMSTUDIO_HOST=localhost               # LM Studio host
