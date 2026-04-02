@@ -15,8 +15,8 @@ experiment:
       - git+https://github.com/huggingface/transformers.git
       - git+https://github.com/unslothai/unsloth_zoo.git
       - git+https://github.com/unslothai/unsloth.git
-    batch_size: 24
-    gradient_accumulation: 2
+    batch_size: 12
+    gradient_accumulation: 4
     learning_rate: 1.0e-4
     num_epochs: 2
     max_seq_length: 2048
