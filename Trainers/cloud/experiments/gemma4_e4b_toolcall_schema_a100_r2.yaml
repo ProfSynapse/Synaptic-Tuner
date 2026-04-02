@@ -11,9 +11,9 @@ experiment:
     gpu: a100-large
     cloud_image: unsloth/unsloth:latest
     pip_packages:
-      - unsloth==2026.3.8
-      - unsloth-zoo==2026.4.2
-      - transformers==5.3.0
+      - git+https://github.com/huggingface/transformers.git
+      - git+https://github.com/unslothai/unsloth_zoo.git
+      - git+https://github.com/unslothai/unsloth.git
     batch_size: 24
     gradient_accumulation: 2
     learning_rate: 1.0e-4
