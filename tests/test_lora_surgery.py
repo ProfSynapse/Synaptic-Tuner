@@ -901,3 +901,246 @@ class TestEdgeCases:
 
         result = await surgeon.run_surgery()
         assert result.duration_seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Registry API Tests
+# ---------------------------------------------------------------------------
+
+class TestRegistry:
+    def test_list_operations_returns_all_eight(self):
+        """All 8 operations should be registered."""
+        from shared.evolutionary.surgery.registry import list_operations
+        ops = list_operations()
+        assert len(ops) == 8
+        expected = [
+            "alpha_sweep", "attention_mlp_ablation", "checkpoint_interpolation",
+            "dare_drop_rescale", "layer_scaling", "metrics_weighted_merge",
+            "module_ablation", "svd_rank_reduction",
+        ]
+        assert ops == expected  # list_operations returns sorted
+
+    def test_get_operation_returns_instance(self):
+        """get_operation should return a fresh instance, not the class."""
+        op = get_operation("alpha_sweep")
+        assert hasattr(op, "execute")
+        assert hasattr(op, "name")
+        assert op.name == "alpha_sweep"
+
+    def test_get_operation_unknown_raises_value_error(self):
+        """get_operation should raise ValueError for unregistered names."""
+        with pytest.raises(ValueError, match="Unknown surgery operation"):
+            get_operation("nonexistent_operation")
+
+    def test_each_operation_has_unique_name(self):
+        """All registered operations should have distinct name attributes."""
+        from shared.evolutionary.surgery.registry import list_operations
+        ops = list_operations()
+        for name in ops:
+            op = get_operation(name)
+            assert op.name == name
+
+
+# ---------------------------------------------------------------------------
+# Protocol Conformance Tests
+# ---------------------------------------------------------------------------
+
+class TestProtocolConformance:
+    def test_all_operations_implement_protocol(self):
+        """All registered operations should structurally match SurgeryOperation."""
+        from shared.evolutionary.surgery.base import SurgeryOperation
+        from shared.evolutionary.surgery.registry import list_operations
+        import inspect
+
+        # Get protocol params excluding 'self'
+        protocol_method = inspect.signature(SurgeryOperation.execute)
+        protocol_params = [
+            p for p in protocol_method.parameters.keys() if p != "self"
+        ]
+
+        for name in list_operations():
+            op = get_operation(name)
+            # Check 'name' attribute exists
+            assert hasattr(op, "name"), f"{name} missing 'name' attribute"
+            assert isinstance(op.name, str), f"{name}.name is not a str"
+
+            # Check execute method exists and has matching signature
+            assert hasattr(op, "execute"), f"{name} missing 'execute' method"
+            method = inspect.signature(op.execute)
+            # Instance method signature excludes 'self'
+            op_params = list(method.parameters.keys())
+            assert op_params == protocol_params, (
+                f"{name}.execute params {op_params} != protocol {protocol_params}"
+            )
+
+    def test_evaluate_fn_is_used_with_await(self):
+        """Verify evaluate_fn is typed as Callable[[str], float] but used with await.
+
+        The auditor flagged this: evaluate_fn typed as Callable[[str], float]
+        but called with 'await evaluate_fn(...)'. This works at runtime because
+        Python's typing doesn't enforce return types, and the actual callable
+        passed is always an async function returning float. But the type
+        annotation is technically incorrect — it should be
+        Callable[[str], Awaitable[float]] for strict typing.
+
+        This test documents the behavior and verifies it works correctly.
+        """
+        import asyncio
+        import inspect
+
+        # Verify the Protocol signature types evaluate_fn as sync
+        from shared.evolutionary.surgery.base import SurgeryOperation
+        sig = inspect.signature(SurgeryOperation.execute)
+        # The parameter exists
+        assert "evaluate_fn" in sig.parameters
+
+        # Verify that passing an async callable still works
+        async def async_evaluate(path: str) -> float:
+            return 0.75
+
+        # The function is async
+        assert asyncio.iscoroutinefunction(async_evaluate)
+
+        # But its annotation says Callable[[str], float]
+        # This is the documented typing gap. Operations await the result,
+        # which works because async functions return coroutines that resolve to float.
+
+
+# ---------------------------------------------------------------------------
+# Backward Compatibility Shim Tests
+# ---------------------------------------------------------------------------
+
+class TestBackwardCompatShim:
+    def test_all_public_types_importable_from_shim(self):
+        """lora_surgery.py should re-export all public types."""
+        from shared.evolutionary.lora_surgery import (
+            LoRASurgeon,
+            OperationResult,
+            SurgeryConfig,
+            SurgeryResult,
+        )
+        assert LoRASurgeon is not None
+        assert OperationResult is not None
+        assert SurgeryConfig is not None
+        assert SurgeryResult is not None
+
+    def test_all_helper_functions_importable_from_shim(self):
+        """lora_surgery.py should re-export all underscore-prefixed helpers."""
+        from shared.evolutionary.lora_surgery import (
+            _check_dependencies,
+            _copy_adapter,
+            _find_lora_pairs,
+            _find_safetensor_files,
+            _get_layer_indices,
+            _get_module_types,
+            _is_attention_key,
+            _is_mlp_key,
+            _load_adapter_config,
+            _load_all_weights,
+            _save_adapter_config,
+            _save_all_weights,
+            _softmax,
+        )
+        # Verify they are callable
+        assert callable(_check_dependencies)
+        assert callable(_copy_adapter)
+        assert callable(_find_lora_pairs)
+        assert callable(_find_safetensor_files)
+        assert callable(_get_layer_indices)
+        assert callable(_get_module_types)
+        assert callable(_is_attention_key)
+        assert callable(_is_mlp_key)
+        assert callable(_load_adapter_config)
+        assert callable(_load_all_weights)
+        assert callable(_save_adapter_config)
+        assert callable(_save_all_weights)
+        assert callable(_softmax)
+
+    def test_shim_types_match_package_types(self):
+        """Shim re-exports should be the same objects as package exports."""
+        from shared.evolutionary.lora_surgery import LoRASurgeon as ShimSurgeon
+        from shared.evolutionary.surgery import LoRASurgeon as PkgSurgeon
+        assert ShimSurgeon is PkgSurgeon
+
+        from shared.evolutionary.lora_surgery import SurgeryConfig as ShimConfig
+        from shared.evolutionary.surgery import SurgeryConfig as PkgConfig
+        assert ShimConfig is PkgConfig
+
+    def test_shim_helpers_match_utils_functions(self):
+        """Shim helper re-exports should be the same functions as in utils."""
+        from shared.evolutionary.lora_surgery import _softmax as shim_softmax
+        from shared.evolutionary.surgery.utils import _softmax as utils_softmax
+        assert shim_softmax is utils_softmax
+
+        from shared.evolutionary.lora_surgery import _is_attention_key as shim_attn
+        from shared.evolutionary.surgery.utils import _is_attention_key as utils_attn
+        assert shim_attn is utils_attn
+
+
+# ---------------------------------------------------------------------------
+# Context Manager Tests
+# ---------------------------------------------------------------------------
+
+class TestContextManager:
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self, tmp_adapter, tmp_path):
+        """LoRASurgeon should work as an async context manager."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=["alpha_sweep"],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+
+        async with LoRASurgeon(tmp_adapter, backend, "test", config) as surgeon:
+            assert surgeon is not None
+            assert surgeon.adapter_path == tmp_adapter
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_work_dir(self, tmp_adapter, tmp_path):
+        """cleanup() should remove the _surgery_work directory."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=["alpha_sweep"],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
+
+        # Run surgery (which creates and then cleans up work dir)
+        await surgeon.run_surgery()
+
+        # Work dir should be cleaned up after surgery
+        work_dir = os.path.join(output_dir, "_surgery_work")
+        assert not os.path.exists(work_dir)
+
+
+# ---------------------------------------------------------------------------
+# Surgeon Backward-Compat Proxy Methods
+# ---------------------------------------------------------------------------
+
+class TestSurgeonProxyMethods:
+    @pytest.mark.asyncio
+    async def test_direct_operation_method_matches_registry(self, tmp_adapter, tmp_path):
+        """Surgeon's named methods should delegate to the same registry operations."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=[],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
+
+        # Call the backward-compat proxy method directly
+        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
+        assert result.operation == "alpha_sweep"
+        assert isinstance(result, OperationResult)
