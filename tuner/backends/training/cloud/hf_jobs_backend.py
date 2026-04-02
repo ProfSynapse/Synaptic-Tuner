@@ -795,6 +795,9 @@ class HFJobsBackend(ITrainingBackend):
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             *checkout_steps,
         ]
+        if config.pip_packages:
+            quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in config.pip_packages)
+            parts.append(f"{python_cmd} -m pip install --upgrade {quoted_pip_packages}")
 
         training_args: list[str] = []
         if config.model_name:

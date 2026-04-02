@@ -30,6 +30,7 @@ class TrainingStageSpec:
     timeout_hours: Optional[float] = None
     image_profile: Optional[str] = None
     cloud_image: Optional[str] = None
+    pip_packages: List[str] = field(default_factory=list)
     batch_size: Optional[int] = None
     gradient_accumulation: Optional[int] = None
     learning_rate: Optional[float] = None
@@ -106,6 +107,7 @@ class EvaluationStageSpec:
     runtime: Optional[str] = None
     image_profile: Optional[str] = None
     cloud_image: Optional[str] = None
+    pip_packages: List[str] = field(default_factory=list)
     gpu: Optional[str] = None
     timeout_hours: Optional[float] = None
 
@@ -115,6 +117,7 @@ class LossStageSpec:
     enabled: bool = True
     gpu: Optional[str] = None
     timeout_hours: Optional[float] = None
+    pip_packages: List[str] = field(default_factory=list)
     max_seq_length: Optional[int] = None
     completion_only: bool = True
 

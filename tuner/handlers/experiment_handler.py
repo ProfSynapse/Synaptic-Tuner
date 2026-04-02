@@ -245,6 +245,8 @@ class HFTrainingStageRunner:
                 requested_profile=spec.training.image_profile,
                 fallback_image=config.cloud_image,
             )
+        if spec.training.pip_packages:
+            config.pip_packages = list(spec.training.pip_packages)
         config.artifact_identifier = self._resolve_bucket_id(config.artifact_identifier)
 
         artifact_prefix, artifact_root = self._planned_training_state(experiment=experiment, config=config)
@@ -359,6 +361,7 @@ class HFEvalStageRunner:
             eval_runtime=spec.evaluation.runtime,
             eval_image_profile=spec.evaluation.image_profile,
             eval_cloud_image=spec.evaluation.cloud_image,
+            eval_pip_packages=list(getattr(spec.evaluation, "pip_packages", []) or []),
             env_backend="none",
             env_template=None,
             env_tool_schema=None,
@@ -456,6 +459,11 @@ class HFLossStageRunner:
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
             *checkout_steps,
         ]
+        if spec.loss.pip_packages:
+            parts.append(
+                "$(command -v python3 || command -v python) -m pip install --upgrade "
+                + " ".join(shlex.quote(pkg) for pkg in spec.loss.pip_packages)
+            )
         loss_cmd = [
             "python3",
             "-m",
