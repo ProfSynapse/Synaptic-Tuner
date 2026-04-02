@@ -139,6 +139,23 @@ class TestHFJobsLoadConfig:
         assert config.artifact_identifier == "toolset-training-artifacts"
         assert config.repo_branch == "main"
         assert config.repo_commit
+        assert config.evolutionary_enabled is False
+        assert config.evolutionary_candidates is None
+        assert config.evolutionary_eval_batch_size is None
+        assert config.evolutionary_validation_config is None
+        assert config.evolutionary_strategy is None
+        assert config.evolutionary_noise_scale is None
+        assert config.evolutionary_max_grad_norm is None
+        assert config.evolutionary_scale_factors is None
+        assert config.evolutionary_selection_method is None
+        assert config.evolutionary_min_improvement is None
+        assert config.evolutionary_min_relative_improvement is None
+        assert config.evolutionary_noise_floor_epsilon is None
+        assert config.evolutionary_eval_frequency is None
+        assert config.evolutionary_warmup_steps is None
+        assert config.evolutionary_cache_baseline is None
+        assert config.evolutionary_log_candidates is None
+        assert config.evolutionary_log_selected is None
 
     def test_loads_kto_config(self, repo_root):
         backend = HFJobsBackend(repo_root)
@@ -417,6 +434,51 @@ class TestBuildTrainingCommand:
         assert "--evolutionary-cache-baseline" in cmd
         assert "--evolutionary-no-log-candidates" in cmd
         assert "--evolutionary-log-selected" in cmd
+
+    def test_command_omits_evolutionary_overrides_when_disabled(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            evolutionary_enabled=False,
+            evolutionary_candidates=4,
+            evolutionary_eval_batch_size=2,
+            evolutionary_validation_config="configs/fitness/tool_calling.yaml",
+            evolutionary_strategy="antithetic_noise",
+            evolutionary_noise_scale=0.03,
+            evolutionary_max_grad_norm=1.0,
+            evolutionary_scale_factors=[0.5, 1.0, 1.5],
+            evolutionary_selection_method="best",
+            evolutionary_min_improvement=0.01,
+            evolutionary_min_relative_improvement=0.0001,
+            evolutionary_noise_floor_epsilon=0.000001,
+            evolutionary_eval_frequency=5,
+            evolutionary_warmup_steps=200,
+            evolutionary_cache_baseline=True,
+            evolutionary_log_candidates=False,
+            evolutionary_log_selected=True,
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--evolutionary-enabled" not in cmd
+        assert "--evolutionary-candidates" not in cmd
+        assert "--evolutionary-eval-batch-size" not in cmd
+        assert "--evolutionary-validation-config" not in cmd
+        assert "--evolutionary-strategy" not in cmd
+        assert "--evolutionary-noise-scale" not in cmd
+        assert "--evolutionary-max-grad-norm" not in cmd
+        assert "--evolutionary-scale-factors" not in cmd
+        assert "--evolutionary-selection-method" not in cmd
+        assert "--evolutionary-min-improvement" not in cmd
+        assert "--evolutionary-min-relative-improvement" not in cmd
+        assert "--evolutionary-noise-floor-epsilon" not in cmd
+        assert "--evolutionary-eval-frequency" not in cmd
+        assert "--evolutionary-warmup-steps" not in cmd
+        assert "--evolutionary-cache-baseline" not in cmd
+        assert "--evolutionary-no-cache-baseline" not in cmd
+        assert "--evolutionary-log-candidates" not in cmd
+        assert "--evolutionary-no-log-candidates" not in cmd
+        assert "--evolutionary-log-selected" not in cmd
+        assert "--evolutionary-no-log-selected" not in cmd
 
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)

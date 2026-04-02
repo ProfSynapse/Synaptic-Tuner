@@ -248,6 +248,8 @@ class HFJobsBackend(ITrainingBackend):
         # Parse timeout string (e.g., "4h" -> 4.0)
         timeout_hours = _parse_timeout(timeout_str)
 
+        evolutionary_enabled = bool(evolutionary_config.get("enabled", False))
+
         return CloudTrainingConfig(
             method=method,
             platform="hf_jobs",
@@ -269,23 +271,23 @@ class HFJobsBackend(ITrainingBackend):
             use_rslora=bool(config.get("lora", {}).get("use_rslora", False)),
             init_lora_weights=config.get("lora", {}).get("init_lora_weights"),
             lora_target_modules=model_config.get("target_modules") or config.get("lora", {}).get("target_modules"),
-            evolutionary_enabled=bool(evolutionary_config.get("enabled", False)),
-            evolutionary_candidates=evolutionary_config.get("candidates"),
-            evolutionary_eval_batch_size=evolutionary_config.get("eval_batch_size"),
-            evolutionary_validation_config=evolutionary_config.get("validation_config"),
-            evolutionary_strategy=evolutionary_strategy.get("type"),
-            evolutionary_noise_scale=evolutionary_params.get("noise_scale"),
-            evolutionary_max_grad_norm=evolutionary_params.get("max_grad_norm"),
-            evolutionary_scale_factors=evolutionary_params.get("scale_factors"),
-            evolutionary_selection_method=evolutionary_selection.get("method"),
-            evolutionary_min_improvement=evolutionary_selection.get("min_improvement"),
-            evolutionary_min_relative_improvement=evolutionary_selection.get("min_relative_improvement"),
-            evolutionary_noise_floor_epsilon=evolutionary_selection.get("noise_floor_epsilon"),
-            evolutionary_eval_frequency=evolutionary_config.get("eval_frequency"),
-            evolutionary_warmup_steps=evolutionary_config.get("warmup_steps"),
-            evolutionary_cache_baseline=evolutionary_config.get("cache_baseline"),
-            evolutionary_log_candidates=evolutionary_logging.get("candidates"),
-            evolutionary_log_selected=evolutionary_logging.get("selected"),
+            evolutionary_enabled=evolutionary_enabled,
+            evolutionary_candidates=evolutionary_config.get("candidates") if evolutionary_enabled else None,
+            evolutionary_eval_batch_size=evolutionary_config.get("eval_batch_size") if evolutionary_enabled else None,
+            evolutionary_validation_config=evolutionary_config.get("validation_config") if evolutionary_enabled else None,
+            evolutionary_strategy=evolutionary_strategy.get("type") if evolutionary_enabled else None,
+            evolutionary_noise_scale=evolutionary_params.get("noise_scale") if evolutionary_enabled else None,
+            evolutionary_max_grad_norm=evolutionary_params.get("max_grad_norm") if evolutionary_enabled else None,
+            evolutionary_scale_factors=evolutionary_params.get("scale_factors") if evolutionary_enabled else None,
+            evolutionary_selection_method=evolutionary_selection.get("method") if evolutionary_enabled else None,
+            evolutionary_min_improvement=evolutionary_selection.get("min_improvement") if evolutionary_enabled else None,
+            evolutionary_min_relative_improvement=evolutionary_selection.get("min_relative_improvement") if evolutionary_enabled else None,
+            evolutionary_noise_floor_epsilon=evolutionary_selection.get("noise_floor_epsilon") if evolutionary_enabled else None,
+            evolutionary_eval_frequency=evolutionary_config.get("eval_frequency") if evolutionary_enabled else None,
+            evolutionary_warmup_steps=evolutionary_config.get("warmup_steps") if evolutionary_enabled else None,
+            evolutionary_cache_baseline=evolutionary_config.get("cache_baseline") if evolutionary_enabled else None,
+            evolutionary_log_candidates=evolutionary_logging.get("candidates") if evolutionary_enabled else None,
+            evolutionary_log_selected=evolutionary_logging.get("selected") if evolutionary_enabled else None,
             provider="hf_jobs",
             gpu_type=flavor,
             timeout_hours=timeout_hours,
@@ -842,41 +844,43 @@ class HFJobsBackend(ITrainingBackend):
                 else ",".join(config.lora_target_modules)
             )
             training_args.extend(["--lora-target-modules", target_modules_arg])
-        if config.method == "sft" and config.evolutionary_enabled:
+        evolutionary_active = config.method == "sft" and config.evolutionary_enabled
+
+        if evolutionary_active:
             training_args.append("--evolutionary-enabled")
-        if config.method == "sft" and config.evolutionary_candidates is not None:
+        if evolutionary_active and config.evolutionary_candidates is not None:
             training_args.extend(["--evolutionary-candidates", str(config.evolutionary_candidates)])
-        if config.method == "sft" and config.evolutionary_eval_batch_size is not None:
+        if evolutionary_active and config.evolutionary_eval_batch_size is not None:
             training_args.extend(["--evolutionary-eval-batch-size", str(config.evolutionary_eval_batch_size)])
-        if config.method == "sft" and config.evolutionary_validation_config:
+        if evolutionary_active and config.evolutionary_validation_config:
             training_args.extend(["--evolutionary-validation-config", str(config.evolutionary_validation_config)])
-        if config.method == "sft" and config.evolutionary_strategy:
+        if evolutionary_active and config.evolutionary_strategy:
             training_args.extend(["--evolutionary-strategy", str(config.evolutionary_strategy)])
-        if config.method == "sft" and config.evolutionary_noise_scale is not None:
+        if evolutionary_active and config.evolutionary_noise_scale is not None:
             training_args.extend(["--evolutionary-noise-scale", str(config.evolutionary_noise_scale)])
-        if config.method == "sft" and config.evolutionary_max_grad_norm is not None:
+        if evolutionary_active and config.evolutionary_max_grad_norm is not None:
             training_args.extend(["--evolutionary-max-grad-norm", str(config.evolutionary_max_grad_norm)])
-        if config.method == "sft" and config.evolutionary_scale_factors:
+        if evolutionary_active and config.evolutionary_scale_factors:
             training_args.extend(
                 ["--evolutionary-scale-factors", ",".join(str(value) for value in config.evolutionary_scale_factors)]
             )
-        if config.method == "sft" and config.evolutionary_selection_method:
+        if evolutionary_active and config.evolutionary_selection_method:
             training_args.extend(["--evolutionary-selection-method", str(config.evolutionary_selection_method)])
-        if config.method == "sft" and config.evolutionary_min_improvement is not None:
+        if evolutionary_active and config.evolutionary_min_improvement is not None:
             training_args.extend(["--evolutionary-min-improvement", str(config.evolutionary_min_improvement)])
-        if config.method == "sft" and config.evolutionary_min_relative_improvement is not None:
+        if evolutionary_active and config.evolutionary_min_relative_improvement is not None:
             training_args.extend(["--evolutionary-min-relative-improvement", str(config.evolutionary_min_relative_improvement)])
-        if config.method == "sft" and config.evolutionary_noise_floor_epsilon is not None:
+        if evolutionary_active and config.evolutionary_noise_floor_epsilon is not None:
             training_args.extend(["--evolutionary-noise-floor-epsilon", str(config.evolutionary_noise_floor_epsilon)])
-        if config.method == "sft" and config.evolutionary_eval_frequency is not None:
+        if evolutionary_active and config.evolutionary_eval_frequency is not None:
             training_args.extend(["--evolutionary-eval-frequency", str(config.evolutionary_eval_frequency)])
-        if config.method == "sft" and config.evolutionary_warmup_steps is not None:
+        if evolutionary_active and config.evolutionary_warmup_steps is not None:
             training_args.extend(["--evolutionary-warmup-steps", str(config.evolutionary_warmup_steps)])
-        if config.method == "sft" and config.evolutionary_cache_baseline is not None:
+        if evolutionary_active and config.evolutionary_cache_baseline is not None:
             training_args.append("--evolutionary-cache-baseline" if config.evolutionary_cache_baseline else "--evolutionary-no-cache-baseline")
-        if config.method == "sft" and config.evolutionary_log_candidates is not None:
+        if evolutionary_active and config.evolutionary_log_candidates is not None:
             training_args.append("--evolutionary-log-candidates" if config.evolutionary_log_candidates else "--evolutionary-no-log-candidates")
-        if config.method == "sft" and config.evolutionary_log_selected is not None:
+        if evolutionary_active and config.evolutionary_log_selected is not None:
             training_args.append("--evolutionary-log-selected" if config.evolutionary_log_selected else "--evolutionary-no-log-selected")
         training_args_str = ""
         if config.method == "grpo":
