@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from datasets import Dataset
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -59,3 +60,35 @@ def test_load_and_prepare_dataset_can_preformat_conversations_to_text(tmp_path, 
     assert train_dataset.column_names == ["text"]
     assert "user::hello" in train_dataset[0]["text"]
     assert "tool_call: useTools" in train_dataset[0]["text"]
+
+
+def test_sanitize_conversations_normalizes_none_content_and_tool_calls():
+    sanitized = data_loader.sanitize_conversations(
+        [
+            {"role": "user", "content": None},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "lookup",
+                            "arguments": "{\"query\": \"abc\"}",
+                        }
+                    }
+                ],
+            },
+        ]
+    )
+
+    assert sanitized[0]["content"] == ""
+    assert "tool_call: lookup" in sanitized[1]["content"]
+    assert "query" in sanitized[1]["content"]
+    assert "tool_calls" not in sanitized[1]
+
+
+def test_preprocessing_contract_module_is_importable_when_present():
+    preprocessing = pytest.importorskip("preprocessing")
+    assert hasattr(preprocessing, "normalize_sft_example")
+    assert hasattr(preprocessing, "materialize_sft_features")
+    assert hasattr(preprocessing, "prepare_sft_dataset")

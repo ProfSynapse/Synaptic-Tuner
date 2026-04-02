@@ -5,54 +5,23 @@ Data loading and preprocessing for SFT training.
 from typing import Optional, Tuple, Any
 from datasets import load_dataset, Dataset
 
+from preprocessing import (
+    ASSISTANT_ONLY,
+    load_and_prepare_sft_dataset,
+    sanitize_conversations as sanitize_prepared_conversations,
+)
+
+
+def _map_num_proc(num_proc: int) -> Optional[int]:
+    return num_proc if num_proc and num_proc > 1 else None
+
 
 def sanitize_conversations(messages: list) -> list:
     """
     Sanitize conversations to handle None content and tool_calls.
     Converts tool_calls to text format for compatibility with chat templates.
     """
-    import json
-    sanitized = []
-    for msg in messages:
-        new_msg = dict(msg)
-
-        # Handle None content
-        content = new_msg.get("content")
-        if content is None:
-            content = ""
-
-        # If there are tool_calls, render them as text
-        if "tool_calls" in new_msg and new_msg["tool_calls"]:
-            tool_text_parts = []
-            for tc in new_msg["tool_calls"]:
-                func = tc.get("function", {})
-                name = func.get("name", "unknown")
-                args = func.get("arguments", "{}")
-                # Parse arguments if it's a string
-                if isinstance(args, str):
-                    try:
-                        args_obj = json.loads(args)
-                        args_formatted = json.dumps(args_obj, indent=2)
-                    except json.JSONDecodeError:
-                        args_formatted = args
-                else:
-                    args_formatted = json.dumps(args, indent=2)
-                tool_text_parts.append(f"tool_call: {name}\narguments: {args_formatted}")
-
-            # Combine content with tool calls
-            if content:
-                content = content + "\n\n" + "\n\n".join(tool_text_parts)
-            else:
-                content = "\n\n".join(tool_text_parts)
-
-        new_msg["content"] = content
-
-        # Remove tool_calls since we've rendered them to content
-        if "tool_calls" in new_msg:
-            del new_msg["tool_calls"]
-
-        sanitized.append(new_msg)
-    return sanitized
+    return sanitize_prepared_conversations(messages)
 
 
 def load_and_prepare_dataset(
@@ -146,7 +115,7 @@ def load_and_prepare_dataset(
 
         raw_datasets = raw_datasets.map(
             format_example,
-            num_proc=num_proc,
+            num_proc=_map_num_proc(num_proc),
             remove_columns=raw_datasets.column_names,
             desc="Applying chat template"
         )
@@ -157,6 +126,91 @@ def load_and_prepare_dataset(
     train_dataset = raw_datasets
 
     # Optional train/validation split
+    eval_dataset = None
+    if split_dataset and test_size > 0:
+        print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
+        split = train_dataset.train_test_split(test_size=test_size, seed=42)
+        train_dataset = split["train"]
+        eval_dataset = split["test"]
+
+        print(f"  Training set: {len(train_dataset)} examples")
+        print(f"  Validation set: {len(eval_dataset)} examples")
+    else:
+        print(f"\nReady for training: {len(train_dataset)} examples")
+
+    print("=" * 60)
+
+    return train_dataset, eval_dataset
+
+
+def load_and_prepare_tokenized_dataset(
+    dataset_name: Optional[str] = None,
+    data_files: Optional[str] = None,
+    local_file: Optional[str] = None,
+    num_proc: int = 1,
+    test_size: float = 0.1,
+    split_dataset: bool = False,
+    filter_desirable: bool = False,
+    tokenizer: Any = None,
+    max_seq_length: int = 2048,
+    loss_mask_mode: str = ASSISTANT_ONLY,
+) -> Tuple[Dataset, Optional[Dataset]]:
+    """
+    Load and prepare dataset into explicit tokenized SFT features.
+
+    This is the repo-owned prepared-dataset path for trainers that want to
+    consume ``input_ids`` / ``attention_mask`` / ``labels`` directly instead of
+    relying on implicit TRL preprocessing behavior.
+    """
+    print("=" * 60)
+    print("LOADING TOKENIZED DATASET FOR SFT")
+    print("=" * 60)
+
+    if tokenizer is None:
+        raise ValueError("tokenizer is required for tokenized dataset preparation")
+
+    if local_file:
+        print(f"Loading from local file: {local_file}")
+        raw_datasets = load_dataset("json", data_files=local_file, split="train")
+    elif dataset_name:
+        print(f"Loading from HuggingFace: {dataset_name}")
+        if data_files:
+            print(f"Using file: {data_files}")
+            raw_datasets = load_dataset(
+                dataset_name,
+                data_files=data_files,
+                num_proc=num_proc
+            )
+        else:
+            raw_datasets = load_dataset(dataset_name, num_proc=num_proc)
+        raw_datasets = raw_datasets["train"]
+    else:
+        raise ValueError("Must provide either dataset_name or local_file")
+
+    print(f"\nRaw dataset size: {len(raw_datasets)} examples")
+
+    if "conversations" in raw_datasets.column_names and "messages" not in raw_datasets.column_names:
+        print("Converting 'conversations' key to 'messages' (TRL 0.15.0+ requirement)")
+        raw_datasets = raw_datasets.rename_column("conversations", "messages")
+
+    if filter_desirable and "label" in raw_datasets.column_names:
+        print("\nFiltering for desirable examples (label=True)...")
+        original_size = len(raw_datasets)
+        raw_datasets = raw_datasets.filter(lambda x: x["label"] == True)
+        filtered_count = len(raw_datasets)
+        print(f"Filtered: {original_size} → {filtered_count} examples")
+        print(f"Removed: {original_size - filtered_count} undesirable examples")
+
+    print("\nPreparing explicit tokenized SFT features...")
+    train_dataset = load_and_prepare_sft_dataset(
+        dataset=raw_datasets,
+        tokenizer=tokenizer,
+        max_seq_length=max_seq_length,
+        loss_mask_mode=loss_mask_mode,
+        num_proc=num_proc,
+        include_text=False,
+    )
+
     eval_dataset = None
     if split_dataset and test_size > 0:
         print(f"\nCreating train/validation split ({1-test_size:.0%}/{test_size:.0%})")
@@ -215,6 +269,13 @@ def print_dataset_samples(dataset: Dataset, num_samples: int = 3):
         elif "text" in example:
             print(f"Format: Text")
             print(f"Content: {example['text'][:200]}...")
+        elif "input_ids" in example and "labels" in example:
+            print("Format: Tokenized SFT")
+            print(f"Input IDs: {len(example['input_ids'])} tokens")
+            supervised = sum(1 for label in example["labels"] if label != -100)
+            print(f"Supervised tokens: {supervised}")
+            if "loss_mask_mode" in example:
+                print(f"Loss mask mode: {example['loss_mask_mode']}")
         else:
             print(f"Format: Unknown - columns: {list(example.keys())}")
 

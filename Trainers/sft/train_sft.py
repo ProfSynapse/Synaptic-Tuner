@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import inspect
 import json
 import os
 import sys
@@ -92,7 +91,8 @@ from unsloth import is_bfloat16_supported
 import transformers
 transformers.logging.set_verbosity_warning()
 
-from trl import SFTConfig, SFTTrainer
+from transformers import Trainer
+from trl import SFTConfig
 
 from configs.config_loader import (
     get_3b_config,
@@ -101,7 +101,7 @@ from configs.config_loader import (
     get_20b_config,
     load_config,
 )
-from src.data_loader import load_and_prepare_dataset, print_dataset_samples
+from src.data_loader import load_and_prepare_tokenized_dataset, print_dataset_samples
 from src.model_loader import (
     load_model_and_tokenizer,
     apply_lora_adapters,
@@ -323,6 +323,40 @@ def extract_previous_log_entries(checkpoint_path: str):
     return entries if entries else None
 
 
+def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dict[str, torch.Tensor]:
+    """Pad explicit tokenized SFT rows into a trainer-ready batch."""
+    if not features:
+        raise ValueError("Cannot collate an empty SFT batch.")
+
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = getattr(tokenizer, "eos_token_id", 0) or 0
+
+    max_len = max(len(feature["input_ids"]) for feature in features)
+    input_ids: list[list[int]] = []
+    attention_mask: list[list[int]] = []
+    labels: list[list[int]] = []
+
+    for feature in features:
+        feature_input_ids = list(feature["input_ids"])
+        feature_attention_mask = list(feature["attention_mask"])
+        feature_labels = list(feature["labels"])
+        pad_len = max_len - len(feature_input_ids)
+        if pad_len > 0:
+            feature_input_ids = feature_input_ids + [pad_token_id] * pad_len
+            feature_attention_mask = feature_attention_mask + [0] * pad_len
+            feature_labels = feature_labels + [-100] * pad_len
+        input_ids.append(feature_input_ids)
+        attention_mask.append(feature_attention_mask)
+        labels.append(feature_labels)
+
+    return {
+        "input_ids": torch.tensor(input_ids, dtype=torch.long),
+        "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+        "labels": torch.tensor(labels, dtype=torch.long),
+    }
+
+
 def build_training_lineage(
     config,
     train_dataset,
@@ -332,6 +366,7 @@ def build_training_lineage(
     args: argparse.Namespace,
     training_time_seconds: Optional[float] = None,
     evolutionary_stats: Optional[Dict[str, Any]] = None,
+    preprocessing_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build comprehensive training lineage for model cards and traceability.
 
@@ -407,6 +442,9 @@ def build_training_lineage(
 
         "results": {},
     }
+
+    if preprocessing_metadata:
+        lineage["dataset"]["preprocessing"] = dict(preprocessing_metadata)
 
     # Add training results if available
     if hasattr(trainer, 'state') and trainer.state is not None:
@@ -901,11 +939,19 @@ def run(args: argparse.Namespace):
         tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
         print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
-    # Preprocess conversations into a canonical `text` column for SFT. This is
-    # more robust than relying on raw `messages` passthrough across newer
-    # TRL/Unsloth versions.
-    use_packing = config.training.packing
-    train_dataset, eval_dataset = load_and_prepare_dataset(
+    loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
+    preprocessing_metadata = {
+        "contract_version": 1,
+        "dataset_representation": "tokenized",
+        "loss_mask_mode": loss_mask_mode,
+        "tool_call_mode": "render_text",
+        "chat_template_source": chat_template_name,
+        "packing": False,
+    }
+
+    # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
+    # depend on implicit TRL/Unsloth dataset preparation behavior.
+    train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
         dataset_name=config.dataset.dataset_name if not config.dataset.local_file else None,
         data_files=config.dataset.dataset_file if not config.dataset.local_file else None,
         local_file=config.dataset.local_file,
@@ -914,7 +960,8 @@ def run(args: argparse.Namespace):
         split_dataset=args.split_dataset or config.dataset.split_dataset,
         filter_desirable=config.dataset.filter_desirable,
         tokenizer=tokenizer,
-        apply_chat_template=True,
+        max_seq_length=config.training.max_seq_length,
+        loss_mask_mode=loss_mask_mode,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
@@ -956,7 +1003,7 @@ def run(args: argparse.Namespace):
         "max_grad_norm": config.training.max_grad_norm,
         "lr_scheduler_type": config.training.lr_scheduler_type,
         "max_seq_length": config.training.max_seq_length,
-        "packing": use_packing,
+        "packing": False,
         "gradient_checkpointing": config.training.gradient_checkpointing,
         "optim": config.training.optim,
         "fp16": not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
@@ -974,8 +1021,6 @@ def run(args: argparse.Namespace):
         "report_to": "wandb" if config.use_wandb else "none",
         "run_name": config.wandb_run_name if config.use_wandb else None,
         "seed": config.seed,
-        "dataset_kwargs": {"add_special_tokens": False},
-        "dataset_text_field": "text",
         "remove_unused_columns": False,
         # Disable tqdm when using dashboard (they conflict)
         "disable_tqdm": use_dashboard,
@@ -1009,7 +1054,7 @@ def run(args: argparse.Namespace):
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
     print(f"\nSFT-specific:")
-    print(f"  Packing: {config.training.packing}")
+    print("  Packing: False (explicit tokenized dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
     print(f"\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
@@ -1075,22 +1120,16 @@ def run(args: argparse.Namespace):
         # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
         logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 
-    # Initialize SFT Trainer (NO ref_model needed!)
-    print("Initializing SFT Trainer...")
+    print("Initializing trainer on explicit tokenized dataset...")
     trainer_kwargs = {
         "model": model,
         "args": training_args,
         "train_dataset": train_dataset,
         "eval_dataset": eval_dataset,
         "callbacks": callbacks,
+        "data_collator": lambda features: collate_prepared_sft_batch(features, tokenizer),
     }
-    trainer_signature = inspect.signature(SFTTrainer.__init__)
-    if "processing_class" in trainer_signature.parameters:
-        trainer_kwargs["processing_class"] = tokenizer
-    else:
-        trainer_kwargs["tokenizer"] = tokenizer
-
-    trainer = SFTTrainer(**trainer_kwargs)
+    trainer = Trainer(**trainer_kwargs)
 
     # Remove PrinterCallback to stop the {'loss': ...} dict spam
     # Our LiveDashboardCallback or MetricsTableCallback handles display instead
@@ -1098,7 +1137,7 @@ def run(args: argparse.Namespace):
         from transformers.trainer_callback import PrinterCallback
         trainer.remove_callback(PrinterCallback)
 
-    print("[OK] SFT trainer initialized with metrics tracking")
+    print("[OK] Trainer initialized with explicit tokenized dataset contract")
 
     # Check if evolutionary training is enabled
     evo_wrapper = None
@@ -1201,6 +1240,7 @@ def run(args: argparse.Namespace):
         args=args,
         training_time_seconds=training_time_seconds,
         evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
+        preprocessing_metadata=preprocessing_metadata,
     )
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
