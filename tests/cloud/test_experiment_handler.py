@@ -11,7 +11,8 @@ from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.per_example_loss import save_losses
 from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
-from tuner.handlers.experiment_handler import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner, StageResult
+from shared.experiment_tracking import StageResult
+from tuner.handlers.stages import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner
 
 
 def _experiment() -> Experiment:
@@ -52,7 +53,7 @@ def test_training_stage_runner_recovers_completed_training_without_resubmitting(
     runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
 
     with patch.object(runner, "_bucket_has_path", return_value=True):
-        with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get") as mock_get:
+        with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get") as mock_get:
             result = runner.run(spec=None, experiment=experiment)
 
     assert result.status == "completed"
@@ -239,7 +240,7 @@ def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_
 
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
-            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+            with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
                 result = runner.run(spec=spec, experiment=experiment)
 
     assert result.status == "completed"
@@ -304,7 +305,7 @@ def test_training_stage_runner_forwards_stage_pip_packages_to_cloud_config(tmp_p
 
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
-            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+            with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
                 result = runner.run(spec=spec, experiment=experiment)
 
     assert result.status == "completed"
@@ -362,7 +363,7 @@ def test_training_stage_runner_does_not_forward_evolutionary_defaults_when_disab
 
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
-            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+            with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
                 result = runner.run(spec=spec, experiment=experiment)
 
     assert result.status == "completed"
@@ -455,7 +456,7 @@ def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_
 
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
-            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+            with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
                 result = runner.run(spec=spec, experiment=experiment)
 
     assert result.status == "completed"
@@ -515,7 +516,7 @@ def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_r
         ),
     )
 
-    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
         mock_handler = MagicMock()
         mock_handler.handle.return_value = 0
         mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
@@ -570,7 +571,7 @@ def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root)
         ),
     )
 
-    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
         mock_handler = MagicMock()
         mock_handler.handle.return_value = 0
         mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
@@ -628,7 +629,7 @@ def test_eval_stage_runner_forwards_stage_pip_packages(tmp_path: Path, repo_root
         ),
     )
 
-    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
         mock_handler = MagicMock()
         mock_handler.handle.return_value = 0
         mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
@@ -693,7 +694,7 @@ def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: 
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.experiment_handler.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit") as mock_submit:
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
@@ -798,7 +799,7 @@ def test_eval_stage_runner_requests_same_job_loss_when_post_training_mode_is_sam
         def handle(self):
             return 0
 
-    with patch("tuner.handlers.experiment_handler.CloudEvalHandler", _FakeCloudEvalHandler):
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler", _FakeCloudEvalHandler):
         result = runner.run(spec=spec, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
@@ -859,7 +860,7 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
     )
 
     with patch.object(runner, "_download_results", return_value=losses_dir):
-        with patch("tuner.handlers.experiment_handler.HFJobExecutor.submit") as mock_submit:
+        with patch("tuner.handlers.stages.hf_loss_stage.HFJobExecutor.submit") as mock_submit:
             result = runner.run(spec=None, experiment=experiment, previous=previous)
 
     assert result.status == "completed"
