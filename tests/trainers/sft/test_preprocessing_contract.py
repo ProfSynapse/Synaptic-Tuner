@@ -26,6 +26,18 @@ class _FakeTokenizer:
         return [ord(char) % 97 for char in text]
 
 
+class _FakeProcessor:
+    def __init__(self):
+        self.tokenizer = _FakeTokenizer()
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=tokenize,
+            add_generation_prompt=add_generation_prompt,
+        )
+
+
 def _as_dict(example):
     if isinstance(example, dict):
         return example
@@ -128,3 +140,26 @@ def test_prepare_sft_dataset_truncates_overlong_examples_deterministically():
     row = prepared_dataset[0]
     assert len(row["input_ids"]) <= 32
     assert len(row["input_ids"]) == len(row["labels"])
+
+
+def test_materialize_sft_features_accepts_processor_backed_models():
+    raw = {
+        "messages": [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "world"},
+        ]
+    }
+
+    normalized = preprocessing.normalize_sft_example(raw)
+    prepared = _as_dict(
+        preprocessing.materialize_sft_features(
+            normalized,
+            tokenizer=_FakeProcessor(),
+            max_seq_length=128,
+            loss_mask_mode="assistant_only",
+            tool_call_mode="render_text",
+        )
+    )
+
+    assert {"input_ids", "attention_mask", "labels"}.issubset(prepared.keys())
+    assert len(prepared["input_ids"]) == len(prepared["labels"])

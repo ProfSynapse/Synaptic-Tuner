@@ -107,6 +107,45 @@ def normalize_sft_messages(record: dict[str, Any]) -> tuple[list[dict[str, Any]]
     return messages, "prompt_completion"
 
 
+def _resolve_chat_template_owner(tokenizer: Any) -> Any:
+    if hasattr(tokenizer, "apply_chat_template"):
+        return tokenizer
+    nested_tokenizer = getattr(tokenizer, "tokenizer", None)
+    if hasattr(nested_tokenizer, "apply_chat_template"):
+        return nested_tokenizer
+    raise AttributeError("Tokenizer/processor does not expose apply_chat_template.")
+
+
+def _resolve_text_encoder(tokenizer: Any) -> Any:
+    if hasattr(tokenizer, "encode"):
+        return tokenizer
+    nested_tokenizer = getattr(tokenizer, "tokenizer", None)
+    if hasattr(nested_tokenizer, "encode"):
+        return nested_tokenizer
+    if callable(tokenizer):
+        return tokenizer
+    raise AttributeError("Tokenizer/processor does not expose a text encoding interface.")
+
+
+def _encode_text(tokenizer: Any, text: str) -> list[int]:
+    encoder = _resolve_text_encoder(tokenizer)
+    if hasattr(encoder, "encode"):
+        return list(encoder.encode(text, add_special_tokens=False))
+
+    encoded = encoder(
+        text,
+        add_special_tokens=False,
+        return_attention_mask=False,
+        return_token_type_ids=False,
+    )
+    input_ids = encoded.get("input_ids") if isinstance(encoded, dict) else getattr(encoded, "input_ids", None)
+    if input_ids is None:
+        raise ValueError("Tokenizer/processor call did not return input_ids.")
+    if input_ids and isinstance(input_ids[0], list):
+        return list(input_ids[0])
+    return list(input_ids)
+
+
 def materialize_sft_example(
     *,
     tokenizer: Any,
@@ -117,16 +156,17 @@ def materialize_sft_example(
 ) -> PreparedSFTExample:
     messages, example_format = normalize_sft_messages(record)
     messages = sanitize_messages_for_chat_template(messages)
+    chat_template_owner = _resolve_chat_template_owner(tokenizer)
 
     if not messages:
         raise ValueError("Cannot materialize empty SFT conversation.")
 
-    full_str = tokenizer.apply_chat_template(
+    full_str = chat_template_owner.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
-    full_tokens = tokenizer.encode(full_str, add_special_tokens=False)
+    full_tokens = _encode_text(tokenizer, full_str)
     truncation_applied = len(full_tokens) > max_seq_length
     input_ids = list(full_tokens[:max_seq_length])
     attention_mask = [1] * len(input_ids)
@@ -134,12 +174,12 @@ def materialize_sft_example(
 
     loss_mask_mode: LossMaskMode = "full_sequence"
     if assistant_only_loss and messages[-1].get("role") == "assistant":
-        prompt_str = tokenizer.apply_chat_template(
+        prompt_str = chat_template_owner.apply_chat_template(
             messages[:-1],
             tokenize=False,
             add_generation_prompt=True,
         )
-        prompt_tokens = tokenizer.encode(prompt_str, add_special_tokens=False)
+        prompt_tokens = _encode_text(tokenizer, prompt_str)
         mask_len = min(len(prompt_tokens), len(labels))
         for idx in range(mask_len):
             if labels[idx] == prompt_tokens[idx]:
