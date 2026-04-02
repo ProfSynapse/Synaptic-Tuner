@@ -253,6 +253,139 @@ def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_
     assert config.lora_target_modules == "all-linear"
 
 
+def test_training_stage_runner_forwards_stage_pip_packages_to_cloud_config(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+
+    spec = ExperimentSpec(
+        name="stage-pip-packages-smoke",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_only",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(
+            model_name="Qwen/Qwen3-4B",
+            max_steps=20,
+            pip_packages=["unsloth==2026.4.2", "transformers==5.3.0"],
+        ),
+        evaluation=EvaluationStageSpec(enabled=False),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    backend = MagicMock()
+    backend.validate_environment.return_value = (True, "")
+    backend.execute.return_value = 0
+    backend.load_config.return_value = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake/config.yaml"),
+        trainer_dir=Path("/fake/trainer"),
+        model_name="base",
+        dataset_file="dataset.jsonl",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a100-large",
+        timeout_hours=4.0,
+        cloud_image="unsloth/unsloth:latest",
+        hf_flavor="a100-large",
+        artifact_backend="hf_bucket",
+        artifact_identifier="professorsynapse/toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="deadbeefcafebabe",
+    )
+
+    with patch.object(runner, "_recover_existing_training", return_value=None):
+        with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+                result = runner.run(spec=spec, experiment=experiment)
+
+    assert result.status == "completed"
+    config = backend.execute.call_args.args[0]
+    assert config.pip_packages == ["unsloth==2026.4.2", "transformers==5.3.0"]
+
+
+def test_training_stage_runner_does_not_forward_evolutionary_defaults_when_disabled(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+
+    spec = ExperimentSpec(
+        name="non-evolutionary-smoke",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_only",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(
+            model_name="Qwen/Qwen3-4B",
+            max_steps=20,
+        ),
+        evaluation=EvaluationStageSpec(enabled=False),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+
+    runner = HFTrainingStageRunner(repo_root=repo_root, tracking_service=service)
+
+    backend = MagicMock()
+    backend.validate_environment.return_value = (True, "")
+    backend.execute.return_value = 0
+    backend.load_config.return_value = CloudTrainingConfig(
+        method="sft",
+        platform="hf_jobs",
+        config_path=Path("/fake/config.yaml"),
+        trainer_dir=Path("/fake/trainer"),
+        model_name="base",
+        dataset_file="dataset.jsonl",
+        epochs=1,
+        batch_size=4,
+        learning_rate=2e-4,
+        provider="hf_jobs",
+        gpu_type="a100-large",
+        timeout_hours=4.0,
+        cloud_image="unsloth/unsloth:latest",
+        hf_flavor="a100-large",
+        artifact_backend="hf_bucket",
+        artifact_identifier="professorsynapse/toolset-training-artifacts",
+        artifact_mount_path="/workspace/outputs",
+        repo_url="https://github.com/test/repo.git",
+        repo_branch="main",
+        repo_commit="deadbeefcafebabe",
+    )
+
+    with patch.object(runner, "_recover_existing_training", return_value=None):
+        with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
+            with patch("tuner.handlers.experiment_handler.TrainingBackendRegistry.get", return_value=backend):
+                result = runner.run(spec=spec, experiment=experiment)
+
+    assert result.status == "completed"
+    config = backend.execute.call_args.args[0]
+    assert config.evolutionary_enabled is False
+    assert config.evolutionary_candidates is None
+    assert config.evolutionary_eval_batch_size is None
+    assert config.evolutionary_validation_config is None
+    assert config.evolutionary_strategy is None
+    assert config.evolutionary_noise_scale is None
+    assert config.evolutionary_max_grad_norm is None
+    assert config.evolutionary_scale_factors is None
+    assert config.evolutionary_selection_method is None
+    assert config.evolutionary_min_improvement is None
+    assert config.evolutionary_min_relative_improvement is None
+    assert config.evolutionary_noise_floor_epsilon is None
+    assert config.evolutionary_eval_frequency is None
+    assert config.evolutionary_warmup_steps is None
+    assert config.evolutionary_cache_baseline is None
+    assert config.evolutionary_log_candidates is None
+    assert config.evolutionary_log_selected is None
+
+
 def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
@@ -397,6 +530,7 @@ def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_r
     assert args.with_loss is False
     assert args.loss_dataset_name is None
     assert args.loss_dataset_file is None
+    assert args.eval_pip_packages == []
 
 
 def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root):
@@ -452,6 +586,61 @@ def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root)
     assert args.loss_dataset_name == "repo/dataset"
     assert args.loss_dataset_file == "sample.jsonl"
     assert args.loss_no_completion_only is True
+
+
+def test_eval_stage_runner_forwards_stage_pip_packages(tmp_path: Path, repo_root):
+    service = TrackingService(tmp_path)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    spec = ExperimentSpec(
+        name="eval-pip-packages",
+        provider="hf_jobs",
+        method="sft",
+        objective="train_eval_smoke",
+        dataset=DatasetSpec(source="repo/dataset", file="sample.jsonl", hash="abc123"),
+        training=TrainingStageSpec(model_name="Qwen/Qwen3-4B", max_steps=20),
+        evaluation=EvaluationStageSpec(
+            enabled=True,
+            preset="quick",
+            pip_packages=["vllm==0.12.0", "transformers==5.3.0"],
+        ),
+        loss=LossStageSpec(enabled=False),
+        features=FeaturesStageSpec(enabled=False),
+    )
+    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    training = StageResult(
+        status="completed",
+        run_record=RunRecord(
+            run_id="train-run",
+            run_type="sft",
+            name="train",
+            timestamp="2026-03-23T00:00:00+00:00",
+            status="completed",
+            output_dir="hf://buckets/test/runs/hf_jobs/sft/abc",
+            model_name="Qwen/Qwen3-4B",
+            dataset_source="repo/dataset/sample.jsonl",
+            provider="hf_jobs",
+            artifact_backend="hf_bucket",
+            artifact_root="hf://buckets/test/runs/hf_jobs/sft/abc",
+            source_commit="deadbeef",
+            stage="training",
+            tags={"bucket_id": "test/toolset-training-artifacts", "artifact_prefix": "runs/hf_jobs/sft/abc"},
+        ),
+    )
+
+    with patch("tuner.handlers.experiment_handler.CloudEvalHandler") as mock_handler_cls:
+        mock_handler = MagicMock()
+        mock_handler.handle.return_value = 0
+        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
+        mock_handler.last_job_id = "eval-job"
+        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
+        mock_handler_cls.return_value = mock_handler
+
+        result = runner.run(spec=spec, experiment=experiment, previous=training)
+
+    assert result.status == "completed"
+    args = mock_handler_cls.call_args.kwargs["args"]
+    assert args.eval_pip_packages == ["vllm==0.12.0", "transformers==5.3.0"]
 
 
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):
@@ -709,7 +898,15 @@ def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path:
                     "file": "train.jsonl",
                 },
             )(),
-            "loss": type("Loss", (), {"max_seq_length": 2048, "completion_only": True})(),
+            "loss": type(
+                "Loss",
+                (),
+                {
+                    "max_seq_length": 2048,
+                    "completion_only": True,
+                    "pip_packages": ["transformers==5.3.0"],
+                },
+            )(),
             "training": type("Training", (), {"max_seq_length": 2048})(),
         },
     )()
@@ -724,6 +921,7 @@ def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path:
     assert "python3 -m shared.experiment_tracking.cloud_loss_job" in command
     assert "--dataset-name professorsynapse/claudesidian-synthetic-dataset" in command
     assert "--dataset-file train.jsonl" in command
+    assert "pip install --upgrade transformers==5.3.0" in command
 
 
 def test_experiment_handler_applies_stage_overrides_to_spec(tmp_path: Path):

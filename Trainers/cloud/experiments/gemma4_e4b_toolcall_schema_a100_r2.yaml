@@ -1,0 +1,50 @@
+experiment:
+  name: gemma4-e4b-toolcall-schema-a100-r2
+  provider: hf_jobs
+  method: sft
+  objective: maximize_toolcall_schema_reliability_before_kto
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: google/gemma-4-E4B-it
+    gpu: a100-large
+    cloud_image: unsloth/unsloth:latest
+    pip_packages:
+      - trl==0.22.2
+      - git+https://github.com/huggingface/transformers.git
+      - git+https://github.com/unslothai/unsloth_zoo.git
+      - git+https://github.com/unslothai/unsloth.git
+    batch_size: 24
+    gradient_accumulation: 2
+    learning_rate: 1.0e-4
+    num_epochs: 2
+    max_seq_length: 2048
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    lora_dropout: 0.0
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: true
+    preset: full
+    runtime: vllm
+    image_profile: fast_vllm
+    gpu: a100-large
+  loss:
+    enabled: true
+    gpu: a100-large
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv

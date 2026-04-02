@@ -139,6 +139,7 @@ docs/test_*.jsonl
 docs/test_*.review.md
 docs/test_webllm_node.mjs
 docs/webllm_test.html
+docs/research/
 
 # Archive folders (local historical snapshots)
 Datasets/archive/
