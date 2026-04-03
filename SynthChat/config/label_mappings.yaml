@@ -1,0 +1,74 @@
+# SynthChat/config/label_mappings.yaml
+# Maps environment issues and stage failures to behavioral/failure-type labels.
+# The classifier uses these rules instead of hardcoded if/elif chains.
+
+# -- Issue message -> issue label classification --
+# Each rule: if the message (lowercased) contains the `match` string, assign the `label`.
+# Rules are evaluated in order; a message can match multiple rules.
+issue_classifiers:
+  - match: "expected tool(s) not executed"
+    label: missing_expected_tool
+  - match: "no acceptable tool called"
+    label: wrong_tool_called
+  - match: "front matter"
+    label: frontmatter_missing
+  - match: "yaml front matter"
+    label: frontmatter_missing
+  - match: "expected path to exist"
+    label: path_state_mismatch
+  - match: "expected path to be absent"
+    label: path_state_mismatch
+  - match: "does not contain expected text"
+    label: content_mismatch
+  - match: "contains forbidden text"
+    label: content_mismatch
+  - match: "failed reading"
+    label: read_failure
+  - match: "is a directory"
+    label: path_type_error
+  - match: "file exists"
+    label: path_type_error
+  - match: "strict schema"
+    label: schema_error
+  - match: "missing required args"
+    label: schema_error
+  - match: "searchmanager_searchcontent"
+    label: retrieval_missing
+  - match: "searchmanager_searchdirectory"
+    label: retrieval_missing
+  - match: "clarification"
+    label: clarification_expected
+  - match: "tool '"
+    match_also: "failed:"
+    label: tool_runtime_error
+
+# -- Issue label -> behavior label rollup --
+# Groups of issue labels that map to a single behavior label.
+behavior_rollups:
+  "behavior:retrieval_failure":
+    - missing_expected_tool
+    - retrieval_missing
+  "behavior:structure_failure":
+    - frontmatter_missing
+  "behavior:tool_execution_failure":
+    - wrong_tool_called
+    - tool_runtime_error
+  "behavior:clarification_failure":
+    - clarification_expected
+
+# -- Stage failure -> failure type rollup --
+# Groups of stage names that map to a single failure_type label.
+failure_type_rollups:
+  "failure_type:environment":
+    - environment
+  "failure_type:behavior":
+    - response
+    - thinking
+  "failure_type:generation":
+    - system_prompt
+    - user
+    - system_generation
+    - user_generation
+    - assistant_generation
+    - environment_generation
+    - final

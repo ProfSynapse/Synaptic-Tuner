@@ -3,10 +3,14 @@
 Location: SynthChat/workspace/sections.py
 Purpose: Build formatted text sections (workspaces, prompts, tools, notes, etc.)
          that are composed into the full mocked workspace system prompt.
+         Tool-related rendering is config-driven via tool_call_formats.yaml.
 Usage: Called by workspace/renderer.py to construct each prompt section.
 """
 
 from typing import Any, Dict, List, Optional
+
+from ..config.format_resolver import get_default_tool_call_format
+from ..schemas.tool_response_schema import resolve_wrapper_name
 
 
 def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
@@ -45,21 +49,54 @@ def _render_available_prompts(prompts: List[Dict[str, Any]]) -> str:
     return "\n".join(lines).strip()
 
 
-def _tool_wrapper_name(tool_schema: Optional[Dict[str, Any]]) -> str:
+def _tool_wrapper_name(
+    tool_schema: Optional[Dict[str, Any]],
+    format_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Resolve the tool wrapper name.
+
+    Priority: format_config > tool_schema.tool_format.wrapper > "useTools"
+    """
+    if format_config is not None:
+        return resolve_wrapper_name(format_config, tool_schema)
+
     if not isinstance(tool_schema, dict):
         return "useTools"
     wrapper_cfg = tool_schema.get("tool_format") or {}
     return str(wrapper_cfg.get("wrapper") or "useTools").strip() or "useTools"
 
 
-def _render_available_tools(tool_schema: Optional[Dict[str, Any]]) -> str:
+def _render_available_tools(
+    tool_schema: Optional[Dict[str, Any]],
+    format_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Render available tools section.
+
+    When format_config is provided, reads the instruction line from
+    format_config["available_tools_instruction"] and substitutes
+    {context_required_csv} with the comma-separated context field list.
+    """
     if not isinstance(tool_schema, dict):
         return ""
 
-    wrapper_name = _tool_wrapper_name(tool_schema)
+    wrapper_name = _tool_wrapper_name(tool_schema, format_config)
+
+    # Build instruction line from config or hardcoded default
+    if format_config is not None:
+        instruction_template = format_config.get(
+            "available_tools_instruction",
+            "Required wrapper context fields: {context_required_csv}.",
+        )
+        ctx_fields = format_config.get("context_fields") or {}
+        context_required = ctx_fields.get("required") or []
+        context_csv = ", ".join(str(f) for f in context_required)
+        instruction = str(instruction_template).replace("{context_required_csv}", context_csv)
+    else:
+        instruction = "Required wrapper context fields: sessionId, workspaceId, memory, goal."
+
     lines: List[str] = [
         f"Use the `{wrapper_name}` wrapper for tool calls.",
-        "Required wrapper context fields: sessionId, workspaceId, memory, goal.",
+        instruction,
         "",
     ]
 

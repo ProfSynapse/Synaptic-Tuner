@@ -1,0 +1,102 @@
+# SynthChat/config/workspace_formats.yaml
+# Named workspace prompt formats.
+# Scenarios reference these by name via `workspace_format: <name>`.
+# The "default" format reproduces today's mocked_workspace_vault behavior.
+
+formats:
+  # -- Current Synaptic workspace format (backward-compatible default) --
+  default:
+    # Ordered list of sections to render. Each section is a dict with:
+    #   tag: XML tag name for wrapping
+    #   source: where to get the content (built-in renderer name or "system_context.<key>")
+    #   optional: if true, section is omitted when content is empty
+    #   template: inline text template (overrides source)
+    #   raw: if true, no XML tag wrapping
+    sections:
+      - tag: session_context
+        source: session_context
+        template: |
+          IMPORTANT: When using tools, include these values in your tool call parameters:
+
+          - sessionId: "{session_id}"
+          - workspaceId: "{workspace_id}" (current workspace)
+
+          Include these in the "context" parameter of your tool calls.
+
+      - tag: vault_structure
+        source: vault_structure
+        optional: true
+
+      - tag: available_workspaces
+        source: available_workspaces
+        optional: true
+
+      - tag: available_prompts
+        source: available_prompts
+        optional: true
+
+      - tag: available_tools
+        source: available_tools
+        optional: true
+
+      - tag: selected_workspace
+        source: selected_workspace
+        # selected_workspace has special rendering (name/id attributes on tag)
+
+      - tag: note_contents
+        source: note_contents
+        optional: true
+
+      - source: extra_sections
+
+      - source: assistant_instructions
+        raw: true  # No XML tag wrapping
+
+    # JSON structure for the selected_workspace payload
+    selected_workspace_fields:
+      - context       # Object with id, name, description, rootFolder
+      - workspaceStructure
+      - recentFiles
+      - keyFiles
+      - workflows
+      - preferences
+      - sessions
+
+    # Defaults for missing system_context values
+    defaults:
+      session_id: "session_eval_001"
+      workspace_name: "Current Workspace"
+
+  # -- Example: Coding IDE format --
+  coding_ide:
+    sections:
+      - tag: session
+        template: |
+          Session ID: {session_id}
+          Project: {project_name}
+
+      - tag: project_structure
+        source: vault_structure
+        optional: true
+
+      - tag: open_files
+        source: note_contents
+        optional: true
+
+      - tag: available_commands
+        source: available_tools
+        optional: true
+
+      - source: assistant_instructions
+        raw: true
+
+    selected_workspace_fields:
+      - context
+      - projectStructure
+      - openFiles
+      - buildConfig
+      - gitStatus
+
+    defaults:
+      session_id: "ide_session_001"
+      workspace_name: "Default Project"
