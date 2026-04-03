@@ -251,6 +251,11 @@ Examples:
         help="Override the exact cloud evaluation Docker image for cloud-eval.",
     )
     parser.add_argument(
+        "--eval-install-strategy",
+        choices=["overlay", "image_only"],
+        help="Control whether cloud-eval overlays repo eval deps on top of the image, or trusts the image runtime as-is.",
+    )
+    parser.add_argument(
         "--with-loss",
         action="store_true",
         help="For cloud-eval, also compute per-example dataset loss in the same remote job when supported.",

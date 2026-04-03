@@ -58,6 +58,7 @@ from tuner.core.exceptions import CloudProviderError
 logger = logging.getLogger(__name__)
 
 _HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
+_HF_BUCKET_SYNC_OVERLAY = "/tmp/hf-bucket-sync-site"
 _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
@@ -241,6 +242,7 @@ class CloudEvalHandler(BaseHandler):
         preset: Optional[str],
         scenarios: Optional[List[str]],
         tags: Optional[str],
+        install_strategy: str,
         pip_packages: Optional[List[str]],
         env_backend: Optional[str],
         env_template: Optional[str],
@@ -259,6 +261,9 @@ class CloudEvalHandler(BaseHandler):
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
         quoted_eval_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_PIP_PACKAGES)
+        quoted_bucket_sync_deps = " ".join(
+            shlex.quote(dep) for dep in ("huggingface_hub>=1.5.0", "hf_transfer")
+        )
         checkout_steps = build_repo_checkout_steps(
             RepoCheckoutSpec(
                 url=repo_source.url,
@@ -267,16 +272,28 @@ class CloudEvalHandler(BaseHandler):
             )
         )
         python_cmd = "$(command -v python3 || command -v python)"
+        normalized_install_strategy = str(install_strategy or "overlay").strip().lower()
+        if normalized_install_strategy not in {"overlay", "image_only"}:
+            raise CloudProviderError(
+                f"Unknown eval install strategy '{install_strategy}'. Supported values: overlay, image_only"
+            )
 
         parts = [
             *checkout_steps,
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
-            f"mkdir -p {_HF_EVAL_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+            f"mkdir -p {_HF_BUCKET_SYNC_OVERLAY}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
-            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
+            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_BUCKET_SYNC_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
+        if normalized_install_strategy == "overlay":
+            parts.extend(
+                [
+                    f"mkdir -p {_HF_EVAL_OVERLAY}",
+                    f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+                ]
+            )
         if pip_packages:
             quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in pip_packages)
             parts.append(f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_pip_packages}")
@@ -744,6 +761,7 @@ class CloudEvalHandler(BaseHandler):
             preset=preset,
             scenarios=scenarios,
             tags=tags,
+            install_strategy=getattr(self.args, "eval_install_strategy", None) or "overlay",
             pip_packages=getattr(self.args, "eval_pip_packages", None),
             env_backend=env_backend,
             env_template=env_template,
