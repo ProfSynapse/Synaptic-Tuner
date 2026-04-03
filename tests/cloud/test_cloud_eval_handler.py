@@ -179,8 +179,41 @@ def test_build_eval_command_passes_vllm_extra_args(repo_root):
         loss_completion_only=True,
     )
 
-    assert "--vllm-extra-arg" in command
-    assert "image=0 audio=0" in command
+    assert "--vllm-extra-arg=--limit-mm-per-prompt" in command
+    assert "--vllm-extra-arg=image=0 audio=0" in command
+
+
+def test_build_eval_command_escapes_flag_shaped_vllm_extra_args(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    command = handler._build_eval_command(
+        helper_module="Evaluator.cloud_hf_job_vllm",
+        bucket_id="test-user/toolset-training-artifacts",
+        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+        preset="full",
+        scenarios=None,
+        tags=None,
+        install_strategy="image_only",
+        pip_packages=None,
+        vllm_extra_args=["--reasoning-parser", "qwen3", "--language-model-only"],
+        env_backend="none",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
+        upload_to_hf=None,
+        update_model_card=False,
+        with_loss=False,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=None,
+        loss_completion_only=True,
+    )
+
+    assert "--vllm-extra-arg=--reasoning-parser" in command
+    assert "--vllm-extra-arg=qwen3" in command
+    assert "--vllm-extra-arg=--language-model-only" in command
 
 
 def test_list_remote_runs_sorts_newest_first(repo_root, clean_env):

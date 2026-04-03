@@ -347,7 +347,9 @@ class CloudEvalHandler(BaseHandler):
                 eval_cmd.append("--loss-no-completion-only")
         if helper_module == "Evaluator.cloud_hf_job_vllm" and vllm_extra_args:
             for extra_arg in vllm_extra_args:
-                eval_cmd.extend(["--vllm-extra-arg", extra_arg])
+                # Use --flag=value form so passthrough args that themselves start
+                # with "-" are not re-parsed as top-level CLI options.
+                eval_cmd.append(f"--vllm-extra-arg={extra_arg}")
 
         parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
         return " && ".join(parts)
