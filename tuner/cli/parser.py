@@ -256,6 +256,12 @@ Examples:
         help="Control whether cloud-eval overlays repo eval deps on top of the image, or trusts the image runtime as-is.",
     )
     parser.add_argument(
+        "--eval-pip-package",
+        action="append",
+        dest="eval_pip_packages",
+        help="Additional pip package pin(s) to install inside the cloud eval job. Can be repeated.",
+    )
+    parser.add_argument(
         "--with-loss",
         action="store_true",
         help="For cloud-eval, also compute per-example dataset loss in the same remote job when supported.",
