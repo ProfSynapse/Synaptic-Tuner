@@ -298,6 +298,9 @@ def resolve_cloud_image(
 
 # Fallback project deps if cloud_config.yaml is missing or has no deps section
 _DEFAULT_PROJECT_DEPS = ["pyyaml", "wandb", "hf_transfer", "python-dotenv", "rich"]
+_GITHUB_REPO_URL_REWRITES = {
+    "https://github.com/ProfSynapse/Toolset-Training": "https://github.com/ProfSynapse/Synaptic-Tuner",
+}
 
 
 def load_project_deps(cloud_config_path: Optional[Path] = None) -> list[str]:
@@ -327,6 +330,17 @@ def load_project_deps(cloud_config_path: Optional[Path] = None) -> list[str]:
         return list(_DEFAULT_PROJECT_DEPS)
 
 
+def _normalize_repo_url(url: str) -> str:
+    cleaned = str(url or "").strip()
+    if not cleaned:
+        return cleaned
+
+    suffix = ".git" if cleaned.endswith(".git") else ""
+    base = cleaned[:-4] if suffix else cleaned
+    rewritten = _GITHUB_REPO_URL_REWRITES.get(base, base)
+    return f"{rewritten}{suffix}" if suffix else rewritten
+
+
 def resolve_repo_url() -> str:
     """
     Get the repository URL for code sync to cloud jobs.
@@ -342,7 +356,7 @@ def resolve_repo_url() -> str:
     """
     url = os.environ.get("CLOUD_REPO_URL")
     if url:
-        return url
+        return _normalize_repo_url(url)
 
     try:
         result = subprocess.run(
@@ -352,7 +366,7 @@ def resolve_repo_url() -> str:
             timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            return _normalize_repo_url(result.stdout.strip())
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
@@ -378,6 +392,7 @@ def resolve_repo_source(repo_root: Path) -> RepoSource:
     if not url:
         url_result = _run_git(repo_root, ["remote", "get-url", "origin"])
         url = url_result.stdout.strip() if url_result.returncode == 0 else ""
+    url = _normalize_repo_url(url)
     if not url:
         raise CloudProviderError(
             "Cannot determine repo URL for cloud code sync. "

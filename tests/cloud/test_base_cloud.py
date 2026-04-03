@@ -91,6 +91,14 @@ class TestResolveRepoUrl:
                     return_value=mock_result):
             assert resolve_repo_url() == "https://github.com/fallback/repo.git"
 
+    def test_canonicalizes_moved_github_repo(self, clean_env):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "https://github.com/ProfSynapse/Toolset-Training.git\n"
+
+        with patch("tuner.backends.training.cloud.base_cloud.subprocess.run", return_value=mock_result):
+            assert resolve_repo_url() == "https://github.com/ProfSynapse/Synaptic-Tuner.git"
+
     def test_raises_when_no_url_available(self, clean_env):
         mock_result = MagicMock()
         mock_result.returncode = 1

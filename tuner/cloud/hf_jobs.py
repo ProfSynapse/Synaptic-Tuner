@@ -13,6 +13,11 @@ from shared.utilities.env import get_env_var, get_hf_token
 from tuner.core.exceptions import CloudProviderError
 
 
+_GITHUB_REPO_URL_REWRITES = {
+    "https://github.com/ProfSynapse/Toolset-Training": "https://github.com/ProfSynapse/Synaptic-Tuner",
+}
+
+
 @dataclass(frozen=True)
 class RepoCheckoutSpec:
     """Exact repository source needed to reproduce a cloud job."""
@@ -117,10 +122,11 @@ def build_repo_checkout_steps(repo: RepoCheckoutSpec) -> List[str]:
         raise CloudProviderError("Cloud jobs require exact repo source metadata.")
 
     quoted_branch = shlex.quote(repo.branch)
-    quoted_url = shlex.quote(repo.url)
+    normalized_url = _normalize_github_repo_url(repo.url)
+    quoted_url = shlex.quote(normalized_url)
     quoted_commit = shlex.quote(repo.commit)
     quoted_dir = shlex.quote(repo.clone_dir)
-    archive_url = _github_archive_url(repo.url, repo.commit)
+    archive_url = _github_archive_url(normalized_url, repo.commit)
     python_cmd = _shell_python_command()
     if archive_url:
         clone_or_download = (
@@ -154,7 +160,7 @@ def build_repo_checkout_steps(repo: RepoCheckoutSpec) -> List[str]:
 
 def _github_archive_url(repo_url: str, commit: str) -> Optional[str]:
     """Return a tarball URL for GitHub repos, or None when unsupported."""
-    cleaned = str(repo_url or "").strip()
+    cleaned = _normalize_github_repo_url(repo_url)
     if cleaned.endswith(".git"):
         cleaned = cleaned[:-4]
     parsed = urlparse(cleaned)
@@ -164,6 +170,16 @@ def _github_archive_url(repo_url: str, commit: str) -> Optional[str]:
     if path.count("/") != 1:
         return None
     return f"https://github.com/{path}/archive/{commit}.tar.gz"
+
+
+def _normalize_github_repo_url(repo_url: str) -> str:
+    cleaned = str(repo_url or "").strip()
+    if not cleaned:
+        return cleaned
+    suffix = ".git" if cleaned.endswith(".git") else ""
+    base = cleaned[:-4] if suffix else cleaned
+    rewritten = _GITHUB_REPO_URL_REWRITES.get(base, base)
+    return f"{rewritten}{suffix}" if suffix else rewritten
 
 
 def _shell_python_command() -> str:

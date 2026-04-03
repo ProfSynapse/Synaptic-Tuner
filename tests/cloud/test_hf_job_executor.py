@@ -36,6 +36,19 @@ def test_build_repo_checkout_steps_pins_exact_commit():
     )
 
 
+def test_build_repo_checkout_steps_canonicalizes_moved_github_repo():
+    steps = build_repo_checkout_steps(
+        RepoCheckoutSpec(
+            url="https://github.com/ProfSynapse/Toolset-Training.git",
+            branch="main",
+            commit="abc12345def67890",
+        )
+    )
+
+    assert "https://github.com/ProfSynapse/Synaptic-Tuner.git" in steps[0]
+    assert "https://github.com/ProfSynapse/Synaptic-Tuner/archive/abc12345def67890.tar.gz" in steps[0]
+
+
 def test_format_timeout_hours_normalizes_integers_and_floats():
     assert format_timeout_hours(4.0) == "4h"
     assert format_timeout_hours(2.5) == "2.5h"
