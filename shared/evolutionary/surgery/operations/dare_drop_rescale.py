@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 import torch
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import DAREConfig, OperationResult, SurgeryConfig
 from ..registry import register_operation
 from ..utils import copy_adapter, load_all_weights, save_all_weights
 
@@ -34,8 +34,9 @@ class DAREDropRescaleOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
+        op_config: DAREConfig = config.dare_config
         weights = load_all_weights(adapter_path)
 
         best_score = baseline_score
@@ -44,7 +45,7 @@ class DAREDropRescaleOperation:
         variants_tried = 0
         details: Dict[str, Any] = {"dare_scores": {}}
 
-        for drop_rate in config.dare_drop_rates:
+        for drop_rate in op_config.drop_rates:
             # Clamp drop_rate to [0.0, 0.99] to prevent division by zero
             if drop_rate >= 1.0:
                 logger.warning(

@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 import torch
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import OperationResult, SVDRankReductionConfig, SurgeryConfig
 from ..registry import register_operation
 from ..utils import (
     copy_adapter,
@@ -42,8 +42,9 @@ class SVDRankReductionOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
+        op_config: SVDRankReductionConfig = config.svd_rank_reduction_config
         weights = load_all_weights(adapter_path)
         adapter_config = load_adapter_config(adapter_path)
         original_rank = adapter_config.get("r", adapter_config.get("lora_rank", 16))
@@ -79,7 +80,7 @@ class SVDRankReductionOperation:
         variants_tried = 0
         details: Dict[str, Any] = {"svd_scores": {}}
 
-        for fraction in config.svd_rank_fractions:
+        for fraction in op_config.rank_fractions:
             new_rank = max(1, int(round(original_rank * fraction)))
             if new_rank >= original_rank:
                 continue

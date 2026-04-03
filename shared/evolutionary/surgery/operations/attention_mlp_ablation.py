@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 import torch
 
@@ -40,7 +40,7 @@ class AttentionMLPAblationOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
         weights = load_all_weights(adapter_path)
 

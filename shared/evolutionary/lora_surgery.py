@@ -1,6 +1,17 @@
 """
 Backward compatibility shim for LoRA Weight Surgery.
 
+.. deprecated::
+    This module is a backward-compatibility shim. New code should import
+    directly from ``shared.evolutionary.surgery`` instead::
+
+        from shared.evolutionary.surgery import LoRASurgeon, SurgeryConfig
+        from shared.evolutionary.surgery.utils import copy_adapter, load_all_weights
+
+    The underscore-prefixed helper aliases (``_load_all_weights``,
+    ``_copy_adapter``, etc.) are deprecated. Use the public names from
+    ``shared.evolutionary.surgery.utils`` directly.
+
 Location: shared/evolutionary/lora_surgery.py
 Purpose: Re-export all public symbols from the new surgery/ package so
          existing consumers (surgery_handler, tests) continue to work

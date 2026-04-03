@@ -8,7 +8,17 @@ Used by: shared/evolutionary/lora_surgery.py (backward-compat shim),
          tuner/handlers/surgery_handler.py, tests.
 """
 
-from .config import OperationResult, SurgeryConfig, SurgeryResult
+from .config import (
+    AlphaSweepConfig,
+    CheckpointInterpolationConfig,
+    DAREConfig,
+    LayerScalingConfig,
+    MetricsWeightedMergeConfig,
+    OperationResult,
+    SVDRankReductionConfig,
+    SurgeryConfig,
+    SurgeryResult,
+)
 from .registry import get_operation, list_operations, register_operation
 from .surgeon import LoRASurgeon
 from .base import SurgeryOperation
@@ -23,6 +33,13 @@ __all__ = [
     "SurgeryResult",
     "OperationResult",
     "SurgeryOperation",
+    # Per-operation config types
+    "AlphaSweepConfig",
+    "LayerScalingConfig",
+    "DAREConfig",
+    "CheckpointInterpolationConfig",
+    "SVDRankReductionConfig",
+    "MetricsWeightedMergeConfig",
     # Registry API
     "get_operation",
     "list_operations",

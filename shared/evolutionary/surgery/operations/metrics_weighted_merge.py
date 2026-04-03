@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 import torch
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import MetricsWeightedMergeConfig, OperationResult, SurgeryConfig
 from ..registry import register_operation
 from ..utils import copy_adapter, load_all_weights, save_all_weights, softmax
 
@@ -34,10 +34,11 @@ class MetricsWeightedMergeOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
-        paths = config.checkpoint_paths
-        scores = config.checkpoint_scores
+        op_config: MetricsWeightedMergeConfig = config.metrics_weighted_merge_config
+        paths = op_config.checkpoint_paths
+        scores = op_config.checkpoint_scores
 
         if len(paths) < 2 or len(paths) != len(scores):
             return OperationResult(

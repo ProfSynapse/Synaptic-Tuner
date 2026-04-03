@@ -128,3 +128,47 @@ def test_prepare_sft_dataset_truncates_overlong_examples_deterministically():
     row = prepared_dataset[0]
     assert len(row["input_ids"]) <= 32
     assert len(row["input_ids"]) == len(row["labels"])
+
+
+# ---------------------------------------------------------------------------
+# Negative-path tests for error branches in shared/sft_preprocessing.py
+# ---------------------------------------------------------------------------
+
+def test_normalize_rejects_example_without_messages_or_prompt_completion():
+    """Should raise ValueError when example has no messages, conversations, or prompt/completion."""
+    from shared.sft_preprocessing import normalize_sft_messages
+
+    with pytest.raises(ValueError, match="must provide messages/conversations or prompt/completion"):
+        normalize_sft_messages({"some_other_key": "value"})
+
+
+def test_normalize_rejects_unsupported_prompt_shape():
+    """Should raise ValueError when prompt is an unsupported type (e.g., int)."""
+    from shared.sft_preprocessing import normalize_sft_messages
+
+    with pytest.raises(ValueError, match="Unsupported prompt shape"):
+        normalize_sft_messages({"prompt": 42, "completion": "answer"})
+
+
+def test_normalize_rejects_unsupported_completion_shape():
+    """Should raise ValueError when completion is an unsupported type (e.g., int)."""
+    from shared.sft_preprocessing import normalize_sft_messages
+
+    with pytest.raises(ValueError, match="Unsupported completion shape"):
+        normalize_sft_messages({"prompt": "question", "completion": 42})
+
+
+def test_materialize_rejects_unsupported_tool_call_mode():
+    """Should raise ValueError for unsupported tool_call_mode."""
+    normalized = preprocessing.normalize_sft_example(
+        {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
+    )
+
+    with pytest.raises(ValueError, match="Unsupported tool_call_mode"):
+        preprocessing.materialize_sft_features(
+            normalized,
+            tokenizer=_FakeTokenizer(),
+            max_seq_length=128,
+            loss_mask_mode="assistant_only",
+            tool_call_mode="unsupported_mode",
+        )

@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # Environment bootstrap — must run before importing torch/unsloth/transformers
 # Skip Windows patches (GRPO exits on Windows above)
 from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging  # noqa: E402
+from shared.training_utils import setup_wandb  # noqa: E402
 
 init_trainer_env(apply_windows_patches=False)
 
@@ -72,9 +73,6 @@ def load_config(config_path: str | None = None) -> dict:
         config_path = str(Path(__file__).parent / "configs" / "config.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-from shared.training_utils import setup_wandb  # noqa: E402
 
 
 def _detect_chat_template(model_name: str) -> str:

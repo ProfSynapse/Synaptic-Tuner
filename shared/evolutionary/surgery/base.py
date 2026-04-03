@@ -8,7 +8,7 @@ Used by: All operation classes in surgery/operations/, LoRASurgeon orchestrator.
 
 from __future__ import annotations
 
-from typing import Callable, Protocol, TYPE_CHECKING
+from typing import Awaitable, Callable, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import OperationResult, SurgeryConfig
@@ -30,7 +30,7 @@ class SurgeryOperation(Protocol):
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
         """Run the operation and return the result."""
         ...

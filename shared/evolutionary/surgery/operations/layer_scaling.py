@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import LayerScalingConfig, OperationResult, SurgeryConfig
 from ..registry import register_operation
 from ..utils import (
     copy_adapter,
@@ -37,8 +37,9 @@ class LayerScalingOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
+        op_config: LayerScalingConfig = config.layer_scaling_config
         weights = load_all_weights(adapter_path)
         layer_indices = get_layer_indices(list(weights.keys()))
 
@@ -61,7 +62,7 @@ class LayerScalingOperation:
 
         for layer_idx in layer_indices:
             layer_pattern = f"layers.{layer_idx}."
-            for scale in config.layer_scales:
+            for scale in op_config.scales:
                 variant_dir = os.path.join(
                     work_dir, f"layer{layer_idx}_scale{scale}"
                 )

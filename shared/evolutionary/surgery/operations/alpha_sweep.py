@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import AlphaSweepConfig, OperationResult, SurgeryConfig
 from ..registry import register_operation
 from ..utils import copy_adapter, load_adapter_config, save_adapter_config
 
@@ -32,8 +32,9 @@ class AlphaSweepOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
+        op_config: AlphaSweepConfig = config.alpha_sweep_config
         original_config = load_adapter_config(adapter_path)
         current_alpha = original_config.get("lora_alpha", 16)
         best_score = baseline_score
@@ -42,7 +43,7 @@ class AlphaSweepOperation:
         variants_tried = 0
         details: Dict[str, Any] = {"alpha_scores": {}}
 
-        for mult in config.alpha_multipliers:
+        for mult in op_config.multipliers:
             new_alpha = int(round(current_alpha * mult))
             if new_alpha == current_alpha:
                 continue

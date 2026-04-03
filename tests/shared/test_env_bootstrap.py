@@ -23,12 +23,16 @@ from shared.env_bootstrap import (
 class TestInitTrainerEnv:
     """Test init_trainer_env() with different flag combinations."""
 
+    _TORCH_VARS = ("TORCH_COMPILE_DISABLE", "TORCHDYNAMO_DISABLE", "PYTORCH_JIT")
+
+    @pytest.fixture(autouse=True)
+    def _clean_torch_env(self, monkeypatch):
+        """Remove torch compile env vars before each test; monkeypatch restores on teardown."""
+        for var in self._TORCH_VARS:
+            monkeypatch.delenv(var, raising=False)
+
     def test_default_flags_set_env_vars(self):
         """Default call should set torch compile env vars."""
-        # Clear any pre-existing values
-        for var in ("TORCH_COMPILE_DISABLE", "TORCHDYNAMO_DISABLE", "PYTORCH_JIT"):
-            os.environ.pop(var, None)
-
         init_trainer_env(
             apply_windows_patches=False,
             load_dotenv=False,
@@ -42,9 +46,6 @@ class TestInitTrainerEnv:
 
     def test_disable_torch_compile_false_skips_env_vars(self):
         """When disable_torch_compile=False, env vars should NOT be set."""
-        for var in ("TORCH_COMPILE_DISABLE", "TORCHDYNAMO_DISABLE", "PYTORCH_JIT"):
-            os.environ.pop(var, None)
-
         init_trainer_env(
             disable_torch_compile=False,
             apply_windows_patches=False,
@@ -57,9 +58,9 @@ class TestInitTrainerEnv:
         assert "TORCHDYNAMO_DISABLE" not in os.environ
         assert "PYTORCH_JIT" not in os.environ
 
-    def test_setdefault_does_not_overwrite(self):
+    def test_setdefault_does_not_overwrite(self, monkeypatch):
         """setdefault should preserve existing env var values."""
-        os.environ["TORCH_COMPILE_DISABLE"] = "0"
+        monkeypatch.setenv("TORCH_COMPILE_DISABLE", "0")
 
         init_trainer_env(
             apply_windows_patches=False,
@@ -70,13 +71,9 @@ class TestInitTrainerEnv:
 
         # Should keep the existing "0", not overwrite to "1"
         assert os.environ["TORCH_COMPILE_DISABLE"] == "0"
-        # Cleanup
-        os.environ.pop("TORCH_COMPILE_DISABLE", None)
 
     def test_all_flags_false_is_noop(self):
         """All flags False should do nothing."""
-        env_snapshot = dict(os.environ)
-
         init_trainer_env(
             disable_torch_compile=False,
             apply_windows_patches=False,
@@ -85,10 +82,9 @@ class TestInitTrainerEnv:
             utf8_output=False,
         )
 
-        # No new env vars introduced by torch compile
-        for var in ("TORCH_COMPILE_DISABLE", "TORCHDYNAMO_DISABLE", "PYTORCH_JIT"):
-            if var not in env_snapshot:
-                assert var not in os.environ
+        # Vars were removed by autouse fixture; should still be absent
+        for var in self._TORCH_VARS:
+            assert var not in os.environ
 
     def test_load_dotenv_without_dotenv_installed(self):
         """load_dotenv=True should silently pass if dotenv not installed."""

@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 import torch
 
-from ..config import OperationResult, SurgeryConfig
+from ..config import CheckpointInterpolationConfig, OperationResult, SurgeryConfig
 from ..registry import register_operation
 from ..utils import copy_adapter, load_all_weights, save_all_weights
 
@@ -34,9 +34,10 @@ class CheckpointInterpolationOperation:
         baseline_score: float,
         work_dir: str,
         config: SurgeryConfig,
-        evaluate_fn: Callable[[str], float],
+        evaluate_fn: Callable[[str], Awaitable[float]],
     ) -> OperationResult:
-        other_path = config.other_checkpoint_path
+        op_config: CheckpointInterpolationConfig = config.checkpoint_interpolation_config
+        other_path = op_config.other_checkpoint_path
 
         if not other_path or not os.path.isdir(other_path):
             return OperationResult(
@@ -61,7 +62,7 @@ class CheckpointInterpolationOperation:
         variants_tried = 0
         details: Dict[str, Any] = {"blend_scores": {}}
 
-        for ratio in config.blend_ratios:
+        for ratio in op_config.blend_ratios:
             variant_dir = os.path.join(work_dir, f"blend_{ratio:.2f}")
             copy_adapter(adapter_path, variant_dir)
 
