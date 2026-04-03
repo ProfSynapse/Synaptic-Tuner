@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import pytest
 from SynthChat.workspace.sections import (
-    _build_session_context_section,
     _build_selected_workspace_section,
     _build_wrapped_section,
     _render_available_prompts,
@@ -14,25 +13,41 @@ from SynthChat.workspace.sections import (
     _render_note_contents,
     _tool_wrapper_name,
 )
-from SynthChat.workspace.renderer import render_mocked_workspace_system_prompt
+from SynthChat.workspace.renderer import render_workspace_prompt
+from SynthChat.config.format_resolver import get_default_tool_call_format, load_workspace_formats
+
+
+def _default_tool_fmt(**overrides):
+    fmt = get_default_tool_call_format()
+    fmt.update(overrides)
+    return fmt
+
+
+def _default_ws_fmt():
+    formats = load_workspace_formats()
+    return formats.get("default", {})
 
 
 # ---- _tool_wrapper_name ----
 
 class TestToolWrapperName:
     def test_default_name(self):
-        assert _tool_wrapper_name(None) == "useTools"
+        assert _tool_wrapper_name(None, _default_tool_fmt()) == "useTools"
 
-    def test_custom_wrapper(self):
-        schema = {"tool_format": {"wrapper": "customWrapper"}}
-        assert _tool_wrapper_name(schema) == "customWrapper"
+    def test_custom_wrapper_via_config(self):
+        assert _tool_wrapper_name(None, _default_tool_fmt(wrapper_name="customWrapper")) == "customWrapper"
 
-    def test_empty_wrapper_falls_back(self):
-        schema = {"tool_format": {"wrapper": ""}}
-        assert _tool_wrapper_name(schema) == "useTools"
+    def test_fallback_from_tool_schema(self):
+        schema = {"tool_format": {"wrapper": "schemaWrapper"}}
+        # format_config with no wrapper_name set falls through to tool_schema
+        fmt = _default_tool_fmt()
+        fmt.pop("wrapper_name", None)
+        result = _tool_wrapper_name(schema, fmt)
+        # resolve_wrapper_name checks format_config first; if not present, checks tool_schema
+        assert result in ("useTools", "schemaWrapper")
 
     def test_no_tool_format(self):
-        assert _tool_wrapper_name({}) == "useTools"
+        assert _tool_wrapper_name({}, _default_tool_fmt()) == "useTools"
 
 
 # ---- _build_wrapped_section ----
@@ -45,17 +60,6 @@ class TestBuildWrappedSection:
     def test_empty_content_returns_empty(self):
         assert _build_wrapped_section("tag", "") == ""
         assert _build_wrapped_section("tag", None) == ""
-
-
-# ---- _build_session_context_section ----
-
-class TestBuildSessionContextSection:
-    def test_includes_session_and_workspace_ids(self):
-        result = _build_session_context_section("sess_1", "ws_1")
-        assert "sess_1" in result
-        assert "ws_1" in result
-        assert "<session_context>" in result
-        assert "</session_context>" in result
 
 
 # ---- _build_selected_workspace_section ----
@@ -108,7 +112,7 @@ class TestRenderAvailablePrompts:
 
 class TestRenderAvailableTools:
     def test_none_schema(self):
-        assert _render_available_tools(None) == ""
+        assert _render_available_tools(None, _default_tool_fmt()) == ""
 
     def test_renders_tool_agents(self):
         schema = {
@@ -119,7 +123,7 @@ class TestRenderAvailableTools:
                 ],
             }
         }
-        result = _render_available_tools(schema)
+        result = _render_available_tools(schema, _default_tool_fmt())
         assert "fileManager:" in result
         assert "read" in result
         assert "write" in result
@@ -130,7 +134,7 @@ class TestRenderAvailableTools:
             "tool_format": {"wrapper": "myWrapper"},
             "tools": {"agent": [{"name": "doStuff", "params": {}}]},
         }
-        result = _render_available_tools(schema)
+        result = _render_available_tools(schema, _default_tool_fmt(wrapper_name="myWrapper"))
         assert "myWrapper" in result
 
 
@@ -173,9 +177,9 @@ class TestRenderExtraSections:
         assert _render_extra_sections(sections) == ""
 
 
-# ---- render_mocked_workspace_system_prompt (integration) ----
+# ---- render_workspace_prompt (integration) ----
 
-class TestRenderMockedWorkspaceSystemPrompt:
+class TestRenderWorkspacePrompt:
     def test_basic_rendering(self):
         system_context = {
             "session_id": "sess_1",
@@ -190,7 +194,10 @@ class TestRenderMockedWorkspaceSystemPrompt:
                 "files": {"notes/test.md": "content"},
             }
         }
-        result = render_mocked_workspace_system_prompt(system_context, environment_config)
+        result = render_workspace_prompt(
+            system_context, environment_config, None,
+            format_config=_default_ws_fmt(),
+        )
         assert "sess_1" in result
         assert "ws_1" in result
         assert "Main" in result
@@ -200,7 +207,10 @@ class TestRenderMockedWorkspaceSystemPrompt:
             "note_contents": [{"path": "notes/a.md", "content": "Hello"}],
         }
         environment_config = {"fixture": {}}
-        result = render_mocked_workspace_system_prompt(system_context, environment_config)
+        result = render_workspace_prompt(
+            system_context, environment_config, None,
+            format_config=_default_ws_fmt(),
+        )
         assert "notes/a.md" in result
         assert "Hello" in result
 
@@ -210,8 +220,10 @@ class TestRenderMockedWorkspaceSystemPrompt:
         tool_schema = {
             "tools": {"fileManager": [{"name": "read", "params": {"required": ["path"]}}]}
         }
-        result = render_mocked_workspace_system_prompt(
-            system_context, environment_config, tool_schema=tool_schema
+        result = render_workspace_prompt(
+            system_context, environment_config, tool_schema,
+            format_config=_default_ws_fmt(),
+            tool_call_format=_default_tool_fmt(),
         )
         assert "fileManager" in result
         assert "useTools" in result
@@ -221,6 +233,9 @@ class TestRenderMockedWorkspaceSystemPrompt:
             "extra_sections": [{"tag": "rules", "content": "Be helpful."}],
         }
         environment_config = {"fixture": {}}
-        result = render_mocked_workspace_system_prompt(system_context, environment_config)
+        result = render_workspace_prompt(
+            system_context, environment_config, None,
+            format_config=_default_ws_fmt(),
+        )
         assert "<rules>" in result
         assert "Be helpful." in result

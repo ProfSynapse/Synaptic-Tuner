@@ -167,17 +167,3 @@ def find_lora_pairs(
     return pairs
 
 
-# Backward-compat aliases (underscore-prefixed names used by tests and shim)
-_check_dependencies = check_dependencies
-_load_adapter_config = load_adapter_config
-_save_adapter_config = save_adapter_config
-_find_safetensor_files = find_safetensor_files
-_load_all_weights = load_all_weights
-_save_all_weights = save_all_weights
-_copy_adapter = copy_adapter
-_get_layer_indices = get_layer_indices
-_get_module_types = get_module_types
-_is_attention_key = is_attention_key
-_is_mlp_key = is_mlp_key
-_softmax = softmax
-_find_lora_pairs = find_lora_pairs

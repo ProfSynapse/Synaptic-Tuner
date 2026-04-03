@@ -47,7 +47,7 @@ def _build_wrapper_schema(
     allowed_tools: List[str],
     context_overrides: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Build schema for wrapper-style tool calls (e.g. useTools)."""
+    """Build schema for wrapper-style tool calls (single function wrapping multiple calls)."""
     agent_enum = sorted({t.split("_", 1)[0] for t in allowed_tools}) if allowed_tools else []
     tool_enum = sorted({t.split("_", 1)[1] for t in allowed_tools}) if allowed_tools else []
 
@@ -233,7 +233,7 @@ def build_tool_generation_prompt(
 
     Performs {placeholder} substitution for {wrapper_name} and {allowed_tools_csv}.
     """
-    wrapper_name = format_config.get("wrapper_name") or "useTools"
+    wrapper_name = format_config.get("wrapper_name") or ""
     instructions = format_config.get("generation_instructions") or []
 
     lines = []
@@ -263,7 +263,8 @@ def resolve_wrapper_name(
 ) -> str:
     """Resolve wrapper function name.
 
-    Priority: format_config["wrapper_name"] > tool_schema.tool_format.wrapper > "useTools"
+    Priority: format_config["wrapper_name"] > tool_schema.tool_format.wrapper > ""
+    Returns empty string when no wrapper is configured (native tool-call mode).
     """
     wrapper = format_config.get("wrapper_name")
     if wrapper:
@@ -275,69 +276,7 @@ def resolve_wrapper_name(
         if wrapper:
             return wrapper
 
-    return "useTools"
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible wrappers (existing public API)
-# ---------------------------------------------------------------------------
-
-def _build_use_tools_response_schema(
-    wrapper_name: str = "useTools",
-    allowed_tools: Optional[List[str]] = None,
-    session_id: Optional[str] = None,
-    workspace_id: Optional[str] = None,
-    format_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Backward-compatible wrapper around build_tool_response_schema.
-
-    Existing callers can use the same signature. New callers should pass format_config
-    to use the full config-driven behavior.
-    """
-    if format_config is None:
-        format_config = get_default_tool_call_format()
-
-    # Override wrapper_name in format_config if explicitly provided and different from default
-    if wrapper_name != "useTools" or format_config.get("wrapper_name") != wrapper_name:
-        format_config = dict(format_config)
-        format_config["wrapper_name"] = wrapper_name
-
-    context_overrides = {}
-    if session_id:
-        context_overrides["sessionId"] = session_id
-    if workspace_id:
-        context_overrides["workspaceId"] = workspace_id
-
-    return build_tool_response_schema(
-        format_config=format_config,
-        allowed_tools=allowed_tools,
-        context_overrides=context_overrides,
-    )
-
-
-def _build_use_tools_generation_prompt(
-    *,
-    base_prompt: str,
-    wrapper_name: str,
-    allowed_tools: List[str],
-    format_config: Optional[Dict[str, Any]] = None,
-) -> str:
-    """Backward-compatible wrapper around build_tool_generation_prompt.
-
-    Existing callers can use the same keyword-only signature.
-    """
-    if format_config is None:
-        format_config = get_default_tool_call_format()
-
-    if wrapper_name != format_config.get("wrapper_name"):
-        format_config = dict(format_config)
-        format_config["wrapper_name"] = wrapper_name
-
-    return build_tool_generation_prompt(
-        format_config=format_config,
-        base_prompt=base_prompt,
-        allowed_tools=allowed_tools,
-    )
+    return ""
 
 
 # ---------------------------------------------------------------------------

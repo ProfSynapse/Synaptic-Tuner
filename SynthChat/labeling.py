@@ -12,8 +12,6 @@ Usage: Called by SynthChatGenerator._build_metadata_labels (generator.py)
 import re
 from typing import Any, Dict, List, Optional
 
-from .config.format_resolver import get_default_label_mappings
-
 
 def _slugify_label(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
@@ -22,7 +20,7 @@ def _slugify_label(value: str) -> str:
 
 def _classify_environment_issue(
     message: str,
-    classifiers: Optional[List[Dict[str, str]]] = None,
+    classifiers: List[Dict[str, str]],
 ) -> List[str]:
     """Classify an environment issue message into labels.
 
@@ -30,14 +28,10 @@ def _classify_environment_issue(
         message: The issue message text.
         classifiers: List of classifier rules from label_mappings config.
             Each rule has 'match', optional 'match_also', and 'label'.
-            Falls back to built-in defaults if None.
     """
     text = str(message or "").strip().lower()
     if not text:
         return []
-
-    if classifiers is None:
-        classifiers = get_default_label_mappings()["issue_classifiers"]
 
     labels = set()
     for rule in classifiers:
@@ -105,16 +99,14 @@ def build_metadata_labels(
     stage_failures: List[str],
     environment_trace: Optional[Dict[str, Any]],
     generated_environment: Dict[str, Any],
-    label_mappings: Optional[Dict[str, Any]] = None,
+    label_mappings: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build structured labels for downstream filtering and KTO/GRPO slicing.
 
     Args:
         label_mappings: Config dict with keys issue_classifiers, behavior_rollups,
-            failure_type_rollups. Falls back to built-in defaults if None.
+            failure_type_rollups.
     """
-    if label_mappings is None:
-        label_mappings = get_default_label_mappings()
 
     classifiers = label_mappings.get("issue_classifiers", [])
     behavior_rollups = label_mappings.get("behavior_rollups", {})

@@ -28,17 +28,17 @@ from shared.evolutionary.lora_surgery import (
     OperationResult,
     SurgeryConfig,
     SurgeryResult,
-    _copy_adapter,
-    _find_lora_pairs,
-    _get_layer_indices,
-    _get_module_types,
-    _is_attention_key,
-    _is_mlp_key,
-    _load_adapter_config,
-    _load_all_weights,
-    _save_adapter_config,
-    _save_all_weights,
-    _softmax,
+    copy_adapter,
+    find_lora_pairs,
+    get_layer_indices,
+    get_module_types,
+    is_attention_key,
+    is_mlp_key,
+    load_adapter_config,
+    load_all_weights,
+    save_adapter_config,
+    save_all_weights,
+    softmax,
 )
 from shared.evolutionary.surgery.registry import get_operation
 
@@ -205,89 +205,89 @@ surgery:
 # ---------------------------------------------------------------------------
 
 class TestHelpers:
-    def test_get_layer_indices(self):
+    def testget_layer_indices(self):
         keys = [
             "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight",
             "base_model.model.model.layers.0.self_attn.q_proj.lora_B.weight",
             "base_model.model.model.layers.3.self_attn.q_proj.lora_A.weight",
             "base_model.model.model.layers.7.mlp.gate_proj.lora_A.weight",
         ]
-        assert _get_layer_indices(keys) == [0, 3, 7]
+        assert get_layer_indices(keys) == [0, 3, 7]
 
     def test_get_layer_indices_empty(self):
-        assert _get_layer_indices([]) == []
-        assert _get_layer_indices(["some.random.key"]) == []
+        assert get_layer_indices([]) == []
+        assert get_layer_indices(["some.random.key"]) == []
 
-    def test_get_module_types(self):
+    def testget_module_types(self):
         keys = [
             "layers.0.self_attn.q_proj.lora_A.weight",
             "layers.0.self_attn.k_proj.lora_B.weight",
             "layers.0.mlp.gate_proj.lora_A.weight",
         ]
-        types = _get_module_types(keys)
+        types = get_module_types(keys)
         assert "q_proj" in types
         assert "k_proj" in types
         assert "gate_proj" in types
 
-    def test_is_attention_key(self):
-        assert _is_attention_key("layers.0.self_attn.q_proj.lora_A.weight")
-        assert _is_attention_key("layers.0.self_attn.k_proj.lora_B.weight")
-        assert _is_attention_key("layers.0.self_attn.v_proj.lora_A.weight")
-        assert _is_attention_key("layers.0.self_attn.o_proj.lora_A.weight")
-        assert not _is_attention_key("layers.0.mlp.gate_proj.lora_A.weight")
+    def testis_attention_key(self):
+        assert is_attention_key("layers.0.self_attn.q_proj.lora_A.weight")
+        assert is_attention_key("layers.0.self_attn.k_proj.lora_B.weight")
+        assert is_attention_key("layers.0.self_attn.v_proj.lora_A.weight")
+        assert is_attention_key("layers.0.self_attn.o_proj.lora_A.weight")
+        assert not is_attention_key("layers.0.mlp.gate_proj.lora_A.weight")
 
-    def test_is_mlp_key(self):
-        assert _is_mlp_key("layers.0.mlp.gate_proj.lora_A.weight")
-        assert _is_mlp_key("layers.0.mlp.up_proj.lora_B.weight")
-        assert _is_mlp_key("layers.0.mlp.down_proj.lora_A.weight")
-        assert not _is_mlp_key("layers.0.self_attn.q_proj.lora_A.weight")
+    def testis_mlp_key(self):
+        assert is_mlp_key("layers.0.mlp.gate_proj.lora_A.weight")
+        assert is_mlp_key("layers.0.mlp.up_proj.lora_B.weight")
+        assert is_mlp_key("layers.0.mlp.down_proj.lora_A.weight")
+        assert not is_mlp_key("layers.0.self_attn.q_proj.lora_A.weight")
 
-    def test_softmax(self):
-        result = _softmax([1.0, 1.0, 1.0])
+    def testsoftmax(self):
+        result = softmax([1.0, 1.0, 1.0])
         assert len(result) == 3
         assert abs(sum(result) - 1.0) < 1e-6
         assert abs(result[0] - result[1]) < 1e-6
 
     def test_softmax_temperature(self):
         # Higher temperature -> more uniform
-        high_temp = _softmax([1.0, 2.0, 3.0], temperature=10.0)
-        low_temp = _softmax([1.0, 2.0, 3.0], temperature=0.1)
+        high_temp = softmax([1.0, 2.0, 3.0], temperature=10.0)
+        low_temp = softmax([1.0, 2.0, 3.0], temperature=0.1)
         # With high temp, values should be more uniform
         assert max(high_temp) - min(high_temp) < max(low_temp) - min(low_temp)
 
-    def test_find_lora_pairs(self):
+    def testfind_lora_pairs(self):
         weights = {
             "prefix.q_proj.lora_A.weight": torch.randn(8, 64),
             "prefix.q_proj.lora_B.weight": torch.randn(64, 8),
             "prefix.k_proj.lora_A.weight": torch.randn(8, 64),
             # Missing B for k_proj
         }
-        pairs = _find_lora_pairs(weights)
+        pairs = find_lora_pairs(weights)
         assert "prefix.q_proj" in pairs
         assert "prefix.k_proj" not in pairs
 
-    def test_load_save_adapter_config(self, tmp_path):
+    def test_loadsave_adapter_config(self, tmp_path):
         adapter_dir = str(tmp_path / "adapter")
         os.makedirs(adapter_dir)
         config = {"r": 16, "lora_alpha": 32}
-        _save_adapter_config(adapter_dir, config)
-        loaded = _load_adapter_config(adapter_dir)
+        save_adapter_config(adapter_dir, config)
+        loaded = load_adapter_config(adapter_dir)
         assert loaded["r"] == 16
         assert loaded["lora_alpha"] == 32
 
     def test_load_adapter_config_missing(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            _load_adapter_config(str(tmp_path / "nonexistent"))
+            load_adapter_config(str(tmp_path / "nonexistent"))
 
-    def test_copy_adapter(self, tmp_adapter, tmp_path):
+    def testcopy_adapter(self, tmp_adapter, tmp_path):
         dst = str(tmp_path / "copied")
-        result = _copy_adapter(tmp_adapter, dst)
+        result = copy_adapter(tmp_adapter, dst)
         assert result == dst
         assert os.path.exists(os.path.join(dst, "adapter_config.json"))
         assert os.path.exists(os.path.join(dst, "adapter_model.safetensors"))
 
-    def test_load_save_all_weights(self, tmp_adapter):
-        weights = _load_all_weights(tmp_adapter)
+    def test_loadsave_all_weights(self, tmp_adapter):
+        weights = load_all_weights(tmp_adapter)
         assert len(weights) > 0
         # All values should be tensors
         for v in weights.values():
@@ -296,8 +296,8 @@ class TestHelpers:
         # Save and reload
         new_dir = tmp_adapter + "_copy"
         os.makedirs(new_dir)
-        _save_all_weights(new_dir, weights)
-        reloaded = _load_all_weights(new_dir)
+        save_all_weights(new_dir, weights)
+        reloaded = load_all_weights(new_dir)
         assert set(reloaded.keys()) == set(weights.keys())
         shutil.rmtree(new_dir)
 
@@ -401,7 +401,7 @@ class TestLayerScaling:
         # Check a variant directory
         variant_dir = os.path.join(work_dir, "layer0_scale0.0")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
-        weights = _load_all_weights(variant_dir)
+        weights = load_all_weights(variant_dir)
         for key, tensor in weights.items():
             if "layers.0." in key:
                 assert torch.allclose(tensor, torch.zeros_like(tensor))
@@ -459,7 +459,7 @@ class TestModuleAblation:
         # Verify an ablated variant
         variant_dir = os.path.join(work_dir, "ablate_q_proj")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
-        weights = _load_all_weights(variant_dir)
+        weights = load_all_weights(variant_dir)
         for key, tensor in weights.items():
             if ".q_proj." in key:
                 assert torch.allclose(tensor, torch.zeros_like(tensor))
@@ -492,8 +492,8 @@ class TestCheckpointInterpolation:
     @pytest.mark.asyncio
     async def test_blend_ratio_math(self, tmp_adapter, tmp_other_adapter, tmp_path):
         """Verify that blend ratio=0.5 produces the average of two checkpoints."""
-        weights_a = _load_all_weights(tmp_adapter)
-        weights_b = _load_all_weights(tmp_other_adapter)
+        weights_a = load_all_weights(tmp_adapter)
+        weights_b = load_all_weights(tmp_other_adapter)
 
         work_dir = str(tmp_path / "output" / "_surgery_work")
         os.makedirs(work_dir, exist_ok=True)
@@ -513,7 +513,7 @@ class TestCheckpointInterpolation:
 
         variant_dir = os.path.join(work_dir, "blend_0.50")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
-        blended = _load_all_weights(variant_dir)
+        blended = load_all_weights(variant_dir)
         common_keys = set(weights_a.keys()) & set(weights_b.keys())
         for key in list(common_keys)[:3]:
             expected = 0.5 * weights_a[key] + 0.5 * weights_b[key]
@@ -543,7 +543,7 @@ class TestCheckpointInterpolation:
 class TestDAREDropRescale:
     def test_expected_value_preserved(self, tmp_adapter, tmp_path):
         """DARE should preserve expected value: E[x_dropped] approx E[x_original]."""
-        weights = _load_all_weights(tmp_adapter)
+        weights = load_all_weights(tmp_adapter)
         # Pick a representative key
         sample_key = list(weights.keys())[0]
         original = weights[sample_key]
@@ -609,8 +609,8 @@ class TestSVDRankReduction:
         # Check dimensions in the variant
         variant_dir = os.path.join(work_dir, "svd_rank4")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
-        weights = _load_all_weights(variant_dir)
-        pairs = _find_lora_pairs(weights)
+        weights = load_all_weights(variant_dir)
+        pairs = find_lora_pairs(weights)
         for prefix, (a_key, b_key) in pairs.items():
             a_shape = weights[a_key].shape
             b_shape = weights[b_key].shape
@@ -1004,77 +1004,6 @@ class TestProtocolConformance:
         # But its annotation says Callable[[str], float]
         # This is the documented typing gap. Operations await the result,
         # which works because async functions return coroutines that resolve to float.
-
-
-# ---------------------------------------------------------------------------
-# Backward Compatibility Shim Tests
-# ---------------------------------------------------------------------------
-
-class TestBackwardCompatShim:
-    def test_all_public_types_importable_from_shim(self):
-        """lora_surgery.py should re-export all public types."""
-        from shared.evolutionary.lora_surgery import (
-            LoRASurgeon,
-            OperationResult,
-            SurgeryConfig,
-            SurgeryResult,
-        )
-        assert LoRASurgeon is not None
-        assert OperationResult is not None
-        assert SurgeryConfig is not None
-        assert SurgeryResult is not None
-
-    def test_all_helper_functions_importable_from_shim(self):
-        """lora_surgery.py should re-export all underscore-prefixed helpers."""
-        from shared.evolutionary.lora_surgery import (
-            _check_dependencies,
-            _copy_adapter,
-            _find_lora_pairs,
-            _find_safetensor_files,
-            _get_layer_indices,
-            _get_module_types,
-            _is_attention_key,
-            _is_mlp_key,
-            _load_adapter_config,
-            _load_all_weights,
-            _save_adapter_config,
-            _save_all_weights,
-            _softmax,
-        )
-        # Verify they are callable
-        assert callable(_check_dependencies)
-        assert callable(_copy_adapter)
-        assert callable(_find_lora_pairs)
-        assert callable(_find_safetensor_files)
-        assert callable(_get_layer_indices)
-        assert callable(_get_module_types)
-        assert callable(_is_attention_key)
-        assert callable(_is_mlp_key)
-        assert callable(_load_adapter_config)
-        assert callable(_load_all_weights)
-        assert callable(_save_adapter_config)
-        assert callable(_save_all_weights)
-        assert callable(_softmax)
-
-    def test_shim_types_match_package_types(self):
-        """Shim re-exports should be the same objects as package exports."""
-        from shared.evolutionary.lora_surgery import LoRASurgeon as ShimSurgeon
-        from shared.evolutionary.surgery import LoRASurgeon as PkgSurgeon
-        assert ShimSurgeon is PkgSurgeon
-
-        from shared.evolutionary.lora_surgery import SurgeryConfig as ShimConfig
-        from shared.evolutionary.surgery import SurgeryConfig as PkgConfig
-        assert ShimConfig is PkgConfig
-
-    def test_shim_helpers_match_utils_functions(self):
-        """Shim helper re-exports should be the same functions as in utils."""
-        from shared.evolutionary.lora_surgery import _softmax as shim_softmax
-        from shared.evolutionary.surgery.utils import _softmax as utils_softmax
-        assert shim_softmax is utils_softmax
-
-        from shared.evolutionary.lora_surgery import _is_attention_key as shim_attn
-        from shared.evolutionary.surgery.utils import _is_attention_key as utils_attn
-        assert shim_attn is utils_attn
 
 
 # ---------------------------------------------------------------------------

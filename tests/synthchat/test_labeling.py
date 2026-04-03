@@ -8,6 +8,15 @@ from SynthChat.labeling import (
     _slugify_label,
     build_metadata_labels,
 )
+from SynthChat.config.format_resolver import get_default_label_mappings
+
+
+def _default_classifiers():
+    return get_default_label_mappings()["issue_classifiers"]
+
+
+def _default_label_mappings():
+    return get_default_label_mappings()
 
 
 # ---- _slugify_label ----
@@ -36,46 +45,46 @@ class TestSlugifyLabel:
 
 class TestClassifyEnvironmentIssue:
     def test_empty_message(self):
-        assert _classify_environment_issue("") == []
-        assert _classify_environment_issue(None) == []
+        assert _classify_environment_issue("", _default_classifiers()) == []
+        assert _classify_environment_issue(None, _default_classifiers()) == []
 
     def test_missing_expected_tool(self):
-        labels = _classify_environment_issue("Expected tool(s) not executed in session")
+        labels = _classify_environment_issue("Expected tool(s) not executed in session", _default_classifiers())
         assert "missing_expected_tool" in labels
 
     def test_wrong_tool_called(self):
-        labels = _classify_environment_issue("No acceptable tool called")
+        labels = _classify_environment_issue("No acceptable tool called", _default_classifiers())
         assert "wrong_tool_called" in labels
 
     def test_frontmatter_missing(self):
-        labels = _classify_environment_issue("YAML front matter not found")
+        labels = _classify_environment_issue("YAML front matter not found", _default_classifiers())
         assert "frontmatter_missing" in labels
 
     def test_path_state_mismatch(self):
-        labels = _classify_environment_issue("Expected path to exist: notes/test.md")
+        labels = _classify_environment_issue("Expected path to exist: notes/test.md", _default_classifiers())
         assert "path_state_mismatch" in labels
 
     def test_content_mismatch(self):
-        labels = _classify_environment_issue("does not contain expected text")
+        labels = _classify_environment_issue("does not contain expected text", _default_classifiers())
         assert "content_mismatch" in labels
 
     def test_multiple_labels(self):
         msg = "Expected tool(s) not executed; no acceptable tool called"
-        labels = _classify_environment_issue(msg)
+        labels = _classify_environment_issue(msg, _default_classifiers())
         assert "missing_expected_tool" in labels
         assert "wrong_tool_called" in labels
 
     def test_labels_sorted(self):
         msg = "Expected path to exist: x; does not contain expected text"
-        labels = _classify_environment_issue(msg)
+        labels = _classify_environment_issue(msg, _default_classifiers())
         assert labels == sorted(labels)
 
     def test_tool_runtime_error(self):
-        labels = _classify_environment_issue("Tool 'fileManager_read' failed: some error")
+        labels = _classify_environment_issue("Tool 'fileManager_read' failed: some error", _default_classifiers())
         assert "tool_runtime_error" in labels
 
     def test_clarification_expected(self):
-        labels = _classify_environment_issue("clarification needed but not given")
+        labels = _classify_environment_issue("clarification needed but not given", _default_classifiers())
         assert "clarification_expected" in labels
 
 
@@ -113,6 +122,7 @@ class TestBuildMetadataLabels:
             "stage_failures": [],
             "environment_trace": None,
             "generated_environment": {},
+            "label_mappings": _default_label_mappings(),
         }
         defaults.update(overrides)
         return defaults
