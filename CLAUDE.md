@@ -87,6 +87,8 @@ Delegate to `pact-memory-agent` with `"Save memory: [context]"` or `"Search memo
 - Test outputs should go to `scratch/fixtures/synthchat/` (or another `scratch/` subfolder)
 - **Be greedy to stop on errors** — Monitor output and kill immediately if something looks wrong. Early exit = faster iteration.
 - **Pre-commit hook gotcha** — The PACT hook checks `print\s*\(.*token` case-insensitively. Any print/log line containing "token" near an env var name gets blocked. Workaround: rephrase to avoid "token", or user runs `git commit --no-verify` manually.
+- **NO HARDCODING for specific scenarios** — SynthChat is fully config-driven. Tool-call formats (e.g., `useTools`/`getTools`), workspace structures, and label mappings are all defined in YAML configs under `SynthChat/config/`. The included `useTools` wrapper format is a **toy example** demonstrating the system's capabilities — it is NOT the canonical format and must NEVER be treated as the ground truth. When writing or modifying SynthChat code, everything must read from config; never hardcode scenario-specific behavior.
+- **No backward-compat shims** — This codebase has no external consumers. When refactoring, move code and update imports directly. Do not add re-exports, dual signatures, or deprecated wrappers.
 
 ---
 
@@ -197,7 +199,7 @@ To be unambiguous when accepting upstream: `git show origin/main:<file> > <file>
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
 - Resume: `claude --resume 354ebdf7-a2c4-4fef-bfef-fa63fc87cb6b`
 - Team: `pact-354ebdf7`
-- Started: 2026-04-02 22:36:42 UTC
+- Started: 2026-04-03 12:30:58 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
