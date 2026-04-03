@@ -8,11 +8,19 @@ from SynthChat.schemas.environment_schema import (
     _build_canonical_environment_schema,
 )
 from SynthChat.schemas.tool_response_schema import (
-    _build_use_tools_generation_prompt,
-    _build_use_tools_response_schema,
+    build_tool_generation_prompt,
+    build_tool_response_schema,
     _resolve_allowed_tool_names,
     _resolve_context_defaults,
 )
+from SynthChat.config.format_resolver import get_default_tool_call_format
+
+
+def _default_fmt(**overrides):
+    """Return a copy of the default tool call format config with optional overrides."""
+    fmt = get_default_tool_call_format()
+    fmt.update(overrides)
+    return fmt
 
 
 # ---- _build_canonical_environment_schema ----
@@ -81,18 +89,18 @@ class TestBuildCanonicalEnvironmentGenerationPrompt:
             assert t in prompt
 
 
-# ---- _build_use_tools_response_schema ----
+# ---- build_tool_response_schema ----
 
-class TestBuildUseToolsResponseSchema:
+class TestBuildToolResponseSchema:
     def test_default_schema_structure(self):
-        schema = _build_use_tools_response_schema()
+        schema = build_tool_response_schema(format_config=_default_fmt())
         assert schema["type"] == "object"
         assert "content" in schema["properties"]
         assert "tool_calls" in schema["properties"]
         assert set(schema["required"]) == {"content", "tool_calls"}
 
     def test_custom_wrapper_name(self):
-        schema = _build_use_tools_response_schema(wrapper_name="myWrapper")
+        schema = build_tool_response_schema(format_config=_default_fmt(wrapper_name="myWrapper"))
         tool_calls = schema["properties"]["tool_calls"]
         # Navigate to the array option with items
         array_option = [
@@ -103,8 +111,9 @@ class TestBuildUseToolsResponseSchema:
         assert fn_name["const"] == "myWrapper"
 
     def test_allowed_tools_constrain_enum(self):
-        schema = _build_use_tools_response_schema(
-            allowed_tools=["fileManager_read", "fileManager_write", "searchManager_search"]
+        schema = build_tool_response_schema(
+            format_config=_default_fmt(),
+            allowed_tools=["fileManager_read", "fileManager_write", "searchManager_search"],
         )
         tool_calls = schema["properties"]["tool_calls"]
         array_option = [
@@ -122,8 +131,9 @@ class TestBuildUseToolsResponseSchema:
         assert "search" in tool_enum
 
     def test_session_and_workspace_consts(self):
-        schema = _build_use_tools_response_schema(
-            session_id="sess_123", workspace_id="ws_456"
+        schema = build_tool_response_schema(
+            format_config=_default_fmt(),
+            context_overrides={"sessionId": "sess_123", "workspaceId": "ws_456"},
         )
         tool_calls = schema["properties"]["tool_calls"]
         array_option = [
@@ -136,50 +146,50 @@ class TestBuildUseToolsResponseSchema:
         assert context["properties"]["workspaceId"]["const"] == "ws_456"
 
     def test_tool_calls_allows_null(self):
-        schema = _build_use_tools_response_schema()
+        schema = build_tool_response_schema(format_config=_default_fmt())
         options = schema["properties"]["tool_calls"]["anyOf"]
         null_option = [opt for opt in options if opt.get("type") == "null"]
         assert len(null_option) == 1
 
     def test_tool_calls_allows_empty_array(self):
-        schema = _build_use_tools_response_schema()
+        schema = build_tool_response_schema(format_config=_default_fmt())
         options = schema["properties"]["tool_calls"]["anyOf"]
         empty_arr = [opt for opt in options if opt.get("type") == "array" and opt.get("maxItems") == 0]
         assert len(empty_arr) == 1
 
 
-# ---- _build_use_tools_generation_prompt ----
+# ---- build_tool_generation_prompt ----
 
-class TestBuildUseToolsGenerationPrompt:
+class TestBuildToolGenerationPrompt:
     def test_includes_base_prompt(self):
-        prompt = _build_use_tools_generation_prompt(
+        prompt = build_tool_generation_prompt(
+            format_config=_default_fmt(),
             base_prompt="Test the tools",
-            wrapper_name="useTools",
             allowed_tools=[],
         )
         assert "Test the tools" in prompt
 
     def test_includes_wrapper_name(self):
-        prompt = _build_use_tools_generation_prompt(
+        prompt = build_tool_generation_prompt(
+            format_config=_default_fmt(wrapper_name="myWrapper"),
             base_prompt="test",
-            wrapper_name="myWrapper",
             allowed_tools=[],
         )
         assert "myWrapper" in prompt
 
     def test_includes_allowed_tools(self):
-        prompt = _build_use_tools_generation_prompt(
+        prompt = build_tool_generation_prompt(
+            format_config=_default_fmt(),
             base_prompt="test",
-            wrapper_name="useTools",
             allowed_tools=["fileManager_read", "searchManager_search"],
         )
         assert "fileManager_read" in prompt
         assert "searchManager_search" in prompt
 
     def test_no_tools_line_when_empty(self):
-        prompt = _build_use_tools_generation_prompt(
+        prompt = build_tool_generation_prompt(
+            format_config=_default_fmt(),
             base_prompt="test",
-            wrapper_name="useTools",
             allowed_tools=[],
         )
         assert "Allowed concrete tools" not in prompt

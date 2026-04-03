@@ -151,9 +151,21 @@ SynthChat (env-backed data)  →  SFT (local or HF Jobs)  →  cloud eval / exac
 - Local NVIDIA `train -> grpo` now routes to the env-backed trainer and will bootstrap the isolated GRPO runtime if it is missing.
 - The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
 
+## Config-Driven Architecture
+
+SynthChat is fully config-driven. **Nothing is hardcoded for a specific use case.** The included example formats (`useTools`, `getTools`, workspace structures, label mappings) are **toy demonstrations** showing how the system works — they are not canonical formats and should not be treated as ground truth.
+
+Everything is configurable via YAML in `SynthChat/config/`:
+- **`tool_call_formats.yaml`** — Define any tool-call response schema (wrapper name, context fields, call structure)
+- **`workspace_formats.yaml`** — Define system prompt sections, tag names, default values
+- **`label_mappings.yaml`** — Define issue classification rules and label rollup groups
+- **`settings.yaml`** — Generation settings, model config, output paths
+
+To add a new tool-call format (e.g., for your own agent framework), add a named entry to `tool_call_formats.yaml` and reference it from your scenario YAML. No code changes required.
+
 ## Dataset Format
 
-JSONL with `conversations` array. Tool call structure is fully configurable.
+JSONL with `conversations` array. Tool call structure is fully configurable — the example below uses the included `useTools` wrapper format, but you can define any format via `tool_call_formats.yaml`.
 
 ```json
 {

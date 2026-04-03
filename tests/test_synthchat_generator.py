@@ -6,7 +6,8 @@ from pathlib import Path
 import yaml
 
 from SynthChat.generator import SynthChatGenerator
-from SynthChat.generator import _build_use_tools_generation_prompt, _build_use_tools_response_schema
+from SynthChat.schemas.tool_response_schema import build_tool_generation_prompt, build_tool_response_schema
+from SynthChat.config.format_resolver import get_default_tool_call_format
 from shared.agentic_judge import AgenticTurnJudge
 from shared.environments import EnvironmentValidator
 
@@ -415,11 +416,11 @@ def test_structured_generation_uses_configured_max_tokens():
 
 
 def test_use_tools_response_schema_allows_text_only_responses():
-    schema = _build_use_tools_response_schema(
-        wrapper_name="useTools",
+    fmt = get_default_tool_call_format()
+    schema = build_tool_response_schema(
+        format_config=fmt,
         allowed_tools=["contentManager_write"],
-        session_id="session_001",
-        workspace_id="ws_001",
+        context_overrides={"sessionId": "session_001", "workspaceId": "ws_001"},
     )
 
     tool_calls_schema = schema["properties"]["tool_calls"]
@@ -434,9 +435,10 @@ def test_use_tools_response_schema_allows_text_only_responses():
 
 
 def test_use_tools_generation_prompt_explicitly_allows_text_or_tools():
-    prompt = _build_use_tools_generation_prompt(
+    fmt = get_default_tool_call_format()
+    prompt = build_tool_generation_prompt(
+        format_config=fmt,
         base_prompt="Continue the task.",
-        wrapper_name="useTools",
         allowed_tools=["contentManager_write"],
     )
 
@@ -2788,7 +2790,7 @@ def test_user_generation_stage_gate_ignores_urls_and_connection_strings():
 
 
 def test_apply_stage_review_result_clears_transient_failure_when_later_review_passes():
-    from SynthChat.generator import _apply_stage_review_result
+    from SynthChat.targets import _apply_stage_review_result
 
     stage_failures = ["user_generation"]
     stage_reviews = {}

@@ -3,7 +3,8 @@
 Location: SynthChat/labeling.py
 Purpose: Build structured metadata labels (flat and filter) for downstream
          dataset slicing, KTO/GRPO candidate classification, and environment
-         issue categorization.
+         issue categorization. Classifiers and rollup rules are read from
+         config (label_mappings.yaml) rather than hardcoded.
 Usage: Called by SynthChatGenerator._build_metadata_labels (generator.py)
        during the final metadata assembly stage of each generation run.
 """
@@ -17,35 +18,34 @@ def _slugify_label(value: str) -> str:
     return value.strip("_")
 
 
-def _classify_environment_issue(message: str) -> List[str]:
+def _classify_environment_issue(
+    message: str,
+    classifiers: List[Dict[str, str]],
+) -> List[str]:
+    """Classify an environment issue message into labels.
+
+    Args:
+        message: The issue message text.
+        classifiers: List of classifier rules from label_mappings config.
+            Each rule has 'match', optional 'match_also', and 'label'.
+    """
     text = str(message or "").strip().lower()
     if not text:
         return []
 
     labels = set()
-
-    if "expected tool(s) not executed" in text:
-        labels.add("missing_expected_tool")
-    if "no acceptable tool called" in text:
-        labels.add("wrong_tool_called")
-    if "front matter" in text or "yaml front matter" in text:
-        labels.add("frontmatter_missing")
-    if "expected path to exist" in text or "expected path to be absent" in text:
-        labels.add("path_state_mismatch")
-    if "does not contain expected text" in text or "contains forbidden text" in text:
-        labels.add("content_mismatch")
-    if "failed reading" in text:
-        labels.add("read_failure")
-    if "is a directory" in text or "file exists" in text:
-        labels.add("path_type_error")
-    if "strict schema" in text or "missing required args" in text:
-        labels.add("schema_error")
-    if "searchmanager_searchcontent" in text or "searchmanager_searchdirectory" in text:
-        labels.add("retrieval_missing")
-    if "clarification" in text:
-        labels.add("clarification_expected")
-    if "tool '" in text and "failed:" in text:
-        labels.add("tool_runtime_error")
+    for rule in classifiers:
+        match_str = str(rule.get("match", "")).lower()
+        if not match_str:
+            continue
+        if match_str not in text:
+            continue
+        match_also = rule.get("match_also")
+        if match_also and str(match_also).lower() not in text:
+            continue
+        label = str(rule.get("label", "")).strip()
+        if label:
+            labels.add(label)
 
     return sorted(labels)
 
@@ -68,6 +68,30 @@ def _derive_kto_candidate_label(
     return None
 
 
+def _apply_failure_type_rollups(
+    stage_failure_labels: List[str],
+    failure_type_rollups: Dict[str, List[str]],
+) -> set:
+    """Apply failure_type rollup rules from config."""
+    labels = set()
+    for rollup_label, trigger_stages in failure_type_rollups.items():
+        if any(stage in stage_failure_labels for stage in trigger_stages):
+            labels.add(rollup_label)
+    return labels
+
+
+def _apply_behavior_rollups(
+    issue_labels: set,
+    behavior_rollups: Dict[str, List[str]],
+) -> set:
+    """Apply behavior rollup rules from config."""
+    labels = set()
+    for rollup_label, trigger_labels in behavior_rollups.items():
+        if any(label in issue_labels for label in trigger_labels):
+            labels.add(rollup_label)
+    return labels
+
+
 def build_metadata_labels(
     scenario_key: str,
     scenario: Dict[str, Any],
@@ -75,8 +99,19 @@ def build_metadata_labels(
     stage_failures: List[str],
     environment_trace: Optional[Dict[str, Any]],
     generated_environment: Dict[str, Any],
+    label_mappings: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Build structured labels for downstream filtering and KTO/GRPO slicing."""
+    """Build structured labels for downstream filtering and KTO/GRPO slicing.
+
+    Args:
+        label_mappings: Config dict with keys issue_classifiers, behavior_rollups,
+            failure_type_rollups.
+    """
+
+    classifiers = label_mappings.get("issue_classifiers", [])
+    behavior_rollups = label_mappings.get("behavior_rollups", {})
+    failure_type_rollups = label_mappings.get("failure_type_rollups", {})
+
     tags = [str(tag).strip() for tag in scenario.get("tags", []) if str(tag).strip()]
     triggers = [str(trigger).strip() for trigger in scenario.get("triggers", []) if str(trigger).strip()]
     flat_labels = {
@@ -120,7 +155,7 @@ def build_metadata_labels(
             issue_level = str(issue.get("level", "")).strip().lower() or "unknown"
             if issue_message:
                 issues.append({"level": issue_level, "message": issue_message})
-            for label in _classify_environment_issue(issue_message):
+            for label in _classify_environment_issue(issue_message, classifiers):
                 issue_labels.add(label)
                 flat_labels.add(f"issue:{label}")
 
@@ -153,21 +188,9 @@ def build_metadata_labels(
     elif has_environment and environment_passed is False:
         flat_labels.add("kto_candidate:negative")
 
-    if "environment" in stage_failure_labels:
-        flat_labels.add("failure_type:environment")
-    if any(stage in stage_failure_labels for stage in ("response", "thinking")):
-        flat_labels.add("failure_type:behavior")
-    if any(stage in stage_failure_labels for stage in ("system_prompt", "user", "system_generation", "user_generation", "assistant_generation", "environment_generation", "final")):
-        flat_labels.add("failure_type:generation")
-
-    if any(label in issue_labels for label in {"missing_expected_tool", "retrieval_missing"}):
-        flat_labels.add("behavior:retrieval_failure")
-    if "frontmatter_missing" in issue_labels:
-        flat_labels.add("behavior:structure_failure")
-    if any(label in issue_labels for label in {"wrong_tool_called", "tool_runtime_error"}):
-        flat_labels.add("behavior:tool_execution_failure")
-    if "clarification_expected" in issue_labels:
-        flat_labels.add("behavior:clarification_failure")
+    # Apply config-driven rollups
+    flat_labels.update(_apply_failure_type_rollups(stage_failure_labels, failure_type_rollups))
+    flat_labels.update(_apply_behavior_rollups(issue_labels, behavior_rollups))
 
     return {
         "flat": sorted(flat_labels),

@@ -3,10 +3,13 @@
 Location: SynthChat/workspace/sections.py
 Purpose: Build formatted text sections (workspaces, prompts, tools, notes, etc.)
          that are composed into the full mocked workspace system prompt.
+         Tool-related rendering is config-driven via tool_call_formats.yaml.
 Usage: Called by workspace/renderer.py to construct each prompt section.
 """
 
 from typing import Any, Dict, List, Optional
+
+from ..schemas.tool_response_schema import resolve_wrapper_name
 
 
 def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
@@ -45,21 +48,43 @@ def _render_available_prompts(prompts: List[Dict[str, Any]]) -> str:
     return "\n".join(lines).strip()
 
 
-def _tool_wrapper_name(tool_schema: Optional[Dict[str, Any]]) -> str:
-    if not isinstance(tool_schema, dict):
-        return "useTools"
-    wrapper_cfg = tool_schema.get("tool_format") or {}
-    return str(wrapper_cfg.get("wrapper") or "useTools").strip() or "useTools"
+def _tool_wrapper_name(
+    tool_schema: Optional[Dict[str, Any]],
+    format_config: Dict[str, Any],
+) -> str:
+    """Resolve the tool wrapper name.
+
+    Priority: format_config > tool_schema.tool_format.wrapper > "" (no wrapper)
+    """
+    return resolve_wrapper_name(format_config, tool_schema)
 
 
-def _render_available_tools(tool_schema: Optional[Dict[str, Any]]) -> str:
+def _render_available_tools(
+    tool_schema: Optional[Dict[str, Any]],
+    format_config: Dict[str, Any],
+) -> str:
+    """Render available tools section.
+
+    Reads the instruction line from format_config["available_tools_instruction"]
+    and substitutes {context_required_csv} with the comma-separated context field list.
+    """
     if not isinstance(tool_schema, dict):
         return ""
 
-    wrapper_name = _tool_wrapper_name(tool_schema)
+    wrapper_name = _tool_wrapper_name(tool_schema, format_config)
+
+    instruction_template = format_config.get(
+        "available_tools_instruction",
+        "Required wrapper context fields: {context_required_csv}.",
+    )
+    ctx_fields = format_config.get("context_fields") or {}
+    context_required = ctx_fields.get("required") or []
+    context_csv = ", ".join(str(f) for f in context_required)
+    instruction = str(instruction_template).replace("{context_required_csv}", context_csv)
+
     lines: List[str] = [
         f"Use the `{wrapper_name}` wrapper for tool calls.",
-        "Required wrapper context fields: sessionId, workspaceId, memory, goal.",
+        instruction,
         "",
     ]
 
@@ -94,20 +119,6 @@ def _build_selected_workspace_section(name: str, workspace_id: str, payload: str
         ]
     )
 
-
-def _build_session_context_section(session_id: str, workspace_id: str) -> str:
-    return "\n".join(
-        [
-            "<session_context>",
-            "IMPORTANT: When using tools, include these values in your tool call parameters:",
-            "",
-            f'- sessionId: "{session_id}"',
-            f'- workspaceId: "{workspace_id}" (current workspace)',
-            "",
-            'Include these in the "context" parameter of your tool calls.',
-            "</session_context>",
-        ]
-    )
 
 
 def _build_wrapped_section(tag: str, content: str) -> str:

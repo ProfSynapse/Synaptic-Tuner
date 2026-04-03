@@ -93,7 +93,7 @@ def test_import_llm_package():
 
 def test_import_workspace_renderer():
     mod = _import("SynthChat.workspace.renderer")
-    assert hasattr(mod, "render_mocked_workspace_system_prompt")
+    assert hasattr(mod, "render_workspace_prompt")
 
 
 def test_import_workspace_sections():
@@ -113,7 +113,7 @@ def test_import_workspace_fixture_helpers():
 
 def test_import_workspace_package():
     mod = _import("SynthChat.workspace")
-    assert hasattr(mod, "render_mocked_workspace_system_prompt")
+    assert hasattr(mod, "render_workspace_prompt")
 
 
 # ---- schemas subpackage ----
@@ -126,8 +126,8 @@ def test_import_schemas_environment():
 
 def test_import_schemas_tool_response():
     mod = _import("SynthChat.schemas.tool_response_schema")
-    assert hasattr(mod, "_build_use_tools_response_schema")
-    assert hasattr(mod, "_build_use_tools_generation_prompt")
+    assert hasattr(mod, "build_tool_response_schema")
+    assert hasattr(mod, "build_tool_generation_prompt")
     assert hasattr(mod, "_resolve_allowed_tool_names")
     assert hasattr(mod, "_resolve_context_defaults")
 
@@ -137,9 +137,9 @@ def test_import_schemas_package():
     mod = _import("SynthChat.schemas")
     assert mod is not None
     from SynthChat.schemas.environment_schema import _build_canonical_environment_schema
-    from SynthChat.schemas.tool_response_schema import _build_use_tools_response_schema
+    from SynthChat.schemas.tool_response_schema import build_tool_response_schema
     assert _build_canonical_environment_schema is not None
-    assert _build_use_tools_response_schema is not None
+    assert build_tool_response_schema is not None
 
 
 # ---- agentic subpackage ----

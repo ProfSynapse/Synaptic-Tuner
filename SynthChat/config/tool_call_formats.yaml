@@ -1,0 +1,105 @@
+# SynthChat/config/tool_call_formats.yaml
+# Named tool-call response formats.
+# Scenarios reference these by name via `tool_call_format: <name>`.
+# The "default" format reproduces today's hardcoded behavior.
+
+formats:
+  # -- Current Synaptic useTools wrapper (backward-compatible default) --
+  default:
+    wrapper_name: useTools
+
+    # Fields required inside function.arguments.context
+    context_fields:
+      required:
+        - sessionId
+        - workspaceId
+        - memory
+        - goal
+      properties:
+        sessionId: { type: string, minLength: 1 }
+        workspaceId: { type: string, minLength: 1 }
+        memory: { type: string, minLength: 1 }
+        goal: { type: string, minLength: 1 }
+
+    # Schema for each item in function.arguments.calls[]
+    call_item:
+      properties:
+        agent: { type: string, minLength: 1 }
+        tool: { type: string, minLength: 1 }
+        params: { type: object, additionalProperties: true }
+      required: [agent, tool, params]
+
+    # Additional top-level fields inside function.arguments
+    extra_argument_fields:
+      strategy:
+        type: string
+        enum: [serial, parallel]
+
+    # Required top-level fields inside function.arguments
+    argument_required: [context, calls]
+
+    # LLM generation prompt lines (appended before the base prompt)
+    generation_instructions:
+      - "Return a single JSON object only."
+      - "Your job is to either call tools or respond via text."
+      - "If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'."
+      - "If no tool call is needed, respond with normal text in content and set tool_calls to null or []."
+      - "Inside function.arguments.calls, each item must use this exact shape:"
+      - '{"agent": "AgentName", "tool": "toolName", "params": {...}}'
+      - "Do not use dotted names like 'contentManager.read' for either agent or tool."
+      - "Do not use nested wrappers like params.tool, params.parameters, or assistant as the agent name."
+      - "Put the real tool arguments directly inside params."
+      - "Use content as null when the response is tool-only."
+      - "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools."
+
+    # Instruction line for the available_tools section of workspace prompts
+    available_tools_instruction: >-
+      Required wrapper context fields: {context_required_csv}.
+
+  # -- Example: Plain OpenAI-style tool calls (no wrapper) --
+  openai_native:
+    wrapper_name: null  # No wrapper -- each tool gets its own tool_calls entry
+
+    context_fields:
+      required: []
+      properties: {}
+
+    call_item: null  # Not used -- tools are called directly
+
+    extra_argument_fields: {}
+    argument_required: []
+
+    generation_instructions:
+      - "Return a single JSON object only."
+      - "Use the standard OpenAI tool_calls format."
+      - "Each tool call should be a separate entry in tool_calls."
+      - "Set content to null when the response is tool-only."
+
+    available_tools_instruction: >-
+      Call tools directly using the standard function calling format.
+
+  # -- Example: MCP-style tool calls --
+  mcp_style:
+    wrapper_name: use_mcp_tool
+
+    context_fields:
+      required: [server_name]
+      properties:
+        server_name: { type: string, minLength: 1 }
+
+    call_item:
+      properties:
+        tool_name: { type: string, minLength: 1 }
+        arguments: { type: object, additionalProperties: true }
+      required: [tool_name, arguments]
+
+    extra_argument_fields: {}
+    argument_required: [server_name, tool_name, arguments]
+
+    generation_instructions:
+      - "Return a single JSON object only."
+      - "Use the MCP tool calling format with function.name = 'use_mcp_tool'."
+      - "Inside function.arguments, provide server_name, tool_name, and arguments."
+
+    available_tools_instruction: >-
+      Call tools using the MCP format. Specify server_name and tool_name.

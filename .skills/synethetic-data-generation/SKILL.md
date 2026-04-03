@@ -100,6 +100,18 @@ OLLAMA_HOST=http://localhost:11434    # Ollama endpoint
 HF_TOKEN=hf_...                       # HuggingFace uploads
 ```
 
+## Config-Driven Architecture
+
+SynthChat is fully config-driven — all tool-call formats, workspace structures, and label mappings are defined in YAML under `SynthChat/config/`. The included formats (e.g., `useTools` wrapper) are **example demonstrations**, not canonical formats. Users define their own formats without touching code.
+
+Key config files:
+- `SynthChat/config/tool_call_formats.yaml` — Tool-call response schemas (wrapper name, context fields, call structure)
+- `SynthChat/config/workspace_formats.yaml` — System prompt sections and structure
+- `SynthChat/config/label_mappings.yaml` — Issue classification and label rollups
+- `SynthChat/config/settings.yaml` — Generation settings, model config, output paths
+
+To add a new tool-call format, add a named entry to `tool_call_formats.yaml` and reference it from your scenario YAML. No code changes needed.
+
 ## Tips
 
 - Use `--workers 4` for parallel generation (each worker gets its own LLM client)

@@ -38,23 +38,31 @@ from .targets import (
     _extract_shared_seed_spec,
     _apply_stage_review_result,
 )
-from .workspace import render_mocked_workspace_system_prompt as _render_workspace_prompt
+from .workspace.renderer import render_workspace_prompt
 from .workspace.sections import _tool_wrapper_name
 from .schemas.environment_schema import (
     _build_canonical_environment_schema,
     _build_canonical_environment_generation_prompt,
 )
 from .schemas.tool_response_schema import (
-    _build_use_tools_response_schema,
-    _build_use_tools_generation_prompt,
+    build_tool_response_schema,
+    build_tool_generation_prompt,
     _resolve_allowed_tool_names,
     _resolve_context_defaults,
+    resolve_wrapper_name,
 )
 from .labeling import (
     build_metadata_labels,
     _slugify_label,
     _classify_environment_issue,
     _derive_kto_candidate_label,
+)
+from .config.format_resolver import (
+    load_tool_call_formats,
+    load_workspace_formats,
+    load_label_mappings,
+    resolve_tool_call_format,
+    resolve_workspace_format,
 )
 from .parsing import (
     stringify_assistant_message,
@@ -184,6 +192,11 @@ class SynthChatGenerator:
 
         # Load scenario configurations
         self.scenario_loader = ScenarioLoader(scenarios_dir)
+
+        # Load config-driven format registries (tool calls, workspace, labels)
+        self._tool_call_formats = load_tool_call_formats()
+        self._workspace_formats = load_workspace_formats()
+        self._label_mappings = load_label_mappings()
 
         # Initialize or use provided improvement engine
         if engine is None and enable_stage_validation:
@@ -648,10 +661,21 @@ class SynthChatGenerator:
         system_template = scenario.get("system_template")
 
         if system_template == "mocked_workspace_vault":
+            ws_format = resolve_workspace_format(scenario, self._workspace_formats)
+            tcf = resolve_tool_call_format(scenario, self._tool_call_formats) if ws_format else None
+            tool_schema = self.environment_validator.tool_schema if self.environment_validator else None
+            # Apply tool_schema wrapper override to resolved tool_call_format
+            if tcf and isinstance(tool_schema, dict):
+                ts_wrapper = (tool_schema.get("tool_format") or {}).get("wrapper")
+                if ts_wrapper and str(ts_wrapper).strip():
+                    tcf = dict(tcf)
+                    tcf["wrapper_name"] = str(ts_wrapper).strip()
             system_content = self._render_mocked_workspace_system_prompt(
                 system_context=resolved_system_context or {},
                 environment_config=resolved_environment_config or {},
-                tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
+                tool_schema=tool_schema,
+                format_config=ws_format,
+                tool_call_format=tcf,
             )
             example["conversations"].append({
                 "role": "system",
@@ -1384,26 +1408,45 @@ class SynthChatGenerator:
         max_retries = int(generation_cfg.get("max_retries", 3) or 3)
         prompt = f"{assistant_context}\n\n{assistant_prompt}"
         if schema_name == "use_tools_response":
-            wrapper_name = _tool_wrapper_name(self.environment_validator.tool_schema if self.environment_validator else None)
+            tool_schema = self.environment_validator.tool_schema if self.environment_validator else None
+            tool_call_fmt = resolve_tool_call_format(scenario, self._tool_call_formats)
+            # Check tool_schema for wrapper override (e.g. tool_schema.tool_format.wrapper)
+            # This allows the environment validator's tool schema to set the wrapper name
+            wrapper_name = resolve_wrapper_name(tool_call_fmt, tool_schema)
+            if isinstance(tool_schema, dict):
+                ts_wrapper = (tool_schema.get("tool_format") or {}).get("wrapper")
+                if ts_wrapper and str(ts_wrapper).strip():
+                    wrapper_name = str(ts_wrapper).strip()
             allowed_tools = _resolve_allowed_tool_names(
                 scenario=scenario,
-                tool_schema=(self.environment_validator.tool_schema if self.environment_validator else None),
+                tool_schema=tool_schema,
             )
             session_id, workspace_id = _resolve_context_defaults(
                 system_context=system_context,
             )
-            prompt = _build_use_tools_generation_prompt(
+            # Apply wrapper_name override to format config if needed
+            fmt = tool_call_fmt
+            if wrapper_name != fmt.get("wrapper_name"):
+                fmt = dict(fmt)
+                fmt["wrapper_name"] = wrapper_name
+
+            prompt = build_tool_generation_prompt(
+                format_config=fmt,
                 base_prompt=prompt,
-                wrapper_name=wrapper_name,
                 allowed_tools=allowed_tools,
             )
+            context_overrides = {}
+            if session_id:
+                context_overrides["sessionId"] = session_id
+            if workspace_id:
+                context_overrides["workspaceId"] = workspace_id
+
             payload = self._call_llm_structured(
                 prompt=prompt,
-                schema=_build_use_tools_response_schema(
-                    wrapper_name=wrapper_name,
+                schema=build_tool_response_schema(
+                    format_config=fmt,
                     allowed_tools=allowed_tools,
-                    session_id=session_id,
-                    workspace_id=workspace_id,
+                    context_overrides=context_overrides,
                 ),
                 randomize=randomize_params,
                 trace_label=trace_label,
@@ -1439,6 +1482,7 @@ class SynthChatGenerator:
             stage_failures=stage_failures,
             environment_trace=environment_trace,
             generated_environment=generated_environment,
+            label_mappings=self._label_mappings,
         )
 
     def _improve_stage(
@@ -1627,9 +1671,14 @@ class SynthChatGenerator:
         self,
         system_context: Dict[str, Any],
         environment_config: Dict[str, Any],
-        tool_schema: Optional[Dict[str, Any]] = None,
+        tool_schema: Optional[Dict[str, Any]],
+        format_config: Dict[str, Any],
+        tool_call_format: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Render production-style mocked workspace prompt from structured config."""
-        return _render_workspace_prompt(system_context, environment_config, tool_schema)
+        return render_workspace_prompt(
+            system_context, environment_config, tool_schema,
+            format_config=format_config, tool_call_format=tool_call_format,
+        )
 
 
