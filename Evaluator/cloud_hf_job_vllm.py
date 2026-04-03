@@ -65,6 +65,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--vllm-timeout", type=int, default=600)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.85)
     parser.add_argument("--vllm-tensor-parallel-size", type=int, default=0)
+    parser.add_argument("--vllm-extra-arg", action="append", dest="vllm_extra_args")
     parser.add_argument("--loss-workers", type=int, default=0)
     return parser.parse_args()
 
@@ -340,6 +341,7 @@ def main() -> int:
             lora_modules={"finetuned": str(model_dir)},
             timeout=args.vllm_timeout,
             show_logs=True,
+            extra_args=args.vllm_extra_args,
         )
         if not server_started:
             raise RuntimeError("Failed to start the vLLM server in the cloud eval job.")

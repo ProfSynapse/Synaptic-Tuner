@@ -58,6 +58,7 @@ from tuner.core.exceptions import CloudProviderError
 logger = logging.getLogger(__name__)
 
 _HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
+_HF_BUCKET_SYNC_OVERLAY = "/tmp/hf-bucket-sync-site"
 _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
@@ -241,7 +242,9 @@ class CloudEvalHandler(BaseHandler):
         preset: Optional[str],
         scenarios: Optional[List[str]],
         tags: Optional[str],
+        install_strategy: str,
         pip_packages: Optional[List[str]],
+        vllm_extra_args: Optional[List[str]],
         env_backend: Optional[str],
         env_template: Optional[str],
         env_tool_schema: Optional[str],
@@ -259,6 +262,9 @@ class CloudEvalHandler(BaseHandler):
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
         quoted_eval_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_PIP_PACKAGES)
+        quoted_bucket_sync_deps = " ".join(
+            shlex.quote(dep) for dep in ("huggingface_hub>=1.5.0", "hf_transfer")
+        )
         checkout_steps = build_repo_checkout_steps(
             RepoCheckoutSpec(
                 url=repo_source.url,
@@ -267,17 +273,29 @@ class CloudEvalHandler(BaseHandler):
             )
         )
         python_cmd = "$(command -v python3 || command -v python)"
+        normalized_install_strategy = str(install_strategy or "overlay").strip().lower()
+        if normalized_install_strategy not in {"overlay", "image_only"}:
+            raise CloudProviderError(
+                f"Unknown eval install strategy '{install_strategy}'. Supported values: overlay, image_only"
+            )
 
         parts = [
             *checkout_steps,
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
-            f"mkdir -p {_HF_EVAL_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
-            f"export PYTHONPATH={_HF_EVAL_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
+            f"mkdir -p {_HF_BUCKET_SYNC_OVERLAY}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
-            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
+            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_BUCKET_SYNC_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
+        if normalized_install_strategy == "overlay":
+            parts.extend(
+                [
+                    f"mkdir -p {_HF_EVAL_OVERLAY}",
+                    f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+                    f"export PYTHONPATH={_HF_EVAL_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
+                ]
+            )
         if pip_packages:
             quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in pip_packages)
             parts.append(f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_pip_packages}")
@@ -324,6 +342,9 @@ class CloudEvalHandler(BaseHandler):
                 eval_cmd.extend(["--loss-max-seq-length", str(loss_max_seq_length)])
             if not loss_completion_only:
                 eval_cmd.append("--loss-no-completion-only")
+        if helper_module == "Evaluator.cloud_hf_job_vllm" and vllm_extra_args:
+            for extra_arg in vllm_extra_args:
+                eval_cmd.extend(["--vllm-extra-arg", extra_arg])
 
         parts.append("cd /workspace/repo && " + " ".join(shlex.quote(arg) for arg in eval_cmd))
         return " && ".join(parts)
@@ -711,7 +732,11 @@ class CloudEvalHandler(BaseHandler):
         env_exec_config = getattr(self.args, "env_exec_config", None)
         upload_to_hf = getattr(self.args, "upload_to_hf", None)
         update_model_card = bool(getattr(self.args, "update_model_card", False))
-        flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
+        flavor = (
+            getattr(self.args, "gpu", None)
+            or self._hf_eval_settings().get("flavor")
+            or hf_settings.get("flavor", "a10g-small")
+        )
         timeout_hours = float(getattr(self.args, "timeout_hours", None) or 4.0)
         eval_runtime = self._resolve_eval_runtime()
         helper_module = self._resolve_eval_helper_module(eval_runtime)
@@ -745,7 +770,9 @@ class CloudEvalHandler(BaseHandler):
             preset=preset,
             scenarios=scenarios,
             tags=tags,
+            install_strategy=getattr(self.args, "eval_install_strategy", None) or "overlay",
             pip_packages=getattr(self.args, "eval_pip_packages", None),
+            vllm_extra_args=getattr(self.args, "eval_vllm_extra_args", None),
             env_backend=env_backend,
             env_template=env_template,
             env_tool_schema=env_tool_schema,

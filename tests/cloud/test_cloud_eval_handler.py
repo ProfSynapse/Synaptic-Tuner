@@ -17,7 +17,9 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
         preset="full",
         scenarios=None,
         tags=None,
+        install_strategy="overlay",
         pip_packages=None,
+        vllm_extra_args=None,
         env_backend="local",
         env_template=None,
         env_tool_schema=None,
@@ -44,7 +46,7 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m Evaluator.cloud_hf_job" in command
     assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" in command
-    assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
+    assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in command
     assert "vllm==0.11.0" not in command
 
 
@@ -60,7 +62,9 @@ def test_build_eval_command_can_include_same_job_loss(repo_root):
         preset="full",
         scenarios=None,
         tags=None,
+        install_strategy="overlay",
         pip_packages=None,
+        vllm_extra_args=None,
         env_backend="none",
         env_template=None,
         env_tool_schema=None,
@@ -94,7 +98,9 @@ def test_build_eval_command_installs_stage_pip_packages(repo_root):
         preset="full",
         scenarios=None,
         tags=None,
+        install_strategy="overlay",
         pip_packages=["vllm==0.12.0", "transformers==5.3.0"],
+        vllm_extra_args=None,
         env_backend="none",
         env_template=None,
         env_tool_schema=None,
@@ -109,6 +115,71 @@ def test_build_eval_command_installs_stage_pip_packages(repo_root):
     )
 
     assert "pip install --upgrade vllm==0.12.0 transformers==5.3.0" in command
+
+
+def test_build_eval_command_can_skip_eval_overlay(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    command = handler._build_eval_command(
+        helper_module="Evaluator.cloud_hf_job_vllm",
+        bucket_id="test-user/toolset-training-artifacts",
+        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+        preset="full",
+        scenarios=None,
+        tags=None,
+        install_strategy="image_only",
+        pip_packages=None,
+        vllm_extra_args=None,
+        env_backend="none",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
+        upload_to_hf=None,
+        update_model_card=False,
+        with_loss=False,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=None,
+        loss_completion_only=True,
+    )
+
+    assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in command
+    assert "pip install --upgrade --target /tmp/hf-eval-site" not in command
+    assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" not in command
+
+
+def test_build_eval_command_passes_vllm_extra_args(repo_root):
+    handler = CloudEvalHandler(args=Namespace())
+    handler._repo_root = repo_root
+
+    command = handler._build_eval_command(
+        helper_module="Evaluator.cloud_hf_job_vllm",
+        bucket_id="test-user/toolset-training-artifacts",
+        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+        preset="full",
+        scenarios=None,
+        tags=None,
+        install_strategy="image_only",
+        pip_packages=None,
+        vllm_extra_args=["--limit-mm-per-prompt", "image=0 audio=0"],
+        env_backend="none",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
+        upload_to_hf=None,
+        update_model_card=False,
+        with_loss=False,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=None,
+        loss_completion_only=True,
+    )
+
+    assert "--vllm-extra-arg" in command
+    assert "image=0 audio=0" in command
 
 
 def test_list_remote_runs_sorts_newest_first(repo_root, clean_env):

@@ -349,6 +349,7 @@ def start_vllm_server(
     wait_for_ready: bool = True,
     timeout: int = 120,
     show_logs: bool = True,
+    extra_args: Optional[list[str]] = None,
 ) -> bool:
     """Start the vLLM server.
 
@@ -363,6 +364,7 @@ def start_vllm_server(
         wait_for_ready: Wait for server to be ready
         timeout: Timeout in seconds for server startup
         show_logs: Show live server logs during startup
+        extra_args: Additional raw vLLM server arguments
 
     Returns:
         True if server started successfully
@@ -413,6 +415,9 @@ def start_vllm_server(
         cmd.extend(["--max-lora-rank", "64"])  # Support higher LoRA ranks from training
         for name, path in lora_modules.items():
             cmd.extend(["--lora-modules", f"{name}={path}"])
+
+    if extra_args:
+        cmd.extend(str(arg) for arg in extra_args if str(arg).strip())
 
     print(f"\n[vLLM] Command: {' '.join(cmd)}")
 
