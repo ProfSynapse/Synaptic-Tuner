@@ -1,12 +1,8 @@
 FROM vllm/vllm-openai:gemma4
 
-ARG TRANSFORMERS_SOURCE=https://github.com/huggingface/transformers/archive/refs/heads/main.zip
+ARG TRANSFORMERS_VERSION=5.5.0
 
 USER root
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
 
 # The stock gemma4 image currently ships a broken Transformers install that
 # still exposes removed tensorflow_text backend references. Remove it fully
@@ -27,7 +23,12 @@ for base in site.getsitepackages():
                 path.unlink(missing_ok=True)
 PY
 
-RUN python3 -m pip install --no-cache-dir --force-reinstall --no-deps "${TRANSFORMERS_SOURCE}" \
-    && python3 -m pip install --no-cache-dir --upgrade pyyaml wandb hf_transfer python-dotenv rich
+RUN python3 -m pip install --no-cache-dir --force-reinstall --no-deps "transformers==${TRANSFORMERS_VERSION}" \
+    && python3 -m pip install --no-cache-dir --upgrade pyyaml wandb hf_transfer python-dotenv rich peft
+
+# Keep the runtime on the PyTorch path only. The Gemma vLLM images currently
+# behave better when TensorFlow backend probing is disabled explicitly.
+ENV USE_TORCH=1
+ENV USE_TF=0
 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
