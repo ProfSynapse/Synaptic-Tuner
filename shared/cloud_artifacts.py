@@ -14,7 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from transformers import TrainerCallback
+try:
+    from transformers import TrainerCallback
+except Exception:  # pragma: no cover - fallback keeps non-training cloud paths importable
+    class TrainerCallback:  # type: ignore[no-redef]
+        """Minimal fallback used when Transformers cannot be imported at module load."""
+
+        pass
 
 _logger = logging.getLogger(__name__)
 

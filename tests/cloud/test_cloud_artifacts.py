@@ -1,3 +1,5 @@
+import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -60,6 +62,28 @@ def test_write_manifest_writes_stable_json(tmp_path):
     assert contents.endswith("\n")
     assert '"provider": "hf_jobs"' in contents
     assert '"status": "completed"' in contents
+
+
+def test_cloud_artifacts_imports_without_transformers(monkeypatch):
+    class BrokenTransformers(ModuleType):
+        def __getattr__(self, name):
+            raise ValueError("transformers backend import failed")
+
+    module_path = Path(__file__).resolve().parents[2] / "shared" / "cloud_artifacts.py"
+    spec = importlib.util.spec_from_file_location("test_cloud_artifacts_fallback", module_path)
+    assert spec is not None and spec.loader is not None
+
+    broken_transformers = BrokenTransformers("transformers")
+    monkeypatch.setitem(sys.modules, "transformers", broken_transformers)
+
+    fallback_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = fallback_module
+    try:
+        spec.loader.exec_module(fallback_module)
+        assert fallback_module.TrainerCallback.__name__ == "TrainerCallback"
+        assert issubclass(fallback_module.HFBucketSyncCallback, fallback_module.TrainerCallback)
+    finally:
+        sys.modules.pop(spec.name, None)
 
 
 def test_hf_bucket_sync_callback_syncs_checkpoint_dir(tmp_path):
@@ -209,11 +233,16 @@ def test_sync_file_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
         bucket.bucket_id = f"test-user/{bucket_id.split('/')[-1]}"
         return bucket
 
-    def sync_bucket(src, dst, token=None):
-        calls.append((src, dst, token))
-
-    mock_hub.sync_bucket = sync_bucket
     mock_hub.create_bucket = create_bucket
+
+    class MockHfApi:
+        def __init__(self, token=None):
+            self.token = token
+
+        def upload_file(self, *, path_or_fileobj, path_in_repo, repo_id, repo_type):
+            calls.append((path_or_fileobj, path_in_repo, repo_id, repo_type, self.token))
+
+    mock_hub.HfApi = MockHfApi
 
     with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
         sync_file_to_hf_bucket(
@@ -224,8 +253,10 @@ def test_sync_file_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
         )
 
     assert (
-        str(local_file.parent),
-        "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_120000-abcdef12/logs",
+        str(local_file),
+        "runs/hf_jobs/sft/20260314_120000-abcdef12/logs/training.jsonl",
+        "test-user/toolset-training-artifacts",
+        "bucket",
         "hf_test_token",
     ) in calls
 
