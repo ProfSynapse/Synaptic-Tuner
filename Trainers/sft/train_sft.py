@@ -105,7 +105,8 @@ from src.data_loader import load_and_prepare_tokenized_dataset, print_dataset_sa
 from src.model_loader import (
     load_model_and_tokenizer,
     apply_lora_adapters,
-    check_gpu_memory
+    check_gpu_memory,
+    _is_vision_model,
 )
 from src.training_callbacks import (
     MetricsTableCallback,
@@ -201,10 +202,27 @@ def _check_lfm2_lora_targets(config) -> Optional[str]:
     return None
 
 
+def _is_qwen35_family(model_name: str) -> bool:
+    """Detect Qwen3.5 models, which use the newer VLM-backed runtime path."""
+    name_lower = model_name.lower()
+    return "qwen3.5" in name_lower or "qwen3_5" in name_lower
+
+
+def _check_qwen35_4bit(config) -> Optional[str]:
+    """Warn when Qwen3.5 is configured for 4-bit training."""
+    if config.model.load_in_4bit:
+        return (
+            "Qwen3.5 is not recommended for QLoRA / 4-bit training on the Unsloth path. "
+            "Set load_in_4bit: false and use bf16 LoRA instead."
+        )
+    return None
+
+
 # Registry: list of (detector_fn, [check_fn, ...]) tuples.
 # To add a new model family, append a tuple with a detector and its checks.
 MODEL_COMPATIBILITY_RULES = [
     (_is_lfm2_family, [_check_lfm2_4bit, _check_lfm2_lora_targets]),
+    (_is_qwen35_family, [_check_qwen35_4bit]),
 ]
 
 UNSLOTH_ALLOWED_INIT_LORA_WEIGHTS = {"gaussian", "loftq", "corda"}
@@ -904,6 +922,7 @@ def run(args: argparse.Namespace):
     )
 
     # Load model and tokenizer FIRST (needed for packing preprocessing)
+    is_vision_model = _is_vision_model(config.model.model_name)
     model, tokenizer = load_model_and_tokenizer(
         model_name=config.model.model_name,
         max_seq_length=config.model.max_seq_length,
@@ -972,6 +991,7 @@ def run(args: argparse.Namespace):
     # Apply LoRA adapters
     model = apply_lora_adapters(
         model,
+        is_vision_model=is_vision_model,
         r=config.lora.r,
         lora_alpha=config.lora.lora_alpha,
         lora_dropout=config.lora.lora_dropout,

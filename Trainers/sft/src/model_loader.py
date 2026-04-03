@@ -2,9 +2,17 @@
 Model loading with Unsloth optimizations for RTX 3090.
 """
 
-from unsloth import FastLanguageModel, is_bfloat16_supported
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 import torch
+from unsloth import FastLanguageModel, is_bfloat16_supported
+
+try:
+    from unsloth import FastVisionModel
+    VISION_MODEL_AVAILABLE = True
+except ImportError:
+    FastVisionModel = None
+    VISION_MODEL_AVAILABLE = False
 
 
 # Mistral-specific chat template (for models using [INST] format)
@@ -31,6 +39,24 @@ def _is_mistral_model(model_name: str) -> bool:
     """Detect if a model is a Mistral model based on name."""
     model_name_lower = model_name.lower()
     return 'mistral' in model_name_lower
+
+
+def _is_vision_model(model_name: str) -> bool:
+    """Detect if a model should use Unsloth's vision-aware loader path."""
+    model_name_lower = model_name.lower()
+    indicators = [
+        "vl",
+        "vision",
+        "qwen2-vl",
+        "qwen3-vl",
+        "qwen3.5",
+        "qwen3_5",
+        "llava",
+        "pixtral",
+        "paligemma",
+        "idefics",
+    ]
+    return any(indicator in model_name_lower for indicator in indicators)
 
 
 def load_model_and_tokenizer(
@@ -61,17 +87,38 @@ def load_model_and_tokenizer(
     print(f"4-bit quantization: {load_in_4bit}")
     print(f"dtype: {dtype if dtype else 'auto-detect'}")
 
-    # Load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_name,
-        max_seq_length=max_seq_length,
-        dtype=dtype,
-        load_in_4bit=load_in_4bit,
-        token=hf_token,
-    )
+    is_vl = _is_vision_model(model_name)
+    if is_vl and VISION_MODEL_AVAILABLE:
+        print("✓ Detected Vision-Language model, using FastVisionModel")
+        model, tokenizer = FastVisionModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
+    elif is_vl and not VISION_MODEL_AVAILABLE:
+        raise ImportError(
+            f"Model {model_name} appears to be a vision-language model but FastVisionModel "
+            "is not available. Install unsloth_zoo: pip install --upgrade unsloth unsloth_zoo"
+        )
+    else:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=max_seq_length,
+            dtype=dtype,
+            load_in_4bit=load_in_4bit,
+            token=hf_token,
+        )
 
     # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
     # This ensures proper handling for all model types including VL models
+    if hasattr(tokenizer, "tokenizer"):
+        print(f"✓ Detected VL processor ({type(tokenizer).__name__})")
+        print("  Extracting text tokenizer for text-only SFT training...")
+        tokenizer = tokenizer.tokenizer
+        print(f"✓ Using text tokenizer: {type(tokenizer).__name__}")
+
     if tokenizer.chat_template is not None:
         print("✓ Chat template already configured")
     else:
@@ -105,6 +152,7 @@ def load_model_and_tokenizer(
 
 def apply_lora_adapters(
     model,
+    is_vision_model: bool = False,
     r: int = 64,
     lora_alpha: int = 128,
     lora_dropout: float = 0.05,
@@ -169,7 +217,9 @@ def apply_lora_adapters(
     if init_lora_weights is not None:
         peft_kwargs["init_lora_weights"] = init_lora_weights
 
-    model = FastLanguageModel.get_peft_model(
+    peft_api = FastVisionModel if is_vision_model else FastLanguageModel
+
+    model = peft_api.get_peft_model(
         model,
         **peft_kwargs,
     )
