@@ -279,15 +279,18 @@ class CloudEvalHandler(BaseHandler):
                 f"Unknown eval install strategy '{install_strategy}'. Supported values: overlay, image_only"
             )
 
-        parts = [
-            *checkout_steps,
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
-            f"mkdir -p {_HF_BUCKET_SYNC_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
-            f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
-            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_BUCKET_SYNC_OVERLAY}",
-            "export HF_HUB_ENABLE_HF_TRANSFER=1",
-        ]
+        parts = [*checkout_steps]
+        if normalized_install_strategy == "overlay":
+            parts.append(f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}")
+        parts.extend(
+            [
+                f"mkdir -p {_HF_BUCKET_SYNC_OVERLAY}",
+                f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
+                f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
+                f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_BUCKET_SYNC_OVERLAY}",
+                "export HF_HUB_ENABLE_HF_TRANSFER=1",
+            ]
+        )
         if normalized_install_strategy == "overlay":
             parts.extend(
                 [

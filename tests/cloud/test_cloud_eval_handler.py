@@ -146,6 +146,7 @@ def test_build_eval_command_can_skip_eval_overlay(repo_root):
     )
 
     assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in command
+    assert "pip install --upgrade pyyaml wandb hf_transfer python-dotenv rich" not in command
     assert "pip install --upgrade --target /tmp/hf-eval-site" not in command
     assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" not in command
 
