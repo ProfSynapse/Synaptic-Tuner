@@ -10,86 +10,27 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-import torch
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# Force UTF-8 output for Windows to handle unicode characters like ✓
-if sys.platform == "win32":
-    import io
-    # Check if stdout/stderr are attached to a terminal or file (have buffer)
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    if hasattr(sys.stderr, 'buffer'):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
-# Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # dotenv not required
-
-# Suppress verbose logging from transformers BEFORE importing it
-# This prevents the metrics dict spam during training
-import logging
-logging.getLogger("transformers").setLevel(logging.WARNING)
-logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
-
-# ============================================================================
-# DISABLE TORCH.COMPILE - Required for VL models and WSL compatibility
-# Must be set BEFORE importing unsloth
-# ============================================================================
-os.environ['TORCH_COMPILE_DISABLE'] = '1'
-os.environ['PYTORCH_JIT'] = '0'
-
-# ============================================================================
-# WINDOWS COMPATIBILITY PATCHES - Apply BEFORE importing unsloth
-# ============================================================================
-if sys.platform == 'win32':
-    print("Applying Windows compatibility patches for Unsloth...")
-    from dataclasses import dataclass, fields
-    import dataclasses
-
-    # Patch 1: Wrap fields() for non-dataclasses
-    original_fields = fields
-    def patched_fields(class_or_instance):
-        try:
-            return original_fields(class_or_instance)
-        except TypeError:
-            return ()
-    dataclasses.fields = patched_fields
-
-    # Patch 2: Disable torch.compile
-    os.environ['PYTORCH_JIT'] = '0'
-    os.environ['TORCH_COMPILE_DISABLE'] = '1'
-
-    # Patch 3: Pre-patch torch._inductor
-    try:
-        import torch._inductor.runtime.hints
-        if not hasattr(torch._inductor.runtime.hints, 'attr_desc_fields'):
-            torch._inductor.runtime.hints.attr_desc_fields = set()
-    except:
-        pass
-
-    print("[OK] Windows patches applied")
-# ============================================================================
-
-# Add src to path
+# Add repo root and src to path before imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-# Add shared to path for evolutionary module
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from unsloth import is_bfloat16_supported
+# Environment bootstrap — must run before importing torch/unsloth/transformers
+from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging
 
-# Now that unsloth is imported, suppress transformers logging
-import transformers
-transformers.logging.set_verbosity_warning()
+init_trainer_env()
+
+import torch  # noqa: E402
+
+from unsloth import is_bfloat16_supported  # noqa: E402
+
+# Suppress transformers library-level logging after import
+suppress_transformers_logging()
 
 from transformers import Trainer
 from trl import SFTConfig
@@ -123,6 +64,13 @@ from shared.cloud_artifacts import (
     write_manifest,
 )
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
+from shared.training_utils import (
+    setup_wandb,
+    extract_previous_log_entries,
+    save_training_lineage,
+    build_base_lineage,
+    apply_tier_preset,
+)
 from shared.experiment_tracking.lineage_enrichment import enrich_training_lineage
 
 # Evolutionary training (optional)
@@ -276,52 +224,6 @@ def validate_model_compatibility(config) -> None:
     print(border + "\n")
 
 
-def setup_wandb():
-    """Auto-setup W&B if API key is in environment."""
-    wandb_key = os.environ.get("WANDB_API_KEY")
-
-    if not wandb_key:
-        return False  # No key, W&B disabled
-
-    try:
-        import wandb
-
-        # Login with API key from .env
-        wandb.login(key=wandb_key, relogin=True, force=True)
-
-        print("[OK] W&B: Logged in automatically (using WANDB_API_KEY from .env)")
-        return True
-    except Exception as e:
-        print(f"[WARN] W&B: Login failed ({e})")
-        return False
-
-
-def extract_previous_log_entries(checkpoint_path: str):
-    """Extract previous training log entries when resuming from checkpoint."""
-    import json
-
-    checkpoint_dir = Path(checkpoint_path)
-    if not checkpoint_dir.is_dir():
-        checkpoint_dir = checkpoint_dir.parent
-
-    # Find training.jsonl in checkpoint dir or its parent
-    log_paths = list(checkpoint_dir.glob("**/training_*.jsonl"))
-    if not log_paths:
-        return None
-
-    log_file = log_paths[0]
-    print(f"Loading previous log entries from: {log_file}")
-
-    entries = []
-    with open(log_file, 'r') as f:
-        for line in f:
-            try:
-                entries.append(json.loads(line))
-            except:
-                continue
-
-    return entries if entries else None
-
 
 def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dict[str, torch.Tensor]:
     """Pad explicit tokenized SFT rows into a trainer-ready batch."""
@@ -368,49 +270,28 @@ def build_training_lineage(
     evolutionary_stats: Optional[Dict[str, Any]] = None,
     preprocessing_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build comprehensive training lineage for model cards and traceability.
-
-    Args:
-        config: Training configuration object
-        train_dataset: Training dataset
-        eval_dataset: Evaluation dataset (may be None)
-        trainer: SFT trainer after training
-        run_dir: Path to training run directory
-        args: Command-line arguments
-        training_time_seconds: Total training time in seconds
-
-    Returns:
-        Dictionary containing complete training lineage
-    """
-    hardware_info = capture_hardware_info(torch)
-
+    """Build SFT training lineage using shared base + SFT-specific fields."""
     # Get dataset source info
     dataset_source = args.local_file or config.dataset.local_file
     if not dataset_source:
         dataset_source = f"{config.dataset.dataset_name}/{config.dataset.dataset_file}"
 
-    # Build lineage dictionary
-    lineage = {
-        "training_type": "SFT",
-        "timestamp": datetime.now().isoformat(),
-        "run_directory": str(run_dir),
-
-        "model": {
+    lineage = build_base_lineage(
+        training_type="SFT",
+        model_info={
             "base_model": config.model.model_name,
             "max_seq_length": config.model.max_seq_length,
             "load_in_4bit": config.model.load_in_4bit,
             "dtype": str(config.model.dtype),
         },
-
-        "lora": {
+        lora_info={
             "rank": config.lora.r,
             "alpha": config.lora.lora_alpha,
             "dropout": config.lora.lora_dropout,
             "target_modules": config.lora.target_modules,
             "bias": config.lora.bias,
         },
-
-        "training": {
+        training_info={
             "batch_size": config.training.per_device_train_batch_size,
             "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
             "effective_batch_size": config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps,
@@ -429,40 +310,21 @@ def build_training_lineage(
             "bf16": torch.cuda.is_bf16_supported() if config.training.bf16 is True else config.training.bf16,
             "seed": config.seed,
         },
-
-        "dataset": {
+        dataset_info={
             "source": dataset_source,
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
             "filter_desirable": config.dataset.filter_desirable,
         },
+        run_dir=run_dir,
+        trainer=trainer,
+        training_time_seconds=training_time_seconds,
+    )
 
-        "hardware": hardware_info,
-        "capacity_profile": summarize_capacity_from_logs(run_dir / "logs"),
-
-        "results": {},
-    }
-
+    # SFT-specific extensions
     if preprocessing_metadata:
         lineage["dataset"]["preprocessing"] = dict(preprocessing_metadata)
 
-    # Add training results if available
-    if hasattr(trainer, 'state') and trainer.state is not None:
-        lineage["results"]["final_step"] = trainer.state.global_step
-        lineage["results"]["total_epochs"] = trainer.state.epoch
-
-        if hasattr(trainer.state, 'log_history') and trainer.state.log_history:
-            # Get the last logged loss
-            for entry in reversed(trainer.state.log_history):
-                if 'loss' in entry:
-                    lineage["results"]["final_loss"] = entry['loss']
-                    break
-
-    if training_time_seconds:
-        lineage["results"]["training_time_seconds"] = round(training_time_seconds, 1)
-        lineage["results"]["training_time_formatted"] = f"{training_time_seconds // 3600:.0f}h {(training_time_seconds % 3600) // 60:.0f}m {training_time_seconds % 60:.0f}s"
-
-    # Add evolutionary training info if available
     if hasattr(config, 'evolutionary') and config.evolutionary.enabled:
         lineage["evolutionary"] = {
             "enabled": True,
@@ -485,33 +347,6 @@ def build_training_lineage(
             )
 
     return enrich_training_lineage(lineage, args=args)
-
-
-def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:
-    """Save training lineage to JSON file.
-
-    Args:
-        lineage: Training lineage dictionary
-        run_dir: Path to training run directory
-
-    Returns:
-        Path to saved lineage file
-    """
-    lineage_path = run_dir / "training_lineage.json"
-
-    with open(lineage_path, 'w', encoding='utf-8') as f:
-        json.dump(lineage, f, indent=2, default=str)
-
-    print(f"[OK] Training lineage saved to: {lineage_path}")
-
-    feature_row = build_capacity_feature_row(lineage)
-    if feature_row:
-        features_path = run_dir / "capacity_features.json"
-        with open(features_path, 'w', encoding='utf-8') as f:
-            json.dump(feature_row, f, indent=2, default=str)
-        print(f"[OK] Capacity features saved to: {features_path}")
-
-    return lineage_path
 
 
 def parse_args(argv=None):
@@ -712,15 +547,7 @@ def run(args: argparse.Namespace):
 
     # Apply tier preset (overrides base config, but explicit CLI flags override tier)
     if args.tier:
-        import yaml as _yaml
-        tier_path = Path(__file__).parent / "configs" / "tiers" / f"{args.tier}.yaml"
-        if not tier_path.exists():
-            raise FileNotFoundError(f"Tier config not found: {tier_path}")
-        with open(tier_path) as f:
-            tier_config = _yaml.safe_load(f)
-
-        # Map tier keys to config attributes
-        _tier_config_map = {
+        _sft_tier_config_map = {
             "r": ("lora", "r"),
             "lora_alpha": ("lora", "lora_alpha"),
             "learning_rate": ("training", "learning_rate"),
@@ -732,15 +559,10 @@ def run(args: argparse.Namespace):
             "use_rslora": ("lora", "use_rslora"),
             "target_modules": ("lora", "target_modules"),
         }
-        for key, value in tier_config.items():
-            if key == "max_steps":
-                # max_steps is handled via args, not config
-                if args.max_steps is None:
-                    args.max_steps = value
-            elif key in _tier_config_map:
-                section, attr = _tier_config_map[key]
-                setattr(getattr(config, section), attr, value)
-        print(f"Applied '{args.tier}' tier preset: {tier_config}")
+        apply_tier_preset(
+            config, args.tier, _sft_tier_config_map, args,
+            configs_dir=Path(__file__).parent / "configs",
+        )
 
     # Apply CLI overrides
     if args.batch_size:

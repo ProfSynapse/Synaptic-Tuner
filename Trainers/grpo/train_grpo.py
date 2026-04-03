@@ -14,43 +14,35 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# ============================================================================
 # GRPO is not supported on native Windows (use WSL2 or Linux)
-# ============================================================================
 if sys.platform == "win32":
     print("GRPO/GSPO training is not supported on native Windows.")
     print("Please use WSL2 (Ubuntu) or Linux.")
     sys.exit(1)
 
-# ============================================================================
-# Disable torch.compile (stability + compatibility)
-# Must be set BEFORE importing torch/unsloth in many environments
-# ============================================================================
-os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-os.environ.setdefault("PYTORCH_JIT", "0")
+# Add src and repo root to path before imports
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Environment bootstrap — must run before importing torch/unsloth/transformers
+# Skip Windows patches (GRPO exits on Windows above)
+from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging  # noqa: E402
+from shared.training_utils import setup_wandb  # noqa: E402
+
+init_trainer_env(apply_windows_patches=False)
+
+# GRPO-specific env vars
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch  # noqa: E402
-
-# Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
-try:  # noqa: E402
-    from dotenv import load_dotenv  # type: ignore
-
-    load_dotenv()
-except Exception:
-    pass
-
-# Add src and repo root to path (for shared module)
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))  # repo root
 
 from unsloth import is_bfloat16_supported  # noqa: E402
 from unsloth.chat_templates import get_chat_template  # noqa: E402
@@ -58,7 +50,6 @@ from trl import GRPOConfig, GRPOTrainer  # noqa: E402
 
 import yaml  # noqa: E402
 from src.data_loader import load_raw_dataset, format_dataset_for_grpo, print_dataset_samples  # noqa: E402
-
 
 from src.model_loader import (  # noqa: E402
     load_model_and_tokenizer,
@@ -70,13 +61,8 @@ from src.model_loader import (  # noqa: E402
 from src.rewards import build_combined_reward_function  # noqa: E402
 from src.training_callbacks import LiveDashboardCallback, MetricsTableCallback, DASHBOARD_AVAILABLE, RICH_AVAILABLE  # noqa: E402
 
-# Suppress verbose logging - we have our custom dashboard
-import logging
-logging.getLogger("transformers").setLevel(logging.WARNING)
-logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
-logging.getLogger("transformers.trainer_callback").setLevel(logging.WARNING)
-import transformers
-transformers.logging.set_verbosity_warning()
+# Suppress transformers library-level logging after import
+suppress_transformers_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -87,21 +73,6 @@ def load_config(config_path: str | None = None) -> dict:
         config_path = str(Path(__file__).parent / "configs" / "config.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-def setup_wandb() -> bool:
-    wandb_key = os.environ.get("WANDB_API_KEY")
-    if not wandb_key:
-        return False
-    try:
-        import wandb  # type: ignore
-
-        wandb.login(key=wandb_key, relogin=True, force=True)
-        print("✓ W&B: Logged in automatically (using WANDB_API_KEY from .env)")
-        return True
-    except Exception as e:
-        print(f"⚠ W&B: Login failed ({e})")
-        return False
 
 
 def _detect_chat_template(model_name: str) -> str:
@@ -440,6 +411,65 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"  Final model: {final_model_path}")
     print(f"  Logs: {logs_dir}")
 
+    # ── Build and save training lineage (matches SFT/KTO lineage flow) ──
+    try:
+        from shared.training_utils import build_base_lineage, save_training_lineage
+
+        bf16_supported = is_bfloat16_supported()
+        bf16 = bool(training_cfg.get("bf16") and bf16_supported)
+        fp16 = bool(training_cfg.get("fp16") and not bf16)
+        dataset_source = dataset_cfg.get("local_file") or dataset_cfg.get("dataset_name")
+
+        lineage = build_base_lineage(
+            training_type="GRPO",
+            model_info={
+                "base_model": model_cfg["model_name"],
+                "max_seq_length": model_cfg.get("max_seq_length", 0),
+                "load_in_4bit": model_cfg.get("load_in_4bit", True),
+                "dtype": str(model_cfg.get("dtype", "auto")),
+            },
+            lora_info={
+                "rank": lora_cfg["r"],
+                "alpha": lora_cfg["lora_alpha"],
+                "dropout": lora_cfg["lora_dropout"],
+                "target_modules": lora_cfg["target_modules"],
+                "bias": lora_cfg["bias"],
+            },
+            training_info={
+                "batch_size": training_cfg["per_device_train_batch_size"],
+                "gradient_accumulation_steps": training_cfg["gradient_accumulation_steps"],
+                "effective_batch_size": training_cfg["per_device_train_batch_size"] * training_cfg["gradient_accumulation_steps"],
+                "learning_rate": training_cfg["learning_rate"],
+                "num_epochs": training_cfg["num_train_epochs"],
+                "max_steps": training_cfg.get("max_steps", -1),
+                "warmup_ratio": training_cfg["warmup_ratio"],
+                "lr_scheduler": training_cfg["lr_scheduler_type"],
+                "optimizer": training_cfg["optim"],
+                "max_grad_norm": training_cfg.get("max_grad_norm", 1.0),
+                "gradient_checkpointing": lora_cfg.get("use_gradient_checkpointing", False),
+                "fp16": fp16,
+                "bf16": bf16,
+                "seed": config.get("seed", 42),
+                # GRPO-specific params
+                "num_generations": training_cfg["num_generations"],
+                "max_prompt_length": training_cfg["max_prompt_length"],
+                "max_completion_length": training_cfg["max_completion_length"],
+                "beta": training_cfg.get("beta", 0.1),
+                "mode": "GSPO" if training_cfg.get("use_gspo") else "GRPO",
+            },
+            dataset_info={
+                "source": dataset_source or "",
+                "train_examples": len(formatted_dataset),
+                "eval_examples": 0,
+            },
+            run_dir=run_dir,
+            trainer=trainer,
+        )
+
+        save_training_lineage(lineage, run_dir)
+    except Exception as _exc:
+        logger.warning("Lineage generation failed (non-fatal): %s", _exc)
+
     # ── Unified experiment tracking (best-effort) ──
     try:
         from shared.experiment_tracking.adapters import register_grpo_run
@@ -451,7 +481,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             dataset_source=dataset_cfg.get("local_file") or dataset_cfg.get("dataset_name"),
         )
     except Exception as _exc:
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "Unified tracking registration failed (non-fatal): %s", _exc
         )
 

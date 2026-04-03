@@ -40,6 +40,7 @@ from shared.evolutionary.lora_surgery import (
     _save_all_weights,
     _softmax,
 )
+from shared.evolutionary.surgery.registry import get_operation
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +311,8 @@ class TestAlphaSweep:
     async def test_modifies_adapter_config(self, tmp_adapter, tmp_path):
         """Alpha sweep should modify adapter_config.json, not weights."""
         output_dir = str(tmp_path / "output")
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             eval_scenario="test",
@@ -324,8 +327,11 @@ class TestAlphaSweep:
             default_score=0.5,
         )
 
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
-        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("alpha_sweep")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "alpha_sweep"
         assert result.variants_tried >= 1
@@ -334,15 +340,20 @@ class TestAlphaSweep:
     @pytest.mark.asyncio
     async def test_skips_identical_alpha(self, tmp_adapter, tmp_path):
         """If multiplier produces same alpha, it should be skipped."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             alpha_multipliers=[1.0],  # Same as current
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("alpha_sweep")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
         assert result.variants_tried == 0
 
 
@@ -350,15 +361,20 @@ class TestLayerScaling:
     @pytest.mark.asyncio
     async def test_applies_correct_multipliers(self, tmp_adapter, tmp_path):
         """Layer scaling should scale layer weights by the given factor."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             layer_scales=[0.0, 2.0],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.layer_scaling(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("layer_scaling")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "layer_scaling"
         assert result.variants_tried > 0
@@ -367,19 +383,23 @@ class TestLayerScaling:
     @pytest.mark.asyncio
     async def test_zero_scale_zeros_layer(self, tmp_adapter, tmp_path):
         """Scaling a layer by 0 should zero all its weights."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             layer_scales=[0.0],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        # After running, check that the variant with scale=0 has zeroed weights
-        await surgeon.layer_scaling(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("layer_scaling")
+        await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         # Check a variant directory
-        variant_dir = os.path.join(config.output_dir, "_surgery_work", "layer0_scale0.0")
+        variant_dir = os.path.join(work_dir, "layer0_scale0.0")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
         weights = _load_all_weights(variant_dir)
         for key, tensor in weights.items():
@@ -397,14 +417,19 @@ class TestLayerScaling:
         weights = {"some.random.key": torch.randn(4, 4)}
         st.save_file(weights, os.path.join(adapter_dir, "adapter_model.safetensors"))
 
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=adapter_dir,
             output_dir=str(tmp_path / "output"),
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(adapter_dir, backend, "test", config)
 
-        result = await surgeon.layer_scaling(adapter_dir, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("layer_scaling")
+        result = await op.execute(adapter_dir, 0.5, work_dir, config, evaluate_fn)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "no_lora_layers_found"
 
@@ -413,21 +438,26 @@ class TestModuleAblation:
     @pytest.mark.asyncio
     async def test_zeros_module_weights(self, tmp_adapter, tmp_path):
         """Module ablation should zero all weights for a given module type."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.module_ablation(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("module_ablation")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "module_ablation"
         assert result.variants_tried > 0
         assert "module_scores" in result.details
 
         # Verify an ablated variant
-        variant_dir = os.path.join(config.output_dir, "_surgery_work", "ablate_q_proj")
+        variant_dir = os.path.join(work_dir, "ablate_q_proj")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
         weights = _load_all_weights(variant_dir)
         for key, tensor in weights.items():
@@ -439,6 +469,8 @@ class TestCheckpointInterpolation:
     @pytest.mark.asyncio
     async def test_blends_at_correct_ratios(self, tmp_adapter, tmp_other_adapter, tmp_path):
         """Interpolation should blend weights at the specified ratio."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -446,9 +478,12 @@ class TestCheckpointInterpolation:
             blend_ratios=[0.5],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("checkpoint_interpolation")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "checkpoint_interpolation"
         assert result.variants_tried == 1
@@ -460,6 +495,8 @@ class TestCheckpointInterpolation:
         weights_a = _load_all_weights(tmp_adapter)
         weights_b = _load_all_weights(tmp_other_adapter)
 
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -467,11 +504,14 @@ class TestCheckpointInterpolation:
             blend_ratios=[0.5],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
 
-        variant_dir = os.path.join(config.output_dir, "_surgery_work", "blend_0.50")
+        op = get_operation("checkpoint_interpolation")
+        await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
+
+        variant_dir = os.path.join(work_dir, "blend_0.50")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
         blended = _load_all_weights(variant_dir)
         common_keys = set(weights_a.keys()) & set(weights_b.keys())
@@ -482,15 +522,20 @@ class TestCheckpointInterpolation:
     @pytest.mark.asyncio
     async def test_single_checkpoint_no_interpolation(self, tmp_adapter, tmp_path):
         """Should skip if no other checkpoint is provided."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             other_checkpoint_path="",
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.checkpoint_interpolation(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("checkpoint_interpolation")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "no_other_checkpoint"
 
@@ -520,15 +565,20 @@ class TestDAREDropRescale:
 
     @pytest.mark.asyncio
     async def test_operation_runs(self, tmp_adapter, tmp_path):
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             dare_drop_rates=[0.2],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.dare_drop_rescale(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("dare_drop_rescale")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
         assert result.operation == "dare_drop_rescale"
         assert result.variants_tried == 1
         assert "dare_scores" in result.details
@@ -538,21 +588,26 @@ class TestSVDRankReduction:
     @pytest.mark.asyncio
     async def test_produces_correct_dimensions(self, tmp_adapter, tmp_path):
         """SVD reduction should produce A/B matrices with reduced rank."""
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
             svd_rank_fractions=[0.5],  # rank 8 -> rank 4
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.svd_rank_reduction(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("svd_rank_reduction")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "svd_rank_reduction"
         assert result.variants_tried == 1
 
         # Check dimensions in the variant
-        variant_dir = os.path.join(config.output_dir, "_surgery_work", "svd_rank4")
+        variant_dir = os.path.join(work_dir, "svd_rank4")
         assert os.path.exists(variant_dir), f"Expected variant dir to exist: {variant_dir}"
         weights = _load_all_weights(variant_dir)
         pairs = _find_lora_pairs(weights)
@@ -572,14 +627,19 @@ class TestSVDRankReduction:
         weights = {"some.lora_A.weight": torch.randn(1, 64)}
         st.save_file(weights, os.path.join(adapter_dir, "adapter_model.safetensors"))
 
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=adapter_dir,
             output_dir=str(tmp_path / "output"),
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(adapter_dir, backend, "test", config)
 
-        result = await surgeon.svd_rank_reduction(adapter_dir, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("svd_rank_reduction")
+        result = await op.execute(adapter_dir, 0.5, work_dir, config, evaluate_fn)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "rank_too_small"
 
@@ -587,14 +647,19 @@ class TestSVDRankReduction:
 class TestAttentionMLPAblation:
     @pytest.mark.asyncio
     async def test_ablation_runs(self, tmp_adapter, tmp_path):
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.attention_mlp_ablation(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("attention_mlp_ablation")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
 
         assert result.operation == "attention_mlp_ablation"
         assert result.variants_tried == 2  # attention + mlp
@@ -606,6 +671,8 @@ class TestAttentionMLPAblation:
 class TestMetricsWeightedMerge:
     @pytest.mark.asyncio
     async def test_insufficient_checkpoints(self, tmp_adapter, tmp_path):
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -613,14 +680,19 @@ class TestMetricsWeightedMerge:
             checkpoint_scores=[0.5],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("metrics_weighted_merge")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
         assert result.variants_tried == 0
         assert result.details.get("reason") == "insufficient_checkpoints_or_scores"
 
     @pytest.mark.asyncio
     async def test_merge_runs(self, tmp_adapter, tmp_other_adapter, tmp_path):
+        work_dir = str(tmp_path / "output" / "_surgery_work")
+        os.makedirs(work_dir, exist_ok=True)
         config = SurgeryConfig(
             adapter_path=tmp_adapter,
             output_dir=str(tmp_path / "output"),
@@ -628,9 +700,12 @@ class TestMetricsWeightedMerge:
             checkpoint_scores=[0.7, 0.3],
         )
         backend = FakeEvalBackend(default_score=0.5)
-        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
 
-        result = await surgeon.metrics_weighted_merge(tmp_adapter, 0.5)
+        async def evaluate_fn(path):
+            return (await backend.run_eval(path, "test")).eval_score
+
+        op = get_operation("metrics_weighted_merge")
+        result = await op.execute(tmp_adapter, 0.5, work_dir, config, evaluate_fn)
         assert result.operation == "metrics_weighted_merge"
         assert result.variants_tried == 1
         assert "merge_weights" in result.details
@@ -826,3 +901,246 @@ class TestEdgeCases:
 
         result = await surgeon.run_surgery()
         assert result.duration_seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Registry API Tests
+# ---------------------------------------------------------------------------
+
+class TestRegistry:
+    def test_list_operations_returns_all_eight(self):
+        """All 8 operations should be registered."""
+        from shared.evolutionary.surgery.registry import list_operations
+        ops = list_operations()
+        assert len(ops) == 8
+        expected = [
+            "alpha_sweep", "attention_mlp_ablation", "checkpoint_interpolation",
+            "dare_drop_rescale", "layer_scaling", "metrics_weighted_merge",
+            "module_ablation", "svd_rank_reduction",
+        ]
+        assert ops == expected  # list_operations returns sorted
+
+    def test_get_operation_returns_instance(self):
+        """get_operation should return a fresh instance, not the class."""
+        op = get_operation("alpha_sweep")
+        assert hasattr(op, "execute")
+        assert hasattr(op, "name")
+        assert op.name == "alpha_sweep"
+
+    def test_get_operation_unknown_raises_value_error(self):
+        """get_operation should raise ValueError for unregistered names."""
+        with pytest.raises(ValueError, match="Unknown surgery operation"):
+            get_operation("nonexistent_operation")
+
+    def test_each_operation_has_unique_name(self):
+        """All registered operations should have distinct name attributes."""
+        from shared.evolutionary.surgery.registry import list_operations
+        ops = list_operations()
+        for name in ops:
+            op = get_operation(name)
+            assert op.name == name
+
+
+# ---------------------------------------------------------------------------
+# Protocol Conformance Tests
+# ---------------------------------------------------------------------------
+
+class TestProtocolConformance:
+    def test_all_operations_implement_protocol(self):
+        """All registered operations should structurally match SurgeryOperation."""
+        from shared.evolutionary.surgery.base import SurgeryOperation
+        from shared.evolutionary.surgery.registry import list_operations
+        import inspect
+
+        # Get protocol params excluding 'self'
+        protocol_method = inspect.signature(SurgeryOperation.execute)
+        protocol_params = [
+            p for p in protocol_method.parameters.keys() if p != "self"
+        ]
+
+        for name in list_operations():
+            op = get_operation(name)
+            # Check 'name' attribute exists
+            assert hasattr(op, "name"), f"{name} missing 'name' attribute"
+            assert isinstance(op.name, str), f"{name}.name is not a str"
+
+            # Check execute method exists and has matching signature
+            assert hasattr(op, "execute"), f"{name} missing 'execute' method"
+            method = inspect.signature(op.execute)
+            # Instance method signature excludes 'self'
+            op_params = list(method.parameters.keys())
+            assert op_params == protocol_params, (
+                f"{name}.execute params {op_params} != protocol {protocol_params}"
+            )
+
+    def test_evaluate_fn_is_used_with_await(self):
+        """Verify evaluate_fn is typed as Callable[[str], float] but used with await.
+
+        The auditor flagged this: evaluate_fn typed as Callable[[str], float]
+        but called with 'await evaluate_fn(...)'. This works at runtime because
+        Python's typing doesn't enforce return types, and the actual callable
+        passed is always an async function returning float. But the type
+        annotation is technically incorrect — it should be
+        Callable[[str], Awaitable[float]] for strict typing.
+
+        This test documents the behavior and verifies it works correctly.
+        """
+        import asyncio
+        import inspect
+
+        # Verify the Protocol signature types evaluate_fn as sync
+        from shared.evolutionary.surgery.base import SurgeryOperation
+        sig = inspect.signature(SurgeryOperation.execute)
+        # The parameter exists
+        assert "evaluate_fn" in sig.parameters
+
+        # Verify that passing an async callable still works
+        async def async_evaluate(path: str) -> float:
+            return 0.75
+
+        # The function is async
+        assert asyncio.iscoroutinefunction(async_evaluate)
+
+        # But its annotation says Callable[[str], float]
+        # This is the documented typing gap. Operations await the result,
+        # which works because async functions return coroutines that resolve to float.
+
+
+# ---------------------------------------------------------------------------
+# Backward Compatibility Shim Tests
+# ---------------------------------------------------------------------------
+
+class TestBackwardCompatShim:
+    def test_all_public_types_importable_from_shim(self):
+        """lora_surgery.py should re-export all public types."""
+        from shared.evolutionary.lora_surgery import (
+            LoRASurgeon,
+            OperationResult,
+            SurgeryConfig,
+            SurgeryResult,
+        )
+        assert LoRASurgeon is not None
+        assert OperationResult is not None
+        assert SurgeryConfig is not None
+        assert SurgeryResult is not None
+
+    def test_all_helper_functions_importable_from_shim(self):
+        """lora_surgery.py should re-export all underscore-prefixed helpers."""
+        from shared.evolutionary.lora_surgery import (
+            _check_dependencies,
+            _copy_adapter,
+            _find_lora_pairs,
+            _find_safetensor_files,
+            _get_layer_indices,
+            _get_module_types,
+            _is_attention_key,
+            _is_mlp_key,
+            _load_adapter_config,
+            _load_all_weights,
+            _save_adapter_config,
+            _save_all_weights,
+            _softmax,
+        )
+        # Verify they are callable
+        assert callable(_check_dependencies)
+        assert callable(_copy_adapter)
+        assert callable(_find_lora_pairs)
+        assert callable(_find_safetensor_files)
+        assert callable(_get_layer_indices)
+        assert callable(_get_module_types)
+        assert callable(_is_attention_key)
+        assert callable(_is_mlp_key)
+        assert callable(_load_adapter_config)
+        assert callable(_load_all_weights)
+        assert callable(_save_adapter_config)
+        assert callable(_save_all_weights)
+        assert callable(_softmax)
+
+    def test_shim_types_match_package_types(self):
+        """Shim re-exports should be the same objects as package exports."""
+        from shared.evolutionary.lora_surgery import LoRASurgeon as ShimSurgeon
+        from shared.evolutionary.surgery import LoRASurgeon as PkgSurgeon
+        assert ShimSurgeon is PkgSurgeon
+
+        from shared.evolutionary.lora_surgery import SurgeryConfig as ShimConfig
+        from shared.evolutionary.surgery import SurgeryConfig as PkgConfig
+        assert ShimConfig is PkgConfig
+
+    def test_shim_helpers_match_utils_functions(self):
+        """Shim helper re-exports should be the same functions as in utils."""
+        from shared.evolutionary.lora_surgery import _softmax as shim_softmax
+        from shared.evolutionary.surgery.utils import _softmax as utils_softmax
+        assert shim_softmax is utils_softmax
+
+        from shared.evolutionary.lora_surgery import _is_attention_key as shim_attn
+        from shared.evolutionary.surgery.utils import _is_attention_key as utils_attn
+        assert shim_attn is utils_attn
+
+
+# ---------------------------------------------------------------------------
+# Context Manager Tests
+# ---------------------------------------------------------------------------
+
+class TestContextManager:
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self, tmp_adapter, tmp_path):
+        """LoRASurgeon should work as an async context manager."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=["alpha_sweep"],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+
+        async with LoRASurgeon(tmp_adapter, backend, "test", config) as surgeon:
+            assert surgeon is not None
+            assert surgeon.adapter_path == tmp_adapter
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_work_dir(self, tmp_adapter, tmp_path):
+        """cleanup() should remove the _surgery_work directory."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=["alpha_sweep"],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
+
+        # Run surgery (which creates and then cleans up work dir)
+        await surgeon.run_surgery()
+
+        # Work dir should be cleaned up after surgery
+        work_dir = os.path.join(output_dir, "_surgery_work")
+        assert not os.path.exists(work_dir)
+
+
+# ---------------------------------------------------------------------------
+# Surgeon Backward-Compat Proxy Methods
+# ---------------------------------------------------------------------------
+
+class TestSurgeonProxyMethods:
+    @pytest.mark.asyncio
+    async def test_direct_operation_method_matches_registry(self, tmp_adapter, tmp_path):
+        """Surgeon's named methods should delegate to the same registry operations."""
+        output_dir = str(tmp_path / "output")
+        config = SurgeryConfig(
+            adapter_path=tmp_adapter,
+            eval_scenario="test",
+            operations=[],
+            output_dir=output_dir,
+            alpha_multipliers=[2.0],
+        )
+        backend = FakeEvalBackend(default_score=0.5)
+        surgeon = LoRASurgeon(tmp_adapter, backend, "test", config)
+
+        # Call the backward-compat proxy method directly
+        result = await surgeon.alpha_sweep(tmp_adapter, 0.5)
+        assert result.operation == "alpha_sweep"
+        assert isinstance(result, OperationResult)

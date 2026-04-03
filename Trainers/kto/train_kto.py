@@ -9,75 +9,28 @@ Usage:
     python train_kto.py --config custom_config.py
 """
 
-# ============================================================================
-# DISABLE TORCH COMPILE - Must be set BEFORE importing torch
-# Prevents nvcc permission errors and dynamo compilation issues
-# ============================================================================
-import os
-os.environ["TORCH_COMPILE_DISABLE"] = "1"
-os.environ["TORCHDYNAMO_DISABLE"] = "1"
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Get accurate CUDA error location
-
 import argparse
-import json
+import os
 import sys
 import time
-import torch
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-# Force UTF-8 output for Windows to handle unicode characters like ✓
-if sys.platform == "win32":
-    import io
-    # Check if stdout/stderr are attached to a terminal or file (have buffer)
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    if hasattr(sys.stderr, 'buffer'):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
-# Load .env file for API keys (HF_TOKEN, WANDB_API_KEY)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # dotenv not required
-
-# ============================================================================
-# WINDOWS COMPATIBILITY PATCHES - Apply BEFORE importing unsloth
-# ============================================================================
-if sys.platform == 'win32':
-    print("Applying Windows compatibility patches for Unsloth...")
-    from dataclasses import dataclass, fields
-    import dataclasses
-
-    # Patch 1: Wrap fields() for non-dataclasses
-    original_fields = fields
-    def patched_fields(class_or_instance):
-        try:
-            return original_fields(class_or_instance)
-        except TypeError:
-            return ()
-    dataclasses.fields = patched_fields
-
-    # Patch 2: Disable torch.compile
-    os.environ['PYTORCH_JIT'] = '0'
-    os.environ['TORCH_COMPILE_DISABLE'] = '1'
-
-    # Patch 3: Pre-patch torch._inductor
-    try:
-        import torch._inductor.runtime.hints
-        if not hasattr(torch._inductor.runtime.hints, 'attr_desc_fields'):
-            torch._inductor.runtime.hints.attr_desc_fields = set()
-    except:
-        pass
-
-    print("✓ Windows patches applied")
-# ============================================================================
-
-# Add src to path
+# Add src and repo root to path before imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from unsloth import is_bfloat16_supported
+# Environment bootstrap — must run before importing torch/unsloth/transformers
+from shared.env_bootstrap import init_trainer_env, suppress_transformers_logging
+
+init_trainer_env()
+
+# KTO-specific: enable CUDA error debugging
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
+import torch  # noqa: E402
+
+from unsloth import is_bfloat16_supported  # noqa: E402
 from trl import KTOConfig, KTOTrainer
 
 # Import custom KTO-S trainer (with SIGN correction)
@@ -106,55 +59,27 @@ from shared.cloud_artifacts import (
     write_manifest,
 )
 from shared.training_capacity import build_capacity_feature_row, capture_hardware_info, summarize_capacity_from_logs
+from shared.training_utils import (
+    setup_wandb,
+    extract_previous_log_entries,
+    save_training_lineage,
+    build_base_lineage,
+    apply_tier_preset,
+)
 from shared.experiment_tracking.lineage_enrichment import enrich_training_lineage
 
 
-def setup_wandb():
-    """Auto-setup W&B if API key is in environment."""
-    wandb_key = os.environ.get("WANDB_API_KEY")
-
-    if not wandb_key:
-        return False  # No key, W&B disabled
-
-    try:
-        import wandb
-
-        # Login with API key from .env
-        wandb.login(key=wandb_key, relogin=True, force=True)
-
-        print("✓ W&B: Logged in automatically (using WANDB_API_KEY from .env)")
-        return True
-
-    except ImportError:
-        print("⚠ W&B: API key found but wandb not installed. Install with: pip install wandb")
-        return False
-    except Exception as e:
-        print(f"⚠ W&B: Login failed - {e}")
-        return False
-
-
 def setup_environment():
-    """Setup environment variables and configurations."""
-    # Enable CUDA error debugging (optional, can slow down training)
-    # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
+    """Setup KTO-specific environment variables and print training banner."""
     # Disable tokenizer parallelism warnings
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    # ============================================================================
     # CUDA MEMORY OPTIMIZATION: Reduce fragmentation
-    # ============================================================================
     # expandable_segments reduces memory fragmentation by consolidating allocations
-    # This can reduce memory usage by ~30% and prevent OOM errors
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # Suppress verbose logging - we have our custom dashboard
-    import logging
-    logging.getLogger("transformers").setLevel(logging.WARNING)
-    logging.getLogger("transformers.trainer").setLevel(logging.WARNING)
-    logging.getLogger("transformers.trainer_callback").setLevel(logging.WARNING)
-    import transformers
-    transformers.logging.set_verbosity_warning()
+    # Suppress transformers library-level logging after import
+    suppress_transformers_logging()
 
     print("=" * 60)
     print("RTX 3090 KTO TRAINING")
@@ -173,77 +98,6 @@ def setup_environment():
 
 
 
-def extract_previous_log_entries(checkpoint_path: str) -> list:
-    """Extract log entries from a previous run when resuming from checkpoint.
-
-    Args:
-        checkpoint_path: Path to checkpoint directory (e.g., "kto_output_rtx3090/20251114_135227/checkpoints/checkpoint-50")
-
-    Returns:
-        List of log entry dicts from the original run, up to the checkpoint step
-    """
-    import json
-    import re
-    from glob import glob
-
-    # Parse checkpoint path to extract timestamp directory and step number
-    checkpoint_path = Path(checkpoint_path)
-
-    # Extract step number from checkpoint name (e.g., "checkpoint-50" -> 50)
-    checkpoint_name = checkpoint_path.name
-    step_match = re.search(r'checkpoint-(\d+)', checkpoint_name)
-    if not step_match:
-        print(f"⚠ Warning: Could not extract step number from checkpoint path: {checkpoint_path}")
-        return []
-
-    resume_step = int(step_match.group(1))
-
-    # Navigate up to find the run directory (timestamp directory)
-    # checkpoint_path is like: kto_output_rtx3090/20251114_135227/checkpoints/checkpoint-50
-    # We want: kto_output_rtx3090/20251114_135227
-    run_dir = checkpoint_path.parent.parent
-
-    # Find log files in the logs subdirectory
-    logs_dir = run_dir / "logs"
-    if not logs_dir.exists():
-        print(f"⚠ Warning: Logs directory not found: {logs_dir}")
-        return []
-
-    # Find training log files (there may be multiple if resuming multiple times)
-    log_files = list(logs_dir.glob("training_*.jsonl"))
-    if not log_files:
-        print(f"⚠ Warning: No log files found in: {logs_dir}")
-        return []
-
-    # Use the most recent log file (sorted by name, which includes timestamp)
-    log_file = sorted(log_files)[-1]
-
-    print(f"\n✓ Found previous run log: {log_file}")
-    print(f"  Extracting entries from steps 0 to {resume_step}")
-
-    # Read log entries up to the resume step
-    previous_entries = []
-    try:
-        with open(log_file, 'r') as f:
-            for line in f:
-                entry = json.loads(line.strip())
-                step = entry.get('step', 0)
-
-                # Include entries up to and including the resume step
-                if step <= resume_step:
-                    previous_entries.append(entry)
-                else:
-                    # We've passed the resume step, no need to read further
-                    break
-
-        print(f"  Extracted {len(previous_entries)} log entries\n")
-        return previous_entries
-
-    except Exception as e:
-        print(f"⚠ Warning: Failed to read log file: {e}")
-        return []
-
-
 def build_training_lineage(
     config,
     train_dataset,
@@ -254,52 +108,28 @@ def build_training_lineage(
     training_time_seconds: Optional[float] = None,
     final_loss: Optional[float] = None
 ) -> Dict[str, Any]:
-    """Build comprehensive training lineage for model cards and traceability.
-
-    Args:
-        config: Training configuration object
-        train_dataset: Training dataset
-        eval_dataset: Evaluation dataset (may be None)
-        trainer: KTO trainer after training
-        run_dir: Path to training run directory
-        args: Command-line arguments
-        training_time_seconds: Total training time in seconds
-        final_loss: Final training loss from trainer output
-
-    Returns:
-        Dictionary containing complete training lineage
-    """
-    from datetime import datetime
-
-    hardware_info = capture_hardware_info(torch)
-
+    """Build KTO training lineage using shared base + KTO-specific fields."""
     # Get dataset source info
     dataset_source = args.local_file or config.dataset.local_file
     if not dataset_source:
         dataset_source = f"{config.dataset.dataset_name}/{config.dataset.dataset_file}"
 
-    # Build lineage dictionary
-    lineage = {
-        "training_type": "KTO",
-        "timestamp": datetime.now().isoformat(),
-        "run_directory": str(run_dir),
-
-        "model": {
+    lineage = build_base_lineage(
+        training_type="KTO",
+        model_info={
             "base_model": config.model.model_name,
             "max_seq_length": config.model.max_seq_length,
             "load_in_4bit": config.model.load_in_4bit,
             "dtype": str(config.model.dtype),
         },
-
-        "lora": {
+        lora_info={
             "rank": config.lora.r,
             "alpha": config.lora.lora_alpha,
             "dropout": config.lora.lora_dropout,
             "target_modules": config.lora.target_modules,
             "bias": config.lora.bias,
         },
-
-        "training": {
+        training_info={
             "batch_size": config.training.per_device_train_batch_size,
             "gradient_accumulation_steps": config.training.gradient_accumulation_steps,
             "effective_batch_size": config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps,
@@ -322,20 +152,17 @@ def build_training_lineage(
             "undesirable_weight": config.training.undesirable_weight,
             "use_kto_s": config.training.use_kto_s,
         },
-
-        "dataset": {
+        dataset_info={
             "source": dataset_source,
             "train_examples": len(train_dataset),
             "eval_examples": len(eval_dataset) if eval_dataset else 0,
         },
+        run_dir=run_dir,
+        trainer=trainer,
+        training_time_seconds=training_time_seconds,
+    )
 
-        "hardware": hardware_info,
-        "capacity_profile": summarize_capacity_from_logs(run_dir / "logs"),
-
-        "results": {},
-    }
-
-    # Add two-stage LR info if enabled
+    # KTO-specific extensions
     if config.training.use_two_stage_lr:
         lineage["training"]["two_stage_lr"] = {
             "enabled": True,
@@ -345,54 +172,11 @@ def build_training_lineage(
             "reduction_factor": config.training.lr_reduction_factor,
         }
 
-    # Add training results if available
-    if hasattr(trainer, 'state') and trainer.state is not None:
-        lineage["results"]["final_step"] = trainer.state.global_step
-        lineage["results"]["total_epochs"] = trainer.state.epoch
-
-        if hasattr(trainer.state, 'log_history') and trainer.state.log_history:
-            # Get the last logged loss
-            for entry in reversed(trainer.state.log_history):
-                if 'loss' in entry:
-                    lineage["results"]["final_loss"] = entry['loss']
-                    break
-
-    # Use provided final_loss if available
+    # Use provided final_loss if available (overrides trainer state extraction)
     if final_loss is not None:
         lineage["results"]["final_loss"] = final_loss
 
-    if training_time_seconds:
-        lineage["results"]["training_time_seconds"] = round(training_time_seconds, 1)
-        lineage["results"]["training_time_formatted"] = f"{training_time_seconds // 3600:.0f}h {(training_time_seconds % 3600) // 60:.0f}m {training_time_seconds % 60:.0f}s"
-
     return enrich_training_lineage(lineage, args=args)
-
-
-def save_training_lineage(lineage: Dict[str, Any], run_dir: Path) -> Path:
-    """Save training lineage to JSON file.
-
-    Args:
-        lineage: Training lineage dictionary
-        run_dir: Path to training run directory
-
-    Returns:
-        Path to saved lineage file
-    """
-    lineage_path = run_dir / "training_lineage.json"
-
-    with open(lineage_path, 'w', encoding='utf-8') as f:
-        json.dump(lineage, f, indent=2, default=str)
-
-    print(f"✓ Training lineage saved to: {lineage_path}")
-
-    feature_row = build_capacity_feature_row(lineage)
-    if feature_row:
-        features_path = run_dir / "capacity_features.json"
-        with open(features_path, 'w', encoding='utf-8') as f:
-            json.dump(feature_row, f, indent=2, default=str)
-        print(f"✓ Capacity features saved to: {features_path}")
-
-    return lineage_path
 
 
 def main():
@@ -729,15 +513,7 @@ def main():
 
     # Apply tier preset (overrides base config, but explicit CLI flags override tier)
     if args.tier:
-        import yaml as _yaml
-        tier_path = Path(__file__).parent / "configs" / "tiers" / f"{args.tier}.yaml"
-        if not tier_path.exists():
-            raise FileNotFoundError(f"Tier config not found: {tier_path}")
-        with open(tier_path) as f:
-            tier_config = _yaml.safe_load(f)
-
-        # Map tier keys to config attributes
-        _tier_config_map = {
+        _kto_tier_config_map = {
             "r": ("lora", "r"),
             "lora_alpha": ("lora", "lora_alpha"),
             "use_dora": ("lora", "use_dora"),
@@ -749,15 +525,10 @@ def main():
             "batch_size": ("training", "per_device_train_batch_size"),
             "gradient_accumulation_steps": ("training", "gradient_accumulation_steps"),
         }
-        for key, value in tier_config.items():
-            if key == "max_steps":
-                # max_steps is handled via args, not config
-                if args.max_steps is None:
-                    args.max_steps = value
-            elif key in _tier_config_map:
-                section, attr = _tier_config_map[key]
-                setattr(getattr(config, section), attr, value)
-        print(f"Applied '{args.tier}' tier preset: {tier_config}")
+        apply_tier_preset(
+            config, args.tier, _kto_tier_config_map, args,
+            configs_dir=Path(__file__).parent / "configs",
+        )
 
     # Apply LoRA technique CLI overrides (after tier, so they take precedence)
     if args.use_dora:
