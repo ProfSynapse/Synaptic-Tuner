@@ -9,6 +9,7 @@ Used by: Trainers/cloud/jobs/gguf_conversion.yaml (HF Jobs cloud runner)
 """
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -84,6 +85,39 @@ def install_gguf_package() -> None:
     ])
 
 
+def fix_tokenizer_config(model_dir: Path) -> None:
+    """Patch tokenizer_config.json if extra_special_tokens is a list instead of a dict.
+
+    Some model uploads (e.g. Gemma 4) produce extra_special_tokens as a list,
+    but transformers expects a dict mapping token names to values. Convert
+    the list format to a dict keyed by the token string content.
+    """
+    config_path = model_dir / "tokenizer_config.json"
+    if not config_path.exists():
+        return
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    extra = config.get("extra_special_tokens")
+    if not isinstance(extra, list):
+        return
+
+    # Convert list of token dicts/strings to a dict keyed by content
+    patched = {}
+    for item in extra:
+        if isinstance(item, dict):
+            content = item.get("content", str(item))
+            patched[content] = item
+        else:
+            patched[str(item)] = str(item)
+
+    config["extra_special_tokens"] = patched
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    log.info("Patched extra_special_tokens in tokenizer_config.json (list -> dict)")
+
+
 def convert_to_gguf(
     llama_cpp_dir: Path, model_dir: Path, outfile: Path, quant: str
 ) -> None:
@@ -139,6 +173,7 @@ def main() -> None:
     download_model(args.model_repo, model_dir)
     clone_llama_cpp(llama_cpp_dir)
     install_gguf_package()
+    fix_tokenizer_config(model_dir)
     convert_to_gguf(llama_cpp_dir, model_dir, outfile, args.quant)
     upload_gguf(outfile, upload_repo)
 
