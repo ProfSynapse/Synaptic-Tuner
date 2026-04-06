@@ -1,0 +1,27 @@
+name: gguf-conversion
+description: Convert a HuggingFace model to GGUF format and upload the result. Pure Python, no GPU required.
+provider: hf_jobs
+
+job:
+  image: "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+  flavor: "cpu-upgrade"
+  namespace: "professorsynapse"
+  timeout_hours: 4
+  labels:
+    task: gguf-conversion
+
+repo:
+  checkout: true
+  clone_dir: "/workspace/repo"
+
+setup:
+  use_project_deps: true
+
+run:
+  include_hf_token: true
+  env:
+    PYTHONPATH: "{repo_dir}"
+    GGUF_MODEL_REPO: "professorsynapse/gemma-4-e4b-sft"
+    GGUF_QUANT_TYPE: "q8_0"
+  steps:
+    - "cd {repo_dir} && python scripts/cloud_gguf_convert.py --model-repo $GGUF_MODEL_REPO --quant $GGUF_QUANT_TYPE"
