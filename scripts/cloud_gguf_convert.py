@@ -75,9 +75,13 @@ def clone_llama_cpp(dest: Path) -> Path:
 
 
 def install_gguf_package() -> None:
-    """Install the gguf Python package required by the converter."""
-    log.info("Installing gguf Python package ...")
-    run_cmd([sys.executable, "-m", "pip", "install", "gguf>=0.16.0"])
+    """Install the gguf Python package and upgrade transformers for tokenizer compat."""
+    log.info("Installing gguf Python package and upgrading transformers ...")
+    run_cmd([
+        sys.executable, "-m", "pip", "install",
+        "gguf>=0.16.0",
+        "transformers>=4.52.0",
+    ])
 
 
 def convert_to_gguf(
