@@ -364,6 +364,10 @@ def parse_args(argv=None):
     # Training parameters
     parser.add_argument("--batch-size", type=int,
                        help="Override per-device batch size")
+    parser.add_argument("--save-steps", type=int,
+                       help="Override checkpoint save frequency (steps)")
+    parser.add_argument("--save-total-limit", type=int,
+                       help="Override max checkpoints kept")
     parser.add_argument("--gradient-accumulation", type=int,
                        help="Override gradient accumulation steps")
     parser.add_argument("--learning-rate", type=float,
@@ -567,6 +571,10 @@ def run(args: argparse.Namespace):
     # Apply CLI overrides
     if args.batch_size:
         config.training.per_device_train_batch_size = args.batch_size
+    if args.save_steps is not None:
+        config.training.save_steps = args.save_steps
+    if args.save_total_limit is not None:
+        config.training.save_total_limit = args.save_total_limit
     if args.gradient_accumulation:
         config.training.gradient_accumulation_steps = args.gradient_accumulation
     if args.learning_rate:
