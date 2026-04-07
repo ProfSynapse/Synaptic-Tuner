@@ -121,12 +121,16 @@ def materialize_sft_example(
     if not messages:
         raise ValueError("Cannot materialize empty SFT conversation.")
 
+    # Unwrap Processor → Tokenizer for multimodal models (Gemma 4, Qwen-VL, etc.)
+    # Processors have apply_chat_template but lack encode(); the inner .tokenizer does.
+    _encoder = getattr(tokenizer, "tokenizer", tokenizer)
+
     full_str = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
-    full_tokens = tokenizer.encode(full_str, add_special_tokens=False)
+    full_tokens = _encoder.encode(full_str, add_special_tokens=False)
     truncation_applied = len(full_tokens) > max_seq_length
     input_ids = list(full_tokens[:max_seq_length])
     attention_mask = [1] * len(input_ids)
@@ -139,7 +143,7 @@ def materialize_sft_example(
             tokenize=False,
             add_generation_prompt=True,
         )
-        prompt_tokens = tokenizer.encode(prompt_str, add_special_tokens=False)
+        prompt_tokens = _encoder.encode(prompt_str, add_special_tokens=False)
         mask_len = min(len(prompt_tokens), len(labels))
         for idx in range(mask_len):
             if labels[idx] == prompt_tokens[idx]:
