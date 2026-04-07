@@ -38,6 +38,8 @@ class TrainingStageSpec:
     max_steps: Optional[int] = None
     max_seq_length: Optional[int] = None
     load_in_4bit: Optional[bool] = None
+    save_steps: Optional[int] = None
+    save_total_limit: Optional[int] = None
     lora_r: Optional[int] = None
     lora_alpha: Optional[int] = None
     lora_dropout: Optional[float] = None
