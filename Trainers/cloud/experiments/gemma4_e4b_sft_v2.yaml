@@ -1,0 +1,35 @@
+experiment:
+  name: gemma4-e4b-sft-v2
+  provider: hf_jobs
+  method: sft
+  objective: gemma4_retrain_full_precision_3epoch
+  dataset:
+    source: professorsynapse/claudesidian-synthetic-dataset
+    file: toolcall_sft_v1_3_r2_20260322.jsonl
+  training:
+    model_name: google/gemma-4-E4B-it
+    gpu: a100-large
+    cloud_image: "unsloth/unsloth:2026.4.4-pt2.9.0-vllm-0.16.0-cu12.8-studio-release-v0.1.35-beta"
+    pip_packages:
+      - "transformers>=5.0"
+    batch_size: 4
+    gradient_accumulation: 4
+    num_epochs: 3
+    learning_rate: 0.0001
+    load_in_4bit: false
+    save_steps: 200
+    save_total_limit: 10
+    lora_r: 64
+    lora_alpha: 128
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: false
+  loss:
+    enabled: false
