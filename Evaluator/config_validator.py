@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import yaml
 
+from shared.validation.parsing.tool_call_parser import parse_gemma_tool_calls, is_gemma_tool_call
+
 
 @dataclass
 class ValidationIssue:
@@ -653,6 +655,20 @@ class ConfigDrivenValidator:
                     ))
                 except json.JSONDecodeError:
                     pass
+
+        # Try Gemma format: <|tool_call>call:name{...}<tool_call|>
+        if not tool_calls and is_gemma_tool_call(response):
+            gemma_calls = parse_gemma_tool_calls(response)
+            if gemma_calls:
+                for gc in gemma_calls:
+                    name = gc["function"]["name"]
+                    args_str = gc["function"]["arguments"]
+                    try:
+                        args = json.loads(args_str)
+                    except json.JSONDecodeError:
+                        args = {}
+                    parsed = self._expand_tool_call(name, args)
+                    tool_calls.extend(parsed)
 
         # Try Qwen format: <tool_call>...</tool_call>
         if not tool_calls and "<tool_call>" in response:

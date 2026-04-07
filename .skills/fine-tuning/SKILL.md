@@ -288,6 +288,8 @@ python tuner.py cloud-pipeline --method sft \
   --yes
 ```
 For SFT experiments, the cloud and experiment surfaces now accept:
+- `--train-save-steps` — Override checkpoint save frequency (steps)
+- `--train-save-total-limit` — Override max checkpoints kept
 - `--train-lora-r`
 - `--train-lora-alpha`
 - `--train-lora-dropout`

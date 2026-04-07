@@ -281,6 +281,8 @@ Examples:
     parser.add_argument("--train-dataset-name", help="Override the Hugging Face dataset repo for cloud/cloud-pipeline training.")
     parser.add_argument("--train-dataset-file", help="Override the dataset file within the Hugging Face dataset repo.")
     parser.add_argument("--train-batch-size", type=int, help="Override per-device batch size for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-save-steps", type=int, help="Override checkpoint save frequency (steps) for cloud/cloud-pipeline training.")
+    parser.add_argument("--train-save-total-limit", type=int, help="Override max checkpoints kept for cloud/cloud-pipeline training.")
     parser.add_argument("--train-gradient-accumulation", type=int, help="Override gradient accumulation steps for cloud/cloud-pipeline training.")
     parser.add_argument("--train-learning-rate", type=float, help="Override learning rate for cloud/cloud-pipeline training.")
     parser.add_argument("--train-num-epochs", type=int, help="Override epochs for cloud/cloud-pipeline training.")

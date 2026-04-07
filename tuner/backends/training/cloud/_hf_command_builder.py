@@ -129,6 +129,10 @@ class HFCommandBuilderMixin:
             training_args.extend(["--dataset-file", dataset_file_arg])
         if config.batch_size is not None:
             training_args.extend(["--batch-size", str(config.batch_size)])
+        if config.save_steps is not None:
+            training_args.extend(["--save-steps", str(config.save_steps)])
+        if config.save_total_limit is not None:
+            training_args.extend(["--save-total-limit", str(config.save_total_limit)])
         if config.gradient_accumulation_steps is not None:
             training_args.extend(["--gradient-accumulation", str(config.gradient_accumulation_steps)])
         if config.learning_rate:

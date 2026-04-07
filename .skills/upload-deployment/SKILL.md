@@ -20,6 +20,7 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 | Upload LoRA only | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method lora` |
 | Merge LoRA manually | `./run.sh` → Merge LoRA |
 | Convert to GGUF only | `./run.sh` → Convert |
+| Cloud GGUF conversion | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/gguf_conversion.yaml --yes` |
 | Full pipeline | `./run.sh` → Full Pipeline (Train → Upload → Eval) |
 
 ## Save Strategies
@@ -41,6 +42,8 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 ## Key Directories
 
 - `scripts/upload_model.py` — Generic upload entry point
+- `scripts/cloud_gguf_convert.py` — Cloud GGUF conversion CLI (download → convert → upload)
+- `Trainers/cloud/jobs/gguf_conversion.yaml` — HF Jobs config for cloud GGUF conversion
 - `shared/upload/` — Upload orchestrator and strategies
 - `shared/upload/converters/` — GGUF and WebGPU converters
 - `shared/model_loading/` — Model loading and LoRA merge utilities
@@ -73,6 +76,24 @@ python3 scripts/upload_model.py \
 # Use shared merge utility
 ./run.sh → Merge LoRA
 # Or the GRPO trainer auto-merges when lora_path is set in config
+```
+
+**Cloud GGUF conversion (when local RAM is insufficient):**
+```bash
+# 1. Upload merged model to HF first (if not already there)
+# 2. Edit env vars in the job YAML or override at runtime:
+#    GGUF_MODEL_REPO: the HF repo with the merged model
+#    GGUF_QUANT_TYPE: q8_0, q5_k_m, or q4_k_m
+python tuner.py cloud-run --job-config Trainers/cloud/jobs/gguf_conversion.yaml --yes
+# 3. GGUF is uploaded back to the same HF repo under gguf/
+```
+
+**Cloud GGUF conversion (direct script, outside cloud-run):**
+```bash
+python scripts/cloud_gguf_convert.py \
+  --model-repo user/model-name \
+  --quant q8_0 \
+  --upload-to user/model-name
 ```
 
 **Upload with evaluation results:**
@@ -122,3 +143,6 @@ HF_TOKEN=hf_...                       # Required for uploads
 - Use `upload_manifest.json` to verify what was uploaded
 - The upload orchestrator handles everything — prefer `./run.sh` → Upload over manual commands
 - Cloud jobs never rely on the remote container filesystem as the only copy; inspect provider-native storage first, then publish `final_model` if needed
+- If local GGUF conversion OOMs (common on machines with <32GB RAM), use the cloud GGUF job (`cpu-upgrade` flavor, 32GB RAM, no GPU needed)
+- The cloud GGUF script uses pure Python conversion (llama.cpp `convert_hf_to_gguf.py`) — no compilation required
+- Some models (e.g., Gemma 4) may need tokenizer config patching before conversion — the cloud script handles known quirks automatically

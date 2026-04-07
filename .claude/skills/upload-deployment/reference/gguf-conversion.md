@@ -42,6 +42,31 @@ This creates all three quantizations and uploads them.
 # Select: Convert → GGUF
 ```
 
+### Via Cloud Job (When Local RAM is Insufficient)
+
+Use this when the model's tensors exceed local RAM (common with large vocab models like Gemma 4).
+Requires the merged model to be on HuggingFace first.
+
+```bash
+# Edit GGUF_MODEL_REPO and GGUF_QUANT_TYPE in the job YAML, then:
+python tuner.py cloud-run --job-config Trainers/cloud/jobs/gguf_conversion.yaml --yes
+```
+
+- **Flavor**: `cpu-upgrade` (32GB RAM, no GPU needed)
+- **Image**: Same unsloth image as training jobs
+- **Process**: Downloads model from HF → clones llama.cpp → pure Python conversion → uploads GGUF back to HF repo
+- **No compilation**: Uses `convert_hf_to_gguf.py` directly (Python-only, no cmake/make)
+- **Script**: `scripts/cloud_gguf_convert.py` — can also be run standalone outside cloud-run
+
+**When to use cloud vs local:**
+
+| Scenario | Method |
+|----------|--------|
+| System RAM >= 2x model size | Local (`./run.sh` → Convert) |
+| System RAM < 2x model size | Cloud job (`cpu-upgrade`) |
+| Large vocab models (Gemma 4, etc.) | Cloud job (vocab tensor can be 5GB+) |
+| Multiple quantizations needed | Local reliable converter (merges once, quants in parallel) |
+
 ---
 
 ## Reliable GGUF Converter

@@ -301,6 +301,14 @@ class CloudTrainHandler(BaseHandler):
         if train_batch_size is not None:
             config.batch_size = train_batch_size
 
+        train_save_steps = getattr(args, "train_save_steps", None)
+        if train_save_steps is not None:
+            config.save_steps = train_save_steps
+
+        train_save_total_limit = getattr(args, "train_save_total_limit", None)
+        if train_save_total_limit is not None:
+            config.save_total_limit = train_save_total_limit
+
         train_gradient_accumulation = getattr(args, "train_gradient_accumulation", None)
         if train_gradient_accumulation is not None:
             config.gradient_accumulation_steps = train_gradient_accumulation
@@ -546,6 +554,10 @@ class CloudTrainHandler(BaseHandler):
         if getattr(config, "gradient_accumulation_steps", None) is not None:
             display["Grad Accum"] = str(config.gradient_accumulation_steps)
         display["Learning Rate"] = str(config.learning_rate)
+        if getattr(config, "save_steps", None) is not None:
+            display["Save Steps"] = str(config.save_steps)
+        if getattr(config, "save_total_limit", None) is not None:
+            display["Save Total Limit"] = str(config.save_total_limit)
         if getattr(config, "max_steps", None) is not None:
             display["Max Steps"] = str(config.max_steps)
         if getattr(config, "max_seq_length", None) is not None:

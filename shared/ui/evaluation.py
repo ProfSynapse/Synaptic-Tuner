@@ -126,6 +126,7 @@ class LiveEvaluationDashboard:
         behavior_tested: bool = False,
         behavior_passed: bool = False,
         is_current: bool = False,
+        **_kwargs,
     ):
         """Update dashboard with a new result or current test info.
 

@@ -1,11 +1,12 @@
 """
-Parser for native tool call formats (Mistral, Qwen).
+Parser for native tool call formats (Mistral, Qwen, Gemma).
 
 Converts text-based tool calls to OpenAI-compatible structured format.
 
 Supported formats:
 - Mistral: [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
 - Qwen: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+- Gemma: <|tool_call>call:function_name{"arg":"val"}<tool_call|>
 """
 from __future__ import annotations
 
@@ -322,6 +323,92 @@ def is_qwen_tool_call(content: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Gemma Format Parsing
+# ---------------------------------------------------------------------------
+
+# Outer pattern: iterate over each <|tool_call>...<tool_call|> block
+# Closing tag is optional to handle truncated model output
+_GEMMA_TOOL_CALL_ITER = re.compile(
+    r'<\|tool_call>(.*?)(?:<tool_call\|>|$)',
+    re.DOTALL,
+)
+
+# Inner pattern: extract function name and JSON arguments from block content
+# Allow optional whitespace between name and opening brace (model sometimes adds newlines)
+_GEMMA_TOOL_CALL_ENTRY = re.compile(
+    r'call\:(?P<name>[\w]+)\s*(?P<arguments>\{.*\})',
+    re.DOTALL,
+)
+
+
+def parse_gemma_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse Gemma's <|tool_call>call:name{...}<tool_call|> format to OpenAI tool_calls.
+
+    Gemma format (in content string):
+        <|tool_call>call:function_name{"arg":"val"}<tool_call|>
+
+    OpenAI format (structured):
+        [{"id": "call_0", "type": "function", "function": {"name": "...", "arguments": "{...}"}}]
+
+    Args:
+        content: The content string from the model response
+
+    Returns:
+        List of OpenAI-format tool calls, or None if no Gemma tool calls found
+    """
+    if not content or "<|tool_call>" not in content:
+        return None
+
+    openai_tool_calls = []
+
+    for i, block_match in enumerate(_GEMMA_TOOL_CALL_ITER.finditer(content)):
+        block_body = block_match.group(1).strip()
+        entry_match = _GEMMA_TOOL_CALL_ENTRY.search(block_body)
+        if not entry_match:
+            continue
+
+        name = entry_match.group("name")
+        args_raw = entry_match.group("arguments")
+
+        # Gemma uses <|"|> as escaped quotes in arguments; replace before parsing
+        args_cleaned = args_raw.replace('<|"|>', '"')
+
+        # Validate that arguments is parseable JSON; keep as string either way
+        try:
+            args_obj = json.loads(args_cleaned)
+            arguments = json.dumps(args_obj)
+        except json.JSONDecodeError:
+            # Gemma may output unquoted keys like {name:"val"} — quote them
+            args_fixed = re.sub(
+                r'(?<=[{,])\s*(\w+)\s*:',
+                r'"\1":',
+                args_cleaned,
+            )
+            try:
+                args_obj = json.loads(args_fixed)
+                arguments = json.dumps(args_obj)
+            except json.JSONDecodeError:
+                arguments = args_cleaned
+
+        openai_tool_calls.append({
+            "id": f"call_{i}",
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            },
+        })
+
+    return openai_tool_calls if openai_tool_calls else None
+
+
+def is_gemma_tool_call(content: str) -> bool:
+    """Check if content contains Gemma-format tool calls."""
+    return bool(content and "<|tool_call>" in content)
+
+
+# ---------------------------------------------------------------------------
 # Unified Parsing
 # ---------------------------------------------------------------------------
 
@@ -329,7 +416,7 @@ def parse_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
     """
     Parse tool calls from any supported format.
 
-    Tries Qwen format first (more specific), then Mistral format.
+    Tries Gemma first (most specific markers), then Qwen, then Mistral.
 
     Args:
         content: The content string from the model response
@@ -340,7 +427,11 @@ def parse_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
     if not content:
         return None
 
-    # Try Qwen format first (<tool_call>...</tool_call>)
+    # Try Gemma format first (<|tool_call>call:name{...}<tool_call|>)
+    if is_gemma_tool_call(content):
+        return parse_gemma_tool_calls(content)
+
+    # Try Qwen format (<tool_call>...</tool_call>)
     if is_qwen_tool_call(content):
         return parse_qwen_tool_calls(content)
 
@@ -353,4 +444,8 @@ def parse_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
 
 def has_tool_call(content: str) -> bool:
     """Check if content contains any supported tool call format."""
-    return is_qwen_tool_call(content) or is_mistral_tool_call(content)
+    return (
+        is_gemma_tool_call(content)
+        or is_qwen_tool_call(content)
+        or is_mistral_tool_call(content)
+    )

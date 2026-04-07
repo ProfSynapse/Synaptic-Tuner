@@ -13,6 +13,7 @@ if str(validator_dir) not in sys.path:
 
 import validate_syngen as dataset_validator
 from shared.validation.parsing import parse_qwen_tool_calls
+from shared.validation.parsing.tool_call_parser import parse_gemma_tool_calls, is_gemma_tool_call
 
 
 @dataclass
@@ -148,14 +149,24 @@ def validate_assistant_response(
             return None
         return {"role": "assistant", "content": msg, "tool_calls": calls}
 
+    def _convert_gemma_to_openai(msg: str) -> Optional[Dict[str, Any]]:
+        """Convert Gemma <|tool_call>call:name{...}<tool_call|> content into OpenAI-style tool_calls."""
+        calls = parse_gemma_tool_calls(msg)
+        if not calls:
+            return None
+        return {"role": "assistant", "content": msg, "tool_calls": calls}
+
     # Detect format and validate accordingly
     if isinstance(content, dict):
         message = dict(content)
         if message.get("tool_calls", "__missing__") is None and isinstance(message.get("content"), str):
             message.pop("tool_calls", None)
-        # Qwen sometimes embeds tool calls in content without tool_calls array
+        # Models sometimes embed tool calls in content without tool_calls array
         if (not message.get("tool_calls")) and isinstance(message.get("content"), str):
-            converted = _convert_qwen_to_openai(message["content"])
+            converted = (
+                _convert_gemma_to_openai(message["content"])
+                or _convert_qwen_to_openai(message["content"])
+            )
             if converted:
                 message = converted
 
@@ -176,7 +187,18 @@ def validate_assistant_response(
             # Dict without tool_calls - invalid
             report.add("ERROR", "Assistant response dict must contain 'tool_calls' field")
     elif isinstance(content, str):
-        if "<tool_call>" in content:
+        if is_gemma_tool_call(content):
+            converted = _convert_gemma_to_openai(content)
+            if converted:
+                dataset_validator.validate_assistant_message_openai(converted, report)
+                try:
+                    for name, args in dataset_validator.extract_tool_calls_openai(converted["tool_calls"]):
+                        tool_calls.append(ToolCall(name=name, arguments=args))
+                except Exception:
+                    pass
+            else:
+                report.add("ERROR", "Assistant response contains <|tool_call> markers but could not be parsed")
+        elif "<tool_call>" in content:
             converted = _convert_qwen_to_openai(content)
             if converted:
                 dataset_validator.validate_assistant_message_openai(converted, report)
