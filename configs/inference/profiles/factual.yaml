@@ -1,0 +1,11 @@
+# Inference profile: Factual
+# Optimized for factuality-critical inference (tool-call generation, QA).
+# Enables DoLa contrastive layer decoding to reduce hallucinations.
+
+extends: default
+
+plugins:
+  dola:
+    enabled: true
+    premature_layers: "high"
+    relative_top: 0.1

@@ -1,0 +1,15 @@
+# Inference profile: Creative
+# Optimized for diverse, creative generation (essay writing, brainstorming).
+# DoLa disabled — factuality constraint would reduce diversity.
+
+extends: default
+
+plugins:
+  dola:
+    enabled: false
+  min_p:
+    enabled: true
+    threshold: 0.02
+
+inference:
+  temperature: 0.9

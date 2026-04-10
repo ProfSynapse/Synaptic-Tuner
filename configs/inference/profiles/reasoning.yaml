@@ -1,0 +1,12 @@
+# Inference profile: Reasoning
+# Optimized for long-form reasoning tasks (math, multi-hop QA).
+# Uses DoLa with lower-half layers which better captures reasoning chains.
+
+extends: default
+
+plugins:
+  dola:
+    enabled: true
+    premature_layers: "low"
+    relative_top: 0.1
+    jsd_threshold: 0.01

@@ -1,0 +1,55 @@
+# Inference plugin configuration
+# Controls decoding strategies applied during vLLM serving.
+# Each plugin can be enabled/disabled independently.
+# See docs/plans/vllm-inference-plugins-plan.md for architecture details.
+
+plugins:
+  # --- Layer-access plugins (require IBM vLLM Hook) ---
+
+  dola:
+    enabled: false
+    # Layer selection: "low" (lower half), "high" (upper half), or explicit list [2,4,6,8]
+    # "low" is better for long-form reasoning (math, multi-hop)
+    # "high" is better for short factual answers
+    premature_layers: "high"
+    # Final layer index (null = auto-detect from model config)
+    mature_layer: null
+    # Suppress low-probability tokens after contrasting (0 = no filtering)
+    relative_top: 0.1
+    # JSD threshold for dynamic layer selection (0 = always contrast)
+    jsd_threshold: 0.0
+
+  activation_steering:
+    enabled: false
+    # Path to steering vectors (null = disabled)
+    vectors_path: null
+    scale: 1.0
+    target_layers: []
+
+  # --- Logits-only plugins (native vLLM LogitsProcessor) ---
+
+  repetition_penalty:
+    enabled: false
+    penalty: 1.1
+    window: 64
+
+  min_p:
+    enabled: false
+    threshold: 0.05
+
+# IBM vLLM Hook settings
+# Only needed when a layer-access plugin is enabled.
+# Auto-enabled when any LayerHookPlugin is active.
+vllm_hook:
+  enabled: false
+  registry_port: 9090
+  log_activations: false
+  activation_log_dir: "scratch/activations"
+
+# Global inference overrides (applied after plugins)
+# null = use the value from the incoming request
+inference:
+  temperature: null
+  top_p: null
+  max_tokens: null
+  seed: null
