@@ -21,7 +21,7 @@ from typing import List, Optional, Tuple
 
 import requests
 
-from shared.utilities.paths import iter_training_output_dirs
+from shared.utilities.paths import iter_training_run_dirs
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -52,6 +52,7 @@ class TrainingRun:
     has_merged_16bit: bool
     has_lora: bool
     model_size: Optional[str] = None
+    source: str = "local_training"
 
     @property
     def display_name(self) -> str:
@@ -238,44 +239,38 @@ def discover_training_runs(base_dir: Optional[Path] = None) -> List[TrainingRun]
     repo_root = base_dir.parent if base_dir.name == "Trainers" else base_dir
 
     for trainer_type in TRAINING_METHODS:
-        for output_dir in iter_training_output_dirs(trainer_type, repo_root):
-            if not output_dir.exists():
+        for run_dir in iter_training_run_dirs(trainer_type, repo_root):
+            if not re.match(r"\d{8}_\d{6}", run_dir.name):
                 continue
 
-            for run_dir in output_dir.iterdir():
-                if not run_dir.is_dir():
-                    continue
+            has_final_model = (run_dir / "final_model").exists()
+            has_merged_16bit = False
+            has_lora = False
 
-                if not re.match(r"\d{8}_\d{6}", run_dir.name):
-                    continue
+            for subdir in run_dir.iterdir():
+                if subdir.is_dir():
+                    if (subdir / "merged-16bit").exists():
+                        has_merged_16bit = True
+                    if (subdir / "lora").exists():
+                        has_lora = True
 
-                has_final_model = (run_dir / "final_model").exists()
-                has_merged_16bit = False
-                has_lora = False
+            if has_final_model:
+                adapter_config = run_dir / "final_model" / "adapter_config.json"
+                has_lora = has_lora or adapter_config.exists()
 
-                for subdir in run_dir.iterdir():
-                    if subdir.is_dir():
-                        if (subdir / "merged-16bit").exists():
-                            has_merged_16bit = True
-                        if (subdir / "lora").exists():
-                            has_lora = True
+            model_size = _detect_model_size(run_dir)
 
-                if has_final_model:
-                    adapter_config = run_dir / "final_model" / "adapter_config.json"
-                    has_lora = has_lora or adapter_config.exists()
-
-                model_size = _detect_model_size(run_dir)
-
-                runs.append(TrainingRun(
-                    path=run_dir,
-                    name=run_dir.name,
-                    timestamp=run_dir.name,
-                    trainer_type=trainer_type,
-                    has_final_model=has_final_model,
-                    has_merged_16bit=has_merged_16bit,
-                    has_lora=has_lora,
-                    model_size=model_size,
-                ))
+            runs.append(TrainingRun(
+                path=run_dir,
+                name=run_dir.name,
+                timestamp=run_dir.name,
+                trainer_type=trainer_type,
+                has_final_model=has_final_model,
+                has_merged_16bit=has_merged_16bit,
+                has_lora=has_lora,
+                model_size=model_size,
+                source=_detect_run_source(run_dir),
+            ))
 
     # Sort by timestamp (newest first)
     runs.sort(key=lambda r: r.timestamp, reverse=True)
@@ -299,13 +294,22 @@ def _detect_model_size(run_dir: Path) -> Optional[str]:
             with open(adapter_config) as f:
                 config = json.load(f)
             base_model = config.get("base_model_name_or_path", "")
-            # Extract size from model name
-            for size in ["3b", "7b", "13b", "20b", "70b"]:
-                if size in base_model.lower():
-                    return size.upper()
+            match = re.search(r"(\d+(?:\.\d+)?)\s*([bm])", base_model.lower())
+            if match:
+                return f"{match.group(1)}{match.group(2).upper()}"
         except Exception:
             pass
     return None
+
+
+def _detect_run_source(run_dir: Path) -> str:
+    """Identify whether a run came from local training or imported artifacts."""
+    parts = {part.lower() for part in run_dir.parts}
+    if "toolset-training-artifacts" in parts:
+        return "bucket_pull"
+    if "runs" in parts and "trainers" not in parts:
+        return "cloud_artifact"
+    return "local_training"
 
 
 def discover_huggingface_models() -> List[str]:

@@ -8,9 +8,17 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
-from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_env_var, get_hf_token
 from tuner.core.exceptions import CloudProviderError
+
+
+def normalize_hf_bucket_id(bucket_id: str) -> str:
+    """Normalize bucket identifiers to the canonical namespace/name form."""
+    normalized = str(bucket_id or "").strip()
+    for prefix in ("hf://buckets/", "buckets/"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+    return normalized.strip("/")
 
 
 @dataclass(frozen=True)

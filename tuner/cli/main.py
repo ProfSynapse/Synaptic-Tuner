@@ -7,10 +7,18 @@ Used by: tuner.py wrapper, python -m tuner
 """
 
 import sys
+import io
 from pathlib import Path
 from tuner.utils import load_env_file
 from .parser import create_parser
 from .router import route_command
+
+
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 
 def main():

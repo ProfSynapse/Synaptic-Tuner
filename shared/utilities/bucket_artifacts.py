@@ -7,13 +7,61 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from posixpath import normpath
 from typing import Any, Iterable, TextIO
 
 from huggingface_hub import HfFileSystem
-from huggingface_hub import sync_bucket
 
-from shared.cloud_artifacts import sync_directory_to_hf_bucket, sync_file_to_hf_bucket
 from shared.utilities.env import get_hf_token
+
+
+def _load_sync_bucket():
+    """Import sync_bucket lazily so list/read still work on older Hub builds."""
+    try:
+        from huggingface_hub import sync_bucket as _sync_bucket
+    except ImportError:
+        return None
+    return _sync_bucket
+
+
+def _strip_hf_scheme(path: str) -> str:
+    normalized = str(path or "").strip()
+    if normalized.startswith("hf://"):
+        return normalized[len("hf://") :]
+    return normalized
+
+
+def _hf_relative_child(root: str, child: str) -> str:
+    root_norm = normpath(_strip_hf_scheme(root)).rstrip("/")
+    child_norm = normpath(_strip_hf_scheme(child)).rstrip("/")
+    prefix = f"{root_norm}/"
+    if child_norm.startswith(prefix):
+        return child_norm[len(prefix) :]
+    return Path(child_norm).name
+
+
+def _copy_hf_tree(fs: HfFileSystem, artifact_path: str, target: Path) -> None:
+    """Fallback pull implementation when sync_bucket is unavailable."""
+    info = fs.info(artifact_path)
+    entry_type = info.get("type", "file")
+
+    if entry_type == "directory":
+        target.mkdir(parents=True, exist_ok=True)
+        raw_entries = fs.find(artifact_path, detail=True)
+        iterator = raw_entries.items() if isinstance(raw_entries, dict) else []
+        for remote_path, details in iterator:
+            if details.get("type") == "directory":
+                continue
+            relative = _hf_relative_child(artifact_path, remote_path)
+            destination = target / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with fs.open(remote_path, "rb") as src, open(destination, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with fs.open(artifact_path, "rb") as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst)
 
 
 def build_artifact_path(path: str, *, bucket_id: str | None = None) -> str:
@@ -34,8 +82,17 @@ def _artifact_relative_path(path: str, *, bucket_id: str | None = None) -> Path:
     artifact_path = build_artifact_path(path, bucket_id=bucket_id)
     if artifact_path.startswith("hf://buckets/"):
         remainder = artifact_path[len("hf://buckets/") :]
-        parts = remainder.split("/", 1)
-        relative = parts[1] if len(parts) > 1 else ""
+        normalized_bucket = str(bucket_id or "").strip("/")
+        if normalized_bucket and remainder.startswith(f"{normalized_bucket}/"):
+            relative = remainder[len(normalized_bucket) + 1 :]
+        else:
+            parts = remainder.split("/")
+            if len(parts) >= 3:
+                relative = "/".join(parts[2:])
+            elif len(parts) >= 2:
+                relative = "/".join(parts[1:])
+            else:
+                relative = ""
         return Path(relative)
     local_path = Path(path)
     if local_path.is_absolute():
@@ -178,7 +235,12 @@ def pull_artifacts(
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if artifact_path.startswith("hf://"):
-        sync_bucket(artifact_path, str(target), token=get_hf_token())
+        sync_bucket = _load_sync_bucket()
+        if sync_bucket is not None:
+            sync_bucket(artifact_path, str(target), token=get_hf_token())
+        else:
+            fs = HfFileSystem(token=get_hf_token())
+            _copy_hf_tree(fs, artifact_path, target)
         return target
 
     source = Path(artifact_path)
@@ -226,6 +288,8 @@ def push_artifacts(
     bucket_id: str,
     destination: str | None = None,
 ) -> str:
+    from shared.cloud_artifacts import sync_directory_to_hf_bucket, sync_file_to_hf_bucket
+
     source = Path(path).resolve()
     if not source.exists():
         raise FileNotFoundError(str(source))

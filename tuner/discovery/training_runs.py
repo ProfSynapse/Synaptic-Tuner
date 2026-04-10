@@ -16,7 +16,7 @@ Pattern migrated from: tuner.py lines 220-234 (list_training_runs function)
 from pathlib import Path
 from typing import List
 
-from shared.utilities.paths import iter_training_output_dirs
+from shared.utilities.paths import iter_training_run_dirs
 
 
 class TrainingRunDiscovery:
@@ -100,19 +100,12 @@ class TrainingRunDiscovery:
         """
         runs = []
 
-        for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
-            if not output_dir.exists():
-                continue
+        for d in iter_training_run_dirs(trainer_type, self.repo_root):
+            has_final = (d / "final_model").exists()
+            has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
 
-            for d in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if not d.is_dir():
-                    continue
-
-                has_final = (d / "final_model").exists()
-                has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
-
-                if has_final or has_checkpoints:
-                    runs.append(d)
+            if has_final or has_checkpoints:
+                runs.append(d)
 
         runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         if limit is not None:

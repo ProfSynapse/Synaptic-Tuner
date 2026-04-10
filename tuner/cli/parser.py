@@ -67,6 +67,7 @@ def create_parser() -> argparse.ArgumentParser:
 Commands:
   (none)      Interactive menu
   train       Training workflow (SFT, KTO, GRPO)
+  docker      Local Docker runtime helper (status, bootstrap, pull, smoke, build)
   cloud       Cloud training (HF Jobs, Modal, RunPod)
   cloud-run   Config-driven HF cloud job
   cloud-jobs  Inspect or manage live HF Jobs
@@ -109,6 +110,11 @@ List Subcommands:
 Examples:
   python tuner.py              # Interactive mode
   python tuner.py train        # Go directly to training
+  python tuner.py docker status
+  python tuner.py docker bootstrap --docker-target all
+  python tuner.py docker build --docker-target bucket
+  python tuner.py docker pull --docker-target unsloth
+  python tuner.py docker smoke --docker-target vllm
   python tuner.py cloud        # Cloud training submenu
   python tuner.py eval         # Go directly to evaluation
   python tuner.py synthchat    # Generate or improve data
@@ -138,7 +144,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "docker", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -150,7 +156,7 @@ Examples:
         "subcommand",
         nargs="?",
         default=None,
-        help="Sub-command (e.g., 'datasets' for list, 'train' for ml)"
+        help="Sub-command (e.g., 'datasets' for list, 'train' for ml, 'bootstrap' for docker)"
     )
 
     # Global flags
@@ -165,6 +171,12 @@ Examples:
         action="store_true",
         dest="auto_confirm",
         help="Skip confirmation prompts for non-interactive command execution",
+    )
+    parser.add_argument(
+        "--runtime",
+        choices=["native", "docker"],
+        default="native",
+        help="Local runtime for train/eval flows. Use 'docker' to run on Docker Desktop instead of the local conda environment."
     )
 
     # Doctor-specific flags
@@ -205,6 +217,24 @@ Examples:
         "--flywheel-config",
         dest="flywheel_config",
         help="Path to flywheel config YAML (flywheel commands only)"
+    )
+
+    # Local Docker runtime flags
+    parser.add_argument(
+        "--docker-target",
+        choices=["unsloth", "vllm", "bucket", "all"],
+        dest="docker_target",
+        help="Docker runtime target for 'docker' command (unsloth, vllm, bucket, or all)"
+    )
+    parser.add_argument(
+        "--docker-image",
+        dest="docker_image",
+        help="Explicit Docker image override for local Docker flows ('docker', 'train --runtime docker', 'eval --runtime docker')"
+    )
+    parser.add_argument(
+        "--docker-profile",
+        dest="docker_profile",
+        help="Named Docker image profile from Trainers/cloud/cloud_config.yaml for local Docker flows"
     )
 
     # Surgery-specific flags

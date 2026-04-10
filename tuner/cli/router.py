@@ -68,21 +68,56 @@ def route_command(args: Namespace) -> int:
     """
     # Check for JSON mode - affects error output
     json_mode = getattr(args, 'json', False)
+    command = getattr(args, 'command', None)
 
-    # Import handlers (deferred to avoid circular imports)
+    # Special-case Docker helper so unrelated cloud import failures do not block it.
+    if command == 'docker':
+        try:
+            from tuner.handlers.docker_handler import DockerHandler
+        except ImportError as e:
+            error_msg = f"Handlers not yet implemented: {e}"
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": error_msg,
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: {error_msg}")
+                print("This is expected during migration. Please use tuner_legacy.py instead.")
+            return 1
+        handler = DockerHandler(args=args)
+        return handler.handle()
+
+    if command == 'bucket':
+        try:
+            from tuner.handlers.bucket_handler import BucketHandler
+        except ImportError as e:
+            error_msg = f"Handlers not yet implemented: {e}"
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": error_msg,
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: {error_msg}")
+            return 1
+        handler = BucketHandler(args=args)
+        return handler.handle()
+
+    # Import local handlers first so cloud dependency drift does not block local commands.
     try:
         from tuner.handlers.train_handler import TrainHandler
         from tuner.handlers.eval_handler import EvalHandler
-        from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
-        from tuner.handlers.hardware_plan_handler import HardwarePlanHandler
-        from tuner.handlers.cloud_eval_handler import CloudEvalHandler
-        from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
-        from tuner.handlers.cloud_jobs_handler import CloudJobsHandler
-        from tuner.handlers.cloud_gym_handler import CloudGymHandler
-        from tuner.handlers.cloud_run_handler import CloudRunHandler
-        from tuner.handlers.bucket_handler import BucketHandler
-        from tuner.handlers.experiment_handler import ExperimentHandler
-        from tuner.handlers.experiment_analysis_handler import ExperimentAnalysisHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.ml_handler import MLHandler
@@ -93,7 +128,6 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.flywheel_handler import FlywheelHandler
         from tuner.handlers.surgery_handler import SurgeryHandler
     except ImportError as e:
-        # Graceful degradation if handlers not yet implemented
         error_msg = f"Handlers not yet implemented: {e}"
         if json_mode:
             output = {
@@ -110,16 +144,13 @@ def route_command(args: Namespace) -> int:
             print("This is expected during migration. Please use tuner_legacy.py instead.")
         return 1
 
-    # Get command from args
-    command = getattr(args, 'command', None)
-
     # JSON mode without command is an error (interactive menu needs input)
     # Exception: status, doctor, and list commands work in JSON mode
     if json_mode and not command:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, docker, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -151,27 +182,22 @@ def route_command(args: Namespace) -> int:
     # Special handling for ml command (has subcommand and --config)
     if command == 'ml':
         ml_sub = getattr(args, 'subcommand', None)
-        # Map the generic subcommand to ml_subcommand for the handler
         if args is not None:
             args.ml_subcommand = ml_sub
         handler = MLHandler(args=args)
         return handler.handle()
 
-    # Special handling for flywheel command (has subcommand)
     if command == 'flywheel':
         handler = FlywheelHandler(args=args)
         return handler.handle()
 
-    # Autonomous experiment loop
     if command == 'experiment-loop':
         return _handle_experiment_loop(args, json_mode)
 
-    # Surgery command
     if command == 'surgery':
         handler = SurgeryHandler(args=args)
         return handler.handle()
 
-    # Experiment pipeline
     if command == 'compare-runs':
         import subprocess
         import sys
@@ -197,42 +223,101 @@ def route_command(args: Namespace) -> int:
         print(f"Created experiment: {exp.experiment_id}")
         return 0
 
-    # Import cloud handler (conditional - may not have deps)
-    try:
-        from tuner.handlers.cloud_train_handler import CloudTrainHandler
-    except ImportError:
-        CloudTrainHandler = None
-
-    # Map commands to handlers
-    handlers = {
+    local_handlers = {
         'train': TrainHandler,
-        'cloud-pipeline': CloudPipelineHandler,
-        'cloud-run': CloudRunHandler,
-        'cloud-jobs': CloudJobsHandler,
-        'plan-hardware': HardwarePlanHandler,
         'eval': EvalHandler,
-        'cloud-eval': CloudEvalHandler,
-        'cloud-gym': CloudGymHandler,
-        'cloud-inspect': CloudInspectHandler,
-        'bucket': BucketHandler,
-        'run-experiment': ExperimentHandler,
-        'analyze-experiment': ExperimentAnalysisHandler,
         'synthchat': SynthChatHandler,
         'modelops': ModelOpsHandler,
         'ml': MLHandler,
     }
-    if CloudTrainHandler is not None:
-        handlers['cloud'] = CloudTrainHandler
 
-    # Execute handler with args
-    if command and command in handlers:
-        handler_class = handlers[command]
+    if command and command in local_handlers:
+        handler_class = local_handlers[command]
         handler = handler_class(args=args)
         return handler.handle()
-    else:
-        # No command = interactive menu
-        handler = MainMenuHandler(args=args)
+
+    cloud_commands = {
+        'cloud',
+        'cloud-pipeline',
+        'cloud-run',
+        'cloud-jobs',
+        'plan-hardware',
+        'cloud-eval',
+        'cloud-gym',
+        'cloud-inspect',
+        'run-experiment',
+        'analyze-experiment',
+    }
+
+    if command in cloud_commands:
+        try:
+            from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
+            from tuner.handlers.hardware_plan_handler import HardwarePlanHandler
+            from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+            from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
+            from tuner.handlers.cloud_jobs_handler import CloudJobsHandler
+            from tuner.handlers.cloud_gym_handler import CloudGymHandler
+            from tuner.handlers.cloud_run_handler import CloudRunHandler
+            from tuner.handlers.experiment_handler import ExperimentHandler
+            from tuner.handlers.experiment_analysis_handler import ExperimentAnalysisHandler
+
+            try:
+                from tuner.handlers.cloud_train_handler import CloudTrainHandler
+            except ImportError:
+                CloudTrainHandler = None
+        except ImportError as e:
+            error_msg = f"Cloud handlers unavailable: {e}"
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": error_msg,
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: {error_msg}")
+            return 1
+
+        cloud_handlers = {
+            'cloud-pipeline': CloudPipelineHandler,
+            'cloud-run': CloudRunHandler,
+            'cloud-jobs': CloudJobsHandler,
+            'plan-hardware': HardwarePlanHandler,
+            'cloud-eval': CloudEvalHandler,
+            'cloud-gym': CloudGymHandler,
+            'cloud-inspect': CloudInspectHandler,
+            'run-experiment': ExperimentHandler,
+            'analyze-experiment': ExperimentAnalysisHandler,
+        }
+        if CloudTrainHandler is not None:
+            cloud_handlers['cloud'] = CloudTrainHandler
+
+        if command == 'cloud' and CloudTrainHandler is None:
+            error_msg = "Cloud training handler unavailable in the current environment."
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": error_msg,
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: {error_msg}")
+            return 1
+
+        handler_class = cloud_handlers[command]
+        handler = handler_class(args=args)
         return handler.handle()
+
+    # Execute handler with args
+    handler = MainMenuHandler(args=args)
+    return handler.handle()
 
 
 def _handle_experiment_loop(args: Namespace, json_mode: bool) -> int:
