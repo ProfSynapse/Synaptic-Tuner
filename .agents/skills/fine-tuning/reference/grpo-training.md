@@ -62,8 +62,8 @@ GRPO requires prompts with ground truth for reward scoring:
     {"role": "system", "content": "..."},
     {"role": "user", "content": "..."}
   ],
-  "ground_truth_tool": "vaultManager_openNote",
-  "ground_truth_args_json": "{\"context\": {...}, \"calls\": [{...}]}"
+  "ground_truth_tool": "useTools",
+  "ground_truth_args_json": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage open \\\"notes/example.md\\\"\",\"strategy\":\"serial\"}"
 }
 ```
 

@@ -11,6 +11,9 @@ switches and instead:
 from __future__ import annotations
 
 import json
+import shlex
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.validation.parsing.response_parser import parse_response
@@ -193,10 +196,191 @@ def _looks_like_wrapper_call(call) -> bool:
     )
 
 
+def _looks_like_cli_wrapper_call(call) -> bool:
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    tool_value = args.get("tool")
+    required = ("workspaceId", "sessionId", "memory", "goal")
+    has_wrapper_fields = all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
+    return isinstance(tool_value, str) and bool(tool_value.strip()) and has_wrapper_fields
+
+
+@lru_cache(maxsize=1)
+def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
+    schema_path = Path(__file__).resolve().parents[2] / "tool-schemas.json"
+    if not schema_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(schema_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    catalog: Dict[str, Tuple[str, List[Dict[str, Any]]]] = {}
+    for item in payload.get("tools", []):
+        if not isinstance(item, dict):
+            continue
+        agent = str(item.get("agent", "")).strip()
+        tool = str(item.get("tool", "")).strip()
+        command = str(item.get("command", "")).strip()
+        if not agent or not tool or not command:
+            continue
+        catalog[command] = (f"{agent}_{tool}", item.get("arguments", []) or [])
+    return catalog
+
+
+def _split_cli_commands(tool_value: str) -> List[str]:
+    commands: List[str] = []
+    current: List[str] = []
+    quote: Optional[str] = None
+    escape = False
+    brace_depth = 0
+    bracket_depth = 0
+
+    for char in tool_value:
+        current.append(char)
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char == "{":
+            brace_depth += 1
+            continue
+        if char == "}":
+            brace_depth = max(0, brace_depth - 1)
+            continue
+        if char == "[":
+            bracket_depth += 1
+            continue
+        if char == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            continue
+        if char == "," and brace_depth == 0 and bracket_depth == 0:
+            current.pop()
+            segment = "".join(current).strip()
+            if segment:
+                commands.append(segment)
+            current = []
+
+    tail = "".join(current).strip()
+    if tail:
+        commands.append(tail)
+    return commands
+
+
+def _parse_cli_value(raw_value: str, value_type: str) -> Any:
+    lowered = (value_type or "").strip().lower()
+    if lowered.startswith("array") or lowered == "object":
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return raw_value
+    if lowered == "boolean":
+        if raw_value.lower() in {"true", "1", "yes"}:
+            return True
+        if raw_value.lower() in {"false", "0", "no"}:
+            return False
+        return raw_value
+    if lowered == "number":
+        try:
+            return int(raw_value) if "." not in raw_value else float(raw_value)
+        except ValueError:
+            return raw_value
+    return raw_value
+
+
+def _expand_cli_wrapper_call(call) -> List:
+    args = call.arguments if isinstance(call.arguments, dict) else {}
+    tool_value = args.get("tool")
+    if not isinstance(tool_value, str) or not tool_value.strip():
+        return [call]
+
+    catalog = _load_cli_command_catalog()
+    if not catalog:
+        return [call]
+
+    sorted_commands = sorted(catalog.keys(), key=lambda value: len(value.split()), reverse=True)
+    expanded = []
+
+    for command_str in _split_cli_commands(tool_value):
+        try:
+            tokens = shlex.split(command_str)
+        except ValueError:
+            return [call]
+        if not tokens:
+            continue
+
+        matched_command = None
+        matched_spec = None
+        matched_prefix_len = 0
+        for command in sorted_commands:
+            command_tokens = command.split()
+            if tokens[: len(command_tokens)] == command_tokens:
+                matched_command = command
+                matched_spec = catalog[command]
+                matched_prefix_len = len(command_tokens)
+                break
+
+        if matched_command is None or matched_spec is None:
+            return [call]
+
+        tool_name, argument_specs = matched_spec
+        remaining = tokens[matched_prefix_len:]
+        parsed_args: Dict[str, Any] = {}
+        positional_specs = [arg for arg in argument_specs if arg.get("positional")]
+        flag_specs = {
+            str(arg.get("flag")).strip(): arg
+            for arg in argument_specs
+            if str(arg.get("flag", "")).strip()
+        }
+
+        positional_index = 0
+        i = 0
+        while i < len(remaining):
+            token = remaining[i]
+            if token.startswith("--"):
+                arg_spec = flag_specs.get(token)
+                if not arg_spec:
+                    i += 1
+                    continue
+                value_type = arg_spec.get("type", "string")
+                if value_type == "boolean":
+                    parsed_args[arg_spec["name"]] = True
+                    i += 1
+                    continue
+                if i + 1 < len(remaining):
+                    parsed_args[arg_spec["name"]] = _parse_cli_value(remaining[i + 1], value_type)
+                    i += 2
+                    continue
+                i += 1
+                continue
+
+            if positional_index < len(positional_specs):
+                arg_spec = positional_specs[positional_index]
+                parsed_args[arg_spec["name"]] = _parse_cli_value(token, arg_spec.get("type", "string"))
+                positional_index += 1
+            i += 1
+
+        expanded.append(type(call)(name=tool_name, arguments=parsed_args, raw=call.raw))
+
+    return expanded or [call]
+
+
 def _expand_wrapper_calls(parsed_calls) -> List:
     """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
+        if _looks_like_cli_wrapper_call(call):
+            expanded.extend(_expand_cli_wrapper_call(call))
+            continue
         if not _looks_like_wrapper_call(call):
             expanded.append(call)
             continue

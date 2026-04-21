@@ -81,7 +81,7 @@ response_types:
       tool_categories:
         any_of:
           - search    # searchManager_search*
-          - read      # contentManager_readContent
+          - read      # contentManager_read
           - list      # storageManager_list
 
   # Error recovery response

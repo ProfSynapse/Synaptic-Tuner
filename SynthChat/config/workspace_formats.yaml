@@ -21,7 +21,7 @@ formats:
           - sessionId: "{session_id}"
           - workspaceId: "{workspace_id}" (current workspace)
 
-          Include these in the "context" parameter of your tool calls.
+          Include these as top-level fields in the useTools arguments payload.
 
       - tag: vault_structure
         source: vault_structure

@@ -1,164 +1,163 @@
 #!/usr/bin/env python3
-"""
-Analyze tool usage coverage in synthetic Claudesidian dataset.
+"""Analyze tool coverage using the current CLI-first schema.
 
-Provides detailed breakdown of:
-- Tool usage by manager and mode
-- Good (true) vs Bad (false) label distribution per tool
-- Coverage statistics and missing tools
-- Invalid tool calls in dataset
+This script is intentionally schema-driven:
+- Valid tools come from tool-schemas.json
+- CLI commands inside useTools.tool are parsed from schema command metadata
+- Legacy direct function names and legacy wrapped calls are still recognized
 """
+
+from __future__ import annotations
+
 import json
 import re
+import shlex
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-
-# Define all valid tools (47 total across 6 managers + 1 meta-tool)
-VALID_TOOLS = {
-    # Agent Manager (9 tools)
-    "agentManager_createAgent",
-    "agentManager_deleteAgent",
-    "agentManager_executePrompt",
-    "agentManager_generateImage",
-    "agentManager_getAgent",
-    "agentManager_listAgents",
-    "agentManager_listModels",
-    "agentManager_toggleAgent",
-    "agentManager_updateAgent",
-
-    # Command Manager (2 tools)
-    "commandManager_executeCommand",
-    "commandManager_listCommands",
-
-    # Content Manager (9 tools)
-    "contentManager_appendContent",
-    "contentManager_batchContent",
-    "contentManager_createContent",
-    "contentManager_deleteContent",
-    "contentManager_findReplaceContent",
-    "contentManager_prependContent",
-    "contentManager_readContent",
-    "contentManager_replaceByLine",
-    "contentManager_replaceContent",
-
-    # Memory Manager (8 tools + 5 missing that need schema updates)
-    "memoryManager_createSession",
-    "memoryManager_createState",
-    "memoryManager_listSessions",
-    "memoryManager_listStates",
-    "memoryManager_loadSession",
-    "memoryManager_loadState",
-    "memoryManager_updateSession",
-    "memoryManager_updateWorkspace",
-    # These 5 are called in dataset but missing from schema:
-    "memoryManager_createWorkspace",
-    "memoryManager_listWorkspaces",
-    "memoryManager_loadWorkspace",
-    "memoryManager_updateState",
-    "agentManager_batchExecutePrompt",
-
-    # Vault Manager (7 tools)
-    "vaultManager_createFolder",
-    "vaultManager_deleteFolder",
-    "vaultManager_deleteNote",
-    "vaultManager_duplicateNote",
-    "vaultManager_editFolder",
-    "vaultManager_listDirectory",
-    "vaultManager_moveFolder",
-    "vaultManager_moveNote",
-    "vaultManager_openNote",
-
-    # Vault Librarian (4 tools)
-    "vaultLibrarian_batch",
-    "vaultLibrarian_searchContent",
-    "vaultLibrarian_searchDirectory",
-    "vaultLibrarian_searchMemory",
-
-    # Meta tool (1 tool)
-    "get_tools",
-}
-
-# Organize tools by manager for reporting
-TOOLS_BY_MANAGER = {
-    "agentManager": [
-        "agentManager_batchExecutePrompt",
-        "agentManager_createAgent",
-        "agentManager_deleteAgent",
-        "agentManager_executePrompt",
-        "agentManager_generateImage",
-        "agentManager_getAgent",
-        "agentManager_listAgents",
-        "agentManager_listModels",
-        "agentManager_toggleAgent",
-        "agentManager_updateAgent",
-    ],
-    "commandManager": [
-        "commandManager_executeCommand",
-        "commandManager_listCommands",
-    ],
-    "contentManager": [
-        "contentManager_appendContent",
-        "contentManager_batchContent",
-        "contentManager_createContent",
-        "contentManager_deleteContent",
-        "contentManager_findReplaceContent",
-        "contentManager_prependContent",
-        "contentManager_readContent",
-        "contentManager_replaceByLine",
-        "contentManager_replaceContent",
-    ],
-    "memoryManager": [
-        "memoryManager_createSession",
-        "memoryManager_createState",
-        "memoryManager_createWorkspace",
-        "memoryManager_listSessions",
-        "memoryManager_listStates",
-        "memoryManager_listWorkspaces",
-        "memoryManager_loadSession",
-        "memoryManager_loadState",
-        "memoryManager_loadWorkspace",
-        "memoryManager_updateSession",
-        "memoryManager_updateState",
-        "memoryManager_updateWorkspace",
-    ],
-    "vaultManager": [
-        "vaultManager_createFolder",
-        "vaultManager_deleteFolder",
-        "vaultManager_deleteNote",
-        "vaultManager_duplicateNote",
-        "vaultManager_editFolder",
-        "vaultManager_listDirectory",
-        "vaultManager_moveFolder",
-        "vaultManager_moveNote",
-        "vaultManager_openNote",
-    ],
-    "vaultLibrarian": [
-        "vaultLibrarian_batch",
-        "vaultLibrarian_searchContent",
-        "vaultLibrarian_searchDirectory",
-        "vaultLibrarian_searchMemory",
-    ],
-    "meta": [
-        "get_tools",
-    ],
-}
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
-def extract_tool_calls(assistant_content):
-    """Extract tool names from assistant content."""
-    tools = []
-    # Pattern to match "tool_call: toolName"
-    pattern = r'tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)'
-    matches = re.findall(pattern, assistant_content)
-    tools.extend(matches)
+def load_tool_schema(path: Path) -> Tuple[set[str], Dict[str, List[str]], Dict[str, Tuple[str, List[Dict[str, Any]]]]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    valid_tools: set[str] = set()
+    tools_by_agent: Dict[str, List[str]] = defaultdict(list)
+    command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]] = {}
+
+    for item in payload.get("tools", []):
+        if not isinstance(item, dict):
+            continue
+        agent = str(item.get("agent", "")).strip()
+        tool = str(item.get("tool", "")).strip()
+        command = str(item.get("command", "")).strip()
+        if not agent or not tool:
+            continue
+
+        full_name = f"{agent}_{tool}"
+        valid_tools.add(full_name)
+        tools_by_agent[agent].append(full_name)
+
+        if command:
+            command_lookup[command] = (full_name, item.get("arguments", []) or [])
+
+    return valid_tools, {k: sorted(v) for k, v in tools_by_agent.items()}, command_lookup
+
+
+def parse_arguments(arguments: Any) -> Dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def split_cli_commands(tool_value: str) -> List[str]:
+    commands: List[str] = []
+    current: List[str] = []
+    quote: Optional[str] = None
+    escape = False
+    brace_depth = 0
+    bracket_depth = 0
+
+    for char in tool_value:
+        current.append(char)
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char == "{":
+            brace_depth += 1
+            continue
+        if char == "}":
+            brace_depth = max(0, brace_depth - 1)
+            continue
+        if char == "[":
+            bracket_depth += 1
+            continue
+        if char == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            continue
+        if char == "," and brace_depth == 0 and bracket_depth == 0:
+            current.pop()
+            segment = "".join(current).strip()
+            if segment:
+                commands.append(segment)
+            current = []
+
+    tail = "".join(current).strip()
+    if tail:
+        commands.append(tail)
+    return commands
+
+
+def extract_from_cli(tool_value: str, command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]]) -> List[str]:
+    matched: List[str] = []
+    sorted_commands = sorted(command_lookup.keys(), key=lambda value: len(value.split()), reverse=True)
+
+    for command_str in split_cli_commands(tool_value):
+        try:
+            tokens = shlex.split(command_str)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        for command in sorted_commands:
+            command_tokens = command.split()
+            if tokens[: len(command_tokens)] == command_tokens:
+                matched.append(command_lookup[command][0])
+                break
+    return matched
+
+
+def extract_tools_from_assistant_message(
+    message: Dict[str, Any],
+    command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]],
+) -> List[str]:
+    tools: List[str] = []
+
+    for tool_call in message.get("tool_calls", []) or []:
+        function = tool_call.get("function", {}) or {}
+        function_name = str(function.get("name") or "").strip()
+        arguments = parse_arguments(function.get("arguments", {}))
+
+        if function_name == "useTools":
+            tool_value = arguments.get("tool")
+            if isinstance(tool_value, str) and tool_value.strip():
+                tools.extend(extract_from_cli(tool_value, command_lookup))
+                continue
+
+            for wrapped_call in arguments.get("calls", []) or []:
+                agent = str(wrapped_call.get("agent") or "").strip()
+                tool = str(wrapped_call.get("tool") or "").strip()
+                if agent and tool:
+                    tools.append(f"{agent}_{tool}")
+            continue
+
+        if function_name:
+            tools.append(function_name)
+
+    content = message.get("content", "") or ""
+    tools.extend(re.findall(r"tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)", content))
     return tools
 
 
-def analyze_coverage(jsonl_file):
-    """Analyze tool usage coverage in the dataset."""
+def analyze_coverage(jsonl_file: Path, valid_tools: set[str], tools_by_agent: Dict[str, List[str]], command_lookup: Dict[str, Tuple[str, List[Dict[str, Any]]]]) -> Dict[str, Any]:
     tool_counter = Counter()
-    label_tool_counter = defaultdict(Counter)  # Track tools by label (good/bad)
+    label_tool_counter = defaultdict(Counter)
     invalid_tool_counter = Counter()
     invalid_examples = []
     conversation_count = 0
@@ -166,149 +165,106 @@ def analyze_coverage(jsonl_file):
     good_example_count = 0
     bad_example_count = 0
 
-    with open(jsonl_file, 'r') as f:
-        for line_num, line in enumerate(f, 1):
+    with jsonl_file.open("r", encoding="utf-8") as handle:
+        for line_num, line in enumerate(handle, 1):
             try:
                 data = json.loads(line)
-                conversations = data.get('conversations', [])
-                label = data.get('label', None)
-
-                conversation_count += 1
-                if label is True:
-                    good_example_count += 1
-                elif label is False:
-                    bad_example_count += 1
-
-                # Extract tools from assistant messages
-                for msg in conversations:
-                    if msg.get('role') == 'assistant':
-                        content = msg.get('content', '')
-                        tools = extract_tool_calls(content)
-
-                        for tool in tools:
-                            total_tool_calls += 1
-
-                            if tool in VALID_TOOLS:
-                                tool_counter[tool] += 1
-                                if label is not None:
-                                    label_tool_counter[label][tool] += 1
-                            else:
-                                invalid_tool_counter[tool] += 1
-                                invalid_examples.append({
-                                    'line': line_num,
-                                    'tool': tool,
-                                    'label': label
-                                })
-
-            except json.JSONDecodeError as e:
-                print(f"Error parsing line {line_num}: {e}", file=sys.stderr)
+            except json.JSONDecodeError as exc:
+                print(f"Error parsing line {line_num}: {exc}", file=sys.stderr)
                 continue
 
+            conversations = data.get("conversations", [])
+            label = data.get("label")
+
+            conversation_count += 1
+            if label is True:
+                good_example_count += 1
+            elif label is False:
+                bad_example_count += 1
+
+            for message in conversations:
+                if message.get("role") != "assistant":
+                    continue
+                for tool in extract_tools_from_assistant_message(message, command_lookup):
+                    total_tool_calls += 1
+                    if tool in valid_tools:
+                        tool_counter[tool] += 1
+                        if label is not None:
+                            label_tool_counter[label][tool] += 1
+                    else:
+                        invalid_tool_counter[tool] += 1
+                        invalid_examples.append({"line": line_num, "tool": tool, "label": label})
+
     return {
-        'tool_counter': tool_counter,
-        'label_tool_counter': label_tool_counter,
-        'invalid_tool_counter': invalid_tool_counter,
-        'invalid_examples': invalid_examples,
-        'conversation_count': conversation_count,
-        'total_tool_calls': total_tool_calls,
-        'good_example_count': good_example_count,
-        'bad_example_count': bad_example_count,
+        "tool_counter": tool_counter,
+        "label_tool_counter": label_tool_counter,
+        "invalid_tool_counter": invalid_tool_counter,
+        "invalid_examples": invalid_examples,
+        "conversation_count": conversation_count,
+        "total_tool_calls": total_tool_calls,
+        "good_example_count": good_example_count,
+        "bad_example_count": bad_example_count,
+        "tools_by_agent": tools_by_agent,
+        "valid_tool_count": len(valid_tools),
     }
 
 
-def print_report(results):
-    """Print a formatted coverage report."""
-    print("=" * 80)
-    print("TOOL USAGE COVERAGE REPORT")
-    print("=" * 80)
-    print()
+def print_report(results: Dict[str, Any]) -> None:
+    tool_counter = results["tool_counter"]
+    label_tool_counter = results["label_tool_counter"]
+    invalid_tool_counter = results["invalid_tool_counter"]
+    tools_by_agent = results["tools_by_agent"]
 
-    # Summary stats
-    print("DATASET SUMMARY")
+    print("=" * 80)
+    print("TOOL COVERAGE REPORT")
+    print("=" * 80)
+    print(f"\nConversations analyzed: {results['conversation_count']}")
+    print(f"Total tool calls:        {results['total_tool_calls']}")
+    print(f"Good examples:           {results['good_example_count']}")
+    print(f"Bad examples:            {results['bad_example_count']}")
+    print(f"Schema-defined tools:    {results['valid_tool_count']}")
+
+    print("\nTool usage by agent:")
     print("-" * 80)
-    print(f"Total Examples:        {results['conversation_count']}")
-    print(f"Good Examples (true):  {results['good_example_count']}")
-    print(f"Bad Examples (false):  {results['bad_example_count']}")
-    print(f"Total Tool Calls:      {results['total_tool_calls']}")
-    print(f"Valid Tool Calls:      {sum(results['tool_counter'].values())}")
-    print(f"Invalid Tool Calls:    {sum(results['invalid_tool_counter'].values())}")
-    print(f"Unique Valid Tools:    {len(results['tool_counter'])}")
-    print(f"Unique Invalid Tools:  {len(results['invalid_tool_counter'])}")
+    for agent in sorted(tools_by_agent):
+        manager_tools = tools_by_agent[agent]
+        used = [tool for tool in manager_tools if tool_counter[tool] > 0]
+        print(f"\n{agent}:")
+        print(f"  Covered: {len(used)}/{len(manager_tools)}")
+        if used:
+            for tool in used:
+                print(
+                    f"  - {tool}: total={tool_counter[tool]}, "
+                    f"good={label_tool_counter[True][tool]}, bad={label_tool_counter[False][tool]}"
+                )
+        missing = [tool for tool in manager_tools if tool_counter[tool] == 0]
+        if missing:
+            print(f"  Missing: {', '.join(missing)}")
 
-    if results['good_example_count'] > 0 and results['bad_example_count'] > 0:
-        ratio = results['good_example_count'] / results['bad_example_count']
-        print(f"Label Ratio:           {ratio:.2f}:1 (good:bad)")
-    print()
-
-    # Coverage by manager
-    print("=" * 80)
-    print("COVERAGE BY MANAGER")
-    print("=" * 80)
-    print()
-
-    for manager in sorted(TOOLS_BY_MANAGER.keys()):
-        manager_tools = TOOLS_BY_MANAGER[manager]
-        coverage = sum(1 for tool in manager_tools if tool in results['tool_counter'])
-
-        print(f"{manager.upper()} ({coverage}/{len(manager_tools)} tools with examples)")
+    if invalid_tool_counter:
+        print("\nInvalid/unrecognized tool names:")
         print("-" * 80)
-        print(f"{'Tool':<45} {'Count':>10} {'Good':>10} {'Bad':>10}")
-        print("-" * 80)
-
-        for tool in sorted(manager_tools):
-            count = results['tool_counter'].get(tool, 0)
-            good = results['label_tool_counter'].get(True, Counter())[tool]
-            bad = results['label_tool_counter'].get(False, Counter())[tool]
-
-            if count > 0:
-                print(f"{tool:<45} {count:>10} {good:>10} {bad:>10}")
-            else:
-                print(f"{tool:<45} {'(no examples)':>10}")
-        print()
-
-    # Invalid tools
-    if results['invalid_tool_counter']:
-        print("=" * 80)
-        print("INVALID TOOL CALLS")
-        print("=" * 80)
-        print()
-        print(f"{'Invalid Tool':<50} {'Count':>10}")
-        print("-" * 80)
-
-        for tool, count in results['invalid_tool_counter'].most_common():
-            print(f"{tool:<50} {count:>10}")
-
-        print()
-        print(f"First 20 invalid tool call instances:")
-        print("-" * 80)
-        for example in results['invalid_examples'][:20]:
-            print(f"  Line {example['line']:5d}: {example['tool']:<40} (label={example['label']})")
-
-        if len(results['invalid_examples']) > 20:
-            print(f"  ... and {len(results['invalid_examples']) - 20} more")
-        print()
-
-    print("=" * 80)
-
-
-def main():
-    # Analyze the main dataset file
-    if len(sys.argv) > 1:
-        dataset_path = Path(sys.argv[1])
+        for tool, count in invalid_tool_counter.most_common():
+            print(f"  {tool}: {count}")
     else:
-        dataset_path = Path('syngen_toolset_v1.0.0_claude.jsonl')
+        print("\nNo invalid tool names found.")
 
-    if not dataset_path.exists():
-        print(f"Error: Dataset file not found at {dataset_path}", file=sys.stderr)
-        sys.exit(1)
 
-    print(f"Analyzing: {dataset_path}")
-    print(f"Valid tools defined: {len(VALID_TOOLS)}")
-    print()
+def main(argv: Iterable[str]) -> int:
+    args = list(argv)
+    if len(args) != 2:
+        print("Usage: python3 tools/analyze_tool_coverage.py <dataset.jsonl>")
+        return 1
 
-    results = analyze_coverage(dataset_path)
+    dataset_path = Path(args[1]).resolve()
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_path = repo_root / "tool-schemas.json"
+
+    valid_tools, tools_by_agent, command_lookup = load_tool_schema(schema_path)
+    results = analyze_coverage(dataset_path, valid_tools, tools_by_agent, command_lookup)
     print_report(results)
+    return 0
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

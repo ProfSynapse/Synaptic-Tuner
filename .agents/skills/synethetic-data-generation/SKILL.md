@@ -79,6 +79,14 @@ python -m SynthChat.run generate --provider openrouter --model google/gemini-2.0
 python -m SynthChat.run generate --docs "path/to/essays/" --scenarios essay_outline --per-doc 1
 ```
 
+**Dry-run a checked-in smoke target manifest:**
+```bash
+python -m SynthChat.run generate \
+  --targets-file SynthChat/config/targets_cli_existing_tools_quickcheck.json \
+  --max-iterations 3 \
+  --output Datasets/synthchat/dryrun_cli_existing_tools_quickcheck.jsonl
+```
+
 **Validate then fix:**
 ```bash
 python -m SynthChat.run validate -i Datasets/synthchat/data.jsonl --rubrics system_prompt_format
@@ -121,3 +129,4 @@ To add a new tool-call format, add a named entry to `tool_call_formats.yaml` and
 - Be greedy to stop on errors — kill early, fix, retest
 - Environment traces are stored under `example.metadata.environment` when enabled
 - For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
+- Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices

@@ -264,7 +264,7 @@ environment:
   allowed_tools:
     - searchManager_searchContent
     - contentManager_read
-    - contentManager_update
+    - contentManager_replace
   max_steps: 8
   loop:
     enabled: true
@@ -421,13 +421,13 @@ Example per-test override:
 tests:
   - id: example_env_rule
     question: "Update docs file"
-    expected_tools: ["contentManager_update"]
+    expected_tools: ["contentManager_replace"]
     environment:
-      allowed_tools: ["contentManager_update"]
+      allowed_tools: ["contentManager_replace"]
       execution:
         strict_schema: true
         tool_action_hints:
-          contentManager_update: write
+          contentManager_replace: write
       assertions:
         - type: path_exists
           path: "Projects/docs.md"
@@ -542,19 +542,13 @@ Default wrapper example:
 {
   "name": "useTools",
   "arguments": {
-    "context": {
-      "workspaceId": "ws_123",
-      "sessionId": "sess_456",
-      "memory": [],
-      "goal": "Move the note"
-    },
-    "calls": [
-      {
-        "agent": "storageManager",
-        "tool": "move",
-        "params": {"path": "notes/meeting.md", "newPath": "archive/meeting.md"}
-      }
-    ]
+    "workspaceId": "ws_123",
+    "sessionId": "sess_456",
+    "memory": "Need to inspect and reorganize notes.",
+    "goal": "Move the note and read it back.",
+    "constraints": "Do not touch unrelated files.",
+    "tool": "storage move \"notes/meeting.md\" \"archive/meeting.md\", content read \"archive/meeting.md\"",
+    "strategy": "serial"
   }
 }
 ```

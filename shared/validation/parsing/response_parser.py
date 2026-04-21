@@ -18,7 +18,59 @@ from typing import Any, Dict, List, Optional, Union
 
 from .enums import ResponseType, ToolCallFormat
 from .tool_call_parser import _extract_object_field, _extract_string_field
-from .utilities import fix_json_newlines
+from .utilities import fix_json_newlines, repair_truncated_json
+
+
+def _normalize_tool_arguments(args_raw: Any) -> Dict[str, Any]:
+    """Unwrap common nested wrapper shapes and return the effective args dict."""
+    args = args_raw
+
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            try:
+                args = json.loads(repair_truncated_json(args))
+            except json.JSONDecodeError:
+                return {}
+
+    for _ in range(3):
+        if isinstance(args, dict) and isinstance(args.get("function"), dict):
+            args = args["function"].get("arguments", args)
+            continue
+        if isinstance(args, dict) and isinstance(args.get("tool_calls"), list) and args["tool_calls"]:
+            first = args["tool_calls"][0]
+            if isinstance(first, dict):
+                fn = first.get("function")
+                if isinstance(fn, dict):
+                    args = fn.get("arguments", args)
+                    continue
+        if isinstance(args, dict) and "arguments" in args:
+            inner = args.get("arguments")
+            if isinstance(inner, str):
+                try:
+                    args = json.loads(inner)
+                    continue
+                except json.JSONDecodeError:
+                    try:
+                        args = json.loads(repair_truncated_json(inner))
+                        continue
+                    except json.JSONDecodeError:
+                        return args if isinstance(args, dict) else {}
+            if isinstance(inner, dict):
+                args = inner
+                continue
+        break
+
+    return args if isinstance(args, dict) else {}
+
+
+def _looks_like_use_tools_wrapper(args: Any) -> bool:
+    """Detect top-level CLI-first useTools payloads by argument shape."""
+    if not isinstance(args, dict):
+        return False
+    required = ("workspaceId", "sessionId", "memory", "goal", "tool")
+    return all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
 
 
 @dataclass
@@ -177,14 +229,9 @@ def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> No
             args_raw = function_data.get("arguments", "{}")
 
             # Parse arguments JSON
-            args: Dict[str, Any] = {}
-            if isinstance(args_raw, str):
-                try:
-                    args = json.loads(args_raw)
-                except json.JSONDecodeError:
-                    pass
-            elif isinstance(args_raw, dict):
-                args = args_raw
+            args = _normalize_tool_arguments(args_raw)
+            if _looks_like_use_tools_wrapper(args):
+                name = "useTools"
 
             result.tool_calls.append(ParsedToolCall(
                 name=name,
@@ -265,6 +312,8 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                     args = json.loads(args)
                 except json.JSONDecodeError:
                     args = {}
+            if _looks_like_use_tools_wrapper(args):
+                name = "useTools"
 
             result.tool_calls.append(ParsedToolCall(
                 name=name,
@@ -289,6 +338,8 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                             args = json.loads(fixed_args)
                         except json.JSONDecodeError:
                             pass
+                if _looks_like_use_tools_wrapper(args):
+                    name = "useTools"
 
                 result.tool_calls.append(ParsedToolCall(
                     name=name,

@@ -15,10 +15,8 @@ scenarios:
     # Tool call format definition (self-contained)
     tool_format:
       wrapper: useTools
-      context:
-        required: [sessionId, workspaceId, memory, goal]
-      params:
-        required: [path, content]
+      arguments:
+        required: [sessionId, workspaceId, memory, goal, constraints, tool]
 
     # Validation rubrics for this scenario
     rubrics:
@@ -104,20 +102,12 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<extract from system prompt>",
-                  "workspaceId": "<extract from system prompt>",
-                  "memory": "<brief session context>",
-                  "goal": "<your goal>"
-                },
-                "calls": [{
-                  "agent": "contentManager",
-                  "tool": "write",
-                  "params": {
-                    "path": "<appropriate path in workspace>",
-                    "content": "<full markdown content>"
-                  }
-                }]
+                "workspaceId": "<extract from system prompt>",
+                "sessionId": "<extract from system prompt>",
+                "memory": "<brief session context>",
+                "goal": "<write the requested research note in the right workspace path>",
+                "constraints": "Only create the requested note. Do not modify unrelated files.",
+                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
               }
             }
           }]
@@ -238,20 +228,12 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<extract from system prompt>",
-                  "workspaceId": "<extract from system prompt>",
-                  "memory": "<brief session context>",
-                  "goal": "<your goal>"
-                },
-                "calls": [{
-                  "agent": "contentManager",
-                  "tool": "write",
-                  "params": {
-                    "path": "<appropriate path in workspace>",
-                    "content": "<full markdown content>"
-                  }
-                }]
+                "workspaceId": "<extract from system prompt>",
+                "sessionId": "<extract from system prompt>",
+                "memory": "<brief session context>",
+                "goal": "<write the requested blog post or essay in the right workspace path>",
+                "constraints": "Only create the requested note. Do not modify unrelated files.",
+                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
               }
             }
           }]
@@ -384,20 +366,12 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<extract from system prompt>",
-                  "workspaceId": "<extract from system prompt>",
-                  "memory": "<brief session context>",
-                  "goal": "<your goal>"
-                },
-                "calls": [{
-                  "agent": "contentManager",
-                  "tool": "write",
-                  "params": {
-                    "path": "<appropriate path in workspace>",
-                    "content": "<full markdown content>"
-                  }
-                }]
+                "workspaceId": "<extract from system prompt>",
+                "sessionId": "<extract from system prompt>",
+                "memory": "<brief session context>",
+                "goal": "<write the requested creative piece in the right workspace path>",
+                "constraints": "Only create the requested note. Do not modify unrelated files.",
+                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
               }
             }
           }]
@@ -526,20 +500,12 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<extract from system prompt>",
-                  "workspaceId": "<extract from system prompt>",
-                  "memory": "<brief session context>",
-                  "goal": "<your goal>"
-                },
-                "calls": [{
-                  "agent": "contentManager",
-                  "tool": "write",
-                  "params": {
-                    "path": "<appropriate path in workspace>",
-                    "content": "<full markdown content>"
-                  }
-                }]
+                "workspaceId": "<extract from system prompt>",
+                "sessionId": "<extract from system prompt>",
+                "memory": "<brief session context>",
+                "goal": "<write the requested documentation note in the right workspace path>",
+                "constraints": "Only create the requested note. Do not modify unrelated files.",
+                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
               }
             }
           }]
@@ -668,20 +634,12 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<extract from system prompt>",
-                  "workspaceId": "<extract from system prompt>",
-                  "memory": "<brief session context>",
-                  "goal": "<your goal>"
-                },
-                "calls": [{
-                  "agent": "contentManager",
-                  "tool": "write",
-                  "params": {
-                    "path": "<appropriate path in workspace>",
-                    "content": "<full markdown content>"
-                  }
-                }]
+                "workspaceId": "<extract from system prompt>",
+                "sessionId": "<extract from system prompt>",
+                "memory": "<brief session context>",
+                "goal": "<write the requested journal entry in the right workspace path>",
+                "constraints": "Only create the requested note. Do not modify unrelated files.",
+                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
               }
             }
           }]

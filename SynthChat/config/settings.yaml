@@ -98,7 +98,8 @@ defaults:
     storageManager_move: 30
     storageManager_list: 40
     contentManager_write: 40
-    contentManager_update: 30
+    contentManager_replace: 20
+    contentManager_setProperty: 10
     promptManager_executePrompts: 25
 
     # Content writing scenarios (longer form content with frontmatter)

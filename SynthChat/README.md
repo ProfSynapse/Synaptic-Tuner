@@ -345,7 +345,7 @@ Example shape:
 scenarios:
   envfs_update_config_note:
     type: tool
-    tool: contentManager_update
+    tool: contentManager_replace
     environment_mode: generated
     system_template: mocked_workspace_vault
     system_context:
@@ -376,7 +376,7 @@ For hybrid scenarios:
 scenarios:
   envfs_hybrid_case:
     type: tool
-    tool: contentManager_update
+    tool: contentManager_replace
     environment_mode: hybrid
     environment:
       fixture:

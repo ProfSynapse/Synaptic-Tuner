@@ -1,0 +1,393 @@
+{
+  "generated_at": "2026-04-21T13:28:38.543594+00:00",
+  "scan_roots": [
+    "SynthChat/config",
+    "SynthChat/scenarios",
+    "SynthChat/rubrics"
+  ],
+  "files_with_hits": 21,
+  "files": [
+    {
+      "path": "SynthChat/config/settings.yaml",
+      "current_tool_refs": {
+        "contentManager_replace": 1,
+        "contentManager_setProperty": 1,
+        "contentManager_write": 1,
+        "promptManager_executePrompts": 1,
+        "storageManager_archive": 1,
+        "storageManager_createFolder": 1,
+        "storageManager_list": 1,
+        "storageManager_move": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "prompt_execute_prompts": 1
+      }
+    },
+    {
+      "path": "SynthChat/config/targets_cli_existing_tools_quickcheck.json",
+      "current_tool_refs": {
+        "contentManager_replace": 1,
+        "promptManager_executePrompts": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "prompt_execute_prompts": 1
+      }
+    },
+    {
+      "path": "SynthChat/config/targets_cli_existing_tools_representative.json",
+      "current_tool_refs": {
+        "contentManager_insert": 1,
+        "contentManager_read": 1,
+        "contentManager_replace": 1,
+        "contentManager_write": 1,
+        "memoryManager_archiveWorkspace": 1,
+        "memoryManager_createState": 1,
+        "memoryManager_createWorkspace": 1,
+        "memoryManager_listStates": 1,
+        "memoryManager_listWorkspaces": 1,
+        "memoryManager_loadState": 1,
+        "memoryManager_loadWorkspace": 1,
+        "memoryManager_updateWorkspace": 1,
+        "promptManager_archivePrompt": 1,
+        "promptManager_createPrompt": 1,
+        "promptManager_executePrompts": 1,
+        "promptManager_generateImage": 1,
+        "promptManager_getPrompt": 1,
+        "promptManager_listModels": 1,
+        "promptManager_listPrompts": 1,
+        "promptManager_updatePrompt": 1,
+        "searchManager_searchContent": 1,
+        "searchManager_searchDirectory": 1,
+        "searchManager_searchMemory": 1,
+        "storageManager_archive": 1,
+        "storageManager_copy": 1,
+        "storageManager_createFolder": 1,
+        "storageManager_list": 1,
+        "storageManager_move": 1,
+        "storageManager_open": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "memory_update_workspace": 1,
+        "prompt_execute_prompts": 1
+      }
+    },
+    {
+      "path": "SynthChat/config/tool_call_formats.yaml",
+      "current_tool_refs": {
+        "contentManager_read": 1,
+        "contentManager_replace": 2
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 2
+      }
+    },
+    {
+      "path": "SynthChat/config/workspace_formats.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 1
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/commandManager_tools.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 11
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/contentManager_tools.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 10
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/content_writing_quality.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 3
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/createState_transform.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 2
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/destructive_safety.yaml",
+      "current_tool_refs": {
+        "contentManager_read": 1,
+        "storageManager_archive": 2
+      },
+      "stale_tool_refs": {},
+      "special_hits": {}
+    },
+    {
+      "path": "SynthChat/rubrics/memoryManager_tools.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 10
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/promptManager_tools.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 10
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/searchManager_tools.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 11
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/storageManager_tools.yaml",
+      "current_tool_refs": {
+        "storageManager_move": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 12
+      }
+    },
+    {
+      "path": "SynthChat/rubrics/tool_alignment.yaml",
+      "current_tool_refs": {
+        "contentManager_insert": 1,
+        "contentManager_read": 1,
+        "contentManager_replace": 2
+      },
+      "stale_tool_refs": {},
+      "special_hits": {}
+    },
+    {
+      "path": "SynthChat/scenarios/content_writing.yaml",
+      "current_tool_refs": {},
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 6
+      }
+    },
+    {
+      "path": "SynthChat/scenarios/destructive.yaml",
+      "current_tool_refs": {
+        "searchManager_searchContent": 1,
+        "storageManager_archive": 10,
+        "storageManager_createFolder": 1,
+        "storageManager_move": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {}
+    },
+    {
+      "path": "SynthChat/scenarios/tool_environments.yaml",
+      "current_tool_refs": {
+        "contentManager_replace": 1,
+        "storageManager_archive": 1
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 5
+      }
+    },
+    {
+      "path": "SynthChat/scenarios/tools.yaml",
+      "current_tool_refs": {
+        "canvasManager_list": 3,
+        "canvasManager_read": 3,
+        "canvasManager_update": 3,
+        "canvasManager_write": 3,
+        "contentManager_insert": 3,
+        "contentManager_read": 3,
+        "contentManager_replace": 3,
+        "contentManager_setProperty": 3,
+        "contentManager_write": 3,
+        "memoryManager_archiveWorkspace": 3,
+        "memoryManager_createState": 3,
+        "memoryManager_createWorkspace": 3,
+        "memoryManager_listStates": 3,
+        "memoryManager_listWorkspaces": 3,
+        "memoryManager_loadState": 3,
+        "memoryManager_loadWorkspace": 3,
+        "memoryManager_runWorkflow": 3,
+        "memoryManager_updateWorkspace": 3,
+        "promptManager_archivePrompt": 3,
+        "promptManager_createPrompt": 3,
+        "promptManager_executePrompts": 3,
+        "promptManager_generateImage": 3,
+        "promptManager_getPrompt": 3,
+        "promptManager_listModels": 3,
+        "promptManager_listPrompts": 3,
+        "promptManager_subagent": 3,
+        "promptManager_updatePrompt": 3,
+        "searchManager_searchContent": 3,
+        "searchManager_searchDirectory": 3,
+        "searchManager_searchMemory": 3,
+        "storageManager_archive": 2,
+        "storageManager_copy": 3,
+        "storageManager_createFolder": 3,
+        "storageManager_list": 3,
+        "storageManager_move": 3,
+        "storageManager_open": 3,
+        "taskManager_archiveProject": 3,
+        "taskManager_createProject": 3,
+        "taskManager_createTask": 3,
+        "taskManager_linkNote": 3,
+        "taskManager_listProjects": 3,
+        "taskManager_listTasks": 3,
+        "taskManager_moveTask": 3,
+        "taskManager_openTasks": 3,
+        "taskManager_queryTasks": 3,
+        "taskManager_updateProject": 3,
+        "taskManager_updateTask": 3
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "memory_update_workspace": 3,
+        "prompt_execute_prompts": 3,
+        "useTools_wrapper": 2
+      }
+    },
+    {
+      "path": "SynthChat/scenarios/vault_kto_pilot.yaml",
+      "current_tool_refs": {
+        "contentManager_read": 6,
+        "contentManager_replace": 4,
+        "contentManager_setProperty": 2,
+        "contentManager_write": 4,
+        "searchManager_searchContent": 3,
+        "searchManager_searchDirectory": 1,
+        "storageManager_archive": 5,
+        "storageManager_createFolder": 1,
+        "storageManager_list": 1,
+        "storageManager_move": 2
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 8
+      }
+    },
+    {
+      "path": "SynthChat/scenarios/vault_shared_seed.yaml",
+      "current_tool_refs": {
+        "contentManager_read": 6,
+        "contentManager_replace": 4,
+        "contentManager_setProperty": 2,
+        "contentManager_write": 4,
+        "searchManager_searchContent": 3,
+        "searchManager_searchDirectory": 1,
+        "storageManager_archive": 5,
+        "storageManager_list": 1,
+        "storageManager_move": 2
+      },
+      "stale_tool_refs": {},
+      "special_hits": {
+        "useTools_wrapper": 8
+      }
+    }
+  ],
+  "global": {
+    "current_tool_refs": {
+      "canvasManager_list": 3,
+      "canvasManager_read": 3,
+      "canvasManager_update": 3,
+      "canvasManager_write": 3,
+      "contentManager_insert": 5,
+      "contentManager_read": 19,
+      "contentManager_replace": 19,
+      "contentManager_setProperty": 8,
+      "contentManager_write": 13,
+      "memoryManager_archiveWorkspace": 4,
+      "memoryManager_createState": 4,
+      "memoryManager_createWorkspace": 4,
+      "memoryManager_listStates": 4,
+      "memoryManager_listWorkspaces": 4,
+      "memoryManager_loadState": 4,
+      "memoryManager_loadWorkspace": 4,
+      "memoryManager_runWorkflow": 3,
+      "memoryManager_updateWorkspace": 4,
+      "promptManager_archivePrompt": 4,
+      "promptManager_createPrompt": 4,
+      "promptManager_executePrompts": 6,
+      "promptManager_generateImage": 4,
+      "promptManager_getPrompt": 4,
+      "promptManager_listModels": 4,
+      "promptManager_listPrompts": 4,
+      "promptManager_subagent": 3,
+      "promptManager_updatePrompt": 4,
+      "searchManager_searchContent": 11,
+      "searchManager_searchDirectory": 6,
+      "searchManager_searchMemory": 4,
+      "storageManager_archive": 27,
+      "storageManager_copy": 4,
+      "storageManager_createFolder": 7,
+      "storageManager_list": 7,
+      "storageManager_move": 11,
+      "storageManager_open": 4,
+      "taskManager_archiveProject": 3,
+      "taskManager_createProject": 3,
+      "taskManager_createTask": 3,
+      "taskManager_linkNote": 3,
+      "taskManager_listProjects": 3,
+      "taskManager_listTasks": 3,
+      "taskManager_moveTask": 3,
+      "taskManager_openTasks": 3,
+      "taskManager_queryTasks": 3,
+      "taskManager_updateProject": 3,
+      "taskManager_updateTask": 3
+    },
+    "stale_tool_refs": {},
+    "special_hits": {
+      "memory_update_workspace": 4,
+      "prompt_execute_prompts": 6,
+      "useTools_wrapper": 101
+    }
+  },
+  "areas": {
+    "SynthChat/config": [
+      "SynthChat/config/settings.yaml",
+      "SynthChat/config/targets_cli_existing_tools_quickcheck.json",
+      "SynthChat/config/targets_cli_existing_tools_representative.json",
+      "SynthChat/config/tool_call_formats.yaml",
+      "SynthChat/config/workspace_formats.yaml"
+    ],
+    "SynthChat/rubrics": [
+      "SynthChat/rubrics/commandManager_tools.yaml",
+      "SynthChat/rubrics/contentManager_tools.yaml",
+      "SynthChat/rubrics/content_writing_quality.yaml",
+      "SynthChat/rubrics/createState_transform.yaml",
+      "SynthChat/rubrics/destructive_safety.yaml",
+      "SynthChat/rubrics/memoryManager_tools.yaml",
+      "SynthChat/rubrics/promptManager_tools.yaml",
+      "SynthChat/rubrics/searchManager_tools.yaml",
+      "SynthChat/rubrics/storageManager_tools.yaml",
+      "SynthChat/rubrics/tool_alignment.yaml"
+    ],
+    "SynthChat/scenarios": [
+      "SynthChat/scenarios/content_writing.yaml",
+      "SynthChat/scenarios/destructive.yaml",
+      "SynthChat/scenarios/tool_environments.yaml",
+      "SynthChat/scenarios/tools.yaml",
+      "SynthChat/scenarios/vault_kto_pilot.yaml",
+      "SynthChat/scenarios/vault_shared_seed.yaml"
+    ]
+  }
+}

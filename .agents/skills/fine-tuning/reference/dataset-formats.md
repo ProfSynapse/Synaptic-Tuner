@@ -1,184 +1,140 @@
 # Dataset Formats Reference
 
-Dataset format requirements for each training method.
+Dataset requirements for the current CLI-first tool-calling stack.
 
 ---
 
 ## SFT Dataset Format
 
-**Positive examples only.** No labels needed.
+Positive examples only. Tool-calling examples should use OpenAI-style `tool_calls`.
 
 ```jsonl
 {
   "conversations": [
-    {"role": "user", "content": "Delete the file test.md"},
-    {"role": "assistant", "content": "tool_call: vaultManager_deleteNote\narguments: {\"path\": \"test.md\"}\n\nResult: {\"success\": true}\n\nDeleted test.md successfully."}
-  ]
-}
-```
-
-**Key rules:**
-- Starts with `user` role (NO system message in SFT datasets)
-- Tool calls embedded in assistant response text
-- `label` field is ignored (all examples treated as positive)
-- Single-turn conversations preferred
-
----
-
-## KTO Dataset Format
-
-**Interleaved True/False examples.** Label is required.
-
-```jsonl
-{"conversations": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "good response"}], "label": true}
-{"conversations": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "bad response"}], "label": false}
-```
-
-**Key rules:**
-- `label: true` = desirable response
-- `label: false` = undesirable response
-- Must have BOTH True and False examples
-- Data loader auto-interleaves and balances
-- Imbalanced datasets get truncated to match minority count
-
-**Internal conversion (automatic):**
-```
-conversations format → prompt/completion/label format (for TRL)
-```
-
----
-
-## GRPO Dataset Format
-
-**Prompts with ground truth for reward scoring.**
-
-```jsonl
-{
-  "prompt": [
-    {"role": "system", "content": "You are a helpful assistant..."},
-    {"role": "user", "content": "Open the file notes.md"}
-  ],
-  "ground_truth_tool": "vaultManager_openNote",
-  "ground_truth_args_json": "{\"context\": {\"sessionId\": \"abc\"}, \"calls\": [{\"agent\": \"vaultManager\", \"tool\": \"openNote\", \"params\": {\"path\": \"notes.md\"}}]}"
-}
-```
-
-**Key rules:**
-- `prompt` is a list of message objects (can include system)
-- `ground_truth_tool` — expected tool name
-- `ground_truth_args_json` — expected arguments (useTools format)
-- Ground truth used by reward rubrics for scoring
-
----
-
-## Tool Call Format (in Datasets)
-
-Tool calls can appear in several formats:
-
-### Text-embedded (SFT/KTO)
-```
-tool_call: vaultManager_deleteNote
-arguments: {"path": "test.md"}
-
-Result: {"success": true}
-
-Response text here.
-```
-
-### OpenAI format (in tool_calls field)
-```json
-{
-  "tool_calls": [
+    {"role": "system", "content": "<session_context>...</session_context>"},
+    {"role": "user", "content": "Archive today's note and then read it back."},
     {
-      "function": {
-        "name": "useTools",
-        "arguments": "{\"context\": {...}, \"calls\": [...]}"
-      }
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_001",
+          "type": "function",
+          "function": {
+            "name": "useTools",
+            "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+          }
+        }
+      ]
     }
   ]
 }
 ```
 
-### useTools wrapper (standard)
-```json
+Key rules:
+- Assistant tool-calling turns should use `content: null` with `tool_calls`
+- The wrapped function name is always `useTools`
+- `function.arguments` must use the CLI-first top-level wrapper fields
+- The actual tool operations live in the `tool` command string
+
+---
+
+## KTO Dataset Format
+
+Interleaved desirable and undesirable examples.
+
+```jsonl
+{"conversations":[{"role":"user","content":"..."},{"role":"assistant","content":"good response"}],"label":true}
+{"conversations":[{"role":"user","content":"..."},{"role":"assistant","content":"bad response"}],"label":false}
+```
+
+Key rules:
+- `label: true` = desirable
+- `label: false` = undesirable
+- Keep paired positive/negative coverage where practical
+
+---
+
+## GRPO Dataset Format
+
+Prompts plus a ground-truth tool wrapper for reward scoring.
+
+```jsonl
 {
-  "name": "useTools",
-  "arguments": {
-    "context": {
-      "sessionId": "abc",
-      "workspaceId": "ws_123",
-      "memory": "...",
-      "goal": "..."
-    },
-    "calls": [
-      {
-        "agent": "vaultManager",
-        "tool": "openNote",
-        "params": {"path": "notes.md"}
-      }
-    ]
-  }
+  "prompt": [
+    {"role": "system", "content": "<session_context>...</session_context>"},
+    {"role": "user", "content": "Move the note and read it back."}
+  ],
+  "ground_truth_tool": "useTools",
+  "ground_truth_args_json": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
 }
 ```
 
 ---
 
-## Where Datasets Live
+## Current Tool Wrapper
 
+The canonical tool-call format is:
+
+```json
+{
+  "name": "useTools",
+  "arguments": {
+    "workspaceId": "default",
+    "sessionId": "session_123",
+    "memory": "Need to inspect and reorganize notes.",
+    "goal": "Move a note and then read it back.",
+    "constraints": "Do not touch unrelated files.",
+    "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
+    "strategy": "serial"
+  }
+}
 ```
-Datasets/
-├── behavior_datasets/          # Behavioral training
-│   ├── thinking/               # With thinking blocks
-│   └── non-thinking/           # Without thinking
-├── tools_datasets/             # Tool-specific
-│   ├── thinking/               # With thinking blocks
-│   │   ├── agentManager/
-│   │   ├── contentManager/
-│   │   ├── storageManager/
-│   │   └── ...
-│   └── non-thinking/
-├── synthchat/                  # SynthChat generated
-└── *.jsonl                     # Combined/final datasets
-```
+
+Required top-level fields:
+- `workspaceId`
+- `sessionId`
+- `memory`
+- `goal`
+- `tool`
+
+Optional top-level fields:
+- `constraints`
+- `strategy`
+
+The `tool` value is a CLI command string. Multiple operations are comma-separated.
 
 ---
 
-## Creating KTO Datasets from Evaluator Results
+## Canonical Dataset Locations
 
-Failed behavior tests make great KTO negatives:
-1. Run evaluation: `python -m Evaluator.cli --backend lmstudio --model MODEL`
-2. PASS results → `label: true` (positive examples)
-3. WARN/FAIL results → `label: false` (negative examples)
-4. Combine into interleaved dataset
-
----
-
-## Combining Datasets
-
-Use the combine script from the synthetic-data-generation skill:
-
-```bash
-.claude/skills/synethetic-data-generation/scripts/combine_datasets.sh \
-  -o Datasets/combined_training.jsonl \
-  Datasets/tools_datasets/thinking/
+```text
+Datasets/tools_datasets/non_thinking/
+├── contentManager/
+├── memoryManager/
+├── promptManager/
+├── searchManager/
+└── storageManager/
 ```
 
-This shuffles and adds a `source` field from folder names.
+Current canonical versions:
+- `contentManager/tools_v2.3.jsonl`
+- `memoryManager/tools_v2.4.jsonl`
+- `promptManager/tools_v2.6.jsonl`
+- `searchManager/tools_v2.2.jsonl`
+- `storageManager/tools_v2.4.jsonl`
 
 ---
 
 ## Validation
 
-Always validate before training:
+```bash
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
+```
+
+Use the migration pipeline for corpus refreshes instead of ad hoc rewriting:
 
 ```bash
-# Structural validation
-python .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/my_dataset.jsonl
-
-# Check KTO label balance
-python -c "
-import json
-labels = [json.loads(l).get('label') for l in open('data.jsonl')]
-print(f'True: {labels.count(True)}, False: {labels.count(False)}')
-"
+python3 tools/migrations/05_inventory_cli_schema_datasets.py
+python3 tools/migrations/06_migrate_cli_schema_datasets.py
 ```

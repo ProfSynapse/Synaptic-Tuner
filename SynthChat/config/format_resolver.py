@@ -22,22 +22,16 @@ _CONFIG_DIR = Path(__file__).parent
 
 _DEFAULT_TOOL_CALL_FORMAT: Dict[str, Any] = {
     "wrapper_name": "useTools",
-    "context_fields": {
-        "required": ["sessionId", "workspaceId", "memory", "goal"],
+    "argument_fields": {
+        "required": ["sessionId", "workspaceId", "memory", "goal", "tool"],
         "properties": {
             "sessionId": {"type": "string", "minLength": 1},
             "workspaceId": {"type": "string", "minLength": 1},
             "memory": {"type": "string", "minLength": 1},
             "goal": {"type": "string", "minLength": 1},
-        },
-    },
-    "call_item": {
-        "properties": {
-            "agent": {"type": "string", "minLength": 1},
+            "constraints": {"type": "string", "minLength": 1},
             "tool": {"type": "string", "minLength": 1},
-            "params": {"type": "object", "additionalProperties": True},
         },
-        "required": ["agent", "tool", "params"],
     },
     "extra_argument_fields": {
         "strategy": {
@@ -45,17 +39,19 @@ _DEFAULT_TOOL_CALL_FORMAT: Dict[str, Any] = {
             "enum": ["serial", "parallel"],
         },
     },
-    "argument_required": ["context", "calls"],
+    "argument_required": ["sessionId", "workspaceId", "memory", "goal", "tool"],
     "generation_instructions": [
         "Return a single JSON object only.",
         "Your job is to either call tools or respond via text.",
         "If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'.",
         "If no tool call is needed, respond with normal text in content and set tool_calls to null or [].",
-        "Inside function.arguments.calls, each item must use this exact shape:",
-        '{{"agent": "AgentName", "tool": "toolName", "params": {{...}}}}',
-        "Do not use dotted names like 'contentManager.read' for either agent or tool.",
-        "Do not use nested wrappers like params.tool, params.parameters, or assistant as the agent name.",
-        "Put the real tool arguments directly inside params.",
+        "The function.arguments value must be a single JSON object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy.",
+        "The tool field must be a CLI command string, not a nested object.",
+        "Use CLI command names like 'storage move', 'content read', 'prompt execute-prompts', 'memory load-workspace', and 'search search-content'.",
+        "When multiple commands are needed, join them in the tool field as a comma-separated sequence.",
+        "Do not use context/calls wrappers, params objects, agent/tool arrays, or direct per-tool function names.",
+        "Good: {\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect notes.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}",
+        "Bad: {\"context\": {...}, \"calls\": [...]}, {\"tool_calls\": [...]}, or function.name='contentManager_read'",
         "Use content as null when the response is tool-only.",
         "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools.",
     ],
@@ -264,7 +260,7 @@ def _default_workspace_format() -> Dict[str, Any]:
                     '- sessionId: "{session_id}"\n'
                     '- workspaceId: "{workspace_id}" (current workspace)\n'
                     "\n"
-                    'Include these in the "context" parameter of your tool calls.\n'
+                    'Include these as top-level fields in the useTools arguments payload.\n'
                 ),
             },
             {"tag": "vault_structure", "source": "vault_structure", "optional": True},

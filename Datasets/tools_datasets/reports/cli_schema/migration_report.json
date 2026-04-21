@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-04-21T13:03:09.459479+00:00",
+  "repo_root": "/Users/jrosenbaum/Documents/Code/Synthetic Conversations",
+  "datasets": {
+    "storageManager": {
+      "status": "ok",
+      "input_path": "Datasets/tools_datasets/non_thinking/storageManager/tools_v2.1.jsonl",
+      "output_path": "Datasets/tools_datasets/non_thinking/storageManager/tools_v2.4.jsonl",
+      "input_examples": 1092,
+      "migrated_examples": 1057,
+      "unchanged_examples": 17,
+      "regenerate_examples": 18,
+      "manual_examples": 0,
+      "regenerate_reasons": {
+        "unsupported_open_mode:create": 17,
+        "unsupported_open_mode:splitview": 1
+      }
+    }
+  },
+  "global": {
+    "migrated_examples": 1057,
+    "unchanged_examples": 17,
+    "regenerate_examples": 18,
+    "manual_examples": 0,
+    "regenerate_reasons": {
+      "unsupported_open_mode:create": 17,
+      "unsupported_open_mode:splitview": 1
+    }
+  }
+}

@@ -1403,6 +1403,8 @@ class SynthChatGenerator:
             generation_cfg = {}
 
         schema_name = str(generation_cfg.get("schema") or "").strip()
+        if not schema_name and str(scenario.get("type") or "").strip().lower() == "tool":
+            schema_name = "use_tools_response"
         max_tokens = generation_cfg.get("max_tokens")
         llm_clients = self._get_stage_llm_clients(generation_cfg)
         max_retries = int(generation_cfg.get("max_retries", 3) or 3)
@@ -1680,5 +1682,4 @@ class SynthChatGenerator:
             system_context, environment_config, tool_schema,
             format_config=format_config, tool_call_format=tool_call_format,
         )
-
 

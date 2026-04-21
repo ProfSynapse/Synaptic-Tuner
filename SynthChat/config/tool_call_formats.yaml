@@ -8,26 +8,21 @@ formats:
   default:
     wrapper_name: useTools
 
-    # Fields required inside function.arguments.context
-    context_fields:
+    # Top-level fields required inside function.arguments
+    argument_fields:
       required:
         - sessionId
         - workspaceId
         - memory
         - goal
+        - tool
       properties:
         sessionId: { type: string, minLength: 1 }
         workspaceId: { type: string, minLength: 1 }
         memory: { type: string, minLength: 1 }
         goal: { type: string, minLength: 1 }
-
-    # Schema for each item in function.arguments.calls[]
-    call_item:
-      properties:
-        agent: { type: string, minLength: 1 }
+        constraints: { type: string, minLength: 1 }
         tool: { type: string, minLength: 1 }
-        params: { type: object, additionalProperties: true }
-      required: [agent, tool, params]
 
     # Additional top-level fields inside function.arguments
     extra_argument_fields:
@@ -36,7 +31,7 @@ formats:
         enum: [serial, parallel]
 
     # Required top-level fields inside function.arguments
-    argument_required: [context, calls]
+    argument_required: [sessionId, workspaceId, memory, goal, tool]
 
     # LLM generation prompt lines (appended before the base prompt)
     generation_instructions:
@@ -44,17 +39,19 @@ formats:
       - "Your job is to either call tools or respond via text."
       - "If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'."
       - "If no tool call is needed, respond with normal text in content and set tool_calls to null or []."
-      - "Inside function.arguments.calls, each item must use this exact shape:"
-      - '{"agent": "AgentName", "tool": "toolName", "params": {...}}'
-      - "Do not use dotted names like 'contentManager.read' for either agent or tool."
-      - "Do not use nested wrappers like params.tool, params.parameters, or assistant as the agent name."
-      - "Put the real tool arguments directly inside params."
+      - "The function.arguments value must be a single JSON object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy."
+      - "The tool field must be a CLI command string, not a nested object."
+      - "Use CLI command names like 'storage move', 'content read', 'prompt execute-prompts', 'memory load-workspace', and 'search search-content'."
+      - "When multiple commands are needed, join them in the tool field as a comma-separated sequence."
+      - "Do not use context/calls wrappers, params objects, agent/tool arrays, or direct per-tool function names."
+      - "Good: {\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect notes.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+      - "Bad: {\"context\": {...}, \"calls\": [...]}, {\"tool_calls\": [...]}, or function.name='contentManager_read'"
       - "Use content as null when the response is tool-only."
       - "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools."
 
     # Instruction line for the available_tools section of workspace prompts
     available_tools_instruction: >-
-      Required wrapper context fields: {context_required_csv}.
+      Required wrapper fields: {context_required_csv}.
 
   # -- Example: Plain OpenAI-style tool calls (no wrapper) --
   openai_native:
@@ -74,6 +71,12 @@ formats:
       - "Use the standard OpenAI tool_calls format."
       - "Each tool call should be a separate entry in tool_calls."
       - "Set content to null when the response is tool-only."
+      - "The function.arguments value must be a valid JSON object string containing ONLY that tool's actual parameters."
+      - "Do not put a full assistant message, tool_calls array, function object, or wrapper object inside function.arguments."
+      - "Do not include keys like tool_calls, function, id, type, tool, name, or arguments unless they are actual tool parameters from the schema."
+      - "Good: function.name='contentManager_replace' with function.arguments='{\"path\":\"notes/a.md\",\"oldContent\":\"x\",\"newContent\":\"y\",\"startLine\":3,\"endLine\":3}'"
+      - "Bad: function.arguments='{\"tool_calls\":[...]}', function.arguments='{\"name\":\"contentManager_replace\",\"arguments\":{...}}', or function.arguments='{\"function\":{...}}'"
+      - "Close every JSON string and every brace. Do not truncate the arguments object."
 
     available_tools_instruction: >-
       Call tools directly using the standard function calling format.

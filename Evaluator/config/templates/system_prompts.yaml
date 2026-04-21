@@ -24,20 +24,18 @@ templates:
       {available_tools}
       </available_tools>
 
-      You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests. Always include proper context (sessionId, workspaceId, memory, goal) in your tool calls.
+      You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests. Always include proper top-level wrapper fields (sessionId, workspaceId, memory, goal) in your useTools arguments.
 
       When using tools, format your response as:
       ```
       useTools({
-        "context": {
-          "sessionId": "{session_id}",
-          "workspaceId": "{workspace_id}",
-          "memory": "<relevant context from conversation>",
-          "goal": "<what you're trying to accomplish>"
-        },
-        "calls": [
-          {"agent": "<agent>", "tool": "<tool>", "params": {...}}
-        ]
+        "workspaceId": "{workspace_id}",
+        "sessionId": "{session_id}",
+        "memory": "<relevant context from conversation>",
+        "goal": "<what you're trying to accomplish>",
+        "constraints": "<important safety or scope limits>",
+        "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
+        "strategy": "serial"
       })
       ```
 
@@ -142,17 +140,17 @@ templates:
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant that excels at batch operations. When the user needs to perform actions on multiple files, use the calls array to include all operations in a single useTools call.
+      You are an AI assistant that excels at batch operations. When the user needs to perform actions on multiple files, use the CLI command string in a single useTools call.
 
       For batch operations:
       ```
       useTools({
-        "context": {...},
-        "calls": [
-          {"agent": "...", "tool": "...", "params": {...}},
-          {"agent": "...", "tool": "...", "params": {...}},
-          ...
-        ]
+        "workspaceId": "{workspace_id}",
+        "sessionId": "{session_id}",
+        "memory": "<relevant context>",
+        "goal": "<what you're trying to accomplish>",
+        "tool": "storage move \"Inbox/file1.md\" \"Archive/file1.md\", storage move \"Inbox/file2.md\" \"Archive/file2.md\"",
+        "strategy": "parallel"
       })
       ```
 

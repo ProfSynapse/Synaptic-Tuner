@@ -163,7 +163,10 @@ def validate_ids_match_system_prompt(
 
     context = args.get("context", {})
     if not isinstance(context, dict):
-        return
+        context = {
+            "sessionId": args.get("sessionId"),
+            "workspaceId": args.get("workspaceId"),
+        }
 
     # Validate sessionId matches
     tool_session_id = context.get("sessionId")
@@ -552,8 +555,8 @@ def validate_context(args: dict, report: ExampleReport) -> None:
         return
 
     # Support both formats:
-    # 1. Old Format: 'context' object containing IDs and metadata
-    # 2. New Format: Top-level 'sessionId' and 'workspaceId' (metadata in thinking block)
+    # 1. Legacy wrapper: nested 'context' object
+    # 2. CLI-first wrapper: top-level fields on the useTools arguments object
 
     if "context" in args:
         # --- CONTEXT OBJECT FORMAT ---
@@ -563,8 +566,6 @@ def validate_context(args: dict, report: ExampleReport) -> None:
             return
 
         # Validate required fields in context object
-        # New format uses: workspaceId, sessionId, memory, goal
-        # Old format used: sessionDescription, sessionMemory, toolContext, primaryGoal, subgoal
         required_fields = [
             "sessionId",
             "workspaceId",
@@ -585,7 +586,12 @@ def validate_context(args: dict, report: ExampleReport) -> None:
             report.add("ERROR", f"workspaceId '{ws_id}' does not match generator format")
             
     else:
-        # --- NEW FORMAT (Top-level arguments) ---
+        # --- CLI-FIRST FORMAT (Top-level arguments) ---
+        required_fields = ["sessionId", "workspaceId", "memory", "goal", "tool"]
+        for field in required_fields:
+            if field not in args:
+                report.add("ERROR", f"Missing required '{field}' field in arguments")
+
         # Check for sessionId
         if "sessionId" not in args:
             report.add("ERROR", "Missing required 'sessionId' field in arguments (or missing 'context' object)")

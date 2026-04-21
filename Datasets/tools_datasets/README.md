@@ -1,110 +1,98 @@
-# Tools Datasets
+# Tool Datasets
 
-This directory contains tool-calling training data organized by agent category.
+Canonical tool-calling training data, organized by manager and generation mode.
 
-## Structure
+## Current Scope
 
-```
-tools_datasets/
-├── contentManager/       # CRUD operations on note content
-│   └── tools_v1.0.jsonl
-├── vaultManager/         # File/folder operations
-│   └── tools_v1.0.jsonl
-├── memoryManager/        # Session/state/workspace management
-│   └── tools_v1.0.jsonl
-├── vaultLibrarian/       # Advanced search, batch operations
-│   └── tools_v1.0.jsonl
-├── agentManager/         # Agent lifecycle, prompt execution
-│   └── tools_v1.0.jsonl
-├── split_metadata.json   # Statistics from split operation
-└── README.md
+Active CLI-first canonical datasets currently live under:
+
+```text
+Datasets/tools_datasets/
+├── non_thinking/
+│   ├── contentManager/
+│   ├── memoryManager/
+│   ├── promptManager/
+│   ├── searchManager/
+│   └── storageManager/
+├── thinking/                  # Deferred for this migration pass
+└── reports/cli_schema/
 ```
 
-## Agent Categories
+## Current Canonical Versions
 
-| Agent | Description | Key Tools |
-|-------|-------------|-----------|
-| **contentManager** | Create, read, update, delete note content | `createContent`, `readContent`, `appendContent`, `replaceContent` |
-| **vaultManager** | File and folder operations | `createFolder`, `moveNote`, `deleteNote`, `listDirectory` |
-| **memoryManager** | Session and workspace state management | `createSession`, `loadWorkspace`, `createState`, `listSessions` |
-| **vaultLibrarian** | Search and batch operations | `searchContent`, `searchDirectory`, `searchMemory`, `batch` |
-| **agentManager** | AI agent management and execution | `executePrompt`, `createAgent`, `updateAgent`, `listAgents` |
+- `non_thinking/contentManager/tools_v2.3.jsonl`
+- `non_thinking/memoryManager/tools_v2.4.jsonl`
+- `non_thinking/promptManager/tools_v2.6.jsonl`
+- `non_thinking/searchManager/tools_v2.2.jsonl`
+- `non_thinking/storageManager/tools_v2.4.jsonl`
 
 ## Dataset Format
 
-Each line in the JSONL files is a single example:
+Each example is a ChatML conversation. Tool-calling examples use an OpenAI-style `tool_calls` array and a single CLI-first `useTools` wrapper.
 
 ```json
 {
   "conversations": [
-    {"role": "user", "content": "User request..."},
-    {"role": "assistant", "content": null, "tool_calls": [
-      {
-        "id": "abc123def",
-        "type": "function",
-        "function": {
-          "name": "agentName_toolMethod",
-          "arguments": "{\"context\": {...}, ...}"
+    {"role": "system", "content": "<session_context>...</session_context>"},
+    {"role": "user", "content": "Move today's note into archive and read it back."},
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_001",
+          "type": "function",
+          "function": {
+            "name": "useTools",
+            "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+          }
         }
-      }
-    ]}
+      ]
+    }
   ],
   "label": true
 }
 ```
 
-**Note:** The `label` field is optional. When present, `true` indicates a positive example and `false` indicates a negative example.
+## Migration Workflow
 
-## Usage
-
-### Adding New Examples
-
-1. Edit the appropriate agent's `tools_v1.0.jsonl` file
-2. Ensure each example follows the format above
-3. Run the merge script to regenerate the combined dataset
-
-### Merging Datasets
-
+Inventory:
 ```bash
-cd Datasets/tools
-python merge_tools_datasets.py
+python3 tools/migrations/05_inventory_cli_schema_datasets.py
 ```
 
-This creates:
-- `syngen_tools_sft_merged_v1.0.jsonl` - Combined dataset
-- `syngen_tools_sft_merged_v1.0.metadata.json` - Statistics
-
-### Splitting Source Dataset (One-Time)
-
-If you need to re-split from the original source:
-
+Rewrite non-thinking datasets into the CLI-first wrapper:
 ```bash
-cd Datasets/tools
-python split_tools_dataset.py
+python3 tools/migrations/06_migrate_cli_schema_datasets.py
 ```
 
-## Version History
-
-| Version | Date | Notes |
-|---------|------|-------|
-| v1.0 | 2025-11-25 | Initial split from `syngen_tools_sft_11.24.25_cleaned.jsonl` |
-
-## Context Object Requirements
-
-All tool calls must include a context object with these 7 required fields:
-
-```json
-{
-  "context": {
-    "sessionId": "session_1731015400000_a1b2c3d4e",
-    "workspaceId": "ws_1731015400000_f5g6h7i8j",
-    "sessionDescription": "Brief summary",
-    "sessionMemory": "Prior context (never empty)",
-    "toolContext": "Why calling this tool",
-    "primaryGoal": "User's main objective",
-    "subgoal": "What this call achieves"
-  }
-}
+Inspect reports:
+```text
+Datasets/tools_datasets/reports/cli_schema/
+├── inventory.json
+├── migration_report.json
+├── migration_report.md
+├── regen_queue.jsonl
+└── manual_review.jsonl
 ```
 
-**Important:** `sessionMemory` must never be empty.
+## Validation
+
+Structural validation:
+```bash
+python3 .skills/synethetic-data-generation/scripts/validate_syngen.py Datasets/tools_datasets/non_thinking/contentManager/tools_v2.3.jsonl
+```
+
+Generation smoke test:
+```bash
+python3 -m SynthChat.run generate \
+  --targets-file SynthChat/config/targets_cli_existing_tools_quickcheck.json \
+  --max-iterations 3 \
+  --output Datasets/synthchat/dryrun_cli_existing_tools_quickcheck.jsonl
+```
+
+## Notes
+
+- `thinking/` datasets are intentionally deferred in the current migration plan.
+- `taskManager` and `canvasManager` have SynthChat scenario coverage for future generation, but they are not part of the refreshed canonical dataset pass yet.
+- Old wrapper-era manager names such as `vaultManager`, `vaultLibrarian`, and `agentManager` are no longer canonical for active datasets.

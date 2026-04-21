@@ -101,6 +101,8 @@ Datasets/quality_review/score_batch*.py
 
 # Archive directory (legacy files, not actively maintained)
 /archive/
+/archive/synthchat-cli-schema-*/
+/archive/legacy-cli-schema-*/
 
 # Backup files
 *.backup

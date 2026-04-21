@@ -35,6 +35,15 @@ Or use the dry-run helper script:
 .claude/skills/synethetic-data-generation/scripts/dry_run.sh YOUR_SCENARIO_KEY [count]
 ```
 
+For repeatable multi-scenario smoke tests, prefer a checked-in targets manifest:
+
+```bash
+python -m SynthChat.run generate \
+  --targets-file SynthChat/config/targets_cli_existing_tools_quickcheck.json \
+  --max-iterations 3 \
+  --output Datasets/synthchat/dryrun_cli_existing_tools_quickcheck.jsonl
+```
+
 **For rubric changes** (testing against existing data):
 
 ```bash

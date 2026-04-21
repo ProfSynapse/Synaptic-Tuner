@@ -163,21 +163,21 @@ behaviors:
         - storageManager_list
         - searchManager_searchContent
         - searchManager_searchDirectory
-        - contentManager_readContent
+        - contentManager_read
       not_first:
         - storageManager_archive
-        - contentManager_deleteLines
+        - contentManager_replace
 
   # Reads before writing
   reads_before_write:
     check: tool_sequence
     params:
       first_any_of:
-        - contentManager_readContent
+        - contentManager_read
       before:
-        - contentManager_writeContent
-        - contentManager_replaceByLine
-        - contentManager_insertAtLine
+        - contentManager_write
+        - contentManager_replace
+        - contentManager_insert
 
   # Searches before acting on ambiguous request
   searches_first:
@@ -186,7 +186,7 @@ behaviors:
       first_any_of:
         - searchManager_searchContent
         - searchManager_searchDirectory
-        - searchManager_searchByTags
+        - searchManager_searchContent
 
   # --------------------------------------------------------
   # ERROR RECOVERY CHECKS

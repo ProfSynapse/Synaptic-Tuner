@@ -14,6 +14,107 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 
+def _repair_truncated_json(json_str: str) -> str:
+    """Best-effort repair for under-closed JSON emitted by the model."""
+    result = []
+    stack = []
+    in_string = False
+    escape_next = False
+
+    for char in json_str:
+        result.append(char)
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\":
+            escape_next = True
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in "}]":
+            if stack and stack[-1] == char:
+                stack.pop()
+
+    if in_string:
+        result.append('"')
+
+    while stack:
+        result.append(stack.pop())
+
+    return "".join(result)
+
+
+def _normalize_tool_arguments(args_raw: Any) -> Any:
+    """Unwrap common nested argument wrapper shapes into the actual args object."""
+    args = args_raw
+
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            try:
+                args = json.loads(_repair_truncated_json(args))
+            except json.JSONDecodeError:
+                return args_raw
+
+    # Some models nest the real args under {"arguments": {...}} or
+    # {"function": "...", "arguments": {...}} despite direct-tool instructions.
+    for _ in range(3):
+        if isinstance(args, dict) and isinstance(args.get("function"), dict):
+            args = args["function"].get("arguments", args)
+            continue
+        if isinstance(args, dict) and isinstance(args.get("tool_calls"), list) and args["tool_calls"]:
+            first = args["tool_calls"][0]
+            if isinstance(first, dict):
+                fn = first.get("function")
+                if isinstance(fn, dict):
+                    args = fn.get("arguments", args)
+                    continue
+        if isinstance(args, dict) and "arguments" in args:
+            inner = args.get("arguments")
+            if isinstance(inner, str):
+                try:
+                    args = json.loads(inner)
+                    continue
+                except json.JSONDecodeError:
+                    try:
+                        args = json.loads(_repair_truncated_json(inner))
+                        continue
+                    except json.JSONDecodeError:
+                        break
+            if isinstance(inner, dict):
+                args = inner
+                continue
+        break
+
+    return args
+
+
+def _looks_like_use_tools_wrapper(args: Any) -> bool:
+    """Detect top-level CLI-first useTools payloads by shape.
+
+    Some providers occasionally preserve the wrapper arguments payload but emit the
+    scenario tool name instead of `useTools`. Detect the wrapper from its argument
+    structure so we can normalize the function name before persisting examples.
+    """
+    if not isinstance(args, dict):
+        return False
+    required = ("workspaceId", "sessionId", "memory", "goal", "tool")
+    return all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
+
+
 def stringify_assistant_message(response: Any) -> str:
     """Convert an assistant response dict to a plain text summary."""
     if isinstance(response, str):
@@ -81,8 +182,14 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
                     normalized_tc["function"]["name"] = fn.get("name", "")
 
                     args = fn.get("arguments", "{}")
-                    if isinstance(args, dict):
-                        normalized_tc["function"]["arguments"] = json.dumps(args)
+                    normalized_args = _normalize_tool_arguments(args)
+                    normalized_name = fn.get("name", "")
+                    if _looks_like_use_tools_wrapper(normalized_args):
+                        normalized_name = "useTools"
+
+                    normalized_tc["function"]["name"] = normalized_name
+                    if isinstance(normalized_args, dict):
+                        normalized_tc["function"]["arguments"] = json.dumps(normalized_args)
                     else:
                         normalized_tc["function"]["arguments"] = args
 

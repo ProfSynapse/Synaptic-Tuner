@@ -164,8 +164,8 @@ scenarios:
 
   envfs_triage_correct_note_after_search:
     type: tool
-    tool: contentManager_update
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    tool: contentManager_setProperty
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_setProperty]
     environment_mode: generated
     tags: [vault, retrieval, triage]
     system_template: mocked_workspace_vault
@@ -220,14 +220,14 @@ scenarios:
         Use useTools with:
         - searchManager.searchContent
         - contentManager.read
-        - contentManager.update
+        - contentManager.setProperty
     assistant_generation:
       schema: use_tools_response
 
   envfs_update_production_config_preserve_structure:
     type: tool
-    tool: contentManager_update
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    tool: contentManager_replace
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_replace]
     environment_mode: generated
     tags: [vault, config, retrieval, preservation]
     system_template: mocked_workspace_vault
@@ -283,14 +283,14 @@ scenarios:
         response. Do not rely on native provider tool-calling output outside the
         JSON text.
 
-        Use useTools with search, read, then update.
+        Use useTools with search, read, then replace.
     assistant_generation:
       schema: use_tools_response
 
   envfs_read_before_replace_settings_yaml:
     type: tool
-    tool: contentManager_update
-    expected_tools: [contentManager_read, contentManager_update]
+    tool: contentManager_replace
+    expected_tools: [contentManager_read, contentManager_replace]
     environment_mode: generated
     tags: [vault, settings, preservation]
     system_template: mocked_workspace_vault
@@ -344,7 +344,7 @@ scenarios:
         response. Do not rely on native provider tool-calling output outside the
         JSON text.
 
-        Use useTools with contentManager.read followed by contentManager.update.
+        Use useTools with contentManager.read followed by contentManager.replace.
     assistant_generation:
       schema: use_tools_response
 

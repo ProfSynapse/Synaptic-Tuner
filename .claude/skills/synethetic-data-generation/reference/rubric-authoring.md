@@ -21,7 +21,6 @@ Rubrics define HOW to judge and improve generated examples. Each targets a speci
 | `quality_labels` | response | 0.8 | KTO label assignment (true/false) |
 | `destructive_safety` | response | 0.8 | Proper handling of destructive operations |
 | `contentManager_tools` | response | 0.8 | ContentManager tool call correctness |
-| `commandManager_tools` | response | 0.8 | CommandManager tool call correctness |
 | `memoryManager_tools` | response | 0.8 | MemoryManager tool call correctness |
 | `promptManager_tools` | response | 0.8 | PromptManager tool call correctness |
 | `searchManager_tools` | response | 0.8 | SearchManager tool call correctness |

@@ -22,6 +22,13 @@ from shared.validation.parsing.response_parser import (
 )
 
 
+_DIRECT_CONTENT_ACTION_TOOLS = {
+    "contentManager_insert",
+    "contentManager_replace",
+    "contentManager_write",
+}
+
+
 @dataclass
 class BehaviorIssue:
     """Single behavior validation issue."""
@@ -430,11 +437,11 @@ def _check_anti_pattern(
                    "gives_legal_advice_without_delegation", "superficial_marketing_plan",
                    "superficial_comparison", "oversimplified_license_advice"):
         tool_name = parsed.first_tool_call.name if parsed.first_tool_call else None
-        uses_shallow_tool = tool_name in ("contentManager_createContent", "contentManager_writeContent")
+        uses_shallow_tool = tool_name in _DIRECT_CONTENT_ACTION_TOOLS
         passed = not uses_shallow_tool
         return BehaviorIssue(
             check=f"anti:{pattern}",
-            expected="should use promptManager_executePrompt",
+            expected="should use promptManager_executePrompts",
             actual=f"tool={tool_name}",
             passed=passed,
             message=f"Anti-pattern {pattern}: {'PASS (avoided)' if passed else 'FAIL'} - tool={tool_name}"

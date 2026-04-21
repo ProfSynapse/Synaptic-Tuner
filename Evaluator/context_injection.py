@@ -61,16 +61,16 @@ class EvaluationContext:
 
     def _build_session_context(self) -> str:
         prompt = "<session_context>\n"
-        prompt += "IMPORTANT: When using tools, include these values in your tool call parameters:\n\n"
+        prompt += "IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n"
         prompt += f'- sessionId: "{self.session_id}"\n'
 
         if self.workspace_id == "default":
             prompt += '- workspaceId: "default" (no specific workspace selected)\n'
-            prompt += "\nInclude these in the \"context\" parameter of your tool calls.\n"
+            prompt += "\nInclude these at the top level of your useTools arguments.\n"
             prompt += "NOTE: Use \"default\" as the workspaceId when no specific workspace context is needed.\n"
         else:
             prompt += f'- workspaceId: "{self.workspace_id}" (current workspace)\n'
-            prompt += "\nInclude these in the \"context\" parameter of your tool calls.\n"
+            prompt += "\nInclude these at the top level of your useTools arguments.\n"
 
         prompt += "</session_context>"
         return prompt

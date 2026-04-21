@@ -8,6 +8,7 @@ scenarios:
     agent: storageManager
     tool: storageManager_createFolder
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -40,6 +41,7 @@ scenarios:
     agent: storageManager
     tool: storageManager_archive
     system: true
+    tool_call_format: default
     flags:
       destructive: true
       risk_level: high
@@ -71,6 +73,7 @@ scenarios:
     agent: storageManager
     tool: storageManager_move
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -96,6 +99,7 @@ scenarios:
     agent: storageManager
     tool: storageManager_list
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -115,11 +119,12 @@ scenarios:
         2. Tool call to storageManager_list with path
 
   # ContentManager tools
-  contentManager_createContent:
+  contentManager_write:
     type: tool
     agent: contentManager
-    tool: contentManager_createContent
+    tool: contentManager_write
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -136,14 +141,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about note location and content
-        2. Tool call to contentManager_createContent
+        2. Tool call to contentManager_write
         Include realistic markdown content in the tool call.
 
-  contentManager_updateContent:
+  contentManager_insert:
     type: tool
     agent: contentManager
-    tool: contentManager_replaceContent
+    tool: contentManager_insert
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -151,29 +157,112 @@ scenarios:
         Include notes with placeholder content.
 
       user: |
-        Generate request to update note content.
+        Generate request to add content to an existing note.
         Examples:
-        - "Update that project doc with the new info"
-        - "Change the meeting notes to include what we discussed"
-        - "Add the details to that note"
+        - "Add the new action items to that meeting note"
+        - "Append the latest status details to the project doc"
+        - "Insert the missing context near the top of that note"
 
       assistant: |
         Generate response with:
-        1. <thinking> about what to update
-        2. Tool call to contentManager_replaceContent or appendContent
-        Choose the appropriate method based on request.
+        1. <thinking> about where the new content belongs
+        2. Tool call to contentManager_insert
+        Use startLine=-1 for append style requests or startLine=1 for prepend style requests.
 
-  # AgentManager tools
+  contentManager_read:
+    type: tool
+    agent: contentManager
+    tool: contentManager_read
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with existing notes in folders like "Projects", "Meetings", and "Inbox".
+        Include one note that the user is likely to inspect.
+
+      user: |
+        Generate request to read or inspect a note.
+        Examples:
+        - "Open the project brief"
+        - "Show me what's in that meeting note"
+        - "Read the checklist note"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which note the user means
+        2. Tool call to contentManager_read
+        Include path and a valid startLine.
+
+  contentManager_replace:
+    type: tool
+    agent: contentManager
+    tool: contentManager_replace
+    system: true
+
+    prompts:
+      system: |
+        Generate workspace with an existing note that contains text needing precise replacement.
+        Include surrounding lines and enough explicit detail for the assistant to determine
+        the exact startLine and endLine for the replacement.
+
+      user: |
+        Generate request to replace existing content in a note.
+        Examples:
+        - "Replace the old API URL in the config note"
+        - "Update the status line in that runbook"
+        - "Change the owner name in the project doc"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about reading the target note first and replacing only the exact text
+        2. One useTools call using the CLI-oriented payload
+        The system prompt already contains the exact old text, the exact new text, and enough context to determine the line range.
+        Do not ask for clarification or request the replacement values again.
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        content replace --path "notes/meeting-notes.md" --old-content "> old line" --new-content "new line" --start-line 24 --end-line 24
+        Include --old-content, --new-content, --start-line, and --end-line in every content replace command.
+        If you need more than one command, join them with commas in the tool field and use strategy="serial".
+        Do not use context/calls wrappers or direct function.name="contentManager_replace".
+
+  contentManager_setProperty:
+    type: tool
+    agent: contentManager
+    tool: contentManager_setProperty
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with notes that use YAML frontmatter properties like title, status, tags, or owner.
+
+      user: |
+        Generate request to update note metadata.
+        Examples:
+        - "Mark that incident note as triaged"
+        - "Add a priority tag to the roadmap note"
+        - "Change the owner on the planning doc"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which frontmatter field should change
+        2. Tool call to contentManager_setProperty
+        Include path, property, value, and optionally mode when merge semantics make sense.
+
+  # PromptManager tools
   promptManager_createPrompt:
     type: tool
     agent: promptManager
     tool: promptManager_createPrompt
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
         Generate workspace with existing agents.
-        Show available models in available_agents.
+        Show available prompts in available_prompts.
 
       user: |
         Generate request to create a custom agent.
@@ -188,10 +277,10 @@ scenarios:
         2. Tool call to promptManager_createPrompt
         Include name, description, model, and prompt.
 
-  promptManager_executePrompt:
+  promptManager_executePrompts:
     type: tool
     agent: promptManager
-    tool: promptManager_executePrompt
+    tool: promptManager_executePrompts
     system: true
 
     prompts:
@@ -208,9 +297,179 @@ scenarios:
 
       assistant: |
         Generate response with:
-        1. <thinking> about which agent and what prompt
-        2. Tool call to promptManager_executePrompt
-        Include agent name and prompt text.
+        1. <thinking> about which prompt or prompt sequence to run
+        2. One useTools call using the CLI-oriented payload
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt execute-prompts --prompts "[{\"agentId\":\"researcher\",\"prompt\":\"Find recent EV adoption statistics in the US and provide APA-style citations.\"}]"
+        Do not use context/calls wrappers or direct function.name="promptManager_executePrompts".
+
+  promptManager_archivePrompt:
+    type: tool
+    agent: promptManager
+    tool: promptManager_archivePrompt
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with several custom prompts, including one that is outdated or no longer needed.
+
+      user: |
+        Generate request to archive a prompt.
+        Examples:
+        - "Archive the old release checklist prompt"
+        - "Retire that deprecated writer prompt"
+        - "Remove the legacy summarizer from active use"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which prompt the user means
+        2. Tool call to promptManager_archivePrompt
+        Include the prompt name.
+
+  promptManager_generateImage:
+    type: tool
+    agent: promptManager
+    tool: promptManager_generateImage
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace context where the user creates design or visual assets for notes or projects.
+
+      user: |
+        Generate request to create an image asset.
+        Examples:
+        - "Make a hero image for the launch note"
+        - "Generate a diagram-style cover image"
+        - "Create a concept art image for that project brief"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about the requested visual
+        2. Tool call to promptManager_generateImage
+        Include prompt and savePath, plus optional provider/model settings when useful.
+
+  promptManager_getPrompt:
+    type: tool
+    agent: promptManager
+    tool: promptManager_getPrompt
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with several named prompts and descriptions.
+
+      user: |
+        Generate request to inspect a prompt.
+        Examples:
+        - "Show me the research prompt"
+        - "Open the writer agent config"
+        - "Get the prompt details for the weekly review helper"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about whether to use the prompt name or id
+        2. Tool call to promptManager_getPrompt
+        Include either id or name.
+
+  promptManager_listModels:
+    type: tool
+    agent: promptManager
+    tool: promptManager_listModels
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where the user is managing prompts and model choices.
+
+      user: |
+        Generate request to see available models.
+        Examples:
+        - "What models can I use right now?"
+        - "List the available image and text models"
+        - "Show me the model options before I create a prompt"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about why the user needs model options
+        2. Tool call to promptManager_listModels
+
+  promptManager_listPrompts:
+    type: tool
+    agent: promptManager
+    tool: promptManager_listPrompts
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with multiple prompt definitions, some active and some archived.
+
+      user: |
+        Generate request to browse prompts.
+        Examples:
+        - "List my active prompts"
+        - "Show all the custom prompts in this workspace"
+        - "What prompts do I already have?"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about whether to filter by enabled or archived status
+        2. Tool call to promptManager_listPrompts
+        Include enabledOnly or includeArchived when appropriate.
+
+  promptManager_subagent:
+    type: tool
+    agent: promptManager
+    tool: promptManager_subagent
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where a larger task can be delegated to a subagent with a bounded scope.
+
+      user: |
+        Generate request to delegate a focused task.
+        Examples:
+        - "Spin up a subagent to draft the release notes"
+        - "Use a helper agent to review these docs"
+        - "Delegate the research pass to a subagent"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about the delegated task boundary
+        2. Tool call to promptManager_subagent
+        Include task and any relevant optional fields like agent, tools, or contextFiles.
+
+  promptManager_updatePrompt:
+    type: tool
+    agent: promptManager
+    tool: promptManager_updatePrompt
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with existing prompts that may need renaming, description changes, prompt edits, or enable/disable updates.
+
+      user: |
+        Generate request to update a prompt.
+        Examples:
+        - "Disable the old deployment helper"
+        - "Rename the release writer to Launch Writer"
+        - "Update the research prompt so it cites sources"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which prompt should change and how
+        2. Tool call to promptManager_updatePrompt
+        Include id and whichever fields are being updated.
 
   # MemoryManager tools
   memoryManager_createWorkspace:
@@ -218,6 +477,7 @@ scenarios:
     agent: memoryManager
     tool: memoryManager_createWorkspace
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -237,12 +497,204 @@ scenarios:
         2. Tool call to memoryManager_createWorkspace
         Include name, description, and workflows.
 
-  # VaultLibrarian tools
+  memoryManager_archiveWorkspace:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_archiveWorkspace
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace listing with at least one inactive or completed workspace that could be archived.
+
+      user: |
+        Generate request to archive a workspace.
+        Examples:
+        - "Archive the old client workspace"
+        - "Retire that finished project workspace"
+        - "Move the deprecated workspace out of the active list"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which workspace the user means
+        2. Tool call to memoryManager_archiveWorkspace
+        Include the workspace name.
+
+  memoryManager_createState:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_createState
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace and session context where the user wants to save progress before a risky or important step.
+
+      user: |
+        Generate request to save a checkpoint or state.
+        Examples:
+        - "Save a checkpoint before I refactor this"
+        - "Capture the current state of this work"
+        - "Create a state snapshot before I continue"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about the current work context
+        2. Tool call to memoryManager_createState
+        Include name, conversationContext, activeTask, activeFiles, and nextSteps.
+
+  memoryManager_listStates:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_listStates
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with multiple saved states, including active and archived examples.
+
+      user: |
+        Generate request to browse saved states.
+        Examples:
+        - "Show me my recent checkpoints"
+        - "List the saved states for this project"
+        - "What states do I have available?"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about filters like archived or tags
+        2. Tool call to memoryManager_listStates
+
+  memoryManager_listWorkspaces:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_listWorkspaces
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate multiple workspaces with different recency and archival states.
+
+      user: |
+        Generate request to list workspaces.
+        Examples:
+        - "List all my workspaces"
+        - "Show active workspaces by most recent use"
+        - "What workspaces do I have available?"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about sort order and filtering
+        2. Tool call to memoryManager_listWorkspaces
+        Include includeArchived, sortBy, order, or limit when appropriate.
+
+  memoryManager_loadState:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_loadState
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with multiple named saved states and enough context to infer which one the user wants.
+
+      user: |
+        Generate request to restore a prior state.
+        Examples:
+        - "Load the pre-launch checkpoint"
+        - "Restore the research state from yesterday"
+        - "Open the draft review state"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which saved state matches the request
+        2. Tool call to memoryManager_loadState
+        Include the state name.
+
+  memoryManager_loadWorkspace:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_loadWorkspace
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace listings with enough metadata to infer which workspace the user wants to open.
+
+      user: |
+        Generate request to open a workspace.
+        Examples:
+        - "Open the training workspace"
+        - "Load the client project workspace"
+        - "Switch to the research workspace"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which workspace id matches the request
+        2. Tool call to memoryManager_loadWorkspace
+        Include the workspace id.
+
+  memoryManager_runWorkflow:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_runWorkflow
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with named workflows such as weekly review, sprint planning, or publishing.
+
+      user: |
+        Generate request to run a workflow.
+        Examples:
+        - "Run the weekly review workflow"
+        - "Start the publishing workflow"
+        - "Kick off the sprint planning workflow"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which workflow matches the request
+        2. Tool call to memoryManager_runWorkflow
+        Include workflowId or workflowName.
+
+  memoryManager_updateWorkspace:
+    type: tool
+    agent: memoryManager
+    tool: memoryManager_updateWorkspace
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace listings where one workspace needs metadata updates like description, purpose, preferences, or key files.
+
+      user: |
+        Generate request to update workspace metadata.
+        Examples:
+        - "Update the workspace description for the analytics project"
+        - "Change the purpose of that client workspace"
+        - "Add new key files to the research workspace"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which workspace metadata should change
+        2. Tool call to memoryManager_updateWorkspace
+        Include only the fields being updated.
+
+  # SearchManager tools
   searchManager_searchContent:
     type: tool
     agent: searchManager
     tool: searchManager_searchContent
     system: true
+    tool_call_format: default
 
     prompts:
       system: |
@@ -261,3 +713,463 @@ scenarios:
         1. <thinking> about search terms and scope
         2. Tool call to searchManager_searchContent
         Include search query and optional filters.
+
+  searchManager_searchDirectory:
+    type: tool
+    agent: searchManager
+    tool: searchManager_searchDirectory
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with nested folders, filenames, and extensions across multiple areas.
+
+      user: |
+        Generate request to search for files or directories.
+        Examples:
+        - "Find all markdown files about onboarding"
+        - "Search the docs folders for deployment notes"
+        - "Look for templates with release in the name"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about path scope and filename matching
+        2. Tool call to searchManager_searchDirectory
+        Include query, paths, and optional searchType or fileTypes.
+
+  searchManager_searchMemory:
+    type: tool
+    agent: searchManager
+    tool: searchManager_searchMemory
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace and session context with prior conversations, tool traces, or saved memories that can be searched.
+
+      user: |
+        Generate request to search prior memory.
+        Examples:
+        - "Search memory for the database migration discussion"
+        - "Look up what we decided about the launch checklist"
+        - "Find the earlier conversation about that client issue"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about what memory sources to search
+        2. Tool call to searchManager_searchMemory
+        Include query and optional memoryTypes, searchMethod, or limit.
+
+  # StorageManager tools
+  storageManager_copy:
+    type: tool
+    agent: storageManager
+    tool: storageManager_copy
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with templates, notes, or project folders where copying content makes sense.
+
+      user: |
+        Generate request to copy a file or folder.
+        Examples:
+        - "Copy the article template into the new docs folder"
+        - "Duplicate that project brief for the new client"
+        - "Make a copy of the launch checklist"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about source and destination paths
+        2. Tool call to storageManager_copy
+        Include path and newPath, plus overwrite only when clearly intended.
+
+  storageManager_open:
+    type: tool
+    agent: storageManager
+    tool: storageManager_open
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with notes, docs, and files the user might want to open in the editor.
+
+      user: |
+        Generate request to open a file.
+        Examples:
+        - "Open the roadmap note"
+        - "Bring up the weekly goals file"
+        - "Open the archive summary in the editor"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about which file the user means
+        2. Tool call to storageManager_open
+        Include path and optional mode or focus when justified.
+
+  # CanvasManager tools
+  canvasManager_list:
+    type: tool
+    agent: canvasManager
+    tool: canvasManager_list
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with several canvas files across project and diagram folders.
+
+      user: |
+        Generate request to browse available canvases.
+        Examples:
+        - "List the canvases in the diagrams folder"
+        - "Show me all the canvas files for this project"
+        - "What whiteboard-style canvases do I have?"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about canvas scope or folder filtering
+        2. Tool call to canvasManager_list
+        Include folder and recursive when useful.
+
+  canvasManager_read:
+    type: tool
+    agent: canvasManager
+    tool: canvasManager_read
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with existing .canvas files representing planning maps, architecture diagrams, or research boards.
+
+      user: |
+        Generate request to inspect a canvas.
+        Examples:
+        - "Open the architecture canvas"
+        - "Read the roadmap diagram"
+        - "Show me the structure of that planning board"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which canvas file the user means
+        2. Tool call to canvasManager_read
+        Include the canvas path.
+
+  canvasManager_update:
+    type: tool
+    agent: canvasManager
+    tool: canvasManager_update
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with an existing canvas that may need node or edge changes.
+        Include enough structure that the assistant can infer a meaningful update.
+
+      user: |
+        Generate request to modify an existing canvas.
+        Examples:
+        - "Update the architecture canvas with the new service box"
+        - "Adjust the roadmap canvas to connect the planning node"
+        - "Replace the current board nodes with the new layout"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about whether nodes, edges, or both should change
+        2. Tool call to canvasManager_update
+        Include path and whichever of nodes or edges are being updated.
+
+  canvasManager_write:
+    type: tool
+    agent: canvasManager
+    tool: canvasManager_write
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where the user is creating a brand-new canvas for planning, architecture, or brainstorming.
+
+      user: |
+        Generate request to create a new canvas.
+        Examples:
+        - "Create a new project planning canvas"
+        - "Start an architecture diagram for the release flow"
+        - "Make a brainstorming board for the new feature"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about the initial canvas structure
+        2. Tool call to canvasManager_write
+        Include path and optional initial nodes or edges.
+
+  # TaskManager tools
+  taskManager_archiveProject:
+    type: tool
+    agent: taskManager
+    tool: taskManager_archiveProject
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with several task projects, including one completed or inactive project suitable for archiving.
+
+      user: |
+        Generate request to archive a project.
+        Examples:
+        - "Archive the completed migration project"
+        - "Retire the old launch planning board"
+        - "Move that finished task project out of the active list"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which project the user means
+        2. Tool call to taskManager_archiveProject
+        Include the projectId.
+
+  taskManager_createProject:
+    type: tool
+    agent: taskManager
+    tool: taskManager_createProject
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with task boards or project tracking already in use.
+
+      user: |
+        Generate request to create a new task project.
+        Examples:
+        - "Create a project to track the release migration"
+        - "Set up a task project for the new client onboarding"
+        - "Make a planning project for the design refresh"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about project naming and scope
+        2. Tool call to taskManager_createProject
+        Include name and optional description or metadata.
+
+  taskManager_createTask:
+    type: tool
+    agent: taskManager
+    tool: taskManager_createTask
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with an existing task project and enough project context to create a new task inside it.
+
+      user: |
+        Generate request to add a task.
+        Examples:
+        - "Add a task to draft the launch checklist"
+        - "Create a follow-up item for the deployment review"
+        - "Add a high-priority task for fixing the API timeout"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about project selection and task details
+        2. Tool call to taskManager_createTask
+        Include projectId, title, and optional task metadata.
+
+  taskManager_linkNote:
+    type: tool
+    agent: taskManager
+    tool: taskManager_linkNote
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with task projects and related notes that can be linked to tasks.
+
+      user: |
+        Generate request to link a note to a task.
+        Examples:
+        - "Link the architecture note to that backend task"
+        - "Attach the runbook note to the deployment task"
+        - "Connect the draft spec note to the project task"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about task-note relationship
+        2. Tool call to taskManager_linkNote
+        Include taskId, notePath, and optional linkType or action.
+
+  taskManager_listProjects:
+    type: tool
+    agent: taskManager
+    tool: taskManager_listProjects
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with active, completed, and archived projects in the task system.
+
+      user: |
+        Generate request to list projects.
+        Examples:
+        - "Show me all my task projects"
+        - "List active task boards"
+        - "What projects are currently tracked?"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about filtering by status
+        2. Tool call to taskManager_listProjects
+        Include status or pagination when useful.
+
+  taskManager_listTasks:
+    type: tool
+    agent: taskManager
+    tool: taskManager_listTasks
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with at least one project containing tasks of varying status, assignees, or priorities.
+
+      user: |
+        Generate request to list tasks in a project.
+        Examples:
+        - "List the open tasks for the launch project"
+        - "Show high-priority tasks in that board"
+        - "What tasks are assigned to Alex in the migration project?"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which project and filters apply
+        2. Tool call to taskManager_listTasks
+        Include projectId and optional filter fields.
+
+  taskManager_moveTask:
+    type: tool
+    agent: taskManager
+    tool: taskManager_moveTask
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with multiple task projects or hierarchical tasks where moving a task makes sense.
+
+      user: |
+        Generate request to move a task.
+        Examples:
+        - "Move that task into the launch project"
+        - "Make the testing task a subtask of the release task"
+        - "Re-home the API task under the backend project"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about destination project or parent task
+        2. Tool call to taskManager_moveTask
+        Include taskId and optional projectId or parentTaskId.
+
+  taskManager_openTasks:
+    type: tool
+    agent: taskManager
+    tool: taskManager_openTasks
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where the user wants to open the task board or task view.
+
+      user: |
+        Generate request to open task management UI.
+        Examples:
+        - "Open the task board for the release project"
+        - "Show the tasks view"
+        - "Bring up the project task board and search for blockers"
+
+      assistant: |
+        Generate response with:
+        1. Optional <thinking> about filters or opening mode
+        2. Tool call to taskManager_openTasks
+        Include projectId, search, or mode when appropriate.
+
+  taskManager_queryTasks:
+    type: tool
+    agent: taskManager
+    tool: taskManager_queryTasks
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace with task projects that include dependencies and blocked tasks.
+
+      user: |
+        Generate request for a dependency-aware task query.
+        Examples:
+        - "What are the next actions in the launch project?"
+        - "Show blocked tasks for the migration plan"
+        - "Give me the dependency tree for the release checklist task"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about the right query type
+        2. Tool call to taskManager_queryTasks
+        Include projectId, query, and taskId when the dependency tree is requested.
+
+  taskManager_updateProject:
+    type: tool
+    agent: taskManager
+    tool: taskManager_updateProject
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where an existing task project needs metadata or status updates.
+
+      user: |
+        Generate request to update a project.
+        Examples:
+        - "Rename the migration project to Platform Migration"
+        - "Mark the launch planning project as completed"
+        - "Update the project description for the client rollout board"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which project and fields should change
+        2. Tool call to taskManager_updateProject
+        Include projectId and the fields being updated.
+
+  taskManager_updateTask:
+    type: tool
+    agent: taskManager
+    tool: taskManager_updateTask
+    system: true
+    tool_call_format: default
+
+    prompts:
+      system: |
+        Generate workspace where an existing task needs status, priority, assignee, dependency, or metadata changes.
+
+      user: |
+        Generate request to update a task.
+        Examples:
+        - "Mark the deployment task as in progress"
+        - "Raise the priority on the API timeout task"
+        - "Assign the draft review task to Maya and add the release note link"
+
+      assistant: |
+        Generate response with:
+        1. <thinking> about which task fields should change
+        2. Tool call to taskManager_updateTask
+        Include taskId and the requested updates.

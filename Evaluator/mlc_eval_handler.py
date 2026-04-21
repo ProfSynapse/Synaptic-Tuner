@@ -173,8 +173,8 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
                 const yamlText = await response.text();
                 toolSchema = jsyaml.load(yamlText);
                 const wrapper = toolSchema?.tool_format?.wrapper || 'none';
-                const pattern = toolSchema?.tool_format?.wrapper_structure?.calls?.tool_name_pattern || 'N/A';
-                statusEl.innerHTML = `Tool schema loaded: wrapper=<strong>${{wrapper}}</strong>, pattern=<strong>${{pattern}}</strong>`;
+                const cliField = toolSchema?.tool_format?.wrapper_structure?.cli?.field || 'tool';
+                statusEl.innerHTML = `Tool schema loaded: wrapper=<strong>${{wrapper}}</strong>, cli field=<strong>${{cliField}}</strong>`;
                 console.log('Loaded tool schema:', toolSchema);
                 return toolSchema;
             }} catch (error) {{
@@ -192,22 +192,31 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
             const wrapper = toolSchema?.tool_format?.wrapper;
             const wrapperStructure = toolSchema?.tool_format?.wrapper_structure;
 
-            // Check if this is a wrapper call that needs expansion
-            if (wrapper && name === wrapper && args && args.calls) {{
-                // Get the pattern for constructing tool names (default: {{agent}}_{{tool}})
-                const pattern = wrapperStructure?.calls?.tool_name_pattern || '{{agent}}_{{tool}}';
-
-                for (const call of args.calls) {{
-                    // Apply the pattern from config
-                    let fullName = pattern
-                        .replace('{{agent}}', call.agent || '')
-                        .replace('{{tool}}', call.tool || '');
-
-                    if (fullName && fullName !== '_') {{
-                        tools.push(fullName);
+            // Check if this is a CLI wrapper call that needs expansion
+            if (wrapper && name === wrapper && args && typeof args.tool === 'string') {{
+                const segments = args.tool.split(',').map((segment) => segment.trim()).filter(Boolean);
+                const allTools = [];
+                for (const [agent, entries] of Object.entries(toolSchema?.tools || {{}})) {{
+                    for (const entry of entries || []) {{
+                        if (entry?.command && entry?.name) {{
+                            allTools.push({{
+                                command: entry.command,
+                                fullName: `${{agent}}_${{entry.name}}`,
+                            }});
+                        }}
                     }}
                 }}
-                return tools;
+                allTools.sort((a, b) => b.command.split(' ').length - a.command.split(' ').length);
+
+                for (const segment of segments) {{
+                    const match = allTools.find((entry) => segment === entry.command || segment.startsWith(`${{entry.command}} `));
+                    if (match && !tools.includes(match.fullName)) {{
+                        tools.push(match.fullName);
+                    }}
+                }}
+                if (tools.length > 0) {{
+                    return tools;
+                }}
             }}
 
             // Not a wrapper - return the name as-is

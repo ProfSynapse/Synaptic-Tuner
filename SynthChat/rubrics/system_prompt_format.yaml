@@ -2,183 +2,14 @@ name: System Prompt Format
 description: Validates system prompt has all required sections with realistic content
 scope: system_prompt
 pass_threshold: 0.8
-
-judge_prompt: |
-  # CONTEXT
-  You are evaluating a system prompt for an Obsidian vault management assistant. The system prompt provides context about the vault structure, available workspaces, and agents.
-
-  # MISSION
-  Score based on structural completeness and internal consistency between vault_structure and workspaceStructure.
-
-  # INSTRUCTIONS
-  1. Verify all 5 required XML sections:
-     - `<session_context>` with sessionId and workspaceId
-     - `<vault_structure>` with root-level folders and files
-     - `<available_workspaces>` with 1-2 workspace definitions
-     - `<available_prompts>` with 2-3 custom prompt definitions (YAML)
-     - `<selected_workspace>` with JSON (context, workspaceStructure, recentFiles, keyFiles, workflows, preferences, sessions)
-
-  2. Check hierarchy consistency:
-     - vault_structure shows ROOT level only (top-level folders and root files)
-     - workspaceStructure shows paths INSIDE the workspace's rootFolder
-     - Target file appears in correct location based on workspace
-     - **CRITICAL**: If workspace rootFolder is not "/", that folder MUST appear in vault_structure
-
-  3. Verify workspace selection:
-     - Root workspace: id="default", rootFolder="/"
-     - Folder workspace: rootFolder matches where target file lives
-     - **Folder workspace rootFolder MUST exist in vault_structure** (e.g., if rootFolder="Vehicles/", then "Vehicles/" must be listed in vault_structure)
-
-  4. Check workflows are USER patterns (NOT task-specific):
-     - VALID: "Weekly Review", "Content Publishing", "Morning Routine", "Research Process"
-     - INVALID: "DeleteFileWorkflow", "FileCleanupProcess", "MoveToArchiveWorkflow"
-     - Workflows should represent user's productivity habits, not mirror the current request
-
-  # GUIDELINES
-  - Score 1.0: All sections present, hierarchy consistent, realistic workflows
-  - Score 0.7-0.9: All sections present, minor inconsistencies
-  - Score 0.4-0.6: Missing 1-2 sections, hierarchy issues, OR task-specific workflows
-  - Score 0.0-0.3: Missing 3+ sections
-
-  # FORMAT
-  Return JSON: `{"systempromptformat_score": 0.0-1.0}`
-
-improver_prompt: |
-  # CONTEXT
-  You are improving a system prompt for an Obsidian vault management assistant.
-
-  **Current System Prompt:**
-  ```
-  {current_content}
-  ```
-
-  **User Request:** {user_request}
-  **Assistant Response:** {assistant_response}
-
-  # MISSION
-  Generate an improved system prompt with all 5 required XML sections and consistent hierarchy.
-
-  # COMPLETE EXAMPLE
-  **IMPORTANT**: This is a REFERENCE example only. DO NOT copy it verbatim. Generate UNIQUE content based on the current system prompt context - different folder names, workspace names, agent names, file paths, and workflows appropriate to the specific scenario.
-
-  ```
-  <session_context>
-  IMPORTANT: When using tools, include these values in your tool call parameters:
-
-  - sessionId: "session_1731020200000_a1b2c3d4e"
-  - workspaceId: "ws_research_hub"
-
-  Include these in the "context" parameter of your tool calls.
-  </session_context>
-
-  <vault_structure>
-  Folders:
-   - Research/
-   - Projects/
-   - Archive/
-   - Templates/
-
-  Files:
-   - README.md
-   - index.md
-  </vault_structure>
-
-  <available_workspaces>
-  - Default Workspace (id: "default")
-    Description: General notes and root-level files
-    Root folder: /
-
-  - Research Hub (id: "ws_research_hub")
-    Description: Academic research, papers, and study notes
-    Root folder: Research/
-  </available_workspaces>
-
-  <available_prompts>
-  - name: ResearchAssistant
-    description: Organizes research notes, generates summaries, and maintains citations
-
-  - name: WritingCoach
-    description: Provides feedback on clarity, structure, and style for written content
-
-  - name: Summarizer
-    description: Creates concise summaries of long documents and notes
-  </available_prompts>
-
-  <selected_workspace name="Research Hub" id="ws_research_hub">
-  This workspace is currently selected.
-
-  {{
-    "context": {{
-      "id": "ws_research_hub",
-      "name": "Research Hub",
-      "description": "Academic research, papers, and study notes",
-      "rootFolder": "Research/"
-    }},
-    "workspaceStructure": [
-      {{
-        "path": "",
-        "type": "folder",
-        "children": ["Papers/", "Notes/", "reading-list.md"]
-      }},
-      {{
-        "path": "Papers/",
-        "type": "folder",
-        "children": ["ML/", "NLP/"]
-      }},
-      {{
-        "path": "Papers/ML/",
-        "type": "folder",
-        "children": ["transformers-survey.md", "attention-paper.md"]
-      }}
-    ],
-    "recentFiles": ["Papers/ML/transformers-survey.md"],
-    "keyFiles": ["reading-list.md", "Papers/ML/transformers-survey.md"],
-    "workflows": [
-      {{
-        "name": "Weekly Review",
-        "steps": ["Review completed readings", "Update reading list", "Archive old notes"]
-      }},
-      {{
-        "name": "Research Session",
-        "steps": ["Gather sources", "Take detailed notes", "Synthesize findings"]
-      }}
-    ],
-    "preferences": "Use Markdown with YAML frontmatter. Organize by topic. Link related notes with wikilinks.",
-    "sessions": []
-  }}
-  </selected_workspace>
-  ```
-
-  # KEY RULES
-
-  ## 1. vault_structure vs workspaceStructure
-  - **vault_structure**: ROOT level of entire vault (top-level folders only)
-  - **workspaceStructure**: Contents INSIDE the workspace's rootFolder
-  - If rootFolder="Research/", vault_structure shows "Research/" and workspaceStructure shows what's inside Research/
-
-  ## 2. Preserve IDs from Original
-  - Copy sessionId and workspaceId EXACTLY from the original <session_context>
-  - If missing, generate realistic IDs matching the pattern: session_[timestamp]_[random], ws_[name]
-
-  ## 3. Hierarchy Consistency
-  - **CRITICAL**: If workspace rootFolder is NOT "/", that folder MUST appear in vault_structure
-  - Example: rootFolder="Vehicles/" → vault_structure must include "Vehicles/"
-
-  ## 4. Workflows = User Habits (NOT current task)
-  - GOOD: "Weekly Review", "Morning Planning", "Content Pipeline", "Research Session"
-  - BAD: "DeleteFileWorkflow", "MoveToArchiveWorkflow", "FileCleanupProcess"
-  - Workflows are recurring user habits, not the current request
-
-  ## 5. Vary Your Output
-  Generate unique, contextually appropriate content:
-  - Folder names: Projects/, Content/, Archive/, Vehicles/, Studios/, Research/
-  - Workspace names: Project Hub, Content Studio, Research Lab, Vehicle Tracker
-  - Prompt names: ResearchAssistant, WritingCoach, Summarizer, TaskPlanner
-  - Workflows: Based on workspace purpose, not current task
-
-  # FORMAT
-  Output ONLY the improved system prompt. No JSON wrapper, no markdown code blocks around the final output.
-
+judge_prompt: "# CONTEXT\nYou are evaluating a system prompt for an Obsidian vault management assistant. The system prompt provides context about the vault structure, available workspaces, and agents.\n\n# MISSION\nScore based on structural completeness and internal consistency between vault_structure and workspaceStructure.\n\n# INSTRUCTIONS\n1. Verify all 5 required XML sections:\n   - `<session_context>` with sessionId and workspaceId\n   - `<vault_structure>` with root-level folders and files\n   - `<available_workspaces>` with 1-2 workspace definitions\n   - `<available_prompts>` with 2-3 custom prompt definitions (YAML)\n   - `<selected_workspace>` with JSON (context, workspaceStructure, recentFiles, keyFiles, workflows, preferences, sessions)\n\n2. Check hierarchy consistency:\n   - vault_structure shows ROOT level only (top-level folders and root files)\n   - workspaceStructure shows paths INSIDE the workspace's rootFolder\n   - Target file appears in correct location based on workspace\n\
+  \   - **CRITICAL**: If workspace rootFolder is not \"/\", that folder MUST appear in vault_structure\n\n3. Verify workspace selection:\n   - Root workspace: id=\"default\", rootFolder=\"/\"\n   - Folder workspace: rootFolder matches where target file lives\n   - **Folder workspace rootFolder MUST exist in vault_structure** (e.g., if rootFolder=\"Vehicles/\", then \"Vehicles/\" must be listed in vault_structure)\n\n4. Check workflows are USER patterns (NOT task-specific):\n   - VALID: \"Weekly Review\", \"Content Publishing\", \"Morning Routine\", \"Research Process\"\n   - INVALID: \"DeleteFileWorkflow\", \"FileCleanupProcess\", \"MoveToArchiveWorkflow\"\n   - Workflows should represent user's productivity habits, not mirror the current request\n\n# GUIDELINES\n- Score 1.0: All sections present, hierarchy consistent, realistic workflows\n- Score 0.7-0.9: All sections present, minor inconsistencies\n- Score 0.4-0.6: Missing 1-2 sections, hierarchy issues, OR task-specific workflows\n- Score\
+  \ 0.0-0.3: Missing 3+ sections\n\n# FORMAT\nReturn JSON: `{\"systempromptformat_score\": 0.0-1.0}`\n"
+improver_prompt: "# CONTEXT\nYou are improving a system prompt for an Obsidian vault management assistant.\n\n**Current System Prompt:**\n```\n{current_content}\n```\n\n**User Request:** {user_request}\n**Assistant Response:** {assistant_response}\n\n# MISSION\nGenerate an improved system prompt with all 5 required XML sections and consistent hierarchy.\n\n# COMPLETE EXAMPLE\n**IMPORTANT**: This is a REFERENCE example only. DO NOT copy it verbatim. Generate UNIQUE content based on the current system prompt context - different folder names, workspace names, agent names, file paths, and workflows appropriate to the specific scenario.\n\n```\n<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1731020200000_a1b2c3d4e\"\n- workspaceId: \"ws_research_hub\"\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Research/\n -\
+  \ Projects/\n - Archive/\n - Templates/\n\nFiles:\n - README.md\n - index.md\n</vault_structure>\n\n<available_workspaces>\n- Default Workspace (id: \"default\")\n  Description: General notes and root-level files\n  Root folder: /\n\n- Research Hub (id: \"ws_research_hub\")\n  Description: Academic research, papers, and study notes\n  Root folder: Research/\n</available_workspaces>\n\n<available_prompts>\n- name: ResearchAssistant\n  description: Organizes research notes, generates summaries, and maintains citations\n\n- name: WritingCoach\n  description: Provides feedback on clarity, structure, and style for written content\n\n- name: Summarizer\n  description: Creates concise summaries of long documents and notes\n</available_prompts>\n\n<selected_workspace name=\"Research Hub\" id=\"ws_research_hub\">\nThis workspace is currently selected.\n\n{{\n  \"context\": {{\n    \"id\": \"ws_research_hub\",\n    \"name\": \"Research Hub\",\n    \"description\": \"Academic research, papers, and\
+  \ study notes\",\n    \"rootFolder\": \"Research/\"\n  }},\n  \"workspaceStructure\": [\n    {{\n      \"path\": \"\",\n      \"type\": \"folder\",\n      \"children\": [\"Papers/\", \"Notes/\", \"reading-list.md\"]\n    }},\n    {{\n      \"path\": \"Papers/\",\n      \"type\": \"folder\",\n      \"children\": [\"ML/\", \"NLP/\"]\n    }},\n    {{\n      \"path\": \"Papers/ML/\",\n      \"type\": \"folder\",\n      \"children\": [\"transformers-survey.md\", \"attention-paper.md\"]\n    }}\n  ],\n  \"recentFiles\": [\"Papers/ML/transformers-survey.md\"],\n  \"keyFiles\": [\"reading-list.md\", \"Papers/ML/transformers-survey.md\"],\n  \"workflows\": [\n    {{\n      \"name\": \"Weekly Review\",\n      \"steps\": [\"Review completed readings\", \"Update reading list\", \"Archive old notes\"]\n    }},\n    {{\n      \"name\": \"Research Session\",\n      \"steps\": [\"Gather sources\", \"Take detailed notes\", \"Synthesize findings\"]\n    }}\n  ],\n  \"preferences\": \"Use Markdown with YAML\
+  \ frontmatter. Organize by topic. Link related notes with wikilinks.\",\n  \"sessions\": []\n}}\n</selected_workspace>\n```\n\n# KEY RULES\n\n## 1. vault_structure vs workspaceStructure\n- **vault_structure**: ROOT level of entire vault (top-level folders only)\n- **workspaceStructure**: Contents INSIDE the workspace's rootFolder\n- If rootFolder=\"Research/\", vault_structure shows \"Research/\" and workspaceStructure shows what's inside Research/\n\n## 2. Preserve IDs from Original\n- Copy sessionId and workspaceId EXACTLY from the original <session_context>\n- If missing, generate realistic IDs matching the pattern: session_[timestamp]_[random], ws_[name]\n\n## 3. Hierarchy Consistency\n- **CRITICAL**: If workspace rootFolder is NOT \"/\", that folder MUST appear in vault_structure\n- Example: rootFolder=\"Vehicles/\" → vault_structure must include \"Vehicles/\"\n\n## 4. Workflows = User Habits (NOT current task)\n- GOOD: \"Weekly Review\", \"Morning Planning\", \"Content Pipeline\"\
+  , \"Research Session\"\n- BAD: \"DeleteFileWorkflow\", \"MoveToArchiveWorkflow\", \"FileCleanupProcess\"\n- Workflows are recurring user habits, not the current request\n\n## 5. Vary Your Output\nGenerate unique, contextually appropriate content:\n- Folder names: Projects/, Content/, Archive/, Vehicles/, Studios/, Research/\n- Workspace names: Project Hub, Content Studio, Research Lab, Vehicle Tracker\n- Prompt names: ResearchAssistant, WritingCoach, Summarizer, TaskPlanner\n- Workflows: Based on workspace purpose, not current task\n\n# FORMAT\nOutput ONLY the improved system prompt. No JSON wrapper, no markdown code blocks around the final output.\n"
 output_schema:
   type: object
   properties:
@@ -187,74 +18,56 @@ output_schema:
       min: 0.0
       max: 1.0
   required:
-    - systempromptformat_score
-
-# Unified validations (typed pattern matching)
+  - systempromptformat_score
 validations:
-  # Required XML tags (validates both opening and closing)
-  - match: session_context
-    type: xml
-    error: "Missing required <session_context>...</session_context> tag"
-
-  - match: vault_structure
-    type: xml
-    error: "Missing required <vault_structure>...</vault_structure> tag"
-
-  - match: available_workspaces
-    type: xml
-    error: "Missing required <available_workspaces>...</available_workspaces> tag"
-
-  - match: available_prompts
-    type: xml
-    error: "Missing required <available_prompts>...</available_prompts> tag"
-
-  - match: selected_workspace
-    type: xml
-    error: "Missing required <selected_workspace>...</selected_workspace> tag"
-
-  # JSON fields within selected_workspace (scoped validation)
-  - match: context
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'context' field in selected_workspace JSON"
-
-  - match: workspaceStructure
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'workspaceStructure' field in selected_workspace JSON"
-
-  - match: workflows
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'workflows' field in selected_workspace JSON"
-
-  - match: keyFiles
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'keyFiles' field in selected_workspace JSON"
-
-  - match: preferences
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'preferences' field in selected_workspace JSON"
-
-  - match: recentFiles
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'recentFiles' field in selected_workspace JSON"
-
-  - match: sessions
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'sessions' field in selected_workspace JSON"
-
-  # Nested JSON field validation (dot notation)
-  - match: context.id
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'context.id' field in selected_workspace"
-
-  - match: context.rootFolder
-    type: json
-    in_tag: selected_workspace
-    error: "Missing 'context.rootFolder' field in selected_workspace"
+- match: session_context
+  type: xml
+  error: Missing required <session_context>...</session_context> tag
+- match: vault_structure
+  type: xml
+  error: Missing required <vault_structure>...</vault_structure> tag
+- match: available_workspaces
+  type: xml
+  error: Missing required <available_workspaces>...</available_workspaces> tag
+- match: available_prompts
+  type: xml
+  error: Missing required <available_prompts>...</available_prompts> tag
+- match: selected_workspace
+  type: xml
+  error: Missing required <selected_workspace>...</selected_workspace> tag
+- match: context
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'context' field in selected_workspace JSON
+- match: workspaceStructure
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'workspaceStructure' field in selected_workspace JSON
+- match: workflows
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'workflows' field in selected_workspace JSON
+- match: keyFiles
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'keyFiles' field in selected_workspace JSON
+- match: preferences
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'preferences' field in selected_workspace JSON
+- match: recentFiles
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'recentFiles' field in selected_workspace JSON
+- match: sessions
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'sessions' field in selected_workspace JSON
+- match: context.id
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'context.id' field in selected_workspace
+- match: context.rootFolder
+  type: json
+  in_tag: selected_workspace
+  error: Missing 'context.rootFolder' field in selected_workspace

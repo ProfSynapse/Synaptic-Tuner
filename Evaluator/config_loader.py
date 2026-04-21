@@ -674,12 +674,12 @@ def _build_session_context_section(session_id: str, workspace_id: str) -> str:
     return "\n".join(
         [
             "<session_context>",
-            "IMPORTANT: When using tools, include these values in your tool call parameters:",
+            "IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:",
             "",
             f'- sessionId: "{session_id}"',
             f'- workspaceId: "{workspace_id}" (current workspace)',
             "",
-            'Include these in the "context" parameter of your tool calls.',
+            'Include these as top-level fields in your useTools arguments payload.',
             "</session_context>",
         ]
     )

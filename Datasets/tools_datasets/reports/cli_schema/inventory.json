@@ -1,0 +1,403 @@
+{
+  "generated_at": "2026-04-21T13:03:19.939801+00:00",
+  "repo_root": "/Users/jrosenbaum/Documents/Code/Synthetic Conversations",
+  "schema_path": "tool-schemas.json",
+  "reports_dir": "Datasets/tools_datasets/reports/cli_schema",
+  "in_scope_agents": [
+    "contentManager",
+    "memoryManager",
+    "promptManager",
+    "searchManager",
+    "storageManager"
+  ],
+  "datasets": {
+    "contentManager": {
+      "status": "ok",
+      "path": "Datasets/tools_datasets/non_thinking/contentManager/tools_v2.3.jsonl",
+      "example_count": 488,
+      "tool_counts": {
+        "contentManager.insert": 102,
+        "contentManager.read": 110,
+        "contentManager.write": 304
+      },
+      "call_bucket_counts": {
+        "auto": 516
+      },
+      "example_bucket_counts": {
+        "auto": 488
+      },
+      "reason_counts": {},
+      "source_counts": {
+        "cli_wrapper": 516
+      },
+      "unknown_calls": [],
+      "sample_examples": {
+        "auto": [
+          {
+            "line": 1,
+            "call_count": 1,
+            "user": "Add 'New entry' to the end of log.md."
+          },
+          {
+            "line": 2,
+            "call_count": 1,
+            "user": "Create performance testing guidelines documentation."
+          },
+          {
+            "line": 3,
+            "call_count": 1,
+            "user": "Result: {\"success\": true, \"session\": {\"id\": \"session_1732000000476_348eb33d7\", \"name\": \"Riverlight Commute — Fog Run\", \"description\": \"Tram drafting while fog drifts over the bay\"}}"
+          },
+          {
+            "line": 4,
+            "call_count": 1,
+            "user": "Create a summary of my Meeting Notes from today."
+          },
+          {
+            "line": 5,
+            "call_count": 1,
+            "user": "Add a completed task to my sprint note: 'Implemented user authentication system'"
+          }
+        ]
+      }
+    },
+    "memoryManager": {
+      "status": "ok",
+      "path": "Datasets/tools_datasets/non_thinking/memoryManager/tools_v2.4.jsonl",
+      "example_count": 560,
+      "tool_counts": {
+        "memoryManager.archiveWorkspace": 30,
+        "memoryManager.createState": 138,
+        "memoryManager.createWorkspace": 47,
+        "memoryManager.listStates": 72,
+        "memoryManager.listWorkspaces": 36,
+        "memoryManager.loadState": 24,
+        "memoryManager.loadWorkspace": 221
+      },
+      "call_bucket_counts": {
+        "auto": 521,
+        "heuristic": 47
+      },
+      "example_bucket_counts": {
+        "auto": 513,
+        "heuristic": 47
+      },
+      "reason_counts": {
+        "workspace_metadata_review": 47
+      },
+      "source_counts": {
+        "cli_wrapper": 568
+      },
+      "unknown_calls": [],
+      "sample_examples": {
+        "auto": [
+          {
+            "line": 1,
+            "call_count": 1,
+            "user": "Open Training Materials workspace with recent history."
+          },
+          {
+            "line": 2,
+            "call_count": 1,
+            "user": "Show me my portfolio and help me prepare talking points for interviews"
+          },
+          {
+            "line": 3,
+            "call_count": 1,
+            "user": "When is my car's next maintenance due?"
+          },
+          {
+            "line": 4,
+            "call_count": 1,
+            "user": "I'm running a complex multi-month project - create comprehensive progress tracking across all phases"
+          },
+          {
+            "line": 5,
+            "call_count": 1,
+            "user": "Create a state checkpoint before I start this risky refactoring."
+          }
+        ],
+        "heuristic": [
+          {
+            "line": 16,
+            "call_count": 1,
+            "user": "I want to set up a dedicated workspace for machine learning experiments and model development"
+          },
+          {
+            "line": 22,
+            "call_count": 1,
+            "user": "Create a workspace for documentation projects"
+          },
+          {
+            "line": 34,
+            "call_count": 1,
+            "user": "Set up a new workspace for my Q1 2025 project planning"
+          },
+          {
+            "line": 51,
+            "call_count": 1,
+            "user": "Create a workspace for my freelance writing projects."
+          },
+          {
+            "line": 55,
+            "call_count": 1,
+            "user": "Create Recipe Collection workspace in /Personal/Recipes for organizing my cooking recipes and meal plans. Current goal is cataloging existing recipes. Workflows: recipe entry with ingredients and instructions, then meal planning with weekly menus and shopping lists."
+          }
+        ]
+      }
+    },
+    "promptManager": {
+      "status": "ok",
+      "path": "Datasets/tools_datasets/non_thinking/promptManager/tools_v2.6.jsonl",
+      "example_count": 466,
+      "tool_counts": {
+        "promptManager.archivePrompt": 56,
+        "promptManager.createPrompt": 87,
+        "promptManager.generateImage": 55,
+        "promptManager.getPrompt": 67,
+        "promptManager.listModels": 53,
+        "promptManager.listPrompts": 84,
+        "promptManager.updatePrompt": 88
+      },
+      "call_bucket_counts": {
+        "auto": 490
+      },
+      "example_bucket_counts": {
+        "auto": 466
+      },
+      "reason_counts": {},
+      "source_counts": {
+        "cli_wrapper": 490
+      },
+      "unknown_calls": [],
+      "sample_examples": {
+        "auto": [
+          {
+            "line": 1,
+            "call_count": 1,
+            "user": "Create a new agent called 'code-reviewer' for reviewing pull requests"
+          },
+          {
+            "line": 2,
+            "call_count": 1,
+            "user": "Continue with the next action"
+          },
+          {
+            "line": 3,
+            "call_count": 1,
+            "user": "List all available agents in my workspace"
+          },
+          {
+            "line": 4,
+            "call_count": 1,
+            "user": "Enable the Content Generator agent for my blog writing."
+          },
+          {
+            "line": 5,
+            "call_count": 1,
+            "user": "Create a circuit breaker agent"
+          }
+        ]
+      }
+    },
+    "searchManager": {
+      "status": "ok",
+      "path": "Datasets/tools_datasets/non_thinking/searchManager/tools_v2.2.jsonl",
+      "example_count": 916,
+      "tool_counts": {
+        "searchManager.searchContent": 640,
+        "searchManager.searchDirectory": 231,
+        "searchManager.searchMemory": 82
+      },
+      "call_bucket_counts": {
+        "auto": 953
+      },
+      "example_bucket_counts": {
+        "auto": 899,
+        "no_calls": 17
+      },
+      "reason_counts": {},
+      "source_counts": {
+        "cli_wrapper": 953
+      },
+      "unknown_calls": [],
+      "sample_examples": {
+        "auto": [
+          {
+            "line": 1,
+            "call_count": 1,
+            "user": "I need to archive all my old meeting notes from last quarter. They're scattered in different folders."
+          },
+          {
+            "line": 2,
+            "call_count": 1,
+            "user": "Search memory for when we discussed the database migration."
+          },
+          {
+            "line": 3,
+            "call_count": 1,
+            "user": "Search my memory for past discussions about the 'Alpha' project."
+          },
+          {
+            "line": 4,
+            "call_count": 1,
+            "user": "Search for the meeting notes"
+          },
+          {
+            "line": 5,
+            "call_count": 1,
+            "user": "Look for files mentioning the project"
+          }
+        ],
+        "no_calls": [
+          {
+            "line": 164,
+            "call_count": 0,
+            "user": "Let me know if that operation completed successfully."
+          },
+          {
+            "line": 647,
+            "call_count": 0,
+            "user": "Result: {\"success\": true, \"results\": [{\"path\": \"src/components/Button.tsx\", \"type\": \"file\", \"modified\": \"2025-11-07T15:20:00Z\"}, {\"path\": \"src/hooks/useAuth.ts\", \"type\": \"file\", \"modified\": \"2025-11-06T10:30:00Z\"}, {\"path\": \"src/utils/validators.ts\", \"type\": \"file\", \"modified\": \"2025-11-05T14:15:00Z\"}, {\"path\": \"src/components/Modal.tsx\", \"type\": \"file\", \"modified\": \"2025-11-04T09:45:00Z\"}], \"totalResults\": 4}"
+          },
+          {
+            "line": 725,
+            "call_count": 0,
+            "user": "Look for resources."
+          },
+          {
+            "line": 734,
+            "call_count": 0,
+            "user": "Result: {\"success\": true, \"states\": [{\"id\": \"state_1732400000000_xyz789abc\", \"name\": \"Before refactoring\", \"tags\": [\"backup\", \"stable\"]}, {\"id\": \"state_1732380000000_def456ghi\", \"name\": \"Feature complete\", \"tags\": [\"milestone\"]}], \"count\": 2}"
+          },
+          {
+            "line": 740,
+            "call_count": 0,
+            "user": "Result: {\"success\": true, \"sessions\": [], \"count\": 0, \"query\": \"blockchain\"}"
+          }
+        ]
+      }
+    },
+    "storageManager": {
+      "status": "ok",
+      "path": "Datasets/tools_datasets/non_thinking/storageManager/tools_v2.4.jsonl",
+      "example_count": 1074,
+      "tool_counts": {
+        "storageManager.archive": 149,
+        "storageManager.copy": 128,
+        "storageManager.createFolder": 329,
+        "storageManager.list": 270,
+        "storageManager.move": 268,
+        "storageManager.open": 111
+      },
+      "call_bucket_counts": {
+        "auto": 1255
+      },
+      "example_bucket_counts": {
+        "auto": 1057,
+        "no_calls": 17
+      },
+      "reason_counts": {},
+      "source_counts": {
+        "cli_wrapper": 1255
+      },
+      "unknown_calls": [],
+      "sample_examples": {
+        "auto": [
+          {
+            "line": 1,
+            "call_count": 2,
+            "user": "Move Studios/Boards/LightRay into Studios/Archive/LightRay and open Hero.md from the archived folder."
+          },
+          {
+            "line": 2,
+            "call_count": 1,
+            "user": "Create a Resources folder within my AI Research project folder."
+          },
+          {
+            "line": 3,
+            "call_count": 1,
+            "user": "Copy my project template to start a new project."
+          },
+          {
+            "line": 4,
+            "call_count": 1,
+            "user": "Move temp.md to Archive/old-temp.md."
+          },
+          {
+            "line": 5,
+            "call_count": 1,
+            "user": "Remove the unused.md file from my vault root."
+          }
+        ],
+        "no_calls": [
+          {
+            "line": 371,
+            "call_count": 0,
+            "user": ""
+          },
+          {
+            "line": 434,
+            "call_count": 0,
+            "user": "Result: {\"success\": true, \"data\": {\"path\": \"Meetings/Archive/2025-10/2025-10-12 Sprint Planning.md\", \"moved\": true}}"
+          },
+          {
+            "line": 590,
+            "call_count": 0,
+            "user": "Result: {\"success\": true, \"data\": {\"path\": \"Meetings/Archive/2025-10/2025-10-05 Team Sync.md\", \"moved\": true}}"
+          },
+          {
+            "line": 622,
+            "call_count": 0,
+            "user": "Move this item to the appropriate location."
+          },
+          {
+            "line": 703,
+            "call_count": 0,
+            "user": "Result: {\"success\": false, \"operationsCompleted\": 2, \"operationsFailed\": 1, \"results\": [{\"operation\": \"append\", \"success\": true}, {\"operation\": \"append\", \"success\": false, \"error\": \"File not found\"}, {\"operation\": \"append\", \"success\": true}]}"
+          }
+        ]
+      }
+    }
+  },
+  "global": {
+    "tool_counts": {
+      "contentManager.insert": 102,
+      "contentManager.read": 110,
+      "contentManager.write": 304,
+      "memoryManager.archiveWorkspace": 30,
+      "memoryManager.createState": 138,
+      "memoryManager.createWorkspace": 47,
+      "memoryManager.listStates": 72,
+      "memoryManager.listWorkspaces": 36,
+      "memoryManager.loadState": 24,
+      "memoryManager.loadWorkspace": 221,
+      "promptManager.archivePrompt": 56,
+      "promptManager.createPrompt": 87,
+      "promptManager.generateImage": 55,
+      "promptManager.getPrompt": 67,
+      "promptManager.listModels": 53,
+      "promptManager.listPrompts": 84,
+      "promptManager.updatePrompt": 88,
+      "searchManager.searchContent": 640,
+      "searchManager.searchDirectory": 231,
+      "searchManager.searchMemory": 82,
+      "storageManager.archive": 149,
+      "storageManager.copy": 128,
+      "storageManager.createFolder": 329,
+      "storageManager.list": 270,
+      "storageManager.move": 268,
+      "storageManager.open": 111
+    },
+    "call_bucket_counts": {
+      "auto": 3735,
+      "heuristic": 47
+    },
+    "reason_counts": {
+      "workspace_metadata_review": 47
+    },
+    "source_counts": {
+      "cli_wrapper": 3782
+    }
+  }
+}

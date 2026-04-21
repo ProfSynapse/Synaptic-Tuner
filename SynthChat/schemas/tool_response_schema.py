@@ -48,66 +48,19 @@ def _build_wrapper_schema(
     context_overrides: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build schema for wrapper-style tool calls (single function wrapping multiple calls)."""
-    agent_enum = sorted({t.split("_", 1)[0] for t in allowed_tools}) if allowed_tools else []
-    tool_enum = sorted({t.split("_", 1)[1] for t in allowed_tools}) if allowed_tools else []
-
-    # Build context properties from config
-    ctx_cfg = format_config.get("context_fields") or {}
-    ctx_properties_cfg = ctx_cfg.get("properties") or {}
-    context_properties: Dict[str, Any] = {}
-    for field_name, field_schema in ctx_properties_cfg.items():
-        if isinstance(field_schema, dict):
-            context_properties[field_name] = dict(field_schema)
-        else:
-            context_properties[field_name] = {"type": "string", "minLength": 1}
-
-    # Apply context overrides (e.g. sessionId/workspaceId const values)
-    for field_name, const_value in context_overrides.items():
-        if const_value and field_name in context_properties:
-            context_properties[field_name] = {"const": const_value}
-
-    context_required = list(ctx_cfg.get("required") or [])
-
-    # Build call_item properties from config
-    call_cfg = format_config.get("call_item") or {}
-    call_properties_cfg = (call_cfg.get("properties") or {}).copy()
-    call_required = list(call_cfg.get("required") or [])
-
-    call_properties: Dict[str, Any] = {}
-    for field_name, field_schema in call_properties_cfg.items():
-        if isinstance(field_schema, dict):
-            call_properties[field_name] = dict(field_schema)
-        else:
-            call_properties[field_name] = {"type": "string", "minLength": 1}
-
-    # Apply agent/tool enum constraints if available
-    if agent_enum and "agent" in call_properties:
-        call_properties["agent"] = {"enum": agent_enum}
-    if tool_enum and "tool" in call_properties:
-        call_properties["tool"] = {"enum": tool_enum}
-
-    # Build arguments properties
+    arg_cfg = format_config.get("argument_fields") or {}
+    arg_properties_cfg = arg_cfg.get("properties") or {}
     arguments_properties: Dict[str, Any] = {}
+    for field_name, field_schema in arg_properties_cfg.items():
+        if isinstance(field_schema, dict):
+            arguments_properties[field_name] = dict(field_schema)
+        else:
+            arguments_properties[field_name] = {"type": "string", "minLength": 1}
 
-    if context_properties:
-        arguments_properties["context"] = {
-            "type": "object",
-            "additionalProperties": True,
-            "properties": context_properties,
-            "required": context_required,
-        }
-
-    if call_properties:
-        arguments_properties["calls"] = {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": call_properties,
-                "required": call_required,
-            },
-        }
+    # Apply context overrides (e.g. sessionId/workspaceId const values) to top-level args
+    for field_name, const_value in context_overrides.items():
+        if const_value and field_name in arguments_properties:
+            arguments_properties[field_name] = {"const": const_value}
 
     # Add extra argument fields from config (e.g. strategy)
     extra_fields = format_config.get("extra_argument_fields") or {}

@@ -385,8 +385,8 @@ scenarios:
 
   sharedvault_triage_correct_note_after_search:
     type: tool
-    tool: contentManager_update
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    tool: contentManager_setProperty
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_setProperty]
     environment_mode: provided
     tags: [vault, retrieval, triage, shared_seed]
     system_template: mocked_workspace_vault
@@ -440,15 +440,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with searchManager.searchContent, contentManager.read, then contentManager.update.
+        Use useTools with searchManager.searchContent, contentManager.read, then contentManager.setProperty.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_update_production_config_preserve_structure:
     type: tool
-    tool: contentManager_update
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_update]
+    tool: contentManager_replace
+    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_replace]
     environment_mode: provided
     tags: [vault, config, retrieval, preservation, shared_seed]
     system_template: mocked_workspace_vault
@@ -503,15 +503,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with search, read, then update.
+        Use useTools with search, read, then replace.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_read_before_replace_settings_yaml:
     type: tool
-    tool: contentManager_update
-    expected_tools: [contentManager_read, contentManager_update]
+    tool: contentManager_replace
+    expected_tools: [contentManager_read, contentManager_replace]
     environment_mode: provided
     tags: [vault, settings, preservation, shared_seed]
     system_template: mocked_workspace_vault
@@ -561,7 +561,7 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with contentManager.read followed by contentManager.update.
+        Use useTools with contentManager.read followed by contentManager.replace.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response

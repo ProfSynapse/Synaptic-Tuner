@@ -2,35 +2,13 @@ name: Tool Coverage Tests
 description: Tests for each tool to verify correct tool selection and parameter usage
 tests:
 - id: promptManager_createPrompt
-  question: Create a new agent called "Vault Curator" with the description "Culls outdated workspace docs for the Atlas program".
-    Use the prompt "You are a documentation curator that identifies and removes outdated content from the workspace."
+  question: Create a new prompt named "Vault Curator" with the description "Culls outdated workspace docs for the Atlas program". Use the instruction text "You are a documentation curator that identifies and removes outdated workspace material."
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Documentation/\n - Projects/Atlas/Archive/\n - Projects/Phoenix/\n - Templates/\n\
-    \nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Documentation/changelog.md\n - Projects/Atlas/Documentation/outdated-notes.md\n\
-    \ - Projects/Atlas/Archive/legacy-files.md\n - Templates/agent-template.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root\
-    \ folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits\
-    \ workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\
-    \n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description:\
-    \ Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\
-    \n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\
-    \n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\"\
-    : \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\"\
-    : [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"README.md\"]},\n    {\"\
-    path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\"\
-    , \"type\": \"folder\", \"children\": [\"Documentation/\", \"Archive/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Documentation/\"\
-    , \"type\": \"folder\", \"children\": [\"changelog.md\", \"outdated-notes.md\"]},\n    {\"path\": \"Projects/Atlas/Archive/\"\
-    , \"type\": \"folder\", \"children\": [\"legacy-files.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Documentation/outdated-notes.md\"\
-    , \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Projects/Atlas/Documentation/changelog.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Agent Creation\", \"steps\": [\"Define agent purpose and scope\", \"Select appropriate\
-    \ model\", \"Configure temperature and tools\", \"Test agent on sample tasks\", \"Deploy to workspace\"]}\n  ],\n  \"\
-    preferences\": \"Use descriptive names for agents. Document agent configurations in Templates/.\",\n  \"sessions\": []\n\
-    }\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Documentation/\n - Projects/Atlas/Archive/\n - Projects/Phoenix/\n - Templates/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Documentation/changelog.md\n - Projects/Atlas/Documentation/outdated-notes.md\n - Projects/Atlas/Archive/legacy-files.md\n - Templates/agent-template.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n\
+    \  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\"\
+    , \"type\": \"folder\", \"children\": [\"Documentation/\", \"Archive/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Documentation/\", \"type\": \"folder\", \"children\": [\"changelog.md\", \"outdated-notes.md\"]},\n    {\"path\": \"Projects/Atlas/Archive/\", \"type\": \"folder\", \"children\": [\"legacy-files.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Documentation/outdated-notes.md\", \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Projects/Atlas/Documentation/changelog.md\"],\n  \"workflows\": [\n    {\"name\": \"Agent Creation\", \"steps\": [\"Define agent purpose and scope\", \"Select appropriate model\", \"Configure temperature and tools\", \"Test agent on sample tasks\", \"Deploy to workspace\"]}\n  ],\n  \"preferences\": \"Use descriptive names for agents. Document agent configurations in Templates/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_createPrompt
   expected_context:
@@ -49,28 +27,9 @@ tests:
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Agents/\n - Documentation/\n - Configuration/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Atlas/Agents/active-agents.md\n - Documentation/agent-management.md\n - Configuration/agent-config.json\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n \
-    \ description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and\
-    \ post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n\
-    \  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
-    ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
-    ,\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
-    : \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"\
-    Projects/\", \"Documentation/\", \"Configuration/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\"\
-    , \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Agents/\",\
-    \ \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Agents/\", \"type\": \"folder\", \"children\": [\"active-agents.md\"\
-    ]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Agents/active-agents.md\", \"Configuration/agent-config.json\"],\n  \"\
-    keyFiles\": [\"Projects/Atlas/Agents/active-agents.md\", \"Documentation/agent-management.md\"],\n  \"workflows\": [\n\
-    \    {\"name\": \"Agent Cleanup\", \"steps\": [\"Review agent usage\", \"Identify deprecated agents\", \"Delete unused\
-    \ agents\", \"Update documentation\"]}\n  ],\n  \"preferences\": \"Keep agent roster current. Document all agent lifecycle\
-    \ changes.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Agents/\n - Documentation/\n - Configuration/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Agents/active-agents.md\n - Documentation/agent-management.md\n - Configuration/agent-config.json\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n\
+    \  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"Configuration/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Agents/\", \"overview.md\"]},\n    {\"\
+    path\": \"Projects/Atlas/Agents/\", \"type\": \"folder\", \"children\": [\"active-agents.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Agents/active-agents.md\", \"Configuration/agent-config.json\"],\n  \"keyFiles\": [\"Projects/Atlas/Agents/active-agents.md\", \"Documentation/agent-management.md\"],\n  \"workflows\": [\n    {\"name\": \"Agent Cleanup\", \"steps\": [\"Review agent usage\", \"Identify deprecated agents\", \"Delete unused agents\", \"Update documentation\"]}\n  ],\n  \"preferences\": \"Keep agent roster current. Document all agent lifecycle changes.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_archivePrompt
   expected_context:
@@ -85,35 +44,13 @@ tests:
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
 - id: promptManager_executePrompts
-  question: 'Send the prompt "Summarize all sync failure incidents from the past week and list their root causes" to the Workspace
-    Auditor agent (id: agent_1732300800000_workspace_auditor) and return the raw response.'
+  question: 'Execute the Workspace Auditor entry (id: agent_1732300800000_workspace_auditor) with the request "Summarize all sync failure incidents from the past week and list their root causes" and return the raw response.'
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Projects/Atlas/Logs/\n - Documentation/\n\nFiles:\n - README.md\n\
-    \ - Projects/Atlas/overview.md\n - Projects/Atlas/Incidents/sync-failure-2025-01-10.md\n - Projects/Atlas/Incidents/sync-failure-2025-01-12.md\n\
-    \ - Projects/Atlas/Logs/sync-log.md\n - Documentation/incident-response.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root\
-    \ folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits\
-    \ workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\
-    \n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description:\
-    \ Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\
-    \n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\
-    \n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\"\
-    : \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\"\
-    : [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n \
-    \   {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\",\
-    \ \"type\": \"folder\", \"children\": [\"Incidents/\", \"Logs/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Incidents/\"\
-    , \"type\": \"folder\", \"children\": [\"sync-failure-2025-01-10.md\", \"sync-failure-2025-01-12.md\"]},\n    {\"path\"\
-    : \"Projects/Atlas/Logs/\", \"type\": \"folder\", \"children\": [\"sync-log.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Incidents/sync-failure-2025-01-12.md\"\
-    , \"Projects/Atlas/Logs/sync-log.md\"],\n  \"keyFiles\": [\"Projects/Atlas/Incidents/sync-failure-2025-01-10.md\", \"\
-    Projects/Atlas/Incidents/sync-failure-2025-01-12.md\"],\n  \"workflows\": [\n    {\"name\": \"Incident Analysis\", \"\
-    steps\": [\"Query agents for incident summaries\", \"Review incident logs\", \"Identify root causes\", \"Document findings\"\
-    ]}\n  ],\n  \"preferences\": \"All incidents must include timestamp, severity, and root cause analysis.\",\n  \"sessions\"\
-    : []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Projects/Atlas/Logs/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Incidents/sync-failure-2025-01-10.md\n - Projects/Atlas/Incidents/sync-failure-2025-01-12.md\n - Projects/Atlas/Logs/sync-log.md\n - Documentation/incident-response.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description:\
+    \ Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\"\
+    , \"children\": [\"Incidents/\", \"Logs/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Incidents/\", \"type\": \"folder\", \"children\": [\"sync-failure-2025-01-10.md\", \"sync-failure-2025-01-12.md\"]},\n    {\"path\": \"Projects/Atlas/Logs/\", \"type\": \"folder\", \"children\": [\"sync-log.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Incidents/sync-failure-2025-01-12.md\", \"Projects/Atlas/Logs/sync-log.md\"],\n  \"keyFiles\": [\"Projects/Atlas/Incidents/sync-failure-2025-01-10.md\", \"Projects/Atlas/Incidents/sync-failure-2025-01-12.md\"],\n  \"workflows\": [\n    {\"name\": \"Incident Analysis\", \"steps\": [\"Query agents for incident summaries\", \"Review incident logs\", \"Identify root causes\", \"Document findings\"]}\n  ],\n  \"preferences\": \"All incidents must include timestamp, severity, and root cause analysis.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_executePrompts
   expected_context:
@@ -128,36 +65,14 @@ tests:
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
 - id: promptManager_generateImage
-  question: Generate an image with the prompt "A golden retriever playing fetch with a red frisbee in a sunny park" and save
-    it to Projects/Images/dog-frisbee.png.
+  question: Generate an image with the prompt "A golden retriever playing fetch with a red frisbee in a sunny park" and save it to Projects/Images/dog-frisbee.png.
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Images/\n - Projects/Atlas/\n - Projects/Designs/\n - Resources/\n - Resources/Templates/\n\nFiles:\n - README.md\n\
-    \ - Projects/Atlas/overview.md\n - Projects/Designs/brand-guidelines.md\n - Resources/Templates/image-specs.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/\n\n- Design Assets (id: \"ws_1732300800001_designassets\")\n  Description:\
-    \ Creative assets and media for projects\n  Root folder: Projects/Designs/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n \
-    \ description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and\
-    \ post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n\
-    \  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
-    ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
-    ,\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
-    : \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\"\
-    , \"Resources/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Images/\", \"\
-    Atlas/\", \"Designs/\"]},\n    {\"path\": \"Projects/Images/\", \"type\": \"folder\", \"children\": []},\n    {\"path\"\
-    : \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Designs/\",\
-    \ \"type\": \"folder\", \"children\": [\"brand-guidelines.md\"]},\n    {\"path\": \"Resources/\", \"type\": \"folder\"\
-    , \"children\": [\"Templates/\"]},\n    {\"path\": \"Resources/Templates/\", \"type\": \"folder\", \"children\": [\"image-specs.md\"\
-    ]}\n  ],\n  \"recentFiles\": [\"Projects/Designs/brand-guidelines.md\", \"Resources/Templates/image-specs.md\"],\n  \"\
-    keyFiles\": [\"Projects/Atlas/overview.md\", \"Projects/Designs/brand-guidelines.md\"],\n  \"workflows\": [\n    {\"name\"\
-    : \"Image Generation\", \"steps\": [\"Define image requirements\", \"Generate image using AI\", \"Save to Projects/Images/\"\
-    , \"Review and validate output\"]}\n  ],\n  \"preferences\": \"Save all generated images to Projects/Images/. Use descriptive\
-    \ file names with hyphens.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Images/\n - Projects/Atlas/\n - Projects/Designs/\n - Resources/\n - Resources/Templates/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Designs/brand-guidelines.md\n - Resources/Templates/image-specs.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\n- Design Assets (id: \"ws_1732300800001_designassets\")\n  Description: Creative assets and media for projects\n  Root folder: Projects/Designs/\n</available_workspaces>\n\n<available_prompts>\n\
+    - name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Resources/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Images/\", \"Atlas/\", \"Designs/\"]},\n\
+    \    {\"path\": \"Projects/Images/\", \"type\": \"folder\", \"children\": []},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Designs/\", \"type\": \"folder\", \"children\": [\"brand-guidelines.md\"]},\n    {\"path\": \"Resources/\", \"type\": \"folder\", \"children\": [\"Templates/\"]},\n    {\"path\": \"Resources/Templates/\", \"type\": \"folder\", \"children\": [\"image-specs.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Designs/brand-guidelines.md\", \"Resources/Templates/image-specs.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Projects/Designs/brand-guidelines.md\"],\n  \"workflows\": [\n    {\"name\": \"Image Generation\", \"steps\": [\"Define image requirements\", \"Generate image using AI\", \"Save to Projects/Images/\", \"Review and validate output\"]}\n  ],\n  \"preferences\": \"Save all generated images to Projects/Images/. Use descriptive file names with hyphens.\",\n  \"sessions\": []\n\
+    }\n</selected_workspace>"
   expected_tools:
   - promptManager_generateImage
   expected_context:
@@ -172,36 +87,14 @@ tests:
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
 - id: promptManager_getPrompt
-  question: 'Get the full configuration for the Release Briefing agent (id: agent_1732300800001_release_briefing) so I can
-    see its name, description, and prompt.'
+  question: 'Get the full configuration for the Release Briefing entry (id: agent_1732300800001_release_briefing) so I can inspect it.'
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Agents/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\nFiles:\n\
-    \ - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Agents/agent-roster.md\n - Configuration/Agents/release-briefing-config.json\n\
-    \ - Configuration/Agents/workspace-auditor-config.json\n - Documentation/agent-configuration-guide.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n\
-    \  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release\
-    \ briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy\
-    \ Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for\
-    \ QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
-    \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\":\
-    \ \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Agents/\", \"overview.md\"]},\n    {\"\
-    path\": \"Projects/Atlas/Agents/\", \"type\": \"folder\", \"children\": [\"agent-roster.md\"]},\n    {\"path\": \"Configuration/\"\
-    , \"type\": \"folder\", \"children\": [\"Agents/\"]},\n    {\"path\": \"Configuration/Agents/\", \"type\": \"folder\"\
-    , \"children\": [\"release-briefing-config.json\", \"workspace-auditor-config.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/Agents/release-briefing-config.json\"\
-    , \"Projects/Atlas/Agents/agent-roster.md\"],\n  \"keyFiles\": [\"Documentation/agent-configuration-guide.md\", \"Projects/Atlas/Agents/agent-roster.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Agent Configuration Review\", \"steps\": [\"Identify agent to review\", \"Retrieve\
-    \ agent configuration\", \"Review model settings and permissions\", \"Document findings\"]}\n  ],\n  \"preferences\":\
-    \ \"Store agent configurations in Configuration/Agents/ directory. Use JSON format for config files.\",\n  \"sessions\"\
-    : []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Agents/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Agents/agent-roster.md\n - Configuration/Agents/release-briefing-config.json\n - Configuration/Agents/workspace-auditor-config.json\n - Documentation/agent-configuration-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name:\
+    \ Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n  \
+    \  {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Agents/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Agents/\", \"type\": \"folder\", \"children\": [\"agent-roster.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"Agents/\"]},\n    {\"path\": \"Configuration/Agents/\", \"type\": \"folder\", \"children\": [\"release-briefing-config.json\", \"workspace-auditor-config.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/Agents/release-briefing-config.json\", \"Projects/Atlas/Agents/agent-roster.md\"],\n  \"keyFiles\": [\"Documentation/agent-configuration-guide.md\", \"Projects/Atlas/Agents/agent-roster.md\"],\n  \"workflows\": [\n    {\"name\": \"Agent Configuration Review\", \"steps\": [\"Identify agent to review\", \"Retrieve agent configuration\", \"Review model settings and permissions\", \"Document findings\"]}\n  ],\n  \"preferences\": \"Store agent configurations in Configuration/Agents/ directory. Use JSON format\
+    \ for config files.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_getPrompt
   expected_context:
@@ -220,31 +113,10 @@ tests:
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\nFiles:\n\
-    \ - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Configuration/Agents/registry.json\n\
-    \ - Documentation/agent-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id:\
-    \ \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
-    </available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and\
-    \ reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident\
-    \ Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy\
-    \ system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace\
-    \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
-    : {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking\
-    \ for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\"\
-    : \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n\
-    \    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\"\
-    , \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\"\
-    , \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"\
-    Agents/\"]},\n    {\"path\": \"Configuration/Agents/\", \"type\": \"folder\", \"children\": [\"registry.json\"]}\n  ],\n\
-    \  \"recentFiles\": [\"Configuration/Agents/registry.json\", \"Documentation/agent-management.md\"],\n  \"keyFiles\":\
-    \ [\"Projects/Atlas/overview.md\", \"Configuration/Agents/registry.json\"],\n  \"workflows\": [\n    {\"name\": \"Agent\
-    \ Inventory\", \"steps\": [\"List all registered agents\", \"Review agent purposes\", \"Document agent roster\", \"Identify\
-    \ gaps or redundancies\"]}\n  ],\n  \"preferences\": \"Maintain current agent registry in Configuration/Agents/registry.json.\
-    \ Document all agents in Documentation/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Configuration/Agents/registry.json\n - Documentation/agent-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
+    </available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"\
+    type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"Agents/\"]},\n    {\"path\": \"Configuration/Agents/\", \"type\": \"folder\", \"children\": [\"registry.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/Agents/registry.json\", \"Documentation/agent-management.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Configuration/Agents/registry.json\"],\n  \"workflows\": [\n    {\"name\": \"Agent Inventory\", \"steps\": [\"List all registered agents\", \"Review agent purposes\", \"Document agent roster\", \"Identify gaps or redundancies\"]}\n  ],\n  \"preferences\": \"Maintain current agent registry in Configuration/Agents/registry.json. Document all agents in Documentation/.\",\n  \"sessions\": []\n}\n\
+    </selected_workspace>"
   expected_tools:
   - promptManager_listPrompts
   expected_context:
@@ -264,32 +136,10 @@ tests:
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Drafts/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n - Documentation/Models/\n\
-    \nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Drafts/executive-summary.md\n - Configuration/model-preferences.json\n\
-    \ - Documentation/Models/model-comparison.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id:\
-    \ \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
-    </available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and\
-    \ reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident\
-    \ Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy\
-    \ system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace\
-    \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
-    : {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking\
-    \ for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\"\
-    : \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n\
-    \    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\"\
-    , \"type\": \"folder\", \"children\": [\"Drafts/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Drafts/\", \"\
-    type\": \"folder\", \"children\": [\"executive-summary.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\"\
-    , \"children\": []},\n    {\"path\": \"Documentation/\", \"type\": \"folder\", \"children\": [\"Models/\"]},\n    {\"\
-    path\": \"Documentation/Models/\", \"type\": \"folder\", \"children\": [\"model-comparison.md\"]}\n  ],\n  \"recentFiles\"\
-    : [\"Projects/Atlas/Drafts/executive-summary.md\", \"Configuration/model-preferences.json\"],\n  \"keyFiles\": [\"Documentation/Models/model-comparison.md\"\
-    , \"Projects/Atlas/overview.md\"],\n  \"workflows\": [\n    {\"name\": \"Model Selection\", \"steps\": [\"List available\
-    \ models\", \"Compare parameter sizes and capabilities\", \"Select appropriate model for task\", \"Document model choice\"\
-    ]}\n  ],\n  \"preferences\": \"Document model selections and rationale in Configuration/. Prefer smaller models for drafting\
-    \ tasks.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Drafts/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n - Documentation/Models/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Drafts/executive-summary.md\n - Configuration/model-preferences.json\n - Documentation/Models/model-comparison.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration\
+    \ tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"\
+    README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Drafts/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Drafts/\", \"type\": \"folder\", \"children\": [\"executive-summary.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": []},\n    {\"path\": \"Documentation/\", \"type\": \"folder\", \"children\": [\"Models/\"]},\n    {\"path\": \"Documentation/Models/\", \"type\": \"folder\", \"children\": [\"model-comparison.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Drafts/executive-summary.md\", \"Configuration/model-preferences.json\"],\n  \"keyFiles\": [\"Documentation/Models/model-comparison.md\", \"Projects/Atlas/overview.md\"],\n  \"workflows\": [\n    {\"name\": \"Model Selection\", \"steps\": [\"List available models\", \"Compare parameter sizes and capabilities\", \"Select appropriate model for task\", \"\
+    Document model choice\"]}\n  ],\n  \"preferences\": \"Document model selections and rationale in Configuration/. Prefer smaller models for drafting tasks.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_listModels
   expected_context:
@@ -305,34 +155,13 @@ tests:
     - agent_1732300800003_legacy_intake
     - agent_1732300800004_qa_prototype
 - id: promptManager_updatePrompt
-  question: 'Update the Incident Scribe agent (id: agent_1732300800002_incident_scribe) to change its description to "Documents and tracks all system incidents and post-mortems"
-    and update the prompt to "You are a detailed incident reporter. Document issues thoroughly with root cause analysis."'
+  question: 'Update the Incident Scribe agent (id: agent_1732300800002_incident_scribe) to change its description to "Documents and tracks all system incidents and post-mortems" and update the prompt to "You are a detailed incident reporter. Document issues thoroughly with root cause analysis."'
   tags:
   - promptManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\n\
-    Files:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Incidents/incident-log.md\n - Configuration/Agents/incident-scribe-config.json\n\
-    \ - Documentation/agent-tuning-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\
-    \n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents and reports issues\n\n- name:\
-    \ Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents\
-    \ incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA\
-    \ Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\"\
-    \ id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
-    ,\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
-    : \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"\
-    Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\"\
-    , \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Incidents/\"\
-    , \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Incidents/\", \"type\": \"folder\", \"children\": [\"incident-log.md\"\
-    ]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"Agents/\"]},\n    {\"path\": \"Configuration/Agents/\"\
-    , \"type\": \"folder\", \"children\": [\"incident-scribe-config.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/Agents/incident-scribe-config.json\"\
-    , \"Projects/Atlas/Incidents/incident-log.md\"],\n  \"keyFiles\": [\"Documentation/agent-tuning-guide.md\", \"Configuration/Agents/incident-scribe-config.json\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Agent Tuning\", \"steps\": [\"Review agent performance\", \"Update model or temperature\
-    \ settings\", \"Test updated configuration\", \"Document changes\"]}\n  ],\n  \"preferences\": \"Store agent configurations\
-    \ in Configuration/Agents/. Lower temperature for more deterministic outputs.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Configuration/\n - Configuration/Agents/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Incidents/incident-log.md\n - Configuration/Agents/incident-scribe-config.json\n - Documentation/agent-tuning-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Auditor\n  description: Audits workspace contents\
+    \ and reports issues\n\n- name: Release Briefing\n  description: Generates release briefing summaries\n\n- name: Incident Scribe\n  description: Documents incidents and post-mortems\n\n- name: Legacy Intake\n  description: Processes legacy system data intake\n\n- name: QA Prototype\n  description: Prototype agent for QA testing\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\"\
+    : [\"Incidents/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Incidents/\", \"type\": \"folder\", \"children\": [\"incident-log.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"Agents/\"]},\n    {\"path\": \"Configuration/Agents/\", \"type\": \"folder\", \"children\": [\"incident-scribe-config.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/Agents/incident-scribe-config.json\", \"Projects/Atlas/Incidents/incident-log.md\"],\n  \"keyFiles\": [\"Documentation/agent-tuning-guide.md\", \"Configuration/Agents/incident-scribe-config.json\"],\n  \"workflows\": [\n    {\"name\": \"Agent Tuning\", \"steps\": [\"Review agent performance\", \"Update model or temperature settings\", \"Test updated configuration\", \"Document changes\"]}\n  ],\n  \"preferences\": \"Store agent configurations in Configuration/Agents/. Lower temperature for more deterministic outputs.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - promptManager_updatePrompt
   expected_context:
@@ -369,28 +198,9 @@ tests:
   tags:
   - contentManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Decisions/\n - Projects/Atlas/\n - Templates/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Decisions/Data-Lake-Architecture.md\n\
-    \ - Projects/Decisions/API-Gateway-Selection.md\n - Projects/Atlas/overview.md\n - Templates/retrospective-template.md\n\
-    \ - Documentation/decision-documentation-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id:\
-    \ \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n\
-    </available_workspaces>\n\n<available_prompts>\n- name: Documentation Generator\n  description: Creates and maintains project\
-    \ documentation\n\n- name: Template Manager\n  description: Manages documentation templates\n</available_prompts>\n\n<selected_workspace\
-    \ name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\"\
-    : {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking\
-    \ for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\":\
-    \ \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"Documentation/\", \"README.md\"]},\n   \
-    \ {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Decisions/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Decisions/\"\
-    , \"type\": \"folder\", \"children\": [\"Data-Lake-Architecture.md\", \"API-Gateway-Selection.md\"]},\n    {\"path\":\
-    \ \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Templates/\", \"type\"\
-    : \"folder\", \"children\": [\"retrospective-template.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Decisions/API-Gateway-Selection.md\"\
-    , \"Templates/retrospective-template.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/decision-documentation-guide.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Document Creation\", \"steps\": [\"Select appropriate template\", \"Create new\
-    \ file with content\", \"Add to keyFiles if important\", \"Link from related documents\"]}\n  ],\n  \"preferences\": \"\
-    Use kebab-case for file names. Store retrospectives in Projects/Decisions/. Follow template structure.\",\n  \"sessions\"\
-    : []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Decisions/\n - Projects/Atlas/\n - Templates/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Decisions/Data-Lake-Architecture.md\n - Projects/Decisions/API-Gateway-Selection.md\n - Projects/Atlas/overview.md\n - Templates/retrospective-template.md\n - Documentation/decision-documentation-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- name: Documentation Generator\n  description: Creates\
+    \ and maintains project documentation\n\n- name: Template Manager\n  description: Manages documentation templates\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Decisions/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Decisions/\", \"type\": \"folder\", \"children\": [\"Data-Lake-Architecture.md\", \"API-Gateway-Selection.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Templates/\", \"type\"\
+    : \"folder\", \"children\": [\"retrospective-template.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Decisions/API-Gateway-Selection.md\", \"Templates/retrospective-template.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/decision-documentation-guide.md\"],\n  \"workflows\": [\n    {\"name\": \"Document Creation\", \"steps\": [\"Select appropriate template\", \"Create new file with content\", \"Add to keyFiles if important\", \"Link from related documents\"]}\n  ],\n  \"preferences\": \"Use kebab-case for file names. Store retrospectives in Projects/Decisions/. Follow template structure.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - contentManager_write
   expected_context:
@@ -404,26 +214,9 @@ tests:
   tags:
   - contentManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Incidents/\n - Projects/Atlas/\n - Documentation/\n - Runbooks/\n\nFiles:\n - README.md\n - Projects/Incidents/Sync-Loop.md\n\
-    \ - Projects/Incidents/Database-Timeout.md\n - Projects/Atlas/overview.md\n - Documentation/incident-response.md\n - Runbooks/troubleshooting.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- name:\
-    \ Incident Analyst\n  description: Analyzes incidents and provides insights\n\n- name: Root Cause Investigator\n  description:\
-    \ Investigates root causes of system issues\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"Runbooks/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Incidents/\",\
-    \ \"Atlas/\"]},\n    {\"path\": \"Projects/Incidents/\", \"type\": \"folder\", \"children\": [\"Sync-Loop.md\", \"Database-Timeout.md\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Runbooks/\"\
-    , \"type\": \"folder\", \"children\": [\"troubleshooting.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Incidents/Sync-Loop.md\"\
-    , \"Projects/Incidents/Database-Timeout.md\"],\n  \"keyFiles\": [\"Projects/Incidents/Sync-Loop.md\", \"Documentation/incident-response.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Incident Review\", \"steps\": [\"Read incident report\", \"Review root cause\
-    \ analysis\", \"Identify preventive measures\", \"Update runbooks if needed\"]}\n  ],\n  \"preferences\": \"All incidents\
-    \ must include root cause analysis. Store incident reports in Projects/Incidents/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Incidents/\n - Projects/Atlas/\n - Documentation/\n - Runbooks/\n\nFiles:\n - README.md\n - Projects/Incidents/Sync-Loop.md\n - Projects/Incidents/Database-Timeout.md\n - Projects/Atlas/overview.md\n - Documentation/incident-response.md\n - Runbooks/troubleshooting.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- name: Incident Analyst\n  description: Analyzes incidents and provides insights\n\n- name:\
+    \ Root Cause Investigator\n  description: Investigates root causes of system issues\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"Runbooks/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Incidents/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Incidents/\", \"type\": \"folder\", \"children\": [\"Sync-Loop.md\", \"Database-Timeout.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Runbooks/\", \"type\": \"folder\", \"children\": [\"troubleshooting.md\"\
+    ]}\n  ],\n  \"recentFiles\": [\"Projects/Incidents/Sync-Loop.md\", \"Projects/Incidents/Database-Timeout.md\"],\n  \"keyFiles\": [\"Projects/Incidents/Sync-Loop.md\", \"Documentation/incident-response.md\"],\n  \"workflows\": [\n    {\"name\": \"Incident Review\", \"steps\": [\"Read incident report\", \"Review root cause analysis\", \"Identify preventive measures\", \"Update runbooks if needed\"]}\n  ],\n  \"preferences\": \"All incidents must include root cause analysis. Store incident reports in Projects/Incidents/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - contentManager_read
   expected_context:
@@ -432,34 +225,16 @@ tests:
     workspace_ids:
     - ws_1732300800000_atlasroll
     agent_ids: []
-- id: contentManager_update
-  question: 'I need you to replace line 12 in Projects/Runbooks/Backup.md with exactly this text: "5. Validate restores weekly
-    on staging environment." - go ahead and make the change, no need to confirm.'
+- id: contentManager_replace
+  question: Replace the line "5. Validate restores monthly on staging environment." in Projects/Runbooks/Backup.md with exactly "5. Validate restores weekly on staging environment." The change is approved.
   tags:
   - contentManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Runbooks/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Backup.md\n\
-    \ - Projects/Runbooks/Deployment.md\n - Projects/Runbooks/Monitoring.md\n - Projects/Atlas/overview.md\n - Documentation/runbook-standards.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- name:\
-    \ Runbook Editor\n  description: Maintains and updates operational runbooks\n\n- name: Procedure Validator\n  description:\
-    \ Validates runbook procedures and accuracy\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Runbooks/\", \"Atlas/\"]},\n\
-    \    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Backup.md\", \"Deployment.md\", \"Monitoring.md\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\"\
-    : [\"Projects/Runbooks/Backup.md\", \"Projects/Runbooks/Deployment.md\"],\n  \"keyFiles\": [\"Projects/Runbooks/Backup.md\"\
-    , \"Documentation/runbook-standards.md\"],\n  \"workflows\": [\n    {\"name\": \"Runbook Update\", \"steps\": [\"Identify\
-    \ outdated procedure\", \"Replace specific line with updated instruction\", \"Validate new procedure\", \"Test runbook\
-    \ steps\"]}\n  ],\n  \"preferences\": \"Number all runbook steps. Update validation frequencies as procedures evolve.\"\
-    ,\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Runbooks/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Backup.md\n - Projects/Runbooks/Deployment.md\n - Projects/Runbooks/Monitoring.md\n - Projects/Atlas/overview.md\n - Documentation/runbook-standards.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/\n</available_workspaces>\n\n<available_prompts>\n- name: Runbook Editor\n  description: Maintains and updates operational runbooks\n\n- name: Procedure Validator\n\
+    \  description: Validates runbook procedures and accuracy\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Runbooks/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Backup.md\", \"Deployment.md\", \"Monitoring.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Runbooks/Backup.md\", \"Projects/Runbooks/Deployment.md\"],\n  \"keyFiles\": [\"Projects/Runbooks/Backup.md\"\
+    , \"Documentation/runbook-standards.md\"],\n  \"workflows\": [\n    {\"name\": \"Runbook Update\", \"steps\": [\"Identify outdated procedure\", \"Replace specific line with updated instruction\", \"Validate new procedure\", \"Test runbook steps\"]}\n  ],\n  \"preferences\": \"Number all runbook steps. Update validation frequencies as procedures evolve.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
-  - contentManager_update
+  - contentManager_replace
   expected_context:
     session_id: session_1732300800000_eval01234
     workspace_id: ws_1732300800000_atlasroll
@@ -467,32 +242,13 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: memoryManager_createState
-  question: Create a saved state called "atlas_context_snapshot" with the description "Session state before pivoting to Phoenix
-    work".
+  question: Create a saved state called "atlas_context_snapshot" with the conversation context "Session state before pivoting to Phoenix work", the active work item "Prepare the Atlas to Phoenix handoff", active files ["Projects/Atlas/overview.md", "Projects/Phoenix/migration-plan.md"], and next steps ["Capture the current rollout status", "Resume Phoenix migration planning"].
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Phoenix/migration-plan.md\n - States/state-index.md\n - Documentation/state-management.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description:\
-    \ Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Context Manager\n  description: Manages session context and state\n\n- name: Snapshot Coordinator\n  description:\
-    \ Coordinates state snapshots for recovery\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"\
-    path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"States/\"\
-    , \"type\": \"folder\", \"children\": [\"state-index.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/overview.md\"\
-    , \"Projects/Phoenix/migration-plan.md\"],\n  \"keyFiles\": [\"States/state-index.md\", \"Documentation/state-management.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"State Checkpoint\", \"steps\": [\"Identify checkpoint moment\", \"Create saved\
-    \ state\", \"Add descriptive note\", \"Record in state index\"]}\n  ],\n  \"preferences\": \"Create state snapshots before\
-    \ major context switches. Use descriptive state names.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - States/state-index.md\n - Documentation/state-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n\
+    - name: Context Manager\n  description: Manages session context and state\n\n- name: Snapshot Coordinator\n  description: Coordinates state snapshots for recovery\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"States/\", \"\
+    type\": \"folder\", \"children\": [\"state-index.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/overview.md\", \"Projects/Phoenix/migration-plan.md\"],\n  \"keyFiles\": [\"States/state-index.md\", \"Documentation/state-management.md\"],\n  \"workflows\": [\n    {\"name\": \"State Checkpoint\", \"steps\": [\"Identify checkpoint moment\", \"Create saved state\", \"Add descriptive note\", \"Record in state index\"]}\n  ],\n  \"preferences\": \"Create state snapshots before major context switches. Use descriptive state names.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_createState
   expected_context:
@@ -502,32 +258,13 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: memoryManager_createWorkspace
-  question: Create a new workspace called "Helios Rollout" with the purpose "Project tracking for Helios customer rollout"
-    and root folder "Projects/Helios/".
+  question: Create a new workspace called "Helios Rollout" with the purpose "Project tracking for Helios customer rollout" and root folder "Projects/Helios/".
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Helios/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Helios/planning.md\n - Configuration/workspace-registry.json\n - Documentation/workspace-setup.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Coordinator\n\
-    \  description: Manages workspace creation and organization\n\n- name: Project Planner\n  description: Plans and structures\
-    \ new projects\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\n\
-    This workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Helios/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"\
-    path\": \"Projects/Helios/\", \"type\": \"folder\", \"children\": [\"planning.md\"]},\n    {\"path\": \"Configuration/\"\
-    , \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"Projects/Helios/planning.md\"\
-    , \"Configuration/workspace-registry.json\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/workspace-setup.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Workspace Creation\", \"steps\": [\"Create project folder structure\", \"Define\
-    \ workspace scope\", \"Create workspace configuration\", \"Add to workspace registry\"]}\n  ],\n  \"preferences\": \"\
-    Create workspaces for major projects. Use project name in workspace name and root folder.\",\n  \"sessions\": []\n}\n\
-    </selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Helios/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Helios/planning.md\n - Configuration/workspace-registry.json\n - Documentation/workspace-setup.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Coordinator\n  description: Manages workspace creation and organization\n\n- name: Project Planner\n  description:\
+    \ Plans and structures new projects\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Helios/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Helios/\", \"type\": \"folder\", \"children\": [\"planning.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"Projects/Helios/planning.md\"\
+    , \"Configuration/workspace-registry.json\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/workspace-setup.md\"],\n  \"workflows\": [\n    {\"name\": \"Workspace Creation\", \"steps\": [\"Create project folder structure\", \"Define workspace scope\", \"Create workspace configuration\", \"Add to workspace registry\"]}\n  ],\n  \"preferences\": \"Create workspaces for major projects. Use project name in workspace name and root folder.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_createWorkspace
   expected_context:
@@ -541,28 +278,9 @@ tests:
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Phoenix/migration-plan.md\n - States/checkpoint-a.json\n - States/phoenix-pre-mortem.json\n - States/atlas-milestone-1.json\n\
-    \ - Documentation/state-recovery.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\"\
-    )\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id:\
-    \ \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
-    </available_workspaces>\n\n<available_prompts>\n- name: State Manager\n  description: Manages saved states and recovery\
-    \ points\n\n- name: Checkpoint Coordinator\n  description: Coordinates state checkpoints across sessions\n</available_prompts>\n\
-    \n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\
-    \n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\"\
-    : \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\"\
-    : [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\", \"Documentation/\", \"README.md\"\
-    ]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"\
-    Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\"\
-    : \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"States/\", \"type\": \"folder\", \"children\"\
-    : [\"checkpoint-a.json\", \"phoenix-pre-mortem.json\", \"atlas-milestone-1.json\"]}\n  ],\n  \"recentFiles\": [\"States/atlas-milestone-1.json\"\
-    , \"States/checkpoint-a.json\"],\n  \"keyFiles\": [\"Documentation/state-recovery.md\", \"Projects/Atlas/overview.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"State Review\", \"steps\": [\"List saved states\", \"Review state descriptions\"\
-    , \"Select appropriate restore point\", \"Load saved state\"]}\n  ],\n  \"preferences\": \"Store state files in States/\
-    \ folder. Include descriptive metadata in state files.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - States/checkpoint-a.json\n - States/phoenix-pre-mortem.json\n - States/atlas-milestone-1.json\n - Documentation/state-recovery.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root\
+    \ folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: State Manager\n  description: Manages saved states and recovery points\n\n- name: Checkpoint Coordinator\n  description: Coordinates state checkpoints across sessions\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"\
+    type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"States/\", \"type\": \"folder\", \"children\": [\"checkpoint-a.json\", \"phoenix-pre-mortem.json\", \"atlas-milestone-1.json\"]}\n  ],\n  \"recentFiles\": [\"States/atlas-milestone-1.json\", \"States/checkpoint-a.json\"],\n  \"keyFiles\": [\"Documentation/state-recovery.md\", \"Projects/Atlas/overview.md\"],\n  \"workflows\": [\n    {\"name\": \"State Review\", \"steps\": [\"List saved states\", \"Review state descriptions\", \"Select appropriate restore point\", \"Load saved state\"]}\n  ],\n  \"preferences\": \"Store state files in States/ folder. Include descriptive metadata in state files.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_listStates
   expected_context:
@@ -577,27 +295,9 @@ tests:
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Phoenix/migration-plan.md\n - Configuration/workspace-registry.json\n - Documentation/workspace-management.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\"\
-    )\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Workspace Navigator\n  description: Navigates between workspaces\n\n- name: Project Organizer\n  description:\
-    \ Organizes project workspaces\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"\
-    path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\": \"Configuration/\"\
-    , \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/workspace-registry.json\"\
-    , \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Documentation/workspace-management.md\", \"Configuration/workspace-registry.json\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Workspace Discovery\", \"steps\": [\"List all workspaces\", \"Review workspace\
-    \ descriptions\", \"Identify relevant workspace\", \"Load workspace if needed\"]}\n  ],\n  \"preferences\": \"Maintain\
-    \ workspace registry in Configuration/. Document workspace purposes clearly.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Configuration/workspace-registry.json\n - Documentation/workspace-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\
+    \n<available_prompts>\n- name: Workspace Navigator\n  description: Navigates between workspaces\n\n- name: Project Organizer\n  description: Organizes project workspaces\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\":\
+    \ \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"Configuration/workspace-registry.json\", \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Documentation/workspace-management.md\", \"Configuration/workspace-registry.json\"],\n  \"workflows\": [\n    {\"name\": \"Workspace Discovery\", \"steps\": [\"List all workspaces\", \"Review workspace descriptions\", \"Identify relevant workspace\", \"Load workspace if needed\"]}\n  ],\n  \"preferences\": \"Maintain workspace registry in Configuration/. Document workspace purposes clearly.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_listWorkspaces
   expected_context:
@@ -612,28 +312,9 @@ tests:
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Phoenix/migration-plan.md\n - Projects/Phoenix/post-mortem.md\n - States/phoenix-pre-mortem.json\n - Documentation/state-recovery-guide.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\"\
-    )\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: State Loader\n  description: Loads saved conversation states\n\n- name: Recovery Coordinator\n  description: Coordinates\
-    \ context recovery from snapshots\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"\
-    path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\", \"post-mortem.md\"]},\n   \
-    \ {\"path\": \"States/\", \"type\": \"folder\", \"children\": [\"phoenix-pre-mortem.json\"]}\n  ],\n  \"recentFiles\"\
-    : [\"States/phoenix-pre-mortem.json\", \"Projects/Phoenix/post-mortem.md\"],\n  \"keyFiles\": [\"Documentation/state-recovery-guide.md\"\
-    , \"Projects/Phoenix/migration-plan.md\"],\n  \"workflows\": [\n    {\"name\": \"State Restoration\", \"steps\": [\"Identify\
-    \ restore point\", \"Load saved state\", \"Verify context restoration\", \"Resume work from checkpoint\"]}\n  ],\n  \"\
-    preferences\": \"Use saved states to restore conversation context. Load states before critical work.\",\n  \"sessions\"\
-    : []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - States/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Projects/Phoenix/post-mortem.md\n - States/phoenix-pre-mortem.json\n - Documentation/state-recovery-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
+    </available_workspaces>\n\n<available_prompts>\n- name: State Loader\n  description: Loads saved conversation states\n\n- name: Recovery Coordinator\n  description: Coordinates context recovery from snapshots\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"States/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"\
+    , \"post-mortem.md\"]},\n    {\"path\": \"States/\", \"type\": \"folder\", \"children\": [\"phoenix-pre-mortem.json\"]}\n  ],\n  \"recentFiles\": [\"States/phoenix-pre-mortem.json\", \"Projects/Phoenix/post-mortem.md\"],\n  \"keyFiles\": [\"Documentation/state-recovery-guide.md\", \"Projects/Phoenix/migration-plan.md\"],\n  \"workflows\": [\n    {\"name\": \"State Restoration\", \"steps\": [\"Identify restore point\", \"Load saved state\", \"Verify context restoration\", \"Resume work from checkpoint\"]}\n  ],\n  \"preferences\": \"Use saved states to restore conversation context. Load states before critical work.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_loadState
   expected_context:
@@ -648,27 +329,9 @@ tests:
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Atlas/rollout-plan.md\n - Projects/Phoenix/migration-plan.md\n - Configuration/workspaces.json\n - Documentation/workspace-switching.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\"\
-    )\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Workspace Loader\n  description: Loads workspace contexts\n\n- name: Scope Manager\n  description: Manages workspace\
-    \ scope and boundaries\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\", \"rollout-plan.md\"\
-    ]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]},\n    {\"path\"\
-    : \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspaces.json\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/rollout-plan.md\"\
-    , \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/workspace-switching.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Workspace Loading\", \"steps\": [\"Select target workspace\", \"Load workspace\
-    \ context\", \"Verify scope\", \"Begin scoped work\"]}\n  ],\n  \"preferences\": \"Load workspaces to scope session to\
-    \ specific projects. Use workspace boundaries for organization.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/rollout-plan.md\n - Projects/Phoenix/migration-plan.md\n - Configuration/workspaces.json\n - Documentation/workspace-switching.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n\
+    </available_workspaces>\n\n<available_prompts>\n- name: Workspace Loader\n  description: Loads workspace contexts\n\n- name: Scope Manager\n  description: Manages workspace scope and boundaries\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\", \"rollout-plan.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\"\
+    : [\"migration-plan.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspaces.json\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/rollout-plan.md\", \"Projects/Atlas/overview.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/workspace-switching.md\"],\n  \"workflows\": [\n    {\"name\": \"Workspace Loading\", \"steps\": [\"Select target workspace\", \"Load workspace context\", \"Verify scope\", \"Begin scoped work\"]}\n  ],\n  \"preferences\": \"Load workspaces to scope session to specific projects. Use workspace boundaries for organization.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_loadWorkspace
   expected_context:
@@ -679,35 +342,13 @@ tests:
     - ws_1732300800001_phoenixmg
     agent_ids: []
 - id: memoryManager_updateWorkspace
-  question: 'Update the Phoenix Migration workspace (id: ws_1732300800001_phoenixmg) to change its purpose to "Phoenix
-    system migration - compliance audit pending".'
+  question: 'Update the Phoenix Migration workspace (id: ws_1732300800001_phoenixmg) to change its purpose to "Phoenix system migration - compliance audit pending".'
   tags:
   - memoryManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Phoenix/\n - Projects/Phoenix/Compliance/\n - Configuration/\n - Documentation/\n\nFiles:\n\
-    \ - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Projects/Phoenix/Compliance/audit-checklist.md\n\
-    \ - Configuration/workspace-registry.json\n - Documentation/workspace-metadata.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root\
-    \ folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration\
-    \ tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Administrator\n\
-    \  description: Administers workspace settings and metadata\n\n- name: Compliance Tracker\n  description: Tracks compliance\
-    \ requirements across workspaces\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    , \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"\
-    path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"Compliance/\", \"migration-plan.md\"]},\n    {\"\
-    path\": \"Projects/Phoenix/Compliance/\", \"type\": \"folder\", \"children\": [\"audit-checklist.md\"]},\n    {\"path\"\
-    : \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"\
-    Projects/Phoenix/Compliance/audit-checklist.md\", \"Configuration/workspace-registry.json\"],\n  \"keyFiles\": [\"Documentation/workspace-metadata.md\"\
-    , \"Projects/Phoenix/migration-plan.md\"],\n  \"workflows\": [\n    {\"name\": \"Workspace Metadata Update\", \"steps\"\
-    : [\"Review workspace status\", \"Update description with current state\", \"Save to workspace registry\", \"Notify stakeholders\
-    \ if needed\"]}\n  ],\n  \"preferences\": \"Update workspace descriptions to reflect current project status. Include important\
-    \ milestones.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Projects/Phoenix/Compliance/\n - Configuration/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Projects/Phoenix/Compliance/audit-checklist.md\n - Configuration/workspace-registry.json\n - Documentation/workspace-metadata.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix\
+    \ system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: Workspace Administrator\n  description: Administers workspace settings and metadata\n\n- name: Compliance Tracker\n  description: Tracks compliance requirements across workspaces\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Configuration/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"\
+    ]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"Compliance/\", \"migration-plan.md\"]},\n    {\"path\": \"Projects/Phoenix/Compliance/\", \"type\": \"folder\", \"children\": [\"audit-checklist.md\"]},\n    {\"path\": \"Configuration/\", \"type\": \"folder\", \"children\": [\"workspace-registry.json\"]}\n  ],\n  \"recentFiles\": [\"Projects/Phoenix/Compliance/audit-checklist.md\", \"Configuration/workspace-registry.json\"],\n  \"keyFiles\": [\"Documentation/workspace-metadata.md\", \"Projects/Phoenix/migration-plan.md\"],\n  \"workflows\": [\n    {\"name\": \"Workspace Metadata Update\", \"steps\": [\"Review workspace status\", \"Update description with current state\", \"Save to workspace registry\", \"Notify stakeholders if needed\"]}\n  ],\n  \"preferences\": \"Update workspace descriptions to reflect current project status. Include important milestones.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - memoryManager_updateWorkspace
   expected_context:
@@ -722,28 +363,9 @@ tests:
   tags:
   - searchManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Runbooks/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Atlas/Incidents/workspace-crash-2025-01-10.md\n - Projects/Atlas/Incidents/workspace-crash-2025-01-12.md\n\
-    \ - Runbooks/crash-recovery.md\n - Runbooks/troubleshooting.md\n - Documentation/incident-handling.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Content Searcher\n\
-    \  description: Searches vault content for specific phrases\n\n- name: Incident Investigator\n  description: Investigates\
-    \ incidents using search tools\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Runbooks/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Incidents/\", \"overview.md\"]},\n   \
-    \ {\"path\": \"Projects/Atlas/Incidents/\", \"type\": \"folder\", \"children\": [\"workspace-crash-2025-01-10.md\", \"\
-    workspace-crash-2025-01-12.md\"]},\n    {\"path\": \"Runbooks/\", \"type\": \"folder\", \"children\": [\"crash-recovery.md\"\
-    , \"troubleshooting.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Incidents/workspace-crash-2025-01-12.md\", \"Runbooks/crash-recovery.md\"\
-    ],\n  \"keyFiles\": [\"Runbooks/crash-recovery.md\", \"Documentation/incident-handling.md\"],\n  \"workflows\": [\n  \
-    \  {\"name\": \"Incident Search\", \"steps\": [\"Search vault for incident phrase\", \"Review matching documents\", \"\
-    Locate remediation steps\", \"Apply fixes\"]}\n  ],\n  \"preferences\": \"Search all notes for incident references. Document\
-    \ remediation steps in Runbooks/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Incidents/\n - Runbooks/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Incidents/workspace-crash-2025-01-10.md\n - Projects/Atlas/Incidents/workspace-crash-2025-01-12.md\n - Runbooks/crash-recovery.md\n - Runbooks/troubleshooting.md\n - Documentation/incident-handling.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Content\
+    \ Searcher\n  description: Searches vault content for specific phrases\n\n- name: Incident Investigator\n  description: Investigates incidents using search tools\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Runbooks/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Incidents/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Incidents/\", \"type\": \"folder\", \"children\": [\"workspace-crash-2025-01-10.md\", \"workspace-crash-2025-01-12.md\"\
+    ]},\n    {\"path\": \"Runbooks/\", \"type\": \"folder\", \"children\": [\"crash-recovery.md\", \"troubleshooting.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Incidents/workspace-crash-2025-01-12.md\", \"Runbooks/crash-recovery.md\"],\n  \"keyFiles\": [\"Runbooks/crash-recovery.md\", \"Documentation/incident-handling.md\"],\n  \"workflows\": [\n    {\"name\": \"Incident Search\", \"steps\": [\"Search vault for incident phrase\", \"Review matching documents\", \"Locate remediation steps\", \"Apply fixes\"]}\n  ],\n  \"preferences\": \"Search all notes for incident references. Document remediation steps in Runbooks/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - searchManager_searchContent
   expected_context:
@@ -757,26 +379,9 @@ tests:
   tags:
   - searchManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Rollouts/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Rollouts/Atlas.md\n\
-    \ - Projects/Rollouts/Phoenix.md\n - Projects/Rollouts/Helios.md\n - Projects/Atlas/overview.md\n - Documentation/rollout-management.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Directory Navigator\n  description: Navigates and lists directory contents\n\n- name: File Cataloger\n  description:\
-    \ Catalogs files and folders in vault\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Rollouts/\", \"Atlas/\", \"Phoenix/\"\
-    ]},\n    {\"path\": \"Projects/Rollouts/\", \"type\": \"folder\", \"children\": [\"Atlas.md\", \"Phoenix.md\", \"Helios.md\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\"\
-    , \"type\": \"folder\", \"children\": []}\n  ],\n  \"recentFiles\": [\"Projects/Rollouts/Atlas.md\", \"Projects/Rollouts/Phoenix.md\"\
-    ],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/rollout-management.md\"],\n  \"workflows\": [\n \
-    \   {\"name\": \"Directory Exploration\", \"steps\": [\"Search directory contents\", \"List all files and folders\", \"\
-    Identify relevant files\", \"Access needed files\"]}\n  ],\n  \"preferences\": \"Organize rollout documents in Projects/Rollouts/.\
-    \ Keep one file per rollout project.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Rollouts/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Rollouts/Atlas.md\n - Projects/Rollouts/Phoenix.md\n - Projects/Rollouts/Helios.md\n - Projects/Atlas/overview.md\n - Documentation/rollout-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Directory Navigator\n  description: Navigates and lists directory contents\n\n- name:\
+    \ File Cataloger\n  description: Catalogs files and folders in vault\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Rollouts/\", \"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Rollouts/\", \"type\": \"folder\", \"children\": [\"Atlas.md\", \"Phoenix.md\", \"Helios.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": []}\n  ],\n  \"recentFiles\"\
+    : [\"Projects/Rollouts/Atlas.md\", \"Projects/Rollouts/Phoenix.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/rollout-management.md\"],\n  \"workflows\": [\n    {\"name\": \"Directory Exploration\", \"steps\": [\"Search directory contents\", \"List all files and folders\", \"Identify relevant files\", \"Access needed files\"]}\n  ],\n  \"preferences\": \"Organize rollout documents in Projects/Rollouts/. Keep one file per rollout project.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - searchManager_searchDirectory
   acceptable_tools:
@@ -792,26 +397,9 @@ tests:
   tags:
   - searchManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Atlas/\n - Projects/Atlas/Customer/\n - Documentation/\n - Agreements/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Atlas/Customer/requirements.md\n - Projects/Atlas/Customer/commitments.md\n - Agreements/SLA.md\n - Documentation/customer-promises.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Memory Searcher\n  description: Searches conversation memory\n\n- name: Commitment Tracker\n  description: Tracks\
-    \ customer commitments and promises\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"Agreements/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n\
-    \    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Customer/\", \"overview.md\"]},\n    {\"path\"\
-    : \"Projects/Atlas/Customer/\", \"type\": \"folder\", \"children\": [\"requirements.md\", \"commitments.md\"]},\n    {\"\
-    path\": \"Agreements/\", \"type\": \"folder\", \"children\": [\"SLA.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Customer/commitments.md\"\
-    , \"Agreements/SLA.md\"],\n  \"keyFiles\": [\"Agreements/SLA.md\", \"Documentation/customer-promises.md\"],\n  \"workflows\"\
-    : [\n    {\"name\": \"Commitment Recall\", \"steps\": [\"Search conversation memory\", \"Find customer promise or SLA\
-    \ references\", \"Review agreements\", \"Confirm commitments\"]}\n  ],\n  \"preferences\": \"Document all customer commitments\
-    \ in Projects/Atlas/Customer/. Track SLAs in Agreements/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Atlas/\n - Projects/Atlas/Customer/\n - Documentation/\n - Agreements/\n\nFiles:\n - README.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Customer/requirements.md\n - Projects/Atlas/Customer/commitments.md\n - Agreements/SLA.md\n - Documentation/customer-promises.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Memory Searcher\n  description: Searches conversation memory\n\n- name: Commitment\
+    \ Tracker\n  description: Tracks customer commitments and promises\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"Agreements/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Atlas/\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Customer/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Customer/\", \"type\": \"folder\", \"children\": [\"requirements.md\", \"commitments.md\"]},\n    {\"path\": \"Agreements/\", \"type\": \"folder\", \"children\": [\"SLA.md\"]}\n  ],\n  \"recentFiles\"\
+    : [\"Projects/Atlas/Customer/commitments.md\", \"Agreements/SLA.md\"],\n  \"keyFiles\": [\"Agreements/SLA.md\", \"Documentation/customer-promises.md\"],\n  \"workflows\": [\n    {\"name\": \"Commitment Recall\", \"steps\": [\"Search conversation memory\", \"Find customer promise or SLA references\", \"Review agreements\", \"Confirm commitments\"]}\n  ],\n  \"preferences\": \"Document all customer commitments in Projects/Atlas/Customer/. Track SLAs in Agreements/.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - searchManager_searchMemory
   expected_context:
@@ -825,26 +413,9 @@ tests:
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Retrospectives/\n - Projects/Retrospectives/2024/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n\
-    \ - Projects/Retrospectives/2024/Q4.md\n - Projects/Atlas/overview.md\n - Documentation/retrospective-guide.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Folder Organizer\n\
-    \  description: Organizes vault folder structure\n\n- name: Retrospective Coordinator\n  description: Coordinates retrospective\
-    \ documentation\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\n\
-    This workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Retrospectives/\", \"Atlas/\"\
-    ]},\n    {\"path\": \"Projects/Retrospectives/\", \"type\": \"folder\", \"children\": [\"2024/\"]},\n    {\"path\": \"\
-    Projects/Retrospectives/2024/\", \"type\": \"folder\", \"children\": [\"Q4.md\"]},\n    {\"path\": \"Projects/Atlas/\"\
-    , \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Retrospectives/2024/Q4.md\"\
-    , \"Documentation/retrospective-guide.md\"],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/retrospective-guide.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Folder Creation\", \"steps\": [\"Plan folder structure\", \"Create nested folders\"\
-    , \"Add initial documentation\", \"Update workspace structure\"]}\n  ],\n  \"preferences\": \"Organize retrospectives\
-    \ by year and quarter. Create folder hierarchy as needed.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Retrospectives/\n - Projects/Retrospectives/2024/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Retrospectives/2024/Q4.md\n - Projects/Atlas/overview.md\n - Documentation/retrospective-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Folder Organizer\n  description: Organizes vault folder structure\n\n- name: Retrospective Coordinator\n  description: Coordinates\
+    \ retrospective documentation\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Retrospectives/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Retrospectives/\", \"type\": \"folder\", \"children\": [\"2024/\"]},\n    {\"path\": \"Projects/Retrospectives/2024/\", \"type\": \"folder\", \"children\": [\"Q4.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Retrospectives/2024/Q4.md\", \"Documentation/retrospective-guide.md\"\
+    ],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/retrospective-guide.md\"],\n  \"workflows\": [\n    {\"name\": \"Folder Creation\", \"steps\": [\"Plan folder structure\", \"Create nested folders\", \"Add initial documentation\", \"Update workspace structure\"]}\n  ],\n  \"preferences\": \"Organize retrospectives by year and quarter. Create folder hierarchy as needed.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_createFolder
   expected_context:
@@ -858,26 +429,9 @@ tests:
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Ideas/\n - Projects/Atlas/\n - Projects/Atlas/Risks/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Ideas/Outdated-Risks.md\n\
-    \ - Projects/Atlas/overview.md\n - Projects/Atlas/Risks/consolidated-risks.md\n - Documentation/file-management.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: File Curator\n\
-    \  description: Curates and manages vault files\n\n- name: Consolidation Manager\n  description: Manages content consolidation\
-    \ efforts\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis\
-    \ workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\":\
-    \ \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Ideas/\", \"Atlas/\"]},\n   \
-    \ {\"path\": \"Projects/Ideas/\", \"type\": \"folder\", \"children\": [\"Outdated-Risks.md\"]},\n    {\"path\": \"Projects/Atlas/\"\
-    , \"type\": \"folder\", \"children\": [\"Risks/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Risks/\", \"type\"\
-    : \"folder\", \"children\": [\"consolidated-risks.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Risks/consolidated-risks.md\"\
-    , \"Projects/Ideas/Outdated-Risks.md\"],\n  \"keyFiles\": [\"Projects/Atlas/Risks/consolidated-risks.md\", \"Documentation/file-management.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"File Consolidation\", \"steps\": [\"Merge content to consolidated file\", \"\
-    Verify all content moved\", \"Delete outdated file\", \"Update references\"]}\n  ],\n  \"preferences\": \"Delete files\
-    \ after consolidating content. Keep vault organized and avoid duplicates.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Ideas/\n - Projects/Atlas/\n - Projects/Atlas/Risks/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Ideas/Outdated-Risks.md\n - Projects/Atlas/overview.md\n - Projects/Atlas/Risks/consolidated-risks.md\n - Documentation/file-management.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: File Curator\n  description: Curates and manages vault files\n\n- name: Consolidation Manager\n  description:\
+    \ Manages content consolidation efforts\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Ideas/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Ideas/\", \"type\": \"folder\", \"children\": [\"Outdated-Risks.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"Risks/\", \"overview.md\"]},\n    {\"path\": \"Projects/Atlas/Risks/\", \"type\": \"folder\", \"children\": [\"consolidated-risks.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Atlas/Risks/consolidated-risks.md\"\
+    , \"Projects/Ideas/Outdated-Risks.md\"],\n  \"keyFiles\": [\"Projects/Atlas/Risks/consolidated-risks.md\", \"Documentation/file-management.md\"],\n  \"workflows\": [\n    {\"name\": \"File Consolidation\", \"steps\": [\"Merge content to consolidated file\", \"Verify all content moved\", \"Delete outdated file\", \"Update references\"]}\n  ],\n  \"preferences\": \"Delete files after consolidating content. Keep vault organized and avoid duplicates.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_archive
   expected_context:
@@ -887,31 +441,13 @@ tests:
     - ws_1732300800000_atlasroll
     agent_ids: []
 - id: storageManager_copy
-  question: Duplicate the file Projects/Runbooks/Incident-Response.md to Projects/Runbooks/Incident-Response-Template.md so
-    we can customize it.
+  question: Duplicate the file Projects/Runbooks/Incident-Response.md to Projects/Runbooks/Incident-Response-Template.md so we can customize it.
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Runbooks/\n - Projects/Atlas/\n - Templates/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Incident-Response.md\n\
-    \ - Projects/Atlas/overview.md\n - Templates/runbook-template.md\n - Documentation/runbook-guide.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Template Manager\n\
-    \  description: Manages runbook and documentation templates\n\n- name: Runbook Editor\n  description: Edits and maintains\
-    \ operational runbooks\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\"\
-    >\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\"\
-    : \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\
-    \n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\"\
-    , \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Runbooks/\"\
-    , \"Atlas/\"]},\n    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Incident-Response.md\"\
-    ]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Templates/\"\
-    , \"type\": \"folder\", \"children\": [\"runbook-template.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Runbooks/Incident-Response.md\"\
-    , \"Templates/runbook-template.md\"],\n  \"keyFiles\": [\"Projects/Runbooks/Incident-Response.md\", \"Documentation/runbook-guide.md\"\
-    ],\n  \"workflows\": [\n    {\"name\": \"Template Creation\", \"steps\": [\"Identify source runbook\", \"Duplicate to\
-    \ create template\", \"Customize template\", \"Save in Templates folder\"]}\n  ],\n  \"preferences\": \"Create templates\
-    \ from working runbooks. Store templates in Templates/ folder.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Runbooks/\n - Projects/Atlas/\n - Templates/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Incident-Response.md\n - Projects/Atlas/overview.md\n - Templates/runbook-template.md\n - Documentation/runbook-guide.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Template Manager\n  description: Manages runbook and documentation templates\n\n- name: Runbook Editor\n  description:\
+    \ Edits and maintains operational runbooks\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Templates/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Runbooks/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Incident-Response.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Templates/\", \"type\": \"folder\", \"children\": [\"runbook-template.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Runbooks/Incident-Response.md\"\
+    , \"Templates/runbook-template.md\"],\n  \"keyFiles\": [\"Projects/Runbooks/Incident-Response.md\", \"Documentation/runbook-guide.md\"],\n  \"workflows\": [\n    {\"name\": \"Template Creation\", \"steps\": [\"Identify source runbook\", \"Duplicate to create template\", \"Customize template\", \"Save in Templates folder\"]}\n  ],\n  \"preferences\": \"Create templates from working runbooks. Store templates in Templates/ folder.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_copy
   expected_context:
@@ -925,29 +461,9 @@ tests:
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Decisions/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Decisions/RFC-001-Architecture.md\n\
-    \ - Projects/Decisions/RFC-002-Database.md\n - Projects/Decisions/RFC-003-API-Design.md\n - Projects/Atlas/overview.md\n\
-    \ - Projects/Phoenix/migration-plan.md\n - Documentation/rfc-template.md\n</vault_structure>\n\n<available_workspaces>\n\
-    - Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root\
-    \ folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description: Phoenix system migration\
-    \ tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: Directory Lister\n\
-    \  description: Lists directory contents\n\n- name: RFC Tracker\n  description: Tracks RFC documents and decisions\n</available_prompts>\n\
-    \n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\
-    \n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\"\
-    : \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\"\
-    : [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n \
-    \   {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Decisions/\", \"Atlas/\", \"Phoenix/\"]},\n    {\"\
-    path\": \"Projects/Decisions/\", \"type\": \"folder\", \"children\": [\"RFC-001-Architecture.md\", \"RFC-002-Database.md\"\
-    , \"RFC-003-API-Design.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"\
-    ]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]}\n  ],\n  \"recentFiles\"\
-    : [\"Projects/Decisions/RFC-003-API-Design.md\", \"Projects/Decisions/RFC-002-Database.md\"],\n  \"keyFiles\": [\"Documentation/rfc-template.md\"\
-    , \"Projects/Atlas/overview.md\"],\n  \"workflows\": [\n    {\"name\": \"RFC Discovery\", \"steps\": [\"List Decisions\
-    \ directory\", \"Review filed RFCs\", \"Identify relevant decision documents\", \"Read applicable RFCs\"]}\n  ],\n  \"\
-    preferences\": \"Store all RFCs in Projects/Decisions/. Use RFC-NNN- prefix for numbering.\",\n  \"sessions\": []\n}\n\
-    </selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Decisions/\n - Projects/Atlas/\n - Projects/Phoenix/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Decisions/RFC-001-Architecture.md\n - Projects/Decisions/RFC-002-Database.md\n - Projects/Decisions/RFC-003-API-Design.md\n - Projects/Atlas/overview.md\n - Projects/Phoenix/migration-plan.md\n - Documentation/rfc-template.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n\n- Phoenix Migration (id: \"ws_1732300800001_phoenixmg\")\n  Description:\
+    \ Phoenix system migration tracking\n  Root folder: Projects/Phoenix/\n</available_workspaces>\n\n<available_prompts>\n- name: Directory Lister\n  description: Lists directory contents\n\n- name: RFC Tracker\n  description: Tracks RFC documents and decisions\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Decisions/\", \"Atlas/\", \"Phoenix/\"]},\n    {\"path\": \"Projects/Decisions/\", \"type\": \"folder\", \"children\": [\"RFC-001-Architecture.md\", \"RFC-002-Database.md\"\
+    , \"RFC-003-API-Design.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]},\n    {\"path\": \"Projects/Phoenix/\", \"type\": \"folder\", \"children\": [\"migration-plan.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Decisions/RFC-003-API-Design.md\", \"Projects/Decisions/RFC-002-Database.md\"],\n  \"keyFiles\": [\"Documentation/rfc-template.md\", \"Projects/Atlas/overview.md\"],\n  \"workflows\": [\n    {\"name\": \"RFC Discovery\", \"steps\": [\"List Decisions directory\", \"Review filed RFCs\", \"Identify relevant decision documents\", \"Read applicable RFCs\"]}\n  ],\n  \"preferences\": \"Store all RFCs in Projects/Decisions/. Use RFC-NNN- prefix for numbering.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_list
   expected_context:
@@ -962,26 +478,9 @@ tests:
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Rollouts/\n - Projects/Clients/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Rollouts/Odyssey.md\n\
-    \ - Projects/Clients/Acme.md\n - Projects/Atlas/overview.md\n - Documentation/file-organization.md\n</vault_structure>\n\
-    \n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas\
-    \ customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: File Organizer\n\
-    \  description: Organizes and moves vault files\n\n- name: Client Manager\n  description: Manages client documentation\n\
-    </available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is\
-    \ currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\"\
-    ,\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n\
-    \  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\"\
-    , \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Rollouts/\", \"Clients/\", \"\
-    Atlas/\"]},\n    {\"path\": \"Projects/Rollouts/\", \"type\": \"folder\", \"children\": [\"Odyssey.md\"]},\n    {\"path\"\
-    : \"Projects/Clients/\", \"type\": \"folder\", \"children\": [\"Acme.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\"\
-    : \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Rollouts/Odyssey.md\", \"Projects/Clients/Acme.md\"\
-    ],\n  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/file-organization.md\"],\n  \"workflows\": [\n  \
-    \  {\"name\": \"File Reorganization\", \"steps\": [\"Identify misplaced file\", \"Determine correct location\", \"Move\
-    \ file with overwrite if needed\", \"Update references\"]}\n  ],\n  \"preferences\": \"Organize client files in Projects/Clients/.\
-    \ Overwrite duplicates when consolidating.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Rollouts/\n - Projects/Clients/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Rollouts/Odyssey.md\n - Projects/Clients/Acme.md\n - Projects/Atlas/overview.md\n - Documentation/file-organization.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: File Organizer\n  description: Organizes and moves vault files\n\n- name: Client Manager\n  description: Manages client\
+    \ documentation\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Rollouts/\", \"Clients/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Rollouts/\", \"type\": \"folder\", \"children\": [\"Odyssey.md\"]},\n    {\"path\": \"Projects/Clients/\", \"type\": \"folder\", \"children\": [\"Acme.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Rollouts/Odyssey.md\", \"Projects/Clients/Acme.md\"],\n\
+    \  \"keyFiles\": [\"Projects/Atlas/overview.md\", \"Documentation/file-organization.md\"],\n  \"workflows\": [\n    {\"name\": \"File Reorganization\", \"steps\": [\"Identify misplaced file\", \"Determine correct location\", \"Move file with overwrite if needed\", \"Update references\"]}\n  ],\n  \"preferences\": \"Organize client files in Projects/Clients/. Overwrite duplicates when consolidating.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_move
   expected_context:
@@ -995,26 +494,9 @@ tests:
   tags:
   - storageManager
   - single-tool
-  system: "<session_context>\nIMPORTANT: When using tools, include these values in your tool call parameters:\n\n- sessionId:\
-    \ \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these\
-    \ in the \"context\" parameter of your tool calls.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n\
-    \ - Projects/Runbooks/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Backup.md\n\
-    \ - Projects/Runbooks/Deployment.md\n - Projects/Runbooks/Monitoring.md\n - Projects/Atlas/overview.md\n - Documentation/runbook-usage.md\n\
-    </vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project\
-    \ tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n\
-    - name: Runbook Viewer\n  description: Opens and displays runbook documentation\n\n- name: Operations Guide\n  description:\
-    \ Provides operational guidance and procedures\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"\
-    ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\"\
-    ,\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\"\
-    : \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"\
-    Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"\
-    Runbooks/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Backup.md\"\
-    , \"Deployment.md\", \"Monitoring.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"\
-    overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Runbooks/Backup.md\", \"Projects/Runbooks/Deployment.md\"],\n  \"\
-    keyFiles\": [\"Projects/Runbooks/Backup.md\", \"Documentation/runbook-usage.md\"],\n  \"workflows\": [\n    {\"name\"\
-    : \"Runbook Access\", \"steps\": [\"Identify needed runbook\", \"Open in Obsidian\", \"Review procedures\", \"Execute\
-    \ steps as needed\"]}\n  ],\n  \"preferences\": \"Open runbooks in Obsidian for viewing. Keep runbooks up to date with\
-    \ current procedures.\",\n  \"sessions\": []\n}\n</selected_workspace>"
+  system: "<session_context>\nIMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n- sessionId: \"session_1732300800000_eval01234\"\n- workspaceId: \"ws_1732300800000_atlasroll\" (current workspace)\n\nInclude these as top-level fields in your useTools arguments payload.\n</session_context>\n\n<vault_structure>\nFolders:\n - Projects/\n - Projects/Runbooks/\n - Projects/Atlas/\n - Documentation/\n\nFiles:\n - README.md\n - Projects/Runbooks/Backup.md\n - Projects/Runbooks/Deployment.md\n - Projects/Runbooks/Monitoring.md\n - Projects/Atlas/overview.md\n - Documentation/runbook-usage.md\n</vault_structure>\n\n<available_workspaces>\n- Atlas Rollout (id: \"ws_1732300800000_atlasroll\")\n  Description: Project tracking for Atlas customer rollout\n  Root folder: Projects/Atlas/\n</available_workspaces>\n\n<available_prompts>\n- name: Runbook Viewer\n  description: Opens and displays runbook documentation\n\n- name: Operations Guide\n  description:\
+    \ Provides operational guidance and procedures\n</available_prompts>\n\n<selected_workspace name=\"Atlas Rollout\" id=\"ws_1732300800000_atlasroll\">\nThis workspace is currently selected.\n\n{\n  \"context\": {\n    \"id\": \"ws_1732300800000_atlasroll\",\n    \"name\": \"Atlas Rollout\",\n    \"description\": \"Project tracking for Atlas customer rollout\",\n    \"rootFolder\": \"Projects/Atlas/\"\n  },\n  \"workspaceStructure\": [\n    {\"path\": \"\", \"type\": \"folder\", \"children\": [\"Projects/\", \"Documentation/\", \"README.md\"]},\n    {\"path\": \"Projects/\", \"type\": \"folder\", \"children\": [\"Runbooks/\", \"Atlas/\"]},\n    {\"path\": \"Projects/Runbooks/\", \"type\": \"folder\", \"children\": [\"Backup.md\", \"Deployment.md\", \"Monitoring.md\"]},\n    {\"path\": \"Projects/Atlas/\", \"type\": \"folder\", \"children\": [\"overview.md\"]}\n  ],\n  \"recentFiles\": [\"Projects/Runbooks/Backup.md\", \"Projects/Runbooks/Deployment.md\"],\n  \"keyFiles\": [\"Projects/Runbooks/Backup.md\"\
+    , \"Documentation/runbook-usage.md\"],\n  \"workflows\": [\n    {\"name\": \"Runbook Access\", \"steps\": [\"Identify needed runbook\", \"Open in Obsidian\", \"Review procedures\", \"Execute steps as needed\"]}\n  ],\n  \"preferences\": \"Open runbooks in Obsidian for viewing. Keep runbooks up to date with current procedures.\",\n  \"sessions\": []\n}\n</selected_workspace>"
   expected_tools:
   - storageManager_open
   expected_context:

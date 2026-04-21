@@ -50,10 +50,10 @@ Tags categorize tests for filtered evaluation runs.
 | Tag | Tests | What It Tests |
 |-----|-------|---------------|
 | `storageManager` | ~15 | File operations (move, delete, create, rename) |
-| `contentManager` | ~8 | Content editing (write, append, replace) |
-| `vaultLibrarian` | ~5 | Search operations |
+| `contentManager` | ~8 | Content editing (read, write, insert, replace, setProperty) |
+| `searchManager` | ~5 | Search operations |
 | `memoryManager` | ~4 | Session/workspace management |
-| `agentManager` | ~3 | Agent CRUD operations |
+| `promptManager` | ~3 | Prompt CRUD and delegated execution |
 
 ### Tag Filtering
 

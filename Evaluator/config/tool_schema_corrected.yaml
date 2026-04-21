@@ -1,25 +1,24 @@
 # Tool Schema Configuration (AUTO-GENERATED from tool-schemas.json)
 # Source of truth: tool-schemas.json
-# Do not edit manually - regenerate with: python Tools/audit_tool_schemas.py
+# Do not edit manually - regenerate with: python tools/audit_tool_schemas.py
 
 tool_format:
   wrapper: useTools
   wrapper_structure:
-    context:
+    top_level_fields:
       required:
-      - sessionId
       - workspaceId
+      - sessionId
       - memory
       - goal
+      - tool
       optional:
       - constraints
-    calls:
-      type: array
-      item_fields:
-      - agent
-      - tool
-      - params
-      tool_name_pattern: '{agent}_{tool}'
+      - strategy
+    cli:
+      field: tool
+      separator: ','
+      quoting: shell
     batch:
       enabled: true
       default_strategy: serial
@@ -28,42 +27,234 @@ tool_format:
       - serial
       - parallel
 tools:
-  contentManager:
+  canvasManager:
+  - name: list
+    description: List canvas files in the vault with node/edge counts
+    command: canvas list
+    usage: canvas list [--folder <folder>] [--recursive]
+    params:
+      required: []
+      optional:
+      - folder
+      - recursive
   - name: read
-    description: read operation
+    description: Read the structure of a canvas file (nodes and edges)
+    command: canvas read
+    usage: canvas read <path>
     params:
       required:
       - path
-      - startLine
-      optional:
-      - endLine
+      optional: []
   - name: update
-    description: update operation
+    description: Modify an EXISTING canvas file. Replaces nodes and/or edges arrays.
+      Fails if canvas does not exist - use canvasManager.write to create new canvases.
+    command: canvas update
+    usage: canvas update <path> [--nodes <nodes>] [--edges <edges>]
+    params:
+      required:
+      - path
+      optional:
+      - nodes
+      - edges
+  - name: write
+    description: Create a NEW canvas file. Fails if canvas already exists - use canvasManager.update
+      to modify existing canvases.
+    command: canvas write
+    usage: canvas write <path> [--nodes <nodes>] [--edges <edges>]
+    params:
+      required:
+      - path
+      optional:
+      - nodes
+      - edges
+  composer:
+  - name: compose
+    description: 'Merge multiple vault files of the same type into a single output.
+      Supports markdown (.md), PDF (.pdf), and audio (.mp3, .wav, .ogg, .webm). Audio
+      supports concat (sequential) and mix (layered tracks with volume/fade) modes.
+      Note: WebM audio encoding runs at real-time speed (encoding time equals audio
+      duration).'
+    command: composer compose
+    usage: composer compose [--files <files>] <format> <outputPath> [--separator <separator>]
+      [--include-headers] [--header-level <headerLevel>] [--frontmatter-handling <frontmatterHandling>]
+      [--max-file-size-mb <maxFileSizeMb>] [--max-total-size-mb <maxTotalSizeMb>]
+      [--audio-mode <audioMode>] [--tracks <tracks>] [--output-format <outputFormat>]
+      [--duration <duration>] [--overwrite]
+    params:
+      required:
+      - format
+      - outputPath
+      optional:
+      - files
+      - separator
+      - includeHeaders
+      - headerLevel
+      - frontmatterHandling
+      - maxFileSizeMb
+      - maxTotalSizeMb
+      - audioMode
+      - tracks
+      - outputFormat
+      - duration
+      - overwrite
+  - name: listFormats
+    description: List supported composition formats, their file extensions, and platform
+      availability.
+    command: composer list-formats
+    usage: composer list-formats
+    params:
+      required: []
+      optional: []
+  contentManager:
+  - name: insert
+    description: Insert new content into a note at a specific position. Does not modify
+      existing content — use replace for that.
+    command: content insert
+    usage: content insert --path <path> --content <content> --start-line <startLine>
     params:
       required:
       - path
       - content
       - startLine
+      optional: []
+  - name: read
+    description: Read content from a file with line range
+    command: content read
+    usage: content read <path> <startLine> [--end-line <endLine>]
+    params:
+      required:
+      - path
+      - startLine
       optional:
       - endLine
+  - name: replace
+    description: Replace or delete existing content in a note. Validates that the
+      content at the specified lines matches before making changes. If the content
+      has moved, returns the new line numbers.
+    command: content replace
+    usage: content replace --path <path> --old-content <oldContent> --new-content
+      <newContent> --start-line <startLine> --end-line <endLine>
+    params:
+      required:
+      - path
+      - oldContent
+      - newContent
+      - startLine
+      - endLine
+      optional: []
+  - name: setProperty
+    description: Set a frontmatter property on a note. Supports "replace" (default)
+      and "merge" (array union with dedup) modes.
+    command: content set-property
+    usage: content set-property <path> <property> <value> [--mode <mode>]
+    params:
+      required:
+      - path
+      - property
+      - value
+      optional:
+      - mode
   - name: write
-    description: write operation
+    description: Create a new file or overwrite existing file
+    command: content write
+    usage: content write <path> <content> [--overwrite]
     params:
       required:
       - path
       - content
       optional:
       - overwrite
+  elevenlabs:
+  - name: generateMusic
+    description: Generate music from a text prompt describing genre, mood, instruments,
+      tempo, and lyrics. Saves audio to vault.
+    command: elevenlabs generate-music
+    usage: elevenlabs generate-music <prompt> [--music-length-ms <musicLengthMs>]
+      [--output-path <outputPath>] [--output-format <outputFormat>] [--force-instrumental]
+    params:
+      required:
+      - prompt
+      optional:
+      - musicLengthMs
+      - outputPath
+      - outputFormat
+      - forceInstrumental
+  - name: listVoices
+    description: List available ElevenLabs voices with their IDs, names, and categories.
+    command: elevenlabs list-voices
+    usage: elevenlabs list-voices [--category <category>]
+    params:
+      required: []
+      optional:
+      - category
+  - name: soundEffects
+    description: Generate cinematic sound effects from text descriptions (e.g., "thunder
+      rolling across a mountain valley").
+    command: elevenlabs sound-effects
+    usage: elevenlabs sound-effects <prompt> [--duration-seconds <durationSeconds>]
+      [--prompt-influence <promptInfluence>] [--output-path <outputPath>]
+    params:
+      required:
+      - prompt
+      optional:
+      - durationSeconds
+      - promptInfluence
+      - outputPath
+  - name: textToSpeech
+    description: Convert text to speech audio using ElevenLabs voices. Saves MP3 to
+      vault.
+    command: elevenlabs text-to-speech
+    usage: elevenlabs text-to-speech <prompt> [--voice-id <voiceId>] [--model-id <modelId>]
+      [--output-path <outputPath>] [--stability <stability>] [--similarity-boost <similarityBoost>]
+    params:
+      required:
+      - prompt
+      optional:
+      - voiceId
+      - modelId
+      - outputPath
+      - stability
+      - similarityBoost
+  ingestManager:
+  - name: ingest
+    description: 'Ingest a PDF or audio file into a structured markdown note. PDF:
+      text extraction (default) or vision OCR. Audio: speech transcription using explicit
+      ingest-supported models. Output note created alongside the original file.'
+    command: ingest ingest
+    usage: ingest ingest <filePath> [--mode <mode>] [--ocr-provider <ocrProvider>]
+      [--ocr-model <ocrModel>]
+    params:
+      required:
+      - filePath
+      optional:
+      - mode
+      - ocrProvider
+      - ocrModel
+  - name: listCapabilities
+    description: List available OCR models and audio transcription models that the
+      ingest pipeline supports. Use before ingest to discover valid provider/model
+      options.
+    command: ingest list-capabilities
+    usage: ingest list-capabilities
+    params:
+      required: []
+      optional: []
   memoryManager:
   - name: archiveWorkspace
-    description: archiveWorkspace operation
+    description: Archive a workspace (soft delete). Workspace will be hidden from
+      lists but can be restored.
+    command: memory archive-workspace
+    usage: memory archive-workspace <name> [--restore]
     params:
       required:
       - name
       optional:
       - restore
   - name: createState
-    description: createState operation
+    description: Create a state with restoration context for later resumption
+    command: memory create-state
+    usage: memory create-state <name> <conversationContext> <activeTask> --active-files
+      <activeFiles> --next-steps <nextSteps> [--tags <tags>]
     params:
       required:
       - name
@@ -74,7 +265,12 @@ tools:
       optional:
       - tags
   - name: createWorkspace
-    description: createWorkspace operation
+    description: Create a new workspace with structured context data
+    command: memory create-workspace
+    usage: memory create-workspace <name> <description> <rootFolder> <purpose> [--workflows
+      <workflows>] [--key-files <keyFiles>] [--preferences <preferences>] [--dedicated-agent-id
+      <dedicatedAgentId>] [--related-folders <relatedFolders>] [--related-files <relatedFiles>]
+      [--key-file-instructions <keyFileInstructions>]
     params:
       required:
       - name
@@ -90,7 +286,10 @@ tools:
       - relatedFiles
       - keyFileInstructions
   - name: listStates
-    description: listStates operation
+    description: List states with optional filtering and sorting
+    command: memory list-states
+    usage: memory list-states [--include-archived] [--tags <tags>] [--page <page>]
+      [--page-size <pageSize>] [--order <order>]
     params:
       required: []
       optional:
@@ -100,7 +299,10 @@ tools:
       - pageSize
       - order
   - name: listWorkspaces
-    description: listWorkspaces operation
+    description: List available workspaces with filters and sorting
+    command: memory list-workspaces
+    usage: memory list-workspaces [--include-archived] [--sort-by <sortBy>] [--order
+      <order>] [--limit <limit>]
     params:
       required: []
       optional:
@@ -109,23 +311,44 @@ tools:
       - order
       - limit
   - name: loadState
-    description: loadState operation
+    description: Load a saved state and optionally create a continuation session with
+      restored context
+    command: memory load-state
+    usage: memory load-state <name>
     params:
       required:
       - name
       optional: []
   - name: loadWorkspace
-    description: loadWorkspace operation
+    description: Load a workspace by ID and restore context and state
+    command: memory load-workspace
+    usage: memory load-workspace <id> [--limit <limit>] [--recursive]
     params:
       required:
       - id
       optional:
       - limit
-  - name: updateWorkspace
-    description: updateWorkspace operation
+      - recursive
+  - name: runWorkflow
+    description: Run a workflow immediately and create a fresh conversation for it.
+    command: memory run-workflow
+    usage: memory run-workflow [--workflow-id <workflowId>] [--workflow-name <workflowName>]
+      [--open-in-chat]
     params:
-      required:
-      - workspaceId
+      required: []
+      optional:
+      - workflowId
+      - workflowName
+      - openInChat
+  - name: updateWorkspace
+    description: Update workspace properties. Pass only fields to change - others
+      remain unchanged.
+    command: memory update-workspace
+    usage: memory update-workspace [--name <name>] [--description <description>] [--root-folder
+      <rootFolder>] [--purpose <purpose>] [--workflows <workflows>] [--key-files <keyFiles>]
+      [--preferences <preferences>] [--dedicated-agent-id <dedicatedAgentId>]
+    params:
+      required: []
       optional:
       - name
       - description
@@ -134,15 +357,21 @@ tools:
       - workflows
       - keyFiles
       - preferences
+      - dedicatedAgentId
   promptManager:
   - name: archivePrompt
-    description: archivePrompt operation
+    description: Archive a custom prompt by disabling it (preserves configuration
+      for restoration)
+    command: prompt archive-prompt
+    usage: prompt archive-prompt <name>
     params:
       required:
       - name
       optional: []
   - name: createPrompt
-    description: createPrompt operation
+    description: Create a new custom prompt
+    command: prompt create-prompt
+    usage: prompt create-prompt <name> <description> <prompt> [--is-enabled]
     params:
       required:
       - name
@@ -151,14 +380,23 @@ tools:
       optional:
       - isEnabled
   - name: executePrompts
-    description: executePrompts operation
+    description: 'Execute one or more LLM prompts. For single: pass one item. For
+      multiple: supports sequencing (sequence: 0,1,2), parallel groups, and result
+      forwarding (includePreviousResults: true).'
+    command: prompt execute-prompts
+    usage: prompt execute-prompts --prompts <prompts> [--merge-responses]
     params:
       required:
       - prompts
       optional:
       - mergeResponses
   - name: generateImage
-    description: generateImage operation
+    description: Generate images using Google Nano Banana models (direct or via OpenRouter).
+      Supports reference images for style/composition guidance.
+    command: prompt generate-image
+    usage: prompt generate-image <prompt> [--provider <provider>] [--model <model>]
+      [--aspect-ratio <aspectRatio>] [--number-of-images <numberOfImages>] [--image-size
+      <imageSize>] [--reference-images <referenceImages>] <savePath>
     params:
       required:
       - prompt
@@ -171,26 +409,56 @@ tools:
       - imageSize
       - referenceImages
   - name: getPrompt
-    description: getPrompt operation
+    description: Get a custom prompt for persona adoption - does NOT execute tasks
+      automatically
+    command: prompt get-prompt
+    usage: prompt get-prompt [--id <id>] [--name <name>]
     params:
       required: []
       optional:
       - id
       - name
   - name: listModels
-    description: listModels operation
+    description: List available LLM models grouped by provider
+    command: prompt list-models
+    usage: prompt list-models
     params:
       required: []
       optional: []
   - name: listPrompts
-    description: listPrompts operation
+    description: List all custom prompts
+    command: prompt list-prompts
+    usage: prompt list-prompts [--enabled-only] [--include-archived]
     params:
       required: []
       optional:
       - enabledOnly
       - includeArchived
   - name: subagent
-    description: subagent operation
+    description: 'Spawn an autonomous subagent to work on a task in the background.
+
+
+      The subagent runs independently, using tools as needed, until it completes.
+
+      Results appear as a tool result when the subagent finishes.
+
+
+      Use for:
+
+      - Deep research tasks requiring multiple searches
+
+      - Analysis tasks that need file reading and processing
+
+      - Complex operations you want to run in parallel
+
+
+      The subagent has access to all tools via getTools.
+
+
+      To continue a subagent that hit max iterations, provide continueBranchId.'
+    command: prompt sub
+    usage: prompt sub <task> [-- <agent>] [--tools <tools>] [--context-files <contextFiles>]
+      [--max-iterations <maxIterations>] [--continue-branch-id <continueBranchId>]
     params:
       required:
       - task
@@ -201,7 +469,10 @@ tools:
       - maxIterations
       - continueBranchId
   - name: updatePrompt
-    description: updatePrompt operation
+    description: Update an existing custom prompt
+    command: prompt update-prompt
+    usage: prompt update-prompt <id> [--name <name>] [--description <description>]
+      [--prompt <prompt>] [--is-enabled]
     params:
       required:
       - id
@@ -212,7 +483,14 @@ tools:
       - isEnabled
   searchManager:
   - name: searchContent
-    description: searchContent operation
+    description: Search vault files. Set semantic=true for AI-powered conceptual search
+      using local embeddings (best for concepts/related ideas), or semantic=false
+      for keyword/fuzzy search (best for exact matches). Semantic search is desktop-only
+      and becomes available once the embedding system initializes in the background
+      (first run may take longer while the model downloads).
+    command: search search-content
+    usage: search search-content <query> [--semantic] [--limit <limit>] [--include-content]
+      [--snippet-length <snippetLength>] [--paths <paths>]
     params:
       required:
       - query
@@ -223,7 +501,14 @@ tools:
       - snippetLength
       - paths
   - name: searchDirectory
-    description: searchDirectory operation
+    description: 'FOCUSED directory search with REQUIRED paths parameter. Search for
+      files and/or folders within specific directory paths using fuzzy matching and
+      optional workspace context. Requires: query (search terms) and paths (directory
+      paths to search - cannot be empty).'
+    command: search search-directory
+    usage: search search-directory <query> --paths <paths> [--search-type <searchType>]
+      [--file-types <fileTypes>] [--depth <depth>] [--pattern <pattern>] [--date-range
+      <dateRange>] [--limit <limit>] [--include-content]
     params:
       required:
       - query
@@ -237,26 +522,61 @@ tools:
       - limit
       - includeContent
   - name: searchMemory
-    description: searchMemory operation
+    description: 'Search workspace memory for past conversations, tool execution history,
+      and workspace state snapshots.
+
+
+      TWO MODES:
+
+      - Discovery (default): Search all memory across a workspace. Best for finding
+      past discussions, tool usage, or workspace context.
+
+      - Scoped (provide sessionId): Search within a specific session and get surrounding
+      message context around each match. Best for recovering what happened in a particular
+      session.
+
+
+      TIPS:
+
+      - Use natural language queries for conversations (e.g., "how did we implement
+      auth?").
+
+      - Use specific terms for tool history (e.g., agent or tool names).
+
+      - Narrow results with memoryTypes if you know what you''re looking for.
+
+      - Use sessionId + windowSize to get full context around a match.
+
+
+      REQUIRES: query. Optional: workspaceId (defaults to global workspace if omitted;
+      available from your useTools context, or use MemoryManager listWorkspaces).'
+    command: search search-memory
+    usage: search search-memory <query> [--memory-types <memoryTypes>] [--window-size
+      <windowSize>] [--date-range <dateRange>] [--limit <limit>] [--tool-call-filters
+      <toolCallFilters>] [--search-method <searchMethod>]
     params:
       required:
       - query
-      - workspaceId
       optional:
       - memoryTypes
+      - windowSize
       - dateRange
       - limit
       - toolCallFilters
       - searchMethod
   storageManager:
   - name: archive
-    description: archive operation
+    description: Safely archive a file or folder (moves to .archive/ with timestamp)
+    command: storage archive
+    usage: storage archive <path>
     params:
       required:
       - path
       optional: []
   - name: copy
-    description: copy operation
+    description: Duplicate a file
+    command: storage copy
+    usage: storage copy <path> <newPath> [--overwrite]
     params:
       required:
       - path
@@ -264,20 +584,26 @@ tools:
       optional:
       - overwrite
   - name: createFolder
-    description: createFolder operation
+    description: Create a new folder in the vault
+    command: storage create-folder
+    usage: storage create-folder <path>
     params:
       required:
       - path
       optional: []
   - name: list
-    description: list operation
+    description: List contents of a directory
+    command: storage list
+    usage: storage list [--path <path>] [--filter <filter>]
     params:
       required: []
       optional:
       - path
       - filter
   - name: move
-    description: move operation
+    description: Move or rename a file or folder
+    command: storage move
+    usage: storage move <path> <newPath> [--overwrite]
     params:
       required:
       - path
@@ -285,15 +611,260 @@ tools:
       optional:
       - overwrite
   - name: open
-    description: open operation
+    description: Open a file in the editor
+    command: storage open
+    usage: storage open <path> [--mode <mode>] [--focus]
     params:
       required:
       - path
       optional:
       - mode
       - focus
+  taskManager:
+  - name: archiveProject
+    description: Archive a project by setting its status to 'archived' (soft-delete).
+      The project and its tasks remain queryable but are excluded from active listings.
+      Requires a projectId (from createProject or listProjects).
+    command: task archive-project
+    usage: task archive-project <projectId>
+    params:
+      required:
+      - projectId
+      optional: []
+  - name: createProject
+    description: Create a new project within a workspace. Projects organize tasks
+      and must have a unique name per workspace. Requires a workspaceId (from loadWorkspace
+      or createWorkspace). Returns the new projectId.
+    command: task create-project
+    usage: task create-project <name> [--description <description>] [--metadata <metadata>]
+    params:
+      required:
+      - name
+      optional:
+      - description
+      - metadata
+  - name: createTask
+    description: Create a task within a project. Requires a projectId (from createProject
+      or listProjects). Supports optional priority (critical/high/medium/low), assignee,
+      dueDate, tags, dependsOn[] for DAG edges (cycles rejected), parentTaskId for
+      subtask nesting, and linkedNotes[] for vault note links. Returns the new taskId.
+    command: task create-task
+    usage: task create-task <projectId> <title> [--description <description>] [--parent-task-id
+      <parentTaskId>] [--priority <priority>] [--due-date <dueDate>] [--assignee <assignee>]
+      [--tags <tags>] [--depends-on <dependsOn>] [--linked-notes <linkedNotes>] [--metadata
+      <metadata>]
+    params:
+      required:
+      - projectId
+      - title
+      optional:
+      - description
+      - parentTaskId
+      - priority
+      - dueDate
+      - assignee
+      - tags
+      - dependsOn
+      - linkedNotes
+      - metadata
+  - name: linkNote
+    description: 'Create or remove a bidirectional link between a vault note and a
+      task. Link types: reference (related note), output (task produces this note),
+      input (task consumes this note). Use action=unlink to remove an existing link.'
+    command: task link-note
+    usage: task link-note <taskId> <notePath> [--link-type <linkType>] [--action <action>]
+    params:
+      required:
+      - taskId
+      - notePath
+      optional:
+      - linkType
+      - action
+  - name: listProjects
+    description: List projects in a workspace with optional status filter (active/completed/archived).
+      Returns paginated project objects with id, name, description, status, and timestamps.
+      Use to discover projectIds for task operations.
+    command: task list-projects
+    usage: task list-projects [--status <status>] [--page <page>] [--page-size <pageSize>]
+    params:
+      required: []
+      optional:
+      - status
+      - page
+      - pageSize
+  - name: listTasks
+    description: List tasks in a project with optional filters for status (todo/in_progress/done/cancelled),
+      priority, assignee, and parentTaskId. Returns paginated task objects with full
+      metadata including dependencies and timestamps.
+    command: task list-tasks
+    usage: task list-tasks <projectId> [--status <status>] [--priority <priority>]
+      [--assignee <assignee>] [--parent-task-id <parentTaskId>] [--include-subtasks]
+      [--sort-by <sortBy>] [--sort-order <sortOrder>] [--page <page>] [--page-size
+      <pageSize>]
+    params:
+      required:
+      - projectId
+      optional:
+      - status
+      - priority
+      - assignee
+      - parentTaskId
+      - includeSubtasks
+      - sortBy
+      - sortOrder
+      - page
+      - pageSize
+  - name: moveTask
+    description: Move a task to a different project within the same workspace, or
+      change its parent task (set parentTaskId to nest as subtask, null to make top-level).
+      Requires a taskId (from createTask or listTasks).
+    command: task move-task
+    usage: task move-task <taskId> [--project-id <projectId>] [--parent-task-id <parentTaskId>]
+    params:
+      required:
+      - taskId
+      optional:
+      - projectId
+      - parentTaskId
+  - name: openTasks
+    description: Open the native Task Board workspace view in Obsidian. Optional filters
+      let you preselect a workspace, project, or search query before the board is
+      shown.
+    command: task open-tasks
+    usage: task open-tasks [--project-id <projectId>] [--search <search>] [--mode
+      <mode>]
+    params:
+      required: []
+      optional:
+      - projectId
+      - search
+      - mode
+  - name: queryTasks
+    description: 'DAG-aware queries on a project''s tasks. Three query types: nextActions
+      returns tasks ready to start (status=todo and all dependencies done), blockedTasks
+      returns tasks waiting on incomplete dependencies with their blocker details,
+      dependencyTree returns the full upstream/downstream dependency graph for a specific
+      task. Requires projectId; dependencyTree also requires taskId.'
+    command: task query-tasks
+    usage: task query-tasks <projectId> <query> [--task-id <taskId>]
+    params:
+      required:
+      - projectId
+      - query
+      optional:
+      - taskId
+  - name: updateProject
+    description: Update a project's name, description, status (active/completed/archived),
+      or custom metadata. Requires a projectId (from createProject or listProjects).
+    command: task update-project
+    usage: task update-project <projectId> [--name <name>] [--description <description>]
+      [--status <status>] [--metadata <metadata>]
+    params:
+      required:
+      - projectId
+      optional:
+      - name
+      - description
+      - status
+      - metadata
+  - name: updateTask
+    description: Update task fields (title, description, status, priority, dueDate,
+      assignee, tags), manage DAG dependencies (addDependencies/removeDependencies),
+      and manage note links (addNoteLinks/removeNoteLinks). Dependency additions are
+      validated for cycles. Requires a taskId (from createTask or listTasks).
+    command: task update-task
+    usage: task update-task <taskId> [--title <title>] [--description <description>]
+      [--status <status>] [--priority <priority>] [--due-date <dueDate>] [--assignee
+      <assignee>] [--tags <tags>] [--add-dependencies <addDependencies>] [--remove-dependencies
+      <removeDependencies>] [--add-note-links <addNoteLinks>] [--remove-note-links
+      <removeNoteLinks>] [--metadata <metadata>]
+    params:
+      required:
+      - taskId
+      optional:
+      - title
+      - description
+      - status
+      - priority
+      - dueDate
+      - assignee
+      - tags
+      - addDependencies
+      - removeDependencies
+      - addNoteLinks
+      - removeNoteLinks
+      - metadata
+  webTools:
+  - name: capturePagePdf
+    description: Print the current Web Viewer page to PDF and save it to the vault.
+      Desktop only.
+    command: web-tools capture-page-pdf
+    usage: web-tools capture-page-pdf [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms
+      <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required:
+      - outputPath
+      optional:
+      - url
+      - mode
+      - timeoutMs
+      - settleMs
+  - name: capturePagePng
+    description: Capture the current Web Viewer page as a PNG image and save it to
+      the vault. Desktop only.
+    command: web-tools capture-page-png
+    usage: web-tools capture-page-png [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms
+      <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required:
+      - outputPath
+      optional:
+      - url
+      - mode
+      - timeoutMs
+      - settleMs
+  - name: captureToMarkdown
+    description: Save the active Web Viewer page to the vault as Markdown using Obsidian
+      Web Viewer. Desktop only.
+    command: web-tools capture-to-markdown
+    usage: web-tools capture-to-markdown [--url <url>] [--mode <mode>] <outputPath>
+      [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required:
+      - outputPath
+      optional:
+      - url
+      - mode
+      - timeoutMs
+      - settleMs
+  - name: extractLinks
+    description: Extract links from the current Web Viewer page. Desktop only.
+    command: web-tools extract-links
+    usage: web-tools extract-links [--url <url>] [--mode <mode>] [--max-links <maxLinks>]
+      [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required: []
+      optional:
+      - url
+      - mode
+      - maxLinks
+      - timeoutMs
+      - settleMs
+  - name: openWebpage
+    description: Open a webpage in Obsidian Web Viewer. Desktop only.
+    command: web-tools open-webpage
+    usage: web-tools open-webpage <url> [--mode <mode>] [--focus] [--timeout-ms <timeoutMs>]
+      [--settle-ms <settleMs>]
+    params:
+      required:
+      - url
+      optional:
+      - mode
+      - focus
+      - timeoutMs
+      - settleMs
 validation:
-  context_required: true
+  wrapper_required: true
   allow_unknown_tools: false
   allow_extra_params: true
   path_patterns:

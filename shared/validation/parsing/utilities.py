@@ -70,3 +70,51 @@ def fix_json_newlines(json_str: str) -> str:
         i += 1
 
     return ''.join(result)
+
+
+def repair_truncated_json(json_str: str) -> str:
+    """Best-effort repair for truncated JSON by closing strings/braces/brackets.
+
+    This is intentionally conservative: it only tries to recover outputs that
+    are structurally under-closed at the end, which is a common failure mode in
+    model-generated tool arguments.
+    """
+    s = fix_json_newlines(json_str)
+    result = []
+    stack = []
+    in_string = False
+    escape_next = False
+
+    for char in s:
+        result.append(char)
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\":
+            escape_next = True
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in "}]":
+            if stack and stack[-1] == char:
+                stack.pop()
+
+    if in_string:
+        result.append('"')
+
+    while stack:
+        result.append(stack.pop())
+
+    return "".join(result)

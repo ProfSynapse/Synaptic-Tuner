@@ -5,7 +5,7 @@
 scenarios:
   envfs_update_config_note:
     type: tool
-    tool: contentManager_update
+    tool: contentManager_replace
     environment_mode: generated
     system_template: mocked_workspace_vault
     rubrics:
@@ -84,7 +84,7 @@ scenarios:
         Use the generated workspace context. The response should use useTools with:
         - searchManager.searchContent first
         - contentManager.read next
-        - contentManager.update last
+        - contentManager.replace last
 
         Return:
         {
@@ -95,13 +95,13 @@ scenarios:
             "function": {
               "name": "useTools",
               "arguments": {
-                "context": {
-                  "sessionId": "<from system prompt>",
-                  "workspaceId": "<from system prompt>",
-                  "memory": "<brief state>",
-                  "goal": "<goal>"
-                },
-                "calls": [...]
+                "workspaceId": "<from system prompt>",
+                "sessionId": "<from system prompt>",
+                "memory": "<brief state>",
+                "goal": "<find the production config note, read it, and replace only the target value>",
+                "constraints": "<preserve surrounding content and do not modify unrelated files>",
+                "tool": "search search-content \"<search text>\" --paths \"[\\\"\\\"]\" --limit 10, content read \"<path>\" 1, content replace --path \"<path>\" --old-content \"<old text>\" --new-content \"<new text>\" --start-line <n> --end-line <n>",
+                "strategy": "serial"
               }
             }
           }]
@@ -174,4 +174,28 @@ scenarios:
         - storageManager.list first
         - storageManager.archive second
 
-        Return OpenAI-style tool_calls JSON only.
+        Return exactly one JSON object with top-level keys "content" and "tool_calls".
+        The single tool call must use function.name = "useTools" and a top-level
+        CLI-style arguments payload with workspaceId, sessionId, memory, goal,
+        constraints, tool, and optional strategy.
+
+        Example shape:
+        {
+          "content": null,
+          "tool_calls": [{
+            "id": "call_xxx",
+            "type": "function",
+            "function": {
+              "name": "useTools",
+              "arguments": {
+                "workspaceId": "<from system prompt>",
+                "sessionId": "<from system prompt>",
+                "memory": "<brief state>",
+                "goal": "<verify the target folder is empty and archive it safely>",
+                "constraints": "<do not touch unrelated folders>",
+                "tool": "storage list \"Projects/<folder>\", storage archive \"Projects/<folder>\"",
+                "strategy": "serial"
+              }
+            }
+          }]
+        }

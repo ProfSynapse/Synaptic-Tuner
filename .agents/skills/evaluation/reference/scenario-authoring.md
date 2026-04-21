@@ -236,9 +236,9 @@ Tests whether the model calls the correct tool:
 ### Tool Tags
 - `storageManager` — File operations (move, delete, create)
 - `contentManager` — Content editing
-- `vaultLibrarian` — Search operations
+- `searchManager` — Search operations
 - `memoryManager` — Session/workspace management
-- `agentManager` — Agent CRUD operations
+- `promptManager` — Prompt CRUD and delegated execution
 
 ---
 

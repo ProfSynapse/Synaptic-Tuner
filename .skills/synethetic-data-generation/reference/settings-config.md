@@ -145,7 +145,8 @@ defaults:
     storageManager_move: 30
     storageManager_list: 40
     contentManager_write: 40
-    contentManager_update: 30
+    contentManager_replace: 20
+    contentManager_setProperty: 10
     promptManager_executePrompts: 25
 
     # Content writing
@@ -162,6 +163,11 @@ defaults:
     context_continuity: 20
     strategic_tool_selection: 20
 ```
+
+For repeatable smoke tests, prefer checked-in target manifests rather than editing `defaults.targets` or passing inline JSON. Current examples in this repo include:
+
+- `SynthChat/config/targets_cli_existing_tools_quickcheck.json`
+- `SynthChat/config/targets_cli_existing_tools_representative.json`
 
 ---
 

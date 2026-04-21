@@ -51,16 +51,16 @@ judge_prompt: '## Tool Alignment Check
 
   Thinking goal: "Read config.yaml"
 
-  BAD tool: contentManager_deleteContent with filePath: "config.yaml"
+  BAD tool: contentManager_replace with path: "config.yaml"
 
-  GOOD tool: contentManager_readContent with filePath: "config.yaml"
+  GOOD tool: contentManager_read with path: "config.yaml"
 
 
   Thinking goal: "Append to log.md"
 
-  BAD tool: contentManager_replaceContent
+  BAD tool: contentManager_replace
 
-  GOOD tool: contentManager_appendContent
+  GOOD tool: contentManager_insert with startLine: -1
 
 
   **Note:** If thinking is about file X but tool uses file Y, that''s misalignment

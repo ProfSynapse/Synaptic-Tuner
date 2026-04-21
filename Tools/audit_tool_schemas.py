@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Audit tool schemas and test cases.
+Audit CLI-first tool schemas and regenerate evaluator config.
 
 This script:
 1. Parses tool-schemas.json (source of truth)
-2. Compares against tool_schema.yaml and shows differences
-3. Generates corrected tool_schema.yaml
+2. Compares against Evaluator/config/tool_schema.yaml
+3. Generates corrected Evaluator/config/tool_schema_corrected.yaml
 4. Audits test case questions for non-existent params
 """
 
@@ -45,41 +45,42 @@ def extract_tools_from_json_schema(schemas: Dict[str, Any]) -> Dict[str, Dict[st
     """
     tools = {}
 
-    # Tools are nested under the "tools" key in the schema
-    tools_section = schemas.get("tools", {})
-    for tool_name, schema in tools_section.items():
-        # Parse tool name: agentManager_createAgent -> (agentManager, createAgent)
-        parts = tool_name.split("_", 1)
-        if len(parts) != 2:
+    for item in schemas.get("tools", []):
+        if not isinstance(item, dict):
             continue
 
-        agent, tool = parts
+        agent = str(item.get("agent", "")).strip()
+        tool = str(item.get("tool", "")).strip()
+        if not agent or not tool:
+            continue
 
-        # Extract params from the schema
-        # Each tool schema has properties and required at top level
-        try:
-            properties = schema.get("properties", {})
-            required = schema.get("required", [])
+        arguments = item.get("arguments", []) or []
+        required = [arg["name"] for arg in arguments if isinstance(arg, dict) and arg.get("required")]
+        all_params = [arg["name"] for arg in arguments if isinstance(arg, dict) and arg.get("name")]
+        optional = [name for name in all_params if name not in required]
 
-            all_params = list(properties.keys())
-            optional = [p for p in all_params if p not in required]
-
-            tools[tool_name] = {
-                "agent": agent,
-                "tool": tool,
-                "required": required,
-                "optional": optional,
-                "all_params": all_params,
-                "param_details": {
-                    name: {
-                        "type": props.get("type", "any"),
-                        "description": props.get("description", ""),
-                    }
-                    for name, props in properties.items()
+        tool_name = f"{agent}_{tool}"
+        tools[tool_name] = {
+            "agent": agent,
+            "tool": tool,
+            "description": item.get("description", f"{tool} operation"),
+            "command": item.get("command", ""),
+            "usage": item.get("usage", ""),
+            "required": required,
+            "optional": optional,
+            "all_params": all_params,
+            "param_details": {
+                arg["name"]: {
+                    "type": arg.get("type", "any"),
+                    "description": arg.get("description", ""),
+                    "flag": arg.get("flag"),
+                    "positional": bool(arg.get("positional")),
+                    "required": bool(arg.get("required")),
                 }
+                for arg in arguments
+                if isinstance(arg, dict) and arg.get("name")
             }
-        except (KeyError, TypeError) as e:
-            print(f"Warning: Could not parse {tool_name}: {e}")
+        }
 
     return tools
 
@@ -144,11 +145,37 @@ def compare_with_yaml(json_tools: Dict, yaml_config: Dict) -> List[str]:
 def generate_corrected_yaml(json_tools: Dict, original_yaml: Dict) -> str:
     """Generate corrected tool_schema.yaml content."""
 
-    # Keep the tool_format and validation sections from original
     output = {
-        "tool_format": original_yaml.get("tool_format", {}),
+        "tool_format": {
+            "wrapper": "useTools",
+            "wrapper_structure": {
+                "top_level_fields": {
+                    "required": ["workspaceId", "sessionId", "memory", "goal", "tool"],
+                    "optional": ["constraints", "strategy"],
+                },
+                "cli": {
+                    "field": "tool",
+                    "separator": ",",
+                    "quoting": "shell",
+                },
+                "batch": {
+                    "enabled": True,
+                    "default_strategy": "serial",
+                    "strategy_field": "strategy",
+                    "valid_strategies": ["serial", "parallel"],
+                },
+            },
+        },
         "tools": {},
-        "validation": original_yaml.get("validation", {}),
+        "validation": {
+            "wrapper_required": True,
+            "allow_unknown_tools": False,
+            "allow_extra_params": True,
+            "path_patterns": original_yaml.get("validation", {}).get("path_patterns", {
+                "valid": r"^[\w\-./]+$",
+                "invalid_chars": ["<", ">", ":", "\"", "|", "?", "*"],
+            }),
+        },
     }
 
     # Group tools by agent
@@ -165,9 +192,9 @@ def generate_corrected_yaml(json_tools: Dict, original_yaml: Dict) -> str:
         for tool_info in sorted(by_agent[agent], key=lambda x: x["tool"]):
             tool_entry = {
                 "name": tool_info["tool"],
-                "description": tool_info["param_details"].get(
-                    tool_info["tool"], {}
-                ).get("description", f"{tool_info['tool']} operation"),
+                "description": tool_info["description"],
+                "command": tool_info.get("command", ""),
+                "usage": tool_info.get("usage", ""),
                 "params": {
                     "required": tool_info["required"],
                     "optional": tool_info["optional"],
@@ -326,7 +353,7 @@ def main():
     with open(output_yaml_path, 'w') as f:
         f.write("# Tool Schema Configuration (AUTO-GENERATED from tool-schemas.json)\n")
         f.write("# Source of truth: tool-schemas.json\n")
-        f.write("# Do not edit manually - regenerate with: python Tools/audit_tool_schemas.py\n\n")
+        f.write("# Do not edit manually - regenerate with: python tools/audit_tool_schemas.py\n\n")
         f.write(corrected_yaml)
 
     print(f"  Written to: {output_yaml_path}")
