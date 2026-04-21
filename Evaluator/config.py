@@ -127,6 +127,25 @@ def _env_vllm_port() -> int:
     return _env_int("VLLM_PORT", 8000)
 
 
+def _env_ollama_scheme() -> str:
+    return _env_str("OLLAMA_SCHEME", "http")
+
+
+def _env_lmstudio_scheme() -> str:
+    return _env_str("LMSTUDIO_SCHEME", "http")
+
+
+def _env_vllm_scheme() -> str:
+    return _env_str("VLLM_SCHEME", "http")
+
+
+def _env_vllm_api_key() -> str | None:
+    token = os.getenv("VLLM_API_KEY")
+    if token is not None:
+        token = token.strip()
+    return token or os.getenv("HF_TOKEN")
+
+
 # ---------------------------------------------------------------------------
 # Backend Settings Classes
 # ---------------------------------------------------------------------------
@@ -149,6 +168,9 @@ class BaseBackendSettings(ABC):
     """
 
     model: str
+    scheme: str = field(default="http")
+    api_key: str | None = field(default=None)
+    auth_scheme: str = field(default="Bearer")
     host: str = field(default="127.0.0.1")
     port: int = field(default=0)
     temperature: float = 0.2
@@ -158,7 +180,10 @@ class BaseBackendSettings(ABC):
 
     def base_url(self) -> str:
         """Return the base URL for the backend API."""
-        return f"http://{self.host}:{self.port}"
+        default_port = (self.scheme == "http" and self.port == 80) or (self.scheme == "https" and self.port == 443)
+        if default_port:
+            return f"{self.scheme}://{self.host}"
+        return f"{self.scheme}://{self.host}:{self.port}"
 
 
 @dataclass
@@ -170,6 +195,7 @@ class OllamaSettings(BaseBackendSettings):
     - OLLAMA_PORT: Server port (default: 11434)
     """
 
+    scheme: str = field(default_factory=_env_ollama_scheme)
     host: str = field(default_factory=_env_ollama_host)
     port: int = field(default_factory=_env_ollama_port)
 
@@ -198,6 +224,7 @@ class LMStudioSettings(BaseBackendSettings):
     Check LM Studio's server panel for the current address.
     """
 
+    scheme: str = field(default_factory=_env_lmstudio_scheme)
     host: str = field(default_factory=_env_lmstudio_host)
     port: int = field(default_factory=_env_lmstudio_port)
 
@@ -219,6 +246,8 @@ class VLLMSettings(BaseBackendSettings):
         gpu_memory_utilization: GPU memory fraction (0.0-1.0, default 0.9)
     """
 
+    scheme: str = field(default_factory=_env_vllm_scheme)
+    api_key: str | None = field(default_factory=_env_vllm_api_key)
     host: str = field(default_factory=_env_vllm_host)
     port: int = field(default_factory=_env_vllm_port)
     model_path: Optional[str] = None

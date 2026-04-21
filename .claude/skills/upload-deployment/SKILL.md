@@ -57,6 +57,7 @@ Load the specific reference you need:
 | **Upload Workflow** | Uploading to HuggingFace, full process | `reference/upload-workflow.md` |
 | **GGUF Conversion** | Creating GGUF files, quantization options | `reference/gguf-conversion.md` |
 | **Model Merging** | Merging LoRA into base, preparing for GRPO | `reference/model-merging.md` |
+| **Local Mac GGUF Workflow** | Pull from HF bucket, merge locally on macOS, create GGUF, and place into LM Studio/Ollama | `reference/local-mac-bucket-to-gguf.md` |
 | **Model Cards** | Documentation, lineage, manifests | `reference/model-cards.md` |
 | **Cloud Training** | Provider-native storage, optional final-model publish, artifact discovery | `../fine-tuning/reference/cloud-training.md` |
 
@@ -138,6 +139,12 @@ HF_TOKEN=hf_...                       # Required for uploads
 - Always use `merged_16bit` as the source for GGUF conversion (best quality)
 - The reliable GGUF converter merges LoRA once, then creates all quants (~10 min saved)
 - Vision-language models auto-get an `mmproj.gguf` for the vision projector
+- On macOS, bucket-backed cloud adapters are often easiest to handle one model at a time: pull the `final_model`, merge locally, create the quant you actually need first, then clean temp files before moving to the next model
+- If the local machine lacks `unsloth`, a plain `transformers` + `peft` merge venv is an acceptable fallback for text models before llama.cpp conversion
+- For merged local models, call the lower-level llama.cpp conversion path directly; the current reliable converter's top-level `convert()` flow assumes it starts from a LoRA adapter
+- LM Studio on this repo owner's Mac uses `~/.lmstudio/models/<publisher>/<model-folder>/`; placing the `.gguf` there plus an optional `config.json` is enough for local testing after refresh/restart
+- Qwen 3.5 adapters may need a `ConditionalGeneration` merge path instead of `AutoModelForCausalLM`; if the adapter keys live under `language_model.*`, inspect the base architecture before merging
+- If `llama.cpp` says a merged model architecture is unsupported, update the local `Trainers/llama.cpp` checkout before retrying conversion; newer model families are often converter-gated rather than merge-gated
 - On WSL, temp files use native filesystem to avoid NTFS performance issues
 - `training_lineage.json` is auto-generated — includes model, LoRA, dataset, hardware info
 - Use `upload_manifest.json` to verify what was uploaded

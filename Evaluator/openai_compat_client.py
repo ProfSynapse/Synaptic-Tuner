@@ -128,7 +128,7 @@ class OpenAICompatClient(BaseBackendClient):
         url = f"{self.settings.base_url()}/v1/models"
 
         def fetch_models() -> List[str]:
-            response = requests.get(url, timeout=self.timeout)
+            response = requests.get(url, timeout=self.timeout, headers=self._request_headers())
             response.raise_for_status()
             data = response.json()
             return extract_models_from_list(data)
@@ -146,7 +146,7 @@ class OpenAICompatClient(BaseBackendClient):
         """
         try:
             url = f"{self.settings.base_url()}/v1/models"
-            response = requests.get(url, timeout=5)
+            response = requests.get(url, timeout=5, headers=self._request_headers())
             return response.status_code == 200
         except requests.RequestException:
             return False

@@ -149,3 +149,28 @@ For `a100-large` experiments, the default should be aggressive packing, not cons
 
 - When the user asks to mirror the "latest" experiment, check whether they mean the latest attempt or the latest completed baseline.
 - For A100 packing, a newer failed smoke run can still be the right source for batch shape if it exercised the hardware more realistically than an older underpacked completed run.
+
+## Warm Iteration Strategy
+
+HF Jobs are still the right default for recorded train/eval artifacts, but they are not a warm compute pool. If repeated eval/debug retries are dominated by:
+- repulling the same model artifacts
+- reinstalling the same runtime packages
+- reproing the same vLLM startup issue
+
+then switch the iteration loop to a Docker GPU Space with persistent storage instead of repeatedly submitting new HF Jobs.
+
+The checked-in reusable CLI for this path is:
+
+```bash
+python3 Trainers/cloud/scripts/manage_space.py deploy \
+  --space-id <user>/<space> \
+  --template vllm_warm \
+  --base-image ghcr.io/<org>/<image>:<tag> \
+  --hardware a10g-small \
+  --sleep-time 3600 \
+  --var BASE_MODEL=<model>
+```
+
+Use repeated `--var KEY=VALUE` and `--secret KEY=VALUE` flags to keep the Space generic instead of encoding model-specific behavior into the scaffold itself.
+
+For the full workflow and operational guidance, load `reference/hf-spaces-warm-iteration.md`.

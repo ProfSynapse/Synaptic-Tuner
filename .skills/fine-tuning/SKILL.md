@@ -38,6 +38,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Live HF job logs | `python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200` |
 | Cloud eval against a run | `python tuner.py cloud-eval --run latest --preset full` |
 | HF gym against trained model | `python tuner.py cloud-gym --run latest --method sft` |
+| Warm Space scaffold | `python3 Trainers/cloud/scripts/manage_space.py render --template vllm_warm --output-dir /tmp/my-space --base-image ghcr.io/<org>/<image>:<tag>` |
+| Warm Space deploy | `python3 Trainers/cloud/scripts/manage_space.py deploy --space-id <user>/<space> --template vllm_warm --base-image ghcr.io/<org>/<image>:<tag> --hardware a10g-small --sleep-time 3600 --var BASE_MODEL=<model>` |
 | ML training | `python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml` |
 
 ## Training Methods at a Glance

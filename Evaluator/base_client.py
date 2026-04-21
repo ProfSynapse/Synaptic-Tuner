@@ -81,11 +81,24 @@ class BaseBackendClient(ABC):
             BackendResponse with the result
         """
         start = time.perf_counter()
-        response = requests.post(url, json=payload, timeout=self.timeout)
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=self.timeout,
+            headers=self._request_headers(),
+        )
         response.raise_for_status()
         data = response.json()
         latency_s = time.perf_counter() - start
         return self._extract_response(data, latency_s)
+
+    def _request_headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        api_key = getattr(self.settings, "api_key", None)
+        auth_scheme = getattr(self.settings, "auth_scheme", "Bearer")
+        if api_key:
+            headers["Authorization"] = f"{auth_scheme} {api_key}"
+        return headers
 
     def _execute_with_retry(
         self,
