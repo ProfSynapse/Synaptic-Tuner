@@ -1,0 +1,42 @@
+---
+title: {{SPACE_TITLE}}
+emoji: {{SPACE_EMOJI}}
+colorFrom: {{COLOR_FROM}}
+colorTo: {{COLOR_TO}}
+sdk: docker
+app_port: {{APP_PORT}}
+pinned: false
+---
+
+# {{SPACE_TITLE}}
+
+Warm vLLM Space for repeated runtime and evaluation iteration.
+
+## Runtime
+
+- Base image: `{{BASE_IMAGE}}`
+- App port: `{{APP_PORT}}`
+- Template: `vllm_warm`
+
+## Recommended Variables
+
+- `BASE_MODEL`: base model to serve, for example `google/gemma-4-E4B-it`
+- `ADAPTER_BUCKET_URI`: optional adapter prefix, for example `hf://buckets/<bucket-id>/runs/.../final_model`
+- `GPU_MEMORY_UTILIZATION`: defaults to `0.85`
+- `LIMIT_MM_PER_PROMPT`: optional multimodal cap, for example `image=0 audio=0`
+- `VLLM_EXTRA_ARGS`: optional shell-style extra args passed through to vLLM
+- `LORA_MAX_RANK`: defaults to `64`
+- `LORA_MODULE_NAME`: defaults to `finetuned`
+- `VLLM_TENSOR_PARALLEL_SIZE`: optional tensor parallel size
+
+## Recommended Persistent Cache Variables
+
+- `HF_HOME=/data/.huggingface`
+- `PIP_CACHE_DIR=/data/.cache/pip`
+- `HF_HUB_ENABLE_HF_TRANSFER=1`
+
+## Notes
+
+- This Space is intended for warm iteration, not canonical experiment records.
+- Pause the Space when idle to avoid paying for unused GPU time.
+- Keep final tracked train/eval artifacts on HF Jobs.
