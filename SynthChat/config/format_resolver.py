@@ -21,41 +21,19 @@ _CONFIG_DIR = Path(__file__).parent
 # ---------------------------------------------------------------------------
 
 _DEFAULT_TOOL_CALL_FORMAT: Dict[str, Any] = {
-    "wrapper_name": "useTools",
+    "wrapper_name": None,
     "argument_fields": {
-        "required": ["sessionId", "workspaceId", "memory", "goal", "tool"],
-        "properties": {
-            "sessionId": {"type": "string", "minLength": 1},
-            "workspaceId": {"type": "string", "minLength": 1},
-            "memory": {"type": "string", "minLength": 1},
-            "goal": {"type": "string", "minLength": 1},
-            "constraints": {"type": "string", "minLength": 1},
-            "tool": {"type": "string", "minLength": 1},
-        },
+        "required": [],
+        "properties": {},
     },
-    "extra_argument_fields": {
-        "strategy": {
-            "type": "string",
-            "enum": ["serial", "parallel"],
-        },
-    },
-    "argument_required": ["sessionId", "workspaceId", "memory", "goal", "tool"],
+    "extra_argument_fields": {},
+    "argument_required": [],
     "generation_instructions": [
         "Return a single JSON object only.",
-        "Your job is to either call tools or respond via text.",
-        "If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'.",
+        "Use the configured tool-call format for this scenario.",
         "If no tool call is needed, respond with normal text in content and set tool_calls to null or [].",
-        "The function.arguments value must be a single JSON object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy.",
-        "The tool field must be a CLI command string, not a nested object.",
-        "Use CLI command names like 'storage move', 'content read', 'prompt execute-prompts', 'memory load-workspace', and 'search search-content'.",
-        "When multiple commands are needed, join them in the tool field as a comma-separated sequence.",
-        "Do not use context/calls wrappers, params objects, agent/tool arrays, or direct per-tool function names.",
-        "Good: {\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect notes.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}",
-        "Bad: {\"context\": {...}, \"calls\": [...]}, {\"tool_calls\": [...]}, or function.name='contentManager_read'",
-        "Use content as null when the response is tool-only.",
-        "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools.",
     ],
-    "available_tools_instruction": "Required wrapper context fields: {context_required_csv}.",
+    "available_tools_instruction": "Use the configured tool-call format for this scenario.",
 }
 
 _DEFAULT_LABEL_MAPPINGS: Dict[str, Any] = {
@@ -169,8 +147,7 @@ def resolve_tool_call_format(
     Priority:
     1. scenario["tool_call_format"] as inline dict -> deep-merge with default
     2. scenario["tool_call_format"] as string -> lookup in registry
-    3. scenario["tool_format"]["wrapper"] -> merge into default
-    4. "default" from registry
+    3. "default" from registry
     """
     default_format = formats_registry.get("default", _DEFAULT_TOOL_CALL_FORMAT)
     tcf = scenario.get("tool_call_format")
@@ -183,19 +160,6 @@ def resolve_tool_call_format(
         if named:
             return deepcopy(named)
         return deepcopy(default_format)
-
-    # Check legacy tool_format.wrapper field
-    tool_format = scenario.get("tool_format")
-    if isinstance(tool_format, dict):
-        wrapper = str(tool_format.get("wrapper") or "").strip()
-        context_required = tool_format.get("context", {}).get("required") if isinstance(tool_format.get("context"), dict) else None
-        if wrapper or context_required:
-            merged = deepcopy(default_format)
-            if wrapper:
-                merged["wrapper_name"] = wrapper
-            if isinstance(context_required, list) and context_required:
-                merged["context_fields"]["required"] = context_required
-            return merged
 
     return deepcopy(default_format)
 
@@ -260,7 +224,7 @@ def _default_workspace_format() -> Dict[str, Any]:
                     '- sessionId: "{session_id}"\n'
                     '- workspaceId: "{workspace_id}" (current workspace)\n'
                     "\n"
-                    'Include these as top-level fields in the useTools arguments payload.\n'
+                    "Include these in the tool-call context fields required by the active format.\n"
                 ),
             },
             {"tag": "vault_structure", "source": "vault_structure", "optional": True},

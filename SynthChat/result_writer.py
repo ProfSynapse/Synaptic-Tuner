@@ -141,10 +141,12 @@ def print_summary(results: List, output_file: Path):
     passed = sum(1 for r in results if r.success)
     failed = total - passed
     avg_iterations = sum(r.iterations for r in results) / total if total else 0
+    passed_pct = (passed / total * 100) if total else 0
+    failed_pct = (failed / total * 100) if total else 0
 
     print(f"\n=== Summary ===")
     print(f"Total generated: {total}")
-    print(f"Passed: {passed} ({passed / total * 100:.1f}%)")
-    print(f"Failed: {failed} ({failed / total * 100:.1f}%)")
+    print(f"Passed: {passed} ({passed_pct:.1f}%)")
+    print(f"Failed: {failed} ({failed_pct:.1f}%)")
     print(f"Avg iterations: {avg_iterations:.1f}")
     print(f"Output: {output_file}")

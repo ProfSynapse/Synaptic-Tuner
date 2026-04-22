@@ -4,7 +4,7 @@ Single Responsibility: ALL system_prompt scope logic.
 """
 
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from .base import ScopeHandler
 
 
@@ -43,7 +43,12 @@ class SystemPromptHandler(ScopeHandler):
 
         return improved
 
-    def build_prompt_variables(self, example: Dict, judgment: Dict) -> Dict:
+    def build_prompt_variables(
+        self,
+        example: Dict,
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """
         Build variables for system_prompt improvement template.
 

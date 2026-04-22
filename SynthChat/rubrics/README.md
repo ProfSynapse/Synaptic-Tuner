@@ -1,6 +1,12 @@
 # Rubric YAML Structure
 
-This document defines the structure for rubric YAML files in the improvement engine.
+This document defines the structure for rubric YAML files in the improvement
+engine.
+
+For active tool-calling workflows in this repo, rubrics should teach and
+validate the CLI-first `useTools` wrapper. Do not author new active rubrics
+around nested `context` + `calls` payloads or direct per-tool function names.
+Archive backward-compat-only rubrics instead of leaving them active.
 
 ## Overview
 
@@ -8,6 +14,11 @@ Rubrics are used to:
 1. **Validate** - Programmatically check structure (fields, tags, patterns)
 2. **Judge** - LLM evaluation of quality
 3. **Improve** - Generate better versions when quality is low
+
+For active tool rubrics, the default pattern is:
+- validate the top-level `useTools` wrapper shape
+- judge whether the CLI command string in `tool` matches the request
+- improve while preserving `function.name = "useTools"`
 
 ## Quick Start
 
@@ -35,6 +46,49 @@ output_schema:
     my_score:
       type: number
   required: [my_score]
+```
+
+### Active Tool Rubric Skeleton
+
+```yaml
+name: My Tool Rubric
+description: Validates CLI-first tool calls wrapped in useTools
+scope: response
+pass_threshold: 0.8
+
+judge_prompt: |
+  Evaluate whether the assistant response uses function.name = "useTools"
+  and whether the CLI command string in `tool` matches the user's request.
+  Return JSON: {"mytool_score": 0.0-1.0}
+
+improver_prompt: |
+  Convert the current response into a CLI-first `useTools` assistant message.
+  Keep wrapper fields at the top level of function.arguments and preserve
+  the OpenAI tool_calls structure.
+
+output_schema:
+  type: object
+  properties:
+    mytool_score:
+      type: number
+  required: [mytool_score]
+
+output_format:
+  type: assistant_message
+
+validations:
+  - tools:
+      useTools:
+        _required: [workspaceId, sessionId, memory, goal, tool]
+        _additionalProperties: false
+        workspaceId: string
+        sessionId: string
+        memory: string
+        goal: string
+        tool: string
+        constraints: string
+        strategy: string
+    error: "useTools validation failed: {details}"
 ```
 
 ## Validations

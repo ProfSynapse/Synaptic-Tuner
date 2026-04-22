@@ -61,16 +61,16 @@ class EvaluationContext:
 
     def _build_session_context(self) -> str:
         prompt = "<session_context>\n"
-        prompt += "IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:\n\n"
+        prompt += "IMPORTANT: When using tools, include these values in the tool-call context fields required by the active format:\n\n"
         prompt += f'- sessionId: "{self.session_id}"\n'
 
         if self.workspace_id == "default":
             prompt += '- workspaceId: "default" (no specific workspace selected)\n'
-            prompt += "\nInclude these at the top level of your useTools arguments.\n"
+            prompt += "\nInclude these in the tool-call context fields required by the active format.\n"
             prompt += "NOTE: Use \"default\" as the workspaceId when no specific workspace context is needed.\n"
         else:
             prompt += f'- workspaceId: "{self.workspace_id}" (current workspace)\n'
-            prompt += "\nInclude these at the top level of your useTools arguments.\n"
+            prompt += "\nInclude these in the tool-call context fields required by the active format.\n"
 
         prompt += "</session_context>"
         return prompt
@@ -84,7 +84,7 @@ class EvaluationContext:
             prompt += f"  Description: {ws.description}\n"
             prompt += f"  Root folder: {ws.root_folder}\n\n"
 
-        prompt += "Use memoryManager with loadWorkspace mode to get full workspace context.\n"
+        prompt += "Use the memory load-workspace command to get full workspace context.\n"
         prompt += "</available_workspaces>"
         return prompt
 

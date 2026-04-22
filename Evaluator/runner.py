@@ -744,7 +744,7 @@ def _run_behavior_validation(
         case: The prompt case with potential behavior expectations
         response: Model's response
         extracted_tool_names: Tool names already extracted by schema validation
-                             (with useTools expansion applied)
+                             (with configured wrapper expansion applied)
 
     Returns:
         BehaviorValidationResult or None if no expectations defined

@@ -791,7 +791,7 @@
         }
       ],
       "examples": [
-        "memory create-state \"name-value\" \"conversationContext-value\" \"activeTask-value\" --active-files \"value-1,value-2\" --next-steps \"value-1,value-2\" --tags \"value-1,value-2\""
+        "memory create-state \"name-value\" \"conversationContext-value\" \"activeTask-value\" --active-files \"[\\\"docs/plan.md\\\",\\\"src/main.ts\\\"]\" --next-steps \"[\\\"Create checkpoint\\\",\\\"Start refactor\\\"]\" --tags \"[\\\"checkpoint\\\",\\\"refactor\\\"]\""
       ]
     },
     {
@@ -1155,7 +1155,7 @@
         }
       ],
       "examples": [
-        "memory update-workspace --name \"name-value\" --description \"description-value\" --root-folder \"rootFolder-value\" --purpose \"purpose-value\" --workflows \"value-1,value-2\" --key-files \"value-1,value-2\" --preferences \"preferences-value\" --dedicated-agent-id \"dedicatedAgentId-value\""
+        "memory update-workspace --name \"name-value\" --description \"description-value\" --root-folder \"rootFolder-value\" --purpose \"purpose-value\" --workflows \"[{\\\"name\\\":\\\"Weekly Review\\\",\\\"description\\\":\\\"Run weekly workspace review\\\"}]\" --key-files \"[\\\"docs/plan.md\\\",\\\"reports/q4.md\\\"]\" --preferences \"preferences-value\" --dedicated-agent-id \"dedicatedAgentId-value\""
       ]
     },
     {
@@ -1247,7 +1247,7 @@
         }
       ],
       "examples": [
-        "prompt execute-prompts --prompts \"value-1,value-2\""
+        "prompt execute-prompts --prompts '[{\"agentId\":\"researcher\",\"prompt\":\"Summarize Docs/brief.md in 3 bullets.\"}]'"
       ]
     },
     {
@@ -1562,7 +1562,7 @@
         }
       ],
       "examples": [
-        "search search-content \"query-value\" --limit 1 --snippet-length 1 --paths \"value-1,value-2\""
+        "search search-content \"query-value\" --limit 1 --snippet-length 1 --paths \"[\\\"Projects\\\",\\\"Q4\\\"]\""
       ]
     },
     {
@@ -1646,7 +1646,7 @@
         }
       ],
       "examples": [
-        "search search-directory \"query-value\" --paths \"value-1,value-2\" --search-type \"searchType-value\" --file-types \"value-1,value-2\" --depth 1 --pattern \"pattern-value\" --date-range '{\"key\":\"value\"}' --limit 1"
+        "search search-directory \"query-value\" --paths \"[\\\"Docs\\\",\\\"Runbooks\\\"]\" --search-type \"searchType-value\" --file-types \"[\\\"md\\\",\\\"txt\\\"]\" --depth 1 --pattern \"pattern-value\" --date-range '{\"key\":\"value\"}' --limit 1"
       ]
     },
     {

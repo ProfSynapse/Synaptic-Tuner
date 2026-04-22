@@ -49,7 +49,7 @@ class ParsedResponse:
     raw: str
     text_content: str  # Non-tool-call text
     tool_calls: List[ParsedToolCall] = field(default_factory=list)
-    wrapper_name: Optional[str] = None  # e.g., "useTools"
+    wrapper_name: Optional[str] = None  # e.g., a configured wrapper name
     batch_strategy: Optional[str] = None  # "serial" or "parallel"
 
 
@@ -716,7 +716,7 @@ class ConfigDrivenValidator:
     ) -> List[ParsedToolCall]:
         """Expand a tool call, handling wrapper format.
 
-        If using a wrapper like useTools, expands the CLI tool string
+        If using a configured CLI wrapper, expands the CLI tool string
         into individual ParsedToolCall objects.
         """
         wrapper = self.tool_schema.get("tool_format", {}).get("wrapper")
@@ -857,7 +857,7 @@ class ConfigDrivenValidator:
         context = {
             key: value
             for key, value in args.items()
-            if key in {"workspaceId", "sessionId", "memory", "goal", "constraints"}
+            if key not in {"tool", "strategy"}
         }
         catalog = self._build_cli_command_catalog()
         if not catalog:

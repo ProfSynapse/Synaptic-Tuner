@@ -9,9 +9,10 @@ Single Responsibility: Orchestrate the improvement loop ONLY.
 Delegates all actual work to focused services.
 """
 
+import json
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
 from .config import ConfigLoader, ScopeConfig
@@ -150,7 +151,8 @@ class ImprovementEngine:
         self,
         example: Dict,
         rubric_keys: List[str],
-        max_iterations: int = 3
+        max_iterations: int = 3,
+        prompt_context: Optional[Dict[str, Any]] = None,
     ) -> ImprovementResult:
         """
         Run improvement loop: process scopes sequentially.
@@ -193,7 +195,12 @@ class ImprovementEngine:
                 validation_results = self.validation_service.validate_example(improved, scope_rubrics)
 
                 # 2. Build judge prompt with this scope's rubrics only
-                judge_system, judge_user = self._build_judge_prompt(improved, scope_rubrics, validation_results)
+                judge_system, judge_user = self._build_judge_prompt(
+                    improved,
+                    scope_rubrics,
+                    validation_results,
+                    prompt_context=prompt_context,
+                )
 
                 # 3. Execute judge with retry
                 judgment = self._call_with_retry(
@@ -251,13 +258,19 @@ class ImprovementEngine:
                         improved,
                         scope,
                         failing_rubrics,  # ALL failing rubrics together
-                        judgment
+                        judgment,
+                        prompt_context=prompt_context,
                     )
 
                     if improved_example != improved:
                         # Re-evaluate after improvement with ALL scope rubrics
                         after_validation = self.validation_service.validate_example(improved_example, scope_rubrics)
-                        after_system, after_user = self._build_judge_prompt(improved_example, scope_rubrics, after_validation)
+                        after_system, after_user = self._build_judge_prompt(
+                            improved_example,
+                            scope_rubrics,
+                            after_validation,
+                            prompt_context=prompt_context,
+                        )
                         after_judgment = self._call_with_retry(
                             lambda: self.judge_service.judge(
                                 after_user,
@@ -412,7 +425,8 @@ class ImprovementEngine:
         self,
         example: Dict,
         rubrics: List[Dict],
-        validation_results: Dict
+        validation_results: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, str]:
         """
         Build judge prompt split into system and user parts.
@@ -453,6 +467,14 @@ class ImprovementEngine:
                     for error in errors:
                         system_parts.append(f"  ❌ {error}")
 
+        if isinstance(prompt_context, dict) and prompt_context.get("environment_result"):
+            system_parts.extend([
+                "",
+                "## ENVIRONMENT FEEDBACK",
+                "Use the provided environment/runtime result when scoring and recommending improvements.",
+                "Treat runtime or tool-execution failures as real errors to fix, and mention them explicitly in feedback.",
+            ])
+
         # Output format
         system_parts.extend(["", "## OUTPUT"])
         score_fields = [f'"{r.get("key", r.get("name"))}_score": 0.0-1.0' for r in rubrics]
@@ -472,6 +494,15 @@ class ImprovementEngine:
                 tool_calls = conv["tool_calls"]
                 user_parts.extend(["", "**Tool Calls:**", "```json", json.dumps(tool_calls, indent=2), "```"])
                 break
+
+        if isinstance(prompt_context, dict) and prompt_context.get("environment_result"):
+            user_parts.extend([
+                "",
+                "**Environment Result:**",
+                "```json",
+                json.dumps(prompt_context.get("environment_result") or {}, indent=2),
+                "```",
+            ])
 
         return "\n".join(system_parts), "\n".join(user_parts)
 
@@ -573,7 +604,8 @@ class ImprovementEngine:
         example: Dict,
         scope: str,
         rubrics: List[Dict],
-        judgment: Dict
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict, str, str, str]:
         """
         Improve a single scope using ALL provided rubrics together.
@@ -616,7 +648,7 @@ class ImprovementEngine:
         handler = get_handler(scope, self.scope_config, self.scope_extractor, self.logger)
 
         # Build template variables using scope handler
-        template_vars = handler.build_prompt_variables(example, judgment)
+        template_vars = handler.build_prompt_variables(example, judgment, prompt_context=prompt_context)
 
         # Add feedback to template vars
         feedback = judgment.get(self.scope_config.judge.feedback_field, "")

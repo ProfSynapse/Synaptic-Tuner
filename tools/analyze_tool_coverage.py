@@ -4,7 +4,7 @@
 This script is intentionally schema-driven:
 - Valid tools come from tool-schemas.json
 - CLI commands inside useTools.tool are parsed from schema command metadata
-- Legacy direct function names and legacy wrapped calls are still recognized
+- The active dataset path is expected to use CLI-first useTools payloads
 """
 
 from __future__ import annotations
@@ -138,13 +138,6 @@ def extract_tools_from_assistant_message(
             tool_value = arguments.get("tool")
             if isinstance(tool_value, str) and tool_value.strip():
                 tools.extend(extract_from_cli(tool_value, command_lookup))
-                continue
-
-            for wrapped_call in arguments.get("calls", []) or []:
-                agent = str(wrapped_call.get("agent") or "").strip()
-                tool = str(wrapped_call.get("tool") or "").strip()
-                if agent and tool:
-                    tools.append(f"{agent}_{tool}")
             continue
 
         if function_name:

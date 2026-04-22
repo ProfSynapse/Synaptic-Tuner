@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import shlex
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.validation.parsing.response_parser import parse_response
+from shared.validation.parsing.configured_formats import match_configured_wrapper
 
 from .base import EnvironmentRuntime
 from .types import EnvironmentIssue, ExecutedToolCall
@@ -33,6 +35,8 @@ SUPPORTED_ACTIONS = {
     "search",
     "simulate",
 }
+
+CLI_PARSE_ERRORS_KEY = "__cli_parse_errors__"
 
 
 def execute_response_tool_calls(
@@ -66,6 +70,26 @@ def execute_response_tool_calls(
         args = call.arguments if isinstance(call.arguments, dict) else {}
         record = ExecutedToolCall(name=name, arguments=args)
         schema_entry = schema_index.get(name)
+        cli_parse_errors = []
+        if isinstance(args, dict):
+            raw_cli_errors = args.pop(CLI_PARSE_ERRORS_KEY, None)
+            if isinstance(raw_cli_errors, list):
+                cli_parse_errors = [str(item) for item in raw_cli_errors if str(item).strip()]
+
+        if cli_parse_errors:
+            record.status = "error"
+            record.error = "; ".join(cli_parse_errors)
+            record.recoverable = True
+            issues.append(
+                EnvironmentIssue(
+                    "error",
+                    f"Tool '{name}' has invalid CLI arguments: {'; '.join(cli_parse_errors)}",
+                    code="invalid_cli_arguments",
+                    recoverable=True,
+                )
+            )
+            executions.append(record)
+            continue
 
         if strict_schema and schema_index and schema_entry is None:
             record.status = "error"
@@ -184,24 +208,15 @@ def format_tool_results_message(
     )
 
 
-def _looks_like_wrapper_call(call) -> bool:
-    """Return True when a tool call delegates concrete calls via arguments.calls."""
-    args = call.arguments if isinstance(call.arguments, dict) else {}
-    calls = args.get("calls")
-    if not isinstance(calls, list) or not calls:
-        return False
-    return any(
-        isinstance(item, dict) and str(item.get("agent", "")).strip() and str(item.get("tool", "")).strip()
-        for item in calls
-    )
-
-
 def _looks_like_cli_wrapper_call(call) -> bool:
     args = call.arguments if isinstance(call.arguments, dict) else {}
+    if not isinstance(args, dict):
+        return False
+    wrapper_spec = match_configured_wrapper(args, function_name=getattr(call, "name", None))
+    if wrapper_spec is None:
+        return False
     tool_value = args.get("tool")
-    required = ("workspaceId", "sessionId", "memory", "goal")
-    has_wrapper_fields = all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
-    return isinstance(tool_value, str) and bool(tool_value.strip()) and has_wrapper_fields
+    return isinstance(tool_value, str) and bool(tool_value.strip())
 
 
 @lru_cache(maxsize=1)
@@ -229,6 +244,7 @@ def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
 
 
 def _split_cli_commands(tool_value: str) -> List[str]:
+    tool_value = _normalize_cli_whitespace(tool_value)
     commands: List[str] = []
     current: List[str] = []
     quote: Optional[str] = None
@@ -276,12 +292,35 @@ def _split_cli_commands(tool_value: str) -> List[str]:
     return commands
 
 
+def _normalize_cli_whitespace(value: str) -> str:
+    if not isinstance(value, str):
+        return value
+    quote_map = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+    }
+    normalized_chars: List[str] = []
+    for char in value:
+        char = quote_map.get(char, char)
+        if char.isspace() or unicodedata.category(char) == "Zs":
+            normalized_chars.append(" ")
+        else:
+            normalized_chars.append(char)
+    return "".join(normalized_chars)
+
+
 def _parse_cli_value(raw_value: str, value_type: str) -> Any:
     lowered = (value_type or "").strip().lower()
     if lowered.startswith("array") or lowered == "object":
         try:
             return json.loads(raw_value)
         except json.JSONDecodeError:
+            if lowered == "array<string>":
+                parts = [part.strip() for part in raw_value.split(",") if part.strip()]
+                if parts:
+                    return parts
             return raw_value
     if lowered == "boolean":
         if raw_value.lower() in {"true", "1", "yes"}:
@@ -295,6 +334,29 @@ def _parse_cli_value(raw_value: str, value_type: str) -> Any:
         except ValueError:
             return raw_value
     return raw_value
+
+
+def _validate_cli_arg_value(value: Any, spec: Dict[str, Any]) -> Optional[str]:
+    value_type = str(spec.get("type", "string") or "string").strip().lower()
+    name = str(spec.get("name", "value") or "value")
+
+    if value_type.startswith("array"):
+        if not isinstance(value, list):
+            return f"{name} must be valid JSON array"
+        if value_type == "array<object>" and any(not isinstance(item, dict) for item in value):
+            return f"{name} must be an array of objects"
+        return None
+
+    if value_type == "object" and not isinstance(value, dict):
+        return f"{name} must be valid JSON object"
+
+    if value_type == "number" and not isinstance(value, (int, float)):
+        return f"{name} must be numeric"
+
+    if value_type == "boolean" and not isinstance(value, bool):
+        return f"{name} must be boolean"
+
+    return None
 
 
 def _expand_cli_wrapper_call(call) -> List:
@@ -335,6 +397,7 @@ def _expand_cli_wrapper_call(call) -> List:
         tool_name, argument_specs = matched_spec
         remaining = tokens[matched_prefix_len:]
         parsed_args: Dict[str, Any] = {}
+        parse_errors: List[str] = []
         positional_specs = [arg for arg in argument_specs if arg.get("positional")]
         flag_specs = {
             str(arg.get("flag")).strip(): arg
@@ -347,7 +410,11 @@ def _expand_cli_wrapper_call(call) -> List:
         while i < len(remaining):
             token = remaining[i]
             if token.startswith("--"):
-                arg_spec = flag_specs.get(token)
+                flag_token = token
+                inline_value = None
+                if "=" in token:
+                    flag_token, inline_value = token.split("=", 1)
+                arg_spec = flag_specs.get(flag_token)
                 if not arg_spec:
                     i += 1
                     continue
@@ -356,8 +423,20 @@ def _expand_cli_wrapper_call(call) -> List:
                     parsed_args[arg_spec["name"]] = True
                     i += 1
                     continue
+                if inline_value is not None:
+                    parsed_value = _parse_cli_value(inline_value, value_type)
+                    parsed_args[arg_spec["name"]] = parsed_value
+                    validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
+                    if validation_error:
+                        parse_errors.append(validation_error)
+                    i += 1
+                    continue
                 if i + 1 < len(remaining):
-                    parsed_args[arg_spec["name"]] = _parse_cli_value(remaining[i + 1], value_type)
+                    parsed_value = _parse_cli_value(remaining[i + 1], value_type)
+                    parsed_args[arg_spec["name"]] = parsed_value
+                    validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
+                    if validation_error:
+                        parse_errors.append(validation_error)
                     i += 2
                     continue
                 i += 1
@@ -365,10 +444,16 @@ def _expand_cli_wrapper_call(call) -> List:
 
             if positional_index < len(positional_specs):
                 arg_spec = positional_specs[positional_index]
-                parsed_args[arg_spec["name"]] = _parse_cli_value(token, arg_spec.get("type", "string"))
+                parsed_value = _parse_cli_value(token, arg_spec.get("type", "string"))
+                parsed_args[arg_spec["name"]] = parsed_value
+                validation_error = _validate_cli_arg_value(parsed_value, arg_spec)
+                if validation_error:
+                    parse_errors.append(validation_error)
                 positional_index += 1
             i += 1
 
+        if parse_errors:
+            parsed_args[CLI_PARSE_ERRORS_KEY] = parse_errors
         expanded.append(type(call)(name=tool_name, arguments=parsed_args, raw=call.raw))
 
     return expanded or [call]
@@ -381,31 +466,7 @@ def _expand_wrapper_calls(parsed_calls) -> List:
         if _looks_like_cli_wrapper_call(call):
             expanded.extend(_expand_cli_wrapper_call(call))
             continue
-        if not _looks_like_wrapper_call(call):
-            expanded.append(call)
-            continue
-
-        calls = call.arguments.get("calls", []) if isinstance(call.arguments, dict) else []
-        if not isinstance(calls, list):
-            expanded.append(call)
-            continue
-
-        added = 0
-        for item in calls:
-            if not isinstance(item, dict):
-                continue
-            agent = str(item.get("agent", "")).strip()
-            tool = str(item.get("tool", "")).strip()
-            params = item.get("params", {})
-            if not agent or not tool:
-                continue
-            name = f"{agent}_{tool}"
-            args = params if isinstance(params, dict) else {}
-            expanded.append(type(call)(name=name, arguments=args, raw=call.raw))
-            added += 1
-
-        if added == 0:
-            expanded.append(call)
+        expanded.append(call)
 
     return expanded
 

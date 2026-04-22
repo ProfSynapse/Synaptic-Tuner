@@ -56,9 +56,12 @@ llm:
   # Generation LLM (creates raw examples)
   generation:
     provider: openrouter          # lmstudio | ollama | openrouter | unsloth
-    model: google/gemini-2.0-flash-001
+    model: openai/gpt-oss-120b
     temperature: 0.7
     max_tokens: 4096
+    provider_routing:
+      order: ["Groq"]
+      allow_fallbacks: true
 
   # Improvement LLM (judges and improves - needs strong model)
   improvement:

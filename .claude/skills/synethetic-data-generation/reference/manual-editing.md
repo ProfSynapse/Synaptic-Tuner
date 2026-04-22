@@ -2,6 +2,20 @@
 
 For hand-crafting improvements to individual JSONL lines when automated improvement isn't sufficient.
 
+Prefer the checked-in CLI first for targeted regeneration:
+
+```bash
+python -m SynthChat.run improve \
+  --input dataset.jsonl \
+  --rubrics YOUR_RUBRIC \
+  --lines 7,12,20-25 \
+  --workers 8 \
+  --output regen_slice.jsonl
+```
+
+Use the manual line-editing scripts below only when you truly need to hand-edit
+specific JSONL rows after reviewing the automated regeneration output.
+
 ---
 
 ## Scripts

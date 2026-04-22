@@ -540,15 +540,30 @@ rest of a file, not just on broad file existence checks.
 Default wrapper example:
 ```json
 {
-  "name": "useTools",
-  "arguments": {
-    "workspaceId": "ws_123",
-    "sessionId": "sess_456",
-    "memory": "Need to inspect and reorganize notes.",
-    "goal": "Move the note and read it back.",
-    "constraints": "Do not touch unrelated files.",
-    "tool": "storage move \"notes/meeting.md\" \"archive/meeting.md\", content read \"archive/meeting.md\"",
-    "strategy": "serial"
+  "tool_calls": [
+    {
+      "id": "call_0001",
+      "type": "function",
+      "function": {
+        "name": "useTools",
+        "arguments": "{\"workspaceId\":\"ws_123\",\"sessionId\":\"sess_456\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move the note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/meeting.md\\\" \\\"archive/meeting.md\\\", content read \\\"archive/meeting.md\\\"\",\"strategy\":\"serial\"}"
+      }
+    }
+  ],
+  "content": null
+}
+```
+
+The inner wrapper payload is:
+```json
+{
+  "workspaceId": "ws_123",
+  "sessionId": "sess_456",
+  "memory": "Need to inspect and reorganize notes.",
+  "goal": "Move the note and read it back.",
+  "constraints": "Do not touch unrelated files.",
+  "tool": "storage move \"notes/meeting.md\" \"archive/meeting.md\", content read \"archive/meeting.md\"",
+  "strategy": "serial"
   }
 }
 ```

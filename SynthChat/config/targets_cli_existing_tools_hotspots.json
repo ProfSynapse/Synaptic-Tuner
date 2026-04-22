@@ -1,0 +1,8 @@
+{
+  "contentManager_replace": 1,
+  "memoryManager_updateWorkspace": 1,
+  "promptManager_executePrompts": 1,
+  "promptManager_listModels": 1,
+  "storageManager_copy": 1,
+  "storageManager_move": 1
+}

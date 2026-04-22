@@ -49,8 +49,8 @@ python -m SynthChat.run generate
 # Specific scenarios, 4 workers
 python -m SynthChat.run generate --scenarios storageManager_createFolder storageManager_move --workers 4
 
-# OpenRouter with specific model
-python -m SynthChat.run generate --provider openrouter --model google/gemini-2.0-flash-001
+# OpenRouter with Groq-routed GPT-OSS
+python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-120b
 
 # Docs-based generation
 python -m SynthChat.run generate --docs "essays/" --scenarios essay_outline --per-doc 1
@@ -87,6 +87,8 @@ python -m SynthChat.run improve [options]
 | `--rubrics NAMES` | Comma-separated rubric names | From settings.yaml `improvement.default_rubrics` |
 | `--start-line N` | Start line (1-indexed) | `1` |
 | `--end-line N` | End line (inclusive) | Last line |
+| `--lines SPEC` | Arbitrary 1-indexed line selectors (`3,7,10-15`) | None |
+| `--line-file PATH` | File with line selectors (one per line or comma-separated, `#` comments allowed) | None |
 | `--max-iterations N` | Max improvement loops | From settings.yaml |
 | `--provider PROVIDER` | LLM provider override | From settings.yaml |
 | `--model MODEL` | Model name override | From settings.yaml |
@@ -103,10 +105,26 @@ python -m SynthChat.run improve -i data.jsonl -o data_v2.jsonl \
   --rubrics system_prompt_format,thinking_quality \
   --start-line 1 --end-line 50
 
+# Arbitrary scattered rows
+python -m SynthChat.run improve -i data.jsonl -o regen_slice.jsonl \
+  --rubrics promptManager_tools \
+  --lines 7,12,20-25 \
+  --workers 8
+
+# Checked-in line manifest
+python -m SynthChat.run improve -i data.jsonl -o regen_slice.jsonl \
+  --rubrics contentManager_tools \
+  --line-file Datasets/tools_datasets/reports/cli_schema/regen_lines.txt \
+  --workers 12
+
 # Powerful model for judging
 python -m SynthChat.run improve -i data.jsonl \
   --provider openrouter --model openai/gpt-oss-120b --max-iterations 5
 ```
+
+Notes:
+- `--lines` and `--line-file` select arbitrary rows from the input file; they do not need to be contiguous.
+- When a subset is selected, the `.improve_report.json` still records the original input `line_number` values, which is what you want for deterministic merge/replace workflows.
 
 ---
 

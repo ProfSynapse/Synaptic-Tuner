@@ -18,15 +18,31 @@ This project’s current tool-calling stack is CLI-first. The model learns to em
 
 ```json
 {
-  "name": "useTools",
-  "arguments": {
-    "workspaceId": "default",
-    "sessionId": "session_1731071640123_d7m2v9c4r",
-    "memory": "User wants to reorganize notes and inspect the result.",
-    "goal": "Move a note and read it back.",
-    "constraints": "Do not touch unrelated files.",
-    "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
-    "strategy": "serial"
+  "tool_calls": [
+    {
+      "id": "call_0001",
+      "type": "function",
+      "function": {
+        "name": "useTools",
+        "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_1731071640123_d7m2v9c4r\",\"memory\":\"User wants to reorganize notes and inspect the result.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+      }
+    }
+  ],
+  "content": null
+}
+```
+
+The inner wrapper payload is:
+
+```json
+{
+  "workspaceId": "default",
+  "sessionId": "session_1731071640123_d7m2v9c4r",
+  "memory": "User wants to reorganize notes and inspect the result.",
+  "goal": "Move a note and read it back.",
+  "constraints": "Do not touch unrelated files.",
+  "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
+  "strategy": "serial"
   }
 }
 ```

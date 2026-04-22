@@ -1074,6 +1074,74 @@ class SynthChatGenerator:
                     "executed_tools": [],
                 }
 
+        if (
+            self.environment_validator is not None
+            and self.enable_stage_validation
+            and response_rubrics
+            and isinstance(environment_trace, dict)
+            and environment_trace.get("passed") is False
+        ):
+            stage_failures = [failure for failure in stage_failures if failure != "response"]
+            response_retry_passed = False
+
+            for _ in range(max_iterations):
+                issue_messages = [
+                    str(issue.get("message") or "").strip()
+                    for issue in (environment_trace.get("issues") or [])
+                    if isinstance(issue, dict) and str(issue.get("message") or "").strip()
+                ]
+                prompt_context = {
+                    "environment_result": environment_trace,
+                    "environment_passed": False,
+                    "environment_issue_summary": "\n".join(f"- {message}" for message in issue_messages),
+                }
+                improved, iterations, _ = self._improve_stage(
+                    example,
+                    stage="response",
+                    rubrics=response_rubrics,
+                    max_iterations=1,
+                    prompt_context=prompt_context,
+                )
+                example = improved
+                total_iterations += iterations
+
+                try:
+                    assistant_msg = next(
+                        (msg for msg in reversed(example["conversations"]) if msg.get("role") == "assistant"),
+                        assistant_msg,
+                    )
+                    system_prompt_text = ""
+                    for msg in example["conversations"]:
+                        if msg.get("role") == "system":
+                            system_prompt_text = msg.get("content") or ""
+                            break
+                    expected_tools = scenario.get("expected_tools")
+                    if not expected_tools and scenario.get("tool"):
+                        expected_tools = [scenario.get("tool")]
+                    env_result = self.environment_validator.validate_response(
+                        system_prompt=system_prompt_text,
+                        response=assistant_msg,
+                        environment_config=resolved_environment_config,
+                        expected_tools=expected_tools,
+                    )
+                    environment_trace = env_result.to_dict()
+                    if env_result.passed:
+                        response_retry_passed = True
+                        break
+                except Exception as exc:
+                    environment_trace = {
+                        "passed": False,
+                        "issues": [{"level": "error", "message": f"Environment validation failed after improvement: {exc}"}],
+                        "executed_tools": [],
+                    }
+                    break
+
+            stage_failures = [failure for failure in stage_failures if failure != "environment"]
+            if not bool(environment_trace.get("passed")):
+                stage_failures.append("environment")
+            if not response_retry_passed and "response" not in stage_failures:
+                stage_failures.append("response")
+
         example["metadata"] = {
             "scenario": scenario_key,
             "category": scenario_key,
@@ -1492,7 +1560,8 @@ class SynthChatGenerator:
         example: Dict,
         stage: str,
         rubrics: List[str],
-        max_iterations: int
+        max_iterations: int,
+        prompt_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict, int, bool]:
         """
         Improve a single stage using the improvement engine.
@@ -1513,7 +1582,8 @@ class SynthChatGenerator:
             result = self.engine.run(
                 example=example,
                 rubric_keys=rubrics,
-                max_iterations=max_iterations
+                max_iterations=max_iterations,
+                prompt_context=prompt_context,
             )
             return result.improved_example, result.iterations, result.passed
         except Exception as e:
@@ -1682,4 +1752,3 @@ class SynthChatGenerator:
             system_context, environment_config, tool_schema,
             format_config=format_config, tool_call_format=tool_call_format,
         )
-

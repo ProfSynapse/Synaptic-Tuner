@@ -13,6 +13,12 @@ import re
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+from shared.validation.parsing.configured_formats import (
+    extract_lenient_wrapper_arguments,
+    match_configured_wrapper,
+    sanitize_wrapper_string_fields,
+)
+
 
 def _repair_truncated_json(json_str: str) -> str:
     """Best-effort repair for under-closed JSON emitted by the model."""
@@ -56,7 +62,7 @@ def _repair_truncated_json(json_str: str) -> str:
     return "".join(result)
 
 
-def _normalize_tool_arguments(args_raw: Any) -> Any:
+def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None) -> Any:
     """Unwrap common nested argument wrapper shapes into the actual args object."""
     args = args_raw
 
@@ -64,6 +70,9 @@ def _normalize_tool_arguments(args_raw: Any) -> Any:
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
+            lenient = extract_lenient_wrapper_arguments(args)
+            if lenient:
+                return lenient
             try:
                 args = json.loads(_repair_truncated_json(args))
             except json.JSONDecodeError:
@@ -99,20 +108,10 @@ def _normalize_tool_arguments(args_raw: Any) -> Any:
                 continue
         break
 
+    if isinstance(args, dict):
+        args = sanitize_wrapper_string_fields(args, function_name=function_name)
+
     return args
-
-
-def _looks_like_use_tools_wrapper(args: Any) -> bool:
-    """Detect top-level CLI-first useTools payloads by shape.
-
-    Some providers occasionally preserve the wrapper arguments payload but emit the
-    scenario tool name instead of `useTools`. Detect the wrapper from its argument
-    structure so we can normalize the function name before persisting examples.
-    """
-    if not isinstance(args, dict):
-        return False
-    required = ("workspaceId", "sessionId", "memory", "goal", "tool")
-    return all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
 
 
 def stringify_assistant_message(response: Any) -> str:
@@ -182,10 +181,11 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
                     normalized_tc["function"]["name"] = fn.get("name", "")
 
                     args = fn.get("arguments", "{}")
-                    normalized_args = _normalize_tool_arguments(args)
+                    normalized_args = _normalize_tool_arguments(args, function_name=fn.get("name", ""))
                     normalized_name = fn.get("name", "")
-                    if _looks_like_use_tools_wrapper(normalized_args):
-                        normalized_name = "useTools"
+                    wrapper_spec = match_configured_wrapper(normalized_args, function_name=normalized_name)
+                    if wrapper_spec is not None:
+                        normalized_name = wrapper_spec["wrapper_name"]
 
                     normalized_tc["function"]["name"] = normalized_name
                     if isinstance(normalized_args, dict):
@@ -202,6 +202,24 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
                 "role": "assistant",
                 "content": parsed.get("content"),
             }
+
+    parsed_object = parse_json_object(content_stripped)
+    wrapper_spec = match_configured_wrapper(parsed_object)
+    if wrapper_spec is not None:
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_0001",
+                    "type": "function",
+                    "function": {
+                        "name": wrapper_spec["wrapper_name"],
+                        "arguments": json.dumps(parsed_object),
+                    },
+                }
+            ],
+        }
 
     # Extract thinking block if present
     thinking_match = re.search(r'<thinking>(.*?)</thinking>', content, re.DOTALL)
@@ -246,6 +264,11 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
         if tool_name:
             json_match = re.search(r'\{[^}]+\}', content_without_thinking)
             arguments_str = json_match.group(0) if json_match else "{}"
+            parsed_args = parse_json_object(arguments_str) if arguments_str else None
+            wrapper_spec = match_configured_wrapper(parsed_args, function_name=tool_name)
+            if wrapper_spec is not None:
+                tool_name = wrapper_spec["wrapper_name"]
+                arguments_str = json.dumps(parsed_args)
 
             tool_calls.append({
                 "id": "call_0001",

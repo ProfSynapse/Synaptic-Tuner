@@ -238,7 +238,7 @@ def generate_eval_runner_html(model_name: str, model_dir_name: str, wasm_url: st
                     const jsonStr = qwenMatch[1].trim();
                     const parsed = JSON.parse(jsonStr);
                     if (parsed.name) {{
-                        // Expand using config (handles wrapper like useTools)
+                        // Expand using config (handles configured CLI wrappers)
                         const expanded = expandToolCall(parsed.name, parsed.arguments);
                         for (const t of expanded) {{
                             if (!tools.includes(t)) tools.push(t);

@@ -57,6 +57,22 @@ After creating or modifying any scenario or rubric YAML:
 
 See `reference/testing-protocol.md` for the full protocol and dry-run script.
 
+## Default Quality Gates
+
+In this repo, the default assumption for scenario authoring is:
+- scenarios should include rubrics
+- scenarios should use judge/final_judge where appropriate
+- tool scenarios should use environment execution when practical
+
+Do not assume `generate` is automatically running a judge just because
+`--max-iterations` is set. That only matters when the scenario actually defines
+rubrics/judge config. If a scenario has no `rubrics`, `judge`, or
+`final_judge`, generation is just raw sampling plus any enabled environment
+checks.
+
+Treat judge-less scenarios as explicit smoke/plumbing exceptions, not the
+default production pattern.
+
 ## Common Patterns
 
 **Generate with parallel workers:**
@@ -69,9 +85,29 @@ python -m SynthChat.run generate --workers 4
 python -m SynthChat.run improve -i data.jsonl --rubrics thinking_quality,factuality --start-line 1 --end-line 50
 ```
 
+**Regenerate arbitrary rows from a JSONL file:**
+```bash
+python -m SynthChat.run improve \
+  -i data.jsonl \
+  --rubrics promptManager_tools \
+  --lines 7,12,20-25 \
+  --workers 8 \
+  -o Datasets/synthchat/regen_slice.jsonl
+```
+
+**Use a checked-in line manifest for targeted regeneration:**
+```bash
+python -m SynthChat.run improve \
+  -i data.jsonl \
+  --rubrics contentManager_tools \
+  --line-file Datasets/tools_datasets/reports/cli_schema/regen_lines.txt \
+  --workers 12 \
+  -o Datasets/synthchat/regen_slice.jsonl
+```
+
 **Switch provider/model at CLI:**
 ```bash
-python -m SynthChat.run generate --provider openrouter --model google/gemini-2.0-flash-001
+python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-120b
 ```
 
 **Generate from docs:**
@@ -110,7 +146,13 @@ HF_TOKEN=hf_...                       # HuggingFace uploads
 
 ## Config-Driven Architecture
 
-SynthChat is fully config-driven — all tool-call formats, workspace structures, and label mappings are defined in YAML under `SynthChat/config/`. The included formats (e.g., `useTools` wrapper) are **example demonstrations**, not canonical formats. Users define their own formats without touching code.
+SynthChat is fully config-driven — all tool-call formats, workspace structures, label mappings, and dataset-specific wrapper assumptions must be defined in YAML/config, not hardcoded in code.
+
+Important discipline for this repo:
+- the current CLI/tool wrapper is only one example dataset format, not a runtime truth
+- do not encode wrapper names, top-level fields, or command assumptions in parser/executor/judge code unless that behavior is driven from config
+- if a generation/eval issue seems specific to the current toy/example format, fix config, scenarios, rubrics, or format definitions first
+- environment/runtime failures should be lifted into judge/improver context as structured payload data, not handled primarily with ad hoc format-specific code repairs
 
 Key config files:
 - `SynthChat/config/tool_call_formats.yaml` — Tool-call response schemas (wrapper name, context fields, call structure)
@@ -123,10 +165,14 @@ To add a new tool-call format, add a named entry to `tool_call_formats.yaml` and
 ## Tips
 
 - Use `--workers 4` for parallel generation (each worker gets its own LLM client)
+- Use `improve --lines 3,8,10-15` or `--line-file path.txt` for targeted regeneration of arbitrary dataset rows
+- Improve reports preserve original input `line_number` values even when you select a subset, so merge workflows can patch the source file deterministically
 - Set `save_failures: true` in settings to keep failed examples as KTO negatives
 - Interactions log in `SynthChat/interactions/` shows judge/improve exchanges
 - Progress checkpoints save to `.synthchat_checkpoint.json` on interruption
 - Be greedy to stop on errors — kill early, fix, retest
 - Environment traces are stored under `example.metadata.environment` when enabled
+- When environment validation is enabled, make sure the active judge/improver path receives those errors through prompt variables/config rather than relying on format-specific code patches
+- If a response-stage retry is driven by environment feedback, each retry round must be judged against a freshly rerun environment result. Do not carry a prior round's environment failure forward into later judgments after the response has changed.
 - For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
 - Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices

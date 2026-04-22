@@ -1,0 +1,17 @@
+{
+  "contentManager_replace": 1,
+  "memoryManager_archiveWorkspace": 1,
+  "memoryManager_createState": 1,
+  "memoryManager_updateWorkspace": 1,
+  "promptManager_executePrompts": 1,
+  "promptManager_getPrompt": 1,
+  "promptManager_listModels": 1,
+  "promptManager_updatePrompt": 1,
+  "searchManager_searchContent": 1,
+  "searchManager_searchDirectory": 1,
+  "storageManager_archive": 1,
+  "storageManager_copy": 1,
+  "storageManager_createFolder": 1,
+  "storageManager_list": 1,
+  "storageManager_move": 1
+}

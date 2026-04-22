@@ -11,12 +11,7 @@ scenarios:
     agent: contentManager
     tool: write
     max_tokens: 4096
-
-    # Tool call format definition (self-contained)
-    tool_format:
-      wrapper: useTools
-      arguments:
-        required: [sessionId, workspaceId, memory, goal, constraints, tool]
+    tool_call_format: default
 
     # Validation rubrics for this scenario
     rubrics:
@@ -91,7 +86,7 @@ scenarios:
         OUTPUT ONLY THE REQUEST TEXT.
 
       assistant: |
-        Generate a tool call to write research notes. OUTPUT ONLY VALID JSON.
+        Generate a tool-only assistant response to write research notes. OUTPUT ONLY VALID JSON.
 
         Required format:
         {
@@ -101,14 +96,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<extract from system prompt>",
-                "sessionId": "<extract from system prompt>",
-                "memory": "<brief session context>",
-                "goal": "<write the requested research note in the right workspace path>",
-                "constraints": "Only create the requested note. Do not modify unrelated files.",
-                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
-              }
+              "arguments": "{\"workspaceId\":\"<extract from system prompt>\",\"sessionId\":\"<extract from system prompt>\",\"memory\":\"<brief session context>\",\"goal\":\"<write the requested research note in the right workspace path>\",\"constraints\":\"Only create the requested note. Do not modify unrelated files.\",\"tool\":\"content write \\\"<appropriate path in workspace>\\\" \\\"<full markdown content>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }
@@ -133,6 +121,7 @@ scenarios:
     agent: contentManager
     tool: write
     max_tokens: 4096
+    tool_call_format: default
 
     rubrics:
       system_prompt: [system_prompt_format]
@@ -217,7 +206,7 @@ scenarios:
         OUTPUT ONLY THE REQUEST TEXT - nothing else.
 
       assistant: |
-        Generate a tool call to write a blog post/essay. OUTPUT ONLY VALID JSON.
+        Generate a tool-only assistant response to write a blog post or essay. OUTPUT ONLY VALID JSON.
 
         Required format:
         {
@@ -227,14 +216,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<extract from system prompt>",
-                "sessionId": "<extract from system prompt>",
-                "memory": "<brief session context>",
-                "goal": "<write the requested blog post or essay in the right workspace path>",
-                "constraints": "Only create the requested note. Do not modify unrelated files.",
-                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
-              }
+              "arguments": "{\"workspaceId\":\"<extract from system prompt>\",\"sessionId\":\"<extract from system prompt>\",\"memory\":\"<brief session context>\",\"goal\":\"<write the requested blog post or essay in the right workspace path>\",\"constraints\":\"Only create the requested note. Do not modify unrelated files.\",\"tool\":\"content write \\\"<appropriate path in workspace>\\\" \\\"<full markdown content>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }
@@ -265,6 +247,7 @@ scenarios:
     agent: contentManager
     tool: write
     max_tokens: 4096
+    tool_call_format: default
 
     rubrics:
       system_prompt: [system_prompt_format]
@@ -355,7 +338,7 @@ scenarios:
         OUTPUT ONLY THE REQUEST TEXT - nothing else.
 
       assistant: |
-        Generate a tool call to write creative content. OUTPUT ONLY VALID JSON.
+        Generate a tool-only assistant response to write creative content. OUTPUT ONLY VALID JSON.
 
         Required format:
         {
@@ -365,14 +348,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<extract from system prompt>",
-                "sessionId": "<extract from system prompt>",
-                "memory": "<brief session context>",
-                "goal": "<write the requested creative piece in the right workspace path>",
-                "constraints": "Only create the requested note. Do not modify unrelated files.",
-                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
-              }
+              "arguments": "{\"workspaceId\":\"<extract from system prompt>\",\"sessionId\":\"<extract from system prompt>\",\"memory\":\"<brief session context>\",\"goal\":\"<write the requested creative piece in the right workspace path>\",\"constraints\":\"Only create the requested note. Do not modify unrelated files.\",\"tool\":\"content write \\\"<appropriate path in workspace>\\\" \\\"<full markdown content>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }
@@ -403,6 +379,7 @@ scenarios:
     agent: contentManager
     tool: write
     max_tokens: 4096
+    tool_call_format: default
 
     rubrics:
       system_prompt: [system_prompt_format]
@@ -489,7 +466,7 @@ scenarios:
         OUTPUT ONLY THE REQUEST TEXT - nothing else.
 
       assistant: |
-        Generate a tool call to write documentation. OUTPUT ONLY VALID JSON.
+        Generate a tool-only assistant response to write documentation. OUTPUT ONLY VALID JSON.
 
         Required format:
         {
@@ -499,14 +476,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<extract from system prompt>",
-                "sessionId": "<extract from system prompt>",
-                "memory": "<brief session context>",
-                "goal": "<write the requested documentation note in the right workspace path>",
-                "constraints": "Only create the requested note. Do not modify unrelated files.",
-                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
-              }
+              "arguments": "{\"workspaceId\":\"<extract from system prompt>\",\"sessionId\":\"<extract from system prompt>\",\"memory\":\"<brief session context>\",\"goal\":\"<write the requested documentation note in the right workspace path>\",\"constraints\":\"Only create the requested note. Do not modify unrelated files.\",\"tool\":\"content write \\\"<appropriate path in workspace>\\\" \\\"<full markdown content>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }
@@ -537,6 +507,7 @@ scenarios:
     agent: contentManager
     tool: write
     max_tokens: 4096
+    tool_call_format: default
 
     rubrics:
       system_prompt: [system_prompt_format]
@@ -623,7 +594,7 @@ scenarios:
         OUTPUT ONLY THE REQUEST TEXT - nothing else.
 
       assistant: |
-        Generate a tool call to write a journal/reflection entry. OUTPUT ONLY VALID JSON.
+        Generate a tool-only assistant response to write a journal or reflection entry. OUTPUT ONLY VALID JSON.
 
         Required format:
         {
@@ -633,14 +604,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<extract from system prompt>",
-                "sessionId": "<extract from system prompt>",
-                "memory": "<brief session context>",
-                "goal": "<write the requested journal entry in the right workspace path>",
-                "constraints": "Only create the requested note. Do not modify unrelated files.",
-                "tool": "content write \"<appropriate path in workspace>\" \"<full markdown content>\""
-              }
+              "arguments": "{\"workspaceId\":\"<extract from system prompt>\",\"sessionId\":\"<extract from system prompt>\",\"memory\":\"<brief session context>\",\"goal\":\"<write the requested journal entry in the right workspace path>\",\"constraints\":\"Only create the requested note. Do not modify unrelated files.\",\"tool\":\"content write \\\"<appropriate path in workspace>\\\" \\\"<full markdown content>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }

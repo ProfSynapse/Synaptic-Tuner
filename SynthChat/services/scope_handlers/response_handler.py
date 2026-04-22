@@ -5,7 +5,7 @@ Single Responsibility: ALL response scope logic (text + tool calls).
 
 import json
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from .base import ScopeHandler
 
 
@@ -164,7 +164,12 @@ class ResponseHandler(ScopeHandler):
         """Check if content has tool call markers."""
         return "```tool" in content or '"name":' in content
 
-    def build_prompt_variables(self, example: Dict, judgment: Dict) -> Dict:
+    def build_prompt_variables(
+        self,
+        example: Dict,
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """
         Build variables for response improvement template.
 
@@ -208,6 +213,13 @@ class ResponseHandler(ScopeHandler):
             "user_request": user_request,
             "original_tool_calls": tool_calls_json,
             "thinking_content": thinking_content or "",
+            "environment_result_json": json.dumps((prompt_context or {}).get("environment_result") or {}, indent=2),
+            "environment_issue_summary": str((prompt_context or {}).get("environment_issue_summary") or ""),
+            "environment_passed": (
+                str((prompt_context or {}).get("environment_passed"))
+                if (prompt_context or {}).get("environment_passed") is not None
+                else ""
+            ),
         }
 
     def _is_text_only_response(self, content: str) -> bool:

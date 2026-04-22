@@ -4,7 +4,7 @@
 # The "default" format reproduces today's hardcoded behavior.
 
 formats:
-  # -- Current Synaptic useTools wrapper (backward-compatible default) --
+  # -- Current Synaptic useTools wrapper (default active format) --
   default:
     wrapper_name: useTools
 
