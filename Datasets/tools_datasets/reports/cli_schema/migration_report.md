@@ -1,21 +1,20 @@
 # CLI Schema Migration Report
 
-Generated: 2026-04-21T13:03:09.459479+00:00
+Generated: 2026-04-21T23:04:55.278950+00:00
 
 ## Dataset Summary
 
 | Dataset | Input | Output | Migrated | Unchanged | Regenerate | Manual |
 |---|---|---|---:|---:|---:|---:|
-| storageManager | `Datasets/tools_datasets/non_thinking/storageManager/tools_v2.1.jsonl` | `Datasets/tools_datasets/non_thinking/storageManager/tools_v2.4.jsonl` | 1057 | 17 | 18 | 0 |
+| contentManager | `Datasets/tools_datasets/non_thinking/contentManager/tools_v2.2.jsonl` | `Datasets/tools_datasets/non_thinking/contentManager/tools_v2.5.jsonl` | 488 | 0 | 65 | 0 |
 
 ## Global Counts
 
-- Migrated examples: 1057
-- Unchanged examples: 17
-- Regenerate examples: 18
+- Migrated examples: 488
+- Unchanged examples: 0
+- Regenerate examples: 65
 - Manual examples: 0
 
 ## Top Regeneration Reasons
 
-- `unsupported_open_mode:create`: 17
-- `unsupported_open_mode:splitview`: 1
+- `replace_requires_old_content`: 65
