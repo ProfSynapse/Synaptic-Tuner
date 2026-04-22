@@ -1,0 +1,806 @@
+{
+  "input": "Datasets/tools_datasets/reports/cli_schema/regen_seeds/contentManager_replace_seeds.jsonl",
+  "output": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/contentManager_replace_regenerated.jsonl",
+  "rubrics": [
+    "contentManager_tools"
+  ],
+  "max_iterations": 3,
+  "total_processed": 65,
+  "passed": 65,
+  "failed": 0,
+  "results": [
+    {
+      "line_number": 1,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.85
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 2,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 3,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 4,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 5,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 6,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 7,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 8,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 9,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 10,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 11,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 12,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 13,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 14,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 15,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 16,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 17,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 18,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 19,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 20,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 21,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 22,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 23,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 24,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 25,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 26,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 27,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 28,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 29,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 30,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 31,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 32,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 33,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 34,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 35,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 36,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 37,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 38,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 39,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 40,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 41,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 42,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 43,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 44,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.85
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 45,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 46,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 47,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 48,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 49,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.85
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 50,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 51,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 52,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 53,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 54,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 55,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 56,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 57,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 58,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 59,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 60,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 61,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 62,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 63,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.9
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 64,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 65,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "contentManager_tools_schema": 1.0,
+        "contentManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    }
+  ]
+}

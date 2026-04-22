@@ -1,0 +1,25 @@
+{
+  "input": "Datasets/tools_datasets/reports/cli_schema/regen_seeds/promptManager_executePrompts_retry_seed.jsonl",
+  "output": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/promptManager_executePrompts_retry_regenerated.jsonl",
+  "rubrics": [
+    "promptManager_tools"
+  ],
+  "max_iterations": 3,
+  "total_processed": 1,
+  "passed": 1,
+  "failed": 0,
+  "results": [
+    {
+      "line_number": 1,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "promptManager_tools_schema": 1.0,
+        "promptManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "contentManager": {
+    "base_count": 488,
+    "base_path": "Datasets/tools_datasets/non_thinking/contentManager/tools_v2.5.jsonl",
+    "output_count": 553,
+    "output_path": "Datasets/tools_datasets/non_thinking/contentManager/tools_v2.6.jsonl",
+    "regen_count": 65,
+    "regen_path": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/contentManager_replace_regenerated.jsonl"
+  },
+  "memoryManager": {
+    "base_count": 560,
+    "base_path": "Datasets/tools_datasets/non_thinking/memoryManager/tools_v2.5.jsonl",
+    "output_count": 584,
+    "output_path": "Datasets/tools_datasets/non_thinking/memoryManager/tools_v2.6.jsonl",
+    "regen_count": 24,
+    "regen_path": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/memoryManager_updateWorkspace_regenerated.jsonl"
+  },
+  "promptManager": {
+    "base_count": 466,
+    "base_path": "Datasets/tools_datasets/non_thinking/promptManager/tools_v2.7.jsonl",
+    "output_count": 568,
+    "output_path": "Datasets/tools_datasets/non_thinking/promptManager/tools_v2.8.jsonl",
+    "regen_count": 102,
+    "regen_path": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/promptManager_executePrompts_regenerated.jsonl"
+  }
+}

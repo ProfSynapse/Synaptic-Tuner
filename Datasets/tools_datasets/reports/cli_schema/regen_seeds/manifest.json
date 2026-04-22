@@ -1,0 +1,48 @@
+{
+  "groups": {
+    "contentManager_replace": {
+      "count": 65,
+      "rubrics": [
+        "tool_alignment",
+        "contentManager_tools"
+      ],
+      "seed_file": "contentManager_replace_seeds.jsonl",
+      "source_agents": [
+        "contentManager"
+      ],
+      "source_reasons": [
+        "replace_requires_old_content"
+      ]
+    },
+    "memoryManager_updateWorkspace": {
+      "count": 24,
+      "rubrics": [
+        "tool_alignment",
+        "memoryManager_tools"
+      ],
+      "seed_file": "memoryManager_updateWorkspace_seeds.jsonl",
+      "source_agents": [
+        "memoryManager"
+      ],
+      "source_reasons": [
+        "update_workspace_not_addressable_in_new_schema"
+      ]
+    },
+    "promptManager_executePrompts": {
+      "count": 102,
+      "rubrics": [
+        "tool_alignment",
+        "promptManager_tools"
+      ],
+      "seed_file": "promptManager_executePrompts_seeds.jsonl",
+      "source_agents": [
+        "promptManager"
+      ],
+      "source_reasons": [
+        "prompt_execute_prompts_marked_for_regeneration"
+      ]
+    }
+  },
+  "queue_path": "/Users/jrosenbaum/Documents/Code/Synthetic Conversations/Datasets/tools_datasets/reports/cli_schema/regen_queue.jsonl",
+  "total_examples": 191
+}

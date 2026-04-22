@@ -1,0 +1,311 @@
+{
+  "input": "Datasets/tools_datasets/reports/cli_schema/regen_seeds/memoryManager_updateWorkspace_seeds.jsonl",
+  "output": "Datasets/tools_datasets/reports/cli_schema/regen_outputs/memoryManager_updateWorkspace_regenerated.jsonl",
+  "rubrics": [
+    "memoryManager_tools"
+  ],
+  "max_iterations": 3,
+  "total_processed": 24,
+  "passed": 24,
+  "failed": 0,
+  "results": [
+    {
+      "line_number": 1,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 2,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 3,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 4,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 5,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 6,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 7,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 8,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 9,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 10,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 11,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 12,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 13,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 14,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 15,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 16,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 17,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 18,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 19,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 20,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 21,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 22,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 0.8
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    },
+    {
+      "line_number": 23,
+      "passed": true,
+      "iterations": 3,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response",
+        "response"
+      ]
+    },
+    {
+      "line_number": 24,
+      "passed": true,
+      "iterations": 2,
+      "final_scores": {
+        "memoryManager_tools_schema": 1.0,
+        "memoryManager Tools": 1.0
+      },
+      "scopes_improved": [
+        "response"
+      ]
+    }
+  ]
+}
