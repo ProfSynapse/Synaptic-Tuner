@@ -7,8 +7,10 @@ Scripts, configuration files, environment variables, data patterns, and platform
 ## Key Bash Scripts
 
 **Root Level:**
-- `run.sh` / `run.ps1` - Main CLI wrappers (auto-activate conda)
-- `setup_env.sh` / `setup_env.ps1` - Environment setup
+- `run.sh` / `run.ps1` - Main CLI wrappers
+- `setup_env.sh` / `setup_env.ps1` - Legacy host-environment setup / fallback path
+- `python tuner.py docker bootstrap --docker-target all` - Preferred local Docker bootstrap for Windows + NVIDIA
+- `python tuner.py docker status|pull|smoke|build` - Local Docker runtime management
 
 **Trainers:**
 - `Trainers/rtx3090_sft/setup.sh` - Full SFT environment setup
@@ -64,6 +66,8 @@ OLLAMA_HOST=http://localhost:11434
 WANDB_API_KEY=your_wandb_key
 ```
 
+The CLI now auto-loads repo-root `.env`, including for Docker bootstrap and bucket helper flows.
+
 ---
 
 ## Data Patterns
@@ -116,8 +120,14 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 
 **Windows PowerShell:**
 - Use `.ps1` scripts
-- Some multiprocessing limitations
-- Prefer WSL2 if possible
+- Docker Desktop is now the preferred local GPU path
+- Start with `python tuner.py docker bootstrap --docker-target all`
+- Use `python tuner.py train --runtime docker` and `python tuner.py eval --runtime docker`
+- Keep the host conda path as a fallback, not the default recommendation
+
+**Local Docker Artifacts:**
+- Pulled cloud runs under `toolset-training-artifacts/runs/...` are treated as first-class local eval candidates
+- Use `python tuner.py bucket pull --path runs/hf_jobs/<method>/<run-prefix>/final_model --dest toolset-training-artifacts`
 
 ---
 
@@ -125,13 +135,14 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 
 | Task | Fully Auto | Needs User Input | Notes |
 |------|:----------:|:----------------:|-------|
-| Environment setup | X | | `./setup_env.sh` |
+| Docker bootstrap | X | | `python tuner.py docker bootstrap --docker-target all` |
+| Environment setup (legacy host path) | X | | `./setup_env.sh` |
 | Dependency install | X | | `./run.sh doctor --fix` |
 | List resources | X | | `./run.sh list *` |
 | Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
 | System diagnostics | X | | `./run.sh doctor` |
-| Training (SFT/KTO) | | X | Needs dataset choice, model size |
-| Evaluation | | X | Needs model path, scenario set |
+| Training (SFT/KTO/GRPO) | | X | Prefer `python tuner.py train --runtime docker` for local NVIDIA |
+| Evaluation | | X | Prefer `python tuner.py eval --runtime docker` for local NVIDIA |
 | Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
 | Dataset improvement | | X | Needs rubrics, line range |
 | Synthetic data gen | | X | Needs config, teacher model |
@@ -157,4 +168,4 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 - Run dry runs: `python train_sft.py --dry-run`
 - Validate first: `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py dataset.jsonl`
 
-**Key Principle:** Use the bash scripts (`./run.sh`, `setup.sh`, etc.) rather than direct Python when possible - they handle environment setup, dependency checks, and provide better UX.
+**Key Principle:** For local NVIDIA GPU work, prefer the repo CLI plus Docker Desktop over hand-managed host dependencies. Start with `python tuner.py docker bootstrap --docker-target all`.

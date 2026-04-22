@@ -5,6 +5,8 @@ Bucket artifact read/list handler.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +17,16 @@ from tuner.backends.training.cloud.base_cloud import load_cloud_config
 from tuner.cloud import load_huggingface_hub, resolve_hf_bucket_id
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
+from tuner.utils.docker_runtime import (
+    BUCKET_HELPER_ENV_MARKER,
+    BUCKET_HELPER_IMAGE,
+    CONTAINER_REPO_ROOT,
+    bucket_helper_image_present,
+    build_bucket_helper_image_command,
+    build_bucket_helper_run_command,
+    container_repo_path,
+    ensure_docker_cli,
+)
 
 
 class BucketHandler(BaseHandler):
@@ -29,6 +41,173 @@ class BucketHandler(BaseHandler):
 
     def _cloud_config_path(self) -> Path:
         return self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+
+    def _native_bucket_support(self) -> tuple[bool, str]:
+        """Check whether the current Python has the Buckets APIs we rely on."""
+        try:
+            import huggingface_hub
+        except ImportError as exc:
+            return False, str(exc)
+
+        version = getattr(huggingface_hub, "__version__", "unknown")
+        missing = [
+            name for name in ("HfFileSystem", "create_bucket")
+            if not hasattr(huggingface_hub, name)
+        ]
+        if missing:
+            return False, f"huggingface_hub {version} does not support required APIs: {', '.join(missing)}"
+        return True, ""
+
+    def _bucket_command_is_remote(self, subcommand: str) -> bool:
+        """Return True when the selected bucket command needs HF Buckets support."""
+        if subcommand in {"push", "pull"}:
+            return True
+        if getattr(self.args, "bucket", None):
+            return True
+
+        path = str(getattr(self.args, "path", "") or "").strip()
+        if not path:
+            return True
+        if path.startswith("hf://"):
+            return True
+
+        local_path = Path(path)
+        if local_path.exists():
+            return False
+        if path.startswith("./") or path.startswith("../") or local_path.is_absolute():
+            return False
+        return True
+
+    def _path_for_helper(self, value: Optional[str], *, local_default_to_repo: bool = False) -> Optional[str]:
+        """Translate a repo-local host path into the helper container mount path."""
+        raw = str(value or "").strip()
+        if not raw:
+            if local_default_to_repo:
+                return str(CONTAINER_REPO_ROOT)
+            return None
+        if raw.startswith("hf://"):
+            return raw
+
+        candidate = Path(raw)
+        treat_as_local = (
+            candidate.exists()
+            or candidate.is_absolute()
+            or raw.startswith("./")
+            or raw.startswith("../")
+            or local_default_to_repo
+        )
+        if not treat_as_local:
+            return raw
+
+        resolved = (candidate if candidate.is_absolute() else (self.repo_root / candidate)).resolve()
+        try:
+            return container_repo_path(resolved, self.repo_root)
+        except ValueError as exc:
+            raise CloudProviderError(
+                f"Bucket helper can only access paths inside the repo workspace: {resolved}"
+            ) from exc
+
+    def _helper_cli_args(self, subcommand: str) -> list[str]:
+        """Build the CLI argument list to forward into the helper container."""
+        args = ["bucket", subcommand]
+        if self.json_mode:
+            args.append("--json")
+
+        bucket_id = getattr(self.args, "bucket", None)
+        if bucket_id:
+            args.extend(["--bucket", str(bucket_id)])
+
+        path_value = getattr(self.args, "path", None)
+        if path_value:
+            if subcommand == "push":
+                translated = self._path_for_helper(path_value)
+            else:
+                translated = self._path_for_helper(path_value, local_default_to_repo=False)
+            args.extend(["--path", translated])
+
+        dest_value = getattr(self.args, "dest", None)
+        if subcommand == "pull":
+            translated_dest = self._path_for_helper(dest_value, local_default_to_repo=True)
+            args.extend(["--dest", translated_dest])
+        elif dest_value:
+            args.extend(["--dest", str(dest_value)])
+
+        eval_path = getattr(self.args, "eval_path", None)
+        if eval_path:
+            args.extend(["--eval-path", str(eval_path)])
+
+        loss_path = getattr(self.args, "loss_path", None)
+        if loss_path:
+            args.extend(["--loss-path", str(loss_path)])
+
+        for flag_name, cli_flag in (("tail", "--tail"), ("limit", "--limit")):
+            value = getattr(self.args, flag_name, None)
+            if value is not None:
+                args.extend([cli_flag, str(value)])
+
+        for flag_name, cli_flag in (
+            ("jsonl_latest", "--jsonl-latest"),
+            ("pretty", "--pretty"),
+            ("recursive", "--recursive"),
+            ("files_only", "--files-only"),
+            ("dirs_only", "--dirs-only"),
+        ):
+            if bool(getattr(self.args, flag_name, False)):
+                args.append(cli_flag)
+
+        return args
+
+    def _render_helper_output(self, output: str) -> str:
+        """Rewrite helper container repo paths back to the host workspace path."""
+        if not output:
+            return output
+        return output.replace(str(CONTAINER_REPO_ROOT), str(self.repo_root).replace("\\", "/"))
+
+    def _delegate_to_docker_helper(self, subcommand: str) -> int:
+        """Run the bucket command inside the dedicated Docker helper image."""
+        docker_ok, docker_error = ensure_docker_cli()
+        if not docker_ok:
+            raise CloudProviderError(
+                f"{docker_error} The current Python also lacks required HF Buckets APIs."
+            )
+
+        if not bucket_helper_image_present(self.repo_root):
+            if not self.json_mode:
+                print(f"Building Docker bucket helper image: {BUCKET_HELPER_IMAGE}")
+            build = subprocess.run(
+                build_bucket_helper_image_command(self.repo_root),
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if build.returncode != 0:
+                raise CloudProviderError(
+                    build.stderr.strip() or build.stdout.strip() or "Failed to build Docker bucket helper image."
+                )
+
+        helper = subprocess.run(
+            build_bucket_helper_run_command(
+                self.repo_root,
+                helper_args=self._helper_cli_args(subcommand),
+            ),
+            cwd=str(self.repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        rendered_stdout = self._render_helper_output(helper.stdout or "")
+        rendered_stderr = self._render_helper_output(helper.stderr or "")
+
+        if helper.returncode != 0:
+            message = rendered_stderr.strip() or rendered_stdout.strip() or "Docker bucket helper failed."
+            raise CloudProviderError(message)
+
+        if rendered_stdout.strip():
+            print(rendered_stdout, end="" if rendered_stdout.endswith("\n") else "\n")
+        return 0
 
     def _default_bucket_id(self) -> Optional[str]:
         settings = load_cloud_config(self._cloud_config_path()).get("hf_jobs", {})
@@ -352,6 +531,14 @@ class BucketHandler(BaseHandler):
     def handle(self) -> int:
         try:
             subcommand = str(getattr(self.args, "subcommand", "") or "").strip().lower()
+            if (
+                subcommand in {"read", "list", "pull", "push", "analyze"}
+                and os.getenv(BUCKET_HELPER_ENV_MARKER) != "1"
+                and self._bucket_command_is_remote(subcommand)
+            ):
+                native_ok, _reason = self._native_bucket_support()
+                if not native_ok:
+                    return self._delegate_to_docker_helper(subcommand)
             if subcommand == "read":
                 return self._handle_read()
             if subcommand == "list":
@@ -364,5 +551,8 @@ class BucketHandler(BaseHandler):
                 return self._handle_analyze()
             raise CloudProviderError("Bucket command requires subcommand 'read', 'list', 'pull', 'push', or 'analyze'.")
         except Exception as exc:
-            self.output_error(str(exc), code="BUCKET_ERROR")
+            try:
+                self.output_error(str(exc), code="BUCKET_ERROR")
+            except UnicodeEncodeError:
+                print(f"Error: {exc}")
             return 1

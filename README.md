@@ -67,6 +67,8 @@ That path can run train -> evaluation -> exact loss -> analysis -> recommendatio
 - HF Jobs is now the canonical cloud path for train + evaluate, with `cloud-pipeline` handling the common workflow end-to-end.
 - Cloud evaluation writes structured artifacts back into the source run, including `evaluation_results.json`, `evaluation_results.md`, and `evaluation_lineage.json`.
 - Bucket-backed progress is a first-class UX: training and evaluation stream JSONL progress that the local dashboard can replay.
+- Local NVIDIA workflows now have a first-class Docker path with `python tuner.py docker bootstrap --docker-target all`, `train --runtime docker`, and `eval --runtime docker`.
+- Pulled HF bucket adapters under `toolset-training-artifacts/runs/...` are now discoverable in local Docker eval flows without manual `docker run` commands.
 - `run-experiment` now supports fuller cloud orchestration, including post-training evaluation and exact-loss stages as separate sibling jobs by default.
 - `plan-hardware` and `scripts/hf_jobs_hardware.py` make hardware selection less guessy by using the live HF Jobs hardware surface.
 - Evolutionary SFT is now supported in the cloud experiment path through checked-in specs and `cloud-pipeline --train-*` overrides.
@@ -76,10 +78,38 @@ That path can run train -> evaluation -> exact loss -> analysis -> recommendatio
 | Path | How |
 |------|-----|
 | **Claude Code (recommended)** | Open repo in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and tell it what you want |
+| **Local Docker setup (Windows/NVIDIA)** | `python tuner.py docker bootstrap --docker-target all` |
+| **Local Docker train** | `python tuner.py train --runtime docker` |
+| **Local Docker eval** | `python tuner.py eval --runtime docker` |
 | **HF Jobs cloud train + eval** | `python tuner.py cloud-pipeline --method sft --preset full` |
 | **Full cloud experiment bundle** | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
 | **Interactive CLI** | `./run.sh` (Linux/WSL) or `.\run.ps1` (PowerShell) |
 | **Beginner (no GPU)** | `Trainers/notebooks/sft_colab_beginner.ipynb` in Google Colab |
+
+## Local Docker Workflow
+
+For Windows users with NVIDIA GPUs, the recommended local path is now Docker Desktop, not manual dependency wrangling inside the host training environment.
+
+```bash
+python tuner.py docker bootstrap --docker-target all
+python tuner.py train --runtime docker
+python tuner.py eval --runtime docker
+```
+
+What `docker bootstrap` does:
+- checks whether Docker Desktop is installed and the engine is reachable
+- prepares the local `unsloth`, `vllm`, and bucket-helper images
+- runs smoke tests so you can verify GPU containers work before debugging model code
+
+If you pull a cloud adapter locally, keep it inside the repo under `toolset-training-artifacts/runs/...` and it will show up in local eval discovery:
+
+```bash
+python tuner.py bucket pull \
+  --path runs/hf_jobs/sft/<run-prefix>/final_model \
+  --dest toolset-training-artifacts
+
+python tuner.py eval --runtime docker
+```
 
 ## Using with Claude Code
 

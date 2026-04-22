@@ -230,7 +230,7 @@ class BaseHandler(IHandler, ABC):
             try:
                 from tuner.ui import print_error
                 print_error(message)
-            except ImportError:
+            except (ImportError, UnicodeEncodeError):
                 print(f"Error: {message}", file=sys.stderr)
 
     def output_info(self, message: str, data: Optional[Dict[str, Any]] = None) -> None:
@@ -260,7 +260,7 @@ class BaseHandler(IHandler, ABC):
             try:
                 from tuner.ui import print_info
                 print_info(message)
-            except ImportError:
+            except (ImportError, UnicodeEncodeError):
                 print(f"Info: {message}")
 
     def output_list(

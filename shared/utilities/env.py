@@ -80,4 +80,12 @@ def get_hf_token() -> Optional[str]:
         value = value.strip()
         if value:
             return value
+    load_env_file()
+    for key in ("HF_TOKEN", "HF_API_KEY"):
+        value = os.environ.get(key)
+        if value is None:
+            continue
+        value = value.strip()
+        if value:
+            return value
     return None

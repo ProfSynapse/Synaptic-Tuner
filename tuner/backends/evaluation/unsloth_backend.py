@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from shared.utilities.paths import iter_training_output_dirs
+from shared.utilities.paths import iter_training_run_dirs
 from .base import IEvaluationBackend
 
 
@@ -62,12 +62,10 @@ class UnslothBackend(IEvaluationBackend):
         models = []
 
         for method in ("sft", "kto", "grpo"):
-            for output_dir in iter_training_output_dirs(method, self._repo_root):
-                if not output_dir.exists():
-                    continue
-
-                for adapter_config in output_dir.rglob("final_model/adapter_config.json"):
-                    adapter_dir = adapter_config.parent
+            for run_dir in iter_training_run_dirs(method, self._repo_root):
+                adapter_dir = run_dir / "final_model"
+                adapter_config = adapter_dir / "adapter_config.json"
+                if adapter_config.exists():
                     models.append(str(adapter_dir.resolve()))
 
         # Sort by modification time (newest first)
@@ -131,13 +129,8 @@ class UnslothBackend(IEvaluationBackend):
             size_mb = round(adapter_file.stat().st_size / (1024 ** 2), 1)
 
         # Detect trainer type from path
-        trainer_type = "unknown"
-        if "sft_output" in str(path):
-            trainer_type = "sft"
-        elif "kto_output" in str(path):
-            trainer_type = "kto"
-        elif "grpo_output" in str(path):
-            trainer_type = "grpo"
+        trainer_type = self._detect_trainer_type(path)
+        source = self._detect_source(path)
 
         # Extract run timestamp from parent directory
         timestamp = path.parent.name if path.parent else "unknown"
@@ -153,7 +146,31 @@ class UnslothBackend(IEvaluationBackend):
             "base_model_short": base_model_short,
             "size_mb": size_mb,
             "trainer_type": trainer_type,
+            "source": source,
             "timestamp": timestamp,
             "r": config.get("r"),  # LoRA rank
             "lora_alpha": config.get("lora_alpha"),
         }
+
+    @staticmethod
+    def _detect_trainer_type(path: Path) -> str:
+        parts = [part.lower() for part in path.parts]
+        markers = {
+            "sft": {"sft_output", "sft_output_rtx3090", "rtx3090_sft", "sft"},
+            "kto": {"kto_output", "kto_output_rtx3090", "rtx3090_kto", "kto"},
+            "grpo": {"grpo_output", "grpo_output_rtx3090", "rtx3090_grpo", "grpo"},
+        }
+        for trainer_type, candidates in markers.items():
+            if any(candidate in parts for candidate in candidates):
+                if trainer_type in {"sft", "kto", "grpo"}:
+                    return trainer_type
+        return "unknown"
+
+    @staticmethod
+    def _detect_source(path: Path) -> str:
+        parts = {part.lower() for part in path.parts}
+        if "toolset-training-artifacts" in parts:
+            return "bucket_pull"
+        if "runs" in parts and "trainers" not in parts:
+            return "cloud_artifact"
+        return "local_training"

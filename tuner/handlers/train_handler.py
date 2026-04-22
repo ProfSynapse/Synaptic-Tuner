@@ -10,6 +10,7 @@ Supports --json flag for AI-parseable output. In JSON mode:
 - All output is JSON formatted for programmatic parsing
 """
 
+import shutil
 import subprocess
 from argparse import Namespace
 from pathlib import Path
@@ -17,6 +18,13 @@ from typing import Optional
 
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
+from tuner.utils.docker_runtime import (
+    CONTAINER_REPO_ROOT,
+    build_docker_run_command,
+    container_repo_path,
+    ensure_docker_cli,
+    resolve_training_image,
+)
 from tuner.ui import (
     print_menu,
     print_header,
@@ -75,6 +83,26 @@ def detect_platform() -> str | None:
         return None
 
 
+def detect_docker_platform() -> str | None:
+    """Detect Docker-capable NVIDIA hardware without importing host torch."""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return None
+
+    try:
+        result = subprocess.run(
+            [nvidia_smi, "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return "rtx"
+    except Exception:
+        pass
+    return None
+
+
 class TrainHandler(BaseHandler):
     """
     Handler for training workflow.
@@ -122,11 +150,15 @@ class TrainHandler(BaseHandler):
         has_cuda = False
         has_mlx = False
 
+        runtime = getattr(self.args, "runtime", "native") if self.args else "native"
+
         try:
             import torch
             has_cuda = torch.cuda.is_available()
         except ImportError:
             pass
+        if runtime == "docker" and not has_cuda:
+            has_cuda = detect_docker_platform() == "rtx"
 
         try:
             import mlx.core as mx
@@ -148,12 +180,65 @@ class TrainHandler(BaseHandler):
                 "methods": ["mlx"]
             })
 
+        docker_ok, docker_error = ensure_docker_cli() if runtime == "docker" else (True, "")
+
         return {
             "command": "train",
             "status": "ready" if platforms else "no_platforms",
             "platforms": platforms,
-            "detected_platform": detect_platform(),
+            "detected_platform": detect_platform() if runtime != "docker" else (detect_platform() or detect_docker_platform()),
+            "runtime": runtime,
+            "docker_available": docker_ok,
+            "docker_error": docker_error or None,
         }
+
+    @staticmethod
+    def _script_name_for_config(config) -> str:
+        if config.method == "grpo" and config.config_path.name == "env_config.yaml":
+            return "train_env_grpo.py"
+        return f"train_{config.method}.py"
+
+    def _execute_docker_training(self, config) -> int:
+        try:
+            image, profile = resolve_training_image(
+                self.repo_root,
+                explicit_image=getattr(self.args, "docker_image", None),
+                requested_profile=getattr(self.args, "docker_profile", None),
+            )
+        except Exception as exc:
+            print_error(f"Failed to resolve Docker training image: {exc}")
+            return 1
+
+        script_name = self._script_name_for_config(config)
+        trainer_dir = container_repo_path(config.trainer_dir, self.repo_root)
+        command = [script_name]
+        if script_name == "train_env_grpo.py":
+            command.extend(["--config", container_repo_path(config.config_path, self.repo_root)])
+
+        cmd = build_docker_run_command(
+            image=image,
+            repo_root=self.repo_root,
+            workdir=trainer_dir,
+            entrypoint="python",
+            env={"PYTHONPATH": str(CONTAINER_REPO_ROOT)},
+            command=command,
+        )
+
+        profile_suffix = f" ({profile})" if profile else ""
+        print_info(f"Executing training in Docker with: {image}{profile_suffix}")
+        print()
+
+        try:
+            process = subprocess.Popen(cmd, cwd=str(self.repo_root))
+            return process.wait()
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user.")
+            if "process" in locals():
+                process.terminate()
+            return 130
+        except Exception as exc:
+            print_error(f"Docker training execution error: {exc}")
+            return 1
 
     def handle(self) -> int:
         """
@@ -170,10 +255,15 @@ class TrainHandler(BaseHandler):
             self.output(status)
             return 0
 
+        runtime = getattr(self.args, "runtime", "native") if self.args else "native"
         print_header("TRAINING", "Select your platform and training method")
+        if runtime == "docker":
+            print_info("Using Docker runtime for local GPU execution.")
 
         # Step 1: Auto-detect or select platform
         platform_choice = detect_platform()
+        if runtime == "docker" and not platform_choice:
+            platform_choice = detect_docker_platform()
 
         if platform_choice:
             platform_name = "NVIDIA GPU (CUDA)" if platform_choice == "rtx" else "Apple Silicon (MLX)"
@@ -195,10 +285,19 @@ class TrainHandler(BaseHandler):
             return 1
 
         # Step 3: Validate environment
-        is_valid, error = backend.validate_environment()
-        if not is_valid:
-            print_error(f"Environment validation failed: {error}")
-            return 1
+        if runtime == "docker":
+            if platform_choice != "rtx":
+                print_error("Docker runtime currently supports NVIDIA/CUDA local training only.")
+                return 1
+            docker_ok, docker_error = ensure_docker_cli()
+            if not docker_ok:
+                print_error(docker_error)
+                return 1
+        else:
+            is_valid, error = backend.validate_environment()
+            if not is_valid:
+                print_error(f"Environment validation failed: {error}")
+                return 1
 
         # Step 4: Select method (if multiple available)
         methods = backend.get_available_methods()
@@ -238,21 +337,20 @@ class TrainHandler(BaseHandler):
             print_info("Training cancelled.")
             return 0
 
-        # Step 8: Execute training
-        # Mac uses system python3 (no conda needed), NVIDIA uses conda python
-        if platform_choice == "mac":
-            import shutil
-            python = shutil.which("python3") or "python3"
-        else:
-            python = self.get_conda_python()
-        print_info(f"Executing training with: {python}")
-        print()
-
         # Play training start animation (if available)
         if ASCIIMATICS_AVAILABLE:
             play_training_start(duration_frames=40)
 
-        exit_code = backend.execute(config, python)
+        if runtime == "docker":
+            exit_code = self._execute_docker_training(config)
+        else:
+            if platform_choice == "mac":
+                python = shutil.which("python3") or "python3"
+            else:
+                python = self.get_conda_python()
+            print_info(f"Executing training with: {python}")
+            print()
+            exit_code = backend.execute(config, python)
 
         if exit_code == 0:
             # Play celebration animation on success

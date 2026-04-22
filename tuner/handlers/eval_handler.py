@@ -19,15 +19,29 @@ Supports --json flag for AI-parseable output. In JSON mode:
 - All output is JSON formatted for programmatic parsing
 """
 
+import json
+import socket
+import subprocess
+import time
+from http.client import RemoteDisconnected
 from argparse import Namespace
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import EvaluationBackendRegistry
 from tuner.discovery import TrainingRunDiscovery, CheckpointDiscovery
+from tuner.utils.docker_runtime import (
+    CONTAINER_REPO_ROOT,
+    build_docker_run_command,
+    container_repo_path,
+    ensure_docker_cli,
+    resolve_eval_image,
+)
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
 from shared.ui import (
@@ -105,17 +119,24 @@ class EvalHandler(BaseHandler):
 
         Returns dict with available backends, models, and scenarios.
         """
-        # List available backends
+        runtime = getattr(self.args, "runtime", "native") if self.args else "native"
         backends = []
 
-        # Check each backend
-        backend_configs = [
-            ("unsloth", "Unsloth (LoRA - direct)"),
-            ("llamacpp", "llama.cpp (GGUF)"),
-            ("mlc", "MLC/WebLLM (WebGPU)"),
-            ("ollama", "Ollama (local server)"),
-            ("lmstudio", "LM Studio (local server)"),
-        ]
+        if runtime == "docker":
+            docker_ok, docker_error = ensure_docker_cli()
+            backend_configs = [
+                ("unsloth", "Unsloth (Docker - direct LoRA)"),
+                ("vllm", "vLLM (Docker OpenAI server)"),
+            ]
+        else:
+            docker_ok, docker_error = True, ""
+            backend_configs = [
+                ("unsloth", "Unsloth (LoRA - direct)"),
+                ("llamacpp", "llama.cpp (GGUF)"),
+                ("mlc", "MLC/WebLLM (WebGPU)"),
+                ("ollama", "Ollama (local server)"),
+                ("lmstudio", "LM Studio (local server)"),
+            ]
 
         for backend_id, backend_name in backend_configs:
             backend_info = {
@@ -126,18 +147,30 @@ class EvalHandler(BaseHandler):
             }
 
             try:
-                if backend_id in ("llamacpp", "mlc", "unsloth"):
-                    backend = EvaluationBackendRegistry.get(backend_id, repo_root=self.repo_root)
+                if runtime == "docker":
+                    backend_info["available"] = docker_ok
+                    if backend_id == "unsloth" and docker_ok:
+                        backend = EvaluationBackendRegistry.get("unsloth", repo_root=self.repo_root)
+                        models = backend.list_models()
+                        backend_info["models"] = models[:20] if models else []
+                        backend_info["model_count"] = len(models) if models else 0
+                    elif backend_id == "vllm" and docker_ok:
+                        runs = self._discover_vllm_runs()
+                        backend_info["models"] = [r.display_name for r in runs[:20]]
+                        backend_info["model_count"] = len(runs)
                 else:
-                    backend = EvaluationBackendRegistry.get(backend_id)
+                    if backend_id in ("llamacpp", "mlc", "unsloth"):
+                        backend = EvaluationBackendRegistry.get(backend_id, repo_root=self.repo_root)
+                    else:
+                        backend = EvaluationBackendRegistry.get(backend_id)
 
-                is_connected, _ = backend.validate_connection()
-                backend_info["available"] = is_connected
+                    is_connected, _ = backend.validate_connection()
+                    backend_info["available"] = is_connected
 
-                if is_connected:
-                    models = backend.list_models()
-                    backend_info["models"] = models[:20] if models else []  # Limit for brevity
-                    backend_info["model_count"] = len(models) if models else 0
+                    if is_connected:
+                        models = backend.list_models()
+                        backend_info["models"] = models[:20] if models else []
+                        backend_info["model_count"] = len(models) if models else 0
 
             except (ValueError, Exception):
                 pass
@@ -161,8 +194,11 @@ class EvalHandler(BaseHandler):
         return {
             "command": "eval",
             "status": "ready",
+            "runtime": runtime,
             "backends": backends,
             "scenarios": scenarios,
+            "docker_available": docker_ok,
+            "docker_error": docker_error or None,
         }
 
     def _list_scenarios(self):
@@ -175,6 +211,16 @@ class EvalHandler(BaseHandler):
         from tuner.discovery import PromptSetDiscovery
         discovery = PromptSetDiscovery(repo_root=self.repo_root)
         return discovery.discover_all()
+
+    def _discover_vllm_runs(self):
+        """Discover training runs that can be evaluated through vLLM."""
+        try:
+            from Evaluator.vllm_setup import discover_training_runs
+        except ImportError:
+            return []
+
+        runs = discover_training_runs(self.repo_root / "Trainers")
+        return [run for run in runs if run.best_model_path or run.lora_path]
 
     # -- Generic table display infrastructure ----------------------------------
 
@@ -285,6 +331,7 @@ class EvalHandler(BaseHandler):
             columns=[
                 C("Run"), C("Base Model", style=COLORS["aqua"]),
                 C("Type", style=COLORS["purple"]),
+                C("Source", style="dim"),
                 C("Size", style="dim", justify="right"),
             ],
             row_extractor=lambda i, mp: self._lora_row(backend, mp),
@@ -299,6 +346,7 @@ class EvalHandler(BaseHandler):
             info.get("timestamp", "unknown"),
             info.get("base_model_short", "unknown"),
             info.get("trainer_type", "-").upper(),
+            info.get("source", "-"),
             f"{info.get('size_mb', 0):.0f}MB" if info.get("size_mb") else "-",
         ]
 
@@ -308,7 +356,8 @@ class EvalHandler(BaseHandler):
         return (
             f"{info.get('timestamp', 'unknown')} "
             f"({info.get('base_model_short', 'unknown')}) "
-            f"[{info.get('trainer_type', '-').upper()}]"
+            f"[{info.get('trainer_type', '-').upper()}] "
+            f"{info.get('source', '-')}"
         )
 
     def _display_mlc_models_table(self, backend, models: List[str]) -> None:
@@ -350,6 +399,7 @@ class EvalHandler(BaseHandler):
             title=f"Available {trainer_type.upper()} Training Runs",
             columns=[
                 C("Run"), C("Has Final", style=COLORS["aqua"], justify="center"),
+                C("Source", style="dim"),
                 C("Checkpoints", style=COLORS["purple"], justify="right"),
             ],
             row_extractor=lambda i, rp: self._training_run_row(rp),
@@ -364,12 +414,18 @@ class EvalHandler(BaseHandler):
         cp_count = 0
         if checkpoints_dir.exists():
             cp_count = len(list(checkpoints_dir.glob("checkpoint-*")))
-        return [run_path.name, has_final, str(cp_count)]
+        source = "bucket_pull" if "toolset-training-artifacts" in {part.lower() for part in run_path.parts} else (
+            "cloud_artifact" if "runs" in {part.lower() for part in run_path.parts} and "trainers" not in {part.lower() for part in run_path.parts}
+            else "local_training"
+        )
+        return [run_path.name, has_final, source, str(cp_count)]
 
     @staticmethod
     def _training_run_plain(run_path: Path) -> str:
         has_final = "(final)" if (run_path / "final_model").exists() else ""
-        return f"{run_path.name} {has_final}"
+        parts = {part.lower() for part in run_path.parts}
+        source = "bucket_pull" if "toolset-training-artifacts" in parts else ("cloud_artifact" if "runs" in parts and "trainers" not in parts else "local_training")
+        return f"{run_path.name} {has_final} [{source}]"
 
     def _display_checkpoints_table(self, checkpoints: List, trainer_type: str) -> None:
         """Display available checkpoints with metrics in a table."""
@@ -523,6 +579,305 @@ class EvalHandler(BaseHandler):
         )
         self._display_table(scenarios, spec)
 
+    def _display_vllm_runs_table(self, runs) -> None:
+        """Display vLLM-compatible training runs."""
+        C = self._ColumnSpec
+        spec = self._TableSpec(
+            title="Available vLLM Model Candidates",
+            columns=[
+                C("Run"),
+                C("Trainer", style=COLORS["aqua"]),
+                C("Source", style=COLORS["purple"]),
+                C("Model", style="dim"),
+            ],
+            row_extractor=lambda i, run: [
+                run.timestamp,
+                run.trainer_type.upper(),
+                run.source,
+                run.best_model_path.name if run.best_model_path else "LoRA",
+            ],
+            plain_formatter=lambda i, run: (
+                f"{run.timestamp} [{run.trainer_type.upper()}] "
+                f"{run.source} "
+                f"{run.best_model_path.name if run.best_model_path else 'LoRA'}"
+            ),
+        )
+        self._display_table(runs, spec)
+
+    def _select_vllm_run(self):
+        """Select a local training run for Dockerized vLLM evaluation."""
+        runs = self._discover_vllm_runs()
+        if not runs:
+            print_error("No vLLM-compatible training runs found.")
+            print_info("A merged-16bit export or a final_model LoRA adapter is required.")
+            return None
+
+        self._display_vllm_runs_table(runs)
+
+        while True:
+            try:
+                sel = prompt(f"Select model run (1-{len(runs)})", "1")
+                idx = int(sel) - 1
+                if 0 <= idx < len(runs):
+                    return runs[idx]
+            except ValueError:
+                pass
+            print_error("Invalid selection.")
+
+    def _find_available_port(self, preferred: int = 8000) -> int:
+        """Reserve a local TCP port for the Dockerized vLLM server."""
+        for candidate in (preferred, 0):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.bind(("127.0.0.1", candidate))
+                    return sock.getsockname()[1]
+            except OSError:
+                continue
+        return preferred
+
+    def _wait_for_vllm_models(self, host: str, port: int, timeout_seconds: int = 300) -> list[str]:
+        """Poll the local vLLM endpoint until models are available."""
+        deadline = time.time() + timeout_seconds
+        last_error = "vLLM server did not return any models."
+        while time.time() < deadline:
+            try:
+                with urlopen(f"http://{host}:{port}/v1/models", timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                model_ids = [item.get("id") for item in payload.get("data", []) if item.get("id")]
+                if model_ids:
+                    return model_ids
+                last_error = "vLLM server is up but returned no models."
+            except (URLError, TimeoutError, json.JSONDecodeError, RemoteDisconnected, ConnectionResetError) as exc:
+                last_error = str(exc)
+            time.sleep(2)
+        raise RuntimeError(last_error)
+
+    def _run_docker_unsloth_evaluation(self, model: str, scenario) -> int:
+        """Run direct Unsloth evaluation inside the Docker runtime."""
+        try:
+            image, profile = resolve_eval_image(
+                self.repo_root,
+                runtime="unsloth",
+                explicit_image=getattr(self.args, "docker_image", None),
+                requested_profile=getattr(self.args, "docker_profile", None),
+            )
+        except Exception as exc:
+            print_error(f"Failed to resolve Docker evaluation image: {exc}")
+            return 1
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = self.repo_root / "Evaluator" / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        output_json = results_dir / f"run_{timestamp}.json"
+        output_md = results_dir / f"run_{timestamp}.md"
+
+        cmd = build_docker_run_command(
+            image=image,
+            repo_root=self.repo_root,
+            workdir=str(CONTAINER_REPO_ROOT),
+            entrypoint="python",
+            env={"PYTHONPATH": str(CONTAINER_REPO_ROOT)},
+            command=[
+                "-m",
+                "Evaluator.cli",
+                "--backend",
+                "unsloth",
+                "--model",
+                container_repo_path(Path(model), self.repo_root),
+                "--scenario",
+                scenario.path.name,
+                "--output",
+                container_repo_path(output_json, self.repo_root),
+                "--markdown",
+                container_repo_path(output_md, self.repo_root),
+            ],
+        )
+
+        profile_suffix = f" ({profile})" if profile else ""
+        print_info(f"Running Docker evaluation with: {image}{profile_suffix}")
+        print()
+        result = subprocess.run(cmd, cwd=str(self.repo_root))
+
+        if result.returncode == 0:
+            print()
+            print_info(f"Results saved to: {output_json.relative_to(self.repo_root)}")
+            print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
+        return result.returncode
+
+    def _run_docker_vllm_evaluation(self, run, scenario) -> int:
+        """Start a Dockerized vLLM server and evaluate against it."""
+        try:
+            image, profile = resolve_eval_image(
+                self.repo_root,
+                runtime="vllm",
+                explicit_image=getattr(self.args, "docker_image", None),
+                requested_profile=getattr(self.args, "docker_profile", None),
+            )
+        except Exception as exc:
+            print_error(f"Failed to resolve Docker vLLM image: {exc}")
+            return 1
+
+        model_path = run.best_model_path
+        if model_path is None:
+            print_error("Selected run does not have a usable model path for vLLM.")
+            return 1
+
+        command = [
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000",
+            "--gpu-memory-utilization",
+            "0.9",
+        ]
+        preferred_model_id = None
+
+        adapter_config = model_path / "adapter_config.json"
+        if adapter_config.exists():
+            try:
+                adapter_data = json.loads(adapter_config.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                print_error(f"Failed to parse adapter_config.json: {exc}")
+                return 1
+
+            base_model = adapter_data.get("base_model_name_or_path")
+            if not base_model:
+                print_error("Adapter config is missing base_model_name_or_path.")
+                return 1
+
+            preferred_model_id = f"{run.trainer_type}-{run.timestamp}"
+            command = [
+                "--model",
+                base_model,
+                *command,
+                "--enable-lora",
+                "--max-lora-rank",
+                "64",
+                "--lora-modules",
+                f"{preferred_model_id}={container_repo_path(model_path, self.repo_root)}",
+            ]
+        else:
+            command = [
+                "--model",
+                container_repo_path(model_path, self.repo_root),
+                *command,
+            ]
+
+        host_port = self._find_available_port(8000)
+        container_name = f"tuner-vllm-eval-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        run_cmd = build_docker_run_command(
+            image=image,
+            repo_root=self.repo_root,
+            publish_ports=[(host_port, 8000)],
+            command=command,
+            name=container_name,
+            detach=True,
+        )
+
+        profile_suffix = f" ({profile})" if profile else ""
+        print_info(f"Starting Docker vLLM server with: {image}{profile_suffix}")
+        print_info(f"Container: {container_name}")
+        print_info(f"Endpoint: http://127.0.0.1:{host_port}/v1")
+        print()
+
+        log_process = None
+        try:
+            start = subprocess.run(run_cmd, cwd=str(self.repo_root), capture_output=True, text=True)
+            if start.returncode != 0:
+                print_error(start.stderr.strip() or start.stdout.strip() or "Failed to start Docker vLLM server.")
+                return 1
+
+            log_process = subprocess.Popen(
+                ["docker", "logs", "-f", container_name],
+                cwd=str(self.repo_root),
+            )
+
+            model_ids = self._wait_for_vllm_models("127.0.0.1", host_port)
+            model_id = preferred_model_id if preferred_model_id in model_ids else model_ids[0]
+            print()
+            print_info(f"vLLM server ready. Using model id: {model_id}")
+            print()
+            return self._run_subprocess_evaluation(
+                "vllm",
+                model_id,
+                scenario,
+                host="127.0.0.1",
+                port=host_port,
+            )
+        except RuntimeError as exc:
+            print_error(f"Docker vLLM server failed to become ready: {exc}")
+            return 1
+        finally:
+            if log_process is not None and log_process.poll() is None:
+                log_process.terminate()
+            subprocess.run(
+                ["docker", "rm", "-f", container_name],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+            )
+
+    def _handle_docker_eval(self) -> int:
+        """Run the local evaluation workflow through Docker."""
+        print_header("EVALUATION", "Test your model's performance (Docker runtime)")
+
+        docker_ok, docker_error = ensure_docker_cli()
+        if not docker_ok:
+            print_error(docker_error)
+            return 1
+
+        backend_choice = print_menu([
+            ("unsloth", f"{BOX['star']} Unsloth (Docker - direct LoRA)"),
+            ("vllm", f"{BOX['bullet']} vLLM (Docker - OpenAI server)"),
+        ], "Select backend:")
+
+        if not backend_choice:
+            return 0
+
+        if backend_choice == "unsloth":
+            model, _trainer_type = self._select_unsloth_model()
+            if not model:
+                return 0
+            model_label = model
+        else:
+            selected_run = self._select_vllm_run()
+            if selected_run is None:
+                return 1
+            model = selected_run
+            model_label = selected_run.display_name
+
+        scenarios = self._list_scenarios()
+        if not scenarios:
+            print_error("No test scenarios found in Evaluator/config/scenarios/")
+            return 1
+
+        self._display_scenarios_table(scenarios)
+        while True:
+            try:
+                sel = prompt(f"Select test scenario (1-{len(scenarios)})", "1")
+                idx = int(sel) - 1
+                if 0 <= idx < len(scenarios):
+                    selected = scenarios[idx]
+                    break
+            except ValueError:
+                pass
+            print_error("Invalid selection.")
+
+        print_config({
+            "Runtime": "docker",
+            "Backend": backend_choice,
+            "Model": model_label,
+            "Scenario": f"{selected.name} ({selected.count} tests)",
+        }, "Evaluation Configuration")
+
+        if not confirm("Start evaluation?"):
+            print_info("Evaluation cancelled.")
+            return 0
+
+        if backend_choice == "unsloth":
+            return self._run_docker_unsloth_evaluation(model, selected)
+        return self._run_docker_vllm_evaluation(model, selected)
+
     def handle(self) -> int:
         """
         Execute evaluation workflow.
@@ -537,6 +892,10 @@ class EvalHandler(BaseHandler):
             status = self._get_eval_status()
             self.output(status)
             return 0
+
+        runtime = getattr(self.args, "runtime", "native") if self.args else "native"
+        if runtime == "docker":
+            return self._handle_docker_eval()
 
         print_header("EVALUATION", "Test your model's performance")
 
@@ -802,7 +1161,15 @@ class EvalHandler(BaseHandler):
         passed = sum(1 for r in records if r.passed)
         return 0 if passed == len(records) else 1
 
-    def _run_subprocess_evaluation(self, backend: str, model: str, scenario) -> int:
+    def _run_subprocess_evaluation(
+        self,
+        backend: str,
+        model: str,
+        scenario,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+    ) -> int:
         """
         Fallback: Run evaluation via subprocess.
 
@@ -834,6 +1201,10 @@ class EvalHandler(BaseHandler):
             "--output", str(output_json),
             "--markdown", str(output_md)
         ]
+        if host:
+            cmd.extend(["--host", host])
+        if port:
+            cmd.extend(["--port", str(port)])
 
         print_info(f"Running: {' '.join(cmd)}")
         print()

@@ -13,6 +13,13 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
+| Local Docker status | `python tuner.py docker status` |
+| Bootstrap local Docker runtime | `python tuner.py docker bootstrap --docker-target all` |
+| Build Docker bucket helper | `python tuner.py docker build --docker-target bucket` |
+| Pull local Docker runtime | `python tuner.py docker pull --docker-target unsloth` |
+| Smoke test local Docker runtime | `python tuner.py docker smoke --docker-target all` |
+| Local Docker training | `python tuner.py train --runtime docker` |
+| Local Docker evaluation | `python tuner.py eval --runtime docker` |
 | SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/grpo && python train_grpo.py` |
@@ -91,6 +98,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Treat `loss_summary.json` as a supporting artifact, not the canonical final loss metadata file.
 - The ledger should accumulate real model-size / hardware / timing / cost data so future hardware planning can optimize against observed evidence instead of memory.
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
+- For Windows local GPU work, prefer Docker Desktop plus `python tuner.py docker smoke --docker-target all` as the first environment check before debugging conda or package drift.
+- For first-time local Docker setup, prefer `python tuner.py docker bootstrap --docker-target all`. It should tell you whether Docker Desktop is installed/running, pull or build the required images, and finish with smoke tests.
+- Prefer `python tuner.py train --runtime docker` and `python tuner.py eval --runtime docker` when you want the CLI to stay Docker-first locally while reusing the checked-in trainer and evaluator entrypoints.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
 - Evolutionary SFT is experimental but now first-class in the cloud experiment path. Prefer a checked-in experiment spec or `cloud-pipeline --train-evolutionary-*` overrides over editing trainer YAMLs by hand.
@@ -104,7 +114,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - For in-flight cloud-run health checks, inspect the bucket-backed artifacts first (`training_latest.jsonl`, `stage_summary.json`, `training_lineage.json`, eval/loss partials). Use raw HF logs only as a fallback when the bucket prefix has not started writing yet.
 - For quick bucket spot checks, use `python tuner.py bucket read ...` or `python tuner.py bucket list ...` instead of manual `hf buckets cp` commands.
 - For local inspection or offline diffing, use `python tuner.py bucket pull ...` to sync a bucket-relative path into the current workspace while preserving its relative path.
+- Pulled cloud adapters under `toolset-training-artifacts/runs/...` or `runs/...` should be treated as first-class local runs by `train`/`eval` discovery. Do not spin up a one-off container just because a run originated in HF Jobs.
 - For one-off uploads back into the HF artifact bucket, use `python tuner.py bucket push ...` instead of ad hoc `sync_bucket` snippets.
+- If the active Python lacks modern HF Buckets support, `python tuner.py bucket ...` should fall back to the checked-in Docker bucket helper instead of mutating the main Unsloth environment. Prebuild it with `python tuner.py docker build --docker-target bucket` when you want the fallback path ready ahead of time.
 - For `a100-large` or larger tiers, bias toward aggressive packing. Do not lower batch just because the adapter recipe changed. Start from the highest known-good packed shape for the same model family and only back off after a real OOM or clear instability signal.
 - Treat large unused VRAM on `a100-large` as a mistake, not a comfort margin. If `training_lineage.json` shows tens of GB of reserved headroom, the run is underpacked and the next iteration should push batch size harder even if that risks OOM.
 - For vLLM eval on multi-GPU hardware, prequantized BitsAndBytes base models (for example `*-bnb-4bit`) cannot use tensor parallelism. Do not assume `x4` means vLLM will shard generation across all GPUs; in this path, eval may need to fall back to single-GPU while exact loss still fans out across all visible GPUs afterward.
@@ -173,6 +185,26 @@ Reference config templates for LoRA variants in `.skills/fine-tuning/configs/`:
 See `reference/lora-techniques.md` for full details, integration status, and compatibility notes.
 
 ## Common Patterns
+
+**Bootstrap local Docker on a fresh machine:**
+```bash
+python tuner.py docker bootstrap --docker-target all
+```
+Use this before touching conda if the goal is local GPU training/eval through Docker Desktop. The command should:
+- tell you if Docker Desktop is missing or not running
+- prepare `unsloth`, `vllm`, and the Buckets helper image
+- run smoke tests so you know GPU containers actually work
+
+**Pull a cloud adapter and evaluate it locally through Docker:**
+```bash
+python tuner.py bucket pull \
+  --path runs/hf_jobs/sft/<run-prefix>/final_model \
+  --dest toolset-training-artifacts
+
+python tuner.py eval --runtime docker
+```
+Gotcha:
+- The pulled adapter should now appear in the normal local eval discovery flow. If it does not, inspect where the pull landed and keep it under `toolset-training-artifacts/runs/...` or `runs/...` inside the repo.
 
 **Quick SFT test run:**
 ```bash

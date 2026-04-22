@@ -15,6 +15,10 @@ LEGACY_TRAINER_DIRS = {method: f"rtx3090_{method}" for method in TRAINING_METHOD
 
 CANONICAL_OUTPUT_DIRS = {method: f"{method}_output" for method in TRAINING_METHODS}
 LEGACY_OUTPUT_DIRS = {method: f"{method}_output_rtx3090" for method in TRAINING_METHODS}
+LOCAL_ARTIFACT_RUN_ROOTS = (
+    Path("toolset-training-artifacts") / "runs",
+    Path("runs"),
+)
 
 
 def get_project_root() -> Path:
@@ -133,6 +137,84 @@ def iter_training_output_dirs(method: str, repo_root: Optional[Path] = None) -> 
 
     preferred_trainer_dir = get_trainer_root(normalized, repo_root)
     return [preferred_trainer_dir / get_canonical_output_dir_name(normalized)]
+
+
+def get_local_artifact_run_roots(repo_root: Optional[Path] = None) -> list[Path]:
+    """
+    Return repo-local roots that may contain pulled cloud training artifacts.
+
+    These roots match the relative path preserved by ``python tuner.py bucket pull``.
+    """
+    root = repo_root or get_project_root()
+    candidates: list[Path] = []
+    for relative_root in LOCAL_ARTIFACT_RUN_ROOTS:
+        candidate = root / relative_root
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def iter_imported_training_run_dirs(method: str, repo_root: Optional[Path] = None) -> list[Path]:
+    """
+    Return imported cloud run directories for a method.
+
+    Expected artifact layout:
+        <root>/runs/<provider>/<method>/<run_id>/
+    where ``<root>`` is either ``toolset-training-artifacts`` or the repo root.
+    """
+    normalized = normalize_trainer_method(method)
+    runs: list[Path] = []
+    seen: set[Path] = set()
+
+    for runs_root in get_local_artifact_run_roots(repo_root):
+        if not runs_root.exists():
+            continue
+
+        for provider_dir in runs_root.iterdir():
+            if not provider_dir.is_dir():
+                continue
+
+            method_dir = provider_dir / normalized
+            if not method_dir.exists():
+                continue
+
+            for run_dir in method_dir.iterdir():
+                if run_dir.is_dir():
+                    resolved = run_dir.resolve()
+                    if resolved not in seen:
+                        seen.add(resolved)
+                        runs.append(run_dir)
+
+    return runs
+
+
+def iter_training_run_dirs(method: str, repo_root: Optional[Path] = None) -> list[Path]:
+    """
+    Return all locally discoverable run directories for a method.
+
+    This includes native trainer outputs and imported cloud/bucket artifacts.
+    """
+    normalized = normalize_trainer_method(method)
+    runs: list[Path] = []
+    seen: set[Path] = set()
+
+    for output_dir in iter_training_output_dirs(normalized, repo_root):
+        if not output_dir.exists():
+            continue
+        for run_dir in output_dir.iterdir():
+            if run_dir.is_dir():
+                resolved = run_dir.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    runs.append(run_dir)
+
+    for run_dir in iter_imported_training_run_dirs(normalized, repo_root):
+        resolved = run_dir.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            runs.append(run_dir)
+
+    return runs
 
 
 def get_primary_training_output_dir(method: str, repo_root: Optional[Path] = None) -> Path:
