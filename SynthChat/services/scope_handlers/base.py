@@ -4,7 +4,7 @@ Single Responsibility: Define the contract for scope handlers.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 
 class ScopeHandler(ABC):
@@ -62,7 +62,8 @@ class ScopeHandler(ABC):
     def build_prompt_variables(
         self,
         example: Dict,
-        judgment: Dict
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """
         Build scope-specific variables for prompt template.

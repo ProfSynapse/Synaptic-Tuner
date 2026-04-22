@@ -270,13 +270,14 @@ class EnvironmentSession:
         except Exception as exc:
             final_issues.append(EnvironmentIssue("warning", f"Environment snapshot warning: {exc}"))
 
-        passed = all(issue.level.lower() != "error" for issue in final_issues)
+        hard_failure = any(step.hard_error for step in self.steps)
+        passed = all(issue.level.lower() != "error" for issue in final_issues) and not hard_failure
         trace = EnvironmentEpisodeTrace(
             steps=list(self.steps),
             total_turns=total_turns if total_turns is not None else len(self.steps),
             total_tool_calls=len(self.executed_tools),
             stop_reason=stop_reason,
-            hard_failure=any(step.hard_error for step in self.steps),
+            hard_failure=hard_failure,
             recovered_after_error=_did_recover_after_error(self.steps, passed),
         )
         return EnvironmentValidationResult(

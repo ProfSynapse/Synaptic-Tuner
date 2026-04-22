@@ -94,15 +94,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<from system prompt>",
-                "sessionId": "<from system prompt>",
-                "memory": "<brief state>",
-                "goal": "<find the production config note, read it, and replace only the target value>",
-                "constraints": "<preserve surrounding content and do not modify unrelated files>",
-                "tool": "search search-content \"<search text>\" --paths \"[\\\"\\\"]\" --limit 10, content read \"<path>\" 1, content replace --path \"<path>\" --old-content \"<old text>\" --new-content \"<new text>\" --start-line <n> --end-line <n>",
-                "strategy": "serial"
-              }
+              "arguments": "{\"workspaceId\":\"<from system prompt>\",\"sessionId\":\"<from system prompt>\",\"memory\":\"<brief state>\",\"goal\":\"<find the production config note, read it, and replace only the target value>\",\"constraints\":\"<preserve surrounding content and do not modify unrelated files>\",\"tool\":\"search search-content \\\"<search text>\\\" --paths \\\"[\\\\\\\"\\\\\\\"]\\\" --limit 10, content read \\\"<path>\\\" 1, content replace --path \\\"<path>\\\" --old-content \\\"<old text>\\\" --new-content \\\"<new text>\\\" --start-line <n> --end-line <n>\",\"strategy\":\"serial\"}"
             }
           }]
         }
@@ -187,15 +179,7 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": {
-                "workspaceId": "<from system prompt>",
-                "sessionId": "<from system prompt>",
-                "memory": "<brief state>",
-                "goal": "<verify the target folder is empty and archive it safely>",
-                "constraints": "<do not touch unrelated folders>",
-                "tool": "storage list \"Projects/<folder>\", storage archive \"Projects/<folder>\"",
-                "strategy": "serial"
-              }
+              "arguments": "{\"workspaceId\":\"<from system prompt>\",\"sessionId\":\"<from system prompt>\",\"memory\":\"<brief state>\",\"goal\":\"<verify the target folder is empty and archive it safely>\",\"constraints\":\"<do not touch unrelated folders>\",\"tool\":\"storage list \\\"Projects/<folder>\\\", storage archive \\\"Projects/<folder>\\\"\",\"strategy\":\"serial\"}"
             }
           }]
         }

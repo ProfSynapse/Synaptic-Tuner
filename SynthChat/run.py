@@ -174,6 +174,14 @@ def main():
     improve_parser.add_argument("--rubrics", help="Comma-separated rubric names")
     improve_parser.add_argument("--start-line", type=int, help="Start line (1-indexed)")
     improve_parser.add_argument("--end-line", type=int, help="End line (inclusive)")
+    improve_parser.add_argument(
+        "--lines",
+        help="Comma-separated 1-indexed line selectors (for example: 3,7,10-15)",
+    )
+    improve_parser.add_argument(
+        "--line-file",
+        help="Text file containing 1-indexed line selectors, one per line or comma-separated",
+    )
     improve_parser.add_argument("--max-iterations", type=int, help="Max improvement iterations")
     improve_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
     improve_parser.add_argument("--model", help="Model name (overrides settings.yaml)")

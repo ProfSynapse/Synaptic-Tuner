@@ -638,7 +638,7 @@ def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
             lines.append(f"  Root folder: {root_folder}")
         lines.append("")
     if lines:
-        lines.append("Use memoryManager with loadWorkspace mode to get full workspace context.")
+        lines.append("Use the memory load-workspace command to get full workspace context.")
     return "\n".join(lines).strip()
 
 
@@ -674,12 +674,12 @@ def _build_session_context_section(session_id: str, workspace_id: str) -> str:
     return "\n".join(
         [
             "<session_context>",
-            "IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:",
+            "IMPORTANT: When using tools, include these values in the tool-call context fields required by the active format:",
             "",
             f'- sessionId: "{session_id}"',
             f'- workspaceId: "{workspace_id}" (current workspace)',
             "",
-            'Include these as top-level fields in your useTools arguments payload.',
+            "Include these in the tool-call context fields required by the active format.",
             "</session_context>",
         ]
     )

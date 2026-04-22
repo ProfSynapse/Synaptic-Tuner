@@ -13,9 +13,12 @@ llm:
   # Generation model — creates raw examples. Local models work fine.
   generation:
     provider: openrouter          # openrouter | lmstudio | ollama | unsloth
-    model: google/gemini-2.0-flash-001
+    model: openai/gpt-oss-120b
     temperature: 0.7              # Higher = more variety in generated examples
     max_tokens: 4096
+    provider_routing:
+      order: ["Groq"]             # Prioritize Groq for generation
+      allow_fallbacks: true       # Fall back if preferred unavailable
     # LM Studio example:
     # provider: lmstudio
     # model: local-model

@@ -10,9 +10,6 @@ Usage: Called by generator.py during assistant response generation stage.
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..config.format_resolver import get_default_tool_call_format
-
-
 # ---------------------------------------------------------------------------
 # Schema builder
 # ---------------------------------------------------------------------------
@@ -50,25 +47,14 @@ def _build_wrapper_schema(
     """Build schema for wrapper-style tool calls (single function wrapping multiple calls)."""
     arg_cfg = format_config.get("argument_fields") or {}
     arg_properties_cfg = arg_cfg.get("properties") or {}
-    arguments_properties: Dict[str, Any] = {}
-    for field_name, field_schema in arg_properties_cfg.items():
-        if isinstance(field_schema, dict):
-            arguments_properties[field_name] = dict(field_schema)
-        else:
-            arguments_properties[field_name] = {"type": "string", "minLength": 1}
-
-    # Apply context overrides (e.g. sessionId/workspaceId const values) to top-level args
-    for field_name, const_value in context_overrides.items():
-        if const_value and field_name in arguments_properties:
-            arguments_properties[field_name] = {"const": const_value}
-
-    # Add extra argument fields from config (e.g. strategy)
-    extra_fields = format_config.get("extra_argument_fields") or {}
-    for field_name, field_schema in extra_fields.items():
-        if isinstance(field_schema, dict):
-            arguments_properties[field_name] = dict(field_schema)
-
     argument_required = list(format_config.get("argument_required") or [])
+    argument_field_names = list(arg_properties_cfg.keys()) + list((format_config.get("extra_argument_fields") or {}).keys())
+    override_fields = [field for field, value in context_overrides.items() if value and field in arg_properties_cfg]
+    guidance_fields = sorted(set(argument_required + argument_field_names + override_fields))
+    guidance = (
+        f"JSON string containing the top-level '{wrapper_name}' wrapper payload with fields: "
+        + ", ".join(guidance_fields)
+    )
 
     return {
         "type": "object",
@@ -103,10 +89,9 @@ def _build_wrapper_schema(
                                     "properties": {
                                         "name": {"const": wrapper_name},
                                         "arguments": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "properties": arguments_properties,
-                                            "required": argument_required,
+                                            "type": "string",
+                                            "minLength": 2,
+                                            "description": guidance,
                                         },
                                     },
                                     "required": ["name", "arguments"],

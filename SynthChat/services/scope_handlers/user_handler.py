@@ -8,7 +8,7 @@ comparing content in other scopes against what the user actually said.
 """
 
 import json
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from .base import ScopeHandler
 
 
@@ -48,7 +48,12 @@ class UserHandler(ScopeHandler):
 
         return improved
 
-    def build_prompt_variables(self, example: Dict, judgment: Dict) -> Dict:
+    def build_prompt_variables(
+        self,
+        example: Dict,
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """
         Build variables for user scope template.
 

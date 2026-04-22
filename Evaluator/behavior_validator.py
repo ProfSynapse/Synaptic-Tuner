@@ -98,7 +98,7 @@ def validate_behavior(
         expected_response_type: Expected response type (text_only, tool_only, tool_text)
         anti_patterns: Dict of anti-patterns that should NOT be present
         extracted_tool_names: Tool names already extracted by schema validation
-                             (with useTools expansion applied). If provided, these
+                             (with configured wrapper expansion applied). If provided, these
                              are used instead of parsing the response again.
 
     Returns:
@@ -321,7 +321,7 @@ def _check_expectation(
 
     # Delegation expectations - value specifies the expected tool name
     # e.g., delegates_complex_task: promptManager_executePrompts
-    # Uses extracted tool names from schema validation (already expanded from useTools)
+    # Uses extracted tool names from schema validation (already expanded from configured wrappers)
     if expectation in ("delegates_complex_task", "uses_execute_prompt", "uses_execute_prompts", "delegates_to"):
         # Value can be True (legacy) or a tool name string
         expected_tool = value if isinstance(value, str) else None

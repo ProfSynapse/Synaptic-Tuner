@@ -12,6 +12,16 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
 
+## Config-First Generation Discipline
+
+- This repo is format-agnostic. Do not treat the current tool wrapper, CLI shape, or toy dataset format as a runtime truth.
+- Do not hardcode any current dataset/example format into parser, executor, judge, evaluator, or generation code.
+- Tool-call shapes, wrapper names, context fields, command examples, and dataset-specific assumptions must live in config or scenario/rubric YAML, not in code.
+- If a generation/eval bug appears to be specific to the current CLI/tool wrapper, the first fix path is config, rubric, or scenario work, not runtime code changes.
+- Generic runtime code may validate or transport configured formats, but it must not assume one specific wrapper such as `useTools`, one specific field set, or one specific command structure unless that behavior is itself config-driven.
+- When using environment-backed validation during generation, environment/runtime errors must be surfaced into the judge/improver inputs as structured context so the model can correct the response. Do not rely on ad hoc parser/executor repairs as the primary fix path.
+- If a process requirement is important enough to affect how generation/eval work is done repeatedly, encode it in `AGENTS.md`, the canonical skill under `.skills/`, and the relevant checked-in config/docs before continuing.
+
 ## HF Jobs
 
 - Remote jobs clone and run the exact pushed commit. If the job log shows an older `HEAD`, stop and relaunch from the right SHA instead of debugging stale code.

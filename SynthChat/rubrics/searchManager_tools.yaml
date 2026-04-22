@@ -1,13 +1,61 @@
 name: searchManager Tools
-description: Validates searchManager tool calls use OpenAI format with useTools schema (read-only search)
+description: Validates CLI-first searchManager tool calls wrapped in useTools
 scope: response
 pass_threshold: 0.8
-judge_prompt: "# CONTEXT\nYou are evaluating tool calls for the searchManager agent. Tool calls must use OpenAI format with the useTools schema.\n\n**Tool Calls to Evaluate:**\n```json\n{original_tool_calls}\n```\n\n**System Prompt:**\n```\n{system_prompt}\n```\n\n**User Request:**\n```\n{user_request}\n```\n\n# REQUIRED FORMAT\n\nTool calls MUST use OpenAI tool_calls format with name \"useTools\":\n```json\n{{\n  \"tool_calls\": [\n    {{\n      \"id\": \"unique_id\",\n      \"type\": \"function\",\n      \"function\": {{\n        \"name\": \"useTools\",\n        \"arguments\": \"{{\\\"workspaceId\\\": \\\"default\\\", \\\"sessionId\\\": \\\"session_123\\\", \\\"memory\\\": \\\"Need to inspect and reorganize notes.\\\", \\\"goal\\\": \\\"Move a note and then read it back.\\\", \\\"constraints\\\": \\\"Do not touch unrelated files.\\\", \\\"tool\\\": \\\"storage move \\\\\\\"notes/today.md\\\\\\\" \\\\\\\"archive/today.md\\\\\\\", content read \\\\\\\"archive/today.md\\\\\\\"\\\", \\\"strategy\\\
-  \": \\\"serial\\\"}}\"\n      }}\n    }}\n  ]\n}}\n```\n\nThe `arguments` JSON string must contain:\n```json\n{{\n  \"context\": {{\n    \"workspaceId\": \"string (from session_context or 'default')\",\n    \"sessionId\": \"string (from session_context)\",\n    \"memory\": \"string (1-3 sentences)\",\n    \"goal\": \"string (1-3 sentences)\"\n  }},\n  \"calls\": [\n    {{\n      \"agent\": \"searchManager\",\n      \"tool\": \"toolName\",\n      \"params\": {{ ... tool-specific params ... }}\n    }}\n  ]\n}}\n```\n\n## Valid Tools and Params (all READ-ONLY):\n\n| tool | required params | optional params |\n|------|-----------------|-----------------|\n| searchContent | query | limit, includeContent, snippetLength, paths |\n| searchDirectory | query, paths | searchType, fileTypes, depth, limit |\n| searchMemory | query | memoryTypes, searchMethod, limit |\n\n# EVALUATION CRITERIA\n\n1. **Function Name**: Must be exactly \"useTools\"\n2. **Arguments Structure**: Must have top-level wrapper\
-  \ fields at root, including `workspaceId`, `sessionId`, `memory`, `goal`, and `tool`\n3. **Top-Level Fields**: Must include `workspaceId`, `sessionId`, `memory`, `goal`, and `tool`; `constraints` and `strategy` are optional\n4. **Tool Command String**: `tool` must be a CLI command string that resolves to the correct concrete tool(s)\n5. **Command Resolution**: The CLI command string must resolve to the correct manager/tool for the task\n6. **Tool Value**: Must be valid tool name\n7. **Params**: Must include all required params for the tool\n\n# SCORING\n- **1.0** = Correct format, valid params, proper useTools structure\n- **0.7-0.9** = Minor param issues\n- **0.4-0.6** = Wrong structure OR missing required params\n- **0.0-0.3** = Wrong function name OR completely wrong format\n\n# OUTPUT\nReturn JSON: `{{\"searchmanagertools_score\": 0.0-1.0}}`\n"
-improver_prompt: "# CONTEXT\nYou are converting tool calls to the correct OpenAI assistant message format.\n\n**Current Tool Calls:**\n```json\n{original_tool_calls}\n```\n\n**System Prompt:**\n```\n{system_prompt}\n```\n\n**User Request:**\n```\n{user_request}\n```\n\n**Feedback:**\n```\n{feedback}\n```\n\n# REQUIRED OUTPUT FORMAT\n\nOutput a complete assistant message with `content: null` and `tool_calls` array:\n\n```json\n{{\n  \"content\": null,\n  \"tool_calls\": [\n    {{\n      \"id\": \"call_<random_9chars>\",\n      \"type\": \"function\",\n      \"function\": {{\n        \"name\": \"useTools\",\n        \"arguments\": \"<JSON string with context and calls>\"\n      }}\n    }}\n  ]\n}}\n```\n\n**CRITICAL**: `content` MUST be `null` (not a string, not empty string).\n\n## Valid Tools and Params:\n\n| tool | required params | optional params |\n|------|-----------------|-----------------|\n| searchContent | query | limit, includeContent, snippetLength, paths |\n| searchDirectory\
-  \ | query, paths | searchType, fileTypes, depth, limit |\n| searchMemory | query | memoryTypes, searchMethod, limit |\n\n# INSTRUCTIONS\n\n1. **Extract IDs from system prompt's <session_context>**\n2. **Set content to null** (tool-only response)\n3. **Set function.name to \"useTools\"**\n4. **Build top-level wrapper arguments with `workspaceId`, `sessionId`, `memory`, `goal`, `tool`, and optional `constraints`/`strategy`**\n\n# EXAMPLE\n\n```json\n{{\n  \"content\": null,\n  \"tool_calls\": [\n    {{\n      \"id\": \"call_b2c3d4e5f\",\n      \"type\": \"function\",\n      \"function\": {{\n        \"name\": \"useTools\",\n        \"arguments\": \"{{\\\"context\\\": {{\\\"workspaceId\\\": \\\"default\\\", \\\"sessionId\\\": \\\"session_123\\\", \\\"memory\\\": \\\"User searching for ML content.\\\", \\\"goal\\\": \\\"Find notes about machine learning.\\\"}}, \\\"calls\\\": [{{\\\"agent\\\": \\\"searchManager\\\", \\\"tool\\\": \\\"searchContent\\\", \\\"params\\\": {{\\\"query\\\": \\\"\
-  machine learning\\\", \\\"includeContent\\\": true}}}}]}}\"\n      }}\n    }}\n  ]\n}}\n```\n\n# OUTPUT\nReturn ONLY the JSON object with content and tool_calls. No markdown, no explanation.\n"
+judge_prompt: |
+  # CONTEXT
+  You are evaluating CLI-first tool calls for the searchManager agent.
+
+  **Tool Calls to Evaluate:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  Tool calls must use `function.name = "useTools"` and a top-level arguments payload with:
+  `workspaceId`, `sessionId`, `memory`, `goal`, `tool`, and optional `constraints` / `strategy`.
+
+  Do NOT use nested `context` + `calls`.
+
+  ## Valid search commands
+  - `search search-content ...`
+  - `search search-directory ...`
+  - `search search-memory ...`
+
+  The command string must resolve to the searchManager family and include the query plus any required extra args.
+
+  Return JSON: `{"searchmanagertools_score": 0.0-1.0}`
+improver_prompt: |
+  Convert the current response into a CLI-first `useTools` assistant message.
+
+  **Current Tool Calls:**
+  ```json
+  {original_tool_calls}
+  ```
+
+  **Feedback:**
+  ```
+  {feedback}
+  ```
+
+  Example:
+  ```json
+  {
+    "content": null,
+    "tool_calls": [
+      {
+        "id": "call_<random_9chars>",
+        "type": "function",
+        "function": {
+          "name": "useTools",
+          "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"User is searching for rollout notes.\",\"goal\":\"Find rollout notes mentioning staged deploys.\",\"tool\":\"search search-content \\\"staged deploy\\\" --limit 5 --include-content\",\"strategy\":\"serial\"}"
+        }
+      }
+    ]
+  }
+  ```
+
+  Do NOT use nested `context` + `calls`.
+  Do NOT emit `searchManager_*` as the function name.
 output_schema:
   type: object
   properties:
@@ -17,46 +65,24 @@ output_schema:
       max: 1.0
   required:
   - searchmanagertools_score
+  additionalProperties: false
 output_format:
   type: assistant_message
 validations:
 - tools:
     useTools:
-      context:
-        workspaceId: string
-        sessionId: string
-        memory: string
-        goal: string
-      calls:
-        _item_schema:
-          agent: string
-          tool: string
-          params: object
-        _subtools:
-          searchManager:
-            searchContent:
-              _required:
-              - query
-              query: string
-              limit: number
-              includeContent: boolean
-              snippetLength: number
-              paths: array
-            searchDirectory:
-              _required:
-              - query
-              - paths
-              query: string
-              paths: array
-              searchType: string
-              fileTypes: array
-              depth: number
-              limit: number
-            searchMemory:
-              _required:
-              - query
-              query: string
-              memoryTypes: array
-              searchMethod: string
-              limit: number
+      _required:
+      - workspaceId
+      - sessionId
+      - memory
+      - goal
+      - tool
+      _additionalProperties: false
+      workspaceId: string
+      sessionId: string
+      memory: string
+      goal: string
+      tool: string
+      constraints: string
+      strategy: string
   error: 'useTools validation failed: {details}'

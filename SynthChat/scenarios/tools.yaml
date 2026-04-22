@@ -1,6 +1,41 @@
 # Tool-based scenarios for SynthChat
 # Each scenario is self-contained with embedded prompts
 
+shared_tool_final_review: &shared_tool_final_review
+  enforce: true
+  gates:
+    - type: field_equals
+      field: environment_passed
+      value: true
+  judge:
+    enabled: true
+    max_retries: 3
+    fallback_models:
+      - google/gemini-3.1-flash-lite-preview
+    temperature: 0.1
+    prompt: |
+      You are reviewing a completed CLI-first SynthChat tool example.
+
+      Scenario key:
+      {scenario_key}
+
+      Final environment result:
+      {environment_result_json}
+
+      Final assistant response:
+      {assistant_response_json}
+
+      Conversation trace:
+      {conversation_trace_json}
+
+      Return passed=true only if:
+      - the environment result already passed
+      - the assistant response is coherent training data
+      - the tool trajectory matches the user's request
+      - the emitted tool call follows the CLI-first useTools wrapper shape
+
+      If environment_result.passed is false, then passed must be false.
+
 scenarios:
   # VaultManager tools
   storageManager_createFolder:
@@ -29,12 +64,16 @@ scenarios:
         Don't specify exact paths - make the AI infer from context.
 
       assistant: |
-        Generate assistant response with:
-        1. Optional <thinking> block showing reasoning about folder location
-        2. Tool call to storageManager_createFolder with appropriate path
-        Use OpenAI-style tool_calls format. The thinking should consider:
-        - Where the folder should be created based on context
-        - What path makes sense given the user's vague request
+        Generate response with:
+        1. Optional <thinking> about folder location
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage create-folder "Projects/Q4 Planning"
+        The tool field must begin with the exact literal command prefix `storage create-folder`.
+        Never use legacy tool names like `storageManager_createFolder` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storageManager_createFolder".
 
   storageManager_archive:
     type: tool
@@ -61,19 +100,69 @@ scenarios:
         Don't be specific about which folder.
 
       assistant: |
-        The assistant should ASK for clarification before deleting.
-        Generate a text response that:
-        - Lists potential folders that might match
-        - Asks which specific folder to delete
-        - Warns about irreversibility
-        DO NOT generate a tool call - this should be a clarification response.
+        Generate response with:
+        1. Optional <thinking> about the exact archive target
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage archive "Archive/Deprecated Sprint Notes"
+        The tool field must begin with the exact literal command prefix `storage archive`.
+        Never use legacy tool names like `storageManager_archive` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storageManager_archive".
 
   storageManager_move:
     type: tool
     agent: storageManager
     tool: storageManager_move
-    system: true
+    environment_mode: generated
+    system_template: mocked_workspace_vault
     tool_call_format: default
+    system_context:
+      available_workspaces:
+        - id: default
+          name: Default Workspace
+          description: Project notes and inbox triage
+          root_folder: ""
+      available_prompts:
+        - id: agent_file_organizer
+          name: File Organizer
+          purpose: Finds the right note and moves it into the correct project folder
+      assistant_instructions: >-
+        You are an AI assistant helping manage a filesystem-style workspace.
+        Use the exact existing source path from the generated environment.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a move task.
+
+        Requirements:
+        - Include an Inbox/ folder with exactly one note or file that should be moved.
+        - Include a destination project folder that already exists.
+        - The source file must exist in fixture.files or fixture.notes.
+        - Use only vault-relative paths.
+        - Assertions must verify:
+          1. the source file no longer exists at the old path
+          2. the destination file exists at the new path
+        - selected_workspace should reference the source file in recent_files or key_files.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": [...]
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "default",
+            "selected_workspace": {...}
+          }
+        }
 
     prompts:
       system: |
@@ -91,8 +180,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about source and destination
-        2. Tool call to storageManager_move
-        Consider workspace context for paths.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage move "Inbox/Q4 Brainstorm.md" "Projects/Q4/Brainstorm.md"
+        The tool field must begin with the exact literal command prefix `storage move`.
+        Never use legacy tool names like `storageManager_move` inside the tool string.
+        Use an existing source path exactly as written in the system prompt.
+        Do not use context/calls wrappers or direct function.name="storageManager_move".
 
   storageManager_list:
     type: tool
@@ -116,7 +212,14 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about which folder to list
-        2. Tool call to storageManager_list with path
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage list --path "Projects"
+        The tool field must begin with the exact literal command prefix `storage list`.
+        Never use legacy tool names like `storageManager_list` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storageManager_list".
 
   # ContentManager tools
   contentManager_write:
@@ -141,8 +244,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about note location and content
-        2. Tool call to contentManager_write
-        Include realistic markdown content in the tool call.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        content write "Projects/kickoff-notes.md" "# Kickoff Notes\n\n- Agenda item 1"
+        Include realistic markdown content in the command.
+        Do not use context/calls wrappers or direct function.name="contentManager_write".
 
   contentManager_insert:
     type: tool
@@ -166,21 +274,74 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about where the new content belongs
-        2. Tool call to contentManager_insert
-        Use startLine=-1 for append style requests or startLine=1 for prepend style requests.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        content insert --path "Meetings/team-sync.md" --content "- New action item" --start-line -1
+        Use --start-line -1 for append style requests or --start-line 1 for prepend style requests.
+        Do not use context/calls wrappers or direct function.name="contentManager_insert".
 
   contentManager_read:
     type: tool
     agent: contentManager
     tool: contentManager_read
-    system: true
+    environment_mode: generated
+    system_template: mocked_workspace_vault
     tool_call_format: default
+    system_context:
+      available_workspaces:
+        - id: default
+          name: Default Workspace
+          description: General notes and project documents
+          root_folder: ""
+      available_prompts:
+        - id: agent_note_reader
+          name: Note Reader
+          purpose: Finds and reads the correct note in the workspace
+      assistant_instructions: >-
+        You are an AI assistant helping manage a workspace of notes and documents.
+        Use the available tools to inspect the exact existing note the user requests.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a note-reading task.
+
+        Requirements:
+        - Include 2-4 notes/files in the workspace.
+        - Exactly one note should be the obvious target the user will want to inspect.
+        - Use only vault-relative paths like "Projects/website-redesign.md" or "Meetings/team-sync.md".
+        - Do not use absolute filesystem paths or prefixes like "workspace/".
+        - The target note must exist in fixture.files or fixture.notes.
+        - selected_workspace should include recent_files and key_files that reference the target note.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": []
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "default",
+            "selected_workspace": {
+              "id": "default",
+              "name": "Default Workspace",
+              "root_folder": "",
+              "recent_files": [...],
+              "key_files": [...],
+              "workflows": [...],
+              "preferences": "..."
+            }
+          }
+        }
 
     prompts:
-      system: |
-        Generate workspace with existing notes in folders like "Projects", "Meetings", and "Inbox".
-        Include one note that the user is likely to inspect.
-
       user: |
         Generate request to read or inspect a note.
         Examples:
@@ -191,14 +352,26 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which note the user means
-        2. Tool call to contentManager_read
-        Include path and a valid startLine.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        content read "Projects/project-brief.md" 1 --end-line 40
+        Use an existing file path exactly as written in the system prompt.
+        Do not invent filenames, rewrite spaces as underscores, or normalize the path.
+        Include path and a valid start line.
+        Do not use context/calls wrappers or direct function.name="contentManager_read".
 
   contentManager_replace:
     type: tool
     agent: contentManager
     tool: contentManager_replace
     system: true
+    tool_call_format: default
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, contentManager_tools]
+    final_judge: *shared_tool_final_review
 
     prompts:
       system: |
@@ -215,16 +388,18 @@ scenarios:
 
       assistant: |
         Generate response with:
-        1. <thinking> about reading the target note first and replacing only the exact text
+        1. <thinking> about replacing only the exact text block the system prompt already identifies
         2. One useTools call using the CLI-oriented payload
         The system prompt already contains the exact old text, the exact new text, and enough context to determine the line range.
+        Do not add a separate content read command before the replace command.
+        Emit exactly one content replace command in the tool string for this scenario.
         Do not ask for clarification or request the replacement values again.
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
         content replace --path "notes/meeting-notes.md" --old-content "> old line" --new-content "new line" --start-line 24 --end-line 24
         Include --old-content, --new-content, --start-line, and --end-line in every content replace command.
-        If you need more than one command, join them with commas in the tool field and use strategy="serial".
+        Do not use wildcards like "Status: *" for old content; use the exact text shown in the system prompt.
         Do not use context/calls wrappers or direct function.name="contentManager_replace".
 
   contentManager_setProperty:
@@ -248,8 +423,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which frontmatter field should change
-        2. Tool call to contentManager_setProperty
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        content set-property --path "Projects/roadmap.md" --property "status" --value "triaged"
         Include path, property, value, and optionally mode when merge semantics make sense.
+        Do not use context/calls wrappers or direct function.name="contentManager_setProperty".
 
   # PromptManager tools
   promptManager_createPrompt:
@@ -274,14 +454,26 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about agent purpose and configuration
-        2. Tool call to promptManager_createPrompt
-        Include name, description, model, and prompt.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt create-prompt "Daily Summarizer" "Summarizes daily notes" "You summarize daily notes into concise bullets."
+        The tool field must begin with the exact literal command prefix `prompt create-prompt`.
+        Never use legacy tool names like `promptManager_createPrompt` inside the tool string.
+        Include name, description, and prompt.
+        Do not use context/calls wrappers or direct function.name="promptManager_createPrompt".
 
   promptManager_executePrompts:
     type: tool
     agent: promptManager
     tool: promptManager_executePrompts
     system: true
+    tool_call_format: default
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: [tool_alignment, promptManager_tools]
+    final_judge: *shared_tool_final_review
 
     prompts:
       system: |
@@ -302,6 +494,11 @@ scenarios:
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
         prompt execute-prompts --prompts "[{\"agentId\":\"researcher\",\"prompt\":\"Find recent EV adoption statistics in the US and provide APA-style citations.\"}]"
+        The tool field must begin with the exact literal command prefix `prompt execute-prompts`.
+        Prefer a short single-item JSON array for --prompts, for example:
+        prompt execute-prompts --prompts '[{"agentId":"researcher","prompt":"Summarize Docs/brief.md in 3 bullets."}]'
+        The value passed to --prompts must be valid JSON, not placeholder text and not comma-separated values.
+        Keep the embedded prompt concise and avoid nested quotes, YAML frontmatter, or long multi-clause instructions unless the user explicitly asks for them.
         Do not use context/calls wrappers or direct function.name="promptManager_executePrompts".
 
   promptManager_archivePrompt:
@@ -325,8 +522,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which prompt the user means
-        2. Tool call to promptManager_archivePrompt
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt archive-prompt "Legacy Release Writer"
         Include the prompt name.
+        Do not use context/calls wrappers or direct function.name="promptManager_archivePrompt".
 
   promptManager_generateImage:
     type: tool
@@ -349,8 +551,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about the requested visual
-        2. Tool call to promptManager_generateImage
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt generate-image "A cinematic hero image for a launch note" "assets/launch-hero.png"
         Include prompt and savePath, plus optional provider/model settings when useful.
+        Do not use context/calls wrappers or direct function.name="promptManager_generateImage".
 
   promptManager_getPrompt:
     type: tool
@@ -373,8 +580,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about whether to use the prompt name or id
-        2. Tool call to promptManager_getPrompt
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt get-prompt --name "Weekly Review Helper"
+        The tool field must begin with the exact literal command prefix `prompt get-prompt`.
+        Never use legacy tool names like `promptManager_getPrompt` inside the tool string.
         Include either id or name.
+        Do not use context/calls wrappers or direct function.name="promptManager_getPrompt".
 
   promptManager_listModels:
     type: tool
@@ -397,7 +611,14 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about why the user needs model options
-        2. Tool call to promptManager_listModels
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt list-models
+        The tool field must begin with the exact literal command prefix `prompt list-models`.
+        Never use legacy tool names like `promptManager_listModels` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="promptManager_listModels".
 
   promptManager_listPrompts:
     type: tool
@@ -420,8 +641,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about whether to filter by enabled or archived status
-        2. Tool call to promptManager_listPrompts
-        Include enabledOnly or includeArchived when appropriate.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt list-prompts --include-archived
+        Include --enabled-only or --include-archived when appropriate.
+        Do not use context/calls wrappers or direct function.name="promptManager_listPrompts".
 
   promptManager_subagent:
     type: tool
@@ -468,8 +694,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which prompt should change and how
-        2. Tool call to promptManager_updatePrompt
-        Include id and whichever fields are being updated.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        prompt update-prompt "prompt_123" --name "Launch Writer" --prompt "You write launch communications with citations."
+        The tool field must begin with the exact literal command prefix `prompt update-prompt`.
+        Never use legacy tool names like `promptManager_updatePrompt` inside the tool string.
+        Include the prompt id and whichever fields are being updated.
+        Do not use context/calls wrappers or direct function.name="promptManager_updatePrompt".
 
   # MemoryManager tools
   memoryManager_createWorkspace:
@@ -494,8 +727,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about workspace configuration
-        2. Tool call to memoryManager_createWorkspace
-        Include name, description, and workflows.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory create-workspace "Client Alpha" "Workspace for client delivery notes" "Clients/Alpha" "Track delivery work for Client Alpha"
+        Include name, description, root folder, and purpose.
+        Do not use context/calls wrappers or direct function.name="memoryManager_createWorkspace".
 
   memoryManager_archiveWorkspace:
     type: tool
@@ -518,8 +756,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which workspace the user means
-        2. Tool call to memoryManager_archiveWorkspace
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory archive-workspace "Old Client Workspace"
+        The tool field must begin with the exact literal command prefix `memory archive-workspace`.
+        Never use legacy tool names like `memoryManager_archiveWorkspace` inside the tool string.
         Include the workspace name.
+        Do not use context/calls wrappers or direct function.name="memoryManager_archiveWorkspace".
 
   memoryManager_createState:
     type: tool
@@ -542,8 +787,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about the current work context
-        2. Tool call to memoryManager_createState
-        Include name, conversationContext, activeTask, activeFiles, and nextSteps.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory create-state "Pre-Refactor Checkpoint" "User is about to start a risky refactor." "Capture the current project state." --active-files "[\"docs/plan.md\",\"src/main.ts\"]" --next-steps "[\"Create checkpoint\",\"Start refactor\",\"Review diff\"]"
+        The tool field must begin with the exact literal command prefix `memory create-state`.
+        The values passed to --active-files and --next-steps must be valid JSON arrays of strings.
+        Include name, conversation context, active task, active files, and next steps.
+        Do not use context/calls wrappers or direct function.name="memoryManager_createState".
 
   memoryManager_listStates:
     type: tool
@@ -566,7 +818,12 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about filters like archived or tags
-        2. Tool call to memoryManager_listStates
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory list-states --include-archived
+        Do not use context/calls wrappers or direct function.name="memoryManager_listStates".
 
   memoryManager_listWorkspaces:
     type: tool
@@ -589,8 +846,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about sort order and filtering
-        2. Tool call to memoryManager_listWorkspaces
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory list-workspaces --sort-by "lastUsedAt" --order "desc" --limit 10
         Include includeArchived, sortBy, order, or limit when appropriate.
+        Do not use context/calls wrappers or direct function.name="memoryManager_listWorkspaces".
 
   memoryManager_loadState:
     type: tool
@@ -613,8 +875,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which saved state matches the request
-        2. Tool call to memoryManager_loadState
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory load-state "Pre-Launch Checkpoint"
         Include the state name.
+        Do not use context/calls wrappers or direct function.name="memoryManager_loadState".
 
   memoryManager_loadWorkspace:
     type: tool
@@ -637,8 +904,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which workspace id matches the request
-        2. Tool call to memoryManager_loadWorkspace
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory load-workspace "ws_client_alpha"
         Include the workspace id.
+        Do not use context/calls wrappers or direct function.name="memoryManager_loadWorkspace".
 
   memoryManager_runWorkflow:
     type: tool
@@ -685,8 +957,18 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which workspace metadata should change
-        2. Tool call to memoryManager_updateWorkspace
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        memory update-workspace --name "Analytics Project" --description "Workspace for analytics planning and delivery" --key-files "[\"docs/plan.md\",\"reports/q4.md\"]"
+        The tool field must begin with the exact literal command prefix `memory update-workspace`.
+        Never use legacy tool names like `memoryManager_updateWorkspace` inside the tool string.
+        If key files or workflows are provided, they must be valid JSON arrays.
+        Prefer simple string fields like --description, --purpose, and --key-files.
+        Do not emit JSON object literals inside --preferences or other string flags.
         Include only the fields being updated.
+        Do not use context/calls wrappers or direct function.name="memoryManager_updateWorkspace".
 
   # SearchManager tools
   searchManager_searchContent:
@@ -711,8 +993,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about search terms and scope
-        2. Tool call to searchManager_searchContent
-        Include search query and optional filters.
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        search search-content "Q4 project" --limit 10 --paths "[\"Projects\",\"Q4\"]"
+        The tool field must begin with the exact literal command prefix `search search-content`.
+        The value passed to --paths must be a valid JSON array of strings.
+        Include the search query and optional filters.
+        Do not use context/calls wrappers or direct function.name="searchManager_searchContent".
 
   searchManager_searchDirectory:
     type: tool
@@ -735,8 +1024,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about path scope and filename matching
-        2. Tool call to searchManager_searchDirectory
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        search search-directory "deployment" --paths "[\"Docs\",\"Runbooks\"]" --file-types "[\"md\"]"
+        The tool field must begin with the exact literal command prefix `search search-directory`.
+        The values passed to --paths and --file-types must be valid JSON arrays of strings.
         Include query, paths, and optional searchType or fileTypes.
+        Do not use context/calls wrappers or direct function.name="searchManager_searchDirectory".
 
   searchManager_searchMemory:
     type: tool
@@ -759,16 +1055,67 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about what memory sources to search
-        2. Tool call to searchManager_searchMemory
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        search search-memory "database migration decision" --limit 5
         Include query and optional memoryTypes, searchMethod, or limit.
+        Do not use context/calls wrappers or direct function.name="searchManager_searchMemory".
 
   # StorageManager tools
   storageManager_copy:
     type: tool
     agent: storageManager
     tool: storageManager_copy
-    system: true
+    environment_mode: generated
+    system_template: mocked_workspace_vault
     tool_call_format: default
+    system_context:
+      available_workspaces:
+        - id: default
+          name: Default Workspace
+          description: Templates and project docs
+          root_folder: ""
+      available_prompts:
+        - id: agent_file_copier
+          name: File Copier
+          purpose: Duplicates existing files into new project locations
+      assistant_instructions: >-
+        You are an AI assistant helping manage a filesystem-style workspace.
+        Use the exact existing source path from the generated environment.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a copy task.
+
+        Requirements:
+        - Include exactly one source file that should be copied into a new project folder.
+        - The source file must exist in fixture.files or fixture.notes.
+        - Include the destination parent folder.
+        - Use only vault-relative paths.
+        - Assertions must verify:
+          1. the source file still exists at the original path
+          2. the destination file exists after the copy
+        - selected_workspace should reference the source file in recent_files or key_files.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": [...]
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "default",
+            "selected_workspace": {...}
+          }
+        }
 
     prompts:
       system: |
@@ -784,20 +1131,76 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about source and destination paths
-        2. Tool call to storageManager_copy
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage copy "Templates/article-template.md" "Projects/client-alpha/article-template.md"
+        The tool field must begin with the exact literal command prefix `storage copy`.
+        Use an existing source path exactly as written in the system prompt.
         Include path and newPath, plus overwrite only when clearly intended.
+        Do not use context/calls wrappers or direct function.name="storageManager_copy".
 
   storageManager_open:
     type: tool
     agent: storageManager
     tool: storageManager_open
-    system: true
+    environment_mode: generated
+    system_template: mocked_workspace_vault
     tool_call_format: default
+    system_context:
+      available_workspaces:
+        - id: default
+          name: Default Workspace
+          description: General notes and documents
+          root_folder: ""
+      available_prompts:
+        - id: agent_file_browser
+          name: File Browser
+          purpose: Opens files and documents in the workspace
+      assistant_instructions: >-
+        You are an AI assistant helping manage a workspace of files and notes.
+        Use the available tools to open the exact existing file the user requests.
+    environment_generation:
+      prompt: |
+        Output ONLY valid JSON.
+
+        Generate a realistic filesystem-backed workspace for a file-open task.
+
+        Requirements:
+        - Include 2-4 files in the workspace.
+        - Exactly one file should be the obvious target the user will want to open.
+        - Use only vault-relative paths like "Projects/roadmap.md" or "notes/archive-summary.md".
+        - Do not use absolute filesystem paths or prefixes like "workspace/".
+        - The target file must exist in fixture.files or fixture.notes.
+        - selected_workspace should include recent_files and key_files that reference the target file.
+
+        Output shape:
+        {
+          "environment": {
+            "fixture": {
+              "directories": [...],
+              "files": {...},
+              "notes": [...]
+            },
+            "assertions": []
+          },
+          "system_context": {
+            "session_id": "session_...",
+            "workspace_id": "default",
+            "selected_workspace": {
+              "id": "default",
+              "name": "Default Workspace",
+              "root_folder": "",
+              "recent_files": [...],
+              "key_files": [...],
+              "workflows": [...],
+              "preferences": "..."
+            }
+          }
+        }
 
     prompts:
-      system: |
-        Generate workspace with notes, docs, and files the user might want to open in the editor.
-
       user: |
         Generate request to open a file.
         Examples:
@@ -808,8 +1211,15 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about which file the user means
-        2. Tool call to storageManager_open
+        2. One useTools call using the CLI-oriented payload
+        This scenario should produce a tool-only response with content set to null.
+        Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
+        The tool field must be a CLI command string such as:
+        storage open "Projects/roadmap.md" --mode "editor"
+        Use an existing file path exactly as written in the system prompt.
+        Do not invent filenames, rewrite spaces as underscores, or normalize the path.
         Include path and optional mode or focus when justified.
+        Do not use context/calls wrappers or direct function.name="storageManager_open".
 
   # CanvasManager tools
   canvasManager_list:

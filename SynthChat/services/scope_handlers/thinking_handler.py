@@ -5,7 +5,7 @@ Single Responsibility: ALL thinking scope logic.
 
 import json
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from .base import ScopeHandler
 
 
@@ -90,7 +90,12 @@ class ThinkingHandler(ScopeHandler):
 
         return improved
 
-    def build_prompt_variables(self, example: Dict, judgment: Dict) -> Dict:
+    def build_prompt_variables(
+        self,
+        example: Dict,
+        judgment: Dict,
+        prompt_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """
         Build variables for thinking improvement template.
 

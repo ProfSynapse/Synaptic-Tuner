@@ -16,12 +16,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+from .configured_formats import (
+    extract_lenient_wrapper_arguments,
+    match_configured_wrapper,
+    sanitize_wrapper_string_fields,
+)
 from .enums import ResponseType, ToolCallFormat
 from .tool_call_parser import _extract_object_field, _extract_string_field
 from .utilities import fix_json_newlines, repair_truncated_json
 
-
-def _normalize_tool_arguments(args_raw: Any) -> Dict[str, Any]:
+def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None) -> Dict[str, Any]:
     """Unwrap common nested wrapper shapes and return the effective args dict."""
     args = args_raw
 
@@ -29,6 +33,9 @@ def _normalize_tool_arguments(args_raw: Any) -> Dict[str, Any]:
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
+            lenient = extract_lenient_wrapper_arguments(args)
+            if lenient:
+                return lenient
             try:
                 args = json.loads(repair_truncated_json(args))
             except json.JSONDecodeError:
@@ -62,15 +69,11 @@ def _normalize_tool_arguments(args_raw: Any) -> Dict[str, Any]:
                 continue
         break
 
-    return args if isinstance(args, dict) else {}
+    if isinstance(args, dict):
+        args = sanitize_wrapper_string_fields(args, function_name=function_name)
+        return args
 
-
-def _looks_like_use_tools_wrapper(args: Any) -> bool:
-    """Detect top-level CLI-first useTools payloads by argument shape."""
-    if not isinstance(args, dict):
-        return False
-    required = ("workspaceId", "sessionId", "memory", "goal", "tool")
-    return all(isinstance(args.get(key), str) and str(args.get(key)).strip() for key in required)
+    return {}
 
 
 @dataclass
@@ -139,18 +142,19 @@ class ParsedResponse:
             except json.JSONDecodeError:
                 pass
 
-        # 2. Extract from first tool call's arguments (IDs)
+        # 2. Extract from first tool call's top-level wrapper arguments
         if self.first_tool_call:
-            # Check for nested context object (legacy)
-            legacy_context = self.first_tool_call.arguments.get("context")
-            if isinstance(legacy_context, dict):
-                context_data.update(legacy_context)
-
-            # Check for top-level IDs (new format)
-            for key in ["sessionId", "workspaceId"]:
-                val = self.first_tool_call.arguments.get(key)
-                if val:
-                    context_data[key] = val
+            wrapper_spec = match_configured_wrapper(
+                self.first_tool_call.arguments,
+                function_name=self.first_tool_call.name,
+            )
+            if wrapper_spec is not None:
+                for key in wrapper_spec.get("field_names", []):
+                    if key == "tool":
+                        continue
+                    val = self.first_tool_call.arguments.get(key)
+                    if val is not None:
+                        context_data[key] = val
 
         return context_data if context_data else None
 
@@ -229,9 +233,10 @@ def _parse_openai_format(response: Dict[str, Any], result: ParsedResponse) -> No
             args_raw = function_data.get("arguments", "{}")
 
             # Parse arguments JSON
-            args = _normalize_tool_arguments(args_raw)
-            if _looks_like_use_tools_wrapper(args):
-                name = "useTools"
+            args = _normalize_tool_arguments(args_raw, function_name=name)
+            wrapper_spec = match_configured_wrapper(args, function_name=name)
+            if wrapper_spec is not None:
+                name = wrapper_spec["wrapper_name"]
 
             result.tool_calls.append(ParsedToolCall(
                 name=name,
@@ -312,8 +317,11 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                     args = json.loads(args)
                 except json.JSONDecodeError:
                     args = {}
-            if _looks_like_use_tools_wrapper(args):
-                name = "useTools"
+            if isinstance(args, dict):
+                args = sanitize_wrapper_string_fields(args, function_name=name)
+                wrapper_spec = match_configured_wrapper(args, function_name=name)
+                if wrapper_spec is not None:
+                    name = wrapper_spec["wrapper_name"]
 
             result.tool_calls.append(ParsedToolCall(
                 name=name,
@@ -338,8 +346,11 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                             args = json.loads(fixed_args)
                         except json.JSONDecodeError:
                             pass
-                if _looks_like_use_tools_wrapper(args):
-                    name = "useTools"
+                if isinstance(args, dict):
+                    args = sanitize_wrapper_string_fields(args, function_name=name)
+                    wrapper_spec = match_configured_wrapper(args, function_name=name)
+                    if wrapper_spec is not None:
+                        name = wrapper_spec["wrapper_name"]
 
                 result.tool_calls.append(ParsedToolCall(
                     name=name,

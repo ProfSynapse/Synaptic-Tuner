@@ -40,7 +40,6 @@ def _expand_wrapper_calls(tool_calls: List[ToolCall]) -> List[ToolCall]:
     expanded = []
     for tc in tool_calls:
         if _looks_like_wrapper_call(tc) and isinstance(tc.arguments, dict):
-            wrapper_context = tc.arguments.get("context")
             calls = tc.arguments.get("calls", [])
             added = 0
             if isinstance(calls, list):
@@ -51,8 +50,6 @@ def _expand_wrapper_calls(tool_calls: List[ToolCall]) -> List[ToolCall]:
                         params = call.get("params", {})
                         if agent and tool:
                             merged_args = dict(params) if isinstance(params, dict) else {}
-                            if isinstance(wrapper_context, dict) and "context" not in merged_args:
-                                merged_args["context"] = wrapper_context
                             # Construct full tool name: agent_tool
                             full_name = f"{agent}_{tool}"
                             expanded.append(ToolCall(name=full_name, arguments=merged_args))
@@ -275,53 +272,47 @@ def _validate_ids_against_context(
     Returns:
         Dict with validation results
     """
-    expected_session_id = eval_context.get("session_id")
-    expected_workspace_id = eval_context.get("workspace_id")
-    valid_workspace_ids = [expected_workspace_id] + eval_context.get("workspace_ids", [])
     valid_agent_ids = eval_context.get("agent_ids", [])
 
+    id_expectations: Dict[str, List[Any]] = {}
+    for key, value in eval_context.items():
+        if not key.endswith("_id"):
+            continue
+        field_name = _snake_to_camel(key)
+        candidates: List[Any] = []
+        if value is not None:
+            candidates.append(value)
+        plural_key = f"{key[:-3]}_ids"
+        extra_values = eval_context.get(plural_key, [])
+        if isinstance(extra_values, list):
+            candidates.extend(item for item in extra_values if item is not None)
+        if candidates:
+            id_expectations[field_name] = candidates
+
     results = {
-        "session_id_matches": [],
-        "workspace_id_matches": [],
         "agent_id_matches": [],
         "all_match": True,
     }
+    for field_name in id_expectations:
+        results[f"{field_name}_matches"] = []
 
     for idx, tc in enumerate(tool_calls, 1):
-        context = tc.arguments.get("context", {})
-
-        # Check sessionId
-        tool_session_id = context.get("sessionId")
-        if tool_session_id:
-            matches = tool_session_id == expected_session_id
-            results["session_id_matches"].append({
+        for field_name, valid_values in id_expectations.items():
+            actual_value = tc.arguments.get(field_name)
+            if actual_value is None:
+                continue
+            matches = actual_value in valid_values
+            results[f"{field_name}_matches"].append({
                 "tool_call": idx,
-                "expected": expected_session_id,
-                "actual": tool_session_id,
+                "expected": valid_values,
+                "actual": actual_value,
                 "matches": matches,
             })
             if not matches:
                 results["all_match"] = False
                 issues.append(ValidatorIssue(
                     level="ERROR",
-                    message=f"Tool call #{idx}: sessionId '{tool_session_id}' does not match context '{expected_session_id}'"
-                ))
-
-        # Check workspaceId
-        tool_workspace_id = context.get("workspaceId")
-        if tool_workspace_id:
-            matches = tool_workspace_id in valid_workspace_ids
-            results["workspace_id_matches"].append({
-                "tool_call": idx,
-                "expected": valid_workspace_ids,
-                "actual": tool_workspace_id,
-                "matches": matches,
-            })
-            if not matches:
-                results["all_match"] = False
-                issues.append(ValidatorIssue(
-                    level="ERROR",
-                    message=f"Tool call #{idx}: workspaceId '{tool_workspace_id}' not in context {valid_workspace_ids}"
+                    message=f"Tool call #{idx}: {field_name} '{actual_value}' not in context {valid_values}"
                 ))
 
         # Check agent IDs for promptManager tools
@@ -343,3 +334,10 @@ def _validate_ids_against_context(
                     ))
 
     return results
+
+
+def _snake_to_camel(value: str) -> str:
+    parts = [part for part in str(value).split("_") if part]
+    if not parts:
+        return str(value)
+    return parts[0] + "".join(part[:1].upper() + part[1:] for part in parts[1:])

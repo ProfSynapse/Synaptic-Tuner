@@ -1,118 +1,34 @@
 name: Tool Alignment
-description: Ensures tool calls match what the thinking block describes
+description: Ensures CLI-first tool calls match the thinking block's goal and plan
 scope: response
 pass_threshold: 0.8
-judge_prompt: '## Tool Alignment Check
+judge_prompt: |
+  ## Tool Alignment Check
 
+  Verify that the assistant response matches the thinking block.
 
-  Verify tool calls match the thinking block''s stated goal and plan.
+  For CLI-first tool responses:
+  - tool calls should use `function.name = "useTools"`
+  - wrapper IDs (`workspaceId`, `sessionId`) must match the system prompt
+  - the `tool` command string must match the operation described in the goal/plan
+  - the command should reference the same paths, entities, or targets discussed in thinking
 
+  Misalignment examples:
+  - thinking says read, command performs replace
+  - thinking mentions file X, command targets file Y
+  - nested `context/calls` or direct-tool format instead of CLI-first `useTools`
 
-  **MISALIGNMENT (problem):**
+  Confidence / risk check:
+  - if `confidence < 0.5`, the response should clarify instead of calling tools
+  - if `assessment.risky: true`, the response should seek confirmation before destructive commands
 
-  - Tool name doesn''t match operation in goal
-
-  - Tool parameters use different paths than thinking mentions
-
-  - Operation type differs (thinking says read, tool does delete)
-
-  - Tool affects different files than thinking discusses
-
-  - Session/workspace IDs don''t match system prompt
-
-
-  **ALIGNED (correct):**
-
-  - Tool operation matches goal (read tool for read goal)
-
-  - Tool parameters use same paths mentioned in thinking
-
-  - Tool would achieve what the plan describes
-
-  - IDs from system prompt used correctly
-
-
-  **PARAMETER SOURCE VALIDATION:**
-
-  1. Check if sessionId/workspaceId match <session_context> in system prompt → **PASS**
-
-  2. Check if agent in calls[].agent is a VALID TOOL AGENT:
-     - Valid: contentManager, memoryManager, promptManager, searchManager, storageManager
-     - Invalid: ResearchAssistant, WritingCoach, FileManagerAgent (these are custom prompts in <available_prompts>, NOT tool agents)
-     - If agent name is from <available_prompts> instead of valid tool agents → **FAIL** (score 0.0-0.3)
-
-  3. For other parameters: check if explicitly in user request OR reasonably inferable
-
-  4. **If parameters come from system prompt → tool_alignment PASSES**
-
-
-  **Examples:**
-
-
-  Thinking goal: "Read config.yaml"
-
-  BAD tool: contentManager_replace with path: "config.yaml"
-
-  GOOD tool: contentManager_read with path: "config.yaml"
-
-
-  Thinking goal: "Append to log.md"
-
-  BAD tool: contentManager_replace
-
-  GOOD tool: contentManager_insert with startLine: -1
-
-
-  **Note:** If thinking is about file X but tool uses file Y, that''s misalignment
-  even if tool works.
-
-
-  **CONFIDENCE CHECK:**
-
-  Check the thinking block''s confidence level:
-
-  - If `confidence < 0.5`: Tool calls should NOT be present
-
-  - Response should ask for clarification instead
-
-  - If tool calls present with confidence < 0.5 → Score **0.0-0.3** (major issue)
-
-  - If `assessment.risky: true`: Tool calls should ask for confirmation first
-
-  - If risky operation has tool calls without user confirmation → Score **0.0-0.3**
-
-
-  **Examples:**
-
-  - confidence: 0.3 with tool calls → **BAD** (Score 0.0)
-
-  - confidence: 0.3 with text asking for clarification → **GOOD** (Score 1.0)
-
-  - risky: true with tool calls → **BAD** (Score 0.0-0.3)
-
-  - risky: true with text asking for confirmation → **GOOD** (Score 1.0)
-
-
-  **SCORING:**
-
-  - **1.0** = Perfect alignment, tool calls match thinking exactly, confidence >= 0.5,
-  not risky OR has user confirmation
-
-  - **0.7-0.9** = Good alignment, minor parameter differences
-
-  - **0.4-0.6** = Moderate misalignment, some params don''t match thinking
-
-  - **0.0-0.3** = Major misalignment, wrong tool, OR tool calls present with low confidence
-  (< 0.5), OR risky operation without confirmation
-
-
-  **OUTPUT:**
+  Runtime / environment check:
+  - if the provided environment result shows execution or schema failures, treat those as real alignment failures
+  - recommendations should explicitly call out the runtime/tool errors that need to be corrected
 
   Return JSON with single field: `toolalignment_score` (0.0-1.0)
-
-  '
 improver_prompt: |
-  Fix the assistant response to align tool calls with the thinking block.
+  Fix the assistant response so it aligns with the thinking block and uses the CLI-first wrapper.
 
   **Current Response Text:**
   ```
@@ -124,50 +40,34 @@ improver_prompt: |
   {original_tool_calls}
   ```
 
-  **Thinking Block (Goal and Plan):**
+  **Thinking Block:**
   ```
-  {thinking_block}
+  {thinking_content}
   ```
 
-  **Improvement Feedback:**
+  **Environment Result:**
+  ```json
+  {environment_result_json}
+  ```
+
+  **Environment Issues:**
+  ```
+  {environment_issue_summary}
+  ```
+
+  **Feedback:**
   ```
   {feedback}
   ```
 
-  **YOUR TASK:** Generate an improved assistant response where:
-  1. Tool calls match the operation described in the thinking goal
-  2. Tool parameters match paths/values mentioned in the thinking block
-  3. Tool names align with the planned action (read/write/delete/etc.)
-  4. sessionId and workspaceId match the system prompt
+  Rules:
+  - If the thinking block is risky or low-confidence, replace tool calls with a clarification/confirmation response.
+  - If environment errors are present, fix the response so those runtime/schema issues would no longer occur.
+  - Otherwise preserve the tool-calling path, but emit a single `useTools` call with top-level `workspaceId`, `sessionId`, `memory`, `goal`, `tool`, and optional `constraints` / `strategy`.
+  - Do NOT use nested `context` + `calls`.
+  - Do NOT emit direct tool names as the function name.
 
-  **CRITICAL INSTRUCTIONS:**
-
-  **Check the thinking block's assessment:**
-  - If `assessment.risky: true` OR `confidence < 0.5`:
-    → REPLACE tool calls with text asking user for clarification/confirmation
-    → Explain why the action is risky or uncertain
-    → Example: "I'm not confident about this operation. Could you clarify X?"
-
-  - If `assessment.risky: false` AND `confidence >= 0.5`:
-    → PRESERVE and FIX tool calls (DO NOT replace with text)
-    → Keep tool calls in this exact format:
-      ```tool
-      {{
-        "name": "toolName",
-        "arguments": {{
-          "param": "value"
-        }}
-      }}
-      ```
-    → Fix the tool name and parameters, but preserve the tool call structure
-
-  - The response should contain BOTH the thinking block AND either:
-    - Tool calls (if confident and safe)
-    - Text asking for clarification (if risky or uncertain)
-
-  **Output:**
-  Provide ONLY the improved assistant response (full content including thinking block and tool calls in the correct format).
-
+  Output ONLY the improved assistant response.
 output_schema:
   type: object
   properties:
@@ -179,7 +79,6 @@ output_schema:
   required:
   - toolalignment_score
   additionalProperties: false
-
 validation:
   tool_calls:
     enabled: true

@@ -12,6 +12,18 @@ Write/edit YAML → Dry-run 3-5 examples → Show user → Get approval → Full
 
 No exceptions. Even "small" YAML changes can produce thousands of bad examples if not tested first.
 
+For normal scenario development in this repo, a dry-run should exercise the same
+quality gates you expect in the real dataset:
+- stage rubrics enabled
+- judge/final_judge enabled where the scenario design calls for them
+- environment validation enabled for tool scenarios when practical
+- environment/runtime errors fed back into the judge/improver path when the
+  scenario relies on environment-backed validation
+
+If you are running a smoke test without rubrics/judges, call that out explicitly
+as a plumbing-only test. Do not mistake a wrapper-format smoke pass for a
+quality pass.
+
 ---
 
 ## Protocol Steps
@@ -79,6 +91,11 @@ This produces a clean Markdown file with:
 - Do tool calls have correct parameters?
 - Are IDs consistent (sessionId, workspaceId)?
 - Is content substantive (not generic filler)?
+- If rubrics/judges are configured, did they actually run and gate the example?
+- If environment validation ran, were its errors visible to the judge/improver
+  and reflected in the saved pass/fail outcome?
+- If a scenario unexpectedly skips rubrics/judges, stop and fix the scenario
+  config before trusting the output.
 
 The `jsonl_to_markdown.sh` script also supports line ranges for reviewing subsets of larger files:
 
@@ -141,6 +158,7 @@ Quick dry-run for testing new or modified scenarios:
 |--------|----------|-----|
 | New scenario YAML | YES | Untested template, could produce garbage |
 | Modified scenario prompts | YES | Prompt changes affect all generated examples |
+| Added/removed scenario rubrics or judge config | YES | Changes whether quality gates actually run |
 | New rubric YAML | YES (validate mode) | Untested judge/improver, could reject good data |
 | Modified rubric judge/improver | YES (validate mode) | Scoring may shift, threshold may need adjustment |
 | Changed `pass_threshold` | YES (validate mode) | Could mass-pass or mass-fail |
@@ -173,6 +191,43 @@ python -m SynthChat.run improve \
   --max-iterations 3
 ```
 
+For non-contiguous failures, use explicit selectors instead of rerunning a
+whole range:
+
+```bash
+python -m SynthChat.run improve \
+  --input Datasets/existing_dataset.jsonl \
+  --rubrics YOUR_RUBRIC \
+  --lines 7,12,20-25 \
+  --workers 8 \
+  --max-iterations 3 \
+  --output Datasets/synthchat/regen_slice.jsonl
+```
+
+If the same slice needs to be rerun later, keep the selectors in a checked-in
+text file and use `--line-file`:
+
+```text
+# Datasets/tools_datasets/reports/cli_schema/regen_lines.txt
+7
+12
+20-25
+```
+
+```bash
+python -m SynthChat.run improve \
+  --input Datasets/existing_dataset.jsonl \
+  --rubrics YOUR_RUBRIC \
+  --line-file Datasets/tools_datasets/reports/cli_schema/regen_lines.txt \
+  --workers 8 \
+  --max-iterations 3 \
+  --output Datasets/synthchat/regen_slice.jsonl
+```
+
+The emitted `.improve_report.json` preserves original input `line_number`
+values even when only a subset is processed. Use those preserved line numbers
+when patching regenerated rows back into the source dataset.
+
 ---
 
 ## Red Flags in Dry-Run Output
@@ -187,6 +242,28 @@ Stop and fix the YAML if you see:
 - **All examples identical** — No variety in generated content
 - **Empty fields** — Null thinking blocks, empty tool arguments
 - **Judge always passes/fails** — Threshold or prompt needs tuning
+- **Environment failures ignored by improvement** — runtime issues appear in
+  metadata but do not influence judge feedback or the saved pass/fail result
+- **Stale environment failures carried into later retries** — if the response
+  changes, the next judgment round should only see the new round's environment
+  result, not the prior round's failure unless the rerun reproduces it
+
+---
+
+## Gotcha: stale environment feedback in response retries
+
+If a response-stage retry is triggered by environment/runtime errors, rerun the
+environment after each improved response and feed only that refreshed result
+into the next judgment round.
+
+Check these fields together:
+- `metadata.environment.passed`
+- `metadata.stage_reviews.final.passed`
+- `metadata.labels.filter.stage_failures`
+
+If environment and final judge pass but `stage_failures` still includes
+`response`, the retry loop is likely still judging against stale environment
+feedback from an earlier round.
 
 ---
 

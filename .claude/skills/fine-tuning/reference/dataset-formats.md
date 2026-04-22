@@ -78,15 +78,31 @@ The canonical tool-call format is:
 
 ```json
 {
-  "name": "useTools",
-  "arguments": {
-    "workspaceId": "default",
-    "sessionId": "session_123",
-    "memory": "Need to inspect and reorganize notes.",
-    "goal": "Move a note and then read it back.",
-    "constraints": "Do not touch unrelated files.",
-    "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
-    "strategy": "serial"
+  "tool_calls": [
+    {
+      "id": "call_0001",
+      "type": "function",
+      "function": {
+        "name": "useTools",
+        "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+      }
+    }
+  ],
+  "content": null
+}
+```
+
+The inner wrapper payload is:
+
+```json
+{
+  "workspaceId": "default",
+  "sessionId": "session_123",
+  "memory": "Need to inspect and reorganize notes.",
+  "goal": "Move a note and then read it back.",
+  "constraints": "Do not touch unrelated files.",
+  "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
+  "strategy": "serial"
   }
 }
 ```
