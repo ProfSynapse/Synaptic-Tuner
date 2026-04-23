@@ -36,6 +36,10 @@ class MetricsTableCallback(BaseMetricsCallback):
     start_banner = "TRAINING STARTED"
     completion_banner = "TRAINING COMPLETED"
     log_every_write = False  # Write JSONL only at log_every_n_steps boundary.
+    # Pre-refactor SFT gated the entire on_log body on the interval multiple, so
+    # health_checker.check() and last_log_time update fired only at printed-row cadence.
+    health_check_every_on_log = False
+    interval_time_updates_every_on_log = False
 
     def __init__(
         self,

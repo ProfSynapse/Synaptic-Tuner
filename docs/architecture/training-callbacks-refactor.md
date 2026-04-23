@@ -150,6 +150,58 @@ converge on it.
   have the attribute — `getattr(..., None)` default makes this safe).
   Strictly an improvement in metadata completeness, no control-flow change.
 
+### 6a. JSONL dict-merge precedence — preserved per-trainer (correction note)
+
+> **Correction to the coder's original HANDOFF.** An earlier handoff
+> note said the refactor would "unify on SFT/KTO style
+> `{...our_fields, **logs}` (logs wins)" for all three trainers. That
+> was based on a misread of GRPO's pre-refactor code. Pre-refactor
+> GRPO's `on_log` built the JSONL row as
+> `entry = dict(logs); entry[k] = v; entry.update(capacity)` — i.e.,
+> logs is the base dict and **our fields + capacity override logs on
+> key collisions** (fields-win). Pre-refactor SFT and KTO built the
+> dict as `{**our_fields, **capacity, **logs}` — logs-win. Flipping
+> base to a single unified precedence would have regressed whichever
+> two trainers were on the other side.
+>
+> **Resolution**: per-trainer class attr
+> `BaseMetricsCallback.fields_win_on_collision: bool = False` (default
+> matches SFT/KTO majority). GRPO's `MetricsTableCallback` overrides
+> to `True`. `_write_log_row` branches on the attr and emits the
+> corresponding spread order. All three trainers now preserve their
+> pre-refactor JSONL row content byte-exact.
+>
+> Practical blast radius of either direction is small — HF Trainer's
+> standard emitted log keys (`loss`, `learning_rate`, `epoch`,
+> `grad_norm`) don't collide with our field names (`step`,
+> `timestamp`, `interval_time` / `interval_seconds`,
+> `elapsed_seconds`, `steps_per_second`, `samples_per_sec`,
+> `gpu_memory_gb`). But custom trainers or future TRL key additions
+> could collide, so preservation matters.
+
+### 6b. SFT cadence — interval gate restored via class attrs (correction note)
+
+> **Correction to the coder's original implementation.** The first cut
+> of `BaseMetricsCallback.on_log` unconditionally updated
+> `self.last_log_time` and called
+> `self.health_checker.check(...)` on every `on_log` invocation. This
+> matches KTO and GRPO's pre-refactor behavior but regresses SFT,
+> which gated the entire `on_log` body on
+> `state.global_step % log_every_n_steps != 0` (early return at the
+> top of the function). As a result, in the first cut: SFT's
+> printed-row `Time/5s` column silently redefined from "time between
+> printed rows" to "time between on_log calls", and SFT health-check
+> warnings fired more often than before.
+>
+> **Resolution**: two per-trainer class attrs
+> `BaseMetricsCallback.health_check_every_on_log: bool = True` and
+> `BaseMetricsCallback.interval_time_updates_every_on_log: bool = True`
+> (defaults match KTO/GRPO). SFT's `MetricsTableCallback` overrides
+> both to `False`. `on_log` gates the two lines on
+> `(attr or on_interval)` so SFT only fires them at interval
+> multiples — matching its pre-refactor early-return behavior —
+> while KTO/GRPO retain every-call behavior.
+
 ## 7. No-Public-API-Change Confirmation
 
 Callers import from the **per-trainer module**, not from a shared package:

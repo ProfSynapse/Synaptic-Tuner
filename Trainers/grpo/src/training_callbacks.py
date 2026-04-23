@@ -33,6 +33,9 @@ class MetricsTableCallback(BaseMetricsCallback):
     print_checkpoint_on_save = False  # GRPO does not print checkpoint lines.
     print_completion_banner = False  # GRPO does not print completion banner in MetricsTable.
     interval_key_name = "interval_seconds"  # GRPO's original schema uses this key.
+    # Pre-refactor GRPO built `entry = dict(logs); entry[k]=v; entry.update(cap)`,
+    # so our fields + capacity override logs on key collisions.
+    fields_win_on_collision = True
 
     def __init__(
         self,

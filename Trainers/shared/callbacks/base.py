@@ -127,6 +127,16 @@ class BaseMetricsCallback(TrainerCallback):
     print_checkpoint_on_save: bool = True
     print_completion_banner: bool = True
     interval_key_name: str = "interval_time"  # GRPO overrides to "interval_seconds"
+    # Pre-refactor SFT gated the ENTIRE on_log body on the interval multiple, so the
+    # health-check and last_log_time update fired only at printed-row cadence. KTO/GRPO
+    # fired them every on_log call. Default True matches KTO/GRPO; SFT overrides to False.
+    health_check_every_on_log: bool = True
+    interval_time_updates_every_on_log: bool = True
+    # Pre-refactor GRPO built the JSONL entry as `dict(logs); entry[k]=v; entry.update(cap)`,
+    # where our fields + capacity won over `logs` on key collisions. Pre-refactor SFT and
+    # KTO built `{**our_fields, **capacity, **logs}`, where `logs` won. Default False
+    # preserves SFT/KTO; GRPO overrides to True.
+    fields_win_on_collision: bool = False
 
     def __init__(
         self,
@@ -178,7 +188,12 @@ class BaseMetricsCallback(TrainerCallback):
 
         current_time = datetime.now()
         interval_time = (current_time - self.last_log_time).total_seconds() if self.last_log_time else 0.0
-        self.last_log_time = current_time
+        on_interval = state.global_step % self.log_every_n_steps == 0
+        # SFT (override False) only updates last_log_time at interval multiples, so
+        # the printed `Time/5s` column measures row-to-row gaps, not on_log-to-on_log.
+        # KTO/GRPO (default True) update every call — matches their pre-refactor behavior.
+        if self.interval_time_updates_every_on_log or on_interval:
+            self.last_log_time = current_time
         elapsed = (current_time - self.start_time).total_seconds() if self.start_time else 0.0
         steps_per_sec = state.global_step / elapsed if elapsed > 0 else 0.0
         samples_per_sec = (
@@ -187,7 +202,7 @@ class BaseMetricsCallback(TrainerCallback):
         capacity_snapshot = capture_runtime_capacity_snapshot(torch)
         _annotate_cloud(capacity_snapshot, args)
 
-        should_write_jsonl = self.log_every_write or (state.global_step % self.log_every_n_steps == 0)
+        should_write_jsonl = self.log_every_write or on_interval
         if should_write_jsonl:
             self._write_log_row(
                 logs=logs,
@@ -200,9 +215,12 @@ class BaseMetricsCallback(TrainerCallback):
                 current_time=current_time,
             )
 
-        self.health_checker.check(logs, state.global_step, args.max_grad_norm)
+        # SFT (override False) only runs health checks at interval multiples — matches
+        # pre-refactor top-of-on_log early return. KTO/GRPO (default True) every call.
+        if self.health_check_every_on_log or on_interval:
+            self.health_checker.check(logs, state.global_step, args.max_grad_norm)
 
-        if state.global_step % self.log_every_n_steps != 0:
+        if not on_interval:
             return
 
         if not self.header_printed or state.global_step % (self.log_every_n_steps * 20) == 0:
@@ -234,16 +252,22 @@ class BaseMetricsCallback(TrainerCallback):
         capacity_snapshot: Dict[str, Any],
         current_time: datetime,
     ):
-        entry = {
+        our_fields = {
             "step": int(step),
             "timestamp": current_time.isoformat(),
             self.interval_key_name: interval_time,
             "elapsed_seconds": round(elapsed, 3),
             "steps_per_second": round(steps_per_sec, 3),
             "samples_per_sec": round(samples_per_sec, 3),
-            **capacity_snapshot,
-            **logs,
         }
+        # GRPO (override True): logs is the base, our fields + capacity override — matches
+        # pre-refactor `entry = dict(logs); entry[k]=v; entry.update(cap)`.
+        # SFT/KTO (default False): our fields first, logs wins on collision — matches
+        # pre-refactor `{..our_fields, **capacity, **logs}`.
+        if self.fields_win_on_collision:
+            entry = {**logs, **our_fields, **capacity_snapshot}
+        else:
+            entry = {**our_fields, **capacity_snapshot, **logs}
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
