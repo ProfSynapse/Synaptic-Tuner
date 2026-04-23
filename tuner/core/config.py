@@ -33,7 +33,7 @@ class TrainingConfig:
         method: Training method identifier ('sft', 'kto', 'mlx')
         platform: Platform identifier ('rtx', 'mac')
         config_path: Path to YAML config file
-        trainer_dir: Path to trainer directory (e.g., Trainers/rtx3090_sft)
+        trainer_dir: Path to trainer directory (e.g., Trainers/sft)
         model_name: Base model name (e.g., 'unsloth/mistral-7b-v0.3-bnb-4bit')
         dataset_file: Path to dataset file (absolute or relative)
         epochs: Number of training epochs
@@ -45,7 +45,7 @@ class TrainingConfig:
             method='sft',
             platform='rtx',
             config_path=Path('/path/to/config.yaml'),
-            trainer_dir=Path('/path/to/Trainers/rtx3090_sft'),
+            trainer_dir=Path('/path/to/Trainers/sft'),
             model_name='unsloth/mistral-7b-v0.3-bnb-4bit',
             dataset_file='../../Datasets/syngen_tools_sft_11.18.25.jsonl',
             epochs=3,
@@ -224,7 +224,7 @@ class CloudTrainingConfig(TrainingConfig):
             method='sft',
             platform='hf_jobs',
             config_path=Path('/path/to/config.yaml'),
-            trainer_dir=Path('/path/to/Trainers/rtx3090_sft'),
+            trainer_dir=Path('/path/to/Trainers/sft'),
             model_name='unsloth/mistral-7b-v0.3-bnb-4bit',
             dataset_file='../../Datasets/syngen_tools_sft_11.18.25.jsonl',
             epochs=3,

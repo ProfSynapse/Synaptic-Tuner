@@ -4,7 +4,106 @@ Full YAML configuration reference for all training methods.
 
 ---
 
-## SFT Config (`Trainers/rtx3090_sft/configs/config.yaml`)
+## Local Docker Job Config (`Trainers/local/jobs/*.yaml`)
+
+Use this for repeatable local GPU runs. The config owns Docker image selection, package overrides, model/dataset choices, LoRA settings, and artifact paths.
+
+```yaml
+name: my-local-sft
+provider: local_docker
+job:
+  image: unsloth/unsloth:latest
+  pull_policy: missing      # always | missing | never
+  transfer: auto            # auto | copy | bind
+  keep_container: false
+setup:
+  pip: []                   # model-family runtime overrides
+run:
+  method: sft
+  trainer: Trainers/sft/train_sft.py
+  dry_run: false
+  dashboard: false
+  quiet: true
+model:
+  name: Qwen/Qwen3.5-2B
+  max_seq_length: 2048
+  load_in_4bit: false
+dataset:
+  local_file: Datasets/my_data.jsonl
+training:
+  batch_size: 2
+  gradient_accumulation: 8
+  learning_rate: 1.0e-4
+  num_epochs: 1
+  max_steps: null
+lora:
+  r: 64
+  alpha: 128
+  dropout: 0.0
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+artifacts:
+  output_root: toolset-training-artifacts/runs/local_docker/sft/{name}
+  run_timestamp: "{timestamp}"
+```
+
+Run it with:
+
+```bash
+python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes
+```
+
+Use repo-relative paths for `dataset.local_file`; the runner translates them into the trainer's container working directory. On Windows, `job.transfer: auto` uses copy mode because GPU bind mounts can fail with access denied.
+
+### `job.user` — container user + artifact ownership
+
+Controls which UID the container runs as and whether artifacts are chowned back to the host user on exit. Optional; omit to get the default.
+
+| Value         | Semantics |
+|---------------|-----------|
+| `auto` (default) | Container runs as root; on exit, bind-mount artifacts are chowned back to the invoking host user (Linux / WSL / macOS). Safe default — no root-owned files left on the host. |
+| `root`        | Container runs as root; artifacts remain root-owned on the host. You will need `sudo` to delete them. |
+| `image`       | Container uses the image's default `USER`; no chown-back. Escape hatch — may fail on UID-mismatched bind mounts. |
+| `<uid>:<gid>` | Explicit numeric UID:GID (e.g. `1000:1000`); no chown-back. Useful when you already know the host UID matches. |
+
+Stop timeout: the docker `--stop-timeout` is `60s` by default; override with `job.stop_timeout: <seconds>`.
+
+WSL note: on `/mnt/<letter>/...` drvfs paths, file ownership is a WSL overlay. If chown-back appears ineffective, add `[automount]\noptions="metadata"` to `/etc/wsl.conf` and run `wsl --shutdown`.
+
+### `job.tty` — TTY allocation
+
+Controls whether docker attaches a pseudo-TTY (`-it`) to the training container. Values: `auto` (default — attaches when invoking stdout is a TTY), `always`, `never`.
+To see the asciimatics training dashboard inside docker, run from an interactive terminal and set `run.dashboard: true`.
+Non-interactive callers (CI, `nohup`, `--json`) should keep `auto` or set `never`.
+
+### Persistent container mode
+
+When iterating on the same training job you can reuse a long-lived container across invocations to avoid re-paying pip install, HuggingFace model download, and triton compile on every run. This is opt-in via `job.persist: true` (bind mode only) and exposes three management flags on the `local-run` command:
+
+```bash
+python tuner.py local-run --job-config <yaml> --container-status   # show running/exited/absent
+python tuner.py local-run --job-config <yaml> --stop               # stop (but keep) the container
+python tuner.py local-run --job-config <yaml> --rm-persistent      # stop and delete the container
+```
+
+The container uses Docker's `--init` (tini) as PID 1 so ctrl-C is cleanly forwarded to training: SIGINT → python → `trap EXIT` → chown-back → docker exec returns 130. tini reaps any residual children so you never leak zombies. Persistent mode only works with `transfer: bind`; combining with `transfer: copy` raises a config error.
+
+### `job.persist` — reusable container
+
+Default `false`. When `true` (bind mode only), the runner creates a long-lived container named `local-run-<slug>` (slug derived from `job.name`, no timestamp) and reuses it on subsequent invocations. The first run creates it via `docker run -d --init ...`; subsequent runs `docker exec` into it. pip installs are skipped on reuse when the dep set is unchanged (marker-file hash under `/tmp/.pip-installed-<hash>`).
+
+### `job.mount_hf_cache` — share HuggingFace cache with the host
+
+Default `true` for all bind-mode runs (ephemeral and persistent). Bind-mounts `~/.cache/huggingface` on the host to `/root/.cache/huggingface` in the container so model/tokenizer downloads persist across runs and across different job configs. The handler pre-creates `~/.cache/huggingface` on the host before launching docker so the mount doesn't silently bind an empty root-owned dir. Set `mount_hf_cache: false` for a pristine container that re-downloads everything.
+
+### `job.mount_pip_cache` — share pip cache with the host
+
+Default `true` for all bind-mode runs. Bind-mounts `~/.cache/pip` to `/root/.cache/pip` so pip wheels persist across runs. Pre-created on the host automatically. Set `mount_pip_cache: false` for a pristine container.
+
+### `job.container_name` — override the derived name
+
+Optional. When unset, persistent mode uses `local-run-<slugified-name>` and ephemeral mode uses `local-run-<name>-<timestamp>`. When set, the value is slugified (lowercased, `[a-z0-9-]` only, underscores → hyphens) and used for both modes. For persistent mode this name MUST remain stable across invocations — timestamps defeat reuse.
+
+## Direct SFT Trainer Config (`Trainers/sft/configs/config.yaml`)
 
 ### Model Section
 ```yaml
@@ -37,7 +136,7 @@ lora:
 ### Training Section
 ```yaml
 training:
-  output_dir: "./sft_output_rtx3090"
+  output_dir: "./sft_output"
   per_device_train_batch_size: 2
   gradient_accumulation_steps: 2    # Effective batch = 4
   learning_rate: 2e-4
@@ -125,7 +224,7 @@ python tuner.py cloud-pipeline --method sft \
 
 ---
 
-## KTO Config (`Trainers/rtx3090_kto/configs/config.yaml`)
+## KTO Config (`Trainers/kto/configs/config.yaml`)
 
 **Differences from SFT highlighted:**
 
@@ -178,7 +277,7 @@ dataset:
 
 ---
 
-## GRPO Config (`Trainers/rtx3090_grpo/configs/config.yaml`)
+## GRPO Config (`Trainers/grpo/configs/config.yaml`)
 
 ```yaml
 model:

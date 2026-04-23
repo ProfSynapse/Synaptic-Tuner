@@ -9,7 +9,7 @@ that llama-cli is available. Unlike other backends, it doesn't connect
 to a server - it runs llama-cli directly for inference.
 
 Design decisions:
-- Discovers models from rtx3090_sft and rtx3090_kto output directories
+- Discovers models from canonical trainer output directories
 - Validates llama-cli existence rather than server connectivity
 - Returns GGUF file paths as "model names" for use with Evaluator CLI
 """
@@ -115,10 +115,7 @@ class LlamaCppBackend(IEvaluationBackend):
     def list_models(self) -> List[str]:
         """List available GGUF models from training outputs.
 
-        Searches for GGUF files in:
-        - Trainers/rtx3090_sft/sft_output_rtx3090/**/gguf/*.gguf
-        - Trainers/rtx3090_kto/kto_output_rtx3090/**/gguf/*.gguf
-        - Trainers/rtx3090_grpo/grpo_output_rtx3090/**/gguf/*.gguf
+        Searches for GGUF files in canonical SFT, KTO, and GRPO outputs.
 
         Returns:
             List of GGUF file paths (absolute paths)

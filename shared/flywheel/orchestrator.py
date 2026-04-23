@@ -346,20 +346,20 @@ class FlywheelOrchestrator:
         if trainer == "sft":
             dataset_file = file_paths.get("sft", "")
             return (
-                "Trainers/rtx3090_sft/train_sft.py",
+                "Trainers/sft/train_sft.py",
                 ["--dataset-file", dataset_file],
             )
         elif trainer == "kto":
             dataset_file = file_paths.get("kto", "")
             return (
-                "Trainers/rtx3090_kto/train_kto.py",
+                "Trainers/kto/train_kto.py",
                 ["--dataset-file", dataset_file],
             )
         else:
             # Default to SFT
             dataset_file = file_paths.get("sft", "")
             return (
-                "Trainers/rtx3090_sft/train_sft.py",
+                "Trainers/sft/train_sft.py",
                 ["--dataset-file", dataset_file],
             )
 

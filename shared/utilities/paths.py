@@ -37,7 +37,7 @@ def normalize_trainer_method(trainer_name: str) -> str:
     Normalize a trainer directory name or method to a training method.
 
     Args:
-        trainer_name: Method name like ``sft`` or directory name like ``rtx3090_sft``
+        trainer_name: Method name like ``sft`` or archived legacy directory name like ``rtx3090_sft``
 
     Returns:
         Canonical method name.
@@ -90,7 +90,7 @@ def get_trainer_root(trainer_name: str = None, repo_root: Optional[Path] = None)
     Get the trainer root directory.
 
     Args:
-        trainer_name: Name of trainer (e.g., ``sft`` or ``rtx3090_sft``)
+        trainer_name: Name of trainer (e.g., ``sft``)
         repo_root: Optional explicit repo root
 
     Returns:
@@ -153,7 +153,7 @@ def find_training_run(trainer_name: str, run_id: str = None, repo_root: Optional
     Find a training run directory for a trainer.
 
     Args:
-        trainer_name: Name of trainer (e.g., ``sft`` or ``rtx3090_sft``)
+        trainer_name: Name of trainer (e.g., ``sft``)
         run_id: Specific run ID or None for latest
         repo_root: Optional explicit repo root
 

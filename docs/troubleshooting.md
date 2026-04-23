@@ -146,6 +146,37 @@ conda activate toolset
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 ```
 
+### Local Docker Run Issues
+
+**"Artifacts owned by root after local-run"**
+- Symptom: `rm -rf toolset-training-artifacts/runs/local_docker/...` fails with `EACCES` / "Operation not permitted".
+- Cause: `job.user: root` was set, or the chown-back trap failed mid-run.
+- Fix: set `job.user: auto` in the job YAML (default), or reclaim ownership manually: `sudo chown -R $USER:$USER <path>`.
+
+**"chown ineffective on WSL drvfs"**
+- Symptom: runner prints a notice that the repo is on WSL drvfs (`/mnt/...`); artifacts still appear root-owned in Windows Explorer after exit.
+- Fix: enable POSIX metadata on drvfs — add the following to `/etc/wsl.conf`, then run `wsl --shutdown` and reopen WSL:
+  ```
+  [automount]
+  options="metadata"
+  ```
+  From WSL, chown-back now takes effect; Windows Explorer still shows its own overlay, which is expected.
+
+**"Persistent container is holding VRAM"**
+- Symptom: `nvidia-smi` shows GPU memory pinned by a `local-run-<name>` container after training finished.
+- Cause: `job.persist: true` keeps the container alive between invocations so pip/HF-cache/triton-compile stay warm. The sleep-infinity idle process holds a small amount of VRAM when the image is CUDA-enabled.
+- Fix: stop it when you're done iterating.
+  ```bash
+  python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --stop            # stop but keep
+  python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --rm-persistent   # stop and delete
+  ```
+- Check state any time: `--container-status` prints `running` / `exited` / `absent`.
+
+**"Zombie container after ctrl-C"**
+- Symptom: after ctrl-C, the container still appears in `docker ps` and cannot be re-used; `docker exec` into it hangs.
+- Cause: rare now. The runner uses `--init` (tini) as PID 1 inside persistent containers so SIGINT is forwarded cleanly to the training process and orphan children are reaped. A zombie implies tini itself stalled (docker engine bug) or you ran a container created before `--init` was added.
+- Fix: `--rm-persistent` on the job-config to delete the container. If that hangs, restart Docker Desktop (Windows/WSL) or `sudo systemctl restart docker` (Linux), then re-run.
+
 ---
 
 ## Recovery Procedures
@@ -154,7 +185,7 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 ```bash
 # 1. Find the last checkpoint
-ls -la Trainers/rtx3090_sft/sft_output_rtx3090/<run_id>/checkpoints/
+ls -la Trainers/sft/sft_output/<run_id>/checkpoints/
 
 # 2. Check checkpoint integrity
 python -c "from transformers import AutoModelForCausalLM; AutoModelForCausalLM.from_pretrained('<checkpoint_path>')"

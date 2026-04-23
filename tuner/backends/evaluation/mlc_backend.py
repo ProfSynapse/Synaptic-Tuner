@@ -9,7 +9,7 @@ launches a browser-based evaluation interface. Unlike server-based backends,
 it spawns an HTTP server and opens a browser for WebLLM inference.
 
 Design decisions:
-- Discovers models from rtx3090_sft and rtx3090_kto output directories
+- Discovers models from canonical trainer output directories
 - Looks for directories containing mlc-chat-config.json or -MLC suffix
 - Validates that model has required WebLLM files (ndarray-cache.json, config)
 - Uses browser-based evaluation since MLC-LLM Python serve has version issues
@@ -53,10 +53,7 @@ class MLCBackend(IEvaluationBackend):
     def list_models(self) -> List[str]:
         """List available MLC/WebGPU models from training outputs.
 
-        Searches for MLC model directories in:
-        - Trainers/rtx3090_sft/sft_output_rtx3090/**/webgpu/*-MLC/
-        - Trainers/rtx3090_kto/kto_output_rtx3090/**/webgpu/*-MLC/
-        - Trainers/rtx3090_grpo/grpo_output_rtx3090/**/webgpu/*-MLC/
+        Searches for MLC model directories in canonical SFT, KTO, and GRPO outputs.
 
         Returns:
             List of MLC model directory paths (absolute paths)

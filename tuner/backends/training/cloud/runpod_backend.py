@@ -123,7 +123,7 @@ class RunPodBackend(ITrainingBackend):
         """
         Load training configuration for the specified method.
 
-        Reads the standard training config from Trainers/rtx3090_{method}/
+        Reads the standard training config from Trainers/{method}/
         and overlays cloud-specific settings from cloud_config.yaml.
 
         Args:

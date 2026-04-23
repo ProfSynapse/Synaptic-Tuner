@@ -68,6 +68,26 @@ def route_command(args: Namespace) -> int:
     """
     # Check for JSON mode - affects error output
     json_mode = getattr(args, 'json', False)
+    command = getattr(args, 'command', None)
+
+    if command == "local-run":
+        try:
+            from tuner.handlers.local_run_handler import LocalRunHandler
+        except ImportError as e:
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": f"Local run handler import failed: {e}",
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: Local run handler import failed: {e}")
+            return 1
+        return LocalRunHandler(args=args).handle()
 
     # Import handlers (deferred to avoid circular imports)
     try:
@@ -110,16 +130,13 @@ def route_command(args: Namespace) -> int:
             print("This is expected during migration. Please use tuner_legacy.py instead.")
         return 1
 
-    # Get command from args
-    command = getattr(args, 'command', None)
-
     # JSON mode without command is an error (interactive menu needs input)
     # Exception: status, doctor, and list commands work in JSON mode
     if json_mode and not command:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
