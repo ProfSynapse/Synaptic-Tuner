@@ -45,7 +45,7 @@ Nebius AI Cloud is a GPU cloud platform optimized for AI/ML workloads, offering 
 
    # Import training modules
    import sys
-   sys.path.append('/workspace/Trainers/rtx3090_sft')
+   sys.path.append('/workspace/Trainers/sft')
 
    from configs.training_config import get_7b_config
    from src.model_loader import load_model_and_tokenizer
@@ -126,7 +126,7 @@ Nebius AI Cloud is a GPU cloud platform optimized for AI/ML workloads, offering 
    cd ~/Toolset-Training
 
    # Run setup script (existing setup.sh works!)
-   cd Trainers/rtx3090_sft
+   cd Trainers/sft
    bash setup.sh
 
    # Verify GPU
@@ -138,18 +138,18 @@ Nebius AI Cloud is a GPU cloud platform optimized for AI/ML workloads, offering 
    Use existing training scripts:
    ```bash
    # SFT Training
-   cd ~/Toolset-Training/Trainers/rtx3090_sft
+   cd ~/Toolset-Training/Trainers/sft
    ./train.sh --model-size 7b --wandb --wandb-project nebius-training
 
    # Or KTO Training
-   cd ~/Toolset-Training/Trainers/rtx3090_kto
+   cd ~/Toolset-Training/Trainers/kto
    ./train.sh --model-size 7b
    ```
 
 4. **Monitor with tmux/screen**
    ```bash
    # Start training in detached session
-   tmux new-session -d -s training 'cd ~/Toolset-Training/Trainers/rtx3090_sft && ./train.sh --model-size 7b'
+   tmux new-session -d -s training 'cd ~/Toolset-Training/Trainers/sft && ./train.sh --model-size 7b'
 
    # Attach to monitor
    tmux attach -t training
@@ -215,11 +215,11 @@ Nebius AI Cloud is a GPU cloud platform optimized for AI/ML workloads, offering 
      bash Miniconda3-latest-Linux-x86_64.sh -b
 
      # Setup environment
-     cd /workspace/Trainers/rtx3090_sft
+     cd /workspace/Trainers/sft
      bash setup.sh --quick
 
    run: |
-     cd /workspace/Trainers/rtx3090_sft
+     cd /workspace/Trainers/sft
      source ~/miniconda3/bin/activate unsloth_env
 
      ./train.sh --model-size 7b --wandb --wandb-project nebius-sky
@@ -254,12 +254,12 @@ Nebius AI Cloud is a GPU cloud platform optimized for AI/ML workloads, offering 
 
    setup: |
      # Same as above
-     cd /workspace/Trainers/rtx3090_sft
+     cd /workspace/Trainers/sft
      bash setup.sh --quick
 
    run: |
      # SkyPilot automatically configures distributed training
-     cd /workspace/Trainers/rtx3090_sft
+     cd /workspace/Trainers/sft
      source ~/miniconda3/bin/activate unsloth_env
 
      # Set distributed training env vars (SkyPilot provides these)
@@ -338,7 +338,7 @@ ssh.connect(vm.ip_address, username="ubuntu", key_filename="~/.ssh/id_rsa")
 
 # Execute training
 stdin, stdout, stderr = ssh.exec_command(
-    "cd ~/Toolset-Training/Trainers/rtx3090_sft && ./train.sh --model-size 7b"
+    "cd ~/Toolset-Training/Trainers/sft && ./train.sh --model-size 7b"
 )
 
 # Monitor output
@@ -354,8 +354,8 @@ import sky
 # Define task programmatically
 task = sky.Task(
     name='toolset-training',
-    setup='cd /workspace/Trainers/rtx3090_sft && bash setup.sh --quick',
-    run='cd /workspace/Trainers/rtx3090_sft && ./train.sh --model-size 7b'
+    setup='cd /workspace/Trainers/sft && bash setup.sh --quick',
+    run='cd /workspace/Trainers/sft && ./train.sh --model-size 7b'
 )
 
 # Set resources
@@ -454,7 +454,7 @@ sky.launch(task)
 
 **Issue: "How do I get my model back?"**
 - Solution: Your existing `upload_model.sh` works! Just set HF_TOKEN in `.env`.
-- Or use `scp` to download: `scp -r vm:/workspace/Trainers/rtx3090_sft/sft_output_rtx3090/ ./`
+- Or use `scp` to download: `scp -r vm:/workspace/Trainers/sft/sft_output/ ./`
 
 ---
 

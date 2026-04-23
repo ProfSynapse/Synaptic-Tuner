@@ -76,7 +76,7 @@ Use `docs/nebius_training_notebook.ipynb` - it includes:
    cd Toolset-Training
 
    # Run setup
-   cd Trainers/rtx3090_sft
+   cd Trainers/sft
    bash setup.sh
 
    # Verify GPU
@@ -89,7 +89,7 @@ Use `docs/nebius_training_notebook.ipynb` - it includes:
    ./train.sh --model-size 7b --wandb --wandb-project nebius-training
 
    # Or KTO training
-   cd ../rtx3090_kto
+   cd ../kto
    ./train.sh --model-size 7b
    ```
 
@@ -97,7 +97,7 @@ Use `docs/nebius_training_notebook.ipynb` - it includes:
    ```bash
    # Start in tmux session
    tmux new-session -s training
-   cd ~/Toolset-Training/Trainers/rtx3090_sft
+   cd ~/Toolset-Training/Trainers/sft
    ./train.sh --model-size 7b
 
    # Detach: Ctrl+B then D
@@ -107,7 +107,7 @@ Use `docs/nebius_training_notebook.ipynb` - it includes:
 5. **Download Results**
    ```bash
    # From your local machine
-   scp -r ubuntu@<vm-ip>:~/Toolset-Training/Trainers/rtx3090_sft/sft_output_rtx3090/ ./
+   scp -r ubuntu@<vm-ip>:~/Toolset-Training/Trainers/sft/sft_output/ ./
    ```
 
 **Cost:** ~$1.50 for full SFT training (45 min) + ~$0.50 for KTO (15 min) = **~$2.00 total**
@@ -229,7 +229,7 @@ sky launch --use-spot docs/nebius_skypilot_config.yaml
 # Use VM approach
 ssh ubuntu@<vm-ip>
 git clone <repo>
-cd Toolset-Training/Trainers/rtx3090_sft
+cd Toolset-Training/Trainers/sft
 bash setup.sh --quick
 ./train.sh --model-size 7b
 ```
@@ -239,11 +239,11 @@ bash setup.sh --quick
 ### 2. Full Pipeline + Upload (1 hour total)
 ```bash
 # SFT + KTO + Upload
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 ./train.sh --model-size 7b
 ./upload_model.sh  # Interactive upload
 
-cd ../rtx3090_kto
+cd ../kto
 ./train.sh --model-size 7b
 ./upload_model.sh
 ```
@@ -273,10 +273,10 @@ nvidia-smi -l 1  # Update every second
 ### View Training Logs
 ```bash
 # Real-time monitoring
-tail -f sft_output_rtx3090/*/logs/training_latest.jsonl
+tail -f sft_output/*/logs/training_latest.jsonl
 
 # Or in notebook
-!tail -f /workspace/Trainers/rtx3090_sft/sft_output_rtx3090/*/logs/training_latest.jsonl
+!tail -f /workspace/Trainers/sft/sft_output/*/logs/training_latest.jsonl
 ```
 
 ### W&B Integration (Recommended)

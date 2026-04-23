@@ -406,7 +406,7 @@ Now that you understand how it works, you can:
 1. **Run it:** `./Tools/run_selfplay.sh --quick`
 2. **Inspect output:** `head -5 Datasets/syngen_selfplay_*.jsonl | jq`
 3. **Check validation:** `python tools/validate_syngen.py Datasets/syngen_selfplay_*.jsonl`
-4. **Train with it:** `cd Trainers/rtx3090_kto && python train_kto.py --local-file ../../Datasets/syngen_selfplay_*.jsonl`
+4. **Train with it:** `cd Trainers/kto && python train_kto.py --local-file ../../Datasets/syngen_selfplay_*.jsonl`
 
 ## Customization Ideas
 

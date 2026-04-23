@@ -192,7 +192,7 @@ python tools/validate_syngen.py Datasets/syngen_selfplay_20251204.jsonl
 ### 2. Train with KTO
 
 ```bash
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 
 python train_kto.py \
   --model-size 7b \
@@ -232,11 +232,11 @@ while true; do
     --num-examples 1000
 
   # 2. Train
-  cd Trainers/rtx3090_kto
+  cd Trainers/kto
   python train_kto.py \
     --model-size 7b \
     --local-file "../../Datasets/syngen_selfplay_iter${ITERATION}.jsonl" \
-    --output-dir "kto_output_rtx3090/iter${ITERATION}"
+    --output-dir "kto_output/iter${ITERATION}"
   cd ../..
 
   # 3. Upload

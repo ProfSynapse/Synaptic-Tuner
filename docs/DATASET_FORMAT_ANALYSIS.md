@@ -256,7 +256,7 @@ python tools/convert_to_mcp_format.py \
   Datasets/syngen_tools_sft_11.22.25_mcp.jsonl
 
 # Train on new format
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 ./train.sh --model-size 7b --local-file ../../Datasets/syngen_tools_sft_11.22.25_mcp.jsonl
 
 # Compare results

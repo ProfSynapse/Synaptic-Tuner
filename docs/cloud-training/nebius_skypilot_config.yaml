@@ -62,7 +62,7 @@ setup: |
 
   # Setup training environment
   echo "Setting up training environment..."
-  cd /workspace/Trainers/rtx3090_sft
+  cd /workspace/Trainers/sft
 
   # Run the existing setup script (quick mode, no verification)
   bash setup.sh --quick
@@ -81,7 +81,7 @@ run: |
   conda activate unsloth_env
 
   # Navigate to trainer directory
-  cd /workspace/Trainers/rtx3090_sft
+  cd /workspace/Trainers/sft
 
   # Optional: Set environment variables
   export WANDB_PROJECT="nebius-toolset-training"
@@ -105,14 +105,14 @@ run: |
 
   # Show results
   echo "Output directory:"
-  ls -lh sft_output_rtx3090/
+  ls -lh sft_output/
 
   # Show latest logs
   echo "Latest logs:"
-  find sft_output_rtx3090/ -name "training_*.jsonl" -type f -exec tail -20 {} \;
+  find sft_output/ -name "training_*.jsonl" -type f -exec tail -20 {} \;
 
 # Workdir - where commands execute
-workdir: /workspace/Trainers/rtx3090_sft
+workdir: /workspace/Trainers/sft
 
 # Optional: Environment variables
 envs:

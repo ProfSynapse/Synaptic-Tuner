@@ -63,7 +63,7 @@ Unify the 4 disconnected experiment tracking systems (ML trainer, SFT/KTO traine
 | `shared/experiment_tracking/tracker.py` | Modify | Add `log_metadata()` convenience (default no-op); auto-register on `start_run()` exit |
 | `shared/experiment_tracking/local_tracker.py` | Modify | Wire auto-registration to registry on run completion |
 | `shared/experiment_tracking/__init__.py` | Modify | Export new classes, update `create_tracker()` factory |
-| `Trainers/rtx3090_sft/train_sft.py` | Modify | Add post-training tracker hook (~10 lines) |
+| `Trainers/sft/train_sft.py` | Modify | Add post-training tracker hook (~10 lines) |
 | `Trainers/kto/train_kto.py` | Modify | Add post-training tracker hook (~10 lines) |
 | `Trainers/ml/train.py` | Modify | Minor: ensure tracker auto-registration works with existing usage |
 | `Evaluator/cli.py` | Modify | Add `--training-run` flag, register eval runs (~20 lines) |
@@ -216,7 +216,7 @@ class ExperimentTracker(ABC):
 | `shared/experiment_tracking/tracker.py` | Add `log_metadata()` with default no-op |
 | `shared/experiment_tracking/local_tracker.py` | Wire auto-registration to RunRegistry on `start_run()` exit |
 | `shared/experiment_tracking/__init__.py` | Export RunRecord, RunRegistry, RunFilter; update factory |
-| `Trainers/rtx3090_sft/train_sft.py` | Add post-training tracker hook after `save_training_lineage()` (~10 lines, try/except wrapped) |
+| `Trainers/sft/train_sft.py` | Add post-training tracker hook after `save_training_lineage()` (~10 lines, try/except wrapped) |
 | `Trainers/kto/train_kto.py` | Add post-training tracker hook after `save_training_lineage()` (~10 lines, try/except wrapped) |
 | `Trainers/ml/train.py` | Verify auto-registration works; minor wiring if needed |
 | `Evaluator/cli.py` | Add `--training-run` flag; register eval runs with parent linkage |

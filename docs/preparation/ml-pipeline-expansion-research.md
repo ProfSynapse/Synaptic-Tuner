@@ -19,7 +19,7 @@ MLflow is the recommended experiment tracking platform for both tracks, as it na
 This research was prompted by the desire to expand beyond pure LLM fine-tuning and leverage the strengths of traditional ML where appropriate. The current pipeline structure (documented in `CLAUDE.md`) centers on:
 
 - **tuner.py / run.sh**: CLI entry point with interactive menus
-- **Trainers/**: SFT (`rtx3090_sft/`) and KTO (`rtx3090_kto/`) training
+- **Trainers/**: SFT (`sft/`) and KTO (`kto/`) training
 - **SynthChat/**: Synthetic data generation and quality improvement (rubric runner)
 - **Evaluator/**: Model evaluation harness
 - **shared/**: LLM client, validation, utilities, judge module
@@ -278,9 +278,9 @@ class ConversationFeatureExtractor:
 ```
 Toolset-Training/
 ├── Trainers/
-│   ├── rtx3090_sft/           # Existing LLM SFT
-│   ├── rtx3090_kto/           # Existing LLM KTO
-│   ├── rtx3090_grpo/          # Existing LLM GRPO
+│   ├── sft/           # Existing LLM SFT
+│   ├── kto/           # Existing LLM KTO
+│   ├── grpo/          # Existing LLM GRPO
 │   │
 │   ├── ml_classifiers/        # NEW: Traditional ML training
 │   │   ├── train_quality_scorer.py
@@ -715,7 +715,7 @@ The following sections cover making traditional ML a first-class training capabi
 
 Mirror the existing LLM training pattern: **YAML config in, trained model out, timestamped run directory with logs and artifacts**.
 
-The existing SFT config (`Trainers/rtx3090_sft/configs/config.yaml`) uses a clean hierarchy: `model:`, `lora:`, `training:`. The ML training config should follow the same pattern with ML-specific sections.
+The existing SFT config (`Trainers/sft/configs/config.yaml`) uses a clean hierarchy: `model:`, `lora:`, `training:`. The ML training config should follow the same pattern with ML-specific sections.
 
 ### Config-Driven Training Design
 
@@ -1401,7 +1401,7 @@ This mirrors the LLM training output pattern:
 
 | LLM Training | ML Training | Purpose |
 |--------------|-------------|---------|
-| `sft_output_rtx3090/YYYYMMDD_HHMMSS/` | `ml_output/YYYYMMDD_HHMMSS/` | Timestamped run dir |
+| `sft_output/YYYYMMDD_HHMMSS/` | `ml_output/YYYYMMDD_HHMMSS/` | Timestamped run dir |
 | `final_model/` | `model.joblib` + `model.onnx` | Trained model |
 | `checkpoints/` | `tuning_history.json` | Intermediate state |
 | `logs/training_latest.jsonl` | `logs/training.log` | Training logs |
@@ -1729,9 +1729,9 @@ output:
 ```
 Toolset-Training/
 ├── Trainers/
-│   ├── rtx3090_sft/              # LLM: Supervised Fine-Tuning
-│   ├── rtx3090_kto/              # LLM: KTO Training
-│   ├── rtx3090_grpo/             # LLM: GRPO Training
+│   ├── sft/              # LLM: Supervised Fine-Tuning
+│   ├── kto/              # LLM: KTO Training
+│   ├── grpo/             # LLM: GRPO Training
 │   │
 │   ├── ml/                       # NEW: Traditional ML Training
 │   │   ├── train.py              # Main training entry point
@@ -1983,7 +1983,7 @@ class PerExampleLossCallback(TrainerCallback):
 
 **Integration with existing SFT training**:
 ```python
-# In Trainers/rtx3090_sft/train_sft.py
+# In Trainers/sft/train_sft.py
 loss_callback = PerExampleLossCallback(
     train_dataset=tokenized_dataset,
     output_dir=run_dir / "influence",
@@ -2244,9 +2244,9 @@ def score_new_dataset(impact_model, new_dataset_path):
 
 ```
 Trainers/
-├── rtx3090_sft/
+├── sft/
 │   ├── train_sft.py                  # Add PerExampleLossCallback
-│   └── sft_output_rtx3090/
+│   └── sft_output/
 │       └── YYYYMMDD_HHMMSS/
 │           ├── checkpoints/           # Existing checkpoints (used by TracIn)
 │           └── influence/             # NEW: Influence analysis output
@@ -2275,8 +2275,8 @@ SynthChat/
 
 | Component | Integration | How |
 |-----------|-------------|-----|
-| `Trainers/rtx3090_sft/train_sft.py` | Add loss callback | Custom TrainerCallback |
-| `Trainers/rtx3090_kto/train_kto.py` | Add loss callback | Same callback pattern |
+| `Trainers/sft/train_sft.py` | Add loss callback | Custom TrainerCallback |
+| `Trainers/kto/train_kto.py` | Add loss callback | Same callback pattern |
 | `shared/influence/` | New module | TracIn + loss tracking + meta-model |
 | `SynthChat/services/rubric_runner.py` | Prioritize by impact | Score examples, process high-impact first |
 | `Trainers/ml/` | Meta-model training | Use standalone ML training config |

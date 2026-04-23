@@ -217,7 +217,7 @@ SFT (learn the loop)  →  KTO (learn judgment)  →  GRPO (optimize retrieval)
 **Dataset:** Positive examples only. The model learns WHEN to search, WHAT to read, and HOW to answer.
 
 ```bash
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 
 python train_sft.py \
   --model-size 7b \
@@ -244,7 +244,7 @@ Negative examples come naturally from rubric failures during validation:
 - **Missed answers** where the model says "not found" but the doc was there → `label: false`
 
 ```bash
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 
 python train_kto.py \
   --model-size 7b \
@@ -264,7 +264,7 @@ python train_kto.py \
 GRPO is well-suited here because the reward is **verifiable**: did the search terms retrieve the target document? This mirrors Context-1's CISPO approach.
 
 ```bash
-cd Trainers/rtx3090_grpo
+cd Trainers/grpo
 # Set model.lora_path to KTO checkpoint in configs/config.yaml
 python train_grpo.py
 ```
@@ -301,7 +301,7 @@ presets:
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./Trainers/rtx3090_sft/sft_output_rtx3090/TIMESTAMP/final_model \
+  --model ./Trainers/sft/sft_output/TIMESTAMP/final_model \
   --preset agentic_search \
   --output Evaluator/results/agentic_search_v1.json \
   --markdown Evaluator/results/agentic_search_v1.md
@@ -311,7 +311,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./Trainers/rtx3090_sft/sft_output_rtx3090/TIMESTAMP/final_model \
+  --model ./Trainers/sft/sft_output/TIMESTAMP/final_model \
   --preset agentic_search_runtime \
   --env-backend local \
   --env-tool-schema path/to/your_tool_schema.yaml \
@@ -401,9 +401,9 @@ SynthChat/rubrics/doc_selection.yaml                ← Selection quality rubric
 SynthChat/rubrics/groundedness.yaml                 ← Grounding quality rubric
 Datasets/synthchat/agentic_search_*.jsonl           ← Generated training data
 Evaluator/config/scenarios/agentic_search.yaml      ← Evaluation scenarios
-Trainers/rtx3090_sft/                               ← SFT trainer (same as other pipelines)
-Trainers/rtx3090_kto/                               ← KTO trainer (same as other pipelines)
-Trainers/rtx3090_grpo/                              ← GRPO trainer (same as other pipelines)
+Trainers/sft/                               ← SFT trainer (same as other pipelines)
+Trainers/kto/                               ← KTO trainer (same as other pipelines)
+Trainers/grpo/                              ← GRPO trainer (same as other pipelines)
 ```
 
 ---

@@ -240,4 +240,4 @@ python tools/interleave_dataset.py \
 - **YAML Rubrics:** `../behavior_rubrics/`
 - **Tool Schemas:** `../../tools/tool_schemas.json`
 - **Validator:** `../../tools/validate_syngen.py`
-- **Training Guide:** `../../Trainers/rtx3090_kto/README.md`
+- **Training Guide:** `../../Trainers/kto/README.md`

@@ -85,7 +85,7 @@ Utilities to read/write the YAML configuration files used by the trainers.
 ```typescript
 // lib/config-manager.ts
 export async function getTrainingConfig(method: 'sft' | 'kto') {
-  // Reads Trainers/rtx3090_{method}/configs/config.yaml
+  // Reads Trainers/{method}/configs/config.yaml
   // Returns parsed JSON
 }
 

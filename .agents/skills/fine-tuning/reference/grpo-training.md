@@ -14,11 +14,11 @@ GRPO generates multiple completions per prompt, scores them with deterministic r
 
 ## Configuration
 
-GRPO is configured entirely via YAML: `Trainers/rtx3090_grpo/configs/config.yaml`
+GRPO is configured entirely via YAML: `Trainers/grpo/configs/config.yaml`
 
 ```bash
 # Run GRPO training
-cd Trainers/rtx3090_grpo
+cd Trainers/grpo
 python train_grpo.py
 ```
 
@@ -31,7 +31,7 @@ python train_grpo.py
 ```yaml
 model:
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
-  lora_path: "../rtx3090_sft/sft_output_rtx3090/.../checkpoint-1150"  # Optional
+  lora_path: "../sft/sft_output/.../checkpoint-1150"  # Optional
 
 training:
   per_device_train_batch_size: 6
@@ -155,7 +155,7 @@ To start GRPO from an SFT checkpoint:
 ```yaml
 model:
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
-  lora_path: "../rtx3090_sft/sft_output_rtx3090/20250114/checkpoint-1150"
+  lora_path: "../sft/sft_output/20250114/checkpoint-1150"
 ```
 
 ---
