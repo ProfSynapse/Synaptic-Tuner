@@ -122,6 +122,7 @@ class TestBuildMetadataLabels:
             "stage_failures": [],
             "environment_trace": None,
             "generated_environment": {},
+            "privacy_trace": None,
             "label_mappings": _default_label_mappings(),
         }
         defaults.update(overrides)
@@ -207,3 +208,22 @@ class TestBuildMetadataLabels:
             scenario={"type": "tool", "triggers": ["On Create Note"]}
         ))
         assert "trigger:on_create_note" in result["flat"]
+
+    def test_privacy_labels(self):
+        result = build_metadata_labels(**self._base_args(
+            privacy_trace={
+                "profile": "realistic_pseudonyms",
+                "changed": True,
+                "detection": {
+                    "labels": ["private_email", "private_person"],
+                    "span_count": 2,
+                },
+            }
+        ))
+        flat = result["flat"]
+        assert "privacy:present" in flat
+        assert "privacy_changed:true" in flat
+        assert "privacy_profile:realistic_pseudonyms" in flat
+        assert "privacy_label:private_email" in flat
+        assert result["filter"]["privacy"]["present"] is True
+        assert result["filter"]["privacy"]["span_count"] == 2

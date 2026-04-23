@@ -1,0 +1,2 @@
+{"_meta": {"version": 1, "privacy_preprocess": {"profile": "mask_only"}}}
+{"conversations": [{"role": "user", "content": "Contact [PRIVATE_PERSON] at [PRIVATE_EMAIL]"}], "metadata": {"privacy_preprocess": {"profile": "mask_only", "changed": true, "report_count": 1, "reports": [{"path": "conversations[0].content", "profile": "mask_only", "changed": true}]}}}

@@ -6,7 +6,7 @@ allowed-tools: Read, Bash, Write, Grep, Glob
 
 # SynthChat: Synthetic Data Generation
 
-Generate, improve, validate, and evaluate synthetic training datasets via CLI and YAML configuration.
+Generate, improve, validate, sanitize, and evaluate synthetic training datasets via CLI and YAML configuration.
 
 ## Quick Reference
 
@@ -17,6 +17,7 @@ Generate, improve, validate, and evaluate synthetic training datasets via CLI an
 | Generate with custom tool schema/rules | `python -m SynthChat.run generate --env-backend local --env-tool-schema path/to/tool_schema.yaml --env-exec-config path/to/environment_execution.yaml [options]` |
 | Improve dataset | `python -m SynthChat.run improve -i FILE [options]` |
 | Validate dataset | `python -m SynthChat.run validate -i FILE [options]` |
+| Sanitize docs or JSONL | `python -m SynthChat.run sanitize -i PATH --privacy-profile PROFILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
 | Structural check | `python3 scripts/validate_syngen.py FILE` |
 | JSONL → Markdown | `./scripts/jsonl_to_markdown.sh data.jsonl` |
@@ -38,7 +39,7 @@ Load the specific reference you need:
 
 | Reference | When to Load | Path |
 |-----------|-------------|------|
-| **CLI Commands** | Running generate/improve/validate/eval | `reference/cli-commands.md` |
+| **CLI Commands** | Running generate/improve/validate/sanitize/eval | `reference/cli-commands.md` |
 | **Settings Config** | Configuring providers, models, workers, targets | `reference/settings-config.md` |
 | **Scenario Authoring** | Writing or modifying scenario YAMLs | `reference/scenario-authoring.md` |
 | **Rubric Authoring** | Writing or modifying rubric YAMLs | `reference/rubric-authoring.md` |
@@ -113,6 +114,17 @@ python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-12
 **Generate from docs:**
 ```bash
 python -m SynthChat.run generate --docs "path/to/essays/" --scenarios essay_outline --per-doc 1
+```
+
+**Generate from raw docs with privacy preprocessing:**
+```bash
+python -m SynthChat.run generate --docs "tests/fixtures/privacy/raw_seed_docs" --targets-file SynthChat/config/targets_privacy_docs_smoke.json --privacy-profile realistic_pseudonyms
+```
+
+**Sanitize a docs folder or JSONL dataset:**
+```bash
+python -m SynthChat.run sanitize -i tests/fixtures/privacy/raw_seed_docs --privacy-profile realistic_pseudonyms -o tmp/privacy_docs
+python -m SynthChat.run sanitize -i tests/fixtures/privacy/raw_seed_dataset.jsonl --privacy-profile mask_only -o tmp/privacy_dataset.jsonl
 ```
 
 **Dry-run a checked-in smoke target manifest:**

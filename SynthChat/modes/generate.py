@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..config.privacy import resolve_privacy_settings
 from ..utils.logger import get_logger
 from ..engine import ImprovementEngine
 from ..generator import SynthChatGenerator
@@ -43,6 +44,10 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
     # Load configuration
     config_dir = Path(args.config_dir or "SynthChat/config")
     settings = load_settings(config_dir)
+    privacy_overrides: Dict[str, Any] = {}
+    if getattr(args, "privacy_profile", None):
+        privacy_overrides = {"enabled": True, "profile": args.privacy_profile}
+    settings["privacy_preprocess"] = resolve_privacy_settings(settings, privacy_overrides)
     logger = get_logger("synthchat_generate")
 
     scenarios_dir = Path(args.scenarios_dir or "SynthChat/scenarios")
@@ -78,6 +83,7 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
         environment_validator=environment_validator,
         enable_stage_validation=settings["generation"]["stage_validation"],
         logger=logger,
+        privacy_settings=settings.get("privacy_preprocess"),
     )
 
     # Load targets
@@ -131,6 +137,8 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
         docs = DocsLoader().load(args.docs)
         print(f"Loaded {len(docs)} document(s)")
         print(f"Will generate {args.per_doc} example(s) per doc\n")
+        if settings.get("privacy_preprocess", {}).get("enabled") and settings.get("privacy_preprocess", {}).get("profile"):
+            print(f"Privacy seed preprocessing enabled (profile={settings['privacy_preprocess']['profile']})")
 
     # Generate
     max_iterations = args.max_iterations or settings["improvement"]["max_iterations"]

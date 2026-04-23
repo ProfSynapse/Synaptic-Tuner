@@ -64,6 +64,7 @@ from .config.format_resolver import (
     resolve_tool_call_format,
     resolve_workspace_format,
 )
+from .config.privacy import load_privacy_profiles, resolve_privacy_settings
 from .parsing import (
     stringify_assistant_message,
     parse_assistant_response,
@@ -87,6 +88,8 @@ from .agentic.episode import (
     validate_agentic_synthchat_response,
 )
 from shared.llm.factory import create_client  # noqa: F401 — re-exported for test monkeypatching
+
+from .services.privacy_preprocess import PrivacyPreprocessor
 
 try:
     from shared.environments import EnvironmentValidator
@@ -166,7 +169,9 @@ class SynthChatGenerator:
         engine: Optional[ImprovementEngine] = None,
         environment_validator: Optional["EnvironmentValidator"] = None,
         enable_stage_validation: bool = True,
-        logger=None
+        logger=None,
+        privacy_settings: Optional[Dict[str, Any]] = None,
+        privacy_preprocessor_factory=None,
     ):
         """
         Initialize generator.
@@ -181,6 +186,8 @@ class SynthChatGenerator:
                 tool execution checks.
             enable_stage_validation: Whether to validate each stage (default: True)
             logger: Logger instance (optional)
+            privacy_settings: Optional privacy preprocess settings from settings.yaml / CLI.
+            privacy_preprocessor_factory: Optional factory for test injection.
         """
         self.config_dir = Path(config_dir)
         self.llm_client = llm_client
@@ -197,6 +204,11 @@ class SynthChatGenerator:
         self._tool_call_formats = load_tool_call_formats()
         self._workspace_formats = load_workspace_formats()
         self._label_mappings = load_label_mappings()
+        self._privacy_settings = resolve_privacy_settings({"privacy_preprocess": privacy_settings or {}})
+        self._privacy_profiles = load_privacy_profiles(self.config_dir / "privacy_profiles.yaml")
+        self._privacy_preprocessor_factory = privacy_preprocessor_factory or PrivacyPreprocessor.from_registry
+        self._privacy_preprocessor_cache: Dict[str, PrivacyPreprocessor] = {}
+        self._privacy_doc_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
         # Initialize or use provided improvement engine
         if engine is None and enable_stage_validation:
@@ -421,8 +433,9 @@ class SynthChatGenerator:
         """Prepare a reusable environment/system-context seed for one or more rollouts."""
         prompts = scenario.get("prompts", {})
         template_vars = {}
-        if doc_context:
-            template_vars["doc_content"] = doc_context.content
+        doc_seed = self._resolve_doc_seed(scenario, doc_context)
+        if doc_seed is not None:
+            template_vars["doc_content"] = doc_seed["content"]
             template_vars["doc_path"] = doc_context.path
 
         def render_prompt(prompt: str) -> str:
@@ -546,11 +559,12 @@ class SynthChatGenerator:
         prompts = scenario.get("prompts", {})
         # Get all rubrics from scenario config - fully config-driven
         scenario_rubrics = scenario.get("rubrics", {})
+        doc_seed = self._resolve_doc_seed(scenario, doc_context)
 
         # Build template variables from doc context
         template_vars = {}
-        if doc_context:
-            template_vars["doc_content"] = doc_context.content
+        if doc_seed is not None:
+            template_vars["doc_content"] = doc_seed["content"]
             template_vars["doc_path"] = doc_context.path
 
         def render_prompt(prompt: str) -> str:
@@ -1199,10 +1213,23 @@ class SynthChatGenerator:
             stage_reviews["final"] = final_review
             if final_review.get("passed") is False and final_review.get("enforce", True):
                 stage_failures.append("final")
+        example, output_privacy = self._sanitize_generated_output(
+            scenario_key=scenario_key,
+            scenario=scenario,
+            example=example,
+        )
         if doc_context:
             example["metadata"]["source_doc"] = doc_context.path
+        if doc_seed and doc_seed.get("privacy") is not None:
+            example["metadata"]["source_doc_privacy"] = doc_seed["privacy"]
+        if output_privacy is not None:
+            example["metadata"]["generated_output_privacy"] = output_privacy
         if stage_reviews:
             example["metadata"]["stage_reviews"] = stage_reviews
+        combined_privacy = self._merge_privacy_traces(
+            (doc_seed or {}).get("privacy"),
+            output_privacy,
+        )
         example["metadata"]["labels"] = self._build_metadata_labels(
             scenario_key=scenario_key,
             scenario=scenario,
@@ -1210,6 +1237,7 @@ class SynthChatGenerator:
             stage_failures=stage_failures,
             environment_trace=environment_trace,
             generated_environment=generated_environment,
+            privacy_trace=combined_privacy,
         )
 
         return GenerationResult(
@@ -1543,6 +1571,7 @@ class SynthChatGenerator:
         stage_failures: List[str],
         environment_trace: Optional[Dict[str, Any]],
         generated_environment: Dict[str, Any],
+        privacy_trace: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build structured labels for downstream filtering and KTO/GRPO slicing."""
         return build_metadata_labels(
@@ -1552,8 +1581,156 @@ class SynthChatGenerator:
             stage_failures=stage_failures,
             environment_trace=environment_trace,
             generated_environment=generated_environment,
+            privacy_trace=privacy_trace,
             label_mappings=self._label_mappings,
         )
+
+    def _resolve_privacy_profile_name(self, scenario: Dict[str, Any]) -> Optional[str]:
+        seed_data = scenario.get("seed_data") if isinstance(scenario, dict) else None
+        if isinstance(seed_data, dict):
+            profile_name = str(seed_data.get("preprocess_profile") or "").strip()
+            if profile_name:
+                return profile_name
+        if self._privacy_settings.get("enabled"):
+            profile_name = str(self._privacy_settings.get("profile") or "").strip()
+            if profile_name:
+                return profile_name
+        return None
+
+    def _get_privacy_preprocessor(self, profile_name: str) -> PrivacyPreprocessor:
+        if profile_name not in self._privacy_preprocessor_cache:
+            self._privacy_preprocessor_cache[profile_name] = self._privacy_preprocessor_factory(
+                profile_name=profile_name,
+                profiles_registry=self._privacy_profiles,
+            )
+        return self._privacy_preprocessor_cache[profile_name]
+
+    def _resolve_doc_seed(
+        self,
+        scenario: Dict[str, Any],
+        doc_context: Optional[DocFile],
+    ) -> Optional[Dict[str, Any]]:
+        if doc_context is None:
+            return None
+        if not bool((self._privacy_settings.get("apply_to") or {}).get("docs", True)):
+            return {"content": doc_context.content, "privacy": None}
+
+        profile_name = self._resolve_privacy_profile_name(scenario)
+        if not profile_name:
+            return {"content": doc_context.content, "privacy": None}
+
+        cache_key = (profile_name, doc_context.path)
+        if cache_key not in self._privacy_doc_cache:
+            result = self._get_privacy_preprocessor(profile_name).process_text(
+                doc_context.content,
+                scope_key=doc_context.path,
+            )
+            self._privacy_doc_cache[cache_key] = {
+                "content": result.sanitized_text,
+                "privacy": result.to_metadata(),
+            }
+        return deepcopy(self._privacy_doc_cache[cache_key])
+
+    def _sanitize_generated_output(
+        self,
+        *,
+        scenario_key: str,
+        scenario: Dict[str, Any],
+        example: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+        if not bool((self._privacy_settings.get("apply_to") or {}).get("generated_output", False)):
+            return example, None
+
+        profile_name = self._resolve_privacy_profile_name(scenario)
+        if not profile_name:
+            return example, None
+
+        payload: Dict[str, Any] = {}
+        for field_name in ("conversations", "conversation_trace"):
+            if field_name in example:
+                payload[field_name] = deepcopy(example[field_name])
+        if not payload:
+            return example, None
+
+        sanitized_payload, reports = self._get_privacy_preprocessor(profile_name).sanitize_payload(
+            payload,
+            scope_key=f"{scenario_key}:generated_output",
+        )
+        for field_name, value in sanitized_payload.items():
+            example[field_name] = value
+        return example, self._summarize_privacy_reports(profile_name=profile_name, reports=reports)
+
+    @staticmethod
+    def _summarize_privacy_reports(
+        *,
+        profile_name: str,
+        reports: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        labels = set()
+        span_count = 0
+        for report in reports:
+            detection = report.get("detection") if isinstance(report, dict) else None
+            if not isinstance(detection, dict):
+                continue
+            for label in detection.get("labels") or []:
+                if label:
+                    labels.add(str(label))
+            try:
+                span_count += int(detection.get("span_count", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
+        summary: Dict[str, Any] = {
+            "profile": profile_name,
+            "changed": bool(reports),
+            "report_count": len(reports),
+            "reports": reports,
+            "detection": {
+                "labels": sorted(labels),
+                "span_count": span_count,
+            },
+        }
+        return summary
+
+    @staticmethod
+    def _merge_privacy_traces(*traces: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        active_traces = [trace for trace in traces if isinstance(trace, dict)]
+        if not active_traces:
+            return None
+
+        labels = set()
+        span_count = 0
+        changed = False
+        profiles: List[str] = []
+        for trace in active_traces:
+            if bool(trace.get("changed")):
+                changed = True
+            profile_name = str(trace.get("profile") or "").strip()
+            if profile_name:
+                profiles.append(profile_name)
+            detection = trace.get("detection") if isinstance(trace.get("detection"), dict) else {}
+            for label in detection.get("labels") or []:
+                if label:
+                    labels.add(str(label))
+            try:
+                span_count += int(detection.get("span_count", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
+        deduped_profiles = list(dict.fromkeys(profiles))
+        merged: Dict[str, Any] = {
+            "changed": changed,
+            "detection": {
+                "labels": sorted(labels),
+                "span_count": span_count,
+            },
+        }
+        if len(deduped_profiles) == 1:
+            merged["profile"] = deduped_profiles[0]
+        elif deduped_profiles:
+            merged["profile"] = "multiple"
+            merged["profiles"] = deduped_profiles
+        return merged
 
     def _improve_stage(
         self,

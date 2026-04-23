@@ -15,6 +15,10 @@ from typing import Dict, List, Sequence, Tuple
 from ..engine import ImprovementEngine
 from ..parallel.improve_workers import run_parallel_improvement
 from ..result_writer import generate_output_path
+from ..services.privacy_preprocess import (
+    resolve_privacy_preprocessor,
+    sanitize_payload_with_metadata,
+)
 
 
 def _parse_line_selectors(spec: str) -> List[int]:
@@ -109,6 +113,16 @@ def improve_mode(args, *, load_settings, create_llm_client):
     config_dir = Path(args.config_dir or "SynthChat/config")
     settings = load_settings(config_dir)
     rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
+    privacy_preprocessor = resolve_privacy_preprocessor(
+        config_dir=config_dir,
+        settings=settings,
+        apply_target="input_jsonl",
+        profile_override=getattr(args, "privacy_profile", None),
+    )
+    sanitize_generated_output = bool(
+        privacy_preprocessor is not None
+        and ((settings.get("privacy_preprocess") or {}).get("apply_to") or {}).get("generated_output", False)
+    )
 
     # Load input dataset
     if not args.input:
@@ -149,7 +163,27 @@ def improve_mode(args, *, load_settings, create_llm_client):
     examples = [example for _, example in selected_examples]
     selected_line_numbers = [line_number for line_number, _ in selected_examples]
 
+    input_privacy_changed = 0
+    if privacy_preprocessor is not None:
+        sanitized_examples = []
+        for line_number, example in zip(selected_line_numbers, examples):
+            sanitized_example, summary = sanitize_payload_with_metadata(
+                example,
+                preprocessor=privacy_preprocessor,
+                scope_key=f"{input_path}:{line_number}",
+                metadata_field="privacy_preprocess_input",
+            )
+            if summary.get("changed"):
+                input_privacy_changed += 1
+            sanitized_examples.append(sanitized_example)
+        examples = sanitized_examples
+
     print(f"Loaded {len(examples)} examples from {input_path}\n")
+    if privacy_preprocessor is not None:
+        print(
+            f"Privacy input preprocessing enabled (profile={privacy_preprocessor.profile_name}, "
+            f"changed={input_privacy_changed}/{len(examples)})\n"
+        )
 
     # Determine rubrics to use
     rubrics = args.rubrics or settings["improvement"]["default_rubrics"]
@@ -200,7 +234,17 @@ def improve_mode(args, *, load_settings, create_llm_client):
                     "error": "parallel_result_missing",
                 })
                 continue
-            improved_examples.append(result.improved_example)
+            improved_example = result.improved_example
+            output_privacy_changed = False
+            if sanitize_generated_output:
+                improved_example, output_summary = sanitize_payload_with_metadata(
+                    improved_example,
+                    preprocessor=privacy_preprocessor,
+                    scope_key=f"{input_path}:{original_line_number}:output",
+                    metadata_field="privacy_preprocess_output",
+                )
+                output_privacy_changed = bool(output_summary.get("changed"))
+            improved_examples.append(improved_example)
             if result.passed:
                 passed_count += 1
             else:
@@ -211,6 +255,10 @@ def improve_mode(args, *, load_settings, create_llm_client):
                 "iterations": int(result.iterations),
                 "final_scores": result.final_scores,
                 "scopes_improved": result.scopes_improved,
+                "privacy_input_changed": bool(
+                    ((example.get("metadata") or {}).get("privacy_preprocess_input") or {}).get("changed")
+                ),
+                "privacy_output_changed": output_privacy_changed,
             })
     else:
         # Create LLM client (CLI args override settings.yaml)
@@ -238,11 +286,33 @@ def improve_mode(args, *, load_settings, create_llm_client):
                     max_iterations=max_iterations
                 )
 
-                improved_examples.append(result.improved_example)
+                improved_example = result.improved_example
+                output_privacy_changed = False
+                if sanitize_generated_output:
+                    improved_example, output_summary = sanitize_payload_with_metadata(
+                        improved_example,
+                        preprocessor=privacy_preprocessor,
+                        scope_key=f"{input_path}:{original_line_number}:output",
+                        metadata_field="privacy_preprocess_output",
+                    )
+                    output_privacy_changed = bool(output_summary.get("changed"))
+
+                improved_examples.append(improved_example)
                 if result.passed:
                     passed_count += 1
                 else:
                     failed_count += 1
+                result_rows.append({
+                    "line_number": original_line_number,
+                    "passed": bool(result.passed),
+                    "iterations": int(result.iterations),
+                    "final_scores": result.final_scores,
+                    "scopes_improved": result.scopes_improved,
+                    "privacy_input_changed": bool(
+                        ((example.get("metadata") or {}).get("privacy_preprocess_input") or {}).get("changed")
+                    ),
+                    "privacy_output_changed": output_privacy_changed,
+                })
 
             except Exception as e:
                 print(f"  Error: {e}")
@@ -255,6 +325,10 @@ def improve_mode(args, *, load_settings, create_llm_client):
                     "final_scores": {},
                     "scopes_improved": [],
                     "error": str(e),
+                    "privacy_input_changed": bool(
+                        ((example.get("metadata") or {}).get("privacy_preprocess_input") or {}).get("changed")
+                    ),
+                    "privacy_output_changed": False,
                 })
                 continue
 
@@ -282,6 +356,9 @@ def improve_mode(args, *, load_settings, create_llm_client):
         "total_processed": len(examples),
         "passed": passed_count,
         "failed": failed_count,
+        "privacy_profile": privacy_preprocessor.profile_name if privacy_preprocessor is not None else None,
+        "privacy_input_changed": input_privacy_changed,
+        "privacy_output_enabled": sanitize_generated_output,
         "results": result_rows,
     }
     with open(report_path, "w") as f:

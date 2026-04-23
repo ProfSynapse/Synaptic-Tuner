@@ -99,6 +99,7 @@ def build_metadata_labels(
     stage_failures: List[str],
     environment_trace: Optional[Dict[str, Any]],
     generated_environment: Dict[str, Any],
+    privacy_trace: Optional[Dict[str, Any]],
     label_mappings: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build structured labels for downstream filtering and KTO/GRPO slicing.
@@ -183,6 +184,44 @@ def build_metadata_labels(
     if generated_environment:
         flat_labels.add("environment:generated_payload")
 
+    privacy_filter: Dict[str, Any] = {}
+    if isinstance(privacy_trace, dict):
+        flat_labels.add("privacy:present")
+        changed = bool(privacy_trace.get("changed"))
+        flat_labels.add(f"privacy_changed:{str(changed).lower()}")
+        profile_name = _slugify_label(str(privacy_trace.get("profile") or ""))
+        if profile_name:
+            flat_labels.add(f"privacy_profile:{profile_name}")
+
+        detection = privacy_trace.get("detection")
+        if isinstance(detection, dict):
+            labels = [str(label).strip() for label in detection.get("labels", []) if str(label).strip()]
+            for label in labels:
+                flat_labels.add(f"privacy_label:{label}")
+            privacy_filter = {
+                "present": True,
+                "changed": changed,
+                "profile": str(privacy_trace.get("profile") or "") or None,
+                "labels": sorted(labels),
+                "span_count": int(detection.get("span_count", 0) or 0),
+            }
+        else:
+            privacy_filter = {
+                "present": True,
+                "changed": changed,
+                "profile": str(privacy_trace.get("profile") or "") or None,
+                "labels": [],
+                "span_count": 0,
+            }
+    else:
+        privacy_filter = {
+            "present": False,
+            "changed": False,
+            "profile": None,
+            "labels": [],
+            "span_count": 0,
+        }
+
     if has_environment and environment_passed is True and not stage_failure_labels:
         flat_labels.add("kto_candidate:positive")
     elif has_environment and environment_passed is False:
@@ -216,5 +255,6 @@ def build_metadata_labels(
                 stage_failures=stage_failure_labels,
                 issue_labels=issue_labels,
             ),
+            "privacy": privacy_filter,
         },
     }

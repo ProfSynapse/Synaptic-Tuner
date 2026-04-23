@@ -75,6 +75,17 @@ generation:
   random_seed: null  # Set for reproducibility, null for random
   stage_validation: true  # Validate each stage before proceeding
 
+# Optional privacy preprocessing for seed data and dataset sanitization.
+# When enabled with a profile, raw seed text is sanitized before generation.
+privacy_preprocess:
+  enabled: false
+  profile: null
+  apply_to:
+    docs: true
+    input_jsonl: false
+    generated_output: false
+  on_error: fail   # fail | skip | keep_masked
+
 # Optional environment-backed tool execution checks.
 # This runs generated tool calls against an isolated runtime and stores traces
 # in example metadata to support downstream filtering/evaluation.

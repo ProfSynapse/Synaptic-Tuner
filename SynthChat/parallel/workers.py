@@ -95,6 +95,7 @@ def create_worker_generator(
         environment_validator=create_environment_validator_from_options(environment_options or {}),
         enable_stage_validation=settings["generation"]["stage_validation"],
         logger=logger,
+        privacy_settings=settings.get("privacy_preprocess"),
     )
     return generator
 
