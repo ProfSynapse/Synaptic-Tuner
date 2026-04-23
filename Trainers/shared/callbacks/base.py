@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,8 +17,9 @@ from typing import Any, Dict, List, Optional
 import torch
 from transformers import TrainerCallback, TrainerState, TrainerControl
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
+# sys.path bootstrap is handled by Trainers/shared/callbacks/__init__.py
+# so `shared.*` imports below resolve whenever this module is loaded via
+# `from Trainers.shared.callbacks import ...`.
 from shared.training_capacity import (
     capture_runtime_capacity_snapshot,
     reset_capacity_peaks,
@@ -46,6 +46,7 @@ def resolve_cloud_provider(args: Any) -> Optional[str]:
 
 def _annotate_cloud(capacity_snapshot: Dict[str, Any], args: Any) -> None:
     """Add cloud_provider + cloud_gpu_type to the snapshot in-place."""
+    # Invoked from both BaseMetricsCallback.on_log and BaseLiveDashboardCallback.on_log.
     cloud_provider = resolve_cloud_provider(args)
     if cloud_provider:
         capacity_snapshot.setdefault("cloud_provider", cloud_provider)
@@ -300,7 +301,6 @@ class BaseMetricsCallback(TrainerCallback):
         )
         if not self.print_completion_banner:
             return
-        print("=" * 100)
         print("\n" + "=" * 100)
         print(self.completion_banner)
         print("=" * 100)
@@ -346,6 +346,7 @@ class BaseLiveDashboardCallback(TrainerCallback):
     default_title: str = "Training"
     training_type_attr: str = "sft"
     completion_banner: str = "TRAINING COMPLETED"
+    log_write_swallow_errors: bool = False  # GRPO overrides True; mirrors BaseMetricsCallback.
 
     def __init__(
         self,
@@ -365,7 +366,7 @@ class BaseLiveDashboardCallback(TrainerCallback):
         self.start_time: Optional[datetime] = None
         self.dashboard: Optional[Any] = None
         self.total_steps = 0
-        self.total_epochs = 1
+        self.total_epochs = 1  # Sentinel; overwritten by on_train_begin from args.num_train_epochs.
 
         if previous_log_entries:
             _prepopulate_log_file(self.log_file, previous_log_entries)
@@ -418,8 +419,12 @@ class BaseLiveDashboardCallback(TrainerCallback):
             **capacity_snapshot,
             **logs,
         }
-        with open(self.log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception:
+            if not self.log_write_swallow_errors:
+                raise
 
         if self.dashboard:
             epoch = float(logs.get("epoch", 0.0) or 0.0)

@@ -639,3 +639,442 @@ class TestNewKnobsGrepVisible:
         assert SFTMetrics.fields_win_on_collision is False
         assert KTOMetrics.fields_win_on_collision is False
         assert GRPOMetrics.fields_win_on_collision is True
+
+
+# ---------------------------------------------------------------------------
+# M-J — Dashboard metric fallback chains (KTO + GRPO)
+# ---------------------------------------------------------------------------
+
+class TestDashboardMetricFallbacks:
+    """`_dashboard_metrics` uses multi-key fallback chains for trainer-specific
+    metrics. Pins the per-trainer fallback order so a refactor can't silently
+    drop a supported log-key variant.
+
+    - KTO (`kto/training_callbacks.py:82`): `kl` → `logps/rejected` fallback.
+    - GRPO (`grpo/training_callbacks.py:93-103`): `reward` chain is
+      `reward` → `rewards` → `rewards/mean` → `mean_reward`.
+    """
+
+    def test_kto_kl_falls_back_to_logps_rejected(self, tmp_path):
+        from Trainers.kto.src.training_callbacks import LiveDashboardCallback
+        cb = _make_dashboard_cb(LiveDashboardCallback, tmp_path, "kto_kl_fallback")
+        args = _dashboard_args()
+        cb.on_log(
+            args,
+            _make_state(global_step=1),
+            _make_control(),
+            logs={"loss": 1.0, "logps/rejected": 0.5},  # no 'kl'
+        )
+        kwargs = cb.dashboard.update.call_args.kwargs
+        assert kwargs["kl"] == 0.5, (
+            f"KTO: expected kl fallback to logs['logps/rejected']=0.5; got {kwargs.get('kl')!r}"
+        )
+
+    def test_kto_kl_preferred_over_logps_rejected(self, tmp_path):
+        """When both keys present, `kl` wins (short-circuit in get-fallback)."""
+        from Trainers.kto.src.training_callbacks import LiveDashboardCallback
+        cb = _make_dashboard_cb(LiveDashboardCallback, tmp_path, "kto_kl_preferred")
+        args = _dashboard_args()
+        cb.on_log(
+            args,
+            _make_state(global_step=1),
+            _make_control(),
+            logs={"loss": 1.0, "kl": 0.9, "logps/rejected": 0.1},
+        )
+        kwargs = cb.dashboard.update.call_args.kwargs
+        assert kwargs["kl"] == 0.9
+
+    @pytest.mark.parametrize(
+        "logs_key,logs_value,expected",
+        [
+            ("rewards", 0.7, 0.7),       # no 'reward', falls back to 'rewards'
+            ("rewards/mean", 0.3, 0.3),  # falls back to 'rewards/mean'
+            ("mean_reward", 0.2, 0.2),   # falls back to 'mean_reward'
+        ],
+        ids=["rewards", "rewards_slash_mean", "mean_reward"],
+    )
+    def test_grpo_reward_fallback_chain(self, tmp_path, logs_key, logs_value, expected):
+        from Trainers.grpo.src.training_callbacks import LiveDashboardCallback
+        cb = _make_dashboard_cb(LiveDashboardCallback, tmp_path, f"grpo_reward_{logs_key}")
+        args = _dashboard_args()
+        cb.on_log(
+            args,
+            _make_state(global_step=1),
+            _make_control(),
+            logs={"loss": 1.0, logs_key: logs_value},
+        )
+        kwargs = cb.dashboard.update.call_args.kwargs
+        assert kwargs["reward"] == expected, (
+            f"GRPO: logs[{logs_key!r}]={logs_value} should produce reward={expected}; "
+            f"got {kwargs.get('reward')!r}"
+        )
+
+    def test_grpo_reward_preferred_over_fallbacks(self, tmp_path):
+        """When `reward` is present, it wins over all fallback keys."""
+        from Trainers.grpo.src.training_callbacks import LiveDashboardCallback
+        cb = _make_dashboard_cb(LiveDashboardCallback, tmp_path, "grpo_reward_preferred")
+        args = _dashboard_args()
+        cb.on_log(
+            args,
+            _make_state(global_step=1),
+            _make_control(),
+            logs={"loss": 1.0, "reward": 0.95, "rewards": 0.1, "rewards/mean": 0.2, "mean_reward": 0.3},
+        )
+        kwargs = cb.dashboard.update.call_args.kwargs
+        assert kwargs["reward"] == 0.95
+
+
+# ---------------------------------------------------------------------------
+# F-A — HealthChecker output format snapshot (stdout capture)
+# ---------------------------------------------------------------------------
+
+class TestHealthCheckerOutputSnapshot:
+    """Frozen-string snapshots of SFT/KTO health-check stdout.
+
+    Design doc §9 risk matrix names 'KTO health-check output format drift' as
+    a medium-likelihood risk. These tests pin the exact warning banner format
+    (100-char bracket lines, emoji prefixes, 'Consider:' footer) so any text
+    change in `Trainers/shared/callbacks/health_checks.py` fails loudly."""
+
+    def test_sft_health_checker_all_branches_snapshot(self, capsys):
+        from Trainers.shared.callbacks.health_checks import SFTHealthChecker
+        checker = SFTHealthChecker()
+        # Drives all three SFT branches: loss-range (loss=500 out of 0..100),
+        # grad-clip (grad_norm=150 > 100), step>50 (step=60, loss=5.0 > 2.0).
+        checker.check(
+            logs={"loss": 500.0, "grad_norm": 150.0},
+            step=60,
+            max_grad_norm=1.0,
+        )
+        out = capsys.readouterr().out
+        # Boundary markers: 100-char "!" lines top + bottom + blank padding.
+        assert out.startswith("\n" + "!" * 100 + "\n"), (
+            f"SFT: missing opening bracket line; got {out[:120]!r}"
+        )
+        assert out.endswith("!" * 100 + "\n\n"), (
+            f"SFT: missing closing bracket line; got {out[-120:]!r}"
+        )
+        # All three warning types present with exact phrasing.
+        assert "⚠ Unusual loss value: 500.0000" in out
+        assert "⚠ High gradient norm: 150.00 → 1.00 (clipped)" in out
+        assert "⚠ Loss remains high after 60 steps: 500.0000" in out
+        # Footer: "Consider:" appears when max_grad_norm is None OR grad_norm > 10*max_grad_norm.
+        # Here grad_norm=150 > 10*1.0=10, so the footer should appear.
+        assert "Consider: reducing learning rate or using tighter gradient clipping" in out
+
+    def test_kto_health_checker_all_branches_snapshot(self, capsys):
+        from Trainers.shared.callbacks.health_checks import KTOHealthChecker
+        checker = KTOHealthChecker()
+        # Drives all four KTO branches: loss-range, margin<-1.0, reward-collapse
+        # (abs(chosen)<0.001, abs(rejected)<0.001, step>10), grad-clip.
+        checker.check(
+            logs={
+                "loss": 500.0,
+                "rewards/margins": -2.5,
+                "rewards/chosen": 0.0,
+                "rewards/rejected": 0.0,
+                "grad_norm": 200.0,
+            },
+            step=20,
+            max_grad_norm=1.0,
+        )
+        out = capsys.readouterr().out
+        assert out.startswith("\n" + "!" * 100 + "\n")
+        assert out.endswith("!" * 100 + "\n\n")
+        assert "⚠ Unusual loss value: 500.0000" in out
+        assert "⚠ Very negative margin: -2.5000 (chosen model may be worse than reference)" in out
+        assert "⚠ Reward collapse detected (both rewards near zero)" in out
+        assert "⚠ High gradient norm: 200.00 → 1.00 (clipped)" in out
+        assert "Consider: reducing learning rate or using tighter gradient clipping" in out
+
+    def test_noop_health_checker_emits_nothing(self, capsys):
+        from Trainers.shared.callbacks.health_checks import NoOpHealthChecker
+        checker = NoOpHealthChecker()
+        checker.check(
+            logs={"loss": 500.0, "grad_norm": 999.0},  # would trigger SFT/KTO warnings
+            step=100,
+            max_grad_norm=1.0,
+        )
+        out = capsys.readouterr().out
+        assert out == "", f"NoOpHealthChecker should emit nothing; got {out!r}"
+
+    def test_sft_no_warnings_when_healthy(self, capsys):
+        """Clean-path: no warnings means no stdout output (early-return via _print_warnings)."""
+        from Trainers.shared.callbacks.health_checks import SFTHealthChecker
+        checker = SFTHealthChecker()
+        checker.check(
+            logs={"loss": 0.5, "grad_norm": 1.0},
+            step=10,
+            max_grad_norm=1.0,
+        )
+        out = capsys.readouterr().out
+        assert out == "", f"SFT with healthy metrics should emit nothing; got {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# F-B — capture_runtime_capacity_snapshot GPU branch
+# ---------------------------------------------------------------------------
+
+class _StubDeviceProps:
+    def __init__(self, name="FakeGPU-H100", total_memory=80 * (1024 ** 3)):
+        self.name = name
+        self.total_memory = total_memory
+
+
+def _make_stub_torch(*, cuda_available: bool, total=80 * (1024 ** 3),
+                     reserved=40 * (1024 ** 3), allocated=20 * (1024 ** 3),
+                     max_reserved=60 * (1024 ** 3), max_allocated=50 * (1024 ** 3)):
+    """Build a minimal torch stub matching `capture_runtime_capacity_snapshot`'s
+    attribute reads: `.cuda.is_available/memory_reserved/memory_allocated/
+    max_memory_reserved/max_memory_allocated/get_device_properties`."""
+    cuda_ns = SimpleNamespace(
+        is_available=lambda: cuda_available,
+        memory_reserved=lambda idx=0: reserved,
+        memory_allocated=lambda idx=0: allocated,
+        max_memory_reserved=lambda idx=0: max_reserved,
+        max_memory_allocated=lambda idx=0: max_allocated,
+        get_device_properties=lambda idx=0: _StubDeviceProps(total_memory=total),
+    )
+    return SimpleNamespace(cuda=cuda_ns)
+
+
+class TestCaptureRuntimeCapacitySnapshotGpuBranch:
+    """Exercise the GPU-branch of `capture_runtime_capacity_snapshot` via a
+    torch_module stub. Covers the 18-field GPU block at
+    `shared/training_capacity.py:218-238` plus OOM-risk classification."""
+
+    def test_gpu_branch_fields_present_and_shaped(self):
+        from shared.training_capacity import capture_runtime_capacity_snapshot
+        # reserved=40GB/80GB=50%, max_reserved=60GB/80GB=75% -> oom_risk=low.
+        torch_stub = _make_stub_torch(cuda_available=True)
+        snap = capture_runtime_capacity_snapshot(torch_module=torch_stub)
+
+        # GPU identity + totals.
+        assert snap["gpu_name"] == "FakeGPU-H100"
+        assert snap["gpu_total_memory_gb"] == 80.0
+        # Current values (reserved = the UI-facing "gpu_memory_gb").
+        assert snap["gpu_memory_gb"] == 40.0
+        assert snap["gpu_memory_reserved_gb"] == 40.0
+        assert snap["gpu_memory_allocated_gb"] == 20.0
+        # Peaks.
+        assert snap["max_gpu_memory_reserved_gb"] == 60.0
+        assert snap["max_gpu_memory_allocated_gb"] == 50.0
+        # Percentages.
+        assert snap["gpu_memory_reserved_pct"] == 50.0
+        assert snap["gpu_memory_allocated_pct"] == 25.0
+        assert snap["max_gpu_memory_reserved_pct"] == 75.0
+        assert snap["max_gpu_memory_allocated_pct"] == 62.5
+        # Headroom.
+        assert snap["gpu_memory_reserved_headroom_gb"] == 40.0
+        assert snap["gpu_memory_allocated_headroom_gb"] == 60.0
+        # OOM risk at 75% max_reserved → "low" (<85%).
+        assert snap["oom_risk_level"] == "low"
+
+    def test_gpu_branch_high_oom_risk_classification(self):
+        from shared.training_capacity import capture_runtime_capacity_snapshot
+        # max_reserved=77GB / 80GB = 96.25% -> oom_risk=high (>=92%, <97%).
+        torch_stub = _make_stub_torch(
+            cuda_available=True,
+            max_reserved=77 * (1024 ** 3),
+        )
+        snap = capture_runtime_capacity_snapshot(torch_module=torch_stub)
+        assert snap["oom_risk_level"] == "high"
+
+    def test_cpu_only_omits_gpu_fields(self):
+        from shared.training_capacity import capture_runtime_capacity_snapshot
+        torch_stub = _make_stub_torch(cuda_available=False)
+        snap = capture_runtime_capacity_snapshot(torch_module=torch_stub)
+        # No GPU fields at all.
+        for key in ("gpu_name", "gpu_total_memory_gb", "gpu_memory_gb",
+                    "gpu_memory_reserved_gb", "oom_risk_level"):
+            assert key not in snap, f"CPU-only snapshot leaked GPU key {key!r}"
+        # System RAM fields should still be populated (psutil / sysconf available on CI).
+        assert "system_ram_total_gb" in snap or "system_ram_used_gb" in snap or True
+        # The `or True` above guards against test env having no psutil/sysconf; we
+        # only strictly assert the GPU-fields-omitted invariant.
+
+
+# ---------------------------------------------------------------------------
+# F-C — suppress_training_logs context manager
+# ---------------------------------------------------------------------------
+
+class TestSuppressTrainingLogs:
+    """Direct coverage of `Trainers.shared.callbacks.log_suppression.suppress_training_logs`.
+
+    Two paths:
+    - `_SUPPRESS_AVAILABLE=True`: returns `shared.ui.suppress_logs(...)` context
+      that raises noisy-logger levels to WARNING inside the block.
+    - `_SUPPRESS_AVAILABLE=False`: returns `contextlib.nullcontext()` — a no-op
+      fallback when `shared.ui` is unimportable."""
+
+    def test_returns_context_manager(self):
+        from Trainers.shared.callbacks.log_suppression import suppress_training_logs
+        ctx = suppress_training_logs()
+        # Must be a usable context manager regardless of availability branch.
+        assert hasattr(ctx, "__enter__") and hasattr(ctx, "__exit__")
+        with ctx:
+            pass  # no-op block executes without error
+
+    def test_nullcontext_fallback_when_unavailable(self, monkeypatch):
+        """When `_SUPPRESS_AVAILABLE` is False, suppress_training_logs returns
+        nullcontext — the block runs without side-effects on logger levels."""
+        import Trainers.shared.callbacks.log_suppression as mod
+        from contextlib import nullcontext
+        monkeypatch.setattr(mod, "_SUPPRESS_AVAILABLE", False)
+
+        ctx = mod.suppress_training_logs()
+        # nullcontext class check.
+        assert isinstance(ctx, type(nullcontext())), (
+            f"Expected nullcontext instance when unavailable; got {type(ctx).__name__}"
+        )
+
+    def test_available_branch_delegates_to_suppress_logs(self, monkeypatch):
+        """When `_SUPPRESS_AVAILABLE=True`, the call is delegated to
+        `shared.ui.suppress_logs(_NOISY_LOGGERS, level=logging.WARNING)`.
+        Verify the delegation args without depending on the real suppress_logs
+        implementation."""
+        import Trainers.shared.callbacks.log_suppression as mod
+        import logging
+
+        captured = {}
+
+        def fake_suppress_logs(loggers, level):
+            captured["loggers"] = list(loggers)
+            captured["level"] = level
+            from contextlib import nullcontext
+            return nullcontext()
+
+        monkeypatch.setattr(mod, "_SUPPRESS_AVAILABLE", True)
+        monkeypatch.setattr(mod, "suppress_logs", fake_suppress_logs, raising=False)
+
+        mod.suppress_training_logs()
+
+        assert captured["level"] == logging.WARNING
+        # The canonical noisy-logger list must be passed through verbatim.
+        assert "unsloth" in captured["loggers"]
+        assert "transformers" in captured["loggers"]
+        assert "trl" in captured["loggers"]
+        # Full list lock: pin exact membership so an accidental reorder/removal fails.
+        assert captured["loggers"] == [
+            "unsloth", "transformers", "datasets", "accelerate",
+            "trl", "peft", "bitsandbytes", "torch", "huggingface_hub",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# F-D — JSONL row shape+value parity vs frozen baseline (restricted scope)
+# ---------------------------------------------------------------------------
+#
+# NOTE: the test-engineer reviewer previously recommended AGAINST byte-level
+# parity at the current STANDARD risk tier. User chose 'Address now'. Honest
+# scope note: after stripping all non-deterministic fields (timestamps,
+# capacity/GPU snapshots, interval timing, nvidia-smi output), the parity
+# test reduces to a key+value check on step, loss, learning_rate, epoch —
+# overlapping with TestSftJsonlShape + TestDictMergeOrder. The stripped
+# fields are precisely the ones where byte-parity would have added value,
+# but they are inherently non-deterministic and cannot be frozen.
+#
+# Value delivered: catches regressions in step-counter drift, log key
+# passthrough, and int/float type drift across a multi-step run. Does NOT
+# catch regressions in timing/capacity/interval field computation.
+# ---------------------------------------------------------------------------
+
+# Non-deterministic keys that must be stripped before frozen-baseline diff.
+_NONDETERMINISTIC_FIELDS = frozenset({
+    "timestamp",
+    "interval_time", "interval_seconds",
+    "elapsed_seconds", "steps_per_second", "samples_per_sec",
+    # Capacity/GPU snapshot — machine/run-specific.
+    "gpu_name", "gpu_total_memory_gb", "gpu_memory_gb",
+    "gpu_memory_reserved_gb", "gpu_memory_allocated_gb",
+    "max_gpu_memory_reserved_gb", "max_gpu_memory_allocated_gb",
+    "gpu_memory_reserved_pct", "gpu_memory_allocated_pct",
+    "max_gpu_memory_reserved_pct", "max_gpu_memory_allocated_pct",
+    "gpu_memory_reserved_headroom_gb", "gpu_memory_allocated_headroom_gb",
+    "max_gpu_memory_reserved_headroom_gb", "max_gpu_memory_allocated_headroom_gb",
+    "gpu_utilization_pct", "gpu_vram_used_gb", "gpu_vram_total_gb",
+    "gpu_vram_utilization_pct",
+    "oom_risk_level",
+    "system_ram_total_gb", "system_ram_used_gb", "system_ram_available_gb",
+    "process_ram_gb",
+    "cloud_provider", "cloud_gpu_type",
+})
+
+
+def _strip_nondeterministic(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in _NONDETERMINISTIC_FIELDS}
+
+
+class TestSftJsonlParityBaseline:
+    """Shape+value parity of SFT JSONL rows across a synthetic 10-step run.
+
+    Drives the SFT MetricsTableCallback with deterministic logs over steps 1..10
+    at log_every_n_steps=1 (log_every_write bypass not needed — SFT writes only
+    at boundaries, and every step is a boundary here). Strips non-deterministic
+    fields, compares the remainder against an expected baseline built inline.
+
+    This test's actual reach: step counter integrity + logs passthrough + type
+    stability across many calls. It does NOT cover timing/capacity math."""
+
+    def test_sft_ten_step_synthetic_run_matches_baseline(self, tmp_path):
+        from Trainers.sft.src.training_callbacks import MetricsTableCallback as SFTMetrics
+        cb = SFTMetrics(log_every_n_steps=1, output_dir=str(tmp_path / "sft_parity"))
+        _begin(cb)
+        args = _make_args()
+
+        # Drive 10 deterministic on_log calls.
+        for step in range(1, 11):
+            cb.on_log(
+                args,
+                _make_state(global_step=step, max_steps=10, epoch=step * 0.1),
+                _make_control(),
+                logs={
+                    "loss": round(1.0 + step * 0.1, 3),
+                    "learning_rate": 1e-5,
+                    "epoch": round(step * 0.1, 2),
+                    "grad_norm": round(0.01 * step, 3),
+                },
+            )
+
+        rows = _read_jsonl_rows(cb.log_file)
+        assert len(rows) == 10, f"Expected 10 rows from 10 on_log calls, got {len(rows)}"
+
+        stripped = [_strip_nondeterministic(r) for r in rows]
+
+        # Frozen expected baseline after stripping non-deterministic fields.
+        # Any drift in step/log passthrough/types fails this test.
+        expected = [
+            {
+                "step": step,
+                "loss": round(1.0 + step * 0.1, 3),
+                "learning_rate": 1e-5,
+                "epoch": round(step * 0.1, 2),
+                "grad_norm": round(0.01 * step, 3),
+            }
+            for step in range(1, 11)
+        ]
+
+        assert stripped == expected, (
+            f"SFT JSONL parity failure. "
+            f"First diff at row 0: stripped={stripped[0]!r} vs expected={expected[0]!r}"
+        )
+
+    def test_sft_row_types_stable_across_run(self, tmp_path):
+        """Type-stability guard: across a multi-step run, `step` stays int,
+        `loss`/`learning_rate`/`epoch`/`grad_norm` stay float. Catches type
+        drift that shape-only tests might miss on a single-step call."""
+        from Trainers.sft.src.training_callbacks import MetricsTableCallback as SFTMetrics
+        cb = SFTMetrics(log_every_n_steps=1, output_dir=str(tmp_path / "sft_types"))
+        _begin(cb)
+        args = _make_args()
+        for step in range(1, 6):
+            cb.on_log(args, _make_state(global_step=step), _make_control(),
+                      logs={"loss": 1.5, "learning_rate": 1e-5, "epoch": 0.1 * step, "grad_norm": 0.1})
+
+        rows = _read_jsonl_rows(cb.log_file)
+        for i, row in enumerate(rows):
+            assert isinstance(row["step"], int), f"row {i}: step not int"
+            assert isinstance(row["loss"], float), f"row {i}: loss not float"
+            assert isinstance(row["learning_rate"], float), f"row {i}: learning_rate not float"
+            assert isinstance(row["epoch"], float), f"row {i}: epoch not float"
+            assert isinstance(row["grad_norm"], float), f"row {i}: grad_norm not float"

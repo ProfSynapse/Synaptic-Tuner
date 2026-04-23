@@ -85,4 +85,4 @@ class NoOpHealthChecker(HealthChecker):
     """GRPO: no health checks today."""
 
     def check(self, logs, step, max_grad_norm):
-        return
+        pass

@@ -6,10 +6,7 @@ from transformers import TrainerCallback
 
 
 class CheckpointMonitorCallback(TrainerCallback):
-    """Display checkpoint configuration at start; kept for extensibility."""
-
-    def on_save(self, args, state, control, **kwargs):
-        pass
+    """Display checkpoint configuration at start."""
 
     def on_train_begin(self, args, state, control, **kwargs):
         print(f"\nCheckpoint Configuration:")

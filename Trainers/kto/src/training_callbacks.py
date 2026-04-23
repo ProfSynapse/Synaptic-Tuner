@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-trainer KTO callback shims.
+"""Per-trainer KTO concrete callback subclasses and re-exports.
 
 Public symbols `MetricsTableCallback`, `CheckpointMonitorCallback`,
 `LiveDashboardCallback`, `TwoStageLRCallback`, `DASHBOARD_AVAILABLE`,
@@ -9,12 +9,9 @@ lives in `Trainers.shared.callbacks`.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
+# sys.path bootstrap is handled by Trainers/shared/callbacks/__init__.py.
 from Trainers.shared.callbacks import (
     BaseLiveDashboardCallback,
     BaseMetricsCallback,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-trainer GRPO/GSPO callback shims.
+"""Per-trainer GRPO/GSPO concrete callback subclasses and re-exports.
 
 Public symbols `MetricsTableCallback`, `LiveDashboardCallback`,
 `DASHBOARD_AVAILABLE`, `RICH_AVAILABLE` are re-exported at their original
@@ -8,17 +8,13 @@ paths. Shared lifecycle lives in `Trainers.shared.callbacks`.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
+# sys.path bootstrap is handled by Trainers/shared/callbacks/__init__.py.
 from Trainers.shared.callbacks import (
     BaseLiveDashboardCallback,
     BaseMetricsCallback,
     DASHBOARD_AVAILABLE,
-    NoOpHealthChecker,
     RICH_AVAILABLE,
 )
 
@@ -48,7 +44,7 @@ class MetricsTableCallback(BaseMetricsCallback):
             output_dir=output_dir,
             previous_log_entries=previous_log_entries,
         )
-        self.health_checker = NoOpHealthChecker()
+        # health_checker defaults to NoOpHealthChecker in BaseMetricsCallback.__init__.
 
     def _print_header(self):
         print("\n" + "=" * 60)
@@ -89,6 +85,7 @@ class LiveDashboardCallback(BaseLiveDashboardCallback):
     default_title = "GRPO Training"
     training_type_attr = "grpo"
     completion_banner = "GRPO TRAINING COMPLETED"
+    log_write_swallow_errors = True  # GRPO swallows file-write exceptions on dashboard path too.
 
     def _dashboard_metrics(self, logs, capacity_snapshot):
         reward = (

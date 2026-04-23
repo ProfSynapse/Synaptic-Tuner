@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import logging
-import sys
 from contextlib import nullcontext
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
+# sys.path bootstrap is handled by Trainers/shared/callbacks/__init__.py.
 try:
     from shared.ui import suppress_logs
     _SUPPRESS_AVAILABLE = True

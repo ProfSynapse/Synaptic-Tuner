@@ -9,6 +9,16 @@ re-exported from the per-trainer modules at unchanged paths.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Single point of sys.path bootstrap for the callback package. Submodules
+# (base.py, log_suppression.py) and per-trainer concrete subclass modules
+# (Trainers/<t>/src/training_callbacks.py) rely on the repo-root being on
+# sys.path to import `shared.*`. Consolidated here so each submodule doesn't
+# repeat the incantation.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 from .base import (
     BaseMetricsCallback,
     BaseLiveDashboardCallback,
