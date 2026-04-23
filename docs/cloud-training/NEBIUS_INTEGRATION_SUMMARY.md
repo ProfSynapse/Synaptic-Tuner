@@ -258,7 +258,7 @@ def trigger_training(model_size="7b", dataset_path="..."):
 
     # Run training
     ssh.exec_command(
-        f"cd ~/Toolset-Training/Trainers/rtx3090_sft && "
+        f"cd ~/Toolset-Training/Trainers/sft && "
         f"./train.sh --model-size {model_size} --local-file {dataset_path}"
     )
 

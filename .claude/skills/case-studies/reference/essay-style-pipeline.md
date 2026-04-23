@@ -334,7 +334,7 @@ This creates a preview file like `Datasets/essay_datasets/stage1_thoughts_to_out
 **Dataset:** Validated essay outlines (positive examples only).
 
 ```bash
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 
 python train_sft.py \
   --model-size 7b \
@@ -364,7 +364,7 @@ Unlike tool calling (where bad examples come from high-temperature self-play), e
 2. Using a weaker model to generate outlines (naturally produces lower quality)
 
 ```bash
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 
 python train_kto.py \
   --model-size 7b \
@@ -479,7 +479,7 @@ SynthChat/rubrics/essay_brainstorm_quality/  ← Brainstorm quality rubric
 SynthChat/rubrics/essay_outline_quality/     ← Outline quality rubric
 Datasets/essay_datasets/                     ← Generated essay training data
 Datasets/synthchat/                          ← SynthChat output directory
-Trainers/rtx3090_sft/                        ← SFT trainer (same as tools)
-Trainers/rtx3090_kto/                        ← KTO trainer (same as tools)
+Trainers/sft/                        ← SFT trainer (same as tools)
+Trainers/kto/                        ← KTO trainer (same as tools)
 Evaluator/config/scenarios/                  ← Essay evaluation scenarios
 ```

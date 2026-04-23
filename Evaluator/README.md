@@ -154,7 +154,7 @@ The CLI will:
 # Basic usage
 python -m Evaluator.cli \
   --backend unsloth \
-  --model Trainers/rtx3090_sft/sft_output/20241215_143022/final_model \
+  --model Trainers/sft/sft_output/20241215_143022/final_model \
   --scenario behavior_prompts.yaml
 
 # Multiple scenarios
@@ -625,7 +625,7 @@ Start the inference server (LM Studio, Ollama) before running evaluation.
 ```
 No LoRA adapters found in training outputs
 ```
-Train a model first - adapters appear in `Trainers/rtx3090_*/*/final_model/`.
+Train a model first - adapters appear in `Trainers/{sft,kto,grpo}/*/final_model/`.
 
 ## Migration from JSON
 

@@ -84,7 +84,7 @@ python -m Evaluator.cli \
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./Trainers/rtx3090_sft/sft_output_rtx3090/20250114/final_model \
+  --model ./Trainers/sft/sft_output/20250114/final_model \
   --scenario behavior_prompts.yaml
 ```
 

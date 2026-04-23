@@ -106,7 +106,7 @@ python Tools/selfplay_generator_v2.py \
 ### Phase 1: Initial Training (SFT)
 Use your existing curated datasets:
 ```bash
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 python train_sft.py --model-size 7b
 ```
 
@@ -137,7 +137,7 @@ cat Datasets/syngen_coverage.jsonl \
     > Datasets/combined_training.jsonl
 
 # Train with KTO
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 python train_kto.py \
   --model-size 7b \
   --local-file ../../Datasets/combined_training.jsonl

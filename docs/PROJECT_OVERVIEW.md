@@ -32,7 +32,7 @@ Complete production-ready implementation of KTO (Kahneman-Tversky Optimization) 
 ## Project Structure
 
 ```
-rtx3090_kto/
+kto/
 ├── README.md                    # Full documentation
 ├── QUICKSTART.md               # 5-minute setup guide
 ├── PROJECT_OVERVIEW.md         # This file
@@ -78,13 +78,13 @@ python train_kto.py --model-size 13b
 
 ### Inference
 ```bash
-python src/inference.py ./kto_output_rtx3090/final_model
+python src/inference.py ./kto_output/final_model
 ```
 
 ### Upload
 ```bash
 python src/upload_to_hf.py \
-  ./kto_output_rtx3090/final_model \
+  ./kto_output/final_model \
   username/model-name \
   --token YOUR_HF_TOKEN \
   --create-gguf
@@ -194,7 +194,7 @@ python train_kto.py \
 ```bash
 python train_kto.py \
   --model-size 7b \
-  --output-dir ./kto_output_rtx3090 \
+  --output-dir ./kto_output \
   # Training will resume from last checkpoint if found
 ```
 

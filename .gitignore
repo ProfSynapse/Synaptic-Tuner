@@ -136,7 +136,7 @@ Datasets/synthchat/
 .serena/
 
 # Obvious generated training/test artifacts
-Trainers/rtx3090_grpo/grpo_output_rtx3090/
+Trainers/archive/
 docs/test_*.jsonl
 docs/test_*.review.md
 docs/test_webllm_node.mjs

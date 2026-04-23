@@ -14,7 +14,7 @@ Complete, tested installation guide for RTX 3090 with dependency troubleshooting
 
 ```bash
 # Clone/navigate to project
-cd rtx3090_kto
+cd kto
 
 # Run setup script
 bash setup.sh

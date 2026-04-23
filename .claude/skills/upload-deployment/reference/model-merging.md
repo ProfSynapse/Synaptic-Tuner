@@ -72,10 +72,10 @@ GRPO training requires a merged base to apply new LoRA adapters:
 The GRPO trainer handles this automatically when `lora_path` is set:
 
 ```yaml
-# Trainers/rtx3090_grpo/configs/config.yaml
+# Trainers/grpo/configs/config.yaml
 model:
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"
-  lora_path: "../rtx3090_sft/sft_output_rtx3090/TIMESTAMP/checkpoint-1150"
+  lora_path: "../sft/sft_output/TIMESTAMP/checkpoint-1150"
 ```
 
 The trainer:

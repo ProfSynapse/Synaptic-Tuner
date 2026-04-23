@@ -14,7 +14,7 @@ Get up and running with KTO training on RTX 3090 in 5 minutes.
 
 ```bash
 # Clone or navigate to the project
-cd rtx3090_kto
+cd kto
 
 # Run setup script
 bash setup.sh
@@ -91,7 +91,7 @@ This will:
 # venv/bin/python train_kto.py --model-size 7b
 
 # Expected time: 2-3 hours for 1 epoch
-# Output: ./kto_output_rtx3090/
+# Output: ./kto_output/
 ```
 
 ### Option B: Train on Your Dataset
@@ -117,7 +117,7 @@ Then train:
 
 ```bash
 # Interactive chat
-python src/inference.py ./kto_output_rtx3090/final_model
+python src/inference.py ./kto_output/final_model
 
 # You: What is machine learning?
 # Assistant: [model generates response]
@@ -129,7 +129,7 @@ python src/inference.py ./kto_output_rtx3090/final_model
 # Get token from: https://huggingface.co/settings/tokens
 
 python src/upload_to_hf.py \
-  ./kto_output_rtx3090/final_model \
+  ./kto_output/final_model \
   your-username/your-model-name \
   --token YOUR_HF_TOKEN
 ```

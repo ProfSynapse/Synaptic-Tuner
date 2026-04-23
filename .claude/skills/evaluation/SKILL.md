@@ -61,7 +61,7 @@ Load the specific reference you need:
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./sft_output_rtx3090/TIMESTAMP/final_model \
+  --model ./sft_output/TIMESTAMP/final_model \
   --scenario behavior_prompts.yaml tool_prompts.yaml \
   --output Evaluator/results/my_eval.json \
   --markdown Evaluator/results/my_eval.md

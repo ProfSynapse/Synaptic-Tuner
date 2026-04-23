@@ -41,7 +41,7 @@ Expand Toolset-Training from a pure LLM fine-tuning platform into a dual-purpose
 | `shared/influence/` | New module | Per-example loss tracking, TracIn, meta-model |
 | `tuner.py` / CLI | Modify | Add `ml` subcommand tree |
 | `SynthChat/services/rubric_runner.py` | Modify | Quality scorer pre-filter integration |
-| `Trainers/rtx3090_sft/train_sft.py` | Modify | PerExampleLossCallback (opt-in) |
+| `Trainers/sft/train_sft.py` | Modify | PerExampleLossCallback (opt-in) |
 | `Evaluator/` | Extend | ML model evaluation entry point |
 
 #### Design Approach
@@ -223,8 +223,8 @@ ml_output/YYYYMMDD_HHMMSS/
 | `tuner/cli/router.py` | Add MLHandler route |
 | `tuner/handlers/list_handler.py` | Add ML model/config/dataset listing |
 | `SynthChat/services/rubric_runner.py` | Quality scorer pre-filter hook |
-| `Trainers/rtx3090_sft/train_sft.py` | Add PerExampleLossCallback (opt-in) |
-| `Trainers/rtx3090_kto/train_kto.py` | Add PerExampleLossCallback (opt-in) |
+| `Trainers/sft/train_sft.py` | Add PerExampleLossCallback (opt-in) |
+| `Trainers/kto/train_kto.py` | Add PerExampleLossCallback (opt-in) |
 
 #### Implementation Sequence
 See Synthesized Roadmap below.

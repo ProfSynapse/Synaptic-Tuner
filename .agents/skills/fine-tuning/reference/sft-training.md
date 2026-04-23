@@ -92,11 +92,11 @@ When `completion_only_loss: true` (default):
 
 ## Training Workflow
 
-1. **Setup environment**: `bash setup.sh` (creates conda env, installs deps)
+1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
 2. **Prepare dataset**: JSONL with `conversations` field, positive examples only
-3. **Test setup**: `python train_sft.py --model-size 7b --tier quick --dry-run`
-4. **Quick iteration**: `python train_sft.py --model-size 7b --tier quick` (~5 min)
-5. **Production run**: `python train_sft.py --model-size 7b --tier standard`
+3. **Test setup**: set `run.dry_run: true` in local-run YAML or use `python train_sft.py --model-size 7b --tier quick --dry-run`
+4. **Quick iteration**: cap `training.max_steps` in local-run YAML or use `--tier quick`
+5. **Production run**: remove the step cap and use the intended `training`, `model`, `dataset`, and `lora` settings in YAML
 6. **Monitor**: Watch live dashboard or `tail -f logs/training_latest.jsonl`
 7. **Upload**: `python3 .skills/upload-deployment/scripts/upload_model.py ./final_model user/repo --save-method merged_16bit`
 
@@ -115,7 +115,43 @@ When `completion_only_loss: true` (default):
 
 ## Config File
 
-**Location:** `Trainers/rtx3090_sft/configs/config.yaml`
+**Direct trainer location:** `Trainers/sft/configs/config.yaml`
+
+**Config-driven local Docker location:** `Trainers/local/jobs/*.yaml`
+
+Local Docker job configs keep runtime choices outside shell history:
+
+```yaml
+name: my-sft-run
+provider: local_docker
+job:
+  image: unsloth/unsloth:latest
+  pull_policy: missing
+  transfer: auto
+setup:
+  pip: []
+run:
+  method: sft
+  trainer: Trainers/sft/train_sft.py
+model:
+  name: Qwen/Qwen3.5-2B
+  max_seq_length: 2048
+  load_in_4bit: false
+dataset:
+  local_file: Datasets/my_data.jsonl
+training:
+  batch_size: 2
+  gradient_accumulation: 8
+  learning_rate: 1.0e-4
+  num_epochs: 1
+lora:
+  r: 64
+  alpha: 128
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+artifacts:
+  output_root: toolset-training-artifacts/runs/local_docker/sft/{name}
+  run_timestamp: "{timestamp}"
+```
 
 Key sections:
 - `model` — model name, seq length, quantization

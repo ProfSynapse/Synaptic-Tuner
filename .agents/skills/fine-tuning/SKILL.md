@@ -13,8 +13,9 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
-| SFT training | `cd Trainers/rtx3090_sft && python train_sft.py --model-size 7b` |
-| KTO training | `cd Trainers/rtx3090_kto && python train_kto.py --model-size 7b` |
+| Local Docker config run | `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` |
+| SFT training | `cd Trainers/sft && python train_sft.py --model-size 7b` |
+| KTO training | `cd Trainers/kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/grpo && python train_grpo.py` |
 | Pivot-profile GRPO dataset | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml --pivot-profile-only` |
 | GRPO with pivot filtering | `cd Trainers/grpo && python train_grpo.py --config configs/pivot_config.yaml` |
@@ -64,9 +65,11 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 
 ## Key Directories
 
-- `Trainers/rtx3090_sft/` — SFT trainer
-- `Trainers/rtx3090_kto/` — KTO trainer
+- `Trainers/sft/` — active SFT trainer
+- `Trainers/local/jobs/` — config-driven local Docker job specs
+- `Trainers/kto/` — KTO trainer
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
+- `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
 - `Trainers/cloud/jobs/` — checked-in HF Jobs configs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -91,6 +94,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Treat `loss_summary.json` as a supporting artifact, not the canonical final loss metadata file.
 - The ledger should accumulate real model-size / hardware / timing / cost data so future hardware planning can optimize against observed evidence instead of memory.
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
+- For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
+- For Windows Docker Desktop with GPU, prefer `job.transfer: auto` or `copy` in local-run configs. The runner chooses copy mode on Windows because GPU bind mounts can fail with access denied.
+- Keep newly released model support in local-run `setup.pip` pins or image fields. Do not leave one-off package installs in shell history.
 - For canonical HF experiments, prefer `python tuner.py cloud-pipeline ...` over `cloud-run`.
 - For full train → eval → exact loss → analysis → recommendation runs, prefer `python tuner.py run-experiment ...`.
 - Evolutionary SFT is experimental but now first-class in the cloud experiment path. Prefer a checked-in experiment spec or `cloud-pipeline --train-evolutionary-*` overrides over editing trainer YAMLs by hand.
@@ -114,6 +120,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - If `run-experiment` refuses to launch because the tracked worktree is dirty, prefer creating a clean temporary git worktree and launching from there over asking the user to stash or cleaning their checkout.
 - If a cloud run fails before bucket artifacts appear, treat it as a bootstrap/runtime problem first. Inspect `cloud-jobs logs` before changing training hyperparameters.
 - For newly released architectures or day-zero model launches, verify official Docker Hub tags for `unsloth/unsloth` and `vllm/vllm-openai` before trusting the repo's pinned image profiles. As of 2026-04-02, Docker Hub shows `unsloth/unsloth:latest` updated 1 day ago and `vllm/vllm-openai:latest` / `v0.17.1` updated about 17 hours ago.
+- As of 2026-04-22, local `docker pull unsloth/unsloth:latest` resolved to digest `sha256:9be56babef4efc330316cff3a65f9f911b9e7709bce4114fa7817ba3ffd8565d`. That image still reports `transformers 4.57.1`, so Qwen3.5 local runs need config-level package overrides such as `transformers==5.5.0`, `trl==0.22.2`, and current `unsloth` / `unsloth_zoo`.
 - If a named training image profile is broken, prefer an explicit `training.cloud_image` override to a currently verified official image tag over changing unrelated parts of the experiment such as evaluation backend.
 - If a run needs newer package versions but the right base image is otherwise close, use stage-local experiment-spec `pip_packages` pins under `training:`, `evaluation:`, or `loss:` instead of a one-off helper script or a repo-global image pin.
 - For hyperparameter search, use `python tuner.py experiment-loop ...`; this is the built-in LLM + LightGBM surrogate path.
@@ -176,13 +183,22 @@ See `reference/lora-techniques.md` for full details, integration status, and com
 
 **Quick SFT test run:**
 ```bash
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 python train_sft.py --model-size 3b --tier quick --dry-run
 ```
 
+**Config-driven local Docker SFT smoke run:**
+```bash
+python tuner.py local-run \
+  --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml \
+  --yes
+```
+
+For a different local SFT run, copy a job under `Trainers/local/jobs/` and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
+
 **KTO with local dataset:**
 ```bash
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 python train_kto.py --model-size 7b --local-file ../../Datasets/my_kto_data.jsonl
 ```
 
@@ -427,7 +443,7 @@ RUNPOD_API_KEY=...
 
 Local trainers produce timestamped run directories:
 ```
-{method}_output_rtx3090/YYYYMMDD_HHMMSS/
+{method}_output/YYYYMMDD_HHMMSS/
 ├── checkpoints/
 ├── logs/
 ├── final_model/

@@ -9,7 +9,7 @@ Open your WSL terminal (you should be in Windows Terminal with Ubuntu).
 
 ### 2. Navigate to Project Directory
 ```bash
-cd /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/code/rtx3090_kto
+cd /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/code/kto
 ```
 
 ### 3. Activate Conda Environment
@@ -113,7 +113,7 @@ The table updates every 5 steps automatically. Watch for:
 Training automatically saves checkpoints every 50 steps:
 ```
 ----------------------------------------------------------------------------------------------------
->> CHECKPOINT SAVED at step 50 -> ./kto_output_rtx3090/checkpoint-50
+>> CHECKPOINT SAVED at step 50 -> ./kto_output/checkpoint-50
 ----------------------------------------------------------------------------------------------------
 ```
 
@@ -156,7 +156,7 @@ To stop training gracefully:
 ## After Training Completes
 
 Training will automatically:
-1. Save final model to `./kto_output_rtx3090/final_model`
+1. Save final model to `./kto_output/final_model`
 2. Print completion message
 3. Show where model was saved
 
@@ -166,7 +166,7 @@ To upload to HuggingFace:
 from unsloth import FastLanguageModel
 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="./kto_output_rtx3090/final_model",
+    model_name="./kto_output/final_model",
     max_seq_length=2048,
     dtype=None,
     load_in_4bit=True,
@@ -182,7 +182,7 @@ model.push_to_hub_merged(
 ## Files Created During Training
 
 ```
-kto_output_rtx3090/
+kto_output/
 ├── checkpoint-50/          # First checkpoint
 ├── checkpoint-100/         # Second checkpoint
 ├── checkpoint-145/         # Last checkpoint (if completed)
@@ -197,13 +197,13 @@ kto_output_rtx3090/
 | OOM Error | Use `--batch-size 6 --gradient-accumulation 5` |
 | Training very slow | Check `nvidia-smi` - GPU should be 90-100% |
 | Import errors | Reactivate environment: `conda activate ./venv` |
-| Can't find train_kto.py | Make sure you're in `code/rtx3090_kto` directory |
+| Can't find train_kto.py | Make sure you're in `code/kto` directory |
 
 ## Summary Commands
 
 ```bash
 # Complete fresh start:
-cd /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/code/rtx3090_kto
+cd /mnt/c/Users/Joseph/Documents/Code/Toolset-Training/code/kto
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ./venv
 python train_kto.py --model-size 7b --batch-size 8 --gradient-accumulation 4

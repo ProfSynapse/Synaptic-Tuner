@@ -171,7 +171,7 @@ Evaluator/                              ← Clean imports
     # DELETED - now in shared/validation/parsing/
 
 Trainers/                               ← Direct access
-└── rtx3090_sft/
+└── sft/
     from shared.validation import FitnessEvaluator
 ```
 
@@ -567,7 +567,7 @@ class FitnessEvaluator:
 Minimal additions to existing config:
 
 ```yaml
-# Trainers/rtx3090_sft/configs/config.yaml
+# Trainers/sft/configs/config.yaml
 
 model:
   model_name: "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
@@ -618,7 +618,7 @@ Memory fits easily: ~8.5GB used of 24GB available.
 1. **Enable evolutionary training in config:**
 
 ```yaml
-# Trainers/rtx3090_sft/configs/config.yaml
+# Trainers/sft/configs/config.yaml
 
 evolutionary:
   enabled: true  # Enable evolutionary selection
@@ -637,7 +637,7 @@ evolutionary:
 2. **Create a fitness config (or use the example):**
 
 ```yaml
-# Trainers/rtx3090_sft/configs/fitness/tool_calling.yaml
+# Trainers/sft/configs/fitness/tool_calling.yaml
 
 validations:
   - type: required_field
@@ -858,7 +858,7 @@ shared/evolutionary/
 #### Step 2.3: Integrate into Trainers
 
 ```python
-# Trainers/rtx3090_sft/train_sft.py
+# Trainers/sft/train_sft.py
 if config.evolutionary.enabled:
     from shared.evolutionary import EvolutionaryTrainerWrapper
     trainer = EvolutionaryTrainerWrapper(trainer, config.evolutionary)
@@ -867,7 +867,7 @@ if config.evolutionary.enabled:
 #### Step 2.4: Add fitness config
 
 ```yaml
-# Trainers/rtx3090_sft/configs/fitness/tool_calling.yaml
+# Trainers/sft/configs/fitness/tool_calling.yaml
 # Same format as rubrics!
 ```
 

@@ -298,7 +298,7 @@ CloudTrainHandler.handle()
     |
     +-- backend.load_config(method)
     |     |
-    |     +-- Load Trainers/rtx3090_{method}/configs/config.yaml (training params)
+    |     +-- Load Trainers/{method}/configs/config.yaml (training params)
     |     +-- Load Trainers/cloud/cloud_config.yaml (cloud overlay)
     |     +-- Merge into CloudTrainingConfig
     |
@@ -397,7 +397,7 @@ execute()
 **Code sync strategy**: RunPod pods have internet access. The startup command:
 1. Installs dependencies (`pip install unsloth trl datasets peft`)
 2. Clones the repo (`git clone {repo_url} /workspace/repo`)
-3. Runs the training script (`cd /workspace/repo/Trainers/rtx3090_{method} && python train_{method}.py`)
+3. Runs the training script (`cd /workspace/repo/Trainers/{method} && python train_{method}.py`)
 
 The clone URL can be the user's GitHub repo URL (if public) or use a GitHub token (if private). For private repos, `GH_TOKEN` or a deploy key can be passed as an environment variable.
 
@@ -808,7 +808,7 @@ def _build_startup_command(self, config: CloudTrainingConfig) -> str:
     return (
         f"pip install unsloth trl datasets peft && "
         f"git clone {repo_url} /workspace/repo && "
-        f"cd /workspace/repo/Trainers/rtx3090_{config.method} && "
+        f"cd /workspace/repo/Trainers/{config.method} && "
         f"HF_TOKEN={os.environ.get('HF_TOKEN', '')} "
         f"python train_{config.method}.py"
     )

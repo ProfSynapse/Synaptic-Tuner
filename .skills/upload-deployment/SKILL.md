@@ -66,7 +66,7 @@ Load the specific reference you need:
 **Standard upload after SFT:**
 ```bash
 python3 scripts/upload_model.py \
-  Trainers/sft/sft_output_rtx3090/TIMESTAMP/final_model \
+  Trainers/sft/sft_output/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit \
   --create-gguf

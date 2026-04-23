@@ -202,7 +202,7 @@ config = TrainingConfig(**raw)  # Validates on construction
 - `FeaturesConfig` omits `text` — Phase 2+
 - All fields have sensible defaults; minimal valid config requires only `task`, `data`, `features`
 - `field_validator` on `train_path` gives immediate feedback on missing files
-- The YAML config for SFT uses `yaml.safe_load` + manual `dict_to_dataclass` (see `Trainers/rtx3090_sft/configs/config_loader.py`). Pydantic replaces that entire conversion + validation layer.
+- The YAML config for SFT uses `yaml.safe_load` + manual `dict_to_dataclass` (see `Trainers/sft/configs/config_loader.py`). Pydantic replaces that entire conversion + validation layer.
 
 ---
 
@@ -1093,7 +1093,7 @@ TrainingConfig(**yaml.safe_load(f))    ← Pydantic validates all fields
 
 ### `shared/utilities/paths.py`
 - Provides `get_project_root()`, `get_trainer_root(name)`, `find_training_run(name, id)`
-- **Integration**: `find_training_run` currently hardcodes `sft_output_rtx3090` and `kto_output_rtx3090` patterns. Phase 4 (CLI) will need to extend this or add an ML-specific variant
+- **Integration**: `find_training_run` currently hardcodes `sft_output` and `kto_output` patterns. Phase 4 (CLI) will need to extend this or add an ML-specific variant
 - **Phase 1**: No changes needed. `Trainers/ml/output.py` handles its own directory creation
 
 ### `shared/utilities/env.py`
@@ -1105,7 +1105,7 @@ TrainingConfig(**yaml.safe_load(f))    ← Pydantic validates all fields
 - **Future integration** (Phase 4+): Validation results become features for the quality scorer. The `shared/ml/features.py` module (out of Phase 1 scope) will import from `shared/validation/` to extract schema error counts, tag presence, etc.
 - **Phase 1**: No integration needed
 
-### `Trainers/rtx3090_sft/configs/config_loader.py`
+### `Trainers/sft/configs/config_loader.py`
 - Uses dataclasses + manual `dict_to_dataclass()` conversion
 - **Relationship**: ML config uses Pydantic instead. These are independent — no shared config infrastructure. If the project later wants to unify, SFT/KTO configs could migrate to Pydantic, but that's out of scope
 - **Key difference**: The SFT config loader has no validation beyond type conversion. Pydantic validates constraints (`test_size > 0`, `columns` non-empty, `train_path` exists)
@@ -1172,6 +1172,6 @@ output:
 | Algorithm registry | ABC + `@register_algorithm` decorator + dict | Strategy pattern: enforces interface, enables config-driven lookup, extensible by adding files |
 | Experiment tracking | ABC with LocalTracker fallback | Zero-dependency baseline; MLflow opt-in; tracker swappable without changing training code |
 | Feature engineering | Config -> ColumnTransformer | Leverages sklearn's battle-tested Pipeline/ColumnTransformer; YAML-declarative for common cases |
-| Output structure | Timestamped dirs under `Trainers/ml/ml_output/` | Mirrors SFT pattern (`sft_output_rtx3090/YYYYMMDD_HHMMSS/`); always produces `metrics.json` |
+| Output structure | Timestamped dirs under `Trainers/ml/ml_output/` | Mirrors SFT pattern (`sft_output/YYYYMMDD_HHMMSS/`); always produces `metrics.json` |
 | Import convention | Dotted paths from project root | Matches existing `shared.*`, `Trainers.*` convention |
 | Phase 1 scope | LightGBM only, numeric + categorical only | Smallest vertical slice that proves the architecture end-to-end |

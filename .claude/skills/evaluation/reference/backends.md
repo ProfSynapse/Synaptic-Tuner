@@ -26,7 +26,7 @@ Best for evaluating freshly trained LoRA adapters without a server.
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./Trainers/rtx3090_sft/sft_output_rtx3090/TIMESTAMP/final_model
+  --model ./Trainers/sft/sft_output/TIMESTAMP/final_model
 ```
 
 **Requirements:**

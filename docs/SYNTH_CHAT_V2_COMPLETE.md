@@ -243,7 +243,7 @@ I'll show you what I find and you can confirm if it's the right project.
 
 ### Phase 1: Initial Training (SFT)
 ```bash
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 python train_sft.py --model-size 7b
 ```
 
@@ -257,7 +257,7 @@ python Tools/selfplay_generator_v2.py \
 
 ### Phase 3: KTO Refinement
 ```bash
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 python train_kto.py \
   --model-size 7b \
   --local-file ../../Datasets/syngen_selfplay_v1.jsonl
@@ -319,7 +319,7 @@ top_p = random.uniform(0.92, 0.98)      # Tighter nucleus
 1. Try it: `python Tools/selfplay_generator_v2.py --model your-model --output test.jsonl --num-examples 100`
 2. Inspect: `head -5 test.jsonl | jq`
 3. Validate: `python tools/validate_syngen.py test.jsonl`
-4. Train: `cd Trainers/rtx3090_kto && python train_kto.py --local-file ../../test.jsonl`
+4. Train: `cd Trainers/kto && python train_kto.py --local-file ../../test.jsonl`
 5. Evaluate: Check if model improves on behavioral tests
 6. Iterate: Generate more data with refined model
 

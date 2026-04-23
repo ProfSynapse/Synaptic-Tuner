@@ -95,7 +95,7 @@ This would simplify the CLI UX significantly, especially for users who don't kno
 
 **Why it matters**: Training-inference format mismatch degrades quality. Matching formats exactly during SFT ensures the model sees the same token patterns at inference time.
 
-**Applicability to our pipeline**: HIGH. We should verify our SFT training isn't packing/concatenating examples. Each conversation should be padded individually to match inference format. Check `Trainers/rtx3090_sft/train_sft.py` for packing behavior.
+**Applicability to our pipeline**: HIGH. We should verify our SFT training isn't packing/concatenating examples. Each conversation should be padded individually to match inference format. Check `Trainers/sft/train_sft.py` for packing behavior.
 
 ---
 
@@ -921,7 +921,7 @@ python train_sft.py --config config.yaml --eval-checkpoints 5
 
 # Standalone: evaluate checkpoints from a previous run
 python -m shared.checkpoint_eval \
-    --run-dir sft_output_rtx3090/20260321_120000 \
+    --run-dir sft_output/20260321_120000 \
     --last-n 5 \
     --eval-scenario Evaluator/config/scenarios/tool_prompts.yaml
 ```
