@@ -85,7 +85,7 @@ class TrainingRunDiscovery:
                 print(f"Latest run: {latest_run.name}")
 
         Directory structure expected:
-            Trainers/rtx3090_{trainer_type}/{trainer_type}_output_rtx3090/
+            Trainers/{trainer_type}/{trainer_type}_output/
             ├── 20251122_143000/
             │   ├── final_model/       <- Valid (has final_model)
             │   ├── checkpoints/

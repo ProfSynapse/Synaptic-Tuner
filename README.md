@@ -71,6 +71,18 @@ That path can run train -> evaluation -> exact loss -> analysis -> recommendatio
 - `plan-hardware` and `scripts/hf_jobs_hardware.py` make hardware selection less guessy by using the live HF Jobs hardware surface.
 - Evolutionary SFT is now supported in the cloud experiment path through checked-in specs and `cloud-pipeline --train-*` overrides.
 
+## Local Docker Training
+
+If you have a local GPU and want Docker-isolated Unsloth training without the usual UID/GID permission headaches, use `local-run`:
+
+```bash
+python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml
+```
+
+This runs the training stack inside a container with the asciimatics dashboard visible in your terminal, and writes artifacts back to the host with your own user's ownership. Opting into `job.persist: true` keeps a long-lived container around so repeat runs skip pip install and model download. Checked-in starter configs live under `Trainers/local/jobs/` (smoke + 2-epoch SFT).
+
+Cloud remains the primary path; `local-run` is the supporting path when you want to iterate on a local GPU with Docker isolation.
+
 ## Quick Start
 
 | Path | How |
@@ -78,6 +90,7 @@ That path can run train -> evaluation -> exact loss -> analysis -> recommendatio
 | **Claude Code (recommended)** | Open repo in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and tell it what you want |
 | **HF Jobs cloud train + eval** | `python tuner.py cloud-pipeline --method sft --preset full` |
 | **Full cloud experiment bundle** | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
+| **Local Docker training** | `python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml` |
 | **Interactive CLI** | `./run.sh` (Linux/WSL) or `.\run.ps1` (PowerShell) |
 | **Beginner (no GPU)** | `Trainers/notebooks/sft_colab_beginner.ipynb` in Google Colab |
 

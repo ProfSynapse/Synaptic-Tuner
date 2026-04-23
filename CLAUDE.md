@@ -222,6 +222,7 @@ Synthetic Conversations/
 │   ├── sft/                   # SFT training (initial training)
 │   ├── rtx3090_sft/           # SFT training (legacy, local GPU)
 │   ├── rtx3090_kto/           # KTO training (refinement)
+│   ├── local/                 # Local Docker SFT/KTO jobs (uid-agnostic, persistent-container mode)
 │   └── shared/                # Shared code (upload, model loading, utilities)
 │
 ├── SynthChat/                 # Synthetic chat generation & dataset improvement

@@ -10,6 +10,10 @@ def test_parser_supports_yes_alias_for_auto_confirm():
     args = parser.parse_args(["cloud-run", "--job-config", "Trainers/cloud/jobs/example.yaml", "--auto-confirm"])
     assert args.auto_confirm is True
 
+    args = parser.parse_args(["local-run", "--job-config", "Trainers/local/jobs/example.yaml", "--yes"])
+    assert args.command == "local-run"
+    assert args.auto_confirm is True
+
 
 def test_run_experiment_stage_selection_flags_parse():
     parser = create_parser()

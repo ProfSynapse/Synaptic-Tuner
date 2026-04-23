@@ -15,11 +15,11 @@ Detailed command references and decision trees for all major workflows.
 **Direct Python:**
 ```bash
 # SFT (initial training)
-cd Trainers/rtx3090_sft
+cd Trainers/sft
 python train_sft.py --model-size 7b
 
 # KTO (refinement)
-cd Trainers/rtx3090_kto
+cd Trainers/kto
 python train_kto.py --model-size 7b
 ```
 
@@ -54,7 +54,7 @@ START: User wants to train a model
     |   - Needs positive-only examples (label: true)
     |   - Higher learning rate: 2e-4
     |   - Epochs: 2-3 typical
-    |   - Command: python Trainers/rtx3090_sft/train_sft.py
+    |   - Command: python Trainers/sft/train_sft.py
     |
     +-- REFINING EXISTING MODEL
           |
@@ -63,7 +63,7 @@ START: User wants to train a model
         - Needs interleaved true/false examples
         - Lower learning rate: 1e-6 to 2e-7
         - Epochs: 1 typical
-        - Command: python Trainers/rtx3090_kto/train_kto.py
+        - Command: python Trainers/kto/train_kto.py
           |
           v
 [4] ALWAYS run with --dry-run first to validate configuration
@@ -71,6 +71,33 @@ START: User wants to train a model
     v
 [5] If dry-run passes, run actual training
 ```
+
+---
+
+## 1b. Local Docker Training (`local-run`)
+
+`local-run` runs Unsloth SFT/KTO inside Docker on a local GPU. It sidesteps UID/GID permission issues (artifacts land with your user's ownership), keeps the asciimatics dashboard visible inside the container, and can optionally reuse a persistent container so repeat runs skip pip install and HuggingFace model download.
+
+**Quick start:**
+```bash
+# Smoke test — tiny, verifies the whole path compiles + runs
+python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml
+
+# Real 2-epoch SFT run
+python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_2epoch.yaml
+```
+
+**Container management flags** (no `--job-config` required):
+```bash
+python tuner.py local-run --job-config <yaml> --container-status   # Print container state
+python tuner.py local-run --job-config <yaml> --stop               # Stop persistent container
+python tuner.py local-run --job-config <yaml> --rm-persistent      # Stop + remove persistent container
+python tuner.py local-run --job-config <yaml> --yes                # Skip confirmation prompt
+```
+
+**Config reference:** The `job.*` YAML keys (`job.user`, `job.tty`, `job.persist`, `job.mount_hf_cache`, `job.mount_pip_cache`, `job.container_name`, `job.stop_timeout`, `job.transfer`, `job.keep_container`) are documented in [`.skills/fine-tuning/reference/training-config.md`](../.skills/fine-tuning/reference/training-config.md). The two checked-in configs in `Trainers/local/jobs/` are good starting templates.
+
+**Troubleshooting:** See the `local-run` section in [`docs/troubleshooting.md`](troubleshooting.md) for UID/GID, bind-mount, and persistent-container issues.
 
 ---
 
@@ -84,9 +111,9 @@ START: User wants to train a model
 
 **Direct Python:**
 ```bash
-cd Trainers/rtx3090_sft  # or rtx3090_kto
+cd Trainers/sft  # or kto
 python3 .skills/upload-deployment/scripts/upload_model.py \
-  ./sft_output_rtx3090/YYYYMMDD_HHMMSS/final_model \
+  ./sft_output/YYYYMMDD_HHMMSS/final_model \
   username/model-name \
   --save-method merged_16bit \
   --create-gguf

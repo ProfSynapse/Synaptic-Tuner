@@ -1,0 +1,63 @@
+# Local Docker SFT run for Qwen3.5-2B on the 2026-04-22 dataset.
+#
+# This is the reusable full-run variant of the smoke config. It keeps the
+# memory-sensitive per-device batch at 1 and uses accumulation for an effective
+# batch of 16.
+name: qwen35-2b-sft-2epoch
+provider: local_docker
+
+job:
+  image: unsloth/unsloth:latest
+  pull_policy: missing
+  transfer: bind
+  keep_container: true
+  persist: true
+
+setup:
+  # Qwen3.5 needs newer packages than the current official Unsloth image ships.
+  pip:
+    - transformers==5.5.0
+    - trl==0.22.2
+    - git+https://github.com/unslothai/unsloth_zoo.git
+    - git+https://github.com/unslothai/unsloth.git
+
+run:
+  method: sft
+  trainer: Trainers/sft/train_sft.py
+  dry_run: false
+  dashboard: true
+  quiet: false
+
+model:
+  name: Qwen/Qwen3.5-2B
+  max_seq_length: 2048
+  load_in_4bit: false
+
+dataset:
+  local_file: Datasets/nonthinking_tools_sft_04.22.26.jsonl
+
+training:
+  batch_size: 1
+  gradient_accumulation: 16
+  learning_rate: 1.0e-4
+  num_epochs: 2
+  max_steps: null
+  save_steps: 100
+  save_total_limit: 3
+
+lora:
+  r: 64
+  alpha: 128
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+artifacts:
+  output_root: toolset-training-artifacts/runs/local_docker/sft/{name}
+  run_timestamp: "{timestamp}"

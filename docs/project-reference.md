@@ -11,8 +11,9 @@ Scripts, configuration files, environment variables, data patterns, and platform
 - `setup_env.sh` / `setup_env.ps1` - Environment setup
 
 **Trainers:**
-- `Trainers/rtx3090_sft/setup.sh` - Full SFT environment setup
-- `Trainers/rtx3090_kto/setup.sh` - Full KTO environment setup
+- `Trainers/sft/setup.sh` - Full SFT environment setup
+- `Trainers/kto/setup.sh` - Full KTO environment setup
+- `Trainers/local/jobs/*.yaml` - Local Docker training job configs (used by `python tuner.py local-run`; UID-agnostic, persistent-container mode)
 
 **Tools:**
 - `Tools/run_synth_chat.sh` / `.ps1` - Synthetic chat generation wrapper
@@ -25,8 +26,8 @@ Scripts, configuration files, environment variables, data patterns, and platform
 ## Configuration Files
 
 **Training (Python dataclasses):**
-- `Trainers/rtx3090_sft/configs/training_config.py` - SFT config (LR: 2e-4, epochs: 3)
-- `Trainers/rtx3090_kto/configs/training_config.py` - KTO config (LR: 2e-7, epochs: 1)
+- `Trainers/sft/configs/training_config.py` - SFT config (LR: 2e-4, epochs: 3)
+- `Trainers/kto/configs/training_config.py` - KTO config (LR: 2e-7, epochs: 1)
 
 **Datasets:**
 - SFT: `Datasets/syngen_tools_sft_11.18.25.jsonl` (2,676 positive examples)
@@ -89,7 +90,7 @@ WANDB_API_KEY=your_wandb_key
 ### Training Output Structure
 
 ```
-sft_output_rtx3090/YYYYMMDD_HHMMSS/
+sft_output/YYYYMMDD_HHMMSS/
 ├── checkpoints/           # Training checkpoints
 ├── final_model/          # LoRA adapters
 ├── logs/                 # Training metrics (JSONL)
@@ -103,8 +104,8 @@ sft_output_rtx3090/YYYYMMDD_HHMMSS/
 ### Monitoring Training
 
 ```bash
-cd Trainers/rtx3090_sft
-tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
+cd Trainers/sft
+tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 ```
 
 ---
@@ -131,6 +132,7 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
 | System diagnostics | X | | `./run.sh doctor` |
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
+| Local Docker training | | X | `python tuner.py local-run --job-config Trainers/local/jobs/<config>.yaml`; UID-agnostic, persistent-container mode |
 | Evaluation | | X | Needs model path, scenario set |
 | Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
 | Dataset improvement | | X | Needs rubrics, line range |
@@ -141,8 +143,8 @@ tail -f sft_output_rtx3090/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 ## Key Documentation
 
 - `README.md` - Project overview
-- `Trainers/rtx3090_sft/README.md` - SFT training guide
-- `Trainers/rtx3090_kto/README.md` - KTO training guide
+- `Trainers/sft/README.md` - SFT training guide
+- `Trainers/kto/README.md` - KTO training guide
 - `SynthChat/README.md` - Dataset improvement guide
 - `KTO_TRAINING_REFERENCE.md` - KTO interleaving requirement
 - `docs/EVOLUTIONARY_FINETUNING.md` - Unified validation & evolutionary training design

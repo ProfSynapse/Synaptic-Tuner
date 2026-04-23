@@ -75,6 +75,7 @@ Commands:
   cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
+  local-run   Config-driven local Docker training/eval job
   bucket      Read, list, pull, push, or analyze local / HF bucket artifacts
   run-experiment  Run train -> eval -> loss from one experiment config
   analyze-experiment Inspect a finished experiment bundle and recommendations
@@ -116,6 +117,7 @@ Examples:
   python tuner.py status       # Show system status
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
+  python tuner.py local-run --job-config Trainers/local/jobs/job.yaml --yes
   python tuner.py cloud-jobs list
   python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
@@ -138,7 +140,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -327,7 +329,22 @@ Examples:
     parser.add_argument("--env-template", help="E2B template ID for cloud-eval/cloud-gym when --env-backend e2b.")
     parser.add_argument("--env-tool-schema", help="Custom tool schema YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
-    parser.add_argument("--job-config", help="Config-driven cloud job YAML (cloud-run workflow).")
+    parser.add_argument("--job-config", help="Config-driven job YAML (cloud-run or local-run workflow).")
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="Stop (but keep) the persistent container for the given --job-config (local-run only).",
+    )
+    parser.add_argument(
+        "--rm-persistent",
+        action="store_true",
+        help="Stop and remove the persistent container for the given --job-config (local-run only).",
+    )
+    parser.add_argument(
+        "--container-status",
+        action="store_true",
+        help="Print the persistent container's state for the given --job-config (local-run only).",
+    )
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
     parser.add_argument("--job", help="HF job reference for cloud-jobs show/logs/cancel. Accepts either <job-id> or <namespace>/<job-id>.")
     parser.add_argument("--namespace", help="HF namespace override for cloud-jobs list/show/logs/cancel.")

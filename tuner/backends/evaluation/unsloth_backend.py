@@ -51,9 +51,8 @@ class UnslothBackend(IEvaluationBackend):
     def list_models(self) -> List[str]:
         """List available LoRA adapters from training outputs.
 
-        Searches for final_model directories containing adapter_config.json in:
-        - Trainers/rtx3090_sft/sft_output_rtx3090/*/final_model/
-        - Trainers/rtx3090_kto/kto_output_rtx3090/*/final_model/
+        Searches for final_model directories containing adapter_config.json in
+        the canonical SFT, KTO, and GRPO output directories.
 
         Returns:
             List of adapter directory paths (absolute paths)
