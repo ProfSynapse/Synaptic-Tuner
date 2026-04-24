@@ -4,13 +4,14 @@ Location: SynthChat/run.py
 Purpose: Single CLI for both "generate", "improve", and "validate" modes.
          Contains only the argument parser, factory functions for LLM clients
          and environment validators, and the main() dispatcher. Mode logic
-         lives in SynthChat.modes.{generate,improve,validate}.
-Usage: python -m SynthChat.run [generate|improve|validate] [options]
+         lives in SynthChat.modes.{generate,improve,validate,sanitize}.
+Usage: python -m SynthChat.run [generate|improve|validate|sanitize] [options]
 
 Commands:
     generate - Create new dataset from scenarios
     improve  - Improve existing dataset with rubrics
     validate - Check if dataset passes rubrics (no improvement)
+    sanitize - Apply privacy preprocessing to docs or datasets
 """
 
 import argparse
@@ -24,6 +25,7 @@ from .utils.yaml_loader import load_yaml
 
 from .modes.generate import generate_mode
 from .modes.improve import improve_mode
+from .modes.sanitize import sanitize_mode
 from .modes.validate import validate_mode
 
 
@@ -135,6 +137,11 @@ def main():
     generate_parser.add_argument("--per-doc", type=int, default=1, help="Examples to generate per doc (default: 1)")
     generate_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
     generate_parser.add_argument(
+        "--privacy-profile",
+        default=None,
+        help="Named privacy preprocess profile to apply to seed docs before generation",
+    )
+    generate_parser.add_argument(
         "--env-backend",
         choices=["none", "local", "e2b"],
         default=None,
@@ -186,6 +193,11 @@ def main():
     improve_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
     improve_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
     improve_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
+    improve_parser.add_argument(
+        "--privacy-profile",
+        default=None,
+        help="Named privacy preprocess profile to apply to input JSONL before improvement",
+    )
 
     # Validate command
     validate_parser = subparsers.add_parser("validate", help="Validate dataset (no improvement)")
@@ -195,6 +207,21 @@ def main():
     validate_parser.add_argument("--rubrics", help="Comma-separated rubric names")
     validate_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
     validate_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
+    validate_parser.add_argument(
+        "--privacy-profile",
+        default=None,
+        help="Named privacy preprocess profile to apply to input JSONL before validation",
+    )
+
+    sanitize_parser = subparsers.add_parser("sanitize", help="Sanitize docs or JSONL datasets")
+    sanitize_parser.add_argument("--input", "-i", required=True, help="Input file or directory")
+    sanitize_parser.add_argument("--output", "-o", help="Output file or directory")
+    sanitize_parser.add_argument("--config-dir", help="Config directory path")
+    sanitize_parser.add_argument(
+        "--privacy-profile",
+        default=None,
+        help="Named privacy preprocess profile (overrides settings.yaml)",
+    )
 
     args = parser.parse_args()
 
@@ -221,6 +248,11 @@ def main():
             args,
             load_settings=load_settings,
             create_llm_client=create_llm_client,
+        )
+    elif args.command == "sanitize":
+        sanitize_mode(
+            args,
+            load_settings=load_settings,
         )
 
 

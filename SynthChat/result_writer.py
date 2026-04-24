@@ -46,6 +46,12 @@ class StreamingResultWriter:
                     "streaming": True
                 }
             }
+            privacy_settings = self._settings.get("privacy_preprocess") or {}
+            if privacy_settings.get("enabled") and privacy_settings.get("profile"):
+                metadata["_meta"]["privacy_preprocess"] = {
+                    "profile": privacy_settings.get("profile"),
+                    "apply_to": dict(privacy_settings.get("apply_to") or {}),
+                }
             self._file.write(json.dumps(metadata) + "\n")
             self._file.flush()
 
@@ -128,6 +134,12 @@ def save_results(results: List, output_file: Path, settings: Dict):
                     }
                 }
             }
+            privacy_settings = settings.get("privacy_preprocess") or {}
+            if privacy_settings.get("enabled") and privacy_settings.get("profile"):
+                metadata["_meta"]["privacy_preprocess"] = {
+                    "profile": privacy_settings.get("profile"),
+                    "apply_to": dict(privacy_settings.get("apply_to") or {}),
+                }
             f.write(json.dumps(metadata) + "\n")
 
         # Write examples

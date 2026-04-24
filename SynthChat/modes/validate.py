@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Dict
 
 from ..engine import ImprovementEngine
+from ..services.privacy_preprocess import (
+    resolve_privacy_preprocessor,
+    sanitize_payload_with_metadata,
+)
 
 
 def validate_mode(args, *, load_settings, create_llm_client):
@@ -35,6 +39,12 @@ def validate_mode(args, *, load_settings, create_llm_client):
     config_dir = Path(args.config_dir or "SynthChat/config")
     settings = load_settings(config_dir)
     rubrics_dir = Path(args.rubrics_dir or "SynthChat/rubrics")
+    privacy_preprocessor = resolve_privacy_preprocessor(
+        config_dir=config_dir,
+        settings=settings,
+        apply_target="input_jsonl",
+        profile_override=getattr(args, "privacy_profile", None),
+    )
 
     # Load input dataset
     if not args.input:
@@ -58,6 +68,24 @@ def validate_mode(args, *, load_settings, create_llm_client):
                     print(f"Warning: Skipping malformed JSON at line {line_num}: {e}")
 
     print(f"Loaded {len(examples)} examples from {input_path}\n")
+    if privacy_preprocessor is not None:
+        changed_count = 0
+        sanitized_examples = []
+        for line_num, example in examples:
+            sanitized_example, summary = sanitize_payload_with_metadata(
+                example,
+                preprocessor=privacy_preprocessor,
+                scope_key=f"{input_path}:{line_num}",
+                metadata_field="privacy_preprocess_input",
+            )
+            if summary.get("changed"):
+                changed_count += 1
+            sanitized_examples.append((line_num, sanitized_example))
+        examples = sanitized_examples
+        print(
+            f"Privacy input preprocessing enabled (profile={privacy_preprocessor.profile_name}, "
+            f"changed={changed_count}/{len(examples)})\n"
+        )
 
     # Create LLM client for judging (CLI args override settings.yaml)
     print("Initializing validation LLM client...")
@@ -123,6 +151,8 @@ def validate_mode(args, *, load_settings, create_llm_client):
     print(f"Total examples: {total}")
     print(f"Passed: {total_passed} ({pass_rate:.1f}%)")
     print(f"Failed: {total_failed} ({100 - pass_rate:.1f}%)")
+    if privacy_preprocessor is not None:
+        print(f"Privacy profile: {privacy_preprocessor.profile_name}")
 
     if failing_lines:
         print(f"\nFailing lines: {', '.join(map(str, failing_lines[:20]))}")

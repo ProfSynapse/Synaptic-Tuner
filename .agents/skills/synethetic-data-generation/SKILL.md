@@ -6,7 +6,7 @@ allowed-tools: Read, Bash, Write, Grep, Glob
 
 # SynthChat: Synthetic Data Generation
 
-Generate, improve, validate, and evaluate synthetic training datasets via CLI and YAML configuration.
+Generate, improve, validate, sanitize, and evaluate synthetic training datasets via CLI and YAML configuration.
 
 ## Quick Reference
 
@@ -17,6 +17,7 @@ Generate, improve, validate, and evaluate synthetic training datasets via CLI an
 | Generate with custom tool schema/rules | `python -m SynthChat.run generate --env-backend local --env-tool-schema path/to/tool_schema.yaml --env-exec-config path/to/environment_execution.yaml [options]` |
 | Improve dataset | `python -m SynthChat.run improve -i FILE [options]` |
 | Validate dataset | `python -m SynthChat.run validate -i FILE [options]` |
+| Sanitize docs or JSONL | `python -m SynthChat.run sanitize -i PATH --privacy-profile PROFILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
 | Structural check | `python3 scripts/validate_syngen.py FILE` |
 | JSONL → Markdown | `./scripts/jsonl_to_markdown.sh data.jsonl` |
@@ -38,7 +39,7 @@ Load the specific reference you need:
 
 | Reference | When to Load | Path |
 |-----------|-------------|------|
-| **CLI Commands** | Running generate/improve/validate/eval | `reference/cli-commands.md` |
+| **CLI Commands** | Running generate/improve/validate/sanitize/eval | `reference/cli-commands.md` |
 | **Settings Config** | Configuring providers, models, workers, targets | `reference/settings-config.md` |
 | **Scenario Authoring** | Writing or modifying scenario YAMLs | `reference/scenario-authoring.md` |
 | **Rubric Authoring** | Writing or modifying rubric YAMLs | `reference/rubric-authoring.md` |
@@ -115,6 +116,17 @@ python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-12
 python -m SynthChat.run generate --docs "path/to/essays/" --scenarios essay_outline --per-doc 1
 ```
 
+**Generate from raw docs with privacy preprocessing:**
+```bash
+python -m SynthChat.run generate --docs "tests/fixtures/privacy/raw_seed_docs" --targets-file SynthChat/config/targets_privacy_docs_smoke.json --privacy-profile realistic_pseudonyms
+```
+
+**Sanitize a docs folder or JSONL dataset:**
+```bash
+python -m SynthChat.run sanitize -i tests/fixtures/privacy/raw_seed_docs --privacy-profile realistic_pseudonyms -o tmp/privacy_docs
+python -m SynthChat.run sanitize -i tests/fixtures/privacy/raw_seed_dataset.jsonl --privacy-profile mask_only -o tmp/privacy_dataset.jsonl
+```
+
 **Dry-run a checked-in smoke target manifest:**
 ```bash
 python -m SynthChat.run generate \
@@ -142,7 +154,71 @@ LMSTUDIO_HOST=localhost               # LM Studio host
 LMSTUDIO_PORT=1234                    # LM Studio port
 OLLAMA_HOST=http://localhost:11434    # Ollama endpoint
 HF_TOKEN=hf_...                       # HuggingFace uploads
+OPF_CHECKPOINT=/path/to/privacy-filter-checkpoint   # Local OpenAI Privacy Filter checkpoint
+TIKTOKEN_CACHE_DIR=/path/to/tiktoken-cache          # Local tiktoken cache for OPF
+VLLM_HOST=127.0.0.1                  # Optional OpenAI-compatible vLLM polish endpoint
+VLLM_PORT=8000
 ```
+
+## Privacy Setup
+
+Use the privacy preprocess path when raw docs or JSONL may contain PII or secrets and you want SynthChat to sanitize that content before it reaches the generation/improvement model.
+
+Runtime split:
+- `openai/privacy-filter` is the local span-detection/redaction model
+- `opf` is the runtime wrapper used to load and run that model
+- `vllm` is only for the optional post-sanitize `llm_polish` step, not for OPF itself
+
+Profiles live in:
+- `SynthChat/config/privacy_profiles.yaml`
+
+Global defaults live in:
+- `SynthChat/config/settings.yaml` under `privacy_preprocess`
+
+Scenario-level opt-in lives in:
+- `seed_data.preprocess_profile`
+
+Recommended first-use setup when auto-download is unreliable:
+
+```powershell
+python - <<'PY'
+from pathlib import Path
+import shutil
+from huggingface_hub import snapshot_download
+
+target = Path(r"F:\Code\Toolset-Training\tmp\opf_privacy_filter")
+if not target.exists():
+    target.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id="openai/privacy-filter",
+        local_dir=str(target),
+        allow_patterns=["original/*"],
+    )
+    original = target / "original"
+    for path in original.iterdir():
+        shutil.move(str(path), str(target / path.name))
+    original.rmdir()
+print(target)
+PY
+```
+
+OPF also needs the `o200k_base.tiktoken` encoding file. If that does not auto-download cleanly, cache it locally:
+
+```powershell
+New-Item -ItemType Directory -Force -Path F:\Code\Toolset-Training\tmp\tiktoken_cache | Out-Null
+Invoke-WebRequest `
+  -Uri "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" `
+  -OutFile "F:\Code\Toolset-Training\tmp\tiktoken_cache\fb374d419588a4632f3f557e76b4b70aebbca790"
+```
+
+Then set:
+
+```powershell
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+```
+
+Once those are set, the real OPF-backed sanitize flow can run fully from local files.
 
 ## Config-Driven Architecture
 
@@ -176,3 +252,4 @@ To add a new tool-call format, add a named entry to `tool_call_formats.yaml` and
 - If a response-stage retry is driven by environment feedback, each retry round must be judged against a freshly rerun environment result. Do not carry a prior round's environment failure forward into later judgments after the response has changed.
 - For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
 - Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices
+- For privacy smoke tests, prefer the checked-in fixtures under `tests/fixtures/privacy/`, the target manifest `SynthChat/config/targets_privacy_docs_smoke.json`, and the runbook `docs/plans/synthchat-privacy-smoke-runbook.md`

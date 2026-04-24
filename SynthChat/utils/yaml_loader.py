@@ -24,7 +24,7 @@ def load_yaml(file_path: str) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"YAML file not found: {file_path}")
 
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 

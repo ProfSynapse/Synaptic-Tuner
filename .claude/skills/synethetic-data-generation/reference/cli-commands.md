@@ -3,11 +3,53 @@
 ## Entry Points
 
 ```bash
-python -m SynthChat.run [generate|improve|validate] [options]   # Direct
+python -m SynthChat.run [generate|improve|validate|sanitize] [options]   # Direct
 python -m Evaluator.cli [options]                                # Evaluator
 ./run.sh                                                         # Interactive menu
 python tuner.py                                                  # Main CLI
 ```
+
+## Privacy Runtime Prereqs
+
+For OPF-backed sanitization, the local runtime needs:
+
+- the `opf` Python package
+- a local `openai/privacy-filter` checkpoint
+- the `o200k_base.tiktoken` encoding cache file
+
+Recommended PowerShell setup when automatic downloads are blocked or flaky:
+
+```powershell
+python - <<'PY'
+from pathlib import Path
+import shutil
+from huggingface_hub import snapshot_download
+
+target = Path(r"F:\Code\Toolset-Training\tmp\opf_privacy_filter")
+if not target.exists():
+    target.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id="openai/privacy-filter",
+        local_dir=str(target),
+        allow_patterns=["original/*"],
+    )
+    original = target / "original"
+    for path in original.iterdir():
+        shutil.move(str(path), str(target / path.name))
+    original.rmdir()
+print(target)
+PY
+
+New-Item -ItemType Directory -Force -Path F:\Code\Toolset-Training\tmp\tiktoken_cache | Out-Null
+Invoke-WebRequest `
+  -Uri "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" `
+  -OutFile "F:\Code\Toolset-Training\tmp\tiktoken_cache\fb374d419588a4632f3f557e76b4b70aebbca790"
+
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+```
+
+If those env vars are already set to valid local paths, `sanitize` / `generate --privacy-profile` / `improve --privacy-profile` / `validate --privacy-profile` will reuse them.
 
 ---
 
@@ -33,6 +75,7 @@ python -m SynthChat.run generate [options]
 | `--workers, -w N` | Parallel worker threads | `1` |
 | `--docs PATH` | Doc file or folder for docs-based generation | None |
 | `--per-doc N` | Examples to generate per doc | `1` |
+| `--privacy-profile NAME` | Privacy preprocess profile for raw docs before generation | None |
 | `--env-backend` | Runtime validation backend (`none`, `local`, `e2b`) | From settings / `none` |
 | `--env-template` | E2B template ID (for `--env-backend e2b`) | None |
 | `--env-timeout` | Runtime timeout in seconds | From settings / `120` |
@@ -54,6 +97,11 @@ python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-12
 
 # Docs-based generation
 python -m SynthChat.run generate --docs "essays/" --scenarios essay_outline --per-doc 1
+
+# Docs-based generation with privacy preprocessing
+python -m SynthChat.run generate --docs tests/fixtures/privacy/raw_seed_docs \
+  --targets-file SynthChat/config/targets_privacy_docs_smoke.json \
+  --privacy-profile realistic_pseudonyms
 
 # Custom targets file, limited iterations
 python -m SynthChat.run generate --targets-file my_targets.json --max-iterations 3 -o test_run.jsonl
@@ -93,6 +141,7 @@ python -m SynthChat.run improve [options]
 | `--provider PROVIDER` | LLM provider override | From settings.yaml |
 | `--model MODEL` | Model name override | From settings.yaml |
 | `--workers, -w N` | Parallel workers | `1` |
+| `--privacy-profile NAME` | Privacy preprocess profile for input JSONL before improvement | None |
 
 **Examples:**
 
@@ -120,6 +169,11 @@ python -m SynthChat.run improve -i data.jsonl -o regen_slice.jsonl \
 # Powerful model for judging
 python -m SynthChat.run improve -i data.jsonl \
   --provider openrouter --model openai/gpt-oss-120b --max-iterations 5
+
+# Sanitize dataset content before improvement sends it to the model
+python -m SynthChat.run improve -i data.jsonl \
+  --privacy-profile realistic_pseudonyms \
+  --max-iterations 1
 ```
 
 Notes:
@@ -144,11 +198,58 @@ python -m SynthChat.run validate [options]
 | `--rubrics NAMES` | Comma-separated rubric names | From settings.yaml |
 | `--provider PROVIDER` | LLM provider override | From settings.yaml |
 | `--model MODEL` | Model name override | From settings.yaml |
+| `--privacy-profile NAME` | Privacy preprocess profile for input JSONL before validation | None |
 
 **Output:** Pass rate, failing lines, failures grouped by rubric. Suggests `improve` command to fix.
 
 ```bash
 python -m SynthChat.run validate -i data.jsonl --rubrics system_prompt_format,factuality
+```
+
+```bash
+python -m SynthChat.run validate -i tests/fixtures/privacy/raw_seed_dataset.jsonl \
+  --privacy-profile realistic_pseudonyms
+```
+
+---
+
+## `sanitize` — Apply Privacy Preprocessing
+
+Sanitizes docs or JSONL datasets without running the SynthChat judge/improve loop.
+
+```bash
+python -m SynthChat.run sanitize [options]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--input, -i PATH` | **Required.** Input file or directory | — |
+| `--output, -o PATH` | Output file or directory | Auto-derived |
+| `--config-dir PATH` | Config directory | `SynthChat/config` |
+| `--privacy-profile NAME` | Privacy preprocess profile to apply | From settings / required in practice |
+
+**Examples:**
+
+```bash
+# Mask-only docs sanitize
+python -m SynthChat.run sanitize \
+  -i tests/fixtures/privacy/raw_seed_docs \
+  -o tmp/privacy_mask_only_docs \
+  --privacy-profile mask_only
+
+# Realistic pseudonymization for JSONL
+python -m SynthChat.run sanitize \
+  -i tests/fixtures/privacy/raw_seed_dataset.jsonl \
+  -o tmp/privacy_pseudonyms_dataset.jsonl \
+  --privacy-profile realistic_pseudonyms
+
+# Real OPF-backed docs sanitize using a local checkpoint/tokenizer cache
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+python -m SynthChat.run sanitize \
+  -i tests/fixtures/privacy/raw_seed_docs \
+  -o tmp/privacy_pseudonyms_docs \
+  --privacy-profile realistic_pseudonyms
 ```
 
 ---

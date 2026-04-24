@@ -1,0 +1,2 @@
+{"_meta": {"fixture": "privacy_smoke", "version": 1}}
+{"conversations": [{"role": "user", "content": "Please update Jane Roe at jane.roe@example.com and call her at (415) 555-0187."}], "metadata": {"scenario": "privacy_smoke"}}

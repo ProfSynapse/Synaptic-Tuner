@@ -24,6 +24,11 @@ If you are running a smoke test without rubrics/judges, call that out explicitly
 as a plumbing-only test. Do not mistake a wrapper-format smoke pass for a
 quality pass.
 
+For privacy preprocessing changes, the first smoke is usually `sanitize`, not a
+full dataset run. Prove the OPF checkpoint, tokenizer cache, and replacement
+behavior on the checked-in privacy fixtures before you run a larger SynthChat
+generation or improvement pass.
+
 ---
 
 ## Protocol Steps
@@ -64,6 +69,34 @@ python -m SynthChat.run validate \
   --input YOUR_DATASET.jsonl \
   --rubrics YOUR_RUBRIC_NAME \
   --start-line 1 --end-line 5
+```
+
+**For privacy preprocessing changes** (testing the sanitization path itself):
+
+```powershell
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+
+python -m SynthChat.run sanitize \
+  --input tests/fixtures/privacy/raw_seed_docs \
+  --output tmp/privacy_mask_only_docs \
+  --privacy-profile mask_only
+
+python -m SynthChat.run sanitize \
+  --input tests/fixtures/privacy/raw_seed_docs \
+  --output tmp/privacy_pseudonyms_docs \
+  --privacy-profile realistic_pseudonyms
+```
+
+Then run a small docs-based generation smoke:
+
+```powershell
+python -m SynthChat.run generate \
+  --docs tests/fixtures/privacy/raw_seed_docs \
+  --targets-file SynthChat/config/targets_privacy_docs_smoke.json \
+  --privacy-profile realistic_pseudonyms \
+  --max-iterations 1 \
+  --output Datasets/synthchat/privacy_docs_smoke.jsonl
 ```
 
 ### Step 2: Convert to Markdown for Review
@@ -163,6 +196,7 @@ Quick dry-run for testing new or modified scenarios:
 | Modified rubric judge/improver | YES (validate mode) | Scoring may shift, threshold may need adjustment |
 | Changed `pass_threshold` | YES (validate mode) | Could mass-pass or mass-fail |
 | Changed settings.yaml model/provider | YES | Different model = different output quality |
+| Changed privacy preprocess config/profile/runtime | YES | Could leak raw content or break replacements |
 | Changed settings.yaml targets only | NO | Just counts, doesn't affect content |
 | Changed settings.yaml logging/resilience | NO | Infrastructure, not content |
 
@@ -249,6 +283,10 @@ Stop and fix the YAML if you see:
   result, not the prior round's failure unless the rerun reproduces it
 
 ---
+
+Additional privacy-specific red flags:
+- Raw PII survives the sanitize pass. Stop and inspect `OPF_CHECKPOINT` and `TIKTOKEN_CACHE_DIR` before trusting the run.
+- Sanitize mutates fields you did not intend to touch. Inspect the emitted privacy reports and metadata before scaling up to larger datasets.
 
 ## Gotcha: stale environment feedback in response retries
 
