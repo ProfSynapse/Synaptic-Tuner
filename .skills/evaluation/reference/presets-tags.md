@@ -6,121 +6,91 @@ Evaluation presets and tag-based filtering.
 
 ## Presets
 
-Defined in `Evaluator/config/eval_run.yaml`:
+Presets are defined in `Evaluator/config/eval_run.yaml`.
 
 | Preset | Description | Use Case |
 |--------|-------------|----------|
-| `quick` | Quick smoke test (subset of tests) | Fast iteration during development |
-| `full` | All tests, all scenarios | Comprehensive pre-release testing |
-| `behavior_only` | Behavior tests only | Focus on reasoning/clarification |
-| `strict` | All tests with 95% pass threshold | Quality gate for releases |
+| `quick` | Small smoke subset | Fast iteration |
+| `full` | Configured full suite | Pre-release or checkpoint comparison |
+| `strict` | Higher pass threshold | Release gate |
 
-### Using Presets
+Presets can lag active scenario migrations. When precision matters, pass `--scenario` explicitly.
+
+### Examples
 
 ```bash
 # Quick smoke test
 python -m Evaluator.cli --backend lmstudio --model MODEL --preset quick
 
-# Full suite
+# Full configured suite
 python -m Evaluator.cli --backend lmstudio --model MODEL --preset full
 
-# Behavior focus
-python -m Evaluator.cli --backend lmstudio --model MODEL --preset behavior_only
+# Explicit tool scenario
+python -m Evaluator.cli --backend vllm --model finetuned --scenario tool_prompts.yaml --host 127.0.0.1 --port 8011
 ```
-
-Presets override `--scenario` and other flags. For custom runs, use flags directly.
 
 ---
 
 ## Tags
 
-Tags categorize tests for filtered evaluation runs.
+Tags are arbitrary YAML labels used for filtering and reporting. They are not validators.
 
-### Available Tags
+Common tags:
 
-**Behavioral:**
-| Tag | Tests | What It Tests |
-|-----|-------|---------------|
-| `intellectual_humility` | ~10 | Asking for clarification on ambiguous requests |
-| `clarification` | ~8 | Seeking more info before acting |
-| `destructive` | ~6 | Caution with delete/overwrite operations |
-| `delegation` | ~4 | Using promptManager for complex tasks |
-
-**Tool-Specific:**
-| Tag | Tests | What It Tests |
-|-----|-------|---------------|
-| `storageManager` | ~15 | File operations (move, delete, create, rename) |
-| `contentManager` | ~8 | Content editing (read, write, insert, replace, setProperty) |
-| `searchManager` | ~5 | Search operations |
-| `memoryManager` | ~4 | Session/workspace management |
-| `promptManager` | ~3 | Prompt CRUD and delegated execution |
+| Tag | What It Usually Groups |
+|-----|------------------------|
+| `storageManager` | Storage CLI commands |
+| `contentManager` | Content read/write/edit commands |
+| `searchManager` | Search commands |
+| `memoryManager` | Memory/workspace commands |
+| `promptManager` | Prompt CRUD/execution commands |
+| `single-tool` | One wrapper call expected |
+| `clarification` | Text clarification cases |
+| `destructive` | Delete/archive/overwrite-sensitive cases |
 
 ### Tag Filtering
 
 ```bash
 # Single tag
 python -m Evaluator.cli --backend lmstudio --model MODEL \
-  --tags intellectual_humility
+  --scenario tool_prompts.yaml \
+  --tags storageManager
 
-# Multiple tags (comma-separated)
+# Multiple tags, comma-separated
 python -m Evaluator.cli --backend lmstudio --model MODEL \
-  --tags intellectual_humility,clarification,destructive
-
-# Combine with scenario
-python -m Evaluator.cli --backend lmstudio --model MODEL \
-  --scenario behavior_prompts.yaml \
-  --tags clarification
+  --scenario tool_prompts.yaml \
+  --tags promptManager,single-tool
 ```
 
 ---
 
 ## Custom Run Configuration
 
-For runs that don't fit presets:
-
 ```bash
 # Run only 5 tests
 python -m Evaluator.cli --backend lmstudio --model MODEL \
-  --scenario behavior_prompts.yaml --limit 5
+  --scenario tool_prompts.yaml --limit 5
 
-# Run specific tags with JSON output
+# Run a capability slice with explicit outputs
 python -m Evaluator.cli --backend lmstudio --model MODEL \
   --scenario tool_prompts.yaml \
   --tags storageManager \
-  --output Evaluator/results/storage_tests.json
+  --output Evaluator/results/storage_tests.json \
+  --markdown Evaluator/results/storage_tests.md
 
-# Dry run to verify config
+# Dry run to verify config loads
 python -m Evaluator.cli --backend lmstudio --model MODEL \
-  --scenario behavior_prompts.yaml --dry-run
+  --scenario tool_prompts.yaml --dry-run
 ```
 
 ---
 
-## Recommended Evaluation Strategy
+## Recommended Strategy
 
-### During Development
-```bash
---preset quick              # Fast feedback loop
-```
-
-### After Training
-```bash
---preset full               # Comprehensive check
-```
-
-### Before Release
-```bash
---preset strict             # Quality gate (95% threshold)
-```
-
-### Investigating Specific Capability
-```bash
---tags intellectual_humility  # Focus on weakness
-```
-
-### A/B Comparison
-```bash
-# Same preset, different models
---preset full --output results/model_a.json
---preset full --output results/model_b.json
-```
+| Situation | Command Pattern |
+|-----------|-----------------|
+| Iterating on YAML | `--scenario FILE --limit 1 --tags TAG` |
+| Checking a local vLLM model | `--backend vllm --host 127.0.0.1 --port 8011 --scenario tool_prompts.yaml` |
+| Comparing checkpoints | Same `--scenario`, different `--model`, separate `--output` files |
+| Investigating failures | Open result JSON and inspect `record.correctness.paths` |
+| Release gate | Use a fixed preset or explicit scenario list and compare `correctness_pass_rate` |

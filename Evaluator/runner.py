@@ -12,9 +12,10 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-from .behavior_validator import BehaviorIssue, BehaviorValidationResult, validate_behavior
+from .assertions import CorrectnessResult, evaluate_correctness, has_correctness_config
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
+from .response_view import build_response_view
 from .schema_validator import ToolCall, ValidationResult, ValidatorIssue, validate_assistant_response
 
 try:
@@ -46,7 +47,6 @@ class EvaluationRecord:
         latency_s: Response time in seconds
         raw_response: Complete API response
         error: Error message if request/validation failed
-        behavior: Behavior validation result (if expectations defined)
         environment: Environment validation result (if enabled)
         judge: Judge validation result (if --judge enabled)
     """
@@ -57,19 +57,19 @@ class EvaluationRecord:
     latency_s: Optional[float]
     raw_response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    behavior: Optional[BehaviorValidationResult] = None
+    behavior: Optional[Any] = None
     environment: Optional["EnvironmentValidationResult"] = None
     judge: Optional["JudgeValidationResult"] = None
     scoring: Optional["PathScoringResult"] = None
+    correctness: Optional[CorrectnessResult] = None
     conversation_trace: Optional[List[Dict[str, Any]]] = None
 
     @property
     def status(self) -> str:
         """Get evaluation status: 'pass', 'warn', or 'fail'.
 
-        - pass: Tool correct + behavior expectations met (or no behavior expectations)
-        - warn: Tool correct + behavior expectations NOT met
-        - fail: Tool incorrect OR error
+        - pass: configured correctness assertions passed
+        - fail: configured correctness assertions, judge, environment, or transport failed
 
         When judge is enabled, the judge_mode controls how pattern-match and
         judge results combine:
@@ -80,40 +80,22 @@ class EvaluationRecord:
         if self.error is not None:
             return "fail"
 
-        # Determine pattern match result (schema + expected tools)
-        pattern_passed = self.validator is not None and self.validator.passed
+        if self.correctness is not None:
+            if not self.correctness.passed:
+                return "fail"
+            if self.environment is not None and not self.environment.passed:
+                return "fail"
+            if self.judge is not None and not self.judge.passed:
+                return "fail"
+            return "pass"
 
-        # Environment validation is independent -- always fails if it fails
         if self.environment is not None and not self.environment.passed:
             return "fail"
 
-        # Combine pattern match with judge result
         if self.judge is not None:
-            judge_passed = self.judge.passed
-            mode = self.judge.judge_mode
+            return "pass" if self.judge.passed else "fail"
 
-            if mode == "and":
-                if not pattern_passed or not judge_passed:
-                    return "fail"
-            elif mode == "or":
-                if not pattern_passed and not judge_passed:
-                    return "fail"
-            elif mode == "judge_only":
-                if not judge_passed:
-                    return "fail"
-            else:
-                logger.warning("Unknown judge_mode '%s', defaulting to 'and'", mode)
-                if not pattern_passed or not judge_passed:
-                    return "fail"
-        else:
-            # No judge -- original behavior
-            if not pattern_passed:
-                return "fail"
-
-        # Behavior check (advisory: warn, not fail)
-        if self.behavior is not None and not self.behavior.passed:
-            return "warn"
-        return "pass"
+        return "fail"
 
     @property
     def passed(self) -> bool:
@@ -127,7 +109,7 @@ class EvaluationRecord:
 
     @property
     def warned(self) -> bool:
-        """Check if evaluation warned (tool correct but behavior failed)."""
+        """Check if evaluation warned."""
         return self.status == "warn"
 
     @property
@@ -137,13 +119,18 @@ class EvaluationRecord:
 
     @property
     def behavior_passed(self) -> bool:
-        """Check if behavior validation passed (or not applicable)."""
-        return self.behavior is None or self.behavior.passed
+        """Behavior validation is not part of the assertion-driven runtime."""
+        return True
 
     @property
     def judge_passed(self) -> bool:
         """Check if judge validation passed (or not applicable)."""
         return self.judge is None or self.judge.passed
+
+    @property
+    def correctness_passed(self) -> bool:
+        """Check if configured correctness assertions passed."""
+        return self.correctness is None or self.correctness.passed
 
     @property
     def score(self) -> Optional[float]:
@@ -343,7 +330,7 @@ def _evaluate_single_case(
 
     # Run schema validation (with optional context validation)
     try:
-        validator_result = validate_assistant_response(response.message, eval_context)
+        validator_result = _validate_case_response(case, response.message, eval_context)
     except Exception as exc:
         return EvaluationRecord(
             case=case,
@@ -354,23 +341,18 @@ def _evaluate_single_case(
             error=f"Validation error: {exc}",
         )
 
-    # Check expected tools
-    _check_expected_tools(case, validator_result)
-
-    # Run behavior validation - pass extracted tool names from schema validation
-    extracted_tool_names = [tc.name for tc in validator_result.tool_calls]
-    behavior_result = _run_behavior_validation(case, response.message, extracted_tool_names)
+    response_view = build_response_view(response.message, response.raw)
+    correctness_result = _run_correctness_validation(case, response_view)
+    behavior_result = None
 
     environment_result = None
     if environment_validator is not None:
         try:
             system_prompt = case.metadata.get("system", "")
-            expected_for_env = case.expected_tools if environment_config.get("require_expected_tools") else None
             environment_result = environment_validator.validate_response(
                 system_prompt=system_prompt,
                 response=response.message,
                 environment_config=environment_config,
-                expected_tools=expected_for_env,
             )
         except Exception as exc:
             # Environment validation should fail this case, but we keep schema/behavior data.
@@ -414,7 +396,6 @@ def _evaluate_single_case(
                 case_meta = {
                     "system": case.metadata.get("system", ""),
                     "user_prompt": case.question,
-                    "expected_tools": case.expected_tools or case.acceptable_tools or [],
                     "pattern_passed": pattern_passed,
                     "case_id": case.case_id,
                 }
@@ -444,11 +425,12 @@ def _evaluate_single_case(
         raw_response=response.raw,
         error=None,
         behavior=behavior_result,
-            environment=environment_result,
-            judge=judge_result,
-            scoring=scoring_result,
-            conversation_trace=_build_single_turn_trace(case, response.message),
-        )
+        environment=environment_result,
+        judge=judge_result,
+        scoring=scoring_result,
+        correctness=correctness_result,
+        conversation_trace=_build_single_turn_trace(case, response.message),
+    )
 
 
 def _evaluate_case_with_environment_loop(
@@ -489,7 +471,7 @@ def _evaluate_case_with_environment_loop(
             initial_messages=messages,
             session=session,
             respond=lambda episode_messages, turn_index: client.chat(episode_messages),
-            validate=lambda message: validate_assistant_response(message, eval_context),
+            validate=lambda message: _validate_response_structure(message, eval_context),
             max_turns=max_turns,
             max_tool_steps=max_tool_steps,
             stop_on_text_response=stop_on_text_response,
@@ -498,8 +480,6 @@ def _evaluate_case_with_environment_loop(
             stuck_repeat_limit=stuck_repeat_limit,
             no_progress_window=no_progress_window,
             tool_result_format=tool_result_format,
-            expected_tools=case.expected_tools,
-            require_expected_tools=bool(environment_config.get("require_expected_tools")),
             stringify_response=_stringify_assistant_response,
             require_final_text_after_pass=require_final_text_after_pass,
             final_text_prompt=final_text_prompt,
@@ -508,16 +488,6 @@ def _evaluate_case_with_environment_loop(
         session.close()
 
     turn_validators = [turn.validation for turn in episode.turns]
-    turn_behaviors: List[BehaviorValidationResult] = []
-    for turn in episode.turns:
-        behavior_result = _run_behavior_validation(
-            case,
-            turn.response.message,
-            extracted_tool_names=[tc.name for tc in turn.validation.tool_calls],
-        )
-        if behavior_result is not None:
-            turn_behaviors.append(behavior_result)
-
     final_response = episode.final_response
     final_raw = episode.final_raw
     final_latency = episode.total_latency_s
@@ -525,29 +495,17 @@ def _evaluate_case_with_environment_loop(
     conversation_trace = episode.conversation_trace
 
     combined_validator = _combine_validation_results(turn_validators)
-    if combined_validator is not None:
-        _check_expected_tools(case, combined_validator)
-
-    combined_behavior = _combine_behavior_results(turn_behaviors)
+    combined_behavior = None
     if require_final_text and combined_validator is not None:
         final_text = _extract_text_content(final_response)
         if not final_text.strip():
-            if combined_behavior is None:
-                combined_behavior = BehaviorValidationResult(
-                    passed=False,
-                    issues=[],
-                    response_type_detected="empty",
-                )
-            combined_behavior.issues.append(
-                BehaviorIssue(
-                    check="final_text_required",
-                    expected=True,
-                    actual=False,
-                    passed=False,
+            combined_validator.passed = False
+            combined_validator.issues.append(
+                ValidatorIssue(
+                    level="error",
                     message="Loop expected a final text response but none was produced.",
                 )
             )
-            combined_behavior.passed = False
 
     judge_result = None
     if judge_validator is not None and final_response is not None and combined_validator is not None:
@@ -564,7 +522,6 @@ def _evaluate_case_with_environment_loop(
                 case_meta = {
                     "system": case.metadata.get("system", ""),
                     "user_prompt": case.question,
-                    "expected_tools": case.expected_tools or case.acceptable_tools or [],
                     "pattern_passed": pattern_passed,
                     "case_id": case.case_id,
                 }
@@ -595,51 +552,38 @@ def _evaluate_case_with_environment_loop(
         environment=environment_result,
         judge=judge_result,
         scoring=scoring_result,
+        correctness=_run_correctness_validation(case, build_response_view(final_response, final_raw)) if final_response is not None else None,
         conversation_trace=conversation_trace,
     )
 
 
-def _check_expected_tools(case: PromptCase, validator_result: ValidationResult) -> None:
-    """Check if expected tools were called, updating validator_result in place.
+def _validate_case_response(
+    case: PromptCase,
+    response: Any,
+    eval_context: Optional[Dict[str, Any]],
+) -> ValidationResult:
+    return _validate_response_structure(response, eval_context)
 
-    Supports two modes:
-    - expected_tools: AND logic - ALL listed tools must be called (primary expectation)
-    - acceptable_tools: OR logic - ANY listed tool is valid as an alternative (includes TEXT_ONLY)
 
-    When both are defined, expected_tools are ALSO acceptable (they're what we want!).
-    acceptable_tools provides additional alternatives beyond the expected ones.
-    """
-    called_tool_names = {tc.name for tc in validator_result.tool_calls}
-    has_tool_calls = len(called_tool_names) > 0
+def _validate_response_structure(
+    response: Any,
+    eval_context: Optional[Dict[str, Any]],
+) -> ValidationResult:
+    return validate_assistant_response(response, eval_context)
 
-    # Build the full set of acceptable tools
-    # expected_tools are always acceptable (they're what we want)
-    # acceptable_tools provides additional alternatives
-    all_acceptable = set()
-    if case.expected_tools:
-        all_acceptable.update(case.expected_tools)
-    if case.acceptable_tools:
-        all_acceptable.update(case.acceptable_tools)
 
-    # If we have acceptable alternatives (OR logic)
-    if all_acceptable:
-        # TEXT_ONLY is a pseudo-tool meaning no tool call is acceptable
-        text_only_acceptable = "TEXT_ONLY" in all_acceptable
-        tool_options = [t for t in all_acceptable if t != "TEXT_ONLY"]
+def _has_correctness_expectation(case: PromptCase) -> bool:
+    return has_correctness_config(case.metadata.get("correct"))
 
-        # Check if any acceptable tool was called OR text-only is valid
-        any_acceptable_called = bool(called_tool_names & set(tool_options))
-        text_only_response = not has_tool_calls and text_only_acceptable
 
-        if not any_acceptable_called and not text_only_response:
-            validator_result.passed = False
-            options_str = ", ".join(sorted(all_acceptable))
-            validator_result.issues.append(
-                ValidatorIssue(
-                    level="error",
-                    message=f"No acceptable tool called. Valid options: {options_str}"
-                )
-            )
+def _run_correctness_validation(
+    case: PromptCase,
+    response_view: Mapping[str, Any],
+) -> Optional[CorrectnessResult]:
+    correct = case.metadata.get("correct")
+    if not has_correctness_config(correct):
+        return None
+    return evaluate_correctness(correct, response_view)
 
 
 def _combine_validation_results(results: List[ValidationResult]) -> Optional[ValidationResult]:
@@ -667,21 +611,6 @@ def _combine_validation_results(results: List[ValidationResult]) -> Optional[Val
         issues=combined_issues,
         tool_calls=combined_tool_calls,
         context_validation=combined_context if len(combined_context) > 1 else None,
-    )
-
-
-def _combine_behavior_results(results: List[BehaviorValidationResult]) -> Optional[BehaviorValidationResult]:
-    if not results:
-        return None
-
-    issues: List[BehaviorIssue] = []
-    for result in results:
-        issues.extend(result.issues)
-
-    return BehaviorValidationResult(
-        passed=all(result.passed for result in results),
-        issues=issues,
-        response_type_detected=results[-1].response_type_detected,
     )
 
 
@@ -733,57 +662,11 @@ def _build_single_turn_trace(case: PromptCase, response: Any) -> List[Dict[str, 
     return trace
 
 
-def _run_behavior_validation(
-    case: PromptCase,
-    response: Any,
-    extracted_tool_names: List[str] = None,
-) -> Optional[BehaviorValidationResult]:
-    """Run behavior validation if expectations are defined.
-
-    Args:
-        case: The prompt case with potential behavior expectations
-        response: Model's response
-        extracted_tool_names: Tool names already extracted by schema validation
-                             (with configured wrapper expansion applied)
-
-    Returns:
-        BehaviorValidationResult or None if no expectations defined
-    """
-    behavior_expectations = case.metadata.get("behavior_expectations")
-    expected_response_type = case.metadata.get("expected_response_type")
-    anti_patterns = case.metadata.get("anti_patterns_to_avoid")
-
-    # Skip if no behavior expectations defined
-    if not (behavior_expectations or expected_response_type or anti_patterns):
-        return None
-
-    try:
-        return validate_behavior(
-            response=response,
-            behavior_expectations=behavior_expectations,
-            expected_response_type=expected_response_type,
-            anti_patterns=anti_patterns,
-            extracted_tool_names=extracted_tool_names,
-        )
-    except Exception as exc:
-        # Return error result instead of failing completely
-        return BehaviorValidationResult(
-            passed=False,
-            issues=[BehaviorIssue(
-                check="validation_error",
-                expected="successful validation",
-                actual=str(exc),
-                passed=False,
-                message=f"Behavior validation error: {exc}"
-            )]
-        )
-
-
 def _run_path_scoring(
     *,
     case: PromptCase,
     validator_result: Optional[ValidationResult],
-    behavior_result: Optional[BehaviorValidationResult],
+    behavior_result: Optional[Any],
     environment_result: Optional["EnvironmentValidationResult"],
     judge_result: Optional["JudgeValidationResult"],
 ) -> Optional[PathScoringResult]:
@@ -847,7 +730,7 @@ def _matches_scoring_path(
     path_cfg: Dict[str, Any],
     tool_names: List[str],
     validator_result: Optional[ValidationResult],
-    behavior_result: Optional[BehaviorValidationResult],
+    behavior_result: Optional[Any],
     environment_result: Optional["EnvironmentValidationResult"],
     judge_result: Optional["JudgeValidationResult"],
 ) -> tuple[bool, List[str]]:

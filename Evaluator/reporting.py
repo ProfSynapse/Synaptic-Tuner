@@ -24,6 +24,8 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     schema_passed = sum(1 for record in records if record.schema_passed)
     behavior_tested = sum(1 for record in records if record.behavior is not None)
     behavior_passed = sum(1 for record in records if record.behavior_passed and record.behavior is not None)
+    correctness_tested = sum(1 for record in records if record.correctness is not None)
+    correctness_passed = sum(1 for record in records if record.correctness is not None and record.correctness.passed)
     environment_tested = sum(1 for record in records if record.environment is not None)
     environment_passed = sum(1 for record in records if record.environment is not None and record.environment.passed)
     judge_tested = sum(1 for record in records if record.judge is not None)
@@ -48,6 +50,8 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             "schema_passed": 0,
             "behavior_passed": 0,
             "behavior_tested": 0,
+            "correctness_passed": 0,
+            "correctness_tested": 0,
             "environment_passed": 0,
             "environment_tested": 0,
             "judge_passed": 0,
@@ -75,6 +79,10 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 bucket["behavior_tested"] += 1
                 if record.behavior_passed:
                     bucket["behavior_passed"] += 1
+            if record.correctness is not None:
+                bucket["correctness_tested"] += 1
+                if record.correctness.passed:
+                    bucket["correctness_passed"] += 1
             if record.environment is not None:
                 bucket["environment_tested"] += 1
                 if record.environment.passed:
@@ -89,6 +97,7 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 bucket["score_max_total"] += record.scoring.max_score
 
     failure_reasons = Counter()
+    correctness_failures = Counter()
     behavior_failures = Counter()
     environment_failures = Counter()
     for record in records:
@@ -102,6 +111,11 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             for issue in record.validator.issues:
                 if issue.level.upper() == "ERROR":
                     failure_reasons[issue.message] += 1
+        if record.correctness and not record.correctness.passed:
+            for path in record.correctness.paths:
+                for assertion in path.assertions:
+                    if not assertion.passed:
+                        correctness_failures[f"{path.name}: {assertion.message}"] += 1
         # Track behavior failures separately
         if record.behavior and not record.behavior.passed:
             for issue in record.behavior.issues:
@@ -134,6 +148,9 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         "behavior_tested": behavior_tested,
         "behavior_passed": behavior_passed,
         "behavior_pass_rate": (behavior_passed / behavior_tested) if behavior_tested else 0,
+        "correctness_tested": correctness_tested,
+        "correctness_passed": correctness_passed,
+        "correctness_pass_rate": (correctness_passed / correctness_tested) if correctness_tested else 0,
         "environment_tested": environment_tested,
         "environment_passed": environment_passed,
         "environment_pass_rate": (environment_passed / environment_tested) if environment_tested else 0,
@@ -157,6 +174,13 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 "behavior_tested": bucket["behavior_tested"],
                 "behavior_passed": bucket["behavior_passed"],
                 "behavior_pass_rate": (bucket["behavior_passed"] / bucket["behavior_tested"]) if bucket["behavior_tested"] else 0,
+                "correctness_tested": bucket["correctness_tested"],
+                "correctness_passed": bucket["correctness_passed"],
+                "correctness_pass_rate": (
+                    (bucket["correctness_passed"] / bucket["correctness_tested"])
+                    if bucket["correctness_tested"]
+                    else 0
+                ),
                 "environment_tested": bucket["environment_tested"],
                 "environment_passed": bucket["environment_passed"],
                 "environment_pass_rate": (
@@ -188,6 +212,7 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             for tag, bucket in sorted(by_tag.items())
         },
         "top_failure_reasons": failure_reasons.most_common(10),
+        "top_correctness_failures": correctness_failures.most_common(10),
         "top_behavior_failures": behavior_failures.most_common(10),
         "top_environment_failures": environment_failures.most_common(10),
         "top_judge_failures": judge_failures.most_common(10),
@@ -208,6 +233,8 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
     ]
     if stats['behavior_tested'] > 0:
         lines.append(f"  Behavior validation: {stats['behavior_passed']}/{stats['behavior_tested']} ({stats['behavior_pass_rate']*100:.1f}%)")
+    if stats['correctness_tested'] > 0:
+        lines.append(f"  Correctness assertions: {stats['correctness_passed']}/{stats['correctness_tested']} ({stats['correctness_pass_rate']*100:.1f}%)")
     if stats['environment_tested'] > 0:
         lines.append(
             f"  Environment validation: {stats['environment_passed']}/{stats['environment_tested']} ({stats['environment_pass_rate']*100:.1f}%)"
@@ -234,6 +261,9 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
         if bucket["behavior_tested"] > 0:
             beh_pct = bucket["behavior_pass_rate"] * 100
             line += f" [behavior: {bucket['behavior_passed']}/{bucket['behavior_tested']} ({beh_pct:.1f}%)]"
+        if bucket["correctness_tested"] > 0:
+            corr_pct = bucket["correctness_pass_rate"] * 100
+            line += f" [correctness: {bucket['correctness_passed']}/{bucket['correctness_tested']} ({corr_pct:.1f}%)]"
         if bucket["environment_tested"] > 0:
             env_pct = bucket["environment_pass_rate"] * 100
             line += f" [environment: {bucket['environment_passed']}/{bucket['environment_tested']} ({env_pct:.1f}%)]"
@@ -251,6 +281,10 @@ def console_summary(records: Sequence[EvaluationRecord]) -> str:
     if stats["top_behavior_failures"]:
         lines.append("Top behavior failure reasons:")
         for reason, count in stats["top_behavior_failures"]:
+            lines.append(f"  - {count}× {reason}")
+    if stats["top_correctness_failures"]:
+        lines.append("Top correctness failure reasons:")
+        for reason, count in stats["top_correctness_failures"]:
             lines.append(f"  - {count}× {reason}")
     if stats["top_environment_failures"]:
         lines.append("Top environment failure reasons:")
@@ -282,22 +316,23 @@ def record_to_dict(record: EvaluationRecord) -> Dict[str, Any]:
     behavior = record.behavior.to_dict() if record.behavior else None
     environment = record.environment.to_dict() if record.environment else None
     judge = record.judge.to_dict() if record.judge else None
+    correctness = record.correctness.to_dict() if record.correctness else None
     return {
         "case_id": record.case.case_id,
         "question": record.case.question,
         "tags": record.case.tags,
-        "expected_tools": record.case.expected_tools,
-        "acceptable_tools": record.case.acceptable_tools,
         "response_text": record.response_text,
         "latency_s": record.latency_s,
         "passed": record.passed,
         "schema_passed": record.schema_passed,
+        "correctness_passed": record.correctness.passed if record.correctness else None,
         "behavior_passed": record.behavior_passed,
         "environment_passed": record.environment.passed if record.environment else None,
         "judge_passed": record.judge.passed if record.judge else None,
         "score": record.score,
         "error": record.error,
         "validator": validator,
+        "correctness": correctness,
         "behavior": behavior,
         "environment": environment,
         "judge": judge,

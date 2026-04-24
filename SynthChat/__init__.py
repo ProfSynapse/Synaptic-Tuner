@@ -19,8 +19,10 @@ Components:
     - services/: Validators, scope handlers, parsing
 """
 
-from .engine import ImprovementEngine, ImprovementResult
-from .generator import SynthChatGenerator, ScenarioLoader, GenerationResult
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
 
 __version__ = "1.0.0"
 
@@ -31,3 +33,13 @@ __all__ = [
     "ScenarioLoader",
     "GenerationResult",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in {"ImprovementEngine", "ImprovementResult"}:
+        module = import_module(".engine", __name__)
+        return getattr(module, name)
+    if name in {"SynthChatGenerator", "ScenarioLoader", "GenerationResult"}:
+        module = import_module(".generator", __name__)
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

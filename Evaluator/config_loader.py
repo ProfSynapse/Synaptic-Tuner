@@ -214,9 +214,9 @@ class ConfigLoader:
     ) -> PromptCase:
         """Convert a single test definition to a PromptCase.
 
-        Supports two formats:
-        1. Migrated JSON format: expected_tools, acceptable_tools, system directly on test
-        2. New YAML format: nested under 'expect' key
+        Supports the assertion-driven YAML format. Correctness is configured
+        through the test's ``correct`` block and evaluated generically by the
+        runner.
 
         Args:
             test: Test definition from YAML
@@ -225,36 +225,13 @@ class ConfigLoader:
         Returns:
             PromptCase object
         """
-        expect = test.get("expect", {})
-
-        # Build expected_tools - check both formats
-        expected_tools: List[str] = []
-        if test.get("expected_tools"):
-            # Migrated JSON format
-            expected_tools = test["expected_tools"]
-        elif "tool" in expect:
-            # New YAML format
-            expected_tools = [expect["tool"]]
-
-        # Build acceptable_tools - check both formats
-        acceptable_tools: List[str] = []
-        if test.get("acceptable_tools"):
-            # Migrated JSON format
-            acceptable_tools = test["acceptable_tools"]
-        elif "acceptable" in expect:
-            # New YAML format
-            for option in expect["acceptable"]:
-                if "tool" in option:
-                    acceptable_tools.append(option["tool"])
-                if "pseudo_tool" in option and option["pseudo_tool"] == "TEXT_ONLY":
-                    acceptable_tools.append("TEXT_ONLY")
-
-        # Also check first_tool_any_of for acceptable tools
-        if "first_tool_any_of" in expect:
-            acceptable_tools.extend(expect["first_tool_any_of"])
-
         # Build metadata
         metadata: Dict[str, Any] = {}
+        if isinstance(test.get("correct"), dict):
+            metadata["correct"] = test["correct"]
+        if isinstance(test.get("messages"), list):
+            metadata["messages"] = test["messages"]
+        metadata["config_dir"] = str(self.config_dir)
 
         # Add system prompt - check direct field first, then template
         if test.get("system"):
@@ -271,21 +248,6 @@ class ConfigLoader:
             if template_name:
                 system_prompt = self._render_template(template_name, test, defaults)
                 metadata["system"] = system_prompt
-
-        # Add behavior expectations - check both formats
-        behaviors = test.get("behavior_expectations") or test.get("behaviors", defaults.get("behaviors", []))
-        if behaviors:
-            metadata["behavior_expectations"] = behaviors
-
-        # Add response type expectation - check both formats
-        response_type = test.get("expected_response_type") or expect.get("response_type") or defaults.get("response_type")
-        if response_type:
-            metadata["expected_response_type"] = response_type
-
-        # Add anti-patterns from migrated format
-        anti_patterns = test.get("anti_patterns") or test.get("anti_patterns_to_avoid")
-        if anti_patterns:
-            metadata["anti_patterns_to_avoid"] = anti_patterns
 
         # Add expected context for ID validation
         if test.get("expected_context"):
@@ -306,24 +268,10 @@ class ConfigLoader:
         if scoring_cfg:
             metadata["scoring"] = scoring_cfg
 
-        # Add params expectations for validation
-        if "params_include" in expect:
-            metadata["expected_params"] = expect["params_include"]
-
-        # Add sequence expectations
-        if "first_tool" in expect:
-            metadata["first_tool"] = expect["first_tool"]
-        if "first_tool_any_of" in expect:
-            metadata["first_tool_any_of"] = expect["first_tool_any_of"]
-        if "not_first" in expect:
-            metadata["not_first"] = expect["not_first"]
-
         return PromptCase(
             case_id=test.get("id", ""),
-            question=test.get("question", ""),
+            question=test.get("question", _question_from_messages(test.get("messages", []))),
             tags=test.get("tags", []),
-            expected_tools=expected_tools,
-            acceptable_tools=list(set(acceptable_tools)),  # Dedupe
             metadata=metadata,
         )
 
@@ -770,3 +718,17 @@ def _expected_context_from_system_context(system_context: Optional[Dict[str, Any
         "workspace_ids": workspace_ids,
         "agent_ids": agent_ids,
     }
+
+
+def _question_from_messages(messages: Any) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role", "")).strip().lower() != "user":
+            continue
+        content = message.get("content")
+        if content is not None:
+            return str(content)
+    return ""
