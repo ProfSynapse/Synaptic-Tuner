@@ -154,7 +154,71 @@ LMSTUDIO_HOST=localhost               # LM Studio host
 LMSTUDIO_PORT=1234                    # LM Studio port
 OLLAMA_HOST=http://localhost:11434    # Ollama endpoint
 HF_TOKEN=hf_...                       # HuggingFace uploads
+OPF_CHECKPOINT=/path/to/privacy-filter-checkpoint   # Local OpenAI Privacy Filter checkpoint
+TIKTOKEN_CACHE_DIR=/path/to/tiktoken-cache          # Local tiktoken cache for OPF
+VLLM_HOST=127.0.0.1                  # Optional OpenAI-compatible vLLM polish endpoint
+VLLM_PORT=8000
 ```
+
+## Privacy Setup
+
+Use the privacy preprocess path when raw docs or JSONL may contain PII or secrets and you want SynthChat to sanitize that content before it reaches the generation/improvement model.
+
+Runtime split:
+- `openai/privacy-filter` is the local span-detection/redaction model
+- `opf` is the runtime wrapper used to load and run that model
+- `vllm` is only for the optional post-sanitize `llm_polish` step, not for OPF itself
+
+Profiles live in:
+- `SynthChat/config/privacy_profiles.yaml`
+
+Global defaults live in:
+- `SynthChat/config/settings.yaml` under `privacy_preprocess`
+
+Scenario-level opt-in lives in:
+- `seed_data.preprocess_profile`
+
+Recommended first-use setup when auto-download is unreliable:
+
+```powershell
+python - <<'PY'
+from pathlib import Path
+import shutil
+from huggingface_hub import snapshot_download
+
+target = Path(r"F:\Code\Toolset-Training\tmp\opf_privacy_filter")
+if not target.exists():
+    target.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id="openai/privacy-filter",
+        local_dir=str(target),
+        allow_patterns=["original/*"],
+    )
+    original = target / "original"
+    for path in original.iterdir():
+        shutil.move(str(path), str(target / path.name))
+    original.rmdir()
+print(target)
+PY
+```
+
+OPF also needs the `o200k_base.tiktoken` encoding file. If that does not auto-download cleanly, cache it locally:
+
+```powershell
+New-Item -ItemType Directory -Force -Path F:\Code\Toolset-Training\tmp\tiktoken_cache | Out-Null
+Invoke-WebRequest `
+  -Uri "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" `
+  -OutFile "F:\Code\Toolset-Training\tmp\tiktoken_cache\fb374d419588a4632f3f557e76b4b70aebbca790"
+```
+
+Then set:
+
+```powershell
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+```
+
+Once those are set, the real OPF-backed sanitize flow can run fully from local files.
 
 ## Config-Driven Architecture
 
@@ -188,3 +252,4 @@ To add a new tool-call format, add a named entry to `tool_call_formats.yaml` and
 - If a response-stage retry is driven by environment feedback, each retry round must be judged against a freshly rerun environment result. Do not carry a prior round's environment failure forward into later judgments after the response has changed.
 - For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
 - Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices
+- For privacy smoke tests, prefer the checked-in fixtures under `tests/fixtures/privacy/`, the target manifest `SynthChat/config/targets_privacy_docs_smoke.json`, and the runbook `docs/plans/synthchat-privacy-smoke-runbook.md`

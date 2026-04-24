@@ -113,6 +113,35 @@ cost_tracking:
   include_usage: true
 ```
 
+## Privacy Preprocess Settings
+
+Privacy preprocessing is opt-in. It is intended for sanitizing raw docs or JSONL before that content is shown to a generation/improvement model.
+
+```yaml
+privacy_preprocess:
+  enabled: false
+  profile: null
+  apply_to:
+    docs: true
+    input_jsonl: false
+    generated_output: false
+  on_error: fail                  # fail | skip | keep_masked
+```
+
+Profiles are defined separately in `SynthChat/config/privacy_profiles.yaml`.
+
+Current built-in profiles:
+- `mask_only`
+- `realistic_pseudonyms`
+- `realistic_pseudonyms_vllm_polish`
+
+Operational notes:
+- OPF is the detector runtime, not a chat/completions LLM
+- `generated_output` is optional and should stay off unless you explicitly want output-side sanitization
+- `input_jsonl` applies to `improve` and `validate`
+- `docs` applies to docs-based generation before `{doc_content}` is rendered into prompts
+- OPF needs both a local checkpoint path (`OPF_CHECKPOINT`) and a working `tiktoken` cache (`TIKTOKEN_CACHE_DIR`) if auto-download is not reliable
+
 ---
 
 ## Environment Runtime Validation (Optional)

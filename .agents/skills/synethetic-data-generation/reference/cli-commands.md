@@ -9,6 +9,48 @@ python -m Evaluator.cli [options]                                # Evaluator
 python tuner.py                                                  # Main CLI
 ```
 
+## Privacy Runtime Prereqs
+
+For OPF-backed sanitization, the local runtime needs:
+
+- the `opf` Python package
+- a local `openai/privacy-filter` checkpoint
+- the `o200k_base.tiktoken` encoding cache file
+
+Recommended PowerShell setup when automatic downloads are blocked or flaky:
+
+```powershell
+python - <<'PY'
+from pathlib import Path
+import shutil
+from huggingface_hub import snapshot_download
+
+target = Path(r"F:\Code\Toolset-Training\tmp\opf_privacy_filter")
+if not target.exists():
+    target.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id="openai/privacy-filter",
+        local_dir=str(target),
+        allow_patterns=["original/*"],
+    )
+    original = target / "original"
+    for path in original.iterdir():
+        shutil.move(str(path), str(target / path.name))
+    original.rmdir()
+print(target)
+PY
+
+New-Item -ItemType Directory -Force -Path F:\Code\Toolset-Training\tmp\tiktoken_cache | Out-Null
+Invoke-WebRequest `
+  -Uri "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" `
+  -OutFile "F:\Code\Toolset-Training\tmp\tiktoken_cache\fb374d419588a4632f3f557e76b4b70aebbca790"
+
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+```
+
+If those env vars are already set to valid local paths, `sanitize` / `generate --privacy-profile` / `improve --privacy-profile` / `validate --privacy-profile` will reuse them.
+
 ---
 
 ## `generate` — Create New Dataset
@@ -199,6 +241,14 @@ python -m SynthChat.run sanitize \
 python -m SynthChat.run sanitize \
   -i tests/fixtures/privacy/raw_seed_dataset.jsonl \
   -o tmp/privacy_pseudonyms_dataset.jsonl \
+  --privacy-profile realistic_pseudonyms
+
+# Real OPF-backed docs sanitize using a local checkpoint/tokenizer cache
+$env:OPF_CHECKPOINT="F:\Code\Toolset-Training\tmp\opf_privacy_filter"
+$env:TIKTOKEN_CACHE_DIR="F:\Code\Toolset-Training\tmp\tiktoken_cache"
+python -m SynthChat.run sanitize \
+  -i tests/fixtures/privacy/raw_seed_docs \
+  -o tmp/privacy_pseudonyms_docs \
   --privacy-profile realistic_pseudonyms
 ```
 
