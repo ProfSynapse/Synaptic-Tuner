@@ -596,6 +596,11 @@ class ConfigDrivenValidator:
         content = response.get("content", "")
         tool_calls_raw = response.get("tool_calls", [])
 
+        if not tool_calls_raw and isinstance(content, str):
+            parsed_content = self._parse_string_response(content)
+            parsed_content.raw = str(response)
+            return parsed_content
+
         tool_calls = []
         for tc in tool_calls_raw:
             if isinstance(tc, dict):
@@ -652,10 +657,8 @@ class ConfigDrivenValidator:
                 name = match.group(1)
                 try:
                     args = json.loads(match.group(2))
-                    tool_calls.append(ParsedToolCall(
-                        name=name,
-                        params=args,
-                    ))
+                    parsed = self._expand_tool_call(name, args)
+                    tool_calls.extend(parsed)
                 except json.JSONDecodeError:
                     pass
 

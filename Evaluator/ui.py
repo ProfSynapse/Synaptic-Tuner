@@ -237,7 +237,7 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
                     details.append("(text response)", style="dim")
 
                 # What was expected
-                expected = record.case.expected_tools or record.case.acceptable_tools
+                expected = _expected_for_display(record.case)
                 if expected:
                     details.append("\nExpected: ", style=COLORS['sky'])
                     details.append(f"{', '.join(expected)}", style="green")
@@ -278,6 +278,19 @@ def rich_failure_details(records: Sequence[EvaluationRecord], max_display: int =
             border_style=COLORS['orange'] if record.status == "fail" else "yellow",
             box=box.ROUNDED,
         ))
+
+
+def _expected_for_display(case) -> List[str]:
+    correct = case.metadata.get("correct")
+    if not isinstance(correct, dict):
+        return []
+    paths = correct.get("any") or correct.get("all")
+    if isinstance(paths, list):
+        names = [str(path.get("name")) for path in paths if isinstance(path, dict) and path.get("name")]
+        if names:
+            return names
+    name = correct.get("name")
+    return [str(name)] if name else []
 
     if len(failed) > max_display:
         console.print(f"  [dim]... and {len(failed) - max_display} more failures[/dim]\n")

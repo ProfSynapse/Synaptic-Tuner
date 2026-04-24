@@ -1,0 +1,17 @@
+name: Assertion Smoke
+tests:
+  - id: clarify_without_tool
+    tags: [behavior]
+    messages:
+      - role: system
+        content: Ask for missing details before acting.
+      - role: user
+        content: Update that file.
+    correct:
+      any:
+        - name: clarifies
+          assertions:
+            - type: jsonpath_absent
+              path: $.tool_calls[0]
+            - type: text_regex
+              pattern: '(?i)(which|what|clarify|specify)'

@@ -16,12 +16,23 @@ class PromptCase:
     case_id: str
     question: str
     tags: List[str] = field(default_factory=list)
-    expected_tools: List[str] = field(default_factory=list)
-    acceptable_tools: List[str] = field(default_factory=list)  # OR logic - any of these is valid
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def chat_messages(self) -> List[Dict[str, str]]:
         """Return ChatML-style messages for this test case."""
+        configured_messages = self.metadata.get("messages")
+        if isinstance(configured_messages, list) and configured_messages:
+            messages = []
+            for message in configured_messages:
+                if not isinstance(message, Mapping):
+                    continue
+                role = str(message.get("role", "")).strip()
+                content = message.get("content")
+                if role and content is not None:
+                    messages.append({"role": role, "content": str(content)})
+            if messages:
+                return messages
+
         system_prompt = self.metadata.get("system")
         messages: List[Dict[str, str]] = []
         if isinstance(system_prompt, str) and system_prompt.strip():
@@ -60,11 +71,8 @@ def _build_case(idx: int, payload: Mapping[str, Any]) -> PromptCase:
 
     case_id = payload.get("id") or f"case_{idx + 1:04d}"
     tags = _string_list(payload.get("tags", []))
-    expected = _string_list(payload.get("expected_tools", []))
-    acceptable = _string_list(payload.get("acceptable_tools", []))
-
-    metadata = {k: v for k, v in payload.items() if k not in {"id", "question", "prompt", "tags", "expected_tools", "acceptable_tools"}}
-    return PromptCase(case_id=case_id, question=question.strip(), tags=tags, expected_tools=expected, acceptable_tools=acceptable, metadata=metadata)
+    metadata = {k: v for k, v in payload.items() if k not in {"id", "question", "prompt", "tags"}}
+    return PromptCase(case_id=case_id, question=question.strip(), tags=tags, metadata=metadata)
 
 
 def _string_list(value: Any) -> List[str]:
@@ -73,7 +81,7 @@ def _string_list(value: Any) -> List[str]:
     if isinstance(value, str):
         return [value]
     if not isinstance(value, Iterable):
-        raise ValueError("tags/expected_tools must be strings or iterable of strings")
+        raise ValueError("tags must be strings or iterable of strings")
     result = []
     for entry in value:
         if isinstance(entry, str):
@@ -81,7 +89,7 @@ def _string_list(value: Any) -> List[str]:
             if clean:
                 result.append(clean)
         else:
-            raise ValueError("tags/expected_tools entries must be strings")
+            raise ValueError("tags entries must be strings")
     return result
 
 

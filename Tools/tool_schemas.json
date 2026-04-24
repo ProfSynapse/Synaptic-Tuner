@@ -1,0 +1,70 @@
+{
+    "useTools":  {
+                     "tool_name":  "useTools",
+                     "agent":  "wrapper",
+                     "mode":  "useTools",
+                     "description":  "CLI-first wrapper tool call. Validate the wrapper fields here; validate available CLI commands against the root tool-schemas.json catalog.",
+                     "parameters":  [
+                                        {
+                                            "name":  "workspaceId",
+                                            "optional":  false,
+                                            "type":  "string",
+                                            "description":  "Current workspace id."
+                                        },
+                                        {
+                                            "name":  "sessionId",
+                                            "optional":  false,
+                                            "type":  "string",
+                                            "description":  "Current session id."
+                                        },
+                                        {
+                                            "name":  "memory",
+                                            "optional":  false,
+                                            "type":  "string",
+                                            "description":  "Relevant session memory for this action."
+                                        },
+                                        {
+                                            "name":  "goal",
+                                            "optional":  false,
+                                            "type":  "string",
+                                            "description":  "Immediate goal for the command batch."
+                                        },
+                                        {
+                                            "name":  "tool",
+                                            "optional":  false,
+                                            "type":  "string",
+                                            "description":  "Comma-separated CLI command string."
+                                        },
+                                        {
+                                            "name":  "constraints",
+                                            "optional":  true,
+                                            "type":  "string",
+                                            "description":  "Optional safety or scope constraints."
+                                        },
+                                        {
+                                            "name":  "strategy",
+                                            "optional":  true,
+                                            "type":  "string",
+                                            "description":  "Optional execution strategy for batched CLI commands (serial or parallel)."
+                                        }
+                                    ],
+                     "required_params":  [
+                                             "workspaceId",
+                                             "sessionId",
+                                             "memory",
+                                             "goal",
+                                             "tool"
+                                         ],
+                     "context_schema":  null,
+                     "wrapper":  {
+                                     "cli_field":  "tool",
+                                     "separator":  ",",
+                                     "quoting":  "shell",
+                                     "valid_strategies":  [
+                                                              "serial",
+                                                              "parallel"
+                                                          ],
+                                     "cli_schema_source":  "tool-schemas.json"
+                                 }
+                 }
+}

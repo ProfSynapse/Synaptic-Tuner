@@ -16,7 +16,7 @@ class _FakeClient:
         return BackendResponse(message=self._message, raw={"message": self._message}, latency_s=0.1)
 
 
-def test_scoring_prefers_multi_step_path_over_acceptable_direct_path():
+def test_scoring_prefers_higher_scoring_configured_path():
     response = {
         "tool_calls": [
             {
@@ -25,29 +25,16 @@ def test_scoring_prefers_multi_step_path_over_acceptable_direct_path():
                     "name": "useTools",
                     "arguments": json.dumps(
                         {
-                            "context": {
-                                "sessionId": "session_1732300800000_eval01234",
-                                "workspaceId": "ws_1732300800000_atlasroll",
-                                "memory": "Need to locate the template before writing.",
-                                "goal": "Create the note using the discovered format.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "searchManager",
-                                    "tool": "searchDirectory",
-                                    "params": {"query": "daily note template", "paths": ["Templates/"]},
-                                },
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "read",
-                                    "params": {"path": "Templates/daily-note.md", "startLine": 1},
-                                },
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "write",
-                                    "params": {"path": "Journal/Daily/2026-03-15.md", "content": "---\ntype: daily\n---"},
-                                },
-                            ],
+                            "sessionId": "session_1732300800000_eval01234",
+                            "workspaceId": "ws_1732300800000_atlasroll",
+                            "memory": "Need to locate the template before writing.",
+                            "goal": "Create the note using the discovered format.",
+                            "constraints": "Use the CLI wrapper.",
+                            "tool": (
+                                'search search-directory "daily note template" --paths "Templates/", '
+                                'content read "Templates/daily-note.md" 1, '
+                                'content write "Journal/Daily/2026-03-15.md" "---\\ntype: daily\\n---"'
+                            ),
                         }
                     ),
                 },
@@ -58,36 +45,46 @@ def test_scoring_prefers_multi_step_path_over_acceptable_direct_path():
     case = PromptCase(
         case_id="score_path_case",
         question="Create today's daily note using the vault template.",
-        acceptable_tools=["searchManager_searchDirectory", "contentManager_read", "contentManager_write"],
         metadata={
+            "correct": {
+                "any": [
+                    {
+                        "name": "template_cli",
+                        "assertions": [
+                            {
+                                "type": "jsonpath_regex",
+                                "path": "$.tool_calls[0].function.arguments.tool",
+                                "pattern": r"search search-directory.*content read.*content write",
+                            }
+                        ],
+                    }
+                ]
+            },
             "scoring": {
                 "paths": [
                     {
-                        "name": "template-driven",
+                        "name": "wrapper-path",
                         "tier": "preferred",
                         "score": 1.0,
-                        "ordered_tools": [
-                            "searchManager_searchDirectory",
-                            "contentManager_read",
-                            "contentManager_write",
-                        ],
+                        "all_tools": ["useTools"],
                     },
                     {
-                        "name": "direct-write",
+                        "name": "impossible-path",
                         "tier": "acceptable",
                         "score": 0.5,
-                        "all_tools": ["contentManager_write"],
+                        "min_tool_calls": 2,
                     },
                 ]
-            }
+            },
         },
     )
 
     records = evaluate_cases([case], client=_FakeClient(response))
     record = records[0]
 
+    assert record.status == "pass"
     assert record.scoring is not None
-    assert record.scoring.matched_path == "template-driven"
+    assert record.scoring.matched_path == "wrapper-path"
     assert record.scoring.matched_tier == "preferred"
     assert record.scoring.awarded_score == 1.0
     assert record.scoring.normalized_score == 1.0
@@ -98,7 +95,7 @@ def test_scoring_prefers_multi_step_path_over_acceptable_direct_path():
     assert stats["normalized_score"] == 1.0
 
 
-def test_scoring_falls_back_to_lower_acceptable_path():
+def test_scoring_falls_back_to_lower_configured_path():
     response = {
         "tool_calls": [
             {
@@ -107,19 +104,12 @@ def test_scoring_falls_back_to_lower_acceptable_path():
                     "name": "useTools",
                     "arguments": json.dumps(
                         {
-                            "context": {
-                                "sessionId": "session_1732300800000_eval01234",
-                                "workspaceId": "ws_1732300800000_atlasroll",
-                                "memory": "Writing directly.",
-                                "goal": "Create the note quickly.",
-                            },
-                            "calls": [
-                                {
-                                    "agent": "contentManager",
-                                    "tool": "write",
-                                    "params": {"path": "Journal/Daily/2026-03-15.md", "content": "plain body"},
-                                }
-                            ],
+                            "sessionId": "session_1732300800000_eval01234",
+                            "workspaceId": "ws_1732300800000_atlasroll",
+                            "memory": "Writing directly.",
+                            "goal": "Create the note quickly.",
+                            "constraints": "Use the CLI wrapper.",
+                            "tool": 'content write "Journal/Daily/2026-03-15.md" "plain body"',
                         }
                     ),
                 },
@@ -130,36 +120,46 @@ def test_scoring_falls_back_to_lower_acceptable_path():
     case = PromptCase(
         case_id="score_partial_case",
         question="Create today's daily note.",
-        acceptable_tools=["contentManager_write"],
         metadata={
+            "correct": {
+                "any": [
+                    {
+                        "name": "direct_cli",
+                        "assertions": [
+                            {
+                                "type": "jsonpath_regex",
+                                "path": "$.tool_calls[0].function.arguments.tool",
+                                "pattern": r"^content write",
+                            }
+                        ],
+                    }
+                ]
+            },
             "scoring": {
                 "paths": [
                     {
-                        "name": "template-driven",
+                        "name": "impossible-path",
                         "tier": "preferred",
                         "score": 1.0,
-                        "ordered_tools": [
-                            "searchManager_searchDirectory",
-                            "contentManager_read",
-                            "contentManager_write",
-                        ],
+                        "min_tool_calls": 2,
                     },
                     {
-                        "name": "direct-write",
+                        "name": "wrapper-path",
                         "tier": "acceptable",
                         "score": 0.4,
-                        "all_tools": ["contentManager_write"],
+                        "all_tools": ["useTools"],
                     },
                 ]
-            }
+            },
         },
     )
 
     records = evaluate_cases([case], client=_FakeClient(response))
     record = records[0]
 
+    assert record.status == "pass"
     assert record.scoring is not None
-    assert record.scoring.matched_path == "direct-write"
+    assert record.scoring.matched_path == "wrapper-path"
     assert record.scoring.matched_tier == "acceptable"
     assert record.scoring.awarded_score == 0.4
     assert record.scoring.normalized_score == 0.4

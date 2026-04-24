@@ -1,7 +1,7 @@
 """Evaluator module for testing tool-calling LLMs.
 
 This module provides a complete evaluation harness for testing models
-against prompt sets and validating their tool-calling behavior.
+against prompt sets and validating configured correctness assertions.
 
 Example usage:
     from Evaluator import create_client, evaluate_cases, load_prompt_cases
@@ -45,13 +45,8 @@ from .config import (
 from .prompt_sets import PromptCase, filter_prompts, load_prompt_cases
 
 # Validation
+from .assertions import CorrectnessResult, evaluate_correctness
 from .schema_validator import ValidationResult, validate_assistant_response
-from .behavior_validator import (
-    BehaviorIssue,
-    BehaviorValidationResult,
-    detect_response_type,
-    validate_behavior,
-)
 from .rubric_validator import (
     RubricValidator,
     RubricValidationResult,
@@ -112,10 +107,8 @@ __all__ = [
     # Validation
     "ValidationResult",
     "validate_assistant_response",
-    "BehaviorIssue",
-    "BehaviorValidationResult",
-    "detect_response_type",
-    "validate_behavior",
+    "CorrectnessResult",
+    "evaluate_correctness",
     # Rubric validation (SynthChat integration)
     "RubricValidator",
     "RubricValidationResult",

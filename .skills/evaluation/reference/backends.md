@@ -1,6 +1,6 @@
 # Evaluation Backends Reference
 
-How to configure each supported evaluation backend.
+How to configure supported evaluation backends.
 
 ---
 
@@ -8,168 +8,182 @@ How to configure each supported evaluation backend.
 
 | Backend | Use Case | Model Specification |
 |---------|----------|---------------------|
-| **unsloth** | Direct LoRA evaluation | Path to `final_model/` directory |
-| **llamacpp** | Quantized GGUF models | Path to `.gguf` file |
-| **lmstudio** | Local inference server | Model name loaded in LM Studio |
-| **ollama** | Local inference server | Model name in Ollama |
-| **openrouter** | Cloud API | Model ID (e.g., `qwen/qwen-2.5-72b`) |
-| **mlc** | Browser-based WebLLM | Path to MLC model |
+| `vllm` | Dedicated local/server inference for OpenAI-compatible chat completions | Served model name |
+| `lmstudio` | Local LM Studio server | Model name loaded in LM Studio |
+| `ollama` | Local Ollama server | Ollama model name |
+| `unsloth` | Direct LoRA evaluation | Path to `final_model/` directory |
+| `llamacpp` | Quantized GGUF models | Path to `.gguf` file |
+| `openrouter` | Cloud API | Provider model id |
+| `mlc` | Browser/WebLLM evaluation | MLC model path |
 
 ---
 
-## Backend Configuration
+## vLLM
 
-### Unsloth (Direct LoRA)
+For a local vLLM container exposing an OpenAI-compatible endpoint:
 
-Best for evaluating freshly trained LoRA adapters without a server.
+```bash
+python -m Evaluator.cli \
+  --backend vllm \
+  --model finetuned \
+  --scenario tool_prompts.yaml \
+  --host 127.0.0.1 \
+  --port 8011 \
+  --temperature 0 \
+  --max-tokens 768
+```
+
+Use this for dedicated eval containers and fine-tuned model serving. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions.
+
+---
+
+## LM Studio
+
+```bash
+python -m Evaluator.cli \
+  --backend lmstudio \
+  --model qwen2.5-7b-instruct \
+  --scenario tool_prompts.yaml
+```
+
+Environment variables:
+
+```bash
+LMSTUDIO_HOST=localhost
+LMSTUDIO_PORT=1234
+```
+
+Setup:
+
+1. Start LM Studio.
+2. Load the model.
+3. Start the local server.
+4. Run evaluator.
+
+---
+
+## Ollama
+
+```bash
+python -m Evaluator.cli \
+  --backend ollama \
+  --model qwen2.5:7b-instruct \
+  --scenario tool_prompts.yaml
+```
+
+Environment variables:
+
+```bash
+OLLAMA_HOST=127.0.0.1
+OLLAMA_PORT=11434
+```
+
+---
+
+## Unsloth
+
+Best for evaluating a saved LoRA adapter directly without a separate server.
 
 ```bash
 python -m Evaluator.cli \
   --backend unsloth \
-  --model ./Trainers/sft/sft_output/TIMESTAMP/final_model
+  --model ./Trainers/sft/sft_output/TIMESTAMP/final_model \
+  --scenario tool_prompts.yaml
 ```
 
-**Requirements:**
-- GPU with Unsloth installed
-- Loads base model + merges LoRA in memory
+Requirements:
+
+- GPU runtime with Unsloth installed.
+- Model path points at a compatible saved model/adaptor directory.
 
 ---
 
-### llama.cpp (GGUF)
+## llama.cpp
 
 For evaluating quantized GGUF models.
 
 ```bash
 python -m Evaluator.cli \
   --backend llamacpp \
-  --model ./path/to/model-Q4_K_M.gguf
+  --model ./path/to/model-Q4_K_M.gguf \
+  --scenario tool_prompts.yaml
 ```
-
-**Requirements:**
-- llama.cpp built locally (`Trainers/llama.cpp/`)
-- `./run.sh` auto-offers to build if missing
 
 ---
 
-### LM Studio
+## OpenRouter
 
-For evaluating models loaded in LM Studio's local server.
-
-```bash
-python -m Evaluator.cli \
-  --backend lmstudio \
-  --model qwen2.5-7b-instruct
-```
-
-**Environment variables:**
-```bash
-LMSTUDIO_HOST=localhost    # Auto-detects Windows host in WSL
-LMSTUDIO_PORT=1234
-```
-
-**Setup:**
-1. Start LM Studio
-2. Load model
-3. Start local server (port 1234)
-4. Run evaluator
-
----
-
-### Ollama
-
-For evaluating Ollama-served models.
-
-```bash
-python -m Evaluator.cli \
-  --backend ollama \
-  --model qwen2.5:7b-instruct
-```
-
-**Environment variables:**
-```bash
-OLLAMA_HOST=127.0.0.1
-OLLAMA_PORT=11434
-```
-
-**Setup:**
-1. `ollama serve` (if not already running)
-2. `ollama pull qwen2.5:7b-instruct`
-3. Run evaluator
-
----
-
-### OpenRouter (Cloud)
-
-For evaluating via OpenRouter's API.
+For cloud-hosted model comparisons.
 
 ```bash
 python -m Evaluator.cli \
   --backend openrouter \
-  --model qwen/qwen-2.5-72b-instruct
+  --model qwen/qwen-2.5-72b-instruct \
+  --scenario tool_prompts.yaml
 ```
 
-**Environment variables:**
+Environment variable:
+
 ```bash
 OPENROUTER_API_KEY=sk-or-...
 ```
 
-**Use case:** Evaluating large models (70B+) that don't fit locally, or baseline comparisons against frontier models.
-
 ---
 
-### MLC (WebLLM)
-
-For browser-based evaluation with WebGPU.
+## MLC / WebLLM
 
 ```bash
 python -m Evaluator.cli \
   --backend mlc \
-  --model path/to/mlc-model
+  --model path/to/mlc-model \
+  --scenario tool_prompts.yaml
 ```
 
 ---
 
-## Auto-Detection
+## Backend Auto-Detection
 
-The backend can sometimes be auto-detected from the model path:
-- Path ending in `.gguf` → `llamacpp`
-- Path to directory with `adapter_config.json` → `unsloth`
-- Otherwise → must specify `--backend`
+The backend can sometimes be inferred from the model path:
+
+- Path ending in `.gguf` -> `llamacpp`
+- Directory with `adapter_config.json` -> `unsloth`
+- Otherwise pass `--backend` explicitly.
 
 ---
 
-## Comparison Testing Pattern
+## Comparison Pattern
 
-Evaluate the same scenarios across different backends to compare:
+Run the same scenario file against each model:
 
 ```bash
-# Base model (LM Studio)
-python -m Evaluator.cli --backend lmstudio --model qwen2.5-7b-instruct \
-  --scenario behavior_prompts.yaml --output Evaluator/results/base.json
+python -m Evaluator.cli --backend vllm --model base \
+  --scenario tool_prompts.yaml \
+  --output Evaluator/results/base_tools.json
 
-# Fine-tuned LoRA (Unsloth)
-python -m Evaluator.cli --backend unsloth --model path/to/lora \
-  --scenario behavior_prompts.yaml --output Evaluator/results/finetuned.json
-
-# GGUF quantized (llama.cpp)
-python -m Evaluator.cli --backend llamacpp --model path/to/model-Q4_K_M.gguf \
-  --scenario behavior_prompts.yaml --output Evaluator/results/gguf.json
+python -m Evaluator.cli --backend vllm --model finetuned \
+  --scenario tool_prompts.yaml \
+  --output Evaluator/results/finetuned_tools.json
 ```
 
-Then compare `pass_rate` across the JSON results.
+Compare `summary.correctness_pass_rate`.
 
 ---
 
-## Environment Runtime Backends (Optional)
+## Environment Runtime Backends
 
-Separate from model inference backend, evaluator can execute tool calls in a runtime:
+Environment runtime is separate from model inference. It can execute or simulate tool calls after response validation:
 
 ```bash
 # Local temp-dir runtime
-python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local
+python -m Evaluator.cli --backend lmstudio --model MODEL \
+  --scenario tool_prompts.yaml \
+  --env-backend local
 
 # E2B sandbox runtime
-python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend e2b --env-template YOUR_TEMPLATE
+python -m Evaluator.cli --backend lmstudio --model MODEL \
+  --scenario tool_prompts.yaml \
+  --env-backend e2b \
+  --env-template YOUR_TEMPLATE
 ```
 
-Use `--env-tool-schema` and `--env-exec-config` to support custom tool names and rules.
+Use `--env-tool-schema` and `--env-exec-config` for custom runtime schemas and execution rules. Keep task correctness in scenario `correct` assertions unless runtime execution is explicitly part of the test.

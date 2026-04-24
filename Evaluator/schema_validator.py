@@ -1,4 +1,4 @@
-"""Wrapper utilities around the dataset validator for single responses."""
+"""Structural validation utilities for single assistant responses."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,80 +20,6 @@ from shared.validation.parsing.tool_call_parser import parse_gemma_tool_calls, i
 class ToolCall:
     name: str
     arguments: Dict[str, Any]
-
-
-def _looks_like_wrapper_call(tool_call: ToolCall) -> bool:
-    """Return True when a tool call wraps delegated calls inside arguments."""
-    if not isinstance(tool_call.arguments, dict):
-        return False
-    calls = tool_call.arguments.get("calls")
-    if not isinstance(calls, list) or not calls:
-        return False
-    return any(
-        isinstance(call, dict) and (call.get("tool") or call.get("name"))
-        for call in calls
-    )
-
-
-def _expand_wrapper_calls(tool_calls: List[ToolCall]) -> List[ToolCall]:
-    """Expand delegated wrapper calls into individual concrete tool calls."""
-    expanded = []
-    for tc in tool_calls:
-        if _looks_like_wrapper_call(tc) and isinstance(tc.arguments, dict):
-            calls = tc.arguments.get("calls", [])
-            added = 0
-            if isinstance(calls, list):
-                for call in calls:
-                    if isinstance(call, dict):
-                        agent = call.get("agent", "")
-                        tool = call.get("tool", "")
-                        params = call.get("params", {})
-                        if agent and tool:
-                            merged_args = dict(params) if isinstance(params, dict) else {}
-                            # Construct full tool name: agent_tool
-                            full_name = f"{agent}_{tool}"
-                            expanded.append(ToolCall(name=full_name, arguments=merged_args))
-                            added += 1
-            # If no valid delegated calls found, keep the original wrapper call.
-            if added == 0:
-                expanded.append(tc)
-        else:
-            # Not a delegated wrapper, keep as-is.
-            expanded.append(tc)
-    return expanded
-
-
-def _filter_wrapper_schema_warnings(
-    issues: List["ValidatorIssue"],
-    raw_tool_calls: List[ToolCall],
-    expanded_tool_calls: List[ToolCall],
-) -> List["ValidatorIssue"]:
-    """Remove wrapper-level schema warnings once delegated calls expand cleanly.
-
-    The lower-level dataset validator validates raw function names before wrapper
-    expansion. For delegated-call wrappers, that can emit a generic "No schema
-    found" warning even when the evaluator successfully expands the response
-    into concrete tool/action names. Keep the concrete scoring signal and drop
-    the wrapper-only warning.
-    """
-    suppress_messages = set()
-    for index, tool_call in enumerate(raw_tool_calls, start=1):
-        if not _looks_like_wrapper_call(tool_call):
-            continue
-        expanded_from_call = _expand_wrapper_calls([tool_call])
-        if not expanded_from_call:
-            continue
-        if len(expanded_from_call) == 1 and expanded_from_call[0].name == tool_call.name:
-            continue
-        suppress_messages.add(f"Tool call #{index} ({tool_call.name}): No schema found for this tool")
-
-    if not suppress_messages:
-        return issues
-
-    return [
-        issue for issue in issues
-        if not (issue.level == "WARN" and issue.message in suppress_messages)
-    ]
 
 
 @dataclass
@@ -237,12 +163,7 @@ def validate_assistant_response(
     else:
         report.add("ERROR", f"Assistant response must be string or dict, got {type(content).__name__}")
 
-    raw_tool_calls = list(tool_calls)
     issues = [ValidatorIssue(level=issue.level, message=issue.message) for issue in report.issues]
-
-    # Expand wrapper calls into concrete tool names before downstream checks.
-    tool_calls = _expand_wrapper_calls(tool_calls)
-    issues = _filter_wrapper_schema_warnings(issues, raw_tool_calls, tool_calls)
 
     # Validate IDs against eval context if provided
     context_validation = None
@@ -272,8 +193,6 @@ def _validate_ids_against_context(
     Returns:
         Dict with validation results
     """
-    valid_agent_ids = eval_context.get("agent_ids", [])
-
     id_expectations: Dict[str, List[Any]] = {}
     for key, value in eval_context.items():
         if not key.endswith("_id"):
@@ -289,16 +208,15 @@ def _validate_ids_against_context(
         if candidates:
             id_expectations[field_name] = candidates
 
-    results = {
-        "agent_id_matches": [],
-        "all_match": True,
-    }
+    results = {"all_match": True}
     for field_name in id_expectations:
         results[f"{field_name}_matches"] = []
 
     for idx, tc in enumerate(tool_calls, 1):
         for field_name, valid_values in id_expectations.items():
             actual_value = tc.arguments.get(field_name)
+            if actual_value is None and isinstance(tc.arguments.get("context"), dict):
+                actual_value = tc.arguments["context"].get(field_name)
             if actual_value is None:
                 continue
             matches = actual_value in valid_values
@@ -314,25 +232,6 @@ def _validate_ids_against_context(
                     level="ERROR",
                     message=f"Tool call #{idx}: {field_name} '{actual_value}' not in context {valid_values}"
                 ))
-
-        # Check agent IDs for promptManager tools
-        if tc.name.startswith("promptManager_") and valid_agent_ids:
-            agent_id = tc.arguments.get("id") or tc.arguments.get("agent")
-            if agent_id and agent_id.startswith("agent_"):
-                matches = agent_id in valid_agent_ids
-                results["agent_id_matches"].append({
-                    "tool_call": idx,
-                    "expected": valid_agent_ids,
-                    "actual": agent_id,
-                    "matches": matches,
-                })
-                if not matches:
-                    # Warn but don't fail for agent IDs (model might create new ones)
-                    issues.append(ValidatorIssue(
-                        level="WARN",
-                        message=f"Tool call #{idx}: agentId '{agent_id}' not in context {valid_agent_ids}"
-                    ))
-
     return results
 
 

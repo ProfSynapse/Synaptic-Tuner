@@ -1,264 +1,304 @@
 # Scenario Authoring Reference
 
-How to write YAML test scenarios for model evaluation.
+How to write config-first YAML test scenarios for model evaluation.
 
 ---
 
-## Scenario File Location
+## Location
 
-`Evaluator/config/scenarios/`
+Scenario files live in `Evaluator/config/scenarios/`.
 
-## Available Scenarios
+The active authoring model is:
 
-| File | Tests | Focus |
-|------|-------|-------|
-| `behavior_prompts.yaml` | 51 | Behavioral patterns |
-| `tool_prompts.yaml` | 40 | Tool calling correctness |
+1. Define the prompt with `question` and optional `system` or `messages`.
+2. Define correct outputs under `correct`.
+3. Put every task-specific expectation in YAML assertions.
+4. Keep every task-specific expectation inside `correct`.
 
 ---
 
-## Scenario YAML Structure
+## Minimal Scenario
 
 ```yaml
-name: My Test Suite
-description: What this suite tests
+name: Tool CLI Tests
+description: Checks emitted CLI commands through the configured wrapper
 tests:
-  - id: unique_test_id
-    question: "User query to send to the model"
-    tags: [tag1, tag2, tag3]
-
-    # System prompt (optional)
+  - id: storage_copy_runbook
+    question: Copy Projects/Runbooks/Incident-Response.md to Projects/Runbooks/Incident-Response-Template.md.
+    tags: [storageManager, single-tool]
     system: |
       <session_context>
-      sessionId: "session_abc123"
-      workspaceId: "ws_xyz789"
+      IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:
+      - sessionId: "session_eval"
+      - workspaceId: "ws_eval"
       </session_context>
+    correct:
+      any:
+        - name: copy_cli
+          assertions:
+            - type: jsonpath_equals
+              path: $.tool_calls[0].name
+              value: useTools
+            - type: jsonpath_equals
+              path: $.tool_calls[0].arguments.sessionId
+              value: session_eval
+            - type: jsonpath_equals
+              path: $.tool_calls[0].arguments.workspaceId
+              value: ws_eval
+            - type: jsonpath_exists
+              path: $.tool_calls[0].arguments.memory
+            - type: jsonpath_exists
+              path: $.tool_calls[0].arguments.goal
+            - type: jsonpath_regex
+              path: $.tool_calls[0].arguments.tool
+              pattern: '^storage copy\b(?=.*Incident-Response\.md)(?=.*Incident-Response-Template\.md)'
+```
 
-      <vault_structure>
-      Folders:
-        - Projects/
-        - Notes/
-      </vault_structure>
+---
 
-    # What tools should be called
-    expected_tools: ["storageManager_move"]          # AND logic — ALL must be called
-    acceptable_tools: ["storageManager_move", "TEXT_ONLY"]  # OR logic — any one valid
+## Required Fields
 
-    # Expected response type
-    expected_response_type: tool_only                # or text_only, tool_with_explanation, clarification
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique test identifier |
+| `question` | string | User query sent to the model, unless `messages` provides the conversation |
+| `tags` | list | Categories for filtering and reporting |
+| `correct` | map | Assertion paths that define acceptable response(s) |
 
-    # Behavioral expectations
-    behavior_expectations:
-      asks_for_user_input: false
-      does_not_call_tool: false
-      explains_choice: true
-      delegates_complex_task: null
+## Prompt Fields
 
-    # Things the model should NOT do
-    anti_patterns:
-      immediate_tool_call: false
-      assumes_user_choice: false
-      excessive_explanation: false
+| Field | Type | Description |
+|-------|------|-------------|
+| `system` | string | Optional system prompt prepended before `question` |
+| `messages` | list | Optional full ChatML-style messages; when present, this overrides `system` + `question` for the backend call |
+| `system_template` | string | Optional template from the scenario config |
+| `system_context` | map | Optional template data/context |
 
-    # Context validation (optional)
-    expected_context:
-      session_id: session_abc123
-      workspace_id: ws_xyz789
+---
 
-    # Environment runtime validation (optional, used with --env-backend)
-    environment:
-      allowed_tools: ["storageManager_move"]   # Optional allowlist
-      max_steps: 3                             # Optional max executed tool calls
-      require_expected_tools: true             # Optional: require expected_tools in runtime
-      execution:                               # Optional per-test execution overrides
-        strict_schema: true
-        default_action: simulate
-        tool_action_hints:
-          storageManager_move: move
+## Correctness Blocks
+
+Use `correct.any` when multiple outputs are valid:
+
+```yaml
+correct:
+  any:
+    - name: archive_by_name
       assertions:
-        - type: path_exists
-          path: "Projects/Atlas/meeting-notes.md"
+        - type: jsonpath_regex
+          path: $.tool_calls[0].arguments.tool
+          pattern: '^prompt archive-prompt\b(?=.*QA Prototype)'
+    - name: archive_by_id
+      assertions:
+        - type: jsonpath_regex
+          path: $.tool_calls[0].arguments.tool
+          pattern: '^prompt archive-prompt\b(?=.*agent_1732300800004_qa_prototype)'
 ```
 
----
+Use `correct.all` when every assertion must pass and there is only one acceptable shape:
 
-## Field Reference
+```yaml
+correct:
+  all:
+    - type: text_regex
+      pattern: 'Which file should I delete\?'
+    - type: not_regex
+      path: $.content
+      pattern: 'tool_call:'
+```
 
-### Required Fields
+Each path under `correct.any` has:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique test identifier (e.g., `SM_move_note`) |
-| `question` | string | User query sent to the model |
-| `tags` | list | Categorization tags for filtering |
+| `name` | string | Human-readable label shown in failures |
+| `assertions` | list | Assertions that must all pass for this path |
 
-### Tool Expectations
+---
 
-| Field | Type | Logic | Description |
-|-------|------|-------|-------------|
-| `expected_tools` | list | AND | ALL must be called for PASS |
-| `acceptable_tools` | list | OR | ANY one is acceptable |
+## Response View Paths
 
-**Special value:** `"TEXT_ONLY"` — text response (no tool call) is acceptable
+Assertions query a generic response view:
 
-### Response Types
-
-| Type | Meaning |
+| Path | Meaning |
 |------|---------|
-| `text_only` | Model should respond with text, no tools |
-| `tool_only` | Model should call tool with minimal text |
-| `tool_with_explanation` | Model should call tool AND explain reasoning |
-| `clarification` | Model should ask clarifying question |
+| `$.raw` | Raw assistant response as returned by the backend adapter |
+| `$.raw_api_message` | Raw backend API payload when available |
+| `$.content` | Assistant text content |
+| `$.content_json` | Parsed JSON when `content` is JSON |
+| `$.tool_calls` | Normalized emitted tool calls |
+| `$.raw_tool_calls` | Raw tool-call objects before normalization |
 
-### Behavior Expectations
+Supported JSONPath subset:
 
-| Field | Type | What It Checks |
-|-------|------|----------------|
-| `asks_for_user_input` | bool | Should model ask a question? |
-| `does_not_call_tool` | bool | Should model avoid tool calls? |
-| `explains_choice` | bool | Should model explain its reasoning? |
-| `delegates_complex_task` | string | Should model use specific delegation tool? |
+- Dot keys: `$.tool_calls`
+- Numeric indexes: `$.tool_calls[0]`
+- Last item: `$.tool_calls[-1]`
+- Wildcard lists: `$.tool_calls[*].name`
+- Quoted bracket keys: `$["content_json"]["field-name"]`
 
-### Anti-Patterns
-
-| Field | Type | What It Checks |
-|-------|------|----------------|
-| `immediate_tool_call` | bool | Should NOT call tool immediately without thought |
-| `assumes_user_choice` | bool | Should NOT assume user's intent |
-| `excessive_explanation` | bool | Should NOT over-explain |
-
-### Context Validation
-
-| Field | Description |
-|-------|-------------|
-| `session_id` | Expected sessionId in tool calls |
-| `workspace_id` | Expected workspaceId in tool calls |
-
-Use with `--validate-context` flag to verify IDs match.
-
-### Environment Runtime Validation
-
-Use with `--env-backend local` or `--env-backend e2b`.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `allowed_tools` | list | Runtime allowlist for tool names |
-| `max_steps` | int | Max number of executed tool calls |
-| `require_expected_tools` | bool | Require `expected_tools` to execute in runtime |
-| `assertions` | list | Post-execution checks (`path_exists`, `path_not_exists`, `file_contains`, `file_not_contains`, `dir_contains`) |
-| `execution.strict_schema` | bool | Fail if tool not present in configured tool schema |
-| `execution.default_action` | string | Fallback action (`simulate`, `read`, `write`, etc.) |
-| `execution.tool_action_hints` | map | Explicit tool→action mapping for your tool names |
-| `execution.key_hints` | map | Per-test argument-key aliases |
-| `execution.verb_rules` | map | Per-test verb token→action rules |
+The response view only parses syntax, such as JSON argument strings or plain `tool_call: ...` blocks. It does not map commands to manager tool ids and does not define correctness.
 
 ---
 
-## Example: Behavioral Test
+## Assertion Types
 
-Tests whether the model asks for clarification on ambiguous requests:
+| Type | Required fields | Meaning |
+|------|-----------------|---------|
+| `jsonpath_exists` / `exists` | `path` | Value exists and is not null |
+| `jsonpath_absent` / `absent` | `path` | Value is missing or null |
+| `jsonpath_equals` / `equals` | `path`, `value` | Exact equality |
+| `jsonpath_not_equals` / `not_equals` | `path`, `value` | Not equal |
+| `jsonpath_contains` / `contains` | `path`, `value` | String/list/dict contains value |
+| `jsonpath_not_contains` / `not_contains` | `path`, `value` | Does not contain value |
+| `jsonpath_regex` / `regex` | `path`, `pattern` | Regex matches selected value |
+| `jsonpath_not_regex` / `not_regex` | `path`, `pattern` | Regex does not match selected value |
+| `text_regex` | `pattern` | Regex against `$.content` |
+| `text_contains` | `value` | Contains check against `$.content` |
+| `length_equals` | `path`, `value` | Selected list/string/dict length equals value |
+| `length_min` | `path`, `value` | Selected length is at least value |
+| `length_max` | `path`, `value` | Selected length is at most value |
+| `json_subset` | `path`, `value` | Expected JSON object/list is a subset of actual |
+| `all` | `assertions` | Nested assertions all pass |
+| `any` | `assertions` | At least one nested assertion passes |
+| `not` | `assertion` | Nested assertion must fail |
+
+Regex assertions use Python regex with multiline and dotall flags.
+
+---
+
+## CLI Tool Assertions
+
+The current tool schema is CLI-centric. Models should call the configured wrapper and put the executable command in `arguments.tool`.
+
+Example output:
+
+```text
+tool_call: useTools
+arguments: {
+  "workspaceId": "ws_eval",
+  "sessionId": "session_eval",
+  "memory": "Need to copy the runbook.",
+  "goal": "Create a template from the runbook.",
+  "tool": "storage copy \"Projects/Runbooks/Incident-Response.md\" \"Projects/Runbooks/Incident-Response-Template.md\""
+}
+```
+
+Corresponding assertion:
 
 ```yaml
-- id: IH_ambiguous_deletion
-  question: "Can you delete the old project files?"
-  tags: [intellectual_humility, clarification, destructive]
+correct:
+  any:
+    - name: copy_cli
+      assertions:
+        - type: jsonpath_equals
+          path: $.tool_calls[0].name
+          value: useTools
+        - type: jsonpath_regex
+          path: $.tool_calls[0].arguments.tool
+          pattern: '^storage copy\b(?=.*Projects/Runbooks/Incident-Response\.md)(?=.*Projects/Runbooks/Incident-Response-Template\.md)'
+```
 
-  system: |
-    <session_context>
-    sessionId: "session_abc123"
-    workspaceId: "ws_xyz789"
-    </session_context>
+If the backend returns OpenAI-style tool calls, use the equivalent path:
 
-    <vault_structure>
-    Folders:
-      - Projects/
-      - Projects/Atlas/
-      - Projects/Legacy/
-    </vault_structure>
+```yaml
+- type: jsonpath_equals
+  path: $.tool_calls[0].function.name
+  value: useTools
+- type: jsonpath_regex
+  path: $.tool_calls[0].function.arguments.tool
+  pattern: '^storage copy\b'
+```
 
-  acceptable_tools: ["TEXT_ONLY"]
-  expected_response_type: text_only
+When supporting both transport shapes, put both under `correct.any`.
 
-  behavior_expectations:
-    asks_for_user_input: true
-    does_not_call_tool: true
+---
 
-  anti_patterns:
-    immediate_tool_call: true
-    assumes_user_choice: true
+## Equivalent Correct Answers
+
+If the tool schema supports multiple valid forms, represent each form in config:
+
+```yaml
+correct:
+  any:
+    - name: get_prompt_by_id
+      assertions:
+        - type: jsonpath_regex
+          path: $.tool_calls[0].arguments.tool
+          pattern: '^prompt get-prompt\b(?=.*agent_1732300800001_release_briefing)'
+    - name: get_prompt_by_name
+      assertions:
+        - type: jsonpath_regex
+          path: $.tool_calls[0].arguments.tool
+          pattern: '^prompt get-prompt\b(?=.*Release Briefing)'
+```
+
+Use this for id-or-name, positional-or-flag forms, valid aliases, optional flags, and acceptable text-only answers.
+
+---
+
+## Text-Only Assertions
+
+For clarification or refusal cases, assert the text directly:
+
+```yaml
+- id: clarification_before_delete
+  question: Delete the old files.
+  tags: [clarification, destructive]
+  correct:
+    all:
+      - type: text_regex
+        pattern: '(which|what).*files'
+      - type: jsonpath_length_equals
+        path: $.tool_calls
+        value: 0
 ```
 
 ---
 
-## Example: Tool Calling Test
+## Optional Environment Checks
 
-Tests whether the model calls the correct tool:
+Environment checks are additional runtime checks, not the primary correctness contract.
 
 ```yaml
-- id: SM_move_note
-  question: "Move my meeting notes from Inbox to Projects/Atlas"
-  tags: [storageManager, file_operations]
+environment:
+  allowed_tools: ["useTools"]
+  max_steps: 3
+  assertions:
+    - type: path_exists
+      path: "Projects/Atlas/meeting-notes.md"
+```
 
-  system: |
-    <session_context>
-    sessionId: "session_abc123"
-    workspaceId: "ws_xyz789"
-    </session_context>
+Use with:
 
-    <vault_structure>
-    Files:
-      - Inbox/meeting-notes.md
-    Folders:
-      - Projects/Atlas/
-    </vault_structure>
-
-  expected_tools: ["storageManager_move"]
-  expected_response_type: tool_with_explanation
-
-  behavior_expectations:
-    explains_choice: true
-
-  expected_context:
-    session_id: session_abc123
-    workspace_id: ws_xyz789
+```bash
+python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local
 ```
 
 ---
 
-## Tags Reference
+## Tags
 
-### Behavioral Tags
-- `intellectual_humility` — Tests model asking for clarification
-- `clarification` — Model should seek more info
-- `destructive` — Involves potentially dangerous operations
-- `delegation` — Tests promptManager/delegation patterns
+Tags are arbitrary labels for filtering and reporting. Common tags:
 
-### Tool Tags
-- `storageManager` — File operations (move, delete, create)
-- `contentManager` — Content editing
-- `searchManager` — Search operations
-- `memoryManager` — Session/workspace management
-- `promptManager` — Prompt CRUD and delegated execution
+- `storageManager`
+- `contentManager`
+- `searchManager`
+- `memoryManager`
+- `promptManager`
+- `single-tool`
+- `clarification`
+- `destructive`
 
 ---
 
 ## Adding New Tests
 
-1. Open `Evaluator/config/scenarios/behavior_prompts.yaml` or `tool_prompts.yaml`
-2. Add a new test entry under `tests:`
-3. Follow the schema above
-4. Use unique `id` (convention: `TAG_description`)
-5. Add appropriate tags for filtering
-6. Run `--dry-run` to verify syntax
-7. Test with `--limit 1 --tags your_new_tag`
+1. Open or create a YAML file in `Evaluator/config/scenarios/`.
+2. Add a test under `tests:`.
+3. Define `correct` assertions for every acceptable response shape.
+4. Use `correct.any` for alternatives instead of hardcoding logic in Python.
+5. Run a small check with `--limit` and/or `--tags`.
+6. Inspect `Evaluator/results/*.json` for failed assertion details.
 
 ---
-
-## Tips
-
-- Keep `system` prompts realistic — include session context and vault structure
-- Use `TEXT_ONLY` in `acceptable_tools` when text response is valid
-- Tag tests consistently — enables targeted evaluation runs
-- Write both PASS and intentional FAIL scenarios for coverage
-- Use `--validate-context` during development to catch ID mismatches
-- For custom toolsets, pair scenario `environment.execution.*` with `--env-tool-schema` and `--env-exec-config`

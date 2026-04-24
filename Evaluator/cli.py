@@ -616,6 +616,18 @@ def main(argv: List[str] | None = None) -> int:
     def format_issue_for_display(message: str) -> str | None:
         return simplify_issue_message(message, display_config)
 
+    def expected_for_display(case) -> List[str]:
+        correct = case.metadata.get("correct")
+        if not isinstance(correct, dict):
+            return []
+        paths = correct.get("any") or correct.get("all")
+        if isinstance(paths, list):
+            names = [str(path.get("name")) for path in paths if isinstance(path, dict) and path.get("name")]
+            if names:
+                return names
+        name = correct.get("name")
+        return [str(name)] if name else []
+
     progress_writer = None
     if args.progress_jsonl:
         progress_writer = CloudEvaluationProgressWriter(
@@ -803,7 +815,7 @@ def main(argv: List[str] | None = None) -> int:
                     print(f"         {lbl_called}: {lbl_no_tool}")
 
                 if status == "fail":
-                    expected = record.case.expected_tools or record.case.acceptable_tools
+                    expected = expected_for_display(record.case)
                     if expected:
                         print(f"         {lbl_expected}: {', '.join(expected)}")
 

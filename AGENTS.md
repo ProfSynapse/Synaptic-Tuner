@@ -15,6 +15,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
 ## Config-First Generation Discipline
 
 - This repo is format-agnostic. Do not treat the current tool wrapper, CLI shape, or toy dataset format as a runtime truth.
+- For generation and evaluation tasks, do not change runtime code to support one user's current tool schema, wrapper, commands, examples, or dataset shape. Use config, scenario YAML, rubric YAML, schema files, or checked-in declarative config instead.
+- Only change parser, executor, judge, evaluator, or generation code when the project is intentionally adding a reusable runtime capability that cannot be expressed by existing config surfaces. If that is necessary, stop first and explain why config is insufficient.
 - Do not hardcode any current dataset/example format into parser, executor, judge, evaluator, or generation code.
 - Tool-call shapes, wrapper names, context fields, command examples, and dataset-specific assumptions must live in config or scenario/rubric YAML, not in code.
 - If a generation/eval bug appears to be specific to the current CLI/tool wrapper, the first fix path is config, rubric, or scenario work, not runtime code changes.
