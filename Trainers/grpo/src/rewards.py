@@ -686,6 +686,9 @@ def build_combined_reward_function(
                 if rubric_type == "fitness_evaluator":
                     fitness_config_path = rubric.config.get("config_path")
                     func = build_fitness_reward(config_path=fitness_config_path)
+                elif rubric_type == "judge_rubric":
+                    from .judge_reward import build_judge_rubric_reward
+                    func = build_judge_rubric_reward(rubric.config, base_dir)
                 else:
                     func = build_rubric_reward(rubric)
                 components.append((name, weight, func))

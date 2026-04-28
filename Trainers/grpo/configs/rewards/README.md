@@ -15,9 +15,13 @@ rewards/
 
 ## How It Works
 
-1. **Schema Reference**: All rubrics reference `tool_schema.yaml` for structure definitions
+1. **Schema Reference**: Rule-based rubrics reference `tool_schema.yaml` for structure definitions
 2. **StructureValidator**: Uses `shared/validation` for extraction and validation
-3. **Deterministic Scoring**: No LLM judge - pure rule-based scoring
+3. **Two scoring paths**:
+   - **Deterministic**: rule-based scoring against ground truth (default — see `args_match.yaml`, `format.yaml`, etc.)
+   - **LLM-judge**: see `judge_rubric.yaml` — opt-in path that scores completions
+     via `shared/judge` for non-verifiable criteria (instruction following,
+     formatting, safety). Used by setting `type: judge_rubric` in the YAML.
 
 ## Adding a New Reward
 
