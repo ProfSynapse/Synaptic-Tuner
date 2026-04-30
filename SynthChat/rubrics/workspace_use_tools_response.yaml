@@ -1,0 +1,125 @@
+name: Workspace useTools Response
+description: Validates and repairs CLI-first useTools responses for workspace multistep rollouts
+scope: response
+pass_threshold: 0.95
+judge_prompt: |
+  Evaluate whether the assistant response is a valid CLI-first useTools response.
+
+  Assistant tool calls:
+  ```text
+  {original_tool_calls}
+  ```
+
+  Response text:
+  ```
+  {current_content}
+  ```
+
+  Environment result, when provided:
+  ```json
+  {environment_result_json}
+  ```
+
+  Score 1.0 only if:
+  - function.name is useTools.
+  - function.arguments is a string containing valid JSON.
+  - that JSON object has workspaceId, sessionId, memory, goal, tool, and strategy.
+  - function.arguments uses straight ASCII double quotes.
+  - the tool value is a CLI command string using only configured workspace CLI commands.
+  - content read commands include a start line, for example content read "path/to/file.md" 1.
+  - environment feedback, when provided, has no missing expected tools or tool runtime errors.
+
+  Score 0.0 for smart quotes, single-quoted pseudo-JSON, non-breaking spaces,
+  markdown backticks in arguments, empty objects, placeholders such as "{...}",
+  direct internal function names, shell commands such as cat/grep/ls, shell
+  chaining such as && or semicolon, or environment feedback showing missing
+  expected tools or content read missing startLine.
+
+  Return a JSON object matching the configured output schema.
+improver_prompt: |
+  Rewrite the assistant response so it is a valid CLI-first useTools assistant message.
+
+  Current assistant response text:
+  ```
+  {current_content}
+  ```
+
+  Current tool calls:
+  ```json
+  {original_tool_calls}
+  ```
+
+  User request:
+  ```
+  {user_request}
+  ```
+
+  Environment issues:
+  ```
+  {environment_issue_summary}
+  ```
+
+  Environment result:
+  ```json
+  {environment_result_json}
+  ```
+
+  Feedback:
+  ```
+  {feedback}
+  ```
+
+  Repair rules:
+  - Return only JSON for the corrected assistant message object.
+  - The top-level object must have content and tool_calls.
+  - Set content to null.
+  - Set tool_calls to an array with exactly one OpenAI-style tool call object.
+  - Do not include role.
+  - Do not include function_call.
+  - Do not wrap the JSON in markdown or explanatory text.
+  - The tool call object must have id, type, and function.
+  - Set type to function.
+  - Set function.name to useTools.
+  - Set function.arguments to a JSON string containing a valid JSON object.
+  - The arguments JSON object must contain workspaceId, sessionId, memory, goal, tool, and strategy.
+  - Use only straight ASCII double quotes inside the JSON string.
+  - Do not use smart quotes, curly quotes, non-breaking spaces, markdown backticks, single-quoted pseudo-JSON, or placeholder arguments.
+  - Choose the next useful CLI command from the user request and environment errors.
+  - Use only configured workspace CLI commands.
+  - Do not use shell commands such as cat, grep, ls, &&, pipes, or semicolons.
+  - Chain commands with commas when serial execution is useful.
+  - For lookup tasks, prefer search content or storage list first.
+  - For answer tasks after finding a likely file, use content read with the path and a numeric start line, for example: content read "docs/status.md" 1.
+  - For edit tasks after finding a likely file, use content replace with old and new content.
+
+  Output only the corrected assistant message object. Do not explain the fix.
+output_schema:
+  type: object
+  properties:
+    workspaceusetoolsresponse_score:
+      type: number
+      min: 0.0
+      max: 1.0
+  required:
+    - workspaceusetoolsresponse_score
+  additionalProperties: false
+output_format:
+  type: assistant_message
+validations:
+  - tools:
+      useTools:
+        _required:
+          - workspaceId
+          - sessionId
+          - memory
+          - goal
+          - tool
+        _additionalProperties: false
+        workspaceId: string
+        sessionId: string
+        memory: string
+        goal: string
+        tool: string
+        constraints: string
+        strategy: string
+    error: "useTools validation failed: {details}"

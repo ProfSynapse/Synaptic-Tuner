@@ -1,0 +1,6 @@
+{
+  "envfs_explore_then_update_note": {
+    "seed_count": 1,
+    "rollouts_per_seed": 1
+  }
+}

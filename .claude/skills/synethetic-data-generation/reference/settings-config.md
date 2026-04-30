@@ -13,11 +13,11 @@ llm:
   # Generation model — creates raw examples. Local models work fine.
   generation:
     provider: openrouter          # openrouter | lmstudio | ollama | unsloth
-    model: openai/gpt-oss-120b
+    model: MODEL_ID
     temperature: 0.7              # Higher = more variety in generated examples
     max_tokens: 4096
     provider_routing:
-      order: ["Groq"]             # Prioritize Groq for generation
+      order: ["PROVIDER_NAME"]    # Optional hosted-provider preference
       allow_fallbacks: true       # Fall back if preferred unavailable
     # LM Studio example:
     # provider: lmstudio
@@ -35,11 +35,11 @@ llm:
   # Improvement model — judge + improver. Needs strong/capable model.
   improvement:
     provider: openrouter
-    model: openai/gpt-oss-120b
+    model: MODEL_ID
     temperature: 0.1              # Low = deterministic judging
     max_tokens: 2048
     provider_routing:             # OpenRouter-specific
-      order: ["Groq"]            # Prioritize fast providers
+      order: ["PROVIDER_NAME"]   # Optional hosted-provider preference
       allow_fallbacks: true      # Fall back if preferred unavailable
 ```
 
@@ -172,21 +172,21 @@ Defines how many examples to generate per scenario when no `--targets-file` is g
 defaults:
   targets:
     # Tool scenarios
-    storageManager_createFolder: 50
-    storageManager_archive: 30
-    storageManager_move: 30
-    storageManager_list: 40
-    contentManager_write: 40
-    contentManager_replace: 20
-    contentManager_setProperty: 10
-    promptManager_executePrompts: 25
+    workspace_create_folder: 50
+    workspace_archive_file: 30
+    workspace_move_file: 30
+    workspace_list_folder: 40
+    workspace_write_note: 40
+    workspace_replace_text: 20
+    workspace_set_property: 10
+    workspace_execute_prompt: 25
 
     # Content writing
-    contentManager_write_research: 50
-    contentManager_write_blog: 50
-    contentManager_write_creative: 40
-    contentManager_write_documentation: 50
-    contentManager_write_journal: 40
+    write_research_note: 50
+    write_blog_note: 50
+    write_creative_note: 40
+    write_documentation_note: 50
+    write_journal_note: 40
 
     # Behavioral
     intellectual_humility: 25

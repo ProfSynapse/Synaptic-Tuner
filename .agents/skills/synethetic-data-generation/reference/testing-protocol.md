@@ -24,6 +24,20 @@ If you are running a smoke test without rubrics/judges, call that out explicitly
 as a plumbing-only test. Do not mistake a wrapper-format smoke pass for a
 quality pass.
 
+For environment-backed multi-turn scenarios, test in this order:
+1. Run `env-generate` for the scenario and inspect stage gates before spending
+   calls on full rollouts.
+2. If the scenario uses stage-specific models, verify the env-generation log
+   shows the configured fixture-authoring model, then verify the full rollout
+   log shows the intended assistant/turn-generation model.
+3. Run a one-scenario smoke from a checked-in targets manifest.
+4. Only then run a multi-scenario smoke or dataset pilot.
+
+When a smoke might take more than a minute, launch it in the background with
+stdout, stderr, JSONL, and debug JSONL paths. Poll the logs early. If the first
+30-60 seconds already show a deterministic gate failure or provider timeout,
+stop and fix the config before burning retries.
+
 For privacy preprocessing changes, the first smoke is usually `sanitize`, not a
 full dataset run. Prove the OPF checkpoint, tokenizer cache, and replacement
 behavior on the checked-in privacy fixtures before you run a larger SynthChat
@@ -127,8 +141,29 @@ This produces a clean Markdown file with:
 - If rubrics/judges are configured, did they actually run and gate the example?
 - If environment validation ran, were its errors visible to the judge/improver
   and reflected in the saved pass/fail outcome?
+- If environment generation failed, distinguish deterministic gate failures
+  from LLM judge hallucinations. Trust schema/placeholder/min-fixture gates for
+  structural validity and narrow or disable an LLM env judge that contradicts
+  normalized JSON.
+- If the generated environment is valid but the rollout fails, do not keep
+  tuning environment prompts. Inspect the assistant turns, tool feedback, and
+  in-loop judge feedback to isolate whether the rollout model missed a tool
+  step, the judge pushed after completion, or final text handling was too
+  strict.
+- If expected command sequences contain stale command surfaces such as shell
+  commands while the trained surface is a configured tool wrapper/CLI, add
+  scenario gates that reject those generated answer keys before the rollout.
+- If an agentic rollout failed after recovery, inspect whether final assertions
+  passed. For recovery datasets, earlier recoverable tool errors can be useful
+  training signal when later actions corrected them.
 - If a scenario unexpectedly skips rubrics/judges, stop and fix the scenario
   config before trusting the output.
+- For multi-turn tool scenarios, confirm the saved conversation represents the
+  full episode rather than a single-response repair artifact.
+- Confirm tool feedback shown to the model uses the configured model-facing
+  tool names, not unrelated executor or implementation identifiers.
+- Confirm successful in-loop judge feedback does not cause another assistant
+  turn after a correct final text answer.
 
 The `jsonl_to_markdown.sh` script also supports line ranges for reviewing subsets of larger files:
 
@@ -178,8 +213,8 @@ Quick dry-run for testing new or modified scenarios:
 # Usage: ./dry_run.sh <scenario_key> [count] [extra_args...]
 # Default count: 3
 
-./scripts/dry_run.sh storageManager_createFolder          # 3 examples
-./scripts/dry_run.sh contentManager_write_blog 5          # 5 examples
+./scripts/dry_run.sh workspace_create_folder              # 3 examples
+./scripts/dry_run.sh workspace_write_note 5               # 5 examples
 ./scripts/dry_run.sh essay_outline 2 --docs "essays/"     # 2 examples, docs-based
 ```
 
@@ -224,6 +259,83 @@ python -m SynthChat.run improve \
   --start-line FAILING_LINE --end-line FAILING_LINE \
   --max-iterations 3
 ```
+
+---
+
+## Raw Artifact Inspection
+
+When an environment-backed generation fails, inspect raw inputs and outputs
+before changing scenarios or rubrics. The important surfaces are:
+
+- generated JSONL row
+- `conversations`
+- `conversation_trace`
+- `metadata.environment`
+- `metadata.environment.episode_trace`
+- `metadata.stage_reviews`
+- latest `SynthChat/interactions/*.jsonl`
+
+Use this checklist:
+
+- Did the rendered system prompt include stale or wrong tool-format prose?
+- Did the assistant emit valid structured output before environment execution?
+- If the first assistant turn was malformed, did validation feedback stay
+  inside the agentic loop and allow a corrected retry?
+- Did the environment execute the expected commands?
+- Did tool feedback expose the same model-facing tool names as the prompt?
+- Did the in-loop judge ask for a correction only when the latest assistant
+  action actually failed?
+- Did final gates pass while final judge failed because of an extra or malformed
+  terminal assistant turn?
+- After a final-text request, did the judge accept a grounded text-only answer
+  instead of asking for another search/read just to improve wording?
+- Did response repair collapse a multi-turn trajectory into one assistant
+  message?
+- Did post-loop response improvement rewrite or append an assistant message
+  after the environment-backed episode already succeeded?
+- Are text-only terminal answers accepted as final text even if the structured
+  generator includes an empty `tool_calls` field?
+- If the dataset is for environment-reward GRPO, does the loop stop once the
+  environment passes instead of spending extra turns on brittle final text?
+
+Minimal inspection command:
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+python -c "import json,pathlib; p=pathlib.Path(r'PATH_TO_DRYRUN.jsonl'); \
+for i,l in enumerate(p.read_text(encoding='utf-8-sig').splitlines(),1): \
+    row=json.loads(l); \
+    print('\\nLINE', i, row.get('metadata',{}).get('scenario')); \
+    env=row.get('metadata',{}).get('environment',{}); \
+    print('env', env.get('passed'), 'stop', (env.get('episode_trace') or {}).get('stop_reason')); \
+    print('issues', [x.get('message') for x in env.get('issues',[])]); \
+    print('tools', [(t.get('name'), t.get('status')) for t in env.get('executed_tools',[])]); \
+    print('roles', [(m.get('role'), bool(m.get('tool_calls'))) for m in row.get('conversations',[])])"
+```
+
+If the interaction log contains implementation-only tool names that the model
+should never see, fix the configured model-facing feedback surface before
+tuning prompts.
+
+---
+
+## Multi-Turn Environment Smokes
+
+A useful multi-turn smoke should usually prove these separately:
+
+- prompt render: no stale tool names, correct CLI/wrapper examples, correct
+  workspace/session context
+- first action: model can make one valid discovery/list/read call
+- feedback: environment returns non-empty structured tool results or errors
+- continuation: model uses the feedback instead of guessing hidden paths
+- terminal answer/action: final text or mutation satisfies assertions
+- final review: gates and judge evaluate the whole trajectory, not a flattened
+  one-turn repair
+
+For agentic rollouts, keep `--max-iterations` low while debugging prompt shape
+and loop behavior, then raise it to the normal default after the raw loop is
+healthy. This avoids spending time on repeated improver calls when the problem
+is actually prompt rendering or loop control.
 
 For non-contiguous failures, use explicit selectors instead of rerunning a
 whole range:
