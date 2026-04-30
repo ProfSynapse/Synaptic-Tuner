@@ -90,10 +90,10 @@ python -m SynthChat.run generate [options]
 python -m SynthChat.run generate
 
 # Specific scenarios, 4 workers
-python -m SynthChat.run generate --scenarios storageManager_createFolder storageManager_move --workers 4
+python -m SynthChat.run generate --scenarios workspace_create_folder workspace_move_file --workers 4
 
-# OpenRouter with Groq-routed GPT-OSS
-python -m SynthChat.run generate --provider openrouter --model openai/gpt-oss-120b
+# OpenRouter with an explicit model
+python -m SynthChat.run generate --provider openrouter --model MODEL_ID
 
 # Docs-based generation
 python -m SynthChat.run generate --docs "essays/" --scenarios essay_outline --per-doc 1
@@ -156,19 +156,19 @@ python -m SynthChat.run improve -i data.jsonl -o data_v2.jsonl \
 
 # Arbitrary scattered rows
 python -m SynthChat.run improve -i data.jsonl -o regen_slice.jsonl \
-  --rubrics promptManager_tools \
+  --rubrics prompt_tools \
   --lines 7,12,20-25 \
   --workers 8
 
 # Checked-in line manifest
 python -m SynthChat.run improve -i data.jsonl -o regen_slice.jsonl \
-  --rubrics contentManager_tools \
+  --rubrics content_tools \
   --line-file Datasets/tools_datasets/reports/cli_schema/regen_lines.txt \
   --workers 12
 
-# Powerful model for judging
+# Explicit model for judging/improvement
 python -m SynthChat.run improve -i data.jsonl \
-  --provider openrouter --model openai/gpt-oss-120b --max-iterations 5
+  --provider openrouter --model MODEL_ID --max-iterations 5
 
 # Sanitize dataset content before improvement sends it to the model
 python -m SynthChat.run improve -i data.jsonl \
