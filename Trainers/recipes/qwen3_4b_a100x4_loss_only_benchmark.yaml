@@ -1,5 +1,7 @@
 name: qwen3-4b-a100x4-loss-only-benchmark
 description: Compute exact per-example loss on the finished Qwen3-4B A100 training run using A100x4 hardware.
+target: cloud
+method: loss-bench
 provider: hf_jobs
 
 job:

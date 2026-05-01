@@ -1,5 +1,7 @@
 name: gguf-conversion
 description: Convert a HuggingFace model to GGUF format and upload the result. Pure Python, no GPU required.
+target: cloud
+method: gguf
 provider: hf_jobs
 
 job:

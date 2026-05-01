@@ -1,5 +1,7 @@
 name: battle-of-models-nemotron-nano-4b-sft
 description: Run SFT on the main tool-calling dataset with Nemotron Nano 4B for the battle-of-the-models sweep.
+target: cloud
+method: sft
 provider: hf_jobs
 
 job:

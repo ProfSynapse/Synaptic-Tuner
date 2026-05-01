@@ -4,7 +4,7 @@ Full YAML configuration reference for all training methods.
 
 ---
 
-## Local Docker Job Config (`Trainers/local/jobs/*.yaml`)
+## Local Docker Job Config (`Trainers/recipes/*.yaml` with `target: local`)
 
 Use this for repeatable local GPU runs. The config owns Docker image selection, package overrides, model/dataset choices, LoRA settings, and artifact paths.
 
@@ -49,7 +49,7 @@ artifacts:
 Run it with:
 
 ```bash
-python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes
+python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes
 ```
 
 Use repo-relative paths for `dataset.local_file`; the runner translates them into the trainer's container working directory. On Windows, `job.transfer: auto` uses copy mode because GPU bind mounts can fail with access denied.

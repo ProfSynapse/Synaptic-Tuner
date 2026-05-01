@@ -49,7 +49,7 @@ Requires the merged model to be on HuggingFace first.
 
 ```bash
 # Edit GGUF_MODEL_REPO and GGUF_QUANT_TYPE in the job YAML, then:
-python tuner.py cloud-run --job-config Trainers/cloud/jobs/gguf_conversion.yaml --yes
+python tuner.py cloud-run --job-config Trainers/recipes/gguf_conversion.yaml --yes
 ```
 
 - **Flavor**: `cpu-upgrade` (32GB RAM, no GPU needed)

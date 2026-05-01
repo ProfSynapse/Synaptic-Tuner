@@ -497,7 +497,7 @@ or `file_unchanged`, the validator will treat them as unknown.
 The current remote-first pattern for a small SynthChat pilot is:
 
 ```bash
-python tuner.py cloud-run --job-config Trainers/cloud/jobs/synthchat_vault_kto_pilot.yaml
+python tuner.py cloud-run --job-config Trainers/recipes/synthchat_vault_kto_pilot.yaml
 ```
 
 That job:

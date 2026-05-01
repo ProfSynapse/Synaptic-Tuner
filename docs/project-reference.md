@@ -13,7 +13,7 @@ Scripts, configuration files, environment variables, data patterns, and platform
 **Trainers:**
 - `Trainers/sft/setup.sh` - Full SFT environment setup
 - `Trainers/kto/setup.sh` - Full KTO environment setup
-- `Trainers/local/jobs/*.yaml` - Local Docker training job configs (used by `python tuner.py local-run`; UID-agnostic, persistent-container mode)
+- `Trainers/recipes/*.yaml` - Unified training recipes (each declares `target: local|cloud|both` and `method: sft|kto|grpo`); local recipes are used by `python tuner.py local-run` (UID-agnostic, persistent-container mode), cloud recipes by `python tuner.py cloud-run`
 
 **Tools:**
 - `Tools/run_synth_chat.sh` / `.ps1` - Synthetic chat generation wrapper
@@ -132,7 +132,7 @@ tail -f sft_output/YYYYMMDD_HHMMSS/logs/training_latest.jsonl
 | Dataset validation | X | | `python3 .skills/synethetic-data-generation/scripts/validate_syngen.py` |
 | System diagnostics | X | | `./run.sh doctor` |
 | Training (SFT/KTO) | | X | Needs dataset choice, model size |
-| Local Docker training | | X | `python tuner.py local-run --job-config Trainers/local/jobs/<config>.yaml`; UID-agnostic, persistent-container mode |
+| Local Docker training | | X | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml`; UID-agnostic, persistent-container mode |
 | Evaluation | | X | Needs model path, scenario set |
 | Upload to HuggingFace | | X | Needs repo name, HF_TOKEN |
 | Dataset improvement | | X | Needs rubrics, line range |
