@@ -1,0 +1,34 @@
+{
+  "envfs_explore_then_update_note": {
+    "seed_count": 100,
+    "rollouts_per_seed": 2
+  },
+  "envfs_load_workspace_then_answer": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  },
+  "envfs_memory_load_workspace": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  },
+  "envfs_state_continue_prior_move": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  },
+  "envfs_use_prompt_then_write_brief": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  },
+  "envfs_confirm_before_destructive_archive": {
+    "seed_count": 25,
+    "rollouts_per_seed": 1
+  },
+  "envfs_empty_search_recovery_then_read": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  },
+  "envfs_efficient_chain_before_answer": {
+    "seed_count": 25,
+    "rollouts_per_seed": 2
+  }
+}

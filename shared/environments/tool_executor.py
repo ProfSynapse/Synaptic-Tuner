@@ -73,8 +73,12 @@ def execute_response_tool_calls(
     for call in expanded_calls:
         name = call.name
         args = call.arguments if isinstance(call.arguments, dict) else {}
-        record = ExecutedToolCall(name=name, arguments=args)
         schema_entry = schema_index.get(name)
+        record = ExecutedToolCall(
+            name=name,
+            arguments=args,
+            identifiers=_tool_identifiers_for_record(name, schema_entry, tool_schema),
+        )
         cli_parse_errors = []
         if isinstance(args, dict):
             raw_cli_errors = args.pop(CLI_PARSE_ERRORS_KEY, None)
@@ -731,6 +735,31 @@ def _tool_command_display_map(tool_schema: Optional[Dict[str, Any]]) -> Dict[str
             mapping[f"{agent}_{tool_name}"] = command
             mapping[tool_name] = command
     return mapping
+
+
+def _tool_identifiers_for_record(
+    name: str,
+    schema_entry: Optional[Dict[str, Any]],
+    tool_schema: Optional[Dict[str, Any]],
+) -> List[str]:
+    """Return configured identifiers that can refer to one executed tool."""
+    identifiers: List[str] = []
+
+    def add(value: Any) -> None:
+        candidate = str(value or "").strip()
+        if candidate and candidate not in identifiers:
+            identifiers.append(candidate)
+
+    add(name)
+    if "_" in str(name):
+        add(str(name).split("_", 1)[1])
+
+    if isinstance(schema_entry, dict):
+        add(schema_entry.get("name"))
+        add(schema_entry.get("command"))
+
+    add(_tool_command_display_map(tool_schema).get(name))
+    return identifiers
 
 
 def _display_tool_name(

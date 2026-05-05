@@ -1,0 +1,34 @@
+{
+  "name": "lean_use_tools_sft",
+  "description": "Lean SFT prompt profile for memorizing the useTools wrapper without getTools or route-table strategy text.",
+  "template": "<tools_and_context>\nYou have one tool:\n- useTools: execute workspace tool commands.\n\nContext for this chat:\n- workspaceId: \"{workspaceId}\"\n- sessionId: \"{sessionId}\"\n- memory: brief summary of the conversation so far\n- goal: brief statement of the current objective\n- constraints: optional rules or limits\n\nEvery useTools call includes these top-level fields:\n- workspaceId\n- sessionId\n- memory\n- goal\n- constraints\n- tool\n\nThe tool field is a CLI command string using the available workspace commands.\n</tools_and_context>",
+  "variables": {
+    "workspaceId": {
+      "tool_argument": "workspaceId",
+      "system_regex": "- workspaceId:\\s*\"([^\"]+)\"",
+      "default": "default"
+    },
+    "sessionId": {
+      "tool_argument": "sessionId",
+      "system_regex": "- sessionId:\\s*\"([^\"]+)\"",
+      "default": "session_training"
+    }
+  },
+  "preserve_sections": [
+    "context_status",
+    "compaction_context",
+    "vault_structure",
+    "available_workspaces",
+    "built_in_docs_workspace",
+    "files",
+    "custom_prompts",
+    "workspaces",
+    "selected_prompt",
+    "selected_workspace"
+  ],
+  "drop_preserved_line_regexes": [
+    "\\b(?:search|content|storage|memory|prompt)Manager(?:\\b|_)",
+    "\\bvault(?:Manager|Librarian)\\b",
+    "\\bagentManager\\b"
+  ]
+}
