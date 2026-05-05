@@ -38,7 +38,7 @@ python -m Evaluator.cli [options]
 |------|-------------|---------|
 | `--scenario` | YAML scenario file; can repeat | `tool_prompts.yaml` |
 | `--preset` | Preset from `eval_run.yaml` | `quick`, `full`, `strict` |
-| `--tags` | Comma-separated tag filter | `storageManager,single-tool` |
+| `--tags` | Comma-separated tag filter | `tool-call,single-tool` |
 | `--limit` | Max tests to run | `10` |
 
 ### Output
@@ -125,7 +125,7 @@ python -m Evaluator.cli \
   --backend lmstudio \
   --model MODEL \
   --scenario tool_prompts.yaml \
-  --tags storageManager
+  --tags tool-call
 ```
 
 ### Eval With Judge

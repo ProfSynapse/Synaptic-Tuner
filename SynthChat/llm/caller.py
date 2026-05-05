@@ -9,9 +9,37 @@ Usage: Called by SynthChatGenerator methods in generator.py whenever an
 
 import random
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..parsing import parse_json_object
+
+
+def _resolve_temperature_range(
+    value: Any,
+    *,
+    default: Tuple[float, float],
+) -> Tuple[float, float]:
+    """Resolve an optional temperature range from stage/provider config."""
+    if value is None:
+        return default
+    if isinstance(value, dict):
+        low = value.get("min", value.get("low"))
+        high = value.get("max", value.get("high"))
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        low, high = value
+    else:
+        raise ValueError("temperature_range must be a two-item list or an object with min/max")
+
+    try:
+        resolved = (float(low), float(high))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("temperature_range values must be numbers") from exc
+
+    if resolved[0] < 0 or resolved[1] < 0:
+        raise ValueError("temperature_range values must be non-negative")
+    if resolved[0] > resolved[1]:
+        raise ValueError("temperature_range min must be <= max")
+    return resolved
 
 
 def call_llm(
@@ -118,8 +146,14 @@ def call_llm_structured(
     max_tokens: Optional[int] = None,
     llm_clients: Optional[Sequence[Any]] = None,
     max_retries: int = 3,
+    response_format: str = "json_schema",
+    temperature_range: Any = None,
 ) -> Dict[str, Any]:
     """Call structured output if available, retrying transient empty failures."""
+    structured_temperature_range = _resolve_temperature_range(
+        temperature_range,
+        default=(0.1, 0.4),
+    )
     if not hasattr(default_client, "structured_output"):
         raw = call_llm(
             prompt=f"{system_prompt}\n\n{prompt}" if system_prompt else prompt,
@@ -147,7 +181,7 @@ def call_llm_structured(
     client_chain = list(llm_clients or [default_client])
     for client_index, client in enumerate(client_chain):
         for attempt in range(1, max(1, int(max_retries or 1)) + 1):
-            temperature = random.uniform(0.1, 0.4) if randomize else 0.2
+            temperature = random.uniform(*structured_temperature_range) if randomize else 0.2
             started_at = time.monotonic()
             if logger:
                 logger.info(
@@ -159,6 +193,7 @@ def call_llm_structured(
                     "messages": messages,
                     "schema": schema,
                     "temperature": temperature,
+                    "response_format": response_format,
                 }
                 if resolved_max_tokens is not None:
                     structured_kwargs["max_tokens"] = resolved_max_tokens

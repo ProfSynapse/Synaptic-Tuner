@@ -1,11 +1,11 @@
-# Environment-backed tool-use scenarios for SynthChat
+﻿# Environment-backed tool-use scenarios for SynthChat
 # These scenarios generate a structured filesystem/workspace first, then
 # generate user + assistant turns against that environment.
 
 scenarios:
   envfs_update_config_note:
     type: tool
-    tool: contentManager_replace
+    tool: content replace
     environment_mode: generated
     system_template: mocked_workspace_vault
     rubrics:
@@ -82,9 +82,9 @@ scenarios:
         Generate assistant response as valid JSON only.
 
         Use the generated workspace context. The response should use useTools with:
-        - searchManager.searchContent first
-        - contentManager.read next
-        - contentManager.replace last
+        - search.searchContent first
+        - content.read next
+        - content.replace last
 
         Return:
         {
@@ -94,14 +94,14 @@ scenarios:
             "type": "function",
             "function": {
               "name": "useTools",
-              "arguments": "{\"workspaceId\":\"<from system prompt>\",\"sessionId\":\"<from system prompt>\",\"memory\":\"<brief state>\",\"goal\":\"<find the production config note, read it, and replace only the target value>\",\"constraints\":\"<preserve surrounding content and do not modify unrelated files>\",\"tool\":\"search search-content \\\"<search text>\\\" --paths \\\"[\\\\\\\"\\\\\\\"]\\\" --limit 10, content read \\\"<path>\\\" 1, content replace --path \\\"<path>\\\" --old-content \\\"<old text>\\\" --new-content \\\"<new text>\\\" --start-line <n> --end-line <n>\",\"strategy\":\"serial\"}"
+              "arguments": "{\"workspaceId\":\"<from system prompt>\",\"sessionId\":\"<from system prompt>\",\"memory\":\"<brief state>\",\"goal\":\"<find the production config note, read it, and replace only the target value>\",\"constraints\":\"<preserve surrounding content and do not modify unrelated files>\",\"tool\":\"search content \\\"<search text>\\\" --paths \\\"[\\\\\\\"\\\\\\\"]\\\" --limit 10, content read \\\"<path>\\\" 1, content replace --path \\\"<path>\\\" --old-content \\\"<old text>\\\" --new-content \\\"<new text>\\\" --start-line <n> --end-line <n>\",\"strategy\":\"serial\"}"
             }
           }]
         }
 
   envfs_archive_empty_folder:
     type: tool
-    tool: storageManager_archive
+    tool: storage archive
     environment_mode: generated
     system_template: mocked_workspace_vault
     rubrics:
@@ -163,8 +163,8 @@ scenarios:
         Generate assistant response as valid JSON only.
 
         Use the generated workspace context. The response should use useTools with:
-        - storageManager.list first
-        - storageManager.archive second
+        - storage.list first
+        - storage.archive second
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
         The single tool call must use function.name = "useTools" and a top-level
@@ -183,3 +183,5 @@ scenarios:
             }
           }]
         }
+
+

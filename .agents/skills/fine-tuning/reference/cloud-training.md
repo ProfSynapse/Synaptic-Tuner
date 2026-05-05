@@ -249,7 +249,7 @@ Interpreting saved failures:
 Useful flags:
 - `--method sft` or `--method kto` to filter run discovery
 - `--scenario behavior_prompts.yaml` to run specific scenarios instead of a preset
-- `--tags storageManager,intellectual_humility` to filter cases
+- `--tags tool-call,intellectual_humility` to filter cases
 - `--upload-to-hf username/model-name --update-model-card` to push evaluation lineage to a model repo
 
 Current constraint:

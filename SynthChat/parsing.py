@@ -114,6 +114,20 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
     return args
 
 
+def _normalize_tool_call_item(item: Any) -> Dict[str, Any]:
+    """Return a dict-shaped tool call item without assuming provider validity."""
+    if isinstance(item, dict):
+        return item
+    if isinstance(item, str):
+        try:
+            parsed = json.loads(item)
+        except json.JSONDecodeError:
+            return {"function": {"name": "", "arguments": item}}
+        if isinstance(parsed, dict):
+            return parsed
+    return {"function": {"name": "", "arguments": json.dumps(item)}}
+
+
 def stringify_assistant_message(response: Any) -> str:
     """Convert an assistant response dict to a plain text summary."""
     if isinstance(response, str):
@@ -125,7 +139,7 @@ def stringify_assistant_message(response: Any) -> str:
         if isinstance(content, str) and content.strip():
             parts.append(content.strip())
         if tool_calls:
-            parts.append(f"Tool calls: {tool_calls}")
+            parts.append(f"Tool calls: {json.dumps(tool_calls, ensure_ascii=False)}")
         return "\n\n".join(parts).strip() or json.dumps(response)
     return str(response)
 
@@ -172,6 +186,7 @@ def parse_assistant_response(content: str, scenario: Dict) -> Dict:
 
                 tool_calls = []
                 for tc in parsed["tool_calls"]:
+                    tc = _normalize_tool_call_item(tc)
                     normalized_tc = {
                         "id": tc.get("id", f"call_{len(tool_calls)+1:04d}"),
                         "type": tc.get("type", "function"),
@@ -354,10 +369,13 @@ def normalize_generated_environment(payload: Dict[str, Any]) -> Dict[str, Any]:
     environment = normalized.get("environment")
 
     if not isinstance(environment, dict):
-        if any(key in normalized for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution")):
+        if any(
+            key in normalized
+            for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution", "mock_tool_outputs")
+        ):
             environment = {
                 key: normalized.pop(key)
-                for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution")
+                for key in ("fixture", "assertions", "allowed_tools", "max_steps", "execution", "mock_tool_outputs")
                 if key in normalized
             }
         elif any(key in normalized for key in ("directories", "files", "notes", "folders")):

@@ -9,6 +9,18 @@ Usage: Called by generator.py during environment generation stage.
 from typing import Any, Dict
 
 
+def _non_blank_string_schema() -> Dict[str, Any]:
+    return {"type": "string", "minLength": 1, "pattern": "\\S"}
+
+
+def _relative_path_string_schema() -> Dict[str, Any]:
+    return {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_ ./-]*$",
+    }
+
+
 def _scalar_schema() -> Dict[str, Any]:
     return {
         "anyOf": [
@@ -40,7 +52,7 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "path_exists"},
-                    "path": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
                 },
                 "required": ["type", "path"],
             },
@@ -49,7 +61,7 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "path_not_exists"},
-                    "path": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
                 },
                 "required": ["type", "path"],
             },
@@ -58,7 +70,7 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "file_contains"},
-                    "path": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
                     "text": {"type": "string"},
                 },
                 "required": ["type", "path", "text"],
@@ -68,7 +80,7 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "file_not_contains"},
-                    "path": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
                     "text": {"type": "string"},
                 },
                 "required": ["type", "path", "text"],
@@ -79,7 +91,7 @@ def _assertion_schema() -> Dict[str, Any]:
                 "properties": {
                     "type": {"const": "dir_contains"},
                     "path": {"type": "string"},
-                    "item": {"type": "string", "minLength": 1},
+                    "item": _relative_path_string_schema(),
                 },
                 "required": ["type", "path", "item"],
             },
@@ -88,8 +100,8 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "frontmatter_has_key"},
-                    "path": {"type": "string", "minLength": 1},
-                    "field": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
+                    "field": _non_blank_string_schema(),
                 },
                 "required": ["type", "path", "field"],
             },
@@ -98,8 +110,8 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "frontmatter_field_equals"},
-                    "path": {"type": "string", "minLength": 1},
-                    "field": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
+                    "field": _non_blank_string_schema(),
                     "value": scalar,
                 },
                 "required": ["type", "path", "field", "value"],
@@ -109,8 +121,8 @@ def _assertion_schema() -> Dict[str, Any]:
                 "additionalProperties": False,
                 "properties": {
                     "type": {"const": "frontmatter_field_contains"},
-                    "path": {"type": "string", "minLength": 1},
-                    "field": {"type": "string", "minLength": 1},
+                    "path": _relative_path_string_schema(),
+                    "field": _non_blank_string_schema(),
                     "value": scalar,
                 },
                 "required": ["type", "path", "field", "value"],
@@ -124,10 +136,14 @@ def _build_canonical_environment_generation_prompt(base_prompt: str) -> str:
     contract_lines = [
         "Return one valid JSON object only.",
         "Top-level keys allowed: environment, system_context, task_context.",
-        "environment may contain: fixture, assertions, allowed_tools, max_steps, loop, execution.",
-        "fixture may contain: directories, files, notes, local_path, source.",
+        "environment may contain: fixture, assertions, allowed_tools, max_steps, loop, execution, mock_tool_outputs.",
+        "fixture may contain inline directories, files, and notes.",
+        "mock_tool_outputs may declare structured outputs for non-filesystem tools; each item may contain tool, match, output, status, error, and recoverable.",
+        "Do not use fixture local_path or source unless the scenario explicitly provides a real local path.",
+        "Use only plain ASCII relative paths; do not use placeholders, ellipses, angle brackets, backticks, or leading slash.",
         "notes entries may contain: path, frontmatter, body.",
-        "task_context should contain the hidden task anchors used to keep the environment, user request, and assertions aligned.",
+        "task_context is required and must contain the hidden task anchors used to keep the environment, user request, and assertions aligned.",
+        "fixture must include at least one file or note with non-empty content.",
         "Use only these assertion types:",
         "- path_exists",
         "- path_not_exists",
@@ -163,39 +179,84 @@ def _build_canonical_environment_schema() -> Dict[str, Any]:
                         "properties": {
                             "directories": {
                                 "type": "array",
-                                "items": {"type": "string", "minLength": 1},
+                                "items": _relative_path_string_schema(),
                             },
                             "files": {
                                 "type": "object",
-                                "additionalProperties": {"type": "string"},
+                                "additionalProperties": _non_blank_string_schema(),
+                                "minProperties": 1,
                             },
                             "notes": {
                                 "type": "array",
+                                "minItems": 1,
                                 "items": {
                                     "type": "object",
                                     "additionalProperties": False,
                                     "properties": {
-                                        "path": {"type": "string", "minLength": 1},
+                                        "path": _relative_path_string_schema(),
                                         "frontmatter": {
                                             "type": "object",
                                             "additionalProperties": scalar,
                                         },
-                                        "body": {"type": "string"},
+                                        "body": _non_blank_string_schema(),
                                     },
-                                    "required": ["path"],
+                                    "required": ["path", "body"],
                                 },
                             },
                         },
+                        "anyOf": [
+                            {"required": ["files"]},
+                            {"required": ["notes"]},
+                        ],
                     },
                     "assertions": {
                         "type": "array",
                         "items": _assertion_schema(),
+                        "minItems": 1,
                     },
                     "allowed_tools": {
                         "type": "array",
-                        "items": {"type": "string", "minLength": 1},
+                        "items": _non_blank_string_schema(),
                     },
                     "max_steps": {"type": "integer", "minimum": 1},
+                    "mock_tool_outputs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "tool": _non_blank_string_schema(),
+                                "name": _non_blank_string_schema(),
+                                "command": _non_blank_string_schema(),
+                                "tools": {
+                                    "type": "array",
+                                    "items": _non_blank_string_schema(),
+                                    "minItems": 1,
+                                },
+                                "match": {
+                                    "type": "object",
+                                    "additionalProperties": True,
+                                },
+                                "arguments": {
+                                    "type": "object",
+                                    "additionalProperties": True,
+                                },
+                                "output": {},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["ok", "error", "blocked"],
+                                },
+                                "error": {},
+                                "recoverable": {"type": "boolean"},
+                            },
+                            "anyOf": [
+                                {"required": ["tool"]},
+                                {"required": ["name"]},
+                                {"required": ["command"]},
+                                {"required": ["tools"]},
+                            ],
+                        },
+                    },
                 },
                 "required": ["fixture", "assertions"],
             },
@@ -253,8 +314,9 @@ def _build_canonical_environment_schema() -> Dict[str, Any]:
             },
             "task_context": {
                 "type": "object",
+                "minProperties": 1,
                 "additionalProperties": scalar,
             },
         },
-        "required": ["environment"],
+        "required": ["environment", "task_context"],
     }

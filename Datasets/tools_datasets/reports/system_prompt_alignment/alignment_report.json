@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-05-05T16:00:36.810491+00:00",
+  "profile": "Datasets/tools_datasets/system_prompt_profiles/lean_use_tools_sft.json",
+  "profile_name": "lean_use_tools_sft",
+  "datasets": {
+    "contentManager": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\contentManager\\tools_v2.6.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\contentManager\\tools_v2.7.jsonl",
+      "examples": 553,
+      "changed": 553
+    },
+    "memoryManager": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\memoryManager\\tools_v2.6.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\memoryManager\\tools_v2.7.jsonl",
+      "examples": 584,
+      "changed": 584
+    },
+    "promptManager": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\promptManager\\tools_v2.9.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\promptManager\\tools_v2.10.jsonl",
+      "examples": 568,
+      "changed": 568
+    },
+    "searchManager": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\searchManager\\tools_v2.4.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\searchManager\\tools_v2.5.jsonl",
+      "examples": 916,
+      "changed": 916
+    },
+    "storageManager": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\storageManager\\tools_v2.5.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\storageManager\\tools_v2.6.jsonl",
+      "examples": 1074,
+      "changed": 1074
+    },
+    "text_only": {
+      "status": "ok",
+      "input_path": "Datasets\\tools_datasets\\non_thinking\\text_only\\text_only_v1.1.jsonl",
+      "output_path": "Datasets\\tools_datasets\\non_thinking\\text_only\\text_only_v1.2.jsonl",
+      "examples": 2611,
+      "changed": 2611
+    }
+  },
+  "global": {
+    "examples": 6306,
+    "changed": 6306
+  }
+}

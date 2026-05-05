@@ -96,7 +96,13 @@ class MergeHandler(BaseHandler):
         return checkpoints
 
     def _merge_lora(self, lora_path: Path, output_path: Path) -> bool:
-        """Merge LoRA adapters with base model using shared utilities."""
+        """Merge LoRA adapters with base model using shared utilities.
+
+        This path intentionally assumes it is running in the same configured
+        runtime used for training, normally the local Docker training
+        container. Host Python merges are a fallback because host packages can
+        lag new model architectures or lack GPU-enabled torch.
+        """
         try:
             print_info(f"Merging: {lora_path.name}")
             print_info(f"Output: {output_path}")
@@ -110,6 +116,12 @@ class MergeHandler(BaseHandler):
         """Execute merge workflow."""
         print_header("MERGE LORA TO BASE MODEL")
         print_info("Merge LoRA adapters into base model weights")
+        info_panel(
+            "Runtime Guidance",
+            "Prefer running merge from the matched local Docker training runtime. "
+            "Host Python merge is only reliable when it has GPU-enabled torch and "
+            "the same Transformers/PEFT/Unsloth support as the training job.",
+        )
         print()
 
         # Find all LoRA checkpoints

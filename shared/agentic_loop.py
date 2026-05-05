@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from shared.agentic_judge import AgenticJudgeResult
 from shared.environments import EnvironmentSession
-from shared.environments.tool_executor import format_tool_results_message
+from shared.environments.tool_executor import (
+    format_environment_payload_for_model,
+    format_tool_results_message,
+)
 
 
 @dataclass
@@ -60,9 +64,11 @@ def run_environment_episode(
     stop_on_text_response: bool = True,
     stop_on_environment_pass: bool = False,
     continue_on_execution_error: bool = False,
+    continue_on_validation_error: bool = False,
     stuck_repeat_limit: int = 2,
     no_progress_window: int = 3,
     tool_result_format: str = "json",
+    tool_result_name_format: str = "executor",
     expected_tools: Optional[Sequence[str]] = None,
     require_expected_tools: bool = False,
     stringify_response: Optional[Callable[[Any], str]] = None,
@@ -71,6 +77,7 @@ def run_environment_episode(
     judge_stop_on_hard_failure: bool = False,
     require_final_text_after_pass: bool = False,
     final_text_prompt: Optional[str] = None,
+    debug_event_writer: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
 ) -> AgenticEpisodeResult:
     """Run a multi-turn environment episode with shared loop semantics."""
     messages = [dict(message) for message in initial_messages]
@@ -86,10 +93,29 @@ def run_environment_episode(
     final_text_satisfied = False
 
     for turn_index in range(1, max_turns + 1):
+        _emit_debug_event(
+            debug_event_writer,
+            "agentic_turn_start",
+            {
+                "turn_index": turn_index,
+                "message_count": len(messages),
+                "messages": messages,
+            },
+        )
         response = respond(messages, turn_index)
         total_latency_s += float(response.latency_s or 0.0)
         final_response = response.message
         final_raw = response.raw
+        _emit_debug_event(
+            debug_event_writer,
+            "agentic_turn_response",
+            {
+                "turn_index": turn_index,
+                "response": response.message,
+                "raw": response.raw,
+                "latency_s": response.latency_s,
+            },
+        )
 
         conversation_trace.append(
             {
@@ -102,12 +128,40 @@ def run_environment_episode(
         )
 
         validation = validate(response.message)
+        _emit_debug_event(
+            debug_event_writer,
+            "agentic_turn_validation",
+            {
+                "turn_index": turn_index,
+                "validation": _validation_to_dict(validation),
+            },
+        )
         turns.append(AgenticEpisodeTurn(turn_index=turn_index, response=response, validation=validation))
         if not _validation_passed(validation):
+            if continue_on_validation_error:
+                feedback = _format_validation_feedback_message(validation, stringify(response.message))
+                messages.append({"role": "user", "content": feedback})
+                conversation_trace.append(
+                    {
+                        "role": "user",
+                        "kind": "validation_feedback",
+                        "content": feedback,
+                        "turn_index": turn_index,
+                    }
+                )
+                _emit_debug_event(
+                    debug_event_writer,
+                    "agentic_validation_feedback",
+                    {
+                        "turn_index": turn_index,
+                        "feedback": feedback,
+                    },
+                )
+                continue
             stop_reason = "schema_validation_failed"
             break
 
-        messages.append({"role": "assistant", "content": stringify(response.message)})
+        messages.append(_assistant_message_for_history(response.message, stringify))
 
         if awaiting_final_text:
             turns[-1].final_text_turn = True
@@ -121,16 +175,57 @@ def run_environment_episode(
                 turn_index=turn_index,
                 environment_preview=None,
                 tool_feedback=None,
+                tool_schema=session.validator.tool_schema,
+                tool_name_format=tool_result_name_format,
             )
             turns[-1].judge_result = judge_result
+            if judge_result is not None:
+                _emit_debug_event(
+                    debug_event_writer,
+                    "agentic_turn_judge",
+                    {
+                        "turn_index": turn_index,
+                        "final_text_turn": True,
+                        "judge_result": judge_result.to_dict(),
+                    },
+                )
             if judge_result is not None and judge_result.hard_failure and judge_stop_on_hard_failure:
                 stop_reason = "judge_hard_failure"
                 break
+            judge_requested_correction = bool(
+                judge_result is not None
+                and judge_feedback_visible_to_model
+                and judge_result.feedback_to_model
+                and not judge_result.passed
+            )
+            if judge_requested_correction:
+                messages.append({"role": "user", "content": judge_result.feedback_to_model})
+                conversation_trace.append(
+                    {
+                        "role": "user",
+                        "kind": "judge_feedback",
+                        "content": judge_result.feedback_to_model,
+                        "turn_index": turn_index,
+                    }
+                )
+                _emit_debug_event(
+                    debug_event_writer,
+                    "agentic_judge_feedback",
+                    {
+                        "turn_index": turn_index,
+                        "final_text_turn": True,
+                        "feedback": judge_result.feedback_to_model,
+                    },
+                )
+                continue
             if _response_has_tool_calls(validation, response.message):
                 stop_reason = "final_text_tool_calls_emitted"
                 break
             if not _extract_text_content(response.message).strip():
                 stop_reason = "final_text_missing"
+                break
+            if judge_result is not None and not judge_result.passed:
+                stop_reason = "final_text_judge_failed"
                 break
             final_text_satisfied = True
             stop_reason = "environment_passed_final_text"
@@ -138,15 +233,32 @@ def run_environment_episode(
 
         step = session.execute_response(response.message)
         turns[-1].environment_step = step
+        _emit_debug_event(
+            debug_event_writer,
+            "agentic_environment_step",
+            {
+                "turn_index": turn_index,
+                "step": step.to_dict() if hasattr(step, "to_dict") else step,
+            },
+        )
 
         if step.hard_error:
             stop_reason = "environment_execution_failed"
             break
 
+        preview_expected_tools = expected_tools if require_expected_tools else None
         environment_preview = session.finalize(
-            expected_tools=None,
+            expected_tools=preview_expected_tools,
             total_turns=turn_index,
             stop_reason="preview",
+        )
+        _emit_debug_event(
+            debug_event_writer,
+            "agentic_environment_preview",
+            {
+                "turn_index": turn_index,
+                "preview": environment_preview.to_dict() if hasattr(environment_preview, "to_dict") else environment_preview,
+            },
         )
 
         has_tool_calls = _response_has_tool_calls(validation, response.message)
@@ -156,6 +268,8 @@ def run_environment_episode(
                 executions=step.executed_tools,
                 issues=step.issues,
                 format_name=tool_result_format,
+                tool_schema=session.validator.tool_schema,
+                tool_name_format=tool_result_name_format,
             )
             messages.append({"role": "user", "content": feedback})
             conversation_trace.append(
@@ -165,6 +279,14 @@ def run_environment_episode(
                     "content": feedback,
                     "turn_index": turn_index,
                 }
+            )
+            _emit_debug_event(
+                debug_event_writer,
+                "agentic_tool_feedback",
+                {
+                    "turn_index": turn_index,
+                    "feedback": feedback,
+                },
             )
 
         judge_result = _run_turn_judge(
@@ -177,11 +299,28 @@ def run_environment_episode(
             turn_index=turn_index,
             environment_preview=environment_preview,
             tool_feedback=feedback,
+            tool_schema=session.validator.tool_schema,
+            tool_name_format=tool_result_name_format,
         )
         turns[-1].judge_result = judge_result
+        if judge_result is not None:
+            _emit_debug_event(
+                debug_event_writer,
+                "agentic_turn_judge",
+                {
+                    "turn_index": turn_index,
+                    "judge_result": judge_result.to_dict(),
+                },
+            )
         if judge_result is not None and judge_result.hard_failure and judge_stop_on_hard_failure:
             stop_reason = "judge_hard_failure"
             break
+        judge_requested_correction = bool(
+            judge_result is not None
+            and judge_feedback_visible_to_model
+            and judge_result.feedback_to_model
+            and not judge_result.passed
+        )
         if judge_result is not None and judge_feedback_visible_to_model and judge_result.feedback_to_model:
             messages.append({"role": "user", "content": judge_result.feedback_to_model})
             conversation_trace.append(
@@ -191,6 +330,14 @@ def run_environment_episode(
                     "content": judge_result.feedback_to_model,
                     "turn_index": turn_index,
                 }
+            )
+            _emit_debug_event(
+                debug_event_writer,
+                "agentic_judge_feedback",
+                {
+                    "turn_index": turn_index,
+                    "feedback": judge_result.feedback_to_model,
+                },
             )
         if stop_on_environment_pass and environment_preview.passed:
             if require_final_text_after_pass:
@@ -208,8 +355,23 @@ def run_environment_episode(
                         "turn_index": turn_index,
                     }
                 )
+                _emit_debug_event(
+                    debug_event_writer,
+                    "agentic_final_text_request",
+                    {
+                        "turn_index": turn_index,
+                        "prompt": completion_prompt,
+                    },
+                )
                 continue
             stop_reason = "environment_passed"
+            break
+
+        if judge_requested_correction:
+            continue
+
+        if judge_result is not None and judge_result.should_stop:
+            stop_reason = "judge_requested_stop"
             break
 
         if max_tool_steps and len(session.executed_tools) > max_tool_steps:
@@ -225,9 +387,7 @@ def run_environment_episode(
             stop_reason = stuck_reason
             break
 
-        if has_tool_calls or (step.recoverable_error and continue_on_execution_error) or (
-            judge_result is not None and judge_feedback_visible_to_model and judge_result.feedback_to_model
-        ):
+        if has_tool_calls or (step.recoverable_error and continue_on_execution_error) or judge_requested_correction:
             continue
 
         if require_final_text_after_pass and not environment_preview.passed:
@@ -242,6 +402,17 @@ def run_environment_episode(
         expected_tools=expected_tools if require_expected_tools else None,
         total_turns=len(turns),
         stop_reason=stop_reason,
+    )
+    _emit_debug_event(
+        debug_event_writer,
+        "agentic_episode_done",
+        {
+            "stop_reason": stop_reason,
+            "turn_count": len(turns),
+            "environment_result": environment_result.to_dict() if hasattr(environment_result, "to_dict") else environment_result,
+            "judge_trace": judge_trace,
+            "conversation_trace": conversation_trace,
+        },
     )
     return AgenticEpisodeResult(
         final_response=final_response,
@@ -267,6 +438,37 @@ def _validation_passed(validation: Any) -> bool:
     if isinstance(validation, dict):
         return bool(validation.get("passed"))
     return False
+
+
+def _format_validation_feedback_message(validation: Any, response_text: str) -> str:
+    issues = []
+    raw_issues = getattr(validation, "issues", None)
+    if raw_issues is None and isinstance(validation, dict):
+        raw_issues = validation.get("issues")
+    for issue in raw_issues or []:
+        level = getattr(issue, "level", None)
+        message = getattr(issue, "message", None)
+        if isinstance(issue, dict):
+            level = issue.get("level", level)
+            message = issue.get("message", message)
+        text = str(message or issue).strip()
+        if text:
+            prefix = str(level or "ERROR").upper()
+            issues.append(f"- {prefix}: {text}")
+    issue_text = "\n".join(issues) if issues else "- ERROR: response did not pass validation"
+    return (
+        "Your previous assistant response failed schema validation and was not executed.\n"
+        "Return a corrected assistant response using the configured format.\n\n"
+        "Correction rules:\n"
+        "- function.arguments must be a valid JSON object serialized as a string.\n"
+        "- Use double quotes for every JSON key and string value.\n"
+        "- Escape quotes inside nested CLI commands with backslashes.\n"
+        "- Do not use single-quoted pseudo-JSON, HTML entities, non-breaking spaces, ellipses, or placeholder macros.\n\n"
+        "Validation issues:\n"
+        f"{issue_text}\n\n"
+        "Previous response:\n"
+        f"{response_text}"
+    )
 
 
 def _response_has_tool_calls(validation: Any, response_message: Any) -> bool:
@@ -304,9 +506,25 @@ def _default_stringify_response(response: Any) -> str:
         if isinstance(content, str) and content.strip():
             parts.append(content.strip())
         if tool_calls:
-            parts.append(f"Tool calls: {tool_calls}")
+            try:
+                rendered_tool_calls = json.dumps(tool_calls, ensure_ascii=False)
+            except TypeError:
+                rendered_tool_calls = str(tool_calls)
+            parts.append(f"Tool calls: {rendered_tool_calls}")
         return "\n\n".join(parts).strip() or str(response)
     return str(response)
+
+
+def _assistant_message_for_history(response: Any, stringify: Callable[[Any], str]) -> Dict[str, Any]:
+    """Preserve structured assistant messages while retaining text fallback."""
+    if isinstance(response, dict):
+        message = {"role": "assistant", "content": response.get("content")}
+        if response.get("tool_calls") is not None:
+            message["tool_calls"] = response.get("tool_calls")
+        if message.get("content") is None and not message.get("tool_calls"):
+            message["content"] = stringify(response)
+        return message
+    return {"role": "assistant", "content": stringify(response)}
 
 
 def _extract_text_content(response: Any) -> str:
@@ -328,6 +546,26 @@ def _validation_to_dict(validation: Any) -> Dict[str, Any]:
     return {"value": str(validation)}
 
 
+def _emit_debug_event(
+    debug_event_writer: Optional[Callable[[str, Dict[str, Any]], bool]],
+    event_type: str,
+    payload: Dict[str, Any],
+) -> None:
+    if debug_event_writer is None:
+        return
+    try:
+        debug_event_writer(event_type, _json_safe(payload))
+    except Exception:
+        return
+
+
+def _json_safe(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except TypeError:
+        return str(value)
+
+
 def _run_turn_judge(
     *,
     judge_turn: Optional[Callable[[Dict[str, Any]], AgenticJudgeResult]],
@@ -339,6 +577,8 @@ def _run_turn_judge(
     turn_index: int,
     environment_preview: Any,
     tool_feedback: Optional[str],
+    tool_schema: Optional[Dict[str, Any]] = None,
+    tool_name_format: str = "executor",
 ) -> Optional[AgenticJudgeResult]:
     if judge_turn is None:
         return None
@@ -348,8 +588,16 @@ def _run_turn_judge(
         "response_raw": response.raw,
         "response_latency_s": response.latency_s,
         "validation": _validation_to_dict(validation),
-        "environment_step": environment_step.to_dict() if hasattr(environment_step, "to_dict") else environment_step,
-        "environment_preview": environment_preview.to_dict() if hasattr(environment_preview, "to_dict") else environment_preview,
+        "environment_step": format_environment_payload_for_model(
+            environment_step.to_dict() if hasattr(environment_step, "to_dict") else environment_step,
+            tool_schema,
+            tool_name_format,
+        ),
+        "environment_preview": format_environment_payload_for_model(
+            environment_preview.to_dict() if hasattr(environment_preview, "to_dict") else environment_preview,
+            tool_schema,
+            tool_name_format,
+        ),
         "tool_feedback": tool_feedback,
         "turn_index": turn_index,
     }
@@ -388,7 +636,7 @@ def _detect_stuck_episode(
         len(window) == no_progress_window
         and all(not step.state_changed for step in window)
         and all(step.executed_tools for step in window)
-        and any(any(issue.level.lower() == "error" for issue in step.issues) for step in window)
+        and all(any(issue.level.lower() == "error" for issue in step.issues) for step in window)
     ):
         return "stuck_no_progress"
 

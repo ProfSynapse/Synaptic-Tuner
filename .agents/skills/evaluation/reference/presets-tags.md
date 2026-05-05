@@ -39,11 +39,11 @@ Common tags:
 
 | Tag | What It Usually Groups |
 |-----|------------------------|
-| `storageManager` | Storage CLI commands |
-| `contentManager` | Content read/write/edit commands |
-| `searchManager` | Search commands |
-| `memoryManager` | Memory/workspace commands |
-| `promptManager` | Prompt CRUD/execution commands |
+| `tool-call` | Tool-calling cases |
+| `retrieval` | Search/read/retrieval cases |
+| `edit` | Content or state mutation cases |
+| `workspace` | Workspace/context setup cases |
+| `prompting` | Prompt/workflow cases |
 | `single-tool` | One wrapper call expected |
 | `clarification` | Text clarification cases |
 | `destructive` | Delete/archive/overwrite-sensitive cases |
@@ -54,12 +54,12 @@ Common tags:
 # Single tag
 python -m Evaluator.cli --backend lmstudio --model MODEL \
   --scenario tool_prompts.yaml \
-  --tags storageManager
+  --tags tool-call
 
 # Multiple tags, comma-separated
 python -m Evaluator.cli --backend lmstudio --model MODEL \
   --scenario tool_prompts.yaml \
-  --tags promptManager,single-tool
+  --tags tool-call,single-tool
 ```
 
 ---
@@ -74,7 +74,7 @@ python -m Evaluator.cli --backend lmstudio --model MODEL \
 # Run a capability slice with explicit outputs
 python -m Evaluator.cli --backend lmstudio --model MODEL \
   --scenario tool_prompts.yaml \
-  --tags storageManager \
+  --tags tool-call \
   --output Evaluator/results/storage_tests.json \
   --markdown Evaluator/results/storage_tests.md
 

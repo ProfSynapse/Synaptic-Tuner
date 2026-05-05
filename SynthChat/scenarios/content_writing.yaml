@@ -1,4 +1,4 @@
-# Content Writing Scenarios for SynthChat
+﻿# Content Writing Scenarios for SynthChat
 # Each scenario is SELF-CONTAINED with all definitions inline
 # No external dependencies - everything needed is in the scenario
 
@@ -6,9 +6,9 @@ scenarios:
   # ============================================
   # RESEARCH NOTES
   # ============================================
-  contentManager_write_research:
+  content_write_research:
     type: tool
-    agent: contentManager
+    agent: content
     tool: write
     max_tokens: 4096
     tool_call_format: default
@@ -116,9 +116,9 @@ scenarios:
   # ============================================
   # BLOG POSTS / ESSAYS
   # ============================================
-  contentManager_write_blog:
+  content_write_blog:
     type: tool
-    agent: contentManager
+    agent: content
     tool: write
     max_tokens: 4096
     tool_call_format: default
@@ -242,9 +242,9 @@ scenarios:
   # ============================================
   # CREATIVE WRITING
   # ============================================
-  contentManager_write_creative:
+  content_write_creative:
     type: tool
-    agent: contentManager
+    agent: content
     tool: write
     max_tokens: 4096
     tool_call_format: default
@@ -374,9 +374,9 @@ scenarios:
   # ============================================
   # DOCUMENTATION / HOW-TO
   # ============================================
-  contentManager_write_documentation:
+  content_write_documentation:
     type: tool
-    agent: contentManager
+    agent: content
     tool: write
     max_tokens: 4096
     tool_call_format: default
@@ -502,9 +502,9 @@ scenarios:
   # ============================================
   # JOURNAL / REFLECTION
   # ============================================
-  contentManager_write_journal:
+  content_write_journal:
     type: tool
-    agent: contentManager
+    agent: content
     tool: write
     max_tokens: 4096
     tool_call_format: default
@@ -626,3 +626,5 @@ scenarios:
            - Emotional authenticity
 
         OUTPUT ONLY THE JSON OBJECT - no markdown wrapper, no explanation.
+
+

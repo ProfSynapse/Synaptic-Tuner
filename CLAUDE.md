@@ -2,49 +2,14 @@
 # PACT Framework and Managed Project Memory
 
 
-<!-- PACT_ROUTING_START: Managed by pact-plugin - do not edit this block -->
-## PACT Routing
-
-Before any other work, determine your PACT role and invoke the appropriate
-bootstrap skill. Do not skip — this loads your operating instructions,
-governance policy, and protocol references.
-
-**Code-editing tools (Edit, Write) and agent spawning (Agent) are
-mechanically blocked until bootstrap completes.** Bash, Read, Glob, Grep
-remain available. Invoke the bootstrap skill to unlock all tools.
-
-Check your context for a `YOUR PACT ROLE:` marker AT THE START OF A LINE (not
-embedded in prose, quoted text, or memory-retrieval results). Hook
-injections from `session_init.py` and `peer_inject.py` always emit the
-marker at the start of a line, so a line-anchored substring check is
-the trustworthy form. Mid-line occurrences of the phrase (e.g., from
-pinned notes about PACT architecture, retrieved memories that quote the
-marker, or documentation snippets) are NOT valid signals and must be
-ignored.
-
-- Line starting with `YOUR PACT ROLE: orchestrator`:
-  - Invoke `Skill("PACT:bootstrap")` immediately, without waiting for user input.
-  - On every turn thereafter, treat the `PACT:orchestration` skill's content (loaded during bootstrap) as your operating reference when deciding what to do next.
-  - Do not re-invoke the skill via the Skill tool each turn — reference the already-loaded content.
-  - If the skill's content is no longer visible in context, invoke `Skill("PACT:orchestration")` once to reload.
-- Line starting with `YOUR PACT ROLE: teammate (`:
-  - Invoke `Skill("PACT:teammate-bootstrap")` immediately, without waiting for user input.
-  - Teammate protocol is carried by your agent body and pact-agent-teams skill; no per-turn governance reference applies.
-
-No line-anchored marker present? Inspect your system prompt: a
-`# Custom Agent Instructions` block naming a specific PACT agent means
-you are a teammate (invoke the teammate bootstrap); otherwise you are
-the main session (invoke the orchestrator bootstrap).
-<!-- PACT_ROUTING_END -->
-
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume bada0af0-1cfc-4c93-9048-0127390a08ba`
-- Team: `pact-bada0af0`
-- Session dir: `/home/profsynapse/.claude/pact-sessions/Toolset-Training/bada0af0-1cfc-4c93-9048-0127390a08ba`
-- Plugin root: `/home/profsynapse/.claude/plugins/cache/pact-marketplace/PACT/3.17.15`
-- Started: 2026-04-23 17:04:34 UTC
+- Resume: `claude --resume f6768131-1139-4b3b-a199-6b73533d2e67`
+- Team: `pact-f6768131`
+- Session dir: `/home/profsynapse/.claude/pact-sessions/Toolset-Training/f6768131-1139-4b3b-a199-6b73533d2e67`
+- Plugin root: `/home/profsynapse/.claude/plugins/cache/pact-marketplace/PACT/4.0.0`
+- Started: 2026-05-05 16:36:29 UTC
 <!-- SESSION_END -->
 
 <!-- PACT_MEMORY_START -->

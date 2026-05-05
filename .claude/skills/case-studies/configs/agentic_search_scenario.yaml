@@ -4,9 +4,9 @@
 # ║  BEFORE USING: Replace placeholder tool names with YOUR tools  ║
 # ║                                                                ║
 # ║  Placeholders:                                                 ║
-# ║    YOUR_SEARCH_TOOL  → e.g., grep, ripgrep, searchAPI, etc.   ║
-# ║    YOUR_READ_TOOL    → e.g., cat, readFile, fetchDoc, etc.    ║
-# ║    YOUR_LIST_TOOL    → e.g., ls, listFiles, dirList, etc.     ║
+# ║    YOUR_SEARCH_TOOL  → configured retrieval action            ║
+# ║    YOUR_READ_TOOL    → configured document read/fetch action   ║
+# ║    YOUR_LIST_TOOL    → configured list/browse action           ║
 # ║                                                                ║
 # ║  The three-stage pattern (search → read → answer) is the      ║
 # ║  constant. The actual tools are YOUR choice.                   ║

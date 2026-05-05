@@ -1,4 +1,4 @@
-# Shared-workspace pilot pack.
+﻿# Shared-workspace pilot pack.
 # All task scenarios reuse the same generated vault seed via targets._shared_seed.
 
 shared_agentic_environment: &shared_agentic_environment
@@ -258,8 +258,8 @@ scenarios:
 
   sharedvault_promote_inbox_note_with_example:
     type: tool
-    tool: contentManager_write
-    expected_tools: [contentManager_read, contentManager_write, storageManager_archive]
+    tool: content write
+    expected_tools: [content read, content write, storage archive]
     environment_mode: provided
     tags: [vault, workflow, frontmatter, retrieval, shared_seed]
     system_template: mocked_workspace_vault
@@ -326,8 +326,8 @@ scenarios:
 
   sharedvault_create_daily_note_from_template:
     type: tool
-    tool: contentManager_write
-    expected_tools: [searchManager_searchDirectory, contentManager_read, contentManager_write]
+    tool: content write
+    expected_tools: [search directory, content read, content write]
     environment_mode: provided
     tags: [vault, template, frontmatter, retrieval, shared_seed]
     system_template: mocked_workspace_vault
@@ -378,15 +378,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with searchManager.searchDirectory, contentManager.read, then contentManager.write.
+        Use useTools with search.searchDirectory, content.read, then content.write.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_triage_correct_note_after_search:
     type: tool
-    tool: contentManager_setProperty
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_setProperty]
+    tool: content set-property
+    expected_tools: [search content, content read, content set-property]
     environment_mode: provided
     tags: [vault, retrieval, triage, shared_seed]
     system_template: mocked_workspace_vault
@@ -440,15 +440,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with searchManager.searchContent, contentManager.read, then contentManager.setProperty.
+        Use useTools with search.searchContent, content.read, then content.setProperty.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_update_production_config_preserve_structure:
     type: tool
-    tool: contentManager_replace
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_replace]
+    tool: content replace
+    expected_tools: [search content, content read, content replace]
     environment_mode: provided
     tags: [vault, config, retrieval, preservation, shared_seed]
     system_template: mocked_workspace_vault
@@ -510,8 +510,8 @@ scenarios:
 
   sharedvault_read_before_replace_settings_yaml:
     type: tool
-    tool: contentManager_replace
-    expected_tools: [contentManager_read, contentManager_replace]
+    tool: content replace
+    expected_tools: [content read, content replace]
     environment_mode: provided
     tags: [vault, settings, preservation, shared_seed]
     system_template: mocked_workspace_vault
@@ -561,15 +561,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with contentManager.read followed by contentManager.replace.
+        Use useTools with content.read followed by content.replace.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_archive_empty_folder_after_verification:
     type: tool
-    tool: storageManager_archive
-    expected_tools: [storageManager_list, storageManager_archive]
+    tool: storage archive
+    expected_tools: [storage list, storage archive]
     environment_mode: provided
     tags: [vault, destructive, verification, shared_seed]
     system_template: mocked_workspace_vault
@@ -607,15 +607,15 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with storageManager.list first, then storageManager.archive.
+        Use useTools with storage.list first, then storage.archive.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
 
   sharedvault_archive_only_deprecated_notes:
     type: tool
-    tool: storageManager_archive
-    expected_tools: [searchManager_searchContent, contentManager_read, storageManager_archive]
+    tool: storage archive
+    expected_tools: [search content, content read, storage archive]
     environment_mode: provided
     tags: [vault, destructive, retrieval, shared_seed]
     system_template: mocked_workspace_vault
@@ -667,8 +667,8 @@ scenarios:
 
   sharedvault_continue_inbox_organization:
     type: tool
-    tool: storageManager_move
-    expected_tools: [storageManager_move]
+    tool: storage move
+    expected_tools: [storage move]
     environment_mode: provided
     tags: [vault, workflow, continuity, shared_seed]
     system_template: mocked_workspace_vault
@@ -717,7 +717,7 @@ scenarios:
         Generate assistant response as valid JSON text only.
 
         Return exactly one JSON object with top-level keys "content" and "tool_calls".
-        Use useTools with storageManager.move for each note.
+        Use useTools with storage.move for each note.
     assistant_generation:
       <<: *shared_assistant_generation
       schema: use_tools_response
@@ -780,3 +780,5 @@ scenarios:
         Ask for confirmation before taking any destructive action and do not call tools.
     assistant_generation:
       <<: *shared_assistant_generation
+
+

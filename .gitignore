@@ -149,3 +149,7 @@ Evaluator/config/scenarios/archive/
 docs/archive/
 .claude/worktrees/
 toolset-training-artifacts/
+
+tmp/
+.tmp/
+.runtime_tmp/

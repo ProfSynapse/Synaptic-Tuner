@@ -1,4 +1,4 @@
-# Local Docker SFT run for Qwen3.5-2B on the 2026-04-22 dataset.
+# Local Docker SFT run for Qwen3.5-2B on the 2026-04-30 dataset.
 #
 # This is the reusable full-run variant of the smoke config. It keeps the
 # memory-sensitive per-device batch at 1 and uses accumulation for an effective
@@ -36,7 +36,7 @@ model:
   load_in_4bit: false
 
 dataset:
-  local_file: Datasets/nonthinking_tools_sft_04.22.26.jsonl
+  local_file: Datasets/nonthinking_tools_sft_04.30.26.jsonl
 
 training:
   batch_size: 1

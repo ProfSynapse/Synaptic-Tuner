@@ -7,7 +7,9 @@ from SynthChat.agentic.episode import (
     build_turn_judge,
     build_turn_judge_template_vars,
     synthchat_loop_response,
+    validate_agentic_synthchat_response,
 )
+from shared.agentic_judge import AgenticTurnJudge
 
 
 # ---- build_turn_judge_template_vars ----
@@ -97,6 +99,33 @@ class TestBuildTurnJudge:
         config = {"enabled": True, "prompt": ""}
         assert build_turn_judge(**self._base_kwargs(judge_config=config)) is None
 
+    def test_response_format_passed_to_judge_client(self):
+        class FakeClient:
+            def __init__(self):
+                self.kwargs = None
+
+            def structured_output(self, **kwargs):
+                self.kwargs = kwargs
+                return {
+                    "passed": True,
+                    "hard_failure": False,
+                    "should_stop": False,
+                    "feedback_to_model": "",
+                    "feedback_for_trace": "",
+                }
+
+        client = FakeClient()
+        judge = AgenticTurnJudge(
+            llm_client=client,
+            prompt_template="Judge {turn_index}",
+            response_format="json_object",
+        )
+
+        result = judge.judge({"turn_index": 1})
+
+        assert result.passed is True
+        assert client.kwargs["response_format"] == "json_object"
+
 
 # ---- synthchat_loop_response ----
 
@@ -157,3 +186,11 @@ class TestSynthchatLoopResponse:
         )
         assert "I need to read the file first" in context_received["ctx"]
         assert "<thinking>" in result.message["content"]
+
+
+def test_agentic_validation_allows_text_response_with_empty_tool_calls():
+    result = validate_agentic_synthchat_response(
+        {"role": "assistant", "content": "The status is green.", "tool_calls": []}
+    )
+
+    assert result.passed is True

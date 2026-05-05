@@ -1,4 +1,4 @@
-# Behaviors Configuration
+﻿# Behaviors Configuration
 # Defines reusable behavior checks for test scenarios
 # All checks are generic - no hardcoded tool names
 
@@ -160,33 +160,33 @@ behaviors:
     check: tool_sequence
     params:
       first_any_of:
-        - storageManager_list
-        - searchManager_searchContent
-        - searchManager_searchDirectory
-        - contentManager_read
+        - storage list
+        - search content
+        - search directory
+        - content read
       not_first:
-        - storageManager_archive
-        - contentManager_replace
+        - storage archive
+        - content replace
 
   # Reads before writing
   reads_before_write:
     check: tool_sequence
     params:
       first_any_of:
-        - contentManager_read
+        - content read
       before:
-        - contentManager_write
-        - contentManager_replace
-        - contentManager_insert
+        - content write
+        - content replace
+        - content insert
 
   # Searches before acting on ambiguous request
   searches_first:
     check: tool_sequence
     params:
       first_any_of:
-        - searchManager_searchContent
-        - searchManager_searchDirectory
-        - searchManager_searchContent
+        - search content
+        - search directory
+        - search content
 
   # --------------------------------------------------------
   # ERROR RECOVERY CHECKS
@@ -315,3 +315,4 @@ check_types:
   batch_strategy:
     description: "Check batch uses specific strategy"
     params: [strategy]
+

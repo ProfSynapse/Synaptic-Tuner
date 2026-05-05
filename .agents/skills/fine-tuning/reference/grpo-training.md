@@ -54,7 +54,7 @@ dataset:
 
 ## Dataset Format
 
-GRPO requires prompts with ground truth for reward scoring:
+GRPO requires prompts with ground truth for reward scoring. The exact ground-truth columns are config-driven:
 
 ```json
 {
@@ -62,12 +62,12 @@ GRPO requires prompts with ground truth for reward scoring:
     {"role": "system", "content": "..."},
     {"role": "user", "content": "..."}
   ],
-  "ground_truth_tool": "useTools",
-  "ground_truth_args_json": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage open \\\"notes/example.md\\\"\",\"strategy\":\"serial\"}"
+  "ground_truth_tool": "CONFIGURED_WRAPPER_NAME",
+  "ground_truth_args_json": "{\"FIELD_A\":\"value-a\",\"FIELD_B\":\"value-b\",\"ACTION_FIELD\":\"configured action payload\"}"
 }
 ```
 
-Ground truth uses the same `useTools` wrapper structure as model output.
+Ground truth should use the same configured response schema as model output. Do not assume a particular wrapper name, context field set, or command string format unless the run config defines it.
 
 ---
 
@@ -79,7 +79,7 @@ All rewards are deterministic YAML rubrics in `configs/rewards/`:
 |--------|--------|----------------|
 | `args_match.yaml` | 1.0 | Field-by-field comparison against ground truth |
 | `json_structure.yaml` | 0.3 | Valid JSON parsing |
-| `format.yaml` | 0.2 | Correct `useTools` wrapper format |
+| `format.yaml` | 0.2 | Correct configured response format |
 | `fitness.yaml` | 0.3 | Structural fitness via FitnessEvaluator |
 | `context_completeness.yaml` | — | Context field presence |
 | `tool_selection.yaml` | — | Correct tool name |
@@ -116,6 +116,41 @@ Checks performed:
 - Are required fields present?
 
 This complements semantic rewards (`args_match`, `json_structure`) by validating the response structure against configurable rules in `fitness_rules.yaml`. Useful when training tool-calling models where structural correctness is critical.
+
+### Env-GRPO Rewards
+
+For environment-backed GRPO, reward behavior must be declared in the env run
+config. The trainer may provide generic primitives such as `add_if`, `linear`,
+field-path conditions, and clamps, but it should not hardcode a scenario's
+field names, stop reasons, or pass/fail meaning.
+
+Example:
+
+```yaml
+rewards:
+  default: 0.0
+  rules:
+    - name: solved
+      type: add_if
+      when:
+        type: field_equals
+        field: result.solved
+        value: true
+      score: 1.0
+    - name: extra_step_penalty
+      type: linear
+      field: metrics.steps
+      baseline: 1
+      min_delta: 0
+      weight: -0.02
+  clamp:
+    min: -2.0
+    max: 1.0
+```
+
+If a new reward need cannot be expressed with existing generic primitives, add
+one reusable primitive to the reward interpreter and keep the scenario-specific
+paths and scores in YAML.
 
 **Tuning weight:**
 - Higher weight (0.5+) when structural errors are common early in training
@@ -186,6 +221,58 @@ Use `scripts/split_for_gspo.py` to split datasets.
 | `kl_penalty` | KL divergence from reference | Stable, < 0.1 |
 | `advantage` | Relative reward within group | Positive |
 | `loss` | Policy gradient loss | Decreasing |
+
+## Reward-Signal Smoke Protocol
+
+Before any long GRPO run, run a tiny generation/reward probe and a short
+training smoke. A run can complete successfully while still teaching nothing if
+the reward parser cannot see the model's decoded completion format.
+
+Checklist:
+
+- Generate a few completions from the exact starting model with the exact GRPO
+  prompt formatting.
+- Score those raw completions with the configured reward function before
+  training.
+- Confirm at least some completions have nonzero reward.
+- Confirm each sampled group has reward variation; `frac_reward_zero_std` should
+  be below 1.0 during smoke training.
+- Inspect `reward`, `reward_std`, `frac_reward_zero_std`, `kl`, clipped
+  completions, and raw completions before scaling.
+- If prompts omit a `system` role by design, make sure the user prompt itself
+  contains enough generic task/format contract for the model to produce
+  parseable actions.
+- If the model emits a different valid tool-call surface than the reward expects
+  (for example OpenAI-style tool calls rendered as ChatML text), fix the generic
+  parser/reward configuration rather than teaching a use-case-specific parser.
+- If shared parser code depends on configured format files, ensure the local
+  Docker job copies those config directories too; otherwise the trainer may
+  silently fall back to a narrower parser and produce all-zero rewards.
+- For repeated local Docker smokes, prefer reusing an already-provisioned
+  container when the base model and package stack are unchanged. Keep the job
+  config's `setup.copy` focused on changed code, configs, and datasets; recopying
+  a large merged model into a fresh container can make the run appear hung before
+  trainer startup.
+- If a small smoke shows live reward signal but KL spikes, reduce update size
+  before scaling: lower learning rate, raise `beta`, and/or increase gradient
+  accumulation while keeping `num_generations` compatible with the effective
+  batch size.
+- After GRPO, validate both training health and serving health. A run with
+  healthy nonzero rewards can still produce an adapter that needs a careful
+  merge path before vLLM can load it. Compare merged checkpoint keys to the
+  verified base model and repair via generic merge-helper options when needed.
+- Run the same behavior/tool/environment eval suites against the verified SFT
+  baseline and the GRPO merge. If GRPO improves tool exactness but fails
+  environment-backed multi-turn tasks by refusing tools as "unavailable", the
+  next data iteration needs more first-action environment trajectories and
+  clearer prompt/tool-contract conditioning rather than more single-tool syntax
+  examples.
+
+For Unsloth/TRL GRPO, custom reward functions receive generated completions and
+dataset columns such as `ground_truth_args_json`; the reward function must return
+one float per completion. TRL also logs `reward`, `reward_std`, and
+`frac_reward_zero_std`, which are the quickest checks for whether a GRPO run has
+a usable contrastive signal.
 
 ---
 

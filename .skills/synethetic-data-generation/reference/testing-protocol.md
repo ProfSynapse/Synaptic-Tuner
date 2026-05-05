@@ -45,6 +45,86 @@ generation or improvement pass.
 
 ---
 
+## Iterative Scaling Ladder
+
+For config-driven environment-backed datasets, use this ladder. Do not jump
+from scenario authoring to a large generation run.
+
+1. Author declarative config only: scenario YAML, rubric YAML, tool schema,
+   execution config, target manifest, and settings. If a failure is tied to the
+   current tool surface or dataset shape, first fix the config, not runtime code.
+2. Run an environment-only probe for a few seeds with debug artifacts enabled.
+   Confirm the generated fixture is valid, realistic, diverse enough, and
+   internally consistent before spending calls on assistant rollouts.
+3. Run a tiny full rollout smoke from a checked-in target manifest. Keep the
+   worker count low until raw traces show the assistant, tools, judge feedback,
+   and final answer are all moving through the expected loop.
+4. Analyze the raw JSONL, debug JSONL, stdout, and stderr. Check the generated
+   environment, model-facing tool responses, assistant tool calls, judge notes,
+   final text, and final assertions. Do not rely only on aggregate pass counts.
+   Accepted rows can still be poor training data if they contain recoverable
+   syntax errors, unexpected tools, repeated judge repairs, or a different
+   command shape from the configured expected trajectory.
+5. Make config-only fixes: prompts, schemas, gates, rubrics, target manifests,
+   retry counts, worker counts, model routing, or temperature ranges. Runtime
+   code changes are only for reusable capabilities that cannot be expressed by
+   existing config surfaces.
+6. Repeat the environment probe and tiny rollout after each meaningful fix.
+7. Scale in stages, for example 3x1 -> 10x2 -> 25x2 -> 50x2. Increase workers
+   only after the smaller stage is clean enough to justify more concurrency.
+8. For large stages, tolerate a small failed fraction when failures are
+   non-systemic. Create a passed-only artifact, then run a make-up slice if the
+   target count matters.
+9. Record the artifact paths, pass counts, failure categories, and any config
+   changes so the next run starts from evidence rather than memory.
+
+When analyzing staged runs, collect at least:
+- row count and pass/fail count
+- environment pass/fail status
+- final text/final judge pass status
+- tool sequence distribution and turn count distribution
+- environment issue counts, recoverable tool error counts, and unexpected-tool
+  counts in accepted rows
+- stage review failures by stage
+- provider warnings, empty responses, schema errors, and retry counts
+- diversity proxies such as unique user prompts, workspace/tool IDs, file paths,
+  answer phrases, domains, or task flavors
+
+Classify failures before fixing them:
+- Environment structural failure: fix schema, fixture gates, or env-generation
+  prompt constraints.
+- Fixture semantic mismatch: fix env-generation prompt, environment assertions,
+  or env judge wording so the generated files and expected answer agree.
+- Assistant rollout/tool-order failure: fix the model-facing system prompt,
+  expected trajectory config, response rubric, or in-loop judge feedback.
+- Final text failure: fix the terminal answer instruction, final gates, or
+  final judge. Multi-turn tool tasks should normally end with a text-only
+  assistant answer after tool use is complete.
+- Provider or structured-output instability: adjust retries, worker count,
+  stage-specific model routing, or temperature ranges. Do not tune scenario
+  semantics unless the failure is repeatable.
+- Brittle structured CLI arguments: gate the exact expected command shape in
+  scenario YAML, verify the executor accepts it, and smoke with the intended
+  rollout model. If that model repeatedly produces malformed nested JSON or
+  quoting, use scenario-level `assistant_generation` routing for a stronger
+  teacher rather than accepting noisy recovery traces as the training source.
+
+If a failure can be checked deterministically from metadata, add a final gate
+instead of relying only on an LLM judge. This is especially important for
+multi-step tool trajectories where the judge may accept the final state even
+though the assistant skipped a required discovery/read step. Use generic gates
+whose behavior is supplied by config fields and templates, such as comparing
+scenario-defined expected actions with recorded environment actions using
+scenario-defined renderers. Keep the gate
+configuration declarative; do not add scenario-specific parser or executor
+repairs.
+
+It is often useful to test different model/provider choices for environment
+generation, assistant turn generation, and judging. Treat model routing as
+configuration, and verify in logs that each stage uses the intended route.
+
+---
+
 ## Protocol Steps
 
 ### Step 1: Dry-Run (3-5 Examples)
@@ -136,7 +216,7 @@ This produces a clean Markdown file with:
 - Does the assistant response use the right tool/behavior?
 - Are thinking blocks well-structured (if applicable)?
 - Do tool calls have correct parameters?
-- Are IDs consistent (sessionId, workspaceId)?
+- Are configured context IDs/fields consistent?
 - Is content substantive (not generic filler)?
 - If rubrics/judges are configured, did they actually run and gate the example?
 - If environment validation ran, were its errors visible to the judge/improver
@@ -150,9 +230,9 @@ This produces a clean Markdown file with:
   in-loop judge feedback to isolate whether the rollout model missed a tool
   step, the judge pushed after completion, or final text handling was too
   strict.
-- If expected command sequences contain stale command surfaces such as shell
-  commands while the trained surface is a configured tool wrapper/CLI, add
-  scenario gates that reject those generated answer keys before the rollout.
+- If expected action sequences contain stale surfaces such as shell commands
+  while the trained surface is a configured tool schema, add scenario gates
+  that reject those generated answer keys before the rollout.
 - If an agentic rollout failed after recovery, inspect whether final assertions
   passed. For recovery datasets, earlier recoverable tool errors can be useful
   training signal when later actions corrected them.
@@ -281,7 +361,9 @@ Use this checklist:
 - Did the assistant emit valid structured output before environment execution?
 - If the first assistant turn was malformed, did validation feedback stay
   inside the agentic loop and allow a corrected retry?
-- Did the environment execute the expected commands?
+- Did the environment execute the expected actions?
+- If expected actions are stored in task context, did a deterministic final
+  gate verify action coverage and order against the executed tool trace?
 - Did tool feedback expose the same model-facing tool names as the prompt?
 - Did the in-loop judge ask for a correction only when the latest assistant
   action actually failed?
@@ -317,14 +399,26 @@ If the interaction log contains implementation-only tool names that the model
 should never see, fix the configured model-facing feedback surface before
 tuning prompts.
 
+When validating generated tool/eval data against a trained model, separate
+runtime health from model behavior:
+
+- First confirm the serving process loaded and wrote a usable progress or
+  summary artifact.
+- Treat nonzero eval exits as expected when examples fail; preserve and inspect
+  result artifacts before changing scenarios or runtime.
+- If every case fails with the same infrastructure warning or token-budget
+  error, fix the eval/job config first.
+- If failures are varied and trajectory-specific, analyze saved raw responses
+  and environment traces before generating more data.
+
 ---
 
 ## Multi-Turn Environment Smokes
 
 A useful multi-turn smoke should usually prove these separately:
 
-- prompt render: no stale tool names, correct CLI/wrapper examples, correct
-  workspace/session context
+- prompt render: no stale tool names, correct configured action examples, correct
+  configured context
 - first action: model can make one valid discovery/list/read call
 - feedback: environment returns non-empty structured tool results or errors
 - continuation: model uses the feedback instead of guessing hidden paths
@@ -384,7 +478,7 @@ Stop and fix the YAML if you see:
 - **Missing sections** — No `<vault_structure>`, no frontmatter, etc.
 - **Hallucinated paths** — File paths that don't exist in the system prompt
 - **Wrong tool calls** — Using `delete` when scenario says `create`
-- **ID mismatches** — sessionId/workspaceId don't match `<session_context>`
+- **Context mismatches** — configured context fields don't match the configured prompt/context section
 - **All examples identical** — No variety in generated content
 - **Empty fields** — Null thinking blocks, empty tool arguments
 - **Judge always passes/fails** — Threshold or prompt needs tuning

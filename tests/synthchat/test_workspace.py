@@ -14,11 +14,11 @@ from SynthChat.workspace.sections import (
     _tool_wrapper_name,
 )
 from SynthChat.workspace.renderer import render_workspace_prompt
-from SynthChat.config.format_resolver import get_default_tool_call_format, load_workspace_formats
+from SynthChat.config.format_resolver import load_tool_call_formats, load_workspace_formats
 
 
 def _default_tool_fmt(**overrides):
-    fmt = get_default_tool_call_format()
+    fmt = load_tool_call_formats().get("default", {})
     fmt.update(overrides)
     return fmt
 
@@ -92,7 +92,15 @@ class TestRenderAvailableWorkspaces:
         assert '"a"' in result
         assert "Main project" in result
         assert "Project B" in result
-        assert "memoryManager" in result
+        assert "memoryManager" not in result
+
+    def test_renders_configured_instruction(self):
+        workspaces = [{"name": "Project A", "id": "a"}]
+        result = _render_available_workspaces(
+            workspaces,
+            instruction="Use configured workspace commands.",
+        )
+        assert "Use configured workspace commands." in result
 
 
 # ---- _render_available_prompts ----
@@ -136,6 +144,44 @@ class TestRenderAvailableTools:
         }
         result = _render_available_tools(schema, _default_tool_fmt(wrapper_name="myWrapper"))
         assert "myWrapper" in result
+
+    def test_full_detail_is_config_driven(self):
+        schema = {
+            "tools": {
+                "agent": [
+                    {
+                        "name": "read",
+                        "description": "Read a file.",
+                        "command": "files read",
+                        "usage": "files read <path> <startLine>",
+                        "params": {"required": ["path", "startLine"], "optional": []},
+                        "arguments": [
+                            {
+                                "name": "path",
+                                "type": "string",
+                                "required": True,
+                                "positional": True,
+                                "description": "File path",
+                            },
+                            {
+                                "name": "startLine",
+                                "type": "number",
+                                "required": True,
+                                "positional": True,
+                                "description": "First line",
+                            },
+                        ],
+                        "examples": ['files read "notes/a.md" 1'],
+                    }
+                ]
+            }
+        }
+        fmt = _default_tool_fmt(available_tools_detail="full")
+        result = _render_available_tools(schema, fmt)
+        assert "Command: files read" in result
+        assert "Usage: files read <path> <startLine>" in result
+        assert "path (required, string, positional): File path" in result
+        assert 'Example: files read "notes/a.md" 1' in result
 
 
 # ---- _render_note_contents ----
@@ -239,3 +285,42 @@ class TestRenderWorkspacePrompt:
         )
         assert "<rules>" in result
         assert "Be helpful." in result
+
+    def test_workspace_format_can_request_full_available_tool_schema(self):
+        system_context = {
+            "note_contents": [{"path": "notes/a.md", "content": "Hidden note body"}],
+        }
+        environment_config = {"fixture": {"files": {"notes/a.md": "Hidden note body"}}}
+        tool_schema = {
+            "tools": {
+                "agent": [
+                    {
+                        "name": "read",
+                        "command": "files read",
+                        "usage": "files read <path>",
+                        "params": {"required": ["path"], "optional": []},
+                        "arguments": [
+                            {
+                                "name": "path",
+                                "type": "string",
+                                "required": True,
+                                "positional": True,
+                            }
+                        ],
+                        "examples": ['files read "notes/a.md"'],
+                    }
+                ]
+            }
+        }
+        formats = load_workspace_formats()
+        result = render_workspace_prompt(
+            system_context,
+            environment_config,
+            tool_schema,
+            format_config=formats["cli_schema_tools"],
+            tool_call_format=_default_tool_fmt(),
+        )
+        assert "<available_tools>" in result
+        assert "Usage: files read <path>" in result
+        assert 'Example: files read "notes/a.md"' in result
+        assert "<note_contents>" not in result

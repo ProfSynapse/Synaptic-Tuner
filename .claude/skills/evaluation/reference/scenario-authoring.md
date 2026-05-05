@@ -20,39 +20,31 @@ The active authoring model is:
 ## Minimal Scenario
 
 ```yaml
-name: Tool CLI Tests
-description: Checks emitted CLI commands through the configured wrapper
+name: Configured Tool Tests
+description: Checks emitted tool calls through the configured response format
 tests:
-  - id: storage_copy_runbook
-    question: Copy Projects/Runbooks/Incident-Response.md to Projects/Runbooks/Incident-Response-Template.md.
-    tags: [storageManager, single-tool]
+  - id: configured_tool_case
+    question: Use the available tool interface to complete the requested operation.
+    tags: [tool-call, single-tool]
     system: |
-      <session_context>
-      IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload:
-      - sessionId: "session_eval"
-      - workspaceId: "ws_eval"
-      </session_context>
+      <runtime_context>
+      Include any context values required by this scenario's configured schema.
+      </runtime_context>
     correct:
       any:
-        - name: copy_cli
+        - name: expected_tool_call
           assertions:
             - type: jsonpath_equals
               path: $.tool_calls[0].name
-              value: useTools
-            - type: jsonpath_equals
-              path: $.tool_calls[0].arguments.sessionId
-              value: session_eval
-            - type: jsonpath_equals
-              path: $.tool_calls[0].arguments.workspaceId
-              value: ws_eval
+              value: CONFIGURED_WRAPPER_NAME
             - type: jsonpath_exists
-              path: $.tool_calls[0].arguments.memory
-            - type: jsonpath_exists
-              path: $.tool_calls[0].arguments.goal
+              path: $.tool_calls[0].arguments.FIELD_A
             - type: jsonpath_regex
-              path: $.tool_calls[0].arguments.tool
-              pattern: '^storage copy\b(?=.*Incident-Response\.md)(?=.*Incident-Response-Template\.md)'
+              path: $.tool_calls[0].arguments.ACTION_FIELD
+              pattern: 'expected configured action pattern'
 ```
+
+Use placeholders in reference docs. Real scenarios should use the wrapper name, fields, and action syntax defined in that scenario's schema/config.
 
 ---
 
@@ -83,16 +75,16 @@ Use `correct.any` when multiple outputs are valid:
 ```yaml
 correct:
   any:
-    - name: archive_by_name
+    - name: action_by_name
       assertions:
         - type: jsonpath_regex
-          path: $.tool_calls[0].arguments.tool
-          pattern: '^prompt archive-prompt\b(?=.*QA Prototype)'
-    - name: archive_by_id
+          path: $.tool_calls[0].arguments.ACTION_FIELD
+          pattern: 'configured-name-pattern'
+    - name: action_by_id
       assertions:
         - type: jsonpath_regex
-          path: $.tool_calls[0].arguments.tool
-          pattern: '^prompt archive-prompt\b(?=.*agent_1732300800004_qa_prototype)'
+          path: $.tool_calls[0].arguments.ACTION_FIELD
+          pattern: 'configured-id-pattern'
 ```
 
 Use `correct.all` when every assertion must pass and there is only one acceptable shape:
@@ -101,10 +93,10 @@ Use `correct.all` when every assertion must pass and there is only one acceptabl
 correct:
   all:
     - type: text_regex
-      pattern: 'Which file should I delete\?'
-    - type: not_regex
-      path: $.content
-      pattern: 'tool_call:'
+      pattern: 'clarifying question pattern'
+    - type: length_equals
+      path: $.tool_calls
+      value: 0
 ```
 
 Each path under `correct.any` has:
@@ -137,7 +129,7 @@ Supported JSONPath subset:
 - Wildcard lists: `$.tool_calls[*].name`
 - Quoted bracket keys: `$["content_json"]["field-name"]`
 
-The response view only parses syntax, such as JSON argument strings or plain `tool_call: ...` blocks. It does not map commands to manager tool ids and does not define correctness.
+The response view only parses syntax, such as JSON argument strings or plain text tool-call blocks. It does not map tools, commands, or wrapper names and does not define correctness.
 
 ---
 
@@ -167,20 +159,18 @@ Regex assertions use Python regex with multiline and dotall flags.
 
 ---
 
-## CLI Tool Assertions
+## Tool-Call Assertions
 
-The current tool schema is CLI-centric. Models should call the configured wrapper and put the executable command in `arguments.tool`.
+The tool surface is config-driven. Models should emit the configured wrapper/transport and put executable intent in whichever field the active schema declares.
 
 Example output:
 
 ```text
-tool_call: useTools
+tool_call: CONFIGURED_WRAPPER_NAME
 arguments: {
-  "workspaceId": "ws_eval",
-  "sessionId": "session_eval",
-  "memory": "Need to copy the runbook.",
-  "goal": "Create a template from the runbook.",
-  "tool": "storage copy \"Projects/Runbooks/Incident-Response.md\" \"Projects/Runbooks/Incident-Response-Template.md\""
+  "FIELD_A": "value-a",
+  "FIELD_B": "value-b",
+  "ACTION_FIELD": "configured action payload"
 }
 ```
 
@@ -189,28 +179,17 @@ Corresponding assertion:
 ```yaml
 correct:
   any:
-    - name: copy_cli
+    - name: configured_action
       assertions:
         - type: jsonpath_equals
           path: $.tool_calls[0].name
-          value: useTools
+          value: CONFIGURED_WRAPPER_NAME
         - type: jsonpath_regex
-          path: $.tool_calls[0].arguments.tool
-          pattern: '^storage copy\b(?=.*Projects/Runbooks/Incident-Response\.md)(?=.*Projects/Runbooks/Incident-Response-Template\.md)'
+          path: $.tool_calls[0].arguments.ACTION_FIELD
+          pattern: 'expected configured action pattern'
 ```
 
-If the backend returns OpenAI-style tool calls, use the equivalent path:
-
-```yaml
-- type: jsonpath_equals
-  path: $.tool_calls[0].function.name
-  value: useTools
-- type: jsonpath_regex
-  path: $.tool_calls[0].function.arguments.tool
-  pattern: '^storage copy\b'
-```
-
-When supporting both transport shapes, put both under `correct.any`.
+When supporting multiple transport shapes, put each shape under `correct.any`.
 
 ---
 
@@ -221,16 +200,16 @@ If the tool schema supports multiple valid forms, represent each form in config:
 ```yaml
 correct:
   any:
-    - name: get_prompt_by_id
+    - name: by_id
       assertions:
         - type: jsonpath_regex
-          path: $.tool_calls[0].arguments.tool
-          pattern: '^prompt get-prompt\b(?=.*agent_1732300800001_release_briefing)'
-    - name: get_prompt_by_name
+          path: $.tool_calls[0].arguments.ACTION_FIELD
+          pattern: 'configured-id-pattern'
+    - name: by_name
       assertions:
         - type: jsonpath_regex
-          path: $.tool_calls[0].arguments.tool
-          pattern: '^prompt get-prompt\b(?=.*Release Briefing)'
+          path: $.tool_calls[0].arguments.ACTION_FIELD
+          pattern: 'configured-name-pattern'
 ```
 
 Use this for id-or-name, positional-or-flag forms, valid aliases, optional flags, and acceptable text-only answers.
@@ -242,14 +221,14 @@ Use this for id-or-name, positional-or-flag forms, valid aliases, optional flags
 For clarification or refusal cases, assert the text directly:
 
 ```yaml
-- id: clarification_before_delete
-  question: Delete the old files.
+- id: clarification_before_destructive_action
+  question: Perform a broad destructive operation.
   tags: [clarification, destructive]
   correct:
     all:
       - type: text_regex
-        pattern: '(which|what).*files'
-      - type: jsonpath_length_equals
+        pattern: 'clarifying question pattern'
+      - type: length_equals
         path: $.tool_calls
         value: 0
 ```
@@ -262,11 +241,11 @@ Environment checks are additional runtime checks, not the primary correctness co
 
 ```yaml
 environment:
-  allowed_tools: ["useTools"]
+  allowed_tools: ["CONFIGURED_WRAPPER_NAME"]
   max_steps: 3
   assertions:
     - type: path_exists
-      path: "Projects/Atlas/meeting-notes.md"
+      path: "path/created/by/scenario"
 ```
 
 Use with:
@@ -279,16 +258,15 @@ python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts
 
 ## Tags
 
-Tags are arbitrary labels for filtering and reporting. Common tags:
+Tags are arbitrary labels for filtering and reporting. Define them per scenario suite, for example:
 
-- `storageManager`
-- `contentManager`
-- `searchManager`
-- `memoryManager`
-- `promptManager`
+- `tool-call`
 - `single-tool`
+- `multi-step`
 - `clarification`
 - `destructive`
+- `retrieval`
+- `edit`
 
 ---
 
@@ -298,7 +276,3 @@ Tags are arbitrary labels for filtering and reporting. Common tags:
 2. Add a test under `tests:`.
 3. Define `correct` assertions for every acceptable response shape.
 4. Use `correct.any` for alternatives instead of hardcoding logic in Python.
-5. Run a small check with `--limit` and/or `--tags`.
-6. Inspect `Evaluator/results/*.json` for failed assertion details.
-
----

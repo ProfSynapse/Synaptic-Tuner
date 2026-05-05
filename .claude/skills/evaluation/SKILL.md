@@ -15,10 +15,11 @@ The evaluator does not hardcode a specific tool family, manager id, wrapper name
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` then Evaluate |
-| Tool CLI eval | `python -m Evaluator.cli --backend vllm --model MODEL --scenario tool_prompts.yaml --host 127.0.0.1 --port 8011` |
+| Local Docker eval job | `python tuner.py local-run --job-config Trainers/local/jobs/<eval-job>.yaml --yes` |
+| Tool eval | `python -m Evaluator.cli --backend vllm --model MODEL --scenario tool_prompts.yaml --host 127.0.0.1 --port 8011` |
 | Full configured eval | `python -m Evaluator.cli --backend lmstudio --model MODEL --preset full` |
 | Quick smoke test | `python -m Evaluator.cli --backend lmstudio --model MODEL --preset quick` |
-| Tag filter | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --tags storageManager` |
+| Tag filter | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --tags TAG_NAME` |
 | Dry run config load | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --dry-run` |
 | Eval with environment runtime | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --env-backend local` |
 | Eval with LLM judge | `python -m Evaluator.cli --backend lmstudio --model MODEL --scenario tool_prompts.yaml --judge --judge-rubrics tool_call_quality` |
@@ -37,7 +38,7 @@ Schema/structural validation may still be reported for debugging, but it is not 
 
 - `Evaluator/` - Core evaluation code
 - `Evaluator/config/scenarios/` - YAML test scenarios
-- `Evaluator/config/tool_schema.yaml` - Current CLI wrapper/tool schema metadata
+- `Evaluator/config/tool_schema.yaml` - Configured tool schema metadata
 - `Evaluator/config/rubrics/` - LLM-as-judge rubrics
 - `Evaluator/results/` - Evaluation output JSON and Markdown
 
@@ -57,24 +58,23 @@ Every test should define what counts as correct:
 
 ```yaml
 tests:
-  - id: storage_copy_runbook
-    question: Copy the incident runbook into a template file.
-    tags: [storageManager, single-tool]
+  - id: configured_tool_case
+    question: Use the configured tool interface to complete the requested operation.
+    tags: [tool-call, single-tool]
     system: |
-      <session_context>
-      sessionId: "session_eval"
-      workspaceId: "ws_eval"
-      </session_context>
+      <runtime_context>
+      Include any context fields required by this scenario's configured schema.
+      </runtime_context>
     correct:
       any:
-        - name: copy_cli
+        - name: configured_tool_call
           assertions:
             - type: jsonpath_equals
               path: $.tool_calls[0].name
-              value: useTools
+              value: CONFIGURED_WRAPPER_NAME
             - type: jsonpath_regex
-              path: $.tool_calls[0].arguments.tool
-              pattern: '^storage copy\b(?=.*Incident-Response\.md)(?=.*Incident-Response-Template\.md)'
+              path: $.tool_calls[0].arguments.ACTION_FIELD
+              pattern: 'expected configured action pattern'
 ```
 
 Use `correct.any` for multiple valid answers, such as command by id or by name. Use `correct.all` or nested `all`/`any`/`not` assertions for stricter structures.
@@ -88,7 +88,7 @@ Assertions query a generic response view. This is syntax normalization only:
 - `$.content_json` is parsed JSON content when content is JSON.
 - `$.tool_calls` is a normalized list of emitted tool calls.
 - OpenAI-style `function.arguments` JSON strings are parsed into objects.
-- Plain text blocks like `tool_call: useTools` plus `arguments: {...}` are parsed into the same view.
+- Plain text blocks like `tool_call: CONFIGURED_WRAPPER_NAME` plus `arguments: {...}` are parsed into the same view.
 
 The response view must not map CLI commands to old manager tool ids or decide correctness. Scenario YAML decides what is correct.
 
@@ -96,8 +96,14 @@ The response view must not map CLI commands to old manager tool ids or decide co
 
 - Keep all task-specific expectations in YAML under `correct`.
 - Do not add evaluator code for a specific tool, wrapper, or use case.
-- Prefer regex or JSONPath assertions for tool CLI commands, because shell quoting and argument order can vary.
+- Prefer regex or JSONPath assertions for configured action payloads, because quoting, field order, and equivalent forms can vary.
 - If a schema allows equivalent forms, represent them as separate `correct.any` paths.
 - Use `--limit` and `--tags` for fast iteration.
 - Use `--validate-context` only when the scenario includes context fields that should be structurally checked.
 - Use `--env-backend local` or `e2b` only when you need runtime execution checks beyond response correctness.
+- For local LoRA adapter eval in this repo, prefer `python tuner.py local-run --job-config ...` with `run.method: eval` and `evaluation.runtime: vllm`. That path serves the base model in the local vLLM Docker container and overlays the adapter for parity with the intended local serving runtime.
+- On Windows, set `job.persist: true` for repeat local vLLM eval jobs so `local-run` reuses a named copy-mode container instead of creating a fresh stopped container each time. Set the same `job.container_name` across related eval jobs when they should share the same reused container.
+- Run long Docker/vLLM evals as background jobs with stdout/stderr redirected to files under `Evaluator/results/`, then poll logs and `stage_summary.json` with short commands. Avoid foreground waits that hide failures until a long timeout.
+- Use a fresh `artifacts.host_path` for each eval attempt, or copy completed in-container artifacts to a fresh host folder after a nonzero eval exit. Some evals intentionally return nonzero when cases fail even though results were produced.
+- For persistent copy-mode containers, avoid recopied large model directories once the model is already present. If a `docker cp` is interrupted, verify the container model directory before rerunning; partial model copies can cause misleading vLLM startup failures.
+- For long workspace/system prompts, keep `evaluation.max_tokens` lower than the served model window leaves room for, and raise `--max-model-len` via `server_extra_args` when the model and hardware support it.

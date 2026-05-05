@@ -1,4 +1,4 @@
-# Evaluation Run Configuration
+﻿# Evaluation Run Configuration
 # Defines how to run evaluations - scenarios, model, output, scoring
 
 # ============================================================
@@ -95,9 +95,9 @@ scoring:
 
   # Per-category thresholds (optional)
   category_thresholds:
-    storageManager: 0.85
-    contentManager: 0.80
-    searchManager: 0.75
+    storage: 0.85
+    content: 0.80
+    search: 0.75
     behavior: 0.70
 
 # ============================================================
@@ -135,7 +135,7 @@ presets:
     scenarios:
       - tool_prompts.yaml
     tag_filter:
-      - storageManager
+      - storage
     model:
       inference:
         max_tokens: 512
@@ -157,8 +157,16 @@ presets:
         behavior_pass: 1.0
         tool_correct: 0.5
 
+  workspace_multiturn:
+    description: "Environment-backed multi-turn workspace search/list/read/action tests"
+    scenarios:
+      - workspace_multiturn.yaml
+    scoring:
+      pass_threshold: 0.80
+
   strict:
     description: "Strict validation"
     scoring:
       pass_threshold: 0.95
       combination: "all_must_pass"
+

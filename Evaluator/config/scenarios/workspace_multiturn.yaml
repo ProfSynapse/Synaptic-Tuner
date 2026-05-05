@@ -1,0 +1,585 @@
+﻿name: Workspace Multi-Turn Tool Evals
+description: Environment-backed multi-turn workspace tasks focused on search, list, read, and acting on discovered state.
+defaults:
+  system_template: environmental_workspace_vault
+  system_context:
+    workspace_id: ws_1732300800000_atlasops
+    available_workspaces:
+      - id: ws_1732300800000_atlasops
+        name: Atlas Ops
+        description: Launch operations, customer notes, and incident follow-up
+        root_folder: Projects/Atlas/
+      - id: ws_1732300800001_phoenix
+        name: Phoenix Migration
+        description: Phoenix migration planning and risk tracking
+        root_folder: Projects/Phoenix/
+    available_prompts:
+      - id: agent_1732300800000_workspace_researcher
+        name: Workspace Researcher
+        purpose: Finds relevant files before taking action
+      - id: agent_1732300800001_note_operator
+        name: Note Operator
+        purpose: Updates and moves vault notes after verification
+    selected_workspace:
+      id: ws_1732300800000_atlasops
+      name: Atlas Ops
+      root_folder: Projects/Atlas/
+      preferences: Read before changing existing notes. Prefer workspace-local paths unless the user names another workspace.
+      workflows:
+        - name: Search Then Act
+          steps:
+            - Search or list candidate files
+            - Read the relevant note before editing or moving it
+            - Apply the smallest workspace-local change
+            - Leave unrelated workspace files unchanged
+      sessions:
+        - id: session_prev_workspace_research
+          summary: The user often resumes from prior search results and expects workspace state to carry forward.
+    assistant_instructions: You are an AI assistant helping manage an Obsidian-style workspace. Use your available workspace tools when you need to inspect or change files. Do not infer file contents from names alone.
+  environment:
+    allowed_tools:
+      - storage create-folder
+      - storage list
+      - storage move
+      - storage archive
+      - content read
+      - content write
+      - content replace
+      - search content
+      - search directory
+    max_steps: 10
+    execution:
+      strict_schema: true
+    loop:
+      enabled: true
+      mode: agentic
+      max_turns: 10
+      max_tool_steps: 10
+      continue_on_execution_error: true
+      stop_on_text_response: true
+      stop_on_environment_pass: true
+      require_final_text_after_pass: true
+      final_text_prompt: Reply to the user with a brief final text-only response summarizing what changed.
+      tool_result_format: json
+
+tests:
+  - id: workspace_search_read_report_oauth_callback_loop
+    question: Can you tell me what happened with the OAuth callback loop in Atlas? I need the incident, root cause, and next action, but do not create or edit anything.
+    tags:
+      - workspace
+      - multiturn
+      - search
+      - read
+      - report
+    system_context:
+      session_id: session_1732300800000_workspace000
+      selected_workspace:
+        recent_files:
+          - Projects/Atlas/Support/tickets.md
+          - Projects/Atlas/Incidents/auth-callback-loop.md
+        key_files:
+          - Projects/Atlas/Incidents/auth-callback-loop.md
+    environment:
+      fixture:
+        notes:
+          - path: Projects/Atlas/Support/tickets.md
+            frontmatter:
+              title: Support Tickets
+              type: support-log
+              status: active
+            body: |
+              Login issue tickets are tracked here. No root cause is recorded in this rollup.
+          - path: Projects/Atlas/Incidents/auth-callback-loop.md
+            frontmatter:
+              title: Auth Callback Loop
+              type: incident
+              severity: high
+            body: |
+              OAuth callback loop incident.
+              Incident: OAuth callback loop caused repeated redirects for Acme admins.
+              Root cause: redirect URI mismatch after the staging callback was promoted.
+              Next action: rotate stale callback allowlist and confirm production redirect URI ownership.
+          - path: Projects/Phoenix/Incidents/oauth-callback-loop.md
+            frontmatter:
+              title: Phoenix OAuth Callback Loop
+              type: incident
+              severity: low
+            body: |
+              Phoenix incident belongs to another workspace.
+      assertions:
+        - type: path_exists
+          path: Projects/Atlas/Incidents/auth-callback-loop.md
+        - type: path_exists
+          path: Projects/Phoenix/Incidents/oauth-callback-loop.md
+        - type: path_not_exists
+          path: Projects/Atlas/Briefs/oauth-callback-brief.md
+      loop:
+        stop_on_environment_pass: false
+        require_final_text_after_pass: false
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?is)OAuth callback loop
+        - type: text_regex
+          pattern: (?is)redirect URI mismatch
+        - type: text_regex
+          pattern: (?is)rotate stale callback allowlist
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: search-read-report
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - search content
+            - content read
+          require_environment_pass: true
+        - name: list-read-report
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - storage list
+            - content read
+          require_environment_pass: true
+
+  - id: workspace_list_read_report_release_notes_owner
+    question: Look in the Atlas release area and tell me who owns the customer-facing release notes and whether they are ready. Do not modify files.
+    tags:
+      - workspace
+      - multiturn
+      - list
+      - read
+      - report
+    system_context:
+      session_id: session_1732300800000_workspace005
+      selected_workspace:
+        recent_files:
+          - Projects/Atlas/Release/README.md
+          - Projects/Atlas/Release/customer-facing-notes.md
+        key_files:
+          - Projects/Atlas/Release/customer-facing-notes.md
+    environment:
+      fixture:
+        notes:
+          - path: Projects/Atlas/Release/README.md
+            frontmatter:
+              title: Atlas Release
+              type: index
+            body: |
+              Release notes and launch readiness live in this folder.
+          - path: Projects/Atlas/Release/customer-facing-notes.md
+            frontmatter:
+              title: Customer Facing Release Notes
+              type: release-note
+              owner: Priya
+              status: ready
+            body: |
+              Owner customer-facing release notes.
+              Owner: Priya
+              Readiness: ready for customer distribution.
+              Last reviewed: 2026-04-25
+          - path: Projects/Phoenix/Release/customer-facing-notes.md
+            frontmatter:
+              title: Phoenix Customer Facing Release Notes
+              type: release-note
+              owner: Devon
+              status: draft
+            body: |
+              Phoenix release notes are not part of this request.
+      assertions:
+        - type: path_exists
+          path: Projects/Atlas/Release/customer-facing-notes.md
+        - type: path_exists
+          path: Projects/Phoenix/Release/customer-facing-notes.md
+      loop:
+        stop_on_environment_pass: false
+        require_final_text_after_pass: false
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?is)Priya
+        - type: text_regex
+          pattern: (?is)ready for customer distribution|status:\s*ready|ready
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: list-release-then-read-report
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - storage list
+            - content read
+          require_environment_pass: true
+        - name: search-read-report
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - search directory
+            - content read
+          require_environment_pass: true
+
+  - id: workspace_state_find_read_update_launch_index
+    question: Pick this back up from where we left off. Find the launch checklist item that says customer comms are approved, then update the Atlas launch index with the final go/no-go line and a link to that checklist. Do not touch Phoenix.
+    tags:
+      - workspace
+      - multiturn
+      - search
+      - read
+      - act
+      - workspace_state
+    system_context:
+      session_id: session_1732300800000_workspace001
+      selected_workspace:
+        recent_files:
+          - Projects/Atlas/Launch/index.md
+          - Projects/Atlas/Launch/checklists/customer-comms.md
+        key_files:
+          - Projects/Atlas/Launch/index.md
+        sessions:
+          - id: session_launch_readiness
+            summary: User asked which launch checklist still had open approval items; customer communications was the item to verify next.
+      extra_sections:
+        - tag: prior_conversation
+          content: |
+            User: Which launch checklist still needs review?
+            Assistant: I found several launch checklist files. The next likely candidate is the customer communications checklist, but I need to read it before updating the launch index.
+    environment:
+      fixture:
+        notes:
+          - path: Projects/Atlas/Launch/index.md
+            frontmatter:
+              title: Atlas Launch Index
+              type: index
+              status: active
+            body: |
+              # Atlas Launch
+
+              ## Status
+              - Readiness review pending.
+          - path: Projects/Atlas/Launch/checklists/customer-comms.md
+            frontmatter:
+              title: Customer Comms Checklist
+              type: checklist
+              status: approved
+            body: |
+              - Owner: comms
+              - Customer comms are approved for launch.
+              - Customer comms approved for launch.
+              - Final go/no-go: go
+          - path: Projects/Phoenix/Launch/index.md
+            frontmatter:
+              title: Phoenix Launch Index
+              type: index
+              status: active
+            body: |
+              # Phoenix Launch
+
+              - Phoenix workspace should not be edited.
+      assertions:
+        - type: file_contains
+          path: Projects/Atlas/Launch/index.md
+          text: "Final go/no-go: go"
+        - type: file_contains
+          path: Projects/Atlas/Launch/index.md
+          text: "[[Projects/Atlas/Launch/checklists/customer-comms]]"
+        - type: file_contains
+          path: Projects/Phoenix/Launch/index.md
+          text: "Phoenix workspace should not be edited."
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?s)\S
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: search-read-update-index
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - search content
+            - content read
+            - content write
+          require_environment_pass: true
+        - name: list-read-update-index
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - storage list
+            - content read
+            - content write
+          require_environment_pass: true
+        - name: direct-update-index
+          tier: partial
+          score: 0.45
+          all_tools:
+            - content write
+          require_environment_pass: true
+
+  - id: workspace_state_continue_prior_search_archive_superseded_rfc
+    question: Yes, archive the stale one from that search, but only after checking which RFC is marked superseded. Leave active RFCs and Phoenix files alone.
+    tags:
+      - workspace
+      - multiturn
+      - list
+      - read
+      - act
+      - workspace_state
+      - destructive
+    system_context:
+      session_id: session_1732300800000_workspace002
+      selected_workspace:
+        recent_files:
+          - Projects/Atlas/RFC/RFC-014-cache-policy.md
+          - Projects/Atlas/RFC/RFC-009-cache-policy-old.md
+        key_files:
+          - Projects/Atlas/RFC/RFC-014-cache-policy.md
+      extra_sections:
+        - tag: prior_conversation
+          content: |
+            User: Search Atlas RFCs for cache policy.
+            Assistant: I found two Atlas candidates: Projects/Atlas/RFC/RFC-014-cache-policy.md and Projects/Atlas/RFC/RFC-009-cache-policy-old.md. One may be stale, but I have not read them yet.
+    environment:
+      fixture:
+        notes:
+          - path: Projects/Atlas/RFC/RFC-014-cache-policy.md
+            frontmatter:
+              title: RFC 014 Cache Policy
+              type: rfc
+              status: active
+            body: |
+              Current cache policy for Atlas.
+          - path: Projects/Atlas/RFC/RFC-009-cache-policy-old.md
+            frontmatter:
+              title: RFC 009 Cache Policy Old
+              type: rfc
+              status: superseded
+            body: |
+              Superseded by RFC-014-cache-policy.
+          - path: Projects/Phoenix/RFC/RFC-009-cache-policy-old.md
+            frontmatter:
+              title: Phoenix RFC 009 Cache Policy Old
+              type: rfc
+              status: superseded
+            body: |
+              Phoenix file with the same stale-looking name.
+      assertions:
+        - type: path_not_exists
+          path: Projects/Atlas/RFC/RFC-009-cache-policy-old.md
+        - type: path_exists
+          path: Projects/Atlas/RFC/RFC-014-cache-policy.md
+        - type: path_exists
+          path: Projects/Phoenix/RFC/RFC-009-cache-policy-old.md
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?s)\S
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: read-candidates-then-archive
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - content read
+            - storage archive
+          min_tool_calls: 3
+          require_environment_pass: true
+        - name: list-read-archive
+          tier: acceptable
+          score: 0.85
+          ordered_tools:
+            - storage list
+            - content read
+            - storage archive
+          require_environment_pass: true
+        - name: search-archive
+          tier: partial
+          score: 0.55
+          ordered_tools:
+            - search directory
+            - storage archive
+          require_environment_pass: true
+
+  - id: workspace_search_read_create_oauth_brief
+    question: I need a brief for Maya. Search this workspace for the note mentioning "OAuth callback loop", read whatever you need, and create `Projects/Atlas/Briefs/oauth-callback-brief.md` with the incident, root cause, and next action. If your first guess misses, keep looking.
+    tags:
+      - workspace
+      - multiturn
+      - search
+      - read
+      - act
+      - nondeterministic
+    system_context:
+      session_id: session_1732300800000_workspace003
+      selected_workspace:
+        recent_files:
+          - Projects/Atlas/Support/tickets.md
+          - Projects/Atlas/Incidents/auth-callback-loop.md
+        key_files:
+          - Projects/Atlas/Incidents/auth-callback-loop.md
+    environment:
+      fixture:
+        directories:
+          - Projects/Atlas/Briefs
+        notes:
+          - path: Projects/Atlas/Support/tickets.md
+            frontmatter:
+              title: Support Tickets
+              type: support-log
+              status: active
+            body: |
+              Login issue tickets are tracked here. No root cause is recorded in this rollup.
+          - path: Projects/Atlas/Incidents/auth-callback-loop.md
+            frontmatter:
+              title: Auth Callback Loop
+              type: incident
+              severity: high
+            body: |
+              Incident: OAuth callback loop caused repeated redirects for Acme admins.
+              Root cause: redirect URI mismatch after the staging callback was promoted.
+              Next action: rotate stale callback allowlist and confirm production redirect URI ownership.
+          - path: Projects/Phoenix/Incidents/oauth-callback-loop.md
+            frontmatter:
+              title: Phoenix OAuth Callback Loop
+              type: incident
+              severity: low
+            body: |
+              Phoenix incident belongs to another workspace.
+      assertions:
+        - type: path_exists
+          path: Projects/Atlas/Briefs/oauth-callback-brief.md
+        - type: file_contains
+          path: Projects/Atlas/Briefs/oauth-callback-brief.md
+          text: "OAuth callback loop"
+        - type: file_contains
+          path: Projects/Atlas/Briefs/oauth-callback-brief.md
+          text: "redirect URI mismatch"
+        - type: file_contains
+          path: Projects/Atlas/Briefs/oauth-callback-brief.md
+          text: "rotate stale callback allowlist"
+        - type: path_exists
+          path: Projects/Phoenix/Incidents/oauth-callback-loop.md
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?s)\S
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: search-read-write-brief
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - search content
+            - content read
+            - content write
+          require_environment_pass: true
+        - name: directory-search-read-write-brief
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - search directory
+            - content read
+            - content write
+          require_environment_pass: true
+        - name: direct-write-brief
+          tier: partial
+          score: 0.35
+          all_tools:
+            - content write
+          require_environment_pass: true
+
+  - id: workspace_list_disambiguate_move_acme_escalation
+    question: Move the ACME escalation from the inbox into the right client folder. There is already an older escalation note there, so do not overwrite anything; pick a dated filename.
+    tags:
+      - workspace
+      - multiturn
+      - list
+      - read
+      - act
+      - conflict
+    system_context:
+      session_id: session_1732300800000_workspace004
+      selected_workspace:
+        recent_files:
+          - Inbox/acme-escalation.md
+          - Projects/Atlas/Clients/ACME/escalation.md
+        key_files:
+          - Projects/Atlas/Clients/ACME/escalation.md
+    environment:
+      fixture:
+        notes:
+          - path: Inbox/acme-escalation.md
+            frontmatter:
+              title: ACME Escalation
+              type: escalation
+              client: ACME
+              date: 2026-04-24
+            body: |
+              ACME needs a launch exception decision by Friday.
+          - path: Projects/Atlas/Clients/ACME/escalation.md
+            frontmatter:
+              title: ACME Escalation Archive
+              type: escalation
+              client: ACME
+              date: 2026-03-18
+            body: |
+              Older escalation note that must not be overwritten.
+          - path: Projects/Atlas/Clients/ZenCo/overview.md
+            frontmatter:
+              title: ZenCo Overview
+              type: client
+            body: |
+              Different client folder.
+      assertions:
+        - type: path_exists
+          path: Projects/Atlas/Clients/ACME/escalation-2026-04-24.md
+        - type: path_not_exists
+          path: Inbox/acme-escalation.md
+        - type: file_contains
+          path: Projects/Atlas/Clients/ACME/escalation.md
+          text: "Older escalation note that must not be overwritten."
+        - type: file_contains
+          path: Projects/Atlas/Clients/ACME/escalation-2026-04-24.md
+          text: "ACME needs a launch exception decision by Friday."
+    correct:
+      all:
+        - type: text_regex
+          pattern: (?s)\S
+        - type: length_max
+          path: $.tool_calls
+          value: 0
+    scoring:
+      paths:
+        - name: list-read-move-with-new-name
+          tier: preferred
+          score: 1.0
+          ordered_tools:
+            - storage list
+            - content read
+            - storage move
+          require_environment_pass: true
+        - name: read-then-move-with-new-name
+          tier: acceptable
+          score: 0.8
+          ordered_tools:
+            - content read
+            - storage move
+          require_environment_pass: true
+        - name: direct-move-with-new-name
+          tier: partial
+          score: 0.55
+          all_tools:
+            - storage move
+          require_environment_pass: true
+

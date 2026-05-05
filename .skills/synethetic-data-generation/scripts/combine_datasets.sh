@@ -8,12 +8,12 @@
 # Examples:
 #   # Combine specific files
 #   ./combine_datasets.sh -o Datasets/combined.jsonl \
-#     Datasets/tools_datasets/thinking/contentManager/tools_v1.8.jsonl \
-#     Datasets/tools_datasets/thinking/storageManager/tools_v1.5.jsonl \
-#     Datasets/tools_datasets/thinking/searchManager/tools_v1.3.jsonl
+#     Datasets/tool_rollouts/thinking/content/tools_v1.8.jsonl \
+#     Datasets/tool_rollouts/thinking/storage/tools_v1.5.jsonl \
+#     Datasets/tool_rollouts/thinking/search/tools_v1.3.jsonl
 #
 #   # Combine all JSONL files in a directory
-#   ./combine_datasets.sh -o Datasets/all_managers.jsonl \
+#   ./combine_datasets.sh -o Datasets/all_tools.jsonl \
 #     Datasets/tools_datasets/thinking/
 #
 #   # Combine with custom seed for reproducible shuffle
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 -o OUTPUT [--seed N] FILE1 [FILE2...] [DIR/]"
       echo ""
       echo "Combines multiple JSONL files into a single shuffled dataset."
-      echo "Adds 'source' field from parent folder name (e.g., 'contentManager')."
+      echo "Adds 'source' field from parent folder name (e.g., 'content')."
       echo ""
       echo "Options:"
       echo "  -o, --output PATH   Output JSONL file (required)"

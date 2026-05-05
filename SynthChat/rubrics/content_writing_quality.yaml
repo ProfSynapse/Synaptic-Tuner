@@ -1,5 +1,5 @@
-name: Content Writing Quality
-description: Validates contentManager write calls produce substantial Obsidian-friendly content in the CLI-first wrapper
+﻿name: Content Writing Quality
+description: Validates content write calls produce substantial Obsidian-friendly content in the CLI-first wrapper
 scope: response
 pass_threshold: 0.85
 judge_prompt: |
@@ -85,3 +85,4 @@ validation:
   tool_calls:
     enabled: true
     check_context_ids: true
+

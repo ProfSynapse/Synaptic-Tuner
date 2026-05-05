@@ -30,6 +30,11 @@ except ImportError:
     # Fallback for standalone testing
     StructureValidator = None
 
+try:
+    from shared.validation.parsing.response_parser import parse_response
+except ImportError:
+    parse_response = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,10 +104,20 @@ class RewardRubric:
         """
         Extract structured data from completion text.
 
-        Directly extracts from model's native format (e.g., Qwen's <tool_call> tags).
-        No unnecessary format conversion - just get the arguments and compare.
+        Use the shared response parser first so GRPO rewards score the same
+        generic tool-call surfaces used by evaluation: OpenAI tool_calls,
+        Qwen <tool_call>, Mistral [TOOL_CALLS], and ChatML text tool calls.
         """
         result = {"raw_text": text}
+
+        if parse_response is not None:
+            parsed = parse_response(text)
+            if parsed.first_tool_call:
+                result["tool_name"] = parsed.first_tool_call.name
+                result["parsed_args"] = parsed.first_tool_call.arguments or {}
+                result["format_detected"] = str(parsed.format_detected)
+                result["text_content"] = parsed.text_content
+                return result
 
         # Try Qwen format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
         tool_call_match = re.search(
@@ -346,6 +361,28 @@ class RewardRubric:
                 return overlap / len(gt)
             return 0.0
 
+        elif strategy == "token_overlap":
+            pred_tokens = self._tokenize_for_similarity(str(pred))
+            gt_tokens = self._tokenize_for_similarity(str(gt))
+            if not pred_tokens or not gt_tokens:
+                return 0.0
+            overlap = len(pred_tokens & gt_tokens)
+            return overlap / len(gt_tokens)
+
+        elif strategy.startswith("prefix_tokens"):
+            parts = strategy.split(":", 1)
+            count = 1
+            if len(parts) == 2:
+                try:
+                    count = max(1, int(parts[1]))
+                except ValueError:
+                    count = 1
+            pred_tokens = str(pred).strip().split()
+            gt_tokens = str(gt).strip().split()
+            if len(pred_tokens) < count or len(gt_tokens) < count:
+                return 0.0
+            return 1.0 if pred_tokens[:count] == gt_tokens[:count] else 0.0
+
         elif strategy == "tool_name_match":
             # Compare tool names (handle agent_tool format)
             pred_str = str(pred)
@@ -359,6 +396,14 @@ class RewardRubric:
             return 0.0
 
         return 0.0
+
+    def _tokenize_for_similarity(self, text: str) -> set[str]:
+        """Tokenize strings for generic overlap scoring."""
+        return {
+            token.lower()
+            for token in re.findall(r"[A-Za-z0-9_.-]+", text)
+            if token
+        }
 
     def _score_weighted_legacy(self, data: Dict, gt_args: Dict, comparison: Dict, kwargs: Dict) -> float:
         """Legacy weighted scoring using field lists (backwards compatible)."""

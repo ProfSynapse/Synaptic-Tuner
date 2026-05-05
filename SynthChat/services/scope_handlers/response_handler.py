@@ -41,25 +41,36 @@ class ResponseHandler(ScopeHandler):
         # Get format type (default to content_only for backward compatibility)
         format_type = (output_format or {}).get("type", "content_only")
 
-        for conv in conversations:
-            if conv.get("role") == "assistant":
-                if format_type == "assistant_message":
-                    # Parse improved content as full assistant message JSON
-                    # Expected: {"content": null, "tool_calls": [...]}
-                    self._apply_assistant_message(conv, improved_content)
+        conv = self._select_assistant_conversation(conversations)
+        if conv:
+            if format_type == "assistant_message":
+                # Parse improved content as full assistant message JSON
+                # Expected: {"content": null, "tool_calls": [...]}
+                self._apply_assistant_message(conv, improved_content)
 
-                elif format_type == "tool_calls_only":
-                    # Parse improved content as tool_calls array/object
-                    # Set content to null
-                    self._apply_tool_calls_only(conv, improved_content)
+            elif format_type == "tool_calls_only":
+                # Parse improved content as tool_calls array/object
+                # Set content to null
+                self._apply_tool_calls_only(conv, improved_content)
 
-                else:  # content_only (default)
-                    # Apply as text content, preserve/extract tool calls from text
-                    self._apply_content_only(conv, improved_content)
-
-                break
+            else:  # content_only (default)
+                # Apply as text content, preserve/extract tool calls from text
+                self._apply_content_only(conv, improved_content)
 
         return improved
+
+    def _select_assistant_conversation(self, conversations: list[Dict]) -> Optional[Dict]:
+        """Select the assistant turn targeted by the response scope config."""
+        response_scope = self.scope_config.get_scope("response")
+        selection = "first"
+        if response_scope:
+            selection = getattr(response_scope.extraction, "message_selection", "first") or "first"
+        assistant_conversations = [conv for conv in conversations if conv.get("role") == "assistant"]
+        if not assistant_conversations:
+            return None
+        if str(selection).strip().lower() == "last":
+            return assistant_conversations[-1]
+        return assistant_conversations[0]
 
     def _apply_assistant_message(self, conv: Dict, improved_content: str) -> None:
         """
@@ -195,13 +206,15 @@ class ResponseHandler(ScopeHandler):
         user_request = ""
         original_tool_calls = None
 
+        selected_assistant = self._select_assistant_conversation(conversations)
+
         for conv in conversations:
             role = conv.get("role")
             if role == "system":
                 system_prompt = conv.get("content", "")
-            elif role == "user":
+            elif role == "user" and not user_request:
                 user_request = conv.get("content", "")
-            elif role == "assistant" and "tool_calls" in conv:
+            elif conv is selected_assistant and "tool_calls" in conv:
                 original_tool_calls = conv["tool_calls"]
 
         # Format tool calls as JSON string for template

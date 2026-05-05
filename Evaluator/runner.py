@@ -678,7 +678,10 @@ def _run_path_scoring(
     if not isinstance(paths, list) or not paths:
         return None
 
-    tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
+    if environment_result is not None and getattr(environment_result, "executed_tools", None):
+        tool_steps = [_tool_identifiers_for_scoring(tool) for tool in environment_result.executed_tools]
+    else:
+        tool_steps = [{tc.name} for tc in (validator_result.tool_calls if validator_result else [])]
     matches: List[PathScoreMatch] = []
     max_score = 0.0
     best_score = 0.0
@@ -693,7 +696,7 @@ def _run_path_scoring(
         max_score = max(max_score, score_value)
         matched, reasons = _matches_scoring_path(
             path_cfg=path_cfg,
-            tool_names=tool_names,
+            tool_steps=tool_steps,
             validator_result=validator_result,
             behavior_result=behavior_result,
             environment_result=environment_result,
@@ -728,7 +731,7 @@ def _run_path_scoring(
 def _matches_scoring_path(
     *,
     path_cfg: Dict[str, Any],
-    tool_names: List[str],
+    tool_steps: List[set[str]],
     validator_result: Optional[ValidationResult],
     behavior_result: Optional[Any],
     environment_result: Optional["EnvironmentValidationResult"],
@@ -738,33 +741,35 @@ def _matches_scoring_path(
 
     all_tools = _string_list(path_cfg.get("all_tools"))
     if all_tools:
-        missing = [tool for tool in all_tools if tool not in tool_names]
+        missing = [tool for tool in all_tools if not _any_tool_step_contains(tool_steps, tool)]
         if missing:
             reasons.append(f"missing tools: {', '.join(missing)}")
 
     any_tools = _string_list(path_cfg.get("any_tools"))
-    if any_tools and not any(tool in tool_names for tool in any_tools):
+    if any_tools and not any(_any_tool_step_contains(tool_steps, tool) for tool in any_tools):
         reasons.append(f"needs any of: {', '.join(any_tools)}")
 
     ordered_tools = _string_list(path_cfg.get("ordered_tools"))
-    if ordered_tools and not _contains_subsequence(tool_names, ordered_tools):
+    if ordered_tools and not _contains_subsequence(tool_steps, ordered_tools):
         reasons.append(f"ordered tools not matched: {', '.join(ordered_tools)}")
 
     first_tool = str(path_cfg.get("first_tool", "")).strip()
-    if first_tool and (not tool_names or tool_names[0] != first_tool):
+    if first_tool and (not tool_steps or first_tool not in tool_steps[0]):
         reasons.append(f"first tool should be {first_tool}")
 
     first_tool_any_of = _string_list(path_cfg.get("first_tool_any_of"))
-    if first_tool_any_of and (not tool_names or tool_names[0] not in first_tool_any_of):
+    if first_tool_any_of and (
+        not tool_steps or not any(tool in tool_steps[0] for tool in first_tool_any_of)
+    ):
         reasons.append(f"first tool should be one of: {', '.join(first_tool_any_of)}")
 
     max_tool_calls = path_cfg.get("max_tool_calls")
-    if max_tool_calls is not None and len(tool_names) > int(max_tool_calls):
-        reasons.append(f"too many tool calls: {len(tool_names)} > {int(max_tool_calls)}")
+    if max_tool_calls is not None and len(tool_steps) > int(max_tool_calls):
+        reasons.append(f"too many tool calls: {len(tool_steps)} > {int(max_tool_calls)}")
 
     min_tool_calls = path_cfg.get("min_tool_calls")
-    if min_tool_calls is not None and len(tool_names) < int(min_tool_calls):
-        reasons.append(f"too few tool calls: {len(tool_names)} < {int(min_tool_calls)}")
+    if min_tool_calls is not None and len(tool_steps) < int(min_tool_calls):
+        reasons.append(f"too few tool calls: {len(tool_steps)} < {int(min_tool_calls)}")
 
     if path_cfg.get("require_schema_pass") and not (validator_result and validator_result.passed):
         reasons.append("schema validation did not pass")
@@ -781,12 +786,23 @@ def _matches_scoring_path(
     return len(reasons) == 0, reasons
 
 
-def _contains_subsequence(items: List[str], subsequence: List[str]) -> bool:
+def _tool_identifiers_for_scoring(tool: Any) -> set[str]:
+    identifiers = {str(getattr(tool, "name", "") or "").strip()}
+    for value in getattr(tool, "identifiers", []) or []:
+        identifiers.add(str(value or "").strip())
+    return {value for value in identifiers if value}
+
+
+def _any_tool_step_contains(tool_steps: List[set[str]], tool_name: str) -> bool:
+    return any(tool_name in step for step in tool_steps)
+
+
+def _contains_subsequence(items: List[set[str]], subsequence: List[str]) -> bool:
     if not subsequence:
         return True
     pos = 0
     for item in items:
-        if item == subsequence[pos]:
+        if subsequence[pos] in item:
             pos += 1
             if pos == len(subsequence):
                 return True

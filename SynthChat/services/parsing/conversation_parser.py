@@ -20,9 +20,11 @@ class ParsedConversation:
     """Parsed conversation with structured access to messages."""
     messages: List[ParsedMessage]
 
-    def get_by_role(self, role: str) -> Optional[ParsedMessage]:
-        """Get first message by role."""
-        for msg in self.messages:
+    def get_by_role(self, role: str, selection: str = "first") -> Optional[ParsedMessage]:
+        """Get a message by role using the configured selection strategy."""
+        selection_normalized = (selection or "first").strip().lower()
+        messages = self.messages if selection_normalized != "last" else reversed(self.messages)
+        for msg in messages:
             if msg.role == role:
                 return msg
         return None

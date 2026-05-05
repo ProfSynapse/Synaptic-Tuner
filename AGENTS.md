@@ -11,6 +11,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Do not create throwaway scripts just to get a task done if an existing script, CLI, or skill can be used or extended.
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
+- For local evaluation of LoRA adapters, prefer the config-driven local Docker path that starts a `vllm/vllm-openai` container with the base model and overlays the adapter via `--enable-lora`. Do not default local adapter evals to direct Unsloth loading unless the user explicitly asks for that runtime.
 
 ## Config-First Generation Discipline
 

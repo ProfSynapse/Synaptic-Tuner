@@ -1,17 +1,18 @@
 {
-  "contentManager_replace": 1,
-  "memoryManager_archiveWorkspace": 1,
-  "memoryManager_createState": 1,
-  "memoryManager_updateWorkspace": 1,
-  "promptManager_executePrompts": 1,
-  "promptManager_getPrompt": 1,
-  "promptManager_listModels": 1,
-  "promptManager_updatePrompt": 1,
-  "searchManager_searchContent": 1,
-  "searchManager_searchDirectory": 1,
-  "storageManager_archive": 1,
-  "storageManager_copy": 1,
-  "storageManager_createFolder": 1,
-  "storageManager_list": 1,
-  "storageManager_move": 1
+  "content replace": 1,
+  "memory archive-workspace": 1,
+  "memory create-state": 1,
+  "memory update-workspace": 1,
+  "prompt execute": 1,
+  "prompt get": 1,
+  "prompt list-models": 1,
+  "prompt update": 1,
+  "search content": 1,
+  "search directory": 1,
+  "storage archive": 1,
+  "storage copy": 1,
+  "storage create-folder": 1,
+  "storage list": 1,
+  "storage move": 1
 }
+

@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict
 
 import yaml
@@ -34,9 +34,96 @@ from src.env_runtime import build_cloud_bootstrap_commands, detect_openenv_runti
 from src.training_callbacks import DASHBOARD_AVAILABLE, RICH_AVAILABLE, LiveDashboardCallback, MetricsTableCallback
 
 
+def _load_configured_tokenizer(model_cfg: Dict[str, Any], model_name: str):
+    from transformers import AutoTokenizer, PreTrainedTokenizerFast
+
+    tokenizer_cfg = model_cfg.get("tokenizer")
+    if tokenizer_cfg is None:
+        tokenizer_cfg = {}
+    elif not isinstance(tokenizer_cfg, dict):
+        raise ValueError("model.tokenizer must be a mapping when provided")
+
+    tokenizer_name = str(
+        tokenizer_cfg.get("path")
+        or tokenizer_cfg.get("name")
+        or model_cfg.get("tokenizer_path")
+        or model_cfg.get("tokenizer_name")
+        or model_name
+    ).strip()
+    if not tokenizer_name:
+        raise RuntimeError("Tokenizer source resolved to an empty path/name")
+
+    tokenizer_kwargs = dict(tokenizer_cfg.get("kwargs") or {})
+    for key in ("trust_remote_code", "use_fast", "padding_side", "model_max_length"):
+        if key in tokenizer_cfg and key not in tokenizer_kwargs:
+            tokenizer_kwargs[key] = tokenizer_cfg[key]
+
+    loader = str(tokenizer_cfg.get("loader") or model_cfg.get("tokenizer_loader") or "auto").strip().lower()
+    if loader == "auto":
+        return AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+    if loader in {"pretrained_fast", "pretrained-tokenizer-fast", "fast"}:
+        return PreTrainedTokenizerFast.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+    raise ValueError(f"Unsupported model.tokenizer.loader: {loader}")
+
+
+def _build_peft_config(config: Dict[str, Any]):
+    lora_cfg = config.get("lora") or config.get("peft")
+    if not lora_cfg:
+        return None
+    if not isinstance(lora_cfg, dict):
+        raise ValueError("lora/peft config must be a mapping when provided")
+    if lora_cfg.get("enabled") is False:
+        return None
+
+    from peft import LoraConfig
+
+    kwargs = {
+        "r": int(lora_cfg.get("r", 16)),
+        "lora_alpha": int(lora_cfg.get("lora_alpha", lora_cfg.get("alpha", 32))),
+        "lora_dropout": float(lora_cfg.get("lora_dropout", lora_cfg.get("dropout", 0.0))),
+        "bias": str(lora_cfg.get("bias", "none")),
+        "task_type": str(lora_cfg.get("task_type", "CAUSAL_LM")),
+    }
+    target_modules = lora_cfg.get("target_modules")
+    if target_modules:
+        kwargs["target_modules"] = list(target_modules)
+    for key in ("use_rslora", "use_dora", "modules_to_save"):
+        if key in lora_cfg:
+            kwargs[key] = lora_cfg[key]
+    return LoraConfig(**kwargs)
+
+
+def _build_grpo_trainer_class(base_trainer_cls):
+    """Return a trainer class that honors rollout_func outside vLLM when configured."""
+
+    class ConfiguredRolloutGRPOTrainer(base_trainer_cls):
+        def _generate_single_turn(self, prompts: list):
+            if self.rollout_func is None or self.use_vllm:
+                return super()._generate_single_turn(prompts)
+
+            outputs = self.rollout_func(prompts, self)
+            if not isinstance(outputs, dict):
+                raise RuntimeError("Configured rollout_func returned invalid output shape")
+
+            required_fields = ("prompt_ids", "completion_ids", "logprobs")
+            missing = [field for field in required_fields if field not in outputs]
+            if missing:
+                raise RuntimeError(f"Configured rollout_func missing required fields: {missing}")
+
+            extra_fields = {key: value for key, value in outputs.items() if key not in required_fields}
+            return (
+                outputs["prompt_ids"],
+                outputs["completion_ids"],
+                outputs.get("logprobs"),
+                extra_fields,
+            )
+
+    return ConfiguredRolloutGRPOTrainer
+
+
 def load_config(config_path: str | None = None) -> Dict[str, Any]:
     if config_path is None:
-        config_path = str(Path(__file__).parent / "configs" / "env_config.yaml")
+        raise ValueError("Env-GRPO requires an explicit --config path to a run-specific training YAML")
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
     config["_config_path"] = str(Path(config_path).resolve())
@@ -45,7 +132,7 @@ def load_config(config_path: str | None = None) -> Dict[str, Any]:
 
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cloud-first env-backed GRPO launcher")
-    parser.add_argument("--config", type=str, default=None, help="Path to env GRPO config")
+    parser.add_argument("--config", type=str, required=True, help="Path to env-GRPO run config YAML")
     parser.add_argument("--dry-run", action="store_true", help="Validate config/runtime/dataset and exit")
     parser.add_argument(
         "--print-cloud-bootstrap",
@@ -99,7 +186,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     if args.print_cloud_bootstrap:
         runtime_cfg = ((config.get("env_training") or {}).get("runtime") or {})
         cloud_repo_root = str(runtime_cfg.get("repo_root_in_container") or "/workspace/repo")
-        cloud_config_path = str(Path(cloud_repo_root) / "Trainers" / "grpo" / "configs" / "env_config.yaml")
+        local_config_path = Path(str(config.get("_config_path") or "")).resolve()
+        try:
+            relative_config_path = local_config_path.relative_to(Path(__file__).resolve().parents[2])
+        except ValueError:
+            relative_config_path = Path("Trainers") / "grpo" / "configs" / local_config_path.name
+        cloud_config_path = str(PurePosixPath(cloud_repo_root, *relative_config_path.parts))
         commands = build_cloud_bootstrap_commands(
             config,
             repo_root=cloud_repo_root,
@@ -108,7 +200,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         print("\n".join(commands))
         return {"bootstrap_commands": commands}
 
-    env_cfg = config.get("env_training") or {}
+    env_cfg = dict(config.get("env_training") or {})
     required_reviews = list((env_cfg.get("required_stage_reviews") or []))
     config_dir = Path(config["_config_path"]).parent if config.get("_config_path") else Path.cwd()
     local_file = dataset_cfg.get("local_file")
@@ -130,13 +222,19 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     )
     if args.max_examples and len(filtered_dataset) > args.max_examples:
         filtered_dataset = filtered_dataset.select(range(args.max_examples))
-    formatted_dataset = format_dataset_for_env_grpo(filtered_dataset)
+    formatted_dataset = format_dataset_for_env_grpo(
+        filtered_dataset,
+        prompt_message_roles=dataset_cfg.get("prompt_message_roles"),
+        user_prompt_prefix=dataset_cfg.get("user_prompt_prefix"),
+        user_prompt_suffix=dataset_cfg.get("user_prompt_suffix"),
+    )
 
     runtime_support = detect_openenv_runtime_support()
     summary = {
         "raw_examples": len(raw_dataset),
         "filtered_examples": len(filtered_dataset),
         "formatted_examples": len(formatted_dataset),
+        "prompt_message_roles": dataset_cfg.get("prompt_message_roles"),
         "runtime_support": runtime_support,
     }
 
@@ -165,10 +263,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     model_name = str(model_cfg.get("model_name") or "").strip()
     if not model_name or model_name == "REPLACE_WITH_BUCKETED_SFT_MODEL":
-        raise RuntimeError("Set model.model_name in env_config.yaml to the published bucketed SFT model repo")
+        raise RuntimeError("Set model.model_name in the env-GRPO run config to the published bucketed SFT model repo")
 
-    from transformers import AutoTokenizer
-    from trl import GRPOConfig, GRPOTrainer
+    from trl import GRPOConfig, GRPOTrainer as BaseGRPOTrainer
+
+    GRPOTrainer = _build_grpo_trainer_class(BaseGRPOTrainer)
 
     output_root = Path(training_cfg.get("output_dir") or "./env_grpo_output").resolve()
     run_dir = Path(args.output_dir).resolve() if args.output_dir else output_root / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -176,6 +275,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     logs_dir = run_dir / "logs"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
+    if env_cfg.get("log_trajectories") and not env_cfg.get("trajectory_log_path"):
+        env_cfg["trajectory_log_path"] = str(logs_dir / "env_rollouts.jsonl")
 
     print("\n" + "=" * 60)
     print("ENV-GRPO TRAINING CONFIGURATION")
@@ -195,7 +296,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"Learning rate: {training_cfg.get('learning_rate', 5e-6)}")
     print("=" * 60 + "\n")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = _load_configured_tokenizer(model_cfg, model_name)
+    peft_config = _build_peft_config(config)
     formatted_dataset = formatted_dataset.map(
         lambda ex: {
             **ex,
@@ -259,15 +361,22 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             )
         ]
 
-    trainer = GRPOTrainer(
-        model=model_name,
-        processing_class=tokenizer,
-        reward_funcs=reward_func,
-        train_dataset=formatted_dataset,
-        rollout_func=rollout_func,
-        args=grpo_args,
-        callbacks=callbacks,
-    )
+    trainer_kwargs = {
+        "model": model_name,
+        "processing_class": tokenizer,
+        "reward_funcs": reward_func,
+        "train_dataset": formatted_dataset,
+        "rollout_func": rollout_func,
+        "args": grpo_args,
+        "callbacks": callbacks,
+    }
+    allowed_trainer_args = set(inspect.signature(GRPOTrainer.__init__).parameters) - {"self"}
+    if peft_config is not None:
+        if "peft_config" not in allowed_trainer_args:
+            raise RuntimeError("Configured lora/peft block, but this TRL GRPOTrainer does not accept peft_config")
+        trainer_kwargs["peft_config"] = peft_config
+
+    trainer = GRPOTrainer(**trainer_kwargs)
     if use_dashboard:
         from transformers.trainer_callback import PrinterCallback
 

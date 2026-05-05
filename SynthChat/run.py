@@ -23,6 +23,7 @@ from shared.llm import create_client
 from shared.environments import EnvironmentValidator
 from .utils.yaml_loader import load_yaml
 
+from .modes.env_generate import env_generate_mode
 from .modes.generate import generate_mode
 from .modes.improve import improve_mode
 from .modes.sanitize import sanitize_mode
@@ -69,6 +70,10 @@ def create_llm_client(config: Dict, mode: str = "generation",
         config_defaults["top_p"] = llm_config.get("top_p", 0.9)
     elif "provider_routing" in llm_config:
         config_defaults["provider_routing"] = llm_config["provider_routing"]
+    if "timeout_seconds" in llm_config:
+        config_defaults["timeout_seconds"] = llm_config["timeout_seconds"]
+    if isinstance(llm_config.get("plugins"), list):
+        config_defaults["plugins"] = llm_config["plugins"]
 
     # Create client using shared.llm factory
     client = create_client(config_defaults=config_defaults)
@@ -128,6 +133,16 @@ def main():
     generate_parser.add_argument("--scenarios-dir", help="Scenarios directory path")
     generate_parser.add_argument("--rubrics-dir", help="Rubrics directory path")
     generate_parser.add_argument("--output", "-o", help="Output file path")
+    generate_parser.add_argument(
+        "--debug-artifacts",
+        nargs="?",
+        const="auto",
+        default=None,
+        help=(
+            "Write verbose generation debug events to JSONL. "
+            "Pass a path, or omit the value to write next to --output."
+        ),
+    )
     generate_parser.add_argument("--targets-file", help="JSON file with generation targets")
     generate_parser.add_argument("--scenarios", nargs="+", help="Specific scenarios to generate")
     generate_parser.add_argument("--max-iterations", type=int, help="Max improvement iterations")
@@ -170,6 +185,66 @@ def main():
         "--env-exec-config",
         default=None,
         help="Path to environment execution rules YAML",
+    )
+
+    env_generate_parser = subparsers.add_parser(
+        "env-generate",
+        help="Run only scenario environment_generation and write the resolved seed bundle",
+    )
+    env_generate_parser.add_argument("--scenario", required=True, help="Scenario key to generate")
+    env_generate_parser.add_argument("--seed-id", default="env-debug-seed", help="Seed id label for debug output")
+    env_generate_parser.add_argument("--config-dir", help="Config directory path")
+    env_generate_parser.add_argument("--scenarios-dir", help="Scenarios directory path")
+    env_generate_parser.add_argument("--rubrics-dir", help="Rubrics directory path")
+    env_generate_parser.add_argument("--output", "-o", help="Output JSON file path")
+    env_generate_parser.add_argument(
+        "--debug-artifacts",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="Write verbose environment generation debug events to JSONL",
+    )
+    env_generate_parser.add_argument("--provider", help="LLM provider (overrides settings.yaml)")
+    env_generate_parser.add_argument("--model", help="Model name (overrides settings.yaml)")
+    env_generate_parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=None,
+        help="LLM request timeout in seconds for this diagnostic run",
+    )
+    env_generate_parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=None,
+        help="Override environment_generation max_retries for this diagnostic run",
+    )
+    env_generate_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Override environment_generation max_tokens for this diagnostic run",
+    )
+    env_generate_parser.add_argument(
+        "--seed-index",
+        type=int,
+        default=None,
+        help="Zero-based seed index to expose to seed_context_generation during diagnostic runs",
+    )
+    env_generate_parser.add_argument(
+        "--seed-count",
+        type=int,
+        default=None,
+        help="Total seed count to expose to seed_context_generation during diagnostic runs",
+    )
+    env_generate_parser.add_argument(
+        "--disable-provider-routing",
+        action="store_true",
+        help="Ignore configured provider routing for this diagnostic run",
+    )
+    env_generate_parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Disable temperature randomization for the environment generation call",
     )
 
     # Improve command
@@ -236,6 +311,12 @@ def main():
             load_settings=load_settings,
             create_llm_client=create_llm_client,
             create_environment_validator=create_environment_validator,
+        )
+    elif args.command == "env-generate":
+        env_generate_mode(
+            args,
+            load_settings=load_settings,
+            create_llm_client=create_llm_client,
         )
     elif args.command == "improve":
         improve_mode(

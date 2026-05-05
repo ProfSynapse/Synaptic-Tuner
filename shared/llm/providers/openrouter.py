@@ -2,7 +2,7 @@
 
 import json
 import requests
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from ..base import BaseLLMClient
 from ..exceptions import LLMConnectionError, LLMResponseError
@@ -17,6 +17,7 @@ class OpenRouterClient(BaseLLMClient):
         model: str,
         provider: Dict[str, Any] = None,
         timeout_seconds: float = 60.0,
+        plugins: Optional[List[Dict[str, Any]]] = None,
     ):
         """
         Initialize OpenRouter client.
@@ -33,6 +34,7 @@ class OpenRouterClient(BaseLLMClient):
         self.api_key = api_key
         self.model = model
         self.provider = provider
+        self.plugins = list(plugins or [])
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.timeout_seconds = float(timeout_seconds)
 
@@ -82,6 +84,8 @@ class OpenRouterClient(BaseLLMClient):
         # Add provider routing if configured
         if self.provider:
             payload["provider"] = self.provider
+        if self.plugins:
+            payload["plugins"] = self.plugins
 
         try:
             data = self._make_request(payload)
@@ -113,14 +117,20 @@ class OpenRouterClient(BaseLLMClient):
         schema: Dict[str, Any],
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        response_format: str = "json_schema",
         **kwargs
     ) -> Dict[str, Any]:
         """Send request with JSON schema for structured output."""
+        mode = str(response_format or "json_schema").strip().lower()
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "response_format": {
+        }
+        if mode in {"json_object", "object"}:
+            payload["response_format"] = {"type": "json_object"}
+        elif mode in {"json_schema", "schema", "strict"}:
+            payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": schema.get("name", "response"),
@@ -128,13 +138,16 @@ class OpenRouterClient(BaseLLMClient):
                     "schema": schema
                 }
             }
-        }
+        else:
+            raise LLMResponseError(f"Unsupported OpenRouter response_format: {response_format}")
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
 
         # Add provider routing if configured
         if self.provider:
             payload["provider"] = self.provider
+        if self.plugins:
+            payload["plugins"] = self.plugins
 
         try:
             data = self._make_request(payload)

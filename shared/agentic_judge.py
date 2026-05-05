@@ -71,6 +71,7 @@ class AgenticTurnJudge:
         temperature: float = 0.2,
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
+        response_format: str = "json_schema",
     ) -> None:
         self.llm_client = llm_client
         self.llm_clients = list(llm_clients or [llm_client])
@@ -80,6 +81,7 @@ class AgenticTurnJudge:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_retries = max(1, int(max_retries or 1))
+        self.response_format = str(response_format or "json_schema").strip() or "json_schema"
 
     def judge(self, template_vars: Mapping[str, Any]) -> AgenticJudgeResult:
         prompt = render_agentic_judge_prompt(self.prompt_template, template_vars)
@@ -97,6 +99,7 @@ class AgenticTurnJudge:
                         "messages": messages,
                         "schema": self.output_schema,
                         "temperature": self.temperature,
+                        "response_format": self.response_format,
                     }
                     if self.max_tokens is not None:
                         kwargs["max_tokens"] = self.max_tokens

@@ -1,4 +1,4 @@
-# SynthChat/config/label_mappings.yaml
+﻿# SynthChat/config/label_mappings.yaml
 # Maps environment issues and stage failures to behavioral/failure-type labels.
 # The classifier uses these rules instead of hardcoded if/elif chains.
 
@@ -32,9 +32,9 @@ issue_classifiers:
     label: schema_error
   - match: "missing required args"
     label: schema_error
-  - match: "searchmanager_searchcontent"
+  - match: "search content"
     label: retrieval_missing
-  - match: "searchmanager_searchdirectory"
+  - match: "search directory"
     label: retrieval_missing
   - match: "clarification"
     label: clarification_expected
@@ -72,3 +72,4 @@ failure_type_rollups:
     - assistant_generation
     - environment_generation
     - final
+

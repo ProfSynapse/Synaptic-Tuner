@@ -33,6 +33,7 @@ class ExecutedToolCall:
 
     name: str
     arguments: Dict[str, Any] = field(default_factory=dict)
+    identifiers: List[str] = field(default_factory=list)
     status: str = "ok"
     output: Optional[str] = None
     error: Optional[str] = None
@@ -46,6 +47,8 @@ class ExecutedToolCall:
             "output": self.output,
             "error": self.error,
         }
+        if self.identifiers:
+            payload["identifiers"] = list(self.identifiers)
         if self.recoverable is not None:
             payload["recoverable"] = self.recoverable
         return payload
