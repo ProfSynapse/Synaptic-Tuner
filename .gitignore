@@ -126,6 +126,14 @@ grpo_output_rtx3090/.worktrees/
 # Local scratch workspace
 scratch/
 
+# Runtime/test scratch output
+/.runtime_tmp/
+/.tmp/
+/pytest-cache-files-*/
+/tmp/*
+!/tmp/clipcannon-review/
+!/tmp/clipcannon-review/**
+
 # Local git worktree metadata
 /.worktrees/
 
