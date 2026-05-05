@@ -1,20 +1,41 @@
 # Case Study: Tool-Calling Pipeline
 
-This project’s current tool-calling stack is CLI-first. The model learns to emit a single `useTools` wrapper whose `tool` field contains one or more CLI commands.
+Use this case study when designing a dataset where the assistant must emit
+structured tool actions and then continue based on environment feedback. The
+exact wrapper name, argument fields, action syntax, and environment semantics
+belong in scenario/config files, not in the skill or runtime code.
 
 ---
 
 ## What The Model Must Learn
 
-1. Call `useTools`, not direct tool functions.
-2. Put `workspaceId`, `sessionId`, `memory`, `goal`, and `tool` at the top level of `function.arguments`.
-3. Express concrete operations as CLI commands in the `tool` string.
-4. Use `strategy` when multiple commands are present and ordering matters.
-5. Ask for clarification instead of guessing on vague or destructive requests.
+1. Use the configured tool-call response shape.
+2. Include the configured required context fields exactly where the schema says
+   they belong.
+3. Express concrete operations using the configured action payload format.
+4. Preserve ordering when the scenario requires multiple actions.
+5. Ask for clarification before vague, risky, or destructive operations.
+6. End a completed trajectory with a normal text response when the scenario
+   expects one.
 
 ---
 
-## Canonical Wrapper
+## Config Ownership
+
+The source of truth should be declarative:
+
+- tool-call response shape: configured format/schema file
+- available actions and arguments: configured tool schema
+- workspace or fixture state: scenario/environment YAML
+- expected action sequence: scenario metadata or gates
+- reward/judge behavior: rubric/final-judge config
+
+Skills may describe the workflow, but they should not name the active wrapper,
+current context fields, or concrete action strings as though they are universal.
+
+---
+
+## Generic Example Shape
 
 ```json
 {
@@ -23,8 +44,8 @@ This project’s current tool-calling stack is CLI-first. The model learns to em
       "id": "call_0001",
       "type": "function",
       "function": {
-        "name": "useTools",
-        "arguments": "{\"workspaceId\":\"default\",\"sessionId\":\"session_1731071640123_d7m2v9c4r\",\"memory\":\"User wants to reorganize notes and inspect the result.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
+        "name": "CONFIGURED_WRAPPER_NAME",
+        "arguments": "{\"FIELD_A\":\"value\",\"FIELD_B\":\"value\",\"ACTION_FIELD\":\"CONFIGURED_ACTION_PAYLOAD\"}"
       }
     }
   ],
@@ -32,106 +53,67 @@ This project’s current tool-calling stack is CLI-first. The model learns to em
 }
 ```
 
-The inner wrapper payload is:
-
-```json
-{
-  "workspaceId": "default",
-  "sessionId": "session_1731071640123_d7m2v9c4r",
-  "memory": "User wants to reorganize notes and inspect the result.",
-  "goal": "Move a note and read it back.",
-  "constraints": "Do not touch unrelated files.",
-  "tool": "storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\"",
-  "strategy": "serial"
-  }
-}
-```
-
-The command catalog comes from [`tool-schemas.json`](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/tool-schemas.json).
-
----
-
-## Active Managers
-
-Current migration and generation scope:
-- `contentManager`
-- `memoryManager`
-- `promptManager`
-- `searchManager`
-- `storageManager`
-
-Future-facing scenario coverage exists for:
-- `canvasManager`
-- `taskManager`
-
----
-
-## System Prompt Contract
-
-System prompts still provide runtime context through sections like:
-- `<session_context>`
-- `<vault_structure>`
-- `<available_workspaces>`
-- `<available_prompts>`
-- `<selected_workspace>`
-
-But the model must now copy `sessionId` and `workspaceId` into the top level of `useTools.arguments`, not into a nested `context` object.
-
-Example instruction:
-
-```xml
-<session_context>
-IMPORTANT: When using tools, include these values as top-level fields in your useTools arguments payload.
-- sessionId: "session_1731071640123_d7m2v9c4r"
-- workspaceId: "default" (no specific workspace selected)
-</session_context>
-```
+This is only an illustrative placeholder. Replace the wrapper, fields, and
+payload with whatever the active scenario config declares.
 
 ---
 
 ## Dataset Creation Flow
 
-1. Start from `tool-schemas.json`.
-2. Generate evaluator YAML with:
-   ```bash
-   python3 tools/audit_tool_schemas.py
-   ```
-3. Migrate or regenerate canonical datasets under `Datasets/tools_datasets/`.
-4. Use SynthChat quickcheck targets before broad generation.
-5. Validate with the canonical validator and environment-backed smoke tests.
+1. Start from the canonical schema/config for the capability being trained.
+2. Author or update scenario YAML with the configured tool-call format,
+   generated environment shape, expected actions, and rubrics.
+3. Run environment-generation-only probes before full rollouts.
+4. Run a tiny full smoke with raw trace output enabled.
+5. Inspect the model-facing prompt, assistant payloads, environment responses,
+   judge feedback, and final accepted JSONL rows.
+6. Fix scenario/config/rubric gaps before changing runtime code.
+7. Scale in stages and keep passed-only artifacts when failures are expected.
 
 ---
 
-## Migration Notes
+## System Prompt Alignment
 
-Old wrapper-era formats are no longer canonical:
-- nested `context` + `calls`
-- direct function names like `vaultManager_openNote`
-- legacy managers such as `vaultManager`, `vaultLibrarian`, and `agentManager`
+System prompts should be aligned with the deployment environment, but should
+remain schema-driven. If deployment injects selected workspaces, compacted
+context, prompt references, or available tool summaries, represent those as
+generic sections in the dataset profile and keep the concrete field names in
+config.
 
-The modern equivalents are:
-- `storageManager`
-- `searchManager`
-- `promptManager`
-
-And for content editing:
-- `contentManager_read`
-- `contentManager_write`
-- `contentManager_insert`
-- `contentManager_replace`
-- `contentManager_setProperty`
+For SFT, keep the prompt as small as possible for the target behavior. For GRPO
+or environment-backed rollouts, include only the strategy guidance needed for
+the model to explore, act, observe tool feedback, and finish with a text answer.
 
 ---
 
-## Smoke Test
+## Validation
+
+Prefer deterministic gates for structural facts:
+
+- configured wrapper/action shape parses
+- required fields are present
+- disallowed fields are absent
+- action names and arguments exist in the configured tool schema
+- expected actions were executed in the required order when order matters
+- destructive actions require confirmation when the scenario says so
+
+Use LLM judges for semantic quality:
+
+- whether the model gathered enough context before acting
+- whether it chose an efficient-enough path
+- whether the final answer accurately reflects environment results
+- whether recovery turns improved the trajectory instead of adding noise
+
+---
+
+## Smoke Test Pattern
 
 ```bash
-python3 -m SynthChat.run generate \
-  --provider openrouter \
-  --model qwen/qwen3.6-plus \
-  --targets-file SynthChat/config/targets_cli_existing_tools_quickcheck.json \
+python -m SynthChat.run generate \
+  --targets-file path/to/targets.json \
   --max-iterations 3 \
-  --output Datasets/synthchat/dryrun_cli_existing_tools_quickcheck_qwen_cli.jsonl
+  --output Datasets/synthchat/dryrun_tool_calls.jsonl
 ```
 
-This should produce `useTools` calls with top-level wrapper fields and a CLI `tool` string that expands cleanly in the environment runtime.
+The important part is not the concrete command above; it is the inspection loop:
+generate a small sample, inspect raw traces, repair config/rubrics, then scale.

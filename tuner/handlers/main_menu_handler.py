@@ -116,6 +116,8 @@ class MainMenuHandler(BaseHandler):
         from tuner.handlers.cloud_eval_handler import CloudEvalHandler
         from tuner.handlers.cloud_gym_handler import CloudGymHandler
         from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
+        from tuner.handlers.cloud_run_handler import CloudRunHandler
+        from tuner.handlers.local_run_handler import LocalRunHandler
         from tuner.handlers.synthchat_handler import SynthChatHandler
         from tuner.handlers.modelops_handler import ModelOpsHandler
         from tuner.handlers.ml_handler import MLHandler
@@ -138,7 +140,9 @@ class MainMenuHandler(BaseHandler):
         # Step 3: Define menu options
         menu_options = [
             ("train", f"{BOX['star']} Training - Train models locally (SFT, KTO, GRPO)"),
+            ("local-run", f"{BOX['bullet']} Local Recipe - Run a recipe in local Docker (Trainers/recipes/)"),
             ("cloud", f"{BOX['bullet']} Cloud Training - Train on GPU cloud (HF Jobs, Modal, RunPod)"),
+            ("cloud-run", f"{BOX['bullet']} Cloud Recipe - Submit a recipe to HF Jobs (Trainers/recipes/)"),
             ("cloud-pipeline", f"{BOX['bullet']} Cloud Pipeline - Train then evaluate on HF Jobs"),
             ("cloud-eval", f"{BOX['bullet']} Cloud Evaluation - Evaluate cloud runs on HF Jobs (vLLM)"),
             ("cloud-gym", f"{BOX['bullet']} Cloud Gym - Run vault gym scenarios against a trained cloud run"),
@@ -154,6 +158,8 @@ class MainMenuHandler(BaseHandler):
         # Step 4: Create handler instances (pass args for consistency)
         handlers = {
             "train": TrainHandler(args=self.args),
+            "local-run": LocalRunHandler(args=self.args),
+            "cloud-run": CloudRunHandler(args=self.args),
             "cloud-pipeline": CloudPipelineHandler(args=self.args),
             "eval": EvalHandler(args=self.args),
             "cloud-eval": CloudEvalHandler(args=self.args),

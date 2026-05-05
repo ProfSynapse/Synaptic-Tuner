@@ -3,6 +3,8 @@
 # This file is intentionally config-driven: change model.name, dataset.local_file
 # or training/lora values to run a different local SFT job without changing code.
 name: qwen35-2b-sft-smoke
+target: local
+method: sft
 provider: local_docker
 
 job:

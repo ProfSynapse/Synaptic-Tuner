@@ -13,8 +13,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
-| Local Docker config run | `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` |
-| Local Docker vLLM eval | `python tuner.py local-run --job-config Trainers/local/jobs/<eval-job>.yaml --yes` |
+| Local Docker config run | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` |
+| Local Docker vLLM eval | `python tuner.py local-run --job-config Trainers/recipes/<eval-recipe>.yaml --yes` |
 | SFT training | `cd Trainers/sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/grpo && python train_grpo.py` |
@@ -23,7 +23,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Env-backed GRPO | `cd Trainers/grpo && python train_env_grpo.py --config ./configs/<run-name>_env_grpo.yaml --dry-run` |
 | Experiment loop | `python tuner.py experiment-loop --experiment-config configs/flywheel/experiment_loop.yaml` |
 | LoRA surgery | `python tuner.py surgery --surgery-config configs/lora_surgery.yaml` |
-| HF custom job | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/<job>.yaml` |
+| HF custom job | `python tuner.py cloud-run --job-config Trainers/recipes/<recipe>.yaml` |
 | Canonical HF train+eval | `python tuner.py cloud-pipeline --method sft --preset full` |
 | Full experiment bundle | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
 | Evolutionary SFT smoke test | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<evolutionary-spec>.yaml --yes` |
@@ -67,11 +67,11 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 ## Key Directories
 
 - `Trainers/sft/` — active SFT trainer
-- `Trainers/local/jobs/` — config-driven local Docker job specs
+- `Trainers/recipes/` — unified training recipe configs (local Docker + HF Jobs); each recipe declares `target: local|cloud|both` and `method: sft|kto|grpo`
+- `Evaluator/recipes/` — unified evaluation recipe configs
 - `Trainers/kto/` — KTO trainer
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
 - `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
-- `Trainers/cloud/jobs/` — checked-in HF Jobs configs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
 - `shared/flywheel/` — autonomous experiment-loop logic and LightGBM surrogate search
@@ -95,8 +95,8 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - Treat `loss_summary.json` as a supporting artifact, not the canonical final loss metadata file.
 - The ledger should accumulate real model-size / hardware / timing / cost data so future hardware planning can optimize against observed evidence instead of memory.
 - For local trainer iteration, use the checked-in `train_sft.py`, `train_kto.py`, and `train_grpo.py` entrypoints.
-- For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
-- For repeatable local GPU evaluation of LoRA adapters, prefer `python tuner.py local-run --job-config Trainers/local/jobs/<eval-job>.yaml --yes` with `run.method: eval` and `evaluation.runtime: vllm`. That path starts the local vLLM Docker image with the base model and overlays the adapter instead of evaluating the adapter directly in Unsloth.
+- For repeatable local GPU training, prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` over ad hoc `docker run` commands. Put the model, dataset, Docker image, package overrides, LoRA settings, training knobs, and artifact paths in YAML.
+- For repeatable local GPU evaluation of LoRA adapters, prefer `python tuner.py local-run --job-config Trainers/recipes/<eval-recipe>.yaml --yes` with `run.method: eval` and `evaluation.runtime: vllm`. That path starts the local vLLM Docker image with the base model and overlays the adapter instead of evaluating the adapter directly in Unsloth.
 - For repeatable local GPU evaluation of merged models, use the same config-driven local Docker eval path with `model.merged_path` or `model.path` pointing at a merged model directory. The local-run evaluator serves the merged path directly in vLLM and should be used before GRPO.
 - For local merging of Docker-trained LoRA adapters, prefer the matched Docker training runtime/container over host Python. Host Python is a fallback only: it may have CPU-only torch, stale Transformers, or package versions that do not support the model architecture that trained successfully in Docker.
 - Before GRPO, evaluate the merged SFT model. Treat this as a stage boundary: merge first, run evals against the merged artifact, then launch GRPO from the verified merged base.
@@ -213,11 +213,11 @@ python train_sft.py --model-size 3b --tier quick --dry-run
 **Config-driven local Docker SFT smoke run:**
 ```bash
 python tuner.py local-run \
-  --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml \
+  --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml \
   --yes
 ```
 
-For a different local SFT run, copy a job under `Trainers/local/jobs/` and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
+For a different local SFT run, copy a recipe under `Trainers/recipes/` (one with `target: local` or `target: both`) and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
 
 **KTO with local dataset:**
 ```bash

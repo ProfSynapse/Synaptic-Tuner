@@ -1,5 +1,7 @@
 name: synthchat-vault-kto-pilot
 description: Generate a first environment-backed vault pilot dataset for later KTO/GRPO filtering.
+target: cloud
+method: datagen
 provider: hf_jobs
 
 job:

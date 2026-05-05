@@ -1,5 +1,7 @@
 name: nexus-quark-l25-28-kto
 description: Run KTO from Nexus-Quark-L2.5.28 on the dynamic-role vault KTO dataset.
+target: cloud
+method: kto
 provider: hf_jobs
 
 job:

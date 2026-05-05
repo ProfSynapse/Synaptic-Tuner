@@ -1,5 +1,7 @@
 name: synthchat-vault-kto-smoke
 description: Generate a 1-example environment-backed vault smoke test to verify SynthChat tool execution on HF.
+target: cloud
+method: datagen
 provider: hf_jobs
 
 job:

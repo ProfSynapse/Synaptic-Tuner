@@ -125,7 +125,7 @@ Where:
 
 - SynthChat generation: `python3 -m SynthChat.run ...`
 - KTO / cloud orchestration: `python tuner.py ...`
-- merge/upload jobs: config-driven HF Jobs under `Trainers/cloud/jobs/*.yaml`
+- merge/upload jobs: config-driven HF Jobs as recipes under `Trainers/recipes/*.yaml` (with `target: cloud`)
 - env-GRPO entrypoint: `Trainers/grpo/train_env_grpo.py`
 - env-GRPO config: a run-specific YAML, for example
   `Trainers/grpo/configs/<run-name>_env_grpo.yaml`; do not rely on a shared

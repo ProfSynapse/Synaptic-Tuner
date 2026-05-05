@@ -107,8 +107,8 @@ message. The `final_judge` is a terminal acceptance gate, not the improver.
 Use at least 3 retries/iterations for the response repair stages by default:
 set CLI `--max-iterations 3`, keep scenario judge/final_judge `max_retries: 3`,
 and make response rubrics strict enough to fail runtime misses such as missing
-expected tools, malformed wrapper JSON, unsupported shell commands, or required
-CLI arguments omitted by the model. If any stage fails, the default behavior
+expected tools, malformed configured payloads, unsupported actions, or required
+arguments omitted by the model. If any stage fails, the default behavior
 should be retry/repair with the structured failure context before accepting or
 saving the example.
 
@@ -272,19 +272,18 @@ and let the local schema validator, environment executor, and judge feedback
 drive retries. Keep this as config, not scenario-specific parser logic.
 
 When a tool trajectory fails, inspect the raw debug artifact before changing
-scenario prose. Check the exact `tool` string emitted by the model, the
-executor's parsed arguments, the `tool_results`, and the in-loop judge feedback.
-Executor normalization can hide model mistakes such as non-ASCII whitespace or
-markdown backticks unless those are rejected through config-driven validation
-rules such as `invalid_cli_patterns` in the environment execution config.
-Likewise, generated `task_context.expected_command_sequence` should be gated
-against shell syntax or stale command examples when the trained surface is a
-configured CLI/tool wrapper. Reject those through scenario gates/config, not
-runtime string repairs.
+scenario prose. Check the configured action payload emitted by the model, the
+executor's parsed arguments, the tool/runtime results, and the in-loop judge
+feedback. Executor normalization can hide model mistakes such as non-ASCII
+whitespace or markdown backticks unless those are rejected through
+config-driven validation rules in the environment execution config. Likewise,
+generated expected-action metadata should be gated against stale syntax or
+stale examples for the trained surface. Reject those through scenario
+gates/config, not runtime string repairs.
 
 After a stage passes, still inspect accepted examples for hidden quality
 problems: non-empty environment issues, recoverable tool errors, unexpected
-tools, repeated corrective turns, and mismatched expected-vs-executed command
+tools, repeated corrective turns, and mismatched expected-vs-executed action
 forms. A 100% pass run is not necessarily a clean GRPO/SFT source if every row
 teaches the model to make an avoidable invalid call before recovering.
 
@@ -375,16 +374,16 @@ Once those are set, the real OPF-backed sanitize flow can run fully from local f
 
 ## Config-Driven Architecture
 
-SynthChat is fully config-driven — all tool-call formats, workspace structures, label mappings, and dataset-specific wrapper assumptions must be defined in YAML/config, not hardcoded in code.
+SynthChat is fully config-driven — all tool-call formats, workspace structures, label mappings, and dataset-specific schema assumptions must be defined in YAML/config, not hardcoded in code.
 
 Important discipline for this repo:
-- the current CLI/tool wrapper is only one example dataset format, not a runtime truth
-- do not encode wrapper names, top-level fields, or command assumptions in parser/executor/judge code unless that behavior is driven from config
+- the currently active tool-call schema is only one example dataset format, not a runtime truth
+- do not encode wrapper names, top-level fields, or action assumptions in parser/executor/judge code unless that behavior is driven from config
 - if a generation/eval issue seems specific to the current toy/example format, fix config, scenarios, rubrics, or format definitions first
 - environment/runtime failures should be lifted into judge/improver context as structured payload data, not handled primarily with ad hoc format-specific code repairs
 
 Key config files:
-- `SynthChat/config/tool_call_formats.yaml` — Tool-call response schemas (wrapper name, context fields, call structure)
+- `SynthChat/config/tool_call_formats.yaml` — Tool-call response schema metadata
 - `SynthChat/config/workspace_formats.yaml` — System prompt sections and structure
 - `SynthChat/config/label_mappings.yaml` — Issue classification and label rollups
 - `SynthChat/config/settings.yaml` — Generation settings, model config, output paths

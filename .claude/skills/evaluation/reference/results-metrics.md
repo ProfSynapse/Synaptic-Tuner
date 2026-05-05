@@ -11,10 +11,10 @@ Understanding evaluation output, metrics, and failure details.
 ```text
 Running 27 evaluations...
 
-  PASS  storageManager_copy (6.78s)
-  FAIL  memoryManager_updateWorkspace (4.82s)
-         Model called: useTools
-         Expected: flat_memory_update_workspace
+  PASS  configured_tool_case_a (6.78s)
+  FAIL  configured_tool_case_b (4.82s)
+         Model called: CONFIGURED_WRAPPER_NAME
+         Expected: configured_correct_path
 ```
 
 `Expected` is the name of the configured `correct.any` path, not a hardcoded tool id.
@@ -63,7 +63,7 @@ Markdown reports summarize pass/fail counts, tag breakdowns, and failures:
 ## Results by Category
 | Category | Passed | Total | Rate |
 |----------|--------|-------|------|
-| storageManager | 6/6 | 100.0% |
+| tool-call | 6/6 | 100.0% |
 ```
 
 ---

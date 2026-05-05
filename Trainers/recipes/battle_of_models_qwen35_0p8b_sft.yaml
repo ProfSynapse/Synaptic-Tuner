@@ -1,5 +1,7 @@
-name: battle-of-models-smollm2-1p7b-sft
-description: Run SFT on the main tool-calling dataset with SmolLM2 1.7B Instruct for the battle-of-the-models sweep.
+name: battle-of-models-qwen35-0p8b-sft
+description: Run SFT on the main tool-calling dataset with Qwen3.5 0.8B for the battle-of-the-models sweep.
+target: cloud
+method: sft
 provider: hf_jobs
 
 job:
@@ -9,7 +11,7 @@ job:
   labels:
     task: sft
     experiment: battle_of_models
-    model: smollm2_1p7b
+    model: qwen35_0p8b
 
 repo:
   checkout: true
@@ -24,7 +26,7 @@ run:
     PYTHONPATH: "{repo_dir}"
   steps:
     - "mkdir -p {output_dir}"
-    - "cd {repo_dir}/Trainers/sft && python train_sft.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket toolset-training-artifacts --artifact-prefix runs/hf_jobs/sft/{timestamp}-{commit8} --output-root {output_dir} --model-name HuggingFaceTB/SmolLM2-1.7B-Instruct --no-load-in-4bit --lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj --batch-size 10"
+    - "cd {repo_dir}/Trainers/sft && python train_sft.py --cloud-provider hf_jobs --artifact-backend hf_bucket --artifact-bucket toolset-training-artifacts --artifact-prefix runs/hf_jobs/sft/{timestamp}-{commit8} --output-root {output_dir} --model-name Qwen/Qwen3.5-0.8B --no-load-in-4bit --lora-target-modules q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj --batch-size 12"
 
 artifacts:
   bucket: "toolset-training-artifacts"

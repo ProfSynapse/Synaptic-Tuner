@@ -1,0 +1,52 @@
+# LLM-as-judge reward — scores completions against atomic rubrics
+# via the shared/judge service.
+#
+# This is a TEMPLATE. To activate:
+#   1. Author rubric YAMLs matching shared.judge.RubricDef schema.
+#      Required fields per rubric: name, description, scope, pass_threshold,
+#      judge_prompt, output_schema. The judge_prompt may use template vars
+#      {prompt} / {user_prompt} (the user prompt) and {response} (the model
+#      completion).
+#   2. Set rubrics_dir below to that directory and list rubric_keys
+#      (filename stems without .yaml).
+#   3. Configure the judge LLM under `judge:` — any backend supported by
+#      shared.llm.create_client (openrouter | lmstudio | ollama | unsloth).
+#   4. Pick an aggregation strategy.
+#   5. Add this rubric to rewards.items in configs/config.yaml with a weight.
+#
+# All per-completion judging is one structured-output LLM call covering every
+# rubric (multi-rubric schema), regardless of how many rubrics are listed.
+
+name: judge_rubric
+description: LLM-judge reward scoring completions against atomic rubrics
+type: judge_rubric
+
+# Directory containing rubric YAMLs (RubricLoader format).
+# Paths may be absolute or relative to Trainers/grpo/.
+rubrics_dir: "../../Datasets/judge_rubrics"
+
+# Rubric filename stems (without .yaml) to load from rubrics_dir.
+# Activation requires at least one entry — leaving this empty fails fast at
+# trainer startup with a clear error.
+rubric_keys: []
+
+# Judge LLM. Resolved through shared.llm.create_client.
+judge:
+  backend: openrouter        # openrouter | lmstudio | ollama | unsloth
+  model: openai/gpt-5-mini
+  temperature: 0.3
+  max_tokens: 2048
+  # Provider-specific overrides (only used by the matching backend):
+  # lmstudio_host: localhost
+  # lmstudio_port: 1234
+  # ollama_host: localhost
+  # ollama_port: 11434
+  # provider_routing: { order: [Groq] }
+
+# How to reduce per-rubric scores into a single scalar reward in [0, 1].
+# Options:
+#   mean_score   — mean of [0,1] per-rubric scores
+#   mean_passed  — mean of `passed` booleans (rubric passes if score >= pass_threshold)
+#   min_score    — bottleneck score across rubrics
+#   all_pass     — 1.0 only if every rubric passes, else 0.0
+aggregation: mean_passed

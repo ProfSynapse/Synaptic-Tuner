@@ -16,8 +16,8 @@
 # TOOL AGNOSTICISM
 #   These rubrics are intentionally generic. They evaluate BEHAVIOR — what was
 #   searched for, what was opened, what was claimed — not the names or schemas
-#   of specific tools. Whether your pipeline uses searchManager, a RAG
-#   retriever, grep, an MCP tool, or any other search interface, the quality
+#   of specific tools. Whether your pipeline uses a configured search
+#   interface, a RAG retriever, an MCP tool, or any other retrieval surface, the quality
 #   criteria are the same:
 #
 #     - Did the search terms target the right vocabulary?
@@ -47,7 +47,7 @@
 name: Search Term Quality
 description: >
   Evaluates whether the search terms the model chose would actually surface
-  the target documents in a keyword or grep-style search. Penalizes terms
+  the target documents in the configured retrieval surface. Penalizes terms
   that are too broad, too narrow, or that parrot the user's exact phrasing
   when the underlying documents use different vocabulary.
 scope: tool_calls

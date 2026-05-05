@@ -11,3 +11,7 @@ recorded_at,experiment_id,experiment_name,benchmark_group,base_model,model_size_
 2026-03-23T10:49:26.033205+00:00,exp_20260323_104925_eb49,smoke,train_eval_loss_smoke,HuggingFaceTB/SmolLM2-1.7B-Instruct,1.7b,sample,sft,,,,,,,,,0.000544,,0.000509,,0.000499,,0.001552,,,1,0,0,1,,,1,0.4,completed,
 2026-03-23T10:49:26.224844+00:00,exp_20260323_104926_94c8,resume-smoke,train_eval_loss_smoke,HuggingFaceTB/SmolLM2-1.7B-Instruct,1.7b,sample,sft,,,,,,,,,,,0.000635,,0.000598,,0.0012330000000000002,,,1,0,0,1,,,1,0.4,completed,
 2026-03-23T10:49:26.317963+00:00,exp_20260323_104926_234d,resume-loss,train_eval_loss_smoke,Qwen/Qwen3-4B,4b,sample,sft,,,,,,,,,,,,,0.000894,,0.000894,,,,,,,,,1,0.2,completed,
+2026-05-01T17:49:11.026014+00:00,exp_20260501_174910_795c,smoke,train_eval_loss_smoke,HuggingFaceTB/SmolLM2-1.7B-Instruct,1.7b,sample,sft,,,,,,,,,0.000773,,0.001671,,0.002123,,0.004567,,,1,0,0,1,,,1,0.4,completed,
+2026-05-01T17:49:11.190688+00:00,exp_20260501_174911_302b,resume-smoke,train_eval_loss_smoke,HuggingFaceTB/SmolLM2-1.7B-Instruct,1.7b,sample,sft,,,,,,,,,,,0.001435,,0.001804,,0.003239,,,1,0,0,1,,,1,0.4,completed,
+2026-05-01T17:49:11.415337+00:00,exp_20260501_174911_6f0c,resume-loss,train_eval_loss_smoke,Qwen/Qwen3-4B,4b,sample,sft,,,,,,,,,,,,,0.013988,,0.013988,,,,,,,,,1,0.2,completed,
+2026-05-01T17:49:11.633101+00:00,exp_20260501_174911_2226,parallel-post-training,train_eval_loss_smoke,HuggingFaceTB/SmolLM2-1.7B-Instruct,1.7b,sample,sft,,,,,,,,,0.000682,,0.055593,,0.056313,,0.112588,,,1,0,0,1,,,1,0.4,completed,

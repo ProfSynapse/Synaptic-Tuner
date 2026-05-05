@@ -1,5 +1,7 @@
 name: battle-of-models-qwen35-9b-sft
 description: Run SFT on the main tool-calling dataset with Qwen3.5 9B for the battle-of-the-models sweep.
+target: cloud
+method: sft
 provider: hf_jobs
 
 job:

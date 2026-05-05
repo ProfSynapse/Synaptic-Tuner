@@ -54,7 +54,7 @@ dataset:
 
 ## Dataset Format
 
-GRPO requires prompts with ground truth for reward scoring:
+GRPO requires prompts with ground truth for reward scoring. The exact ground-truth columns are config-driven:
 
 ```json
 {
@@ -62,12 +62,12 @@ GRPO requires prompts with ground truth for reward scoring:
     {"role": "system", "content": "..."},
     {"role": "user", "content": "..."}
   ],
-  "ground_truth_tool": "useTools",
-  "ground_truth_args_json": "{\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect and reorganize notes.\",\"goal\":\"Move a note and then read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage open \\\"notes/example.md\\\"\",\"strategy\":\"serial\"}"
+  "ground_truth_tool": "CONFIGURED_WRAPPER_NAME",
+  "ground_truth_args_json": "{\"FIELD_A\":\"value-a\",\"FIELD_B\":\"value-b\",\"ACTION_FIELD\":\"configured action payload\"}"
 }
 ```
 
-Ground truth uses the same `useTools` wrapper structure as model output.
+Ground truth should use the same configured response schema as model output. Do not assume a particular wrapper name, context field set, or command string format unless the run config defines it.
 
 ---
 
@@ -79,7 +79,7 @@ All rewards are deterministic YAML rubrics in `configs/rewards/`:
 |--------|--------|----------------|
 | `args_match.yaml` | 1.0 | Field-by-field comparison against ground truth |
 | `json_structure.yaml` | 0.3 | Valid JSON parsing |
-| `format.yaml` | 0.2 | Correct `useTools` wrapper format |
+| `format.yaml` | 0.2 | Correct configured response format |
 | `fitness.yaml` | 0.3 | Structural fitness via FitnessEvaluator |
 | `context_completeness.yaml` | — | Context field presence |
 | `tool_selection.yaml` | — | Correct tool name |

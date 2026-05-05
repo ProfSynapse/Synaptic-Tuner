@@ -6,7 +6,7 @@ A complete walkthrough of how to teach a language model to act as a RAG agent �
 
 > **YOUR TOOLS ARE NOT OUR TOOLS**
 >
-> This case study describes a **three-stage pattern**: Search, Select, Answer. The tool names used below (`YOUR_SEARCH_TOOL`, `YOUR_READ_TOOL`, `YOUR_LIST_TOOL`) are **placeholders**. Your system might use `grep`, `ripgrep`, a vector DB query, `cat`, `readFile`, an HTTP API, or something else entirely.
+> This case study describes a **three-stage pattern**: Search, Select, Answer. The tool names used below (`YOUR_SEARCH_TOOL`, `YOUR_READ_TOOL`, `YOUR_LIST_TOOL`) are **placeholders**. Your system might use a configured keyword search, a vector DB query, a document reader, an HTTP API, or something else entirely.
 >
 > **Before you proceed past Stage 1, you must know:**
 > 1. What tool does "search" in your system?
@@ -23,7 +23,7 @@ A complete walkthrough of how to teach a language model to act as a RAG agent �
 
 The model must learn a three-stage behavior loop:
 
-1. **Search** — given a question, generate search terms that would surface target documents in a keyword/grep-style search. The model must reason about vocabulary: what words would the answer contain?
+1. **Search** — given a question, generate search terms that would surface target documents in the configured retrieval surface. The model must reason about vocabulary: what words would the answer contain?
 2. **Selective Read** — from the search results, pick the relevant documents and skip distractors. Not everything returned is useful. The model must show judgment.
 3. **Grounded Answer** — answer using ONLY content from the documents it read. No hallucination. If the docs don't contain the answer, say so.
 
@@ -65,9 +65,9 @@ Define your tool mapping:
 
 | Stage | Placeholder | Your Tool | Example |
 |-------|------------|-----------|---------|
-| Search | `YOUR_SEARCH_TOOL` | ___________ | `grep`, `searchContent`, `vector_query` |
-| Read | `YOUR_READ_TOOL` | ___________ | `cat`, `read`, `fetchDocument` |
-| List | `YOUR_LIST_TOOL` | ___________ | `ls`, `list`, `listDirectory` |
+| Search | `YOUR_SEARCH_TOOL` | ___________ | configured keyword search, vector query |
+| Read | `YOUR_READ_TOOL` | ___________ | configured document read/fetch |
+| List | `YOUR_LIST_TOOL` | ___________ | configured list/browse action |
 
 Once you know your tools, create the tool schema and environment execution config that match your system. The scenario YAML references these tools by name — they must match exactly.
 

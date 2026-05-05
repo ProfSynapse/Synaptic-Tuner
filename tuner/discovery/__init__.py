@@ -23,6 +23,12 @@ from tuner.discovery.prompt_sets import PromptSetDiscovery, PromptSetInfo
 from tuner.discovery.datasets import DatasetDiscovery, DatasetInfo
 from tuner.discovery.rubrics import RubricDiscovery, RubricInfo
 from tuner.discovery.base_models import BaseModelDiscovery, ModelInfo
+from tuner.discovery.recipes import (
+    RECIPE_DIRNAME,
+    RecipeMeta,
+    list_recipes,
+    load_recipe,
+)
 
 __all__ = [
     "TrainingRunDiscovery",
@@ -36,4 +42,8 @@ __all__ = [
     "RubricInfo",
     "BaseModelDiscovery",
     "ModelInfo",
+    "RECIPE_DIRNAME",
+    "RecipeMeta",
+    "list_recipes",
+    "load_recipe",
 ]

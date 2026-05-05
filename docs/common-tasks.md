@@ -81,10 +81,10 @@ START: User wants to train a model
 **Quick start:**
 ```bash
 # Smoke test — tiny, verifies the whole path compiles + runs
-python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml
+python tuner.py local-run --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml
 
 # Real 2-epoch SFT run
-python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_2epoch.yaml
+python tuner.py local-run --job-config Trainers/recipes/qwen35_2b_sft_2epoch.yaml
 ```
 
 **Container management flags** (no `--job-config` required):
@@ -95,7 +95,7 @@ python tuner.py local-run --job-config <yaml> --rm-persistent      # Stop + remo
 python tuner.py local-run --job-config <yaml> --yes                # Skip confirmation prompt
 ```
 
-**Config reference:** The `job.*` YAML keys (`job.user`, `job.tty`, `job.persist`, `job.mount_hf_cache`, `job.mount_pip_cache`, `job.container_name`, `job.stop_timeout`, `job.transfer`, `job.keep_container`) are documented in [`.skills/fine-tuning/reference/training-config.md`](../.skills/fine-tuning/reference/training-config.md). The two checked-in configs in `Trainers/local/jobs/` are good starting templates.
+**Config reference:** The `job.*` YAML keys (`job.user`, `job.tty`, `job.persist`, `job.mount_hf_cache`, `job.mount_pip_cache`, `job.container_name`, `job.stop_timeout`, `job.transfer`, `job.keep_container`) are documented in [`.skills/fine-tuning/reference/training-config.md`](../.skills/fine-tuning/reference/training-config.md). The checked-in recipes with `target: local` in `Trainers/recipes/` are good starting templates.
 
 **Troubleshooting:** See the `local-run` section in [`docs/troubleshooting.md`](troubleshooting.md) for UID/GID, bind-mount, and persistent-container issues.
 

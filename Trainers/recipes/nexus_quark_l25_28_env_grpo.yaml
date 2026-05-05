@@ -1,5 +1,7 @@
 name: nexus-quark-l25-28-env-grpo
 description: Run cloud env-backed GRPO from Nexus-Quark-L2.5.28 on canonical SynthChat rollouts.
+target: cloud
+method: grpo
 provider: hf_jobs
 
 job:

@@ -27,7 +27,7 @@ configured format, not assume one wrapper is globally correct in code.
 | `prompt_tools` | response | 0.8 | Configured prompt tool call correctness |
 | `search_tools` | response | 0.8 | Configured search tool call correctness |
 | `storage_tools` | response | 0.8 | Configured storage tool call correctness |
-| `workspace_use_tools_response` | response | 0.8 | Configured workspace wrapper and CLI command correctness |
+| `configured_tool_response` | response | 0.8 | Configured tool-call response correctness |
 
 ---
 
@@ -100,7 +100,7 @@ validations:
 
 ## Validation Patterns
 
-### Tool Wrapper Validation
+### Configured Tool-Call Validation
 
 ```yaml
 validations:
@@ -111,17 +111,17 @@ validations:
     error: "Configured wrapper validation failed: {details}"
 ```
 
-### Cross-Scope ID Validation
+### Cross-Scope Context Validation
 
 ```yaml
   - cross_scope:
       from: response
       to: system_prompt
       extract:
-        fields: [sessionId, workspaceId]
-        pattern: "(?:sessionId|workspaceId).*?[\"']([^\"']+)[\"']"
+        fields: [CONTEXT_FIELD_A, CONTEXT_FIELD_B]
+        pattern: "(?:CONTEXT_FIELD_A|CONTEXT_FIELD_B).*?[\"']([^\"']+)[\"']"
       validate_in: [session_context]
-    error: "Context ID mismatch: '{value}' not found in session_context"
+    error: "Configured context mismatch: '{value}' not found in session_context"
 ```
 
 ---

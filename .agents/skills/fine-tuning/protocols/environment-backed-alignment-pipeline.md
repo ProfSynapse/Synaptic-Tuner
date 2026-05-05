@@ -1,7 +1,7 @@
 # Environment-Backed Alignment Pipeline
 
-This protocol captures the intended end-to-end training flow for the Nexus
-agent models when using SynthChat-generated environment tasks.
+This protocol captures the intended end-to-end training flow for agent models
+when using SynthChat-generated environment tasks.
 
 ## Purpose
 
@@ -9,7 +9,7 @@ Use SynthChat to generate realistic multi-step tool-use tasks inside real
 filesystem-like environments, then train models in stages:
 
 1. SFT to learn the tool format and basic behavior
-2. Merge and publish the best SFT model under the Nexus naming convention
+2. Merge and publish the best SFT model under the configured naming convention
 3. KTO to refine behavior using stored positive/negative rollout examples
 4. Env-backed GRPO to optimize directly against multi-step task success in the
    live environment
@@ -43,7 +43,7 @@ SynthChat is the task and environment generator.
 Start from the chosen base model and train on supervised examples so the model
 learns:
 - the response structure
-- the tool wrapper format
+- the configured tool-call format
 - the expected assistant behavior
 
 SFT teaches the model what a correct tool-using assistant response looks like.
@@ -51,7 +51,7 @@ SFT teaches the model what a correct tool-using assistant response looks like.
 ### 3. Merge and publish
 
 Take the latest good SFT adapter, merge it into the base model, and publish it
-as the named Nexus release artifact.
+as the named release artifact.
 
 This published merged model is the source of truth for downstream KTO and GRPO.
 Do not continue from an arbitrary local checkpoint when a clean merged/published
@@ -125,7 +125,7 @@ Where:
 
 - SynthChat generation: `python3 -m SynthChat.run ...`
 - KTO / cloud orchestration: `python tuner.py ...`
-- merge/upload jobs: config-driven HF Jobs under `Trainers/cloud/jobs/*.yaml`
+- merge/upload jobs: config-driven HF Jobs as recipes under `Trainers/recipes/*.yaml` (with `target: cloud`)
 - env-GRPO entrypoint: `Trainers/grpo/train_env_grpo.py`
 - env-GRPO config: a run-specific YAML, for example
   `Trainers/grpo/configs/<run-name>_env_grpo.yaml`; do not rely on a shared
