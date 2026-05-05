@@ -110,22 +110,6 @@ Use raw HF job logs mainly for:
 - dependency/runtime crashes before the first artifact sync
 - debugging low-level container issues
 
-## HF Jobs Hardware Lookup
-
-Use the checked-in helper when you want the live HF Jobs hardware list and hourly pricing instead of guessing from memory:
-
-```bash
-python3 scripts/hf_jobs_hardware.py
-python3 scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml
-python3 scripts/hf_jobs_hardware.py --sort-by vram --min-vram 40
-```
-
-Notes:
-- the script queries `GET https://huggingface.co/api/jobs/hardware`
-- it uses `HF_TOKEN` or `HF_API_KEY` automatically when present
-- `--job-config` highlights the current flavor from a cloud job YAML
-- the script now uses a CA bundle automatically, so it should not need ad hoc SSL env vars on normal local setups
-
 ## Blind Hardware Planning
 
 Use the planner when you want a back-of-the-envelope stage recommendation without relying on prior run telemetry:

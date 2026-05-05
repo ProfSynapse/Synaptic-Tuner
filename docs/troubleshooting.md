@@ -167,8 +167,8 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 - Cause: `job.persist: true` keeps the container alive between invocations so pip/HF-cache/triton-compile stay warm. The sleep-infinity idle process holds a small amount of VRAM when the image is CUDA-enabled.
 - Fix: stop it when you're done iterating.
   ```bash
-  python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --stop            # stop but keep
-  python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --rm-persistent   # stop and delete
+  python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --stop            # stop but keep
+  python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --rm-persistent   # stop and delete
   ```
 - Check state any time: `--container-status` prints `running` / `exited` / `absent`.
 

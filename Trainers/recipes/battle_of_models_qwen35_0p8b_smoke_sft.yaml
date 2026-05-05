@@ -1,5 +1,7 @@
 name: battle-of-models-qwen35-0p8b-smoke-sft
 description: Smoke-test the HF Jobs SFT path for the battle-of-the-models sweep with Qwen3.5 0.8B.
+target: cloud
+method: sft
 provider: hf_jobs
 
 job:

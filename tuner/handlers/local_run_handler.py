@@ -28,6 +28,7 @@ from typing import Any, Iterable, Literal
 
 import yaml
 
+from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
 from tuner.ui import BOX, confirm, print_menu
 
@@ -417,7 +418,7 @@ class LocalRunHandler(BaseHandler):
         return True
 
     def _jobs_dir(self) -> Path:
-        return self.repo_root / "Trainers" / "local" / "jobs"
+        return self.repo_root / "Trainers" / "recipes"
 
     def _list_job_configs(self) -> list[Path]:
         jobs_dir = self._jobs_dir()
@@ -449,8 +450,12 @@ class LocalRunHandler(BaseHandler):
 
     @staticmethod
     def _load_yaml(path: Path) -> dict[str, Any]:
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
+        try:
+            data = load_recipe(path, "local")
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            raise LocalRunError(
+                f"Local job config must be a YAML object: {path} ({exc})"
+            ) from exc
         if not isinstance(data, dict):
             raise LocalRunError(f"Local job config must be a YAML object: {path}")
         return data

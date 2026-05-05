@@ -76,10 +76,10 @@ That path can run train -> evaluation -> exact loss -> analysis -> recommendatio
 If you have a local GPU and want Docker-isolated Unsloth training without the usual UID/GID permission headaches, use `local-run`:
 
 ```bash
-python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml
+python tuner.py local-run --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml
 ```
 
-This runs the training stack inside a container with the asciimatics dashboard visible in your terminal, and writes artifacts back to the host with your own user's ownership. Opting into `job.persist: true` keeps a long-lived container around so repeat runs skip pip install and model download. Checked-in starter configs live under `Trainers/local/jobs/` (smoke + 2-epoch SFT).
+This runs the training stack inside a container with the asciimatics dashboard visible in your terminal, and writes artifacts back to the host with your own user's ownership. Opting into `job.persist: true` keeps a long-lived container around so repeat runs skip pip install and model download. Checked-in starter recipes live under `Trainers/recipes/` (smoke + 2-epoch SFT, with `target: local`).
 
 Cloud remains the primary path; `local-run` is the supporting path when you want to iterate on a local GPU with Docker isolation.
 
@@ -90,7 +90,7 @@ Cloud remains the primary path; `local-run` is the supporting path when you want
 | **Claude Code (recommended)** | Open repo in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and tell it what you want |
 | **HF Jobs cloud train + eval** | `python tuner.py cloud-pipeline --method sft --preset full` |
 | **Full cloud experiment bundle** | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<spec>.yaml --yes` |
-| **Local Docker training** | `python tuner.py local-run --job-config Trainers/local/jobs/qwen35_2b_sft_smoke.yaml` |
+| **Local Docker training** | `python tuner.py local-run --job-config Trainers/recipes/qwen35_2b_sft_smoke.yaml` |
 | **Interactive CLI** | `./run.sh` (Linux/WSL) or `.\run.ps1` (PowerShell) |
 | **Beginner (no GPU)** | `Trainers/notebooks/sft_colab_beginner.ipynb` in Google Colab |
 
@@ -153,7 +153,7 @@ SynthChat (env-backed data)  →  SFT (local or HF Jobs)  →  cloud eval / exac
 | **Blind hardware planning** | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` | Live HF Jobs hardware + pricing |
 | **Train KTO** | `python tuner.py train` → `kto` | `Trainers/kto/configs/config.yaml` |
 | **Train env-GRPO** | `python tuner.py train` → `grpo` | `Trainers/grpo/configs/env_config.yaml` |
-| **Cloud env-GRPO** | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml` | HF Jobs config + `Trainers/grpo/configs/env_config.yaml` |
+| **Cloud env-GRPO** | `python tuner.py cloud-run --job-config Trainers/recipes/nexus_quark_l25_28_env_grpo.yaml` | HF Jobs recipe + `Trainers/grpo/configs/env_config.yaml` |
 | **Evaluate** | `python -m Evaluator.cli --backend lmstudio --model MODEL` | `Evaluator/config/scenarios/` |
 | **Upload / merge** | `python tuner.py modelops` or upload scripts | Hugging Face / Nexus model repos |
 

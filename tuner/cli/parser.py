@@ -116,8 +116,8 @@ Examples:
   python tuner.py modelops     # Model operations submenu
   python tuner.py status       # Show system status
   python tuner.py status --json    # JSON output for AI parsing
-  python tuner.py cloud-run --job-config Trainers/cloud/jobs/job.yaml --yes
-  python tuner.py local-run --job-config Trainers/local/jobs/job.yaml --yes
+  python tuner.py cloud-run --job-config Trainers/recipes/job.yaml --yes
+  python tuner.py local-run --job-config Trainers/recipes/job.yaml --yes
   python tuner.py cloud-jobs list
   python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty

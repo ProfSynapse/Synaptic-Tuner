@@ -4,6 +4,8 @@
 # memory-sensitive per-device batch at 1 and uses accumulation for an effective
 # batch of 16.
 name: qwen35-2b-sft-2epoch
+target: local
+method: sft
 provider: local_docker
 
 job:

@@ -22,6 +22,7 @@ from tuner.cloud import (
     resolve_hf_bucket_id,
 )
 from tuner.core.exceptions import CloudProviderError
+from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
 from tuner.ui import BOX, confirm, print_config, print_error, print_header, print_info, print_menu
 
@@ -44,7 +45,7 @@ class CloudRunHandler(BaseHandler):
         return True
 
     def _jobs_dir(self) -> Path:
-        return self.repo_root / "Trainers" / "cloud" / "jobs"
+        return self.repo_root / "Trainers" / "recipes"
 
     def _cloud_config_path(self) -> Path:
         return self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
@@ -85,8 +86,12 @@ class CloudRunHandler(BaseHandler):
         return Path(choice)
 
     def _load_job_config(self, path: Path) -> Dict[str, Any]:
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
+        try:
+            data = load_recipe(path, "cloud")
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            raise CloudProviderError(
+                f"Cloud job config must be a YAML object: {path} ({exc})"
+            ) from exc
         if not isinstance(data, dict):
             raise CloudProviderError(f"Cloud job config must be a YAML object: {path}")
         return data

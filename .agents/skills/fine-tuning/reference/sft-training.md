@@ -92,7 +92,7 @@ When `completion_only_loss: true` (default):
 
 ## Training Workflow
 
-1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/local/jobs/<job>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
+1. **Choose runtime**: prefer `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` for repeatable local Docker runs; use direct `cd Trainers/sft && python train_sft.py ...` for tight trainer iteration.
 2. **Prepare dataset**: JSONL with `conversations` field, positive examples only
 3. **Test setup**: set `run.dry_run: true` in local-run YAML or use `python train_sft.py --model-size 7b --tier quick --dry-run`
 4. **Quick iteration**: cap `training.max_steps` in local-run YAML or use `--tier quick`
@@ -117,7 +117,7 @@ When `completion_only_loss: true` (default):
 
 **Direct trainer location:** `Trainers/sft/configs/config.yaml`
 
-**Config-driven local Docker location:** `Trainers/local/jobs/*.yaml`
+**Config-driven local Docker location:** `Trainers/recipes/*.yaml` (recipes with `target: local` or `target: both`)
 
 Local Docker job configs keep runtime choices outside shell history:
 
