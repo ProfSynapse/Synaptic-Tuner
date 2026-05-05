@@ -1,4 +1,4 @@
-name: createState Transform
+﻿name: createState Transform
 description: Transforms minimal createState tool calls to include all required params by inferring from context
 scope: response
 pass_threshold: 0.9
@@ -122,7 +122,7 @@ improver_prompt: |
 
   **IMPORTANT:**
   - Keep the same context object (workspaceId, sessionId, memory, goal)
-  - Keep agent as "memoryManager" and tool as "createState"
+  - Keep agent as "memory" and tool as "createState"
   - Add all missing required params with inferred values
   - content MUST be null
 
@@ -180,7 +180,7 @@ validations:
             tool: string
             params: object
           _subtools:
-            memoryManager:
+            memory:
               createState:
                 _required: [name, conversationContext, activeTask, activeFiles, nextSteps]
                 name: string
@@ -190,3 +190,4 @@ validations:
                 nextSteps: array
                 tags: array
     error: "createState validation failed: {details}"
+

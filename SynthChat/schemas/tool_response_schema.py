@@ -52,8 +52,18 @@ def _build_wrapper_schema(
     override_fields = [field for field, value in context_overrides.items() if value and field in arg_properties_cfg]
     guidance_fields = sorted(set(argument_required + argument_field_names + override_fields))
     guidance = (
-        f"JSON string containing the top-level '{wrapper_name}' wrapper payload with fields: "
+        f"Top-level '{wrapper_name}' wrapper payload with fields: "
         + ", ".join(guidance_fields)
+    )
+    argument_mode = str(format_config.get("generation_argument_mode") or "string").strip().lower()
+    arguments_schema = (
+        _build_wrapper_argument_object_schema(format_config, context_overrides, guidance)
+        if argument_mode in {"object", "json_object"}
+        else {
+            "type": "string",
+            "minLength": 2,
+            "description": f"JSON string containing the {guidance}",
+        }
     )
 
     return {
@@ -88,11 +98,7 @@ def _build_wrapper_schema(
                                     "additionalProperties": False,
                                     "properties": {
                                         "name": {"const": wrapper_name},
-                                        "arguments": {
-                                            "type": "string",
-                                            "minLength": 2,
-                                            "description": guidance,
-                                        },
+                                        "arguments": arguments_schema,
                                     },
                                     "required": ["name", "arguments"],
                                 },
@@ -104,6 +110,39 @@ def _build_wrapper_schema(
             },
         },
         "required": ["content", "tool_calls"],
+    }
+
+
+def _build_wrapper_argument_object_schema(
+    format_config: Dict[str, Any],
+    context_overrides: Dict[str, Any],
+    description: str,
+) -> Dict[str, Any]:
+    """Build the structured-generation schema for wrapper arguments.
+
+    Saved OpenAI-style messages still serialize function.arguments to a JSON
+    string. This schema only makes the generation step avoid hand-escaping a
+    nested JSON string when the format config opts into object-mode generation.
+    """
+    arg_cfg = format_config.get("argument_fields") or {}
+    properties_cfg = dict(arg_cfg.get("properties") or {})
+    properties_cfg.update(format_config.get("extra_argument_fields") or {})
+    required = list(format_config.get("argument_required") or arg_cfg.get("required") or [])
+
+    properties: Dict[str, Any] = {}
+    for field_name, raw_spec in properties_cfg.items():
+        spec = dict(raw_spec) if isinstance(raw_spec, dict) else {"type": "string"}
+        override = context_overrides.get(field_name)
+        if override:
+            spec["const"] = override
+        properties[field_name] = spec
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "description": description,
+        "properties": properties,
+        "required": required,
     }
 
 
@@ -182,7 +221,8 @@ def build_tool_generation_prompt(
             line = line.replace("{allowed_tools_csv}", ", ".join(allowed_tools))
         lines.append(line)
 
-    if allowed_tools:
+    include_allowed_tools_line = bool(format_config.get("include_allowed_tools_line", True))
+    if allowed_tools and include_allowed_tools_line:
         formatted = ", ".join(allowed_tools)
         lines.append(f"Allowed concrete tools for this task: {formatted}.")
 

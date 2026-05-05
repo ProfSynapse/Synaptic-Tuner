@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 @dataclass
@@ -20,6 +20,7 @@ class LLMConfig:
     openrouter_api_key: Optional[str] = None
     provider_routing: Optional[Dict[str, Any]] = None  # OpenRouter provider routing
     openrouter_timeout_seconds: float = 60.0
+    openrouter_plugins: Optional[List[Dict[str, Any]]] = None
 
     # LM Studio config
     lmstudio_host: str = "localhost"
@@ -100,6 +101,7 @@ class LLMConfig:
                     os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"),
                 )
             ),
+            openrouter_plugins=cfg.get("plugins") if isinstance(cfg.get("plugins"), list) else None,
             lmstudio_host=os.getenv("LMSTUDIO_HOST", "localhost"),
             lmstudio_port=int(os.getenv("LMSTUDIO_PORT", "1234")),
             ollama_host=os.getenv("OLLAMA_HOST", "localhost"),

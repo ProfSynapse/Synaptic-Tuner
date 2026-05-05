@@ -22,11 +22,12 @@ configured format, not assume one wrapper is globally correct in code.
 | `context_alignment` | response | 0.8 | Context IDs match system prompt |
 | `quality_labels` | response | 0.8 | KTO label assignment |
 | `destructive_safety` | response | 0.8 | Proper handling of destructive operations |
-| `contentManager_tools` | response | 0.8 | CLI-first content tool call correctness |
-| `memoryManager_tools` | response | 0.8 | CLI-first memory tool call correctness |
-| `promptManager_tools` | response | 0.8 | CLI-first prompt tool call correctness |
-| `searchManager_tools` | response | 0.8 | CLI-first search tool call correctness |
-| `storageManager_tools` | response | 0.8 | CLI-first storage tool call correctness |
+| `content_tools` | response | 0.8 | Configured content tool call correctness |
+| `memory_tools` | response | 0.8 | Configured memory/state tool call correctness |
+| `prompt_tools` | response | 0.8 | Configured prompt tool call correctness |
+| `search_tools` | response | 0.8 | Configured search tool call correctness |
+| `storage_tools` | response | 0.8 | Configured storage tool call correctness |
+| `workspace_use_tools_response` | response | 0.8 | Configured workspace wrapper and CLI command correctness |
 
 ---
 
@@ -54,7 +55,8 @@ judge_prompt: |
 
 improver_prompt: |
   Explain how to fix the content.
-  If improving a tool response, preserve the CLI-first `useTools` wrapper.
+  If improving a tool response, preserve the wrapper and command surface
+  configured for that scenario.
 
 output_schema:
   type: object

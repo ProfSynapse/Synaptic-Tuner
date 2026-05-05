@@ -113,6 +113,17 @@ class TestParseAssistantResponse:
         ids = [tc["id"] for tc in result["tool_calls"]]
         assert ids == ["call_0001", "call_0002"]
 
+    def test_malformed_tool_call_item_does_not_crash(self):
+        payload = json.dumps({
+            "content": None,
+            "tool_calls": ["not a tool call object"],
+        })
+        result = parse_assistant_response(payload, {})
+
+        assert result["role"] == "assistant"
+        assert result["tool_calls"][0]["function"]["name"] == ""
+        assert result["tool_calls"][0]["function"]["arguments"] == "not a tool call object"
+
 
 # ---- parse_json_object ----
 

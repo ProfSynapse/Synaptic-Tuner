@@ -116,7 +116,7 @@ Use the checked-in helper when you want the live HF Jobs hardware list and hourl
 
 ```bash
 python3 scripts/hf_jobs_hardware.py
-python3 scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/nexus_quark_l25_28_env_grpo.yaml
+python3 scripts/hf_jobs_hardware.py --job-config Trainers/cloud/jobs/<job-config>.yaml
 python3 scripts/hf_jobs_hardware.py --sort-by vram --min-vram 40
 ```
 
@@ -265,7 +265,7 @@ Interpreting saved failures:
 Useful flags:
 - `--method sft` or `--method kto` to filter run discovery
 - `--scenario behavior_prompts.yaml` to run specific scenarios instead of a preset
-- `--tags storageManager,intellectual_humility` to filter cases
+- `--tags tool-call,intellectual_humility` to filter cases
 - `--upload-to-hf username/model-name --update-model-card` to push evaluation lineage to a model repo
 
 Current constraint:

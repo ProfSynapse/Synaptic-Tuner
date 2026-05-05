@@ -66,6 +66,7 @@ formats:
     defaults:
       session_id: "session_eval_001"
       workspace_name: "Current Workspace"
+    available_workspaces_instruction: "Use the configured workspace CLI commands to orient yourself when you need more context."
 
   # -- Example: Coding IDE format --
   coding_ide:
@@ -100,3 +101,106 @@ formats:
     defaults:
       session_id: "ide_session_001"
       workspace_name: "Default Project"
+    available_workspaces_instruction: "Use the configured project commands to orient yourself when you need more context."
+
+  cli_only:
+    sections:
+      - tag: session_context
+        source: session_context
+        template: |
+          IMPORTANT: When using tools, include these values in your tool call parameters:
+
+          - sessionId: "{session_id}"
+          - workspaceId: "{workspace_id}" (current workspace)
+
+          Include these as top-level fields in the useTools arguments payload.
+
+      - tag: vault_structure
+        source: vault_structure
+        optional: true
+
+      - tag: available_workspaces
+        source: available_workspaces
+        optional: true
+
+      - tag: available_prompts
+        source: available_prompts
+        optional: true
+
+      - tag: selected_workspace
+        source: selected_workspace
+
+      - tag: note_contents
+        source: note_contents
+        optional: true
+
+      - source: extra_sections
+
+      - source: assistant_instructions
+        raw: true
+
+    selected_workspace_fields:
+      - context
+      - workspaceStructure
+      - recentFiles
+      - keyFiles
+      - workflows
+      - preferences
+      - sessions
+
+    defaults:
+      session_id: "session_eval_001"
+      workspace_name: "Current Workspace"
+    available_workspaces_instruction: "Use storage list, search, and content read commands to orient yourself when you need more workspace context."
+
+  cli_schema_tools:
+    available_tools_detail: summary
+    available_tools_max_examples: 0
+    sections:
+      - tag: session_context
+        source: session_context
+        template: |
+          IMPORTANT: When using tools, include these values in your tool call parameters:
+
+          - sessionId: "{session_id}"
+          - workspaceId: "{workspace_id}" (current workspace)
+
+          Include these as top-level fields in the useTools arguments payload.
+
+      - tag: vault_structure
+        source: vault_structure
+        optional: true
+
+      - tag: available_workspaces
+        source: available_workspaces
+        optional: true
+
+      - tag: available_prompts
+        source: available_prompts
+        optional: true
+
+      - tag: available_tools
+        source: available_tools
+        optional: true
+
+      - tag: selected_workspace
+        source: selected_workspace
+
+      - source: extra_sections
+
+      - source: assistant_instructions
+        raw: true
+
+    selected_workspace_fields:
+      - context
+      - workspaceStructure
+      - recentFiles
+      - keyFiles
+      - workflows
+      - preferences
+      - sessions
+
+    defaults:
+      session_id: "session_eval_001"
+      workspace_name: "Current Workspace"
+    available_workspaces_instruction: "Use the configured workspace CLI commands to orient yourself when you need more context."

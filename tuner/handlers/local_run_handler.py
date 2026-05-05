@@ -333,6 +333,11 @@ def _cache_mount_args(plan: dict[str, Any], home_dir: Path) -> list[str]:
     return args
 
 
+def _format_container_repo_path(repo_relative: Path) -> str:
+    """Return a repo-relative path as a /workspace/repo POSIX path."""
+    return str(PurePosixPath("/workspace/repo") / repo_relative.as_posix())
+
+
 def _ensure_host_cache_dirs(plan: dict[str, Any], home_dir: Path) -> None:
     """Pre-create ``~/.cache/huggingface`` / ``~/.cache/pip`` on the host.
 
@@ -402,12 +407,38 @@ def _build_persistent_docker_run_args(
     return args
 
 
+def _build_persistent_copy_run_args(plan: dict[str, Any]) -> list[str]:
+    """Build ``docker run -d`` argv for a reusable copy-mode container."""
+    name = plan["persistent_container_name"]
+    stop_timeout = int(plan.get("stop_timeout", DEFAULT_STOP_TIMEOUT))
+    docker_user = "0:0"
+    return [
+        "docker",
+        "run",
+        "-d",
+        "--init",
+        "--name",
+        name,
+        "--stop-timeout",
+        str(stop_timeout),
+        "--gpus",
+        "all",
+        "-u",
+        docker_user,
+        "--entrypoint",
+        "sleep",
+        plan["image"],
+        "infinity",
+    ]
+
+
 class LocalRunHandler(BaseHandler):
     """Run config-driven local Docker jobs, starting with SFT training."""
 
     def __init__(self, args: Namespace | None = None):
         super().__init__(args=args)
         self._container_name: str | None = None
+        self._active_user_spec: UserSpec | None = None
 
     @property
     def name(self) -> str:
@@ -469,6 +500,48 @@ class LocalRunHandler(BaseHandler):
         if isinstance(value, dict):
             return {str(k): self._render_value(v, variables) for k, v in value.items()}
         return value
+
+    def _repo_relative_path(self, raw_path: str | Path) -> Path:
+        path = self._rel_path(Path(str(raw_path)))
+        try:
+            return path.relative_to(self.repo_root)
+        except ValueError as exc:
+            raise LocalRunError(
+                f"Configured path must live under the repo root: {path}"
+            ) from exc
+
+    def _load_json_if_exists(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except json.JSONDecodeError as exc:
+            raise LocalRunError(f"Failed to parse JSON file: {path}") from exc
+        return data if isinstance(data, dict) else {}
+
+    def _resolve_adapter_metadata(self, adapter_rel_path: Path) -> dict[str, Any]:
+        adapter_dir = self._rel_path(adapter_rel_path)
+        if not adapter_dir.exists():
+            raise LocalRunError(f"Configured adapter path does not exist: {adapter_rel_path}")
+        if not adapter_dir.is_dir():
+            raise LocalRunError(f"Configured adapter path must be a directory: {adapter_rel_path}")
+
+        adapter_cfg = self._load_json_if_exists(adapter_dir / "adapter_config.json")
+        lineage = self._load_json_if_exists(adapter_dir.parent / "training_lineage.json")
+        lineage_model = lineage.get("model") if isinstance(lineage.get("model"), dict) else {}
+        lineage_lora = lineage.get("lora") if isinstance(lineage.get("lora"), dict) else {}
+
+        base_model = (
+            adapter_cfg.get("base_model_name_or_path")
+            or lineage_model.get("base_model")
+            or lineage_model.get("name")
+        )
+        lora_rank = adapter_cfg.get("r") or lineage_lora.get("rank")
+        return {
+            "base_model": str(base_model).strip() if base_model else None,
+            "lora_rank": int(lora_rank) if lora_rank is not None else None,
+        }
 
     def _build_sft_command(self, cfg: dict[str, Any], variables: dict[str, str]) -> tuple[list[str], str, Path]:
         model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
@@ -546,6 +619,254 @@ class LocalRunHandler(BaseHandler):
         host_artifact_path = self._rel_path(Path(output_root) / run_timestamp)
         return command, workdir, host_artifact_path
 
+    def _build_eval_command(
+        self,
+        cfg: dict[str, Any],
+        variables: dict[str, str],
+    ) -> tuple[list[str], str, Path, dict[str, Any]]:
+        model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
+        eval_cfg = cfg.get("evaluation", {}) if isinstance(cfg.get("evaluation"), dict) else {}
+        artifacts_cfg = cfg.get("artifacts", {}) if isinstance(cfg.get("artifacts"), dict) else {}
+
+        runtime = str(eval_cfg.get("runtime", "vllm")).strip().lower()
+        if runtime != "vllm":
+            raise LocalRunError(
+                "local-run run.method=eval currently supports evaluation.runtime: vllm."
+            )
+
+        model_raw = (
+            model_cfg.get("adapter_path")
+            or model_cfg.get("merged_path")
+            or model_cfg.get("model_path")
+            or model_cfg.get("path")
+        )
+        if not model_raw:
+            raise LocalRunError(
+                "local eval requires model.adapter_path for a LoRA adapter or "
+                "model.merged_path/model.path for a merged model directory."
+            )
+        model_rel_path = self._repo_relative_path(self._render_value(model_raw, variables))
+        model_host_path = self._rel_path(model_rel_path)
+        if not model_host_path.exists():
+            raise LocalRunError(f"Configured model path does not exist: {model_rel_path}")
+        if not model_host_path.is_dir():
+            raise LocalRunError(f"Configured model path must be a directory: {model_rel_path}")
+
+        is_adapter_model = (model_host_path / "adapter_config.json").exists()
+        is_merged_model = (model_host_path / "config.json").exists() and not is_adapter_model
+        if not is_adapter_model and not is_merged_model:
+            raise LocalRunError(
+                "Configured model path must be either a LoRA adapter directory "
+                "(adapter_config.json) or a merged model directory (config.json)."
+            )
+
+        adapter_meta: dict[str, Any] = {}
+        if is_adapter_model:
+            adapter_meta = self._resolve_adapter_metadata(model_rel_path)
+            base_model = (
+                model_cfg.get("base_name")
+                or model_cfg.get("name")
+                or adapter_meta.get("base_model")
+            )
+            if not base_model:
+                raise LocalRunError(
+                    "Could not infer the base model for local vLLM eval. "
+                    "Set model.base_name (or model.name), or ensure adapter_config.json contains base_model_name_or_path."
+                )
+        else:
+            base_model = _format_container_repo_path(model_rel_path)
+
+        served_model_name = str(eval_cfg.get("served_model_name", "finetuned")).strip() or "finetuned"
+        host = str(eval_cfg.get("host", "127.0.0.1")).strip() or "127.0.0.1"
+        port = int(eval_cfg.get("port", 8000))
+        gpu_memory_utilization = float(eval_cfg.get("gpu_memory_utilization", 0.85))
+        tensor_parallel_size = int(eval_cfg.get("tensor_parallel_size", 0))
+        server_timeout = int(eval_cfg.get("server_timeout", 600))
+        python_bin = str(eval_cfg.get("python_bin", "python3")).strip() or "python3"
+        max_lora_rank = int(eval_cfg.get("max_lora_rank") or adapter_meta.get("lora_rank") or 64)
+        enforce_eager = bool(eval_cfg.get("enforce_eager", True))
+
+        scenarios = _as_list(eval_cfg.get("scenarios"))
+        if eval_cfg.get("scenario"):
+            scenarios.extend(_as_list(eval_cfg.get("scenario")))
+        preset = eval_cfg.get("preset")
+        if not scenarios and not preset:
+            raise LocalRunError(
+                "local eval requires evaluation.scenarios/evaluation.scenario or evaluation.preset."
+            )
+
+        output_root = artifacts_cfg.get("host_path", f"Evaluator/results/{variables['name']}")
+        host_artifact_path = self._rel_path(Path(str(self._render_value(output_root, variables))))
+        try:
+            artifact_rel = host_artifact_path.relative_to(self.repo_root)
+        except ValueError as exc:
+            raise LocalRunError(
+                f"artifacts.host_path must live under the repo root: {host_artifact_path}"
+            ) from exc
+
+        output_dir = _format_container_repo_path(artifact_rel)
+        server_log = f"{output_dir}/vllm_server.log"
+        output_json = f"{output_dir}/evaluation_results.json"
+        output_md = f"{output_dir}/evaluation_results.md"
+        partial_output_json = f"{output_dir}/evaluation_partial.json"
+        partial_output_md = f"{output_dir}/evaluation_partial.md"
+        failure_json = f"{output_dir}/evaluation_failure.json"
+        progress_jsonl = f"{output_dir}/eval_progress.jsonl"
+
+        eval_args = [
+            python_bin,
+            "-m",
+            "Evaluator.cli",
+            "--backend",
+            "vllm",
+            "--model",
+            served_model_name,
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--config-dir",
+            "Evaluator/config",
+            "--output",
+            output_json,
+            "--markdown",
+            output_md,
+            "--partial-output-json",
+            partial_output_json,
+            "--partial-markdown",
+            partial_output_md,
+            "--failure-json",
+            failure_json,
+            "--progress-jsonl",
+            progress_jsonl,
+        ]
+        if bool(eval_cfg.get("no_dashboard", True)):
+            eval_args.append("--no-dashboard")
+        if preset:
+            eval_args.extend(["--preset", str(preset)])
+        for scenario in scenarios:
+            eval_args.extend(["--scenario", str(scenario)])
+        if eval_cfg.get("tags"):
+            eval_args.extend(["--tags", str(eval_cfg["tags"])])
+        for numeric_key, flag in (
+            ("limit", "--limit"),
+            ("temperature", "--temperature"),
+            ("top_p", "--top-p"),
+            ("max_tokens", "--max-tokens"),
+            ("retries", "--retries"),
+            ("timeout", "--timeout"),
+        ):
+            if eval_cfg.get(numeric_key) is not None:
+                eval_args.extend([flag, str(eval_cfg[numeric_key])])
+        if eval_cfg.get("seed") is not None:
+            eval_args.extend(["--seed", str(eval_cfg["seed"])])
+        if bool(eval_cfg.get("validate_context", False)):
+            eval_args.append("--validate-context")
+        if eval_cfg.get("env_backend") and str(eval_cfg["env_backend"]).strip().lower() != "none":
+            eval_args.extend(["--env-backend", str(eval_cfg["env_backend"])])
+        if eval_cfg.get("env_template"):
+            eval_args.extend(["--env-template", str(eval_cfg["env_template"])])
+        if eval_cfg.get("env_tool_schema"):
+            eval_args.extend(["--env-tool-schema", str(eval_cfg["env_tool_schema"])])
+        if eval_cfg.get("env_exec_config"):
+            eval_args.extend(["--env-exec-config", str(eval_cfg["env_exec_config"])])
+        eval_args.extend(_as_list(eval_cfg.get("extra_args")))
+
+        server_cmd = [
+            python_bin,
+            "-u",
+            "-m",
+            "vllm.entrypoints.openai.api_server",
+            "--model",
+            str(base_model),
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--gpu-memory-utilization",
+            str(gpu_memory_utilization),
+        ]
+        if is_adapter_model:
+            server_cmd.extend(
+                [
+                    "--enable-lora",
+                    "--max-lora-rank",
+                    str(max_lora_rank),
+                    "--lora-modules",
+                    f"{served_model_name}={_format_container_repo_path(model_rel_path)}",
+                ]
+            )
+        else:
+            server_cmd.extend(["--served-model-name", served_model_name])
+        if tensor_parallel_size > 0:
+            server_cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
+        if enforce_eager:
+            server_cmd.append("--enforce-eager")
+        server_cmd.extend(_as_list(eval_cfg.get("server_extra_args") or eval_cfg.get("vllm_args")))
+        vllm_use_v1 = "1" if bool(eval_cfg.get("vllm_use_v1", True)) else "0"
+
+        wait_script = f"""import json
+import sys
+import time
+import urllib.request
+
+url = "http://{host}:{port}/v1/models"
+deadline = time.time() + {server_timeout}
+last_error = None
+while time.time() < deadline:
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            if resp.status == 200:
+                payload = json.load(resp)
+                data = payload.get("data") or []
+                ids = [item.get("id") for item in data if isinstance(item, dict)]
+                if "{served_model_name}" in ids or ids:
+                    sys.exit(0)
+    except Exception as exc:
+        last_error = exc
+    time.sleep(2)
+print(f"Timed out waiting for vLLM server at {{url}}: {{last_error}}", file=sys.stderr)
+sys.exit(1)
+"""
+        script_lines = [
+            "set -euo pipefail",
+            f"mkdir -p {shlex.quote(output_dir)}",
+            "export TORCH_COMPILE_DISABLE=1",
+            f"export VLLM_USE_V1=${{VLLM_USE_V1:-{vllm_use_v1}}}",
+            " ".join(shlex.quote(part) for part in server_cmd) + f" > {shlex.quote(server_log)} 2>&1 &",
+            "SERVER_PID=$!",
+            "cleanup() {",
+            '  if kill -0 "$SERVER_PID" 2>/dev/null; then',
+            '    kill "$SERVER_PID" >/dev/null 2>&1 || true',
+            '    wait "$SERVER_PID" 2>/dev/null || true',
+            "  fi",
+            "}",
+            "trap cleanup EXIT",
+            f"{shlex.quote(python_bin)} - <<'PY'",
+            wait_script.rstrip(),
+            "PY",
+            " ".join(shlex.quote(part) for part in eval_args),
+        ]
+        command = ["bash", "-lc", "\n".join(script_lines)]
+        workdir = "/workspace/repo"
+        metadata = {
+            "runtime": runtime,
+            "model_rel_path": model_rel_path,
+            "model_kind": "adapter" if is_adapter_model else "merged",
+            "default_copy_paths": [
+                Path("Evaluator"),
+                Path("SynthChat"),
+                Path("shared"),
+                Path("tuner"),
+                Path(".skills/synethetic-data-generation/scripts"),
+                model_rel_path,
+            ],
+            "default_pip": ["-r", "/workspace/repo/Evaluator/requirements.txt"],
+            "default_image": "vllm/vllm-openai:latest",
+            "copy_artifacts_on_failure": True,
+        }
+        return command, workdir, host_artifact_path, metadata
+
     def _compile(self, config_path: Path, cfg: dict[str, Any]) -> dict[str, Any]:
         provider = str(cfg.get("provider", "local_docker")).strip().lower()
         if provider != "local_docker":
@@ -564,8 +885,8 @@ class LocalRunHandler(BaseHandler):
         setup_cfg = cfg.get("setup", {}) if isinstance(cfg.get("setup"), dict) else {}
         artifacts_cfg = cfg.get("artifacts", {}) if isinstance(cfg.get("artifacts"), dict) else {}
 
-        image = str(job_cfg.get("image", "unsloth/unsloth:latest"))
         method = str(run_cfg.get("method", "sft")).lower()
+        extra_plan: dict[str, Any] = {}
         if run_cfg.get("command"):
             command = _as_list(self._render_value(run_cfg["command"], variables))
             workdir = str(run_cfg.get("workdir", "/workspace/repo"))
@@ -574,8 +895,14 @@ class LocalRunHandler(BaseHandler):
             )
         elif method == "sft":
             command, workdir, host_artifact_path = self._build_sft_command(cfg, variables)
+        elif method == "eval":
+            command, workdir, host_artifact_path, extra_plan = self._build_eval_command(cfg, variables)
         else:
-            raise LocalRunError("local-run currently supports run.method: sft or an explicit run.command list.")
+            raise LocalRunError(
+                "local-run currently supports run.method: sft, run.method: eval, or an explicit run.command list."
+            )
+
+        image = str(job_cfg.get("image") or extra_plan.get("default_image") or "unsloth/unsloth:latest")
 
         transfer_mode = str(job_cfg.get("transfer", "auto")).lower()
         if transfer_mode == "auto":
@@ -587,20 +914,18 @@ class LocalRunHandler(BaseHandler):
 
         copy_paths = [Path(path) for path in _as_list(setup_cfg.get("copy"))]
         if transfer_mode == "copy" and not copy_paths:
-            copy_paths = [Path("Trainers/sft"), Path("shared"), Path("tuner")]
-            dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
-            if dataset_cfg.get("local_file"):
-                copy_paths.append(Path(str(dataset_cfg["local_file"])))
+            if method == "eval":
+                copy_paths = list(extra_plan.get("default_copy_paths") or [])
+            else:
+                copy_paths = [Path("Trainers/sft"), Path("shared"), Path("tuner")]
+                dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
+                if dataset_cfg.get("local_file"):
+                    copy_paths.append(Path(str(dataset_cfg["local_file"])))
 
         stop_timeout = int(job_cfg.get("stop_timeout", DEFAULT_STOP_TIMEOUT))
         tty_mode = _validate_tty_field(job_cfg.get("tty"))
 
         persist = _validate_bool_field(job_cfg.get("persist"), "persist", default=False)
-        if persist and transfer_mode != "bind":
-            raise LocalRunError(
-                "job.persist=true is only supported with transfer=bind "
-                f"(got transfer={transfer_mode!r})."
-            )
         mount_hf_cache = _validate_bool_field(
             job_cfg.get("mount_hf_cache"), "mount_hf_cache", default=True
         )
@@ -620,6 +945,8 @@ class LocalRunHandler(BaseHandler):
             )
 
         pip_items = _as_list(setup_cfg.get("pip"))
+        if not pip_items:
+            pip_items = list(extra_plan.get("default_pip") or [])
         pip_marker_hash = _pip_marker_hash(pip_items)
 
         return {
@@ -650,6 +977,13 @@ class LocalRunHandler(BaseHandler):
             "persist": persist,
             "mount_hf_cache": mount_hf_cache,
             "mount_pip_cache": mount_pip_cache,
+            "method": method,
+            "copy_artifacts_on_failure": bool(
+                extra_plan.get(
+                    "copy_artifacts_on_failure",
+                    job_cfg.get("copy_artifacts_on_failure", False),
+                )
+            ),
         }
 
     def _run(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
@@ -678,9 +1012,33 @@ class LocalRunHandler(BaseHandler):
                 raise LocalRunError(f"Configured copy path does not exist: {relative}")
             dest = "/workspace/repo/" + Path(relative).as_posix()
             parent = str(Path(dest).parent).replace("\\", "/")
+            self._check(["docker", "exec", "-u", "root", container, "rm", "-rf", dest])
             self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", parent])
             self._check(["docker", "cp", str(src), f"{container}:{dest}"])
-        self._check(["docker", "exec", "-u", "root", container, "chown", "-R", "unsloth:unsloth", "/workspace/repo"])
+        chown_target = self._container_copy_owner(container)
+        if chown_target:
+            self._check(["docker", "exec", "-u", "root", container, "chown", "-R", chown_target, "/workspace/repo"])
+
+    def _container_copy_owner(self, container: str) -> str | None:
+        user_spec = getattr(self, "_active_user_spec", None)
+        if isinstance(user_spec, UserSpec) and user_spec.docker_user_flag:
+            return None if user_spec.docker_user_flag == "0:0" else user_spec.docker_user_flag
+
+        result = self._run(
+            ["docker", "exec", container, "sh", "-lc", "id -u && id -g"],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return None
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None
+        if lines[0] == "0" and lines[1] == "0":
+            return None
+        return f"{lines[0]}:{lines[1]}"
+
+    def _clear_container_artifact_path(self, container: str, container_path: str) -> None:
+        self._check(["docker", "exec", "-u", "root", container, "rm", "-rf", container_path])
 
     def _copy_artifacts_from_container(
         self,
@@ -717,6 +1075,7 @@ class LocalRunHandler(BaseHandler):
         user_spec: UserSpec = plan["user_spec"]
         tty_flags = _resolve_tty_flags(plan["tty_mode"], sys.stdout.isatty())
         self._container_name = container
+        self._active_user_spec = user_spec
         self._check(
             [
                 "docker",
@@ -734,24 +1093,39 @@ class LocalRunHandler(BaseHandler):
             ]
         )
         self._check(["docker", "start", container])
+        command_error: Exception | None = None
         try:
             self._check(["docker", "exec", "-u", "root", container, "mkdir", "-p", "/workspace/repo"])
             self._copy_into_container(container, plan["copy_paths"])
             if plan["pip"]:
                 self._check(["docker", "exec", "-u", "root", container, "pip", "install", "--upgrade", *plan["pip"]])
+            self._clear_container_artifact_path(container, plan["container_artifact_path"])
             command_text = " ".join(shlex.quote(part) for part in plan["command"])
             exec_args = ["docker", "exec", *tty_flags, "-w", plan["workdir"]]
             if user_spec.docker_user_flag is not None:
                 exec_args.extend(["-u", user_spec.docker_user_flag])
             exec_args.extend([container, "bash", "-lc", command_text])
-            self._check(exec_args)
-            self._copy_artifacts_from_container(
-                container,
-                plan["container_artifact_path"],
-                plan["host_artifact_path"],
-                user_spec,
-            )
+            try:
+                self._check(exec_args)
+            except Exception as exc:
+                command_error = exc
+            should_copy = command_error is None or bool(plan.get("copy_artifacts_on_failure", False))
+            if should_copy:
+                try:
+                    self._copy_artifacts_from_container(
+                        container,
+                        plan["container_artifact_path"],
+                        plan["host_artifact_path"],
+                        user_spec,
+                    )
+                except Exception as artifact_exc:
+                    if command_error is None:
+                        raise
+                    print(f"Warning: failed to copy artifacts after command failure: {artifact_exc}")
+            if command_error is not None:
+                raise command_error
         finally:
+            self._active_user_spec = None
             if not plan["keep_container"]:
                 self._run(["docker", "rm", "-f", container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self._container_name = None
@@ -826,8 +1200,11 @@ class LocalRunHandler(BaseHandler):
             self._check(["docker", "start", name])
             return "started"
         # absent
-        home_dir = Path(os.path.expanduser("~"))
-        self._check(_build_persistent_docker_run_args(plan, self.repo_root, home_dir))
+        if plan["transfer"] == "bind":
+            home_dir = Path(os.path.expanduser("~"))
+            self._check(_build_persistent_docker_run_args(plan, self.repo_root, home_dir))
+        else:
+            self._check(_build_persistent_copy_run_args(plan))
         return "created"
 
     def _execute_persistent_bind_mode(self, plan: dict[str, Any]) -> None:
@@ -873,6 +1250,66 @@ class LocalRunHandler(BaseHandler):
             exec_args.extend(["-u", "0:0"])
         exec_args.extend([name, "bash", "-lc", command_text])
         self._check(exec_args)
+
+    def _execute_persistent_copy_mode(self, plan: dict[str, Any]) -> None:
+        """Run a copy-mode job inside a reusable container via ``docker exec``."""
+        name = plan["persistent_container_name"]
+        user_spec: UserSpec = plan["user_spec"]
+        tty_flags = _resolve_tty_flags(plan["tty_mode"], sys.stdout.isatty())
+        self._container_name = name
+        self._active_user_spec = user_spec
+        self._ensure_persistent_container(plan)
+
+        command_error: Exception | None = None
+        try:
+            self._check(["docker", "exec", "-u", "root", name, "mkdir", "-p", "/workspace/repo"])
+            self._copy_into_container(name, plan["copy_paths"])
+
+            if plan["pip"] and plan["pip_marker_hash"]:
+                marker = f"/tmp/.pip-installed-{plan['pip_marker_hash']}"
+                pip_install_cmd = (
+                    "pip install --upgrade "
+                    + " ".join(shlex.quote(item) for item in plan["pip"])
+                    + f" && touch {shlex.quote(marker)}"
+                )
+                guarded = (
+                    f"if [ -f {shlex.quote(marker)} ]; then "
+                    f"echo 'pip deps unchanged; skipping install'; "
+                    f"else {pip_install_cmd}; fi"
+                )
+                self._check(
+                    ["docker", "exec", "-u", "0:0", name, "bash", "-lc", guarded]
+                )
+            elif plan["pip"]:
+                self._check(["docker", "exec", "-u", "root", name, "pip", "install", "--upgrade", *plan["pip"]])
+
+            self._clear_container_artifact_path(name, plan["container_artifact_path"])
+            command_text = " ".join(shlex.quote(part) for part in plan["command"])
+            exec_args = ["docker", "exec", *tty_flags, "-w", plan["workdir"]]
+            if user_spec.docker_user_flag is not None:
+                exec_args.extend(["-u", user_spec.docker_user_flag])
+            exec_args.extend([name, "bash", "-lc", command_text])
+            try:
+                self._check(exec_args)
+            except Exception as exc:
+                command_error = exc
+            should_copy = command_error is None or bool(plan.get("copy_artifacts_on_failure", False))
+            if should_copy:
+                try:
+                    self._copy_artifacts_from_container(
+                        name,
+                        plan["container_artifact_path"],
+                        plan["host_artifact_path"],
+                        user_spec,
+                    )
+                except Exception as artifact_exc:
+                    if command_error is None:
+                        raise
+                    print(f"Warning: failed to copy artifacts after command failure: {artifact_exc}")
+            if command_error is not None:
+                raise command_error
+        finally:
+            self._active_user_spec = None
 
     def _stop_persistent(self, name: str) -> int:
         state = self._container_exists(name)
@@ -1027,7 +1464,10 @@ class LocalRunHandler(BaseHandler):
         try:
             self._pull_image(plan["image"], plan["pull_policy"])
             if plan["transfer"] == "copy":
-                self._execute_copy_mode(plan)
+                if plan["persist"]:
+                    self._execute_persistent_copy_mode(plan)
+                else:
+                    self._execute_copy_mode(plan)
             elif plan["transfer"] == "bind":
                 if plan["persist"]:
                     self._execute_persistent_bind_mode(plan)

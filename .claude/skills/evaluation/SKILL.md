@@ -15,6 +15,7 @@ The evaluator does not hardcode a specific tool family, manager id, wrapper name
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` then Evaluate |
+| Local Docker eval job | `python tuner.py local-run --job-config Trainers/local/jobs/<eval-job>.yaml --yes` |
 | Tool CLI eval | `python -m Evaluator.cli --backend vllm --model MODEL --scenario tool_prompts.yaml --host 127.0.0.1 --port 8011` |
 | Full configured eval | `python -m Evaluator.cli --backend lmstudio --model MODEL --preset full` |
 | Quick smoke test | `python -m Evaluator.cli --backend lmstudio --model MODEL --preset quick` |
@@ -101,3 +102,9 @@ The response view must not map CLI commands to old manager tool ids or decide co
 - Use `--limit` and `--tags` for fast iteration.
 - Use `--validate-context` only when the scenario includes context fields that should be structurally checked.
 - Use `--env-backend local` or `e2b` only when you need runtime execution checks beyond response correctness.
+- For local LoRA adapter eval in this repo, prefer `python tuner.py local-run --job-config ...` with `run.method: eval` and `evaluation.runtime: vllm`. That path serves the base model in the local vLLM Docker container and overlays the adapter for parity with the intended local serving runtime.
+- On Windows, set `job.persist: true` for repeat local vLLM eval jobs so `local-run` reuses a named copy-mode container instead of creating a fresh stopped container each time. Set the same `job.container_name` across related eval jobs when they should share the same reused container.
+- Run long Docker/vLLM evals as background jobs with stdout/stderr redirected to files under `Evaluator/results/`, then poll logs and `stage_summary.json` with short commands. Avoid foreground waits that hide failures until a long timeout.
+- Use a fresh `artifacts.host_path` for each eval attempt, or copy completed in-container artifacts to a fresh host folder after a nonzero eval exit. Some evals intentionally return nonzero when cases fail even though results were produced.
+- For persistent copy-mode containers, avoid recopied large model directories once the model is already present. If a `docker cp` is interrupted, verify the container model directory before rerunning; partial model copies can cause misleading vLLM startup failures.
+- For long workspace/system prompts, keep `evaluation.max_tokens` lower than the served model window leaves room for, and raise `--max-model-len` via `server_extra_args` when the model and hardware support it.

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Iterable, TextIO
 
 from huggingface_hub import HfFileSystem
-from huggingface_hub import sync_bucket
 
 from shared.cloud_artifacts import sync_directory_to_hf_bucket, sync_file_to_hf_bucket
 from shared.utilities.env import get_hf_token
@@ -178,6 +177,8 @@ def pull_artifacts(
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if artifact_path.startswith("hf://"):
+        from huggingface_hub import sync_bucket
+
         sync_bucket(artifact_path, str(target), token=get_hf_token())
         return target
 

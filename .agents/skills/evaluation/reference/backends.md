@@ -33,7 +33,25 @@ python -m Evaluator.cli \
   --max-tokens 768
 ```
 
-Use this for dedicated eval containers and fine-tuned model serving. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions.
+Use this for dedicated eval containers and fine-tuned model serving. In this repo, local LoRA eval should usually go through `python tuner.py local-run --job-config ...` with `run.method: eval` and `evaluation.runtime: vllm`, which serves the base model in Docker and overlays the adapter via vLLM LoRA loading. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions.
+
+For repeated local eval on Windows Docker Desktop, prefer `job.persist: true` in
+the job YAML so the same copy-mode vLLM container is reused across runs. If
+multiple eval jobs should share one reused container, give them the same
+`job.container_name`.
+
+Gotchas:
+- Set `evaluation.server_timeout` high enough for model copy plus vLLM startup.
+  Large local merged models commonly need several minutes; `600` seconds is a
+  safer default than a short smoke timeout.
+- If a retained failed eval container stops responding to `docker exec`/`docker
+  top`, do not keep retrying against that same `container_name`. Switch the job
+  to a fresh container name, or use `persist: false` for a one-off diagnostic
+  run. Preserve the failed result directory and logs instead of deleting them.
+- A nonzero local-run exit does not mean no score was saved. If the model served
+  but scenarios failed, inspect `evaluation_results.json`,
+  `evaluation_results.md`, `stage_summary.json`, and `vllm_server.log` under
+  the configured `artifacts.host_path`.
 
 ---
 
@@ -95,6 +113,8 @@ Requirements:
 
 - GPU runtime with Unsloth installed.
 - Model path points at a compatible saved model/adaptor directory.
+
+In this repo, treat direct Unsloth eval as the explicit fallback path. The default local Docker eval workflow for adapters is the vLLM container runtime above so local eval matches the intended serving stack.
 
 ---
 

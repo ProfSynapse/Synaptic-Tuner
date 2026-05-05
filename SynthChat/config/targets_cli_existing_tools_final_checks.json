@@ -1,4 +1,5 @@
 {
-  "promptManager_executePrompts": 1,
-  "storageManager_move": 1
+  "prompt execute": 1,
+  "storage move": 1
 }
+

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,12 +17,14 @@ class LocalEnvironmentRuntime(EnvironmentRuntime):
     """Filesystem-backed runtime using a temporary local directory."""
 
     def __init__(self):
-        self._temp_dir = None
+        self._temp_base: Path | None = None
         self._root: Path | None = None
 
     def setup(self, fixture: EnvironmentFixture) -> None:
-        self._temp_dir = tempfile.TemporaryDirectory(prefix="synaptic_env_")
-        self._root = Path(self._temp_dir.name)
+        self._temp_base = _runtime_temp_base()
+        self._temp_base.mkdir(parents=True, exist_ok=True)
+        self._root = self._temp_base / f"synaptic_env_{uuid.uuid4().hex}"
+        self._root.mkdir(parents=False, exist_ok=False)
 
         for directory in fixture.directories:
             self.mkdir(directory)
@@ -28,9 +32,12 @@ class LocalEnvironmentRuntime(EnvironmentRuntime):
             self.write_text(path, content)
 
     def teardown(self) -> None:
-        if self._temp_dir is not None:
-            self._temp_dir.cleanup()
-        self._temp_dir = None
+        if self._root is not None:
+            root = self._root.resolve()
+            base = self._temp_base.resolve() if self._temp_base is not None else None
+            if base is not None and root.parent == base and root.name.startswith("synaptic_env_"):
+                shutil.rmtree(root, ignore_errors=True)
+        self._temp_base = None
         self._root = None
 
     def mkdir(self, path: str) -> None:
@@ -107,20 +114,26 @@ class LocalEnvironmentRuntime(EnvironmentRuntime):
             return []
 
         root = self._require_root().resolve()
-        needle = (query or "").lower()
+        needle = (query or "").strip().lower()
+        query_terms = _search_terms(query)
         matches: List[str] = []
         for file_path in base.rglob("*"):
             if not file_path.is_file():
                 continue
-            rel = str(file_path.resolve().relative_to(root))
-            if needle in rel.lower():
+            rel = file_path.resolve().relative_to(root).as_posix()
+            rel_lower = rel.lower()
+            if needle and needle in rel_lower:
                 matches.append(rel)
                 continue
             try:
                 content = file_path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
-            if needle in content.lower():
+            content_lower = content.lower()
+            if needle and needle in content_lower:
+                matches.append(rel)
+                continue
+            if query_terms and _all_terms_match(query_terms, f"{rel_lower}\n{content_lower}"):
                 matches.append(rel)
 
         return sorted(set(matches))
@@ -166,3 +179,43 @@ class LocalEnvironmentRuntime(EnvironmentRuntime):
         if self._root is None:
             raise RuntimeError("LocalEnvironmentRuntime is not initialized")
         return self._root
+
+
+def _runtime_temp_base() -> Path:
+    configured = os.getenv("SYNTHCHAT_ENV_TMPDIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path.cwd() / ".runtime_tmp" / "environments").resolve()
+
+
+_SEARCH_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "for",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+}
+
+
+def _search_terms(query: str) -> List[str]:
+    normalized = re.sub(r"[^a-zA-Z0-9]+", " ", query or "").lower()
+    return [
+        token
+        for token in normalized.split()
+        if len(token) > 1 and token not in _SEARCH_STOPWORDS
+    ]
+
+
+def _all_terms_match(terms: List[str], haystack: str) -> bool:
+    normalized = re.sub(r"[^a-zA-Z0-9]+", " ", haystack or "").lower()
+    padded = f" {normalized} "
+    return all(f" {term} " in padded for term in terms)

@@ -49,7 +49,7 @@ Load the specific reference you need:
 
 For environment-backed multi-turn tool data, also load:
 - `reference/scenario-authoring.md` for config-first scenario structure
-- `reference/testing-protocol.md` for dry-run, raw artifact inspection, and failure triage
+- `reference/testing-protocol.md` for the config -> test -> analyze -> fix -> scale loop, raw artifact inspection, and failure triage
 
 ## MANDATORY: Dry-Run Before Full Generation
 
@@ -82,6 +82,21 @@ checks.
 Treat judge-less scenarios as explicit smoke/plumbing exceptions, not the
 default production pattern.
 
+For production-bound environment-backed datasets, use the iterative scaling
+ladder before any large run: author declarative scenario/config only, run an
+environment-only probe, run a tiny rollout smoke, inspect raw JSONL/debug
+artifacts, fix config/rubric/schema issues, repeat the probe, then scale in
+stages. If a large staged run has a small number of failures, create a
+passed-only artifact and optionally run a make-up slice rather than changing
+runtime code for a scenario-specific miss. See `reference/testing-protocol.md`.
+
+When the failure is trace-level and mechanically checkable, prefer a
+deterministic gate over more judge prose. For example, if the generated
+environment includes an expected command sequence, use a config-driven gate
+that renders expected and executed tool calls from configured templates and
+compares coverage/order. The gate must stay generic: tool names, argument paths,
+required order, and render templates belong in scenario/config YAML, not code.
+
 For environment-backed multi-turn tool data, response rubrics are not optional.
 If an assistant turn fails response schema validation, the in-loop turn judge
 will not run because the environment loop stops before executing that malformed
@@ -92,8 +107,8 @@ message. The `final_judge` is a terminal acceptance gate, not the improver.
 Use at least 3 retries/iterations for the response repair stages by default:
 set CLI `--max-iterations 3`, keep scenario judge/final_judge `max_retries: 3`,
 and make response rubrics strict enough to fail runtime misses such as missing
-expected tools, malformed wrapper JSON, unsupported shell commands, or required
-CLI arguments omitted by the model. If any stage fails, the default behavior
+expected tools, malformed configured payloads, unsupported actions, or required
+arguments omitted by the model. If any stage fails, the default behavior
 should be retry/repair with the structured failure context before accepting or
 saving the example.
 
@@ -232,6 +247,14 @@ split in scenario YAML (`environment_generation.provider/model`,
 rerun env-generation-only first, then a small full smoke, because a pass in one
 stage does not prove the other stages are healthy.
 
+For training data, stage model choice should be judged by trace quality, not
+just pass rate. If a rollout model repeatedly reaches a passing final state only
+after recoverable tool syntax errors, skipped required commands, or judge-forced
+repairs, treat that as noisy data. First tighten the scenario gates/rubric so
+the valid command shape is explicit; if the active rollout model still cannot
+emit brittle structured CLI arguments reliably, route only that scenario or
+stage to a stronger teacher model in YAML and rerun the small smoke.
+
 For OpenRouter or other routed providers, choose the environment-generation
 response format per stage. Use `response_format: json_object` for loose dynamic
 maps. Use `response_format: json_schema` when the scenario supplies an inline
@@ -249,15 +272,20 @@ and let the local schema validator, environment executor, and judge feedback
 drive retries. Keep this as config, not scenario-specific parser logic.
 
 When a tool trajectory fails, inspect the raw debug artifact before changing
-scenario prose. Check the exact `tool` string emitted by the model, the
-executor's parsed arguments, the `tool_results`, and the in-loop judge feedback.
-Executor normalization can hide model mistakes such as non-ASCII whitespace or
-markdown backticks unless those are rejected through config-driven validation
-rules such as `invalid_cli_patterns` in the environment execution config.
-Likewise, generated `task_context.expected_command_sequence` should be gated
-against shell syntax or stale command examples when the trained surface is a
-configured CLI/tool wrapper. Reject those through scenario gates/config, not
-runtime string repairs.
+scenario prose. Check the configured action payload emitted by the model, the
+executor's parsed arguments, the tool/runtime results, and the in-loop judge
+feedback. Executor normalization can hide model mistakes such as non-ASCII
+whitespace or markdown backticks unless those are rejected through
+config-driven validation rules in the environment execution config. Likewise,
+generated expected-action metadata should be gated against stale syntax or
+stale examples for the trained surface. Reject those through scenario
+gates/config, not runtime string repairs.
+
+After a stage passes, still inspect accepted examples for hidden quality
+problems: non-empty environment issues, recoverable tool errors, unexpected
+tools, repeated corrective turns, and mismatched expected-vs-executed action
+forms. A 100% pass run is not necessarily a clean GRPO/SFT source if every row
+teaches the model to make an avoidable invalid call before recovering.
 
 **Validate then fix:**
 ```bash
@@ -346,16 +374,16 @@ Once those are set, the real OPF-backed sanitize flow can run fully from local f
 
 ## Config-Driven Architecture
 
-SynthChat is fully config-driven — all tool-call formats, workspace structures, label mappings, and dataset-specific wrapper assumptions must be defined in YAML/config, not hardcoded in code.
+SynthChat is fully config-driven — all tool-call formats, workspace structures, label mappings, and dataset-specific schema assumptions must be defined in YAML/config, not hardcoded in code.
 
 Important discipline for this repo:
-- the current CLI/tool wrapper is only one example dataset format, not a runtime truth
-- do not encode wrapper names, top-level fields, or command assumptions in parser/executor/judge code unless that behavior is driven from config
+- the currently active tool-call schema is only one example dataset format, not a runtime truth
+- do not encode wrapper names, top-level fields, or action assumptions in parser/executor/judge code unless that behavior is driven from config
 - if a generation/eval issue seems specific to the current toy/example format, fix config, scenarios, rubrics, or format definitions first
 - environment/runtime failures should be lifted into judge/improver context as structured payload data, not handled primarily with ad hoc format-specific code repairs
 
 Key config files:
-- `SynthChat/config/tool_call_formats.yaml` — Tool-call response schemas (wrapper name, context fields, call structure)
+- `SynthChat/config/tool_call_formats.yaml` — Tool-call response schema metadata
 - `SynthChat/config/workspace_formats.yaml` — System prompt sections and structure
 - `SynthChat/config/label_mappings.yaml` — Issue classification and label rollups
 - `SynthChat/config/settings.yaml` — Generation settings, model config, output paths

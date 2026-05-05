@@ -2,8 +2,8 @@
 
 Location: SynthChat/llm/client_pool.py
 Purpose: Manage a cache of LLM clients keyed by (provider, model, routing,
-         timeout) so that repeated calls with the same spec reuse a single
-         client instance.
+         timeout, plugins) so that repeated calls with the same spec reuse a
+         single client instance.
 Usage: Created by SynthChatGenerator.__init__ and used throughout generation
        to resolve per-stage LLM overrides.
 """
@@ -59,8 +59,15 @@ class LLMClientPool:
         provider = str(value.get("provider") or "").strip().lower()
         provider_routing = value.get("provider_routing")
         timeout_seconds = value.get("timeout_seconds")
+        plugins = value.get("plugins")
 
-        has_override = bool(model or provider or provider_routing is not None or timeout_seconds is not None)
+        has_override = bool(
+            model
+            or provider
+            or provider_routing is not None
+            or timeout_seconds is not None
+            or plugins is not None
+        )
         if not has_override:
             return None
 
@@ -73,6 +80,8 @@ class LLMClientPool:
             spec["provider_routing"] = provider_routing
         if timeout_seconds is not None:
             spec["timeout_seconds"] = timeout_seconds
+        if plugins is not None:
+            spec["plugins"] = plugins
         return spec
 
     def get_or_create(self, spec: Dict[str, Any]) -> Any:
@@ -81,17 +90,20 @@ class LLMClientPool:
         base_model = str(getattr(self.default_client, "model_name", "") or "").strip()
         base_provider_routing = deepcopy(getattr(self.default_client, "provider", None))
         base_timeout_seconds = getattr(self.default_client, "timeout_seconds", None)
+        base_plugins = deepcopy(getattr(self.default_client, "plugins", None))
 
         provider = str(spec.get("provider") or base_provider).strip().lower()
         model = str(spec.get("model") or base_model).strip()
         provider_routing = deepcopy(spec.get("provider_routing", base_provider_routing))
         timeout_seconds = spec.get("timeout_seconds", base_timeout_seconds)
+        plugins = deepcopy(spec.get("plugins", base_plugins))
 
         cache_key = (
             provider,
             model,
             json.dumps(provider_routing, sort_keys=True) if provider_routing is not None else "",
             str(timeout_seconds) if timeout_seconds is not None else "",
+            json.dumps(plugins, sort_keys=True) if plugins is not None else "",
         )
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -103,7 +115,8 @@ class LLMClientPool:
                 timeout_seconds == base_timeout_seconds
                 or (timeout_seconds is None and base_timeout_seconds is None)
             )
-            if same_routing and same_timeout:
+            same_plugins = plugins == base_plugins
+            if same_routing and same_timeout and same_plugins:
                 self._cache[cache_key] = self.default_client
                 return self.default_client
 
@@ -115,6 +128,8 @@ class LLMClientPool:
             config_defaults["provider_routing"] = provider_routing
         if timeout_seconds is not None:
             config_defaults["timeout_seconds"] = timeout_seconds
+        if plugins is not None:
+            config_defaults["plugins"] = plugins
 
         client = self._create_client(
             provider=provider,

@@ -11,7 +11,7 @@
 
 Add PivotRL as an **optional, config-driven mode** for GRPO training. When enabled, the trainer profiles SFT trajectory turns to find "pivots" (high-variance turns) and trains only on those — delivering the same GRPO accuracy with ~4x fewer rollouts. A functional equivalence reward component is added alongside, replacing brittle string matching.
 
-**Design principle:** Minimal new code. Reuse existing reward system, dataset loader, model loader, and config patterns. Follow the precedent set by `env_config.yaml` / `train_env_grpo.py` — a config preset activates a new mode through the same infrastructure.
+**Design principle:** Minimal new code. Reuse existing reward system, dataset loader, model loader, and config patterns. Follow the precedent set by run-specific config presets and `train_env_grpo.py` — a config activates a mode through shared infrastructure.
 
 ---
 

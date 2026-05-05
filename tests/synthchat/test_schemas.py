@@ -14,6 +14,7 @@ from SynthChat.schemas.tool_response_schema import (
     _resolve_context_defaults,
 )
 from SynthChat.config.format_resolver import get_default_tool_call_format
+from SynthChat.parsing import parse_assistant_response
 
 
 def _default_fmt(**overrides):
@@ -31,13 +32,23 @@ class TestBuildCanonicalEnvironmentSchema:
         assert schema["type"] == "object"
         assert "environment" in schema["properties"]
         assert "environment" in schema["required"]
+        assert "task_context" in schema["required"]
 
     def test_environment_has_fixture_and_assertions(self):
         schema = _build_canonical_environment_schema()
         env = schema["properties"]["environment"]
         assert "fixture" in env["properties"]
         assert "assertions" in env["properties"]
+        assert "mock_tool_outputs" in env["properties"]
         assert set(env["required"]) == {"fixture", "assertions"}
+
+    def test_environment_mock_tool_outputs_are_declarative(self):
+        schema = _build_canonical_environment_schema()
+        mock_items = schema["properties"]["environment"]["properties"]["mock_tool_outputs"]["items"]
+        assert "tool" in mock_items["properties"]
+        assert "match" in mock_items["properties"]
+        assert "output" in mock_items["properties"]
+        assert "status" in mock_items["properties"]
 
     def test_fixture_has_directories_files_notes(self):
         schema = _build_canonical_environment_schema()
@@ -45,11 +56,19 @@ class TestBuildCanonicalEnvironmentSchema:
         assert "directories" in fixture["properties"]
         assert "files" in fixture["properties"]
         assert "notes" in fixture["properties"]
+        assert fixture["properties"]["files"]["minProperties"] == 1
+        assert fixture["properties"]["files"]["additionalProperties"]["minLength"] == 1
+        assert fixture["properties"]["notes"]["minItems"] == 1
+        note = fixture["properties"]["notes"]["items"]
+        assert "body" in note["required"]
+        assert note["properties"]["path"]["pattern"].startswith("^[A-Za-z0-9]")
+        assert "anyOf" in fixture
 
     def test_system_context_and_task_context_present(self):
         schema = _build_canonical_environment_schema()
         assert "system_context" in schema["properties"]
         assert "task_context" in schema["properties"]
+        assert schema["properties"]["task_context"]["minProperties"] == 1
 
     def test_assertions_items_are_anyof(self):
         schema = _build_canonical_environment_schema()
@@ -69,6 +88,22 @@ class TestBuildCanonicalEnvironmentSchema:
         }
         assert types == expected_types
 
+    def test_assertion_paths_reject_placeholder_style_values(self):
+        schema = _build_canonical_environment_schema()
+        assertions = schema["properties"]["environment"]["properties"]["assertions"]
+        path_assertions = [
+            opt
+            for opt in assertions["items"]["anyOf"]
+            if "path" in opt.get("properties", {})
+            and opt["properties"]["path"].get("pattern")
+        ]
+        assert path_assertions
+        for assertion in path_assertions:
+            path_schema = assertion["properties"]["path"]
+            assert path_schema["minLength"] == 1
+            assert "`" not in path_schema["pattern"]
+            assert "A-Za-z0-9" in path_schema["pattern"]
+
 
 # ---- _build_canonical_environment_generation_prompt ----
 
@@ -87,6 +122,12 @@ class TestBuildCanonicalEnvironmentGenerationPrompt:
         prompt = _build_canonical_environment_generation_prompt("test")
         for t in ["path_exists", "file_contains", "frontmatter_has_key"]:
             assert t in prompt
+
+    def test_path_contract_disallows_placeholders(self):
+        prompt = _build_canonical_environment_generation_prompt("test")
+        assert "plain ASCII relative paths" in prompt
+        assert "placeholders" in prompt
+        assert "ellipses" in prompt
 
 
 # ---- build_tool_response_schema ----
@@ -157,6 +198,38 @@ class TestBuildToolResponseSchema:
         empty_arr = [opt for opt in options if opt.get("type") == "array" and opt.get("maxItems") == 0]
         assert len(empty_arr) == 1
 
+    def test_wrapper_arguments_can_be_generated_as_object(self):
+        fmt = _default_fmt(
+            wrapper_name="useTools",
+            generation_argument_mode="object",
+            argument_fields={
+                "required": ["sessionId", "workspaceId", "memory", "goal", "tool"],
+                "properties": {
+                    "sessionId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "memory": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "tool": {"type": "string"},
+                },
+            },
+            argument_required=["sessionId", "workspaceId", "memory", "goal", "tool"],
+        )
+        schema = build_tool_response_schema(
+            format_config=fmt,
+            context_overrides={"sessionId": "sess_123", "workspaceId": "ws_456"},
+        )
+        tool_calls = schema["properties"]["tool_calls"]
+        array_option = [
+            opt for opt in tool_calls["anyOf"]
+            if opt.get("type") == "array" and opt.get("minItems") == 1
+        ][0]
+        arguments = array_option["items"]["properties"]["function"]["properties"]["arguments"]
+
+        assert arguments["type"] == "object"
+        assert arguments["properties"]["sessionId"]["const"] == "sess_123"
+        assert arguments["properties"]["workspaceId"]["const"] == "ws_456"
+        assert "tool" in arguments["required"]
+
 
 # ---- build_tool_generation_prompt ----
 
@@ -193,6 +266,35 @@ class TestBuildToolGenerationPrompt:
             allowed_tools=[],
         )
         assert "Allowed concrete tools" not in prompt
+
+
+def test_parse_assistant_response_serializes_object_wrapper_arguments():
+    raw = json.dumps({
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": {
+                        "workspaceId": "default",
+                        "sessionId": "session_eval_001",
+                        "memory": "Find the file",
+                        "goal": "Read the matching file",
+                        "tool": "content read \"docs/guide.txt\" 1",
+                        "strategy": "serial",
+                    },
+                },
+            }
+        ],
+    })
+
+    message = parse_assistant_response(raw, {"type": "tool", "tool": "content read"})
+
+    args = message["tool_calls"][0]["function"]["arguments"]
+    assert isinstance(args, str)
+    assert json.loads(args)["tool"] == "content read \"docs/guide.txt\" 1"
 
 
 # ---- _resolve_allowed_tool_names ----

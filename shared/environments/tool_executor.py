@@ -11,6 +11,7 @@ switches and instead:
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import unicodedata
 from functools import lru_cache
@@ -27,6 +28,7 @@ SUPPORTED_ACTIONS = {
     "mkdir",
     "append",
     "write",
+    "replace",
     "read",
     "list",
     "move",
@@ -46,13 +48,16 @@ def execute_response_tool_calls(
     tool_schema: Optional[Dict[str, Any]] = None,
     action_hints: Optional[Dict[str, str]] = None,
     strict_schema: bool = False,
+    invalid_cli_patterns: Optional[List[Dict[str, Any]]] = None,
     verb_rules: Optional[Dict[str, List[str]]] = None,
     key_hints: Optional[Dict[str, List[str]]] = None,
+    mock_tool_outputs: Optional[List[Dict[str, Any]]] = None,
     default_action: str = "simulate",
 ) -> Tuple[List[ExecutedToolCall], List[EnvironmentIssue]]:
     """Parse a model response and execute supported tool calls."""
     parsed = parse_response(response)
-    allowed = set(allowed_tools or [])
+    allowed = {str(tool).strip() for tool in (allowed_tools or []) if str(tool).strip()}
+    allowed = _expand_allowed_tool_identifiers(allowed, tool_schema)
     enforce_allowlist = bool(allowed)
     schema_index = _build_tool_index(tool_schema)
     hints = _normalize_action_hints(action_hints or {})
@@ -63,7 +68,7 @@ def execute_response_tool_calls(
     executions: List[ExecutedToolCall] = []
     issues: List[EnvironmentIssue] = []
 
-    expanded_calls = _expand_wrapper_calls(parsed.tool_calls)
+    expanded_calls = _expand_wrapper_calls(parsed.tool_calls, invalid_cli_patterns=invalid_cli_patterns)
 
     for call in expanded_calls:
         name = call.name
@@ -137,6 +142,30 @@ def execute_response_tool_calls(
             executions.append(record)
             continue
 
+        mocked = _find_mock_tool_output(
+            tool_name=name,
+            args=args,
+            schema_entry=schema_entry,
+            mock_tool_outputs=mock_tool_outputs or [],
+        )
+        if mocked is not None:
+            status = str(mocked.get("status") or "ok").strip().lower() or "ok"
+            record.status = status
+            record.output = _stringify_mock_value(mocked.get("output")) if "output" in mocked else None
+            record.error = _stringify_mock_value(mocked.get("error")) if "error" in mocked else None
+            record.recoverable = bool(mocked.get("recoverable", status != "ok"))
+            if status != "ok":
+                issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        record.error or f"Mocked tool '{name}' returned status '{status}'",
+                        code="mock_tool_output_error",
+                        recoverable=record.recoverable,
+                    )
+                )
+            executions.append(record)
+            continue
+
         try:
             action = _resolve_action(
                 tool_name=name,
@@ -173,6 +202,8 @@ def format_tool_results_message(
     executions: List[ExecutedToolCall],
     issues: List[EnvironmentIssue],
     format_name: str = "json",
+    tool_schema: Optional[Dict[str, Any]] = None,
+    tool_name_format: str = "executor",
 ) -> str:
     """Render executed tool results into a message for the next model turn.
 
@@ -184,17 +215,31 @@ def format_tool_results_message(
     payload = {
         "tool_results": [
             {
-                "name": tool.name,
+                "name": _display_tool_name(tool.name, tool_schema, tool_name_format),
                 "status": tool.status,
                 **({"output": tool.output} if tool.output is not None else {}),
-                **({"error": tool.error} if tool.error is not None else {}),
+                **(
+                    {
+                        "error": _replace_tool_names_in_text(
+                            tool.error,
+                            tool_schema,
+                            tool_name_format,
+                        )
+                    }
+                    if tool.error is not None
+                    else {}
+                ),
             }
             for tool in executions
         ],
         "issues": [
             {
                 "level": issue.level,
-                "message": issue.message,
+                "message": _replace_tool_names_in_text(
+                    issue.message,
+                    tool_schema,
+                    tool_name_format,
+                ),
             }
             for issue in issues
         ],
@@ -206,6 +251,37 @@ def format_tool_results_message(
         "Tool execution results:\n"
         f"{json.dumps(payload, ensure_ascii=True)}"
     )
+
+
+def format_environment_payload_for_model(
+    payload: Any,
+    tool_schema: Optional[Dict[str, Any]] = None,
+    tool_name_format: str = "executor",
+) -> Any:
+    """Return a model-facing copy with configured tool display names.
+
+    Internal execution records continue to use executor identifiers. This
+    formatter is only for prompt, feedback, and judge context surfaces.
+    """
+    normalized = str(tool_name_format or "executor").strip().lower()
+    if normalized not in {"command", "cli", "cli_command"}:
+        return payload
+
+    if isinstance(payload, dict):
+        rendered: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key == "name" and isinstance(value, str):
+                rendered[key] = _display_tool_name(value, tool_schema, normalized)
+            elif isinstance(value, str):
+                rendered[key] = _replace_tool_names_in_text(value, tool_schema, normalized)
+            else:
+                rendered[key] = format_environment_payload_for_model(value, tool_schema, normalized)
+        return rendered
+    if isinstance(payload, list):
+        return [format_environment_payload_for_model(item, tool_schema, normalized) for item in payload]
+    if isinstance(payload, str):
+        return _replace_tool_names_in_text(payload, tool_schema, normalized)
+    return payload
 
 
 def _looks_like_cli_wrapper_call(call) -> bool:
@@ -244,7 +320,6 @@ def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
 
 
 def _split_cli_commands(tool_value: str) -> List[str]:
-    tool_value = _normalize_cli_whitespace(tool_value)
     commands: List[str] = []
     current: List[str] = []
     quote: Optional[str] = None
@@ -359,7 +434,7 @@ def _validate_cli_arg_value(value: Any, spec: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _expand_cli_wrapper_call(call) -> List:
+def _expand_cli_wrapper_call(call, invalid_cli_patterns: Optional[List[Dict[str, Any]]] = None) -> List:
     args = call.arguments if isinstance(call.arguments, dict) else {}
     tool_value = args.get("tool")
     if not isinstance(tool_value, str) or not tool_value.strip():
@@ -372,12 +447,23 @@ def _expand_cli_wrapper_call(call) -> List:
     sorted_commands = sorted(catalog.keys(), key=lambda value: len(value.split()), reverse=True)
     expanded = []
 
-    for command_str in _split_cli_commands(tool_value):
+    for raw_command_str in _split_cli_commands(tool_value):
+        command_str = _normalize_cli_whitespace(raw_command_str)
+        parse_errors: List[str] = _invalid_cli_pattern_errors(raw_command_str, invalid_cli_patterns)
         try:
             tokens = shlex.split(command_str)
-        except ValueError:
-            return [call]
+        except ValueError as exc:
+            parse_errors.append(f"CLI command could not be parsed: {exc}")
+            tokens = []
         if not tokens:
+            if parse_errors:
+                expanded.append(
+                    type(call)(
+                        name=getattr(call, "name", "unknown"),
+                        arguments={CLI_PARSE_ERRORS_KEY: parse_errors},
+                        raw=call.raw,
+                    )
+                )
             continue
 
         matched_command = None
@@ -392,12 +478,20 @@ def _expand_cli_wrapper_call(call) -> List:
                 break
 
         if matched_command is None or matched_spec is None:
+            if parse_errors:
+                expanded.append(
+                    type(call)(
+                        name=getattr(call, "name", "unknown"),
+                        arguments={CLI_PARSE_ERRORS_KEY: parse_errors},
+                        raw=call.raw,
+                    )
+                )
+                continue
             return [call]
 
         tool_name, argument_specs = matched_spec
         remaining = tokens[matched_prefix_len:]
         parsed_args: Dict[str, Any] = {}
-        parse_errors: List[str] = []
         positional_specs = [arg for arg in argument_specs if arg.get("positional")]
         flag_specs = {
             str(arg.get("flag")).strip(): arg
@@ -459,16 +553,120 @@ def _expand_cli_wrapper_call(call) -> List:
     return expanded or [call]
 
 
-def _expand_wrapper_calls(parsed_calls) -> List:
+def _invalid_cli_pattern_errors(
+    value: str,
+    invalid_cli_patterns: Optional[List[Dict[str, Any]]],
+) -> List[str]:
+    if not isinstance(value, str) or not invalid_cli_patterns:
+        return []
+
+    errors: List[str] = []
+    for index, rule in enumerate(invalid_cli_patterns, start=1):
+        if isinstance(rule, str):
+            pattern = rule
+            name = f"rule_{index}"
+            message = f"CLI command matched forbidden pattern {name}"
+        elif isinstance(rule, dict):
+            pattern = str(rule.get("pattern") or "")
+            name = str(rule.get("name") or f"rule_{index}")
+            message = str(rule.get("message") or f"CLI command matched forbidden pattern {name}")
+        else:
+            continue
+        if not pattern:
+            continue
+        try:
+            if re.search(pattern, value):
+                errors.append(message)
+        except re.error as exc:
+            errors.append(f"Invalid CLI pattern config {name}: {exc}")
+    return errors
+
+
+def _expand_wrapper_calls(parsed_calls, invalid_cli_patterns: Optional[List[Dict[str, Any]]] = None) -> List:
     """Expand delegated wrapper calls into concrete tool calls."""
     expanded = []
     for call in parsed_calls:
         if _looks_like_cli_wrapper_call(call):
-            expanded.extend(_expand_cli_wrapper_call(call))
+            expanded.extend(_expand_cli_wrapper_call(call, invalid_cli_patterns=invalid_cli_patterns))
             continue
         expanded.append(call)
 
     return expanded
+
+
+def _find_mock_tool_output(
+    *,
+    tool_name: str,
+    args: Dict[str, Any],
+    schema_entry: Optional[Dict[str, Any]],
+    mock_tool_outputs: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return a configured mock response for this call, if one matches.
+
+    The rules are deliberately declarative: a scenario/generated environment
+    chooses which tool identifiers and argument values should receive mocked
+    output. The executor only transports that configured response.
+    """
+    if not isinstance(mock_tool_outputs, list):
+        return None
+
+    identifiers = _tool_identifiers_for_mock_match(tool_name, schema_entry)
+    for item in mock_tool_outputs:
+        if not isinstance(item, dict):
+            continue
+        rule_tools = _mock_rule_tools(item)
+        if rule_tools and identifiers.isdisjoint(rule_tools):
+            continue
+        if not _mock_arguments_match(args, item.get("match", item.get("arguments"))):
+            continue
+        return item
+    return None
+
+
+def _tool_identifiers_for_mock_match(
+    tool_name: str,
+    schema_entry: Optional[Dict[str, Any]],
+) -> set[str]:
+    identifiers = {str(tool_name or "").strip()}
+    if "_" in tool_name:
+        identifiers.add(tool_name.split("_", 1)[1])
+    if isinstance(schema_entry, dict):
+        command = str(schema_entry.get("command") or "").strip()
+        configured_name = str(schema_entry.get("name") or "").strip()
+        if command:
+            identifiers.add(command)
+        if configured_name:
+            identifiers.add(configured_name)
+    return {item for item in identifiers if item}
+
+
+def _mock_rule_tools(item: Dict[str, Any]) -> set[str]:
+    values: List[Any] = []
+    for key in ("tool", "name", "command"):
+        if key in item:
+            values.append(item[key])
+    if isinstance(item.get("tools"), list):
+        values.extend(item["tools"])
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
+def _mock_arguments_match(args: Dict[str, Any], expected: Any) -> bool:
+    if expected in (None, {}, []):
+        return True
+    if not isinstance(expected, dict):
+        return False
+    for key, value in expected.items():
+        if key not in args:
+            return False
+        if args[key] != value:
+            return False
+    return True
+
+
+def _stringify_mock_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=True, indent=2)
 
 
 def _build_tool_index(tool_schema: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -490,6 +688,85 @@ def _build_tool_index(tool_schema: Optional[Dict[str, Any]]) -> Dict[str, Dict[s
             # Keep direct key too if a model emits unqualified names.
             index.setdefault(tool_name, tool)
     return index
+
+
+def _expand_allowed_tool_identifiers(
+    allowed: Iterable[str],
+    tool_schema: Optional[Dict[str, Any]],
+) -> set[str]:
+    expanded = {str(item).strip() for item in allowed if str(item).strip()}
+    if not expanded or not isinstance(tool_schema, dict):
+        return expanded
+
+    for agent, tools in (tool_schema.get("tools") or {}).items():
+        if not isinstance(tools, list):
+            continue
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            tool_name = str(tool.get("name") or "").strip()
+            command = str(tool.get("command") or "").strip()
+            if not tool_name or not command or command not in expanded:
+                continue
+            expanded.add(f"{agent}_{tool_name}")
+            expanded.add(tool_name)
+    return expanded
+
+
+def _tool_command_display_map(tool_schema: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    if not isinstance(tool_schema, dict):
+        return mapping
+
+    for agent, tools in (tool_schema.get("tools") or {}).items():
+        if not isinstance(tools, list):
+            continue
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            tool_name = str(tool.get("name") or "").strip()
+            command = str(tool.get("command") or "").strip()
+            if not tool_name or not command:
+                continue
+            mapping[f"{agent}_{tool_name}"] = command
+            mapping[tool_name] = command
+    return mapping
+
+
+def _display_tool_name(
+    name: str,
+    tool_schema: Optional[Dict[str, Any]],
+    tool_name_format: str,
+) -> str:
+    normalized = str(tool_name_format or "executor").strip().lower()
+    if normalized not in {"command", "cli", "cli_command"}:
+        return name
+    return _tool_command_display_map(tool_schema).get(name, name)
+
+
+def _replace_tool_names_in_text(
+    text: Optional[str],
+    tool_schema: Optional[Dict[str, Any]],
+    tool_name_format: str,
+) -> Optional[str]:
+    if text is None:
+        return None
+    normalized = str(tool_name_format or "executor").strip().lower()
+    if normalized not in {"command", "cli", "cli_command"}:
+        return text
+
+    rendered = str(text)
+    for internal_name, command in sorted(
+        (
+            (name, command)
+            for name, command in _tool_command_display_map(tool_schema).items()
+            if "_" in name
+        ),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        rendered = rendered.replace(internal_name, command)
+    return rendered
 
 
 def _normalize_action_hints(hints: Dict[str, Any]) -> Dict[str, str]:
@@ -591,12 +868,16 @@ def _infer_action_from_args(args: Dict[str, Any], key_hints: Dict[str, List[str]
     has_source_path = _extract_source_path(args, key_hints) is not None
     has_dest_path = _extract_destination_path(args, key_hints) is not None
     has_content = _extract_content(args, key_hints) is not None
+    has_old_content = _extract_old_content(args, key_hints) is not None
+    has_new_content = _extract_new_content(args, key_hints) is not None
     has_query = _extract_query(args, key_hints) is not None
 
     if has_query:
         return "search"
     if has_source_path and has_dest_path:
         return "move"
+    if has_source_path and has_old_content and has_new_content:
+        return "replace"
     if has_source_path and has_content:
         return "write"
     return None
@@ -614,6 +895,8 @@ def _infer_action_from_schema_signature(schema_entry: Optional[Dict[str, Any]]) 
     optional = set(str(k) for k in (params.get("optional") or []))
     keys = required | optional
 
+    if "path" in required and {"oldContent", "newContent"}.issubset(keys):
+        return "replace"
     if {"path", "content"}.issubset(required):
         return "write"
     if {"query"}.issubset(required) or "query" in keys:
@@ -630,6 +913,12 @@ def _action_args_look_compatible(action: str, args: Dict[str, Any], key_hints: D
         return _extract_source_path(args, key_hints) is not None
     if action in {"write", "append"}:
         return _extract_source_path(args, key_hints) is not None
+    if action == "replace":
+        return (
+            _extract_source_path(args, key_hints) is not None
+            and _extract_old_content(args, key_hints) is not None
+            and _extract_new_content(args, key_hints) is not None
+        )
     if action in {"move", "copy"}:
         return (
             _extract_source_path(args, key_hints) is not None
@@ -659,6 +948,19 @@ def _execute_action(
         content = _extract_content(args, key_hints)
         runtime.write_text(path, "" if content is None else content)
         return "written"
+    if action == "replace":
+        path = _require_path(_extract_source_path(args, key_hints), "path")
+        old_content = _extract_old_content(args, key_hints)
+        new_content = _extract_new_content(args, key_hints)
+        if old_content is None:
+            raise ValueError("Missing required old-content-like argument 'oldContent'")
+        if new_content is None:
+            raise ValueError("Missing required new-content-like argument 'newContent'")
+        existing = runtime.read_text(path)
+        if old_content not in existing:
+            raise ValueError("oldContent was not found in the target file")
+        runtime.write_text(path, existing.replace(old_content, new_content, 1))
+        return "replaced"
     if action == "append":
         path = _require_path(_extract_source_path(args, key_hints), "path")
         existing = runtime.read_text(path) if runtime.exists(path) else ""
@@ -728,6 +1030,31 @@ def _extract_content(args: Dict[str, Any], key_hints: Dict[str, List[str]]) -> O
     return _extract_value_by_key_predicate(
         args,
         lambda key: any(token in key for token in ("content", "text", "body", "value")),
+    )
+
+
+def _extract_old_content(args: Dict[str, Any], key_hints: Dict[str, List[str]]) -> Optional[str]:
+    for key in key_hints.get("old_content", []):
+        value = args.get(key)
+        if isinstance(value, str):
+            return value
+    return _extract_value_by_key_predicate(
+        args,
+        lambda key: any(token in key for token in ("oldcontent", "old_content", "oldtext", "old_text")),
+    )
+
+
+def _extract_new_content(args: Dict[str, Any], key_hints: Dict[str, List[str]]) -> Optional[str]:
+    for key in key_hints.get("new_content", []):
+        value = args.get(key)
+        if isinstance(value, str):
+            return value
+    return _extract_value_by_key_predicate(
+        args,
+        lambda key: any(
+            token in key
+            for token in ("newcontent", "new_content", "replacement", "newtext", "new_text")
+        ),
     )
 
 

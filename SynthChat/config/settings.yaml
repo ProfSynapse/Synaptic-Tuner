@@ -6,12 +6,16 @@ llm:
   # Options: lmstudio, ollama, openrouter, unsloth
   generation:
     provider: openrouter
-    model: openai/gpt-oss-120b
+    model: xiaomi/mimo-v2.5
+    provider_routing:
+      require_parameters: false
+    plugins:
+      - id: response-healing
+    fallback_models:
+      - provider: openrouter
+        model: openai/gpt-5.4-nano
     temperature: 0.7
     max_tokens: 4096  # Increased for content writing scenarios
-    provider_routing:
-      order: ["Groq"]  # Prioritize Groq for speed
-      allow_fallbacks: true  # Fall back to others if Groq unavailable
   # Commented out for testing - restore when LM Studio running
   # generation:
   #   provider: lmstudio
@@ -35,12 +39,15 @@ llm:
   improvement:
     provider: openrouter
     model: openai/gpt-oss-120b
+    provider_routing:
+      require_parameters: false
+    plugins:
+      - id: response-healing
+    fallback_models:
+      - provider: openrouter
+        model: openai/gpt-5.4-nano
     temperature: 0.1  # Deterministic judging
     max_tokens: 2048
-    # Provider routing - prioritize specific providers
-    provider_routing:
-      order: ["Groq"]  # Prioritize Groq for speed
-      allow_fallbacks: true  # Fall back to others if Groq unavailable
 
 improvement:
   max_iterations: 10
@@ -107,21 +114,21 @@ cost_tracking:
 defaults:
   targets:
     # Tool scenarios
-    storageManager_createFolder: 50
-    storageManager_archive: 30
-    storageManager_move: 30
-    storageManager_list: 40
-    contentManager_write: 40
-    contentManager_replace: 20
-    contentManager_setProperty: 10
-    promptManager_executePrompts: 25
+    storage create-folder: 50
+    storage archive: 30
+    storage move: 30
+    storage list: 40
+    content write: 40
+    content replace: 20
+    content set-property: 10
+    prompt execute: 25
 
     # Content writing scenarios (longer form content with frontmatter)
-    contentManager_write_research: 50
-    contentManager_write_blog: 50
-    contentManager_write_creative: 40
-    contentManager_write_documentation: 50
-    contentManager_write_journal: 40
+    content_write_research: 50
+    content_write_blog: 50
+    content_write_creative: 40
+    content_write_documentation: 50
+    content_write_journal: 40
 
     # Behavioral scenarios
     intellectual_humility: 25

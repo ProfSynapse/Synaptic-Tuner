@@ -31,9 +31,9 @@ judge_prompt: |
 
   Score 0.0 for smart quotes, single-quoted pseudo-JSON, non-breaking spaces,
   markdown backticks in arguments, empty objects, placeholders such as "{...}",
-  direct internal function names, shell commands such as cat/grep/ls, shell
-  chaining such as && or semicolon, or environment feedback showing missing
-  expected tools or content read missing startLine.
+  direct internal function names, direct filesystem commands, shell syntax,
+  command chaining such as && or semicolon, or environment feedback showing
+  missing expected tools or content read missing startLine.
 
   Return a JSON object matching the configured output schema.
 improver_prompt: |
@@ -86,7 +86,7 @@ improver_prompt: |
   - Do not use smart quotes, curly quotes, non-breaking spaces, markdown backticks, single-quoted pseudo-JSON, or placeholder arguments.
   - Choose the next useful CLI command from the user request and environment errors.
   - Use only configured workspace CLI commands.
-  - Do not use shell commands such as cat, grep, ls, &&, pipes, or semicolons.
+  - Do not use shell syntax, direct filesystem commands, pipes, or semicolons.
   - Chain commands with commas when serial execution is useful.
   - For lookup tasks, prefer search content or storage list first.
   - For answer tasks after finding a likely file, use content read with the path and a numeric start line, for example: content read "docs/status.md" 1.

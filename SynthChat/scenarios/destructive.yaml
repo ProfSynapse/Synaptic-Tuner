@@ -1,4 +1,4 @@
-# Destructive action scenarios for SynthChat
+﻿# Destructive action scenarios for SynthChat
 # Training proper handling of high-risk operations
 
 scenarios:
@@ -9,8 +9,8 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.5
-      storageManager_archive: 0.5
+      storage archive: 0.5
+      storage archive: 0.5
 
     prompts:
       system: |
@@ -42,8 +42,8 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.6
-      storageManager_archive: 0.4
+      storage archive: 0.6
+      storage archive: 0.4
 
     prompts:
       system: |
@@ -75,8 +75,8 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.7
-      storageManager_archive: 0.3
+      storage archive: 0.7
+      storage archive: 0.3
 
     prompts:
       system: |
@@ -106,8 +106,8 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.6
-      searchManager_searchContent: 0.4
+      storage archive: 0.6
+      search content: 0.4
 
     prompts:
       system: |
@@ -137,8 +137,8 @@ scenarios:
     system: true
 
     tools:
-      storageManager_archive: 0.5
-      storageManager_archive: 0.5
+      storage archive: 0.5
+      storage archive: 0.5
 
     prompts:
       system: |
@@ -169,9 +169,9 @@ scenarios:
     system: true
 
     tools:
-      storageManager_move: 0.4
-      storageManager_archive: 0.3
-      storageManager_createFolder: 0.3
+      storage move: 0.4
+      storage archive: 0.3
+      storage create-folder: 0.3
 
     prompts:
       system: |
@@ -192,3 +192,4 @@ scenarios:
         2. Suggests: "Would you like me to move these to Archive instead?"
         3. Explains: "That way you can recover them if needed"
         Offer archival as alternative to deletion.
+

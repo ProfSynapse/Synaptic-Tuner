@@ -1,4 +1,4 @@
-# Response Types Configuration
+﻿# Response Types Configuration
 # Defines what valid responses look like
 # Used to validate response format without hardcoding in Python
 
@@ -80,9 +80,9 @@ response_types:
       has_tool_calls: true
       tool_categories:
         any_of:
-          - search    # searchManager_search*
-          - read      # contentManager_read
-          - list      # storageManager_list
+          - search    # search content*
+          - read      # content read
+          - list      # storage list
 
   # Error recovery response
   error_recovery:
@@ -147,3 +147,4 @@ defaults:
 
   # Pseudo-tool for text-only responses
   text_only_marker: TEXT_ONLY
+

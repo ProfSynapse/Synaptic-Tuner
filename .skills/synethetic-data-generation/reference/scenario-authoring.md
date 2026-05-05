@@ -8,9 +8,9 @@ Scenarios define what SynthChat should generate. Tool-call structure is config-d
 
 ```yaml
 scenarios:
-  workspace_move_file:
+  configured_tool_task:
     type: tool
-    tool: storage move
+    tool: CONFIGURED_TOOL_OR_COMMAND
     system: true
     tool_call_format: default
     workspace_format: cli_only
@@ -20,13 +20,13 @@ scenarios:
     prompts:
       system: |
         Generate a realistic system prompt with:
-        - <session_context> containing sessionId and workspaceId
+        - runtime context fields required by the configured schema
         - <vault_structure>
         - <available_workspaces>
         - <available_prompts>
         - <selected_workspace> JSON
       user: |
-        Generate a natural request that requires moving a file.
+        Generate a natural request that requires the configured tool capability.
         OUTPUT ONLY THE REQUEST TEXT.
       assistant: |
         Generate a single tool response using the configured tool_call_format.
@@ -85,15 +85,49 @@ Use the `environment` block when the tool call should be executed locally during
 ```yaml
 environment:
   allowed_tools:
-    - storage move
-    - content read
+    - CONFIGURED_DISCOVERY_OR_ACTION_TOOL
+    - CONFIGURED_FOLLOWUP_TOOL
   max_steps: 4
   execution:
     strict_schema: true
   assertions:
     - type: path_exists
-      path: "archive/today.md"
+      path: "path/created/by/scenario"
 ```
+
+For non-filesystem tools, generated environments can provide declarative mock
+responses instead of relying on runtime-specific code. Use
+`environment.mock_tool_outputs` when a tool should return structured context
+that drives later actions:
+
+```yaml
+environment:
+  allowed_tools:
+    - CONFIGURED_CONTEXT_TOOL
+    - CONFIGURED_READ_TOOL
+  mock_tool_outputs:
+    - tool: CONFIGURED_CONTEXT_TOOL
+      match:
+        id: "Team Workspace"
+      output:
+        context:
+          name: "Team Workspace"
+          purpose: "Project delivery"
+        keyFiles:
+          - reports/status.md
+        workflows:
+          - name: Weekly review
+            steps:
+              - Read the status note
+              - Summarize blockers
+```
+
+Mock rules are generic and config-driven. `tool`, `name`, or `command` may
+identify the configured tool; `match` is an exact subset of parsed tool
+arguments; `output`, `status`, `error`, and `recoverable` define the response
+shown back to the model. Environment-generation prompts can ask the fixture
+author to create these mock outputs dynamically, as long as the scenario gates
+and judges verify that the expected command sequence and mock response agree.
 
 `allowed_tools`, `expected_tools`, scoring paths, and prose examples should use
 the configured model-facing tool surface. The runtime may internally expand
@@ -158,6 +192,88 @@ judge:
     model: turn_review_model
 ```
 
+When a configured tool argument is itself structured data, such as a JSON array
+passed to a flag, make the accepted shape unambiguous in scenario YAML. Put the
+exact action form in `task_context.expected_action_sequence`, add a
+deterministic stage gate for that action pattern when possible, and make mock
+tool `match` objects agree with the executor's parsed arguments. Do not rely on
+LLM judges to infer whether `"value"`, `["value"]`, and
+`[{"prompt":"value"}]` are equivalent; the environment should teach the one
+shape the configured tool actually accepts.
+
+Structured generation stages can tune their sampling range independently from
+the global generation temperature. Use this when a generated environment is
+valid but repeats the same fixture shape, vocabulary, or domain too often:
+
+```yaml
+environment_generation:
+  schema: canonical_environment
+  response_format: json_object
+  temperature_range:
+    min: 0.6
+    max: 1.0
+```
+
+Test this with `env-generate` before running full rollouts. Higher ranges can
+increase fixture diversity, but they can also raise schema/gate failures. If
+outputs still collapse around one domain, split the scenario into explicit
+config variants or palette slices instead of relying on temperature alone.
+
+For broader diversity without duplicating a scenario into many variants, add a
+generic `seed_context_generation` stage. This runs before
+`environment_generation`, stores the result on the seed bundle, and exposes it
+to later prompts as `{seed_context_json}`. The target loop can also expose
+seed metadata such as `{seed_number}` and `{seed_count}` so the prompt can
+spread flavors across the requested seeds:
+
+```yaml
+seed_context_generation:
+  provider: your_provider
+  model: flavor_model
+  response_format: json_object
+  temperature_range:
+    min: 0.6
+    max: 1.0
+  output_schema:
+    type: object
+    required: [domain, vocabulary]
+    properties:
+      domain:
+        type: string
+      vocabulary:
+        type: array
+        items:
+          type: string
+  gates:
+    - type: json_schema
+      field: value
+      schema:
+        type: object
+        required: [domain, vocabulary]
+  prompt: |
+    Generate one seed-level flavor for seed {seed_number} of {seed_count}.
+    Return only JSON.
+
+environment_generation:
+  prompt: |
+    Use this seed flavor as the source of truth:
+    {seed_context_json}
+
+    Generate the environment...
+```
+
+Use `seed_context_generation` when temperature alone creates shallow variation
+but still repeats the same domain or vocabulary. Keep the stage generic: it
+should emit reusable flavor/context fields, while the environment prompt and
+stage gates decide how those fields constrain the final fixture.
+
+Constrain seed fields for the style they are supposed to represent. If a field
+is a natural-language answer phrase, gate out identifier artifacts such as
+snake_case. If a field is a path, gate it as a path and prompt for
+domain-specific filenames instead of generic repeated names. The seed stage is
+often where diversity problems enter the run; fixing that in schema/prompt
+config is cheaper than repairing generated environments or rollout traces.
+
 Validate each stage separately. Run `env-generate` to prove fixture shape and
 hidden answer keys before running an agentic rollout. Then inspect the rollout
 trace to decide whether failures came from environment authoring, the
@@ -182,7 +298,7 @@ Strict `json_schema` mode is best for fixed response shapes such as tool-call
 wrappers, and it can also work for generated environments when the scenario
 provides a complete inline schema for the allowed structure. Use it when you
 can constrain dynamic file maps with typed `additionalProperties`, require the
-needed `task_context` keys, enforce fixed command counts, and add ASCII/path
+needed `task_context` keys, enforce fixed action counts, and add ASCII/path
 patterns. Prefer this path when JSON mode produces malformed JSON, corrupted
 hidden anchors, or sparse environments that repeatedly need review feedback.
 If the environment shape is too open-ended to express cleanly as JSON Schema,
@@ -192,19 +308,42 @@ Shared environment gates are only a baseline. If a generated scenario depends
 on exact `task_context` keys, a fixed command count, or assertion semantics,
 add scenario-specific gates in YAML. Prefer `required_mapping_keys` for hidden
 answer-key fields and an inline `json_schema` gate for constraints such as
-"expected_command_sequence has exactly two commands" or "assertion types may
+  "expected_action_sequence has exactly two actions" or "assertion types may
 only be `path_exists` and `file_contains`." This catches bad generated
 environments before the agent loop wastes turns on impossible assertions.
-Also gate generated answer-key commands against stale or unsupported command
-surfaces. If the trained interface is a configured tool wrapper or CLI, reject
-shell examples such as `grep`, `cat`, pipes, semicolons, and chained shell
-operators in `task_context.expected_command_sequence` with
+Also gate generated answer-key actions against stale or unsupported action
+surfaces. If the trained interface is a configured tool schema, reject
+unconfigured shell examples, pipes, semicolons, and chained shell operators in
+`task_context.expected_action_sequence` with
 `no_placeholder_strings` or an inline schema/pattern gate.
 
-For CLI-style tools, keep raw command validation config-driven. If debug
-artifacts show model-emitted commands with non-ASCII whitespace, markdown
+For multi-step rollouts, final judges should be backed by deterministic trace
+gates when the desired path is mechanically knowable. A common pattern is to
+generate an expected action sequence in `task_context`, execute the assistant
+trajectory in the environment, then compare expected actions to executed
+tools with config-defined renderers:
+
+```yaml
+final_judge:
+  gates:
+    - type: expected_actions_executed
+      expected_field: task_context.expected_action_sequence
+      executed_field: environment_result.executed_tools
+      require_order: true
+      renderers:
+        CONFIGURED_TOOL_A: "{arguments.FIELD_A}"
+        CONFIGURED_TOOL_B: "{arguments.FIELD_B}"
+```
+
+The scenario supplies all semantics: which metadata fields to read, whether
+order matters, and how each model-facing or executor-facing tool name renders
+to a comparable action string. This keeps the runtime reusable while making
+the acceptance criteria stricter than an LLM judge alone.
+
+For command-string tools, keep raw action validation config-driven. If debug
+artifacts show model-emitted actions with non-ASCII whitespace, markdown
 backticks, shell syntax, or other provider-specific artifacts, add
-`invalid_cli_patterns` in the environment execution config or scenario
+configured invalid-pattern rules in the environment execution config or scenario
 execution overrides. Do not repair those strings in scenario-specific runtime
 code; the model should receive structured validation/tool feedback and retry.
 
@@ -255,12 +394,12 @@ recoverable errors that were corrected later in the same rollout.
 - If environment validation is enabled, make sure the response-stage judge or
   improver can see environment/runtime failures through template variables or
   stage payloads. Those failures should inform improvement recommendations.
-- For content edits, define concrete read/write/insert/replace commands in
-  scenario or tool-schema config and make examples match that syntax exactly.
-- For early training on edit tools, prefer command-safe generated anchors:
+- For edit-like tools, define concrete discovery/read/action steps in scenario
+  or tool-schema config and make examples match that syntax exactly.
+- For early training on edit-like tools, prefer command-safe generated anchors:
   hyphenated search tokens and underscore-only replacement strings. Add quoting
   and multi-word arguments as a later difficulty tier after the model reliably
-  performs search -> read -> edit.
+  performs discover -> inspect -> act.
 - Keep format-specific instructions inside scenario/config text, not runtime code.
 - Use checked-in target manifests for smoke tests.
 - If you intentionally omit rubrics/judges for a smoke test, note that choice in
@@ -270,18 +409,19 @@ recoverable errors that were corrected later in the same rollout.
   fallback behavior in judge/improver guidance, not in mandatory expected tools,
   unless every passing trajectory must execute that fallback.
 - When a later action depends on unknown tool output, instruct the model to stop
-  after the discovery command and wait for feedback. Chain multiple commands
+  after the discovery action and wait for feedback. Chain multiple actions
   only when every path and argument is already known.
-- In-loop judge feedback should be short and copyable. Prefer one next command:
-  `Call useTools with tool exactly: <command>`. Avoid wrapper JSON, markdown
+- In-loop judge feedback should be short and copyable. Prefer one next action
+  in the configured response format. Avoid wrapper JSON, markdown
   fences, multiple alternatives, and escaped command examples in feedback shown
   back to the model.
 - For loops that require a final text answer after environment pass, make the
   in-loop judge distinguish final-text turns from tool turns. Once the
   environment preview has passed and the runner asks for final text, the judge
   should accept a concise text-only answer with no tool calls. Do not let the
-  judge invent extra verification/search/read steps unless those exact commands
-  are still missing from the configured/generated expected command sequence.
+  judge invent extra verification/discovery/inspection steps unless those exact
+  actions are still missing from the configured/generated expected action
+  sequence.
   Grounded supporting details from the latest tool output are acceptable unless
   they contradict the environment result or violate the scenario's requested
   answer style.

@@ -10,11 +10,35 @@ from env_rewards import build_env_reward_function
 def test_build_env_reward_function_applies_stop_reason_penalties():
     reward = build_env_reward_function(
         {
-            "success_reward": 1.0,
-            "failure_penalty": -1.0,
-            "step_penalty": 0.1,
-            "max_tool_steps_penalty": 0.5,
-            "text_before_completion_penalty": 0.25,
+            "default": 0.0,
+            "rules": [
+                {
+                    "type": "add_if",
+                    "when": {"type": "field_equals", "field": "env_passed", "value": True},
+                    "score": 1.0,
+                },
+                {
+                    "type": "add_if",
+                    "when": {"type": "field_equals", "field": "env_passed", "value": False},
+                    "score": -1.0,
+                },
+                {
+                    "type": "linear",
+                    "field": "total_turns",
+                    "baseline": 1,
+                    "min_delta": 0,
+                    "weight": -0.1,
+                },
+                {
+                    "type": "add_if",
+                    "when": {
+                        "type": "field_equals",
+                        "field": "stop_reason",
+                        "value": "max_tool_steps_exceeded",
+                    },
+                    "score": -0.5,
+                },
+            ],
         }
     )
 
@@ -27,4 +51,3 @@ def test_build_env_reward_function_applies_stop_reason_penalties():
 
     assert scores[0] == 0.9
     assert scores[1] == -1.8
-

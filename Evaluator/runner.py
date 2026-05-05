@@ -678,7 +678,10 @@ def _run_path_scoring(
     if not isinstance(paths, list) or not paths:
         return None
 
-    tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
+    if environment_result is not None and getattr(environment_result, "executed_tools", None):
+        tool_names = [tool.name for tool in environment_result.executed_tools]
+    else:
+        tool_names = [tc.name for tc in (validator_result.tool_calls if validator_result else [])]
     matches: List[PathScoreMatch] = []
     max_score = 0.0
     best_score = 0.0

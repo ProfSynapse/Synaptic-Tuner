@@ -4,9 +4,9 @@ This document defines the structure for rubric YAML files in the improvement
 engine.
 
 For active tool-calling workflows in this repo, rubrics should teach and
-validate the CLI-first `useTools` wrapper. Do not author new active rubrics
-around nested `context` + `calls` payloads or direct per-tool function names.
-Archive backward-compat-only rubrics instead of leaving them active.
+validate the CLI-first `useTools` wrapper. Keep active rubrics focused on the
+current wrapper fields and CLI command strings. Archive backward-compat-only
+rubrics instead of leaving them active.
 
 ## Overview
 

@@ -49,7 +49,7 @@ Load the specific reference you need:
 
 For environment-backed multi-turn tool data, also load:
 - `reference/scenario-authoring.md` for config-first scenario structure
-- `reference/testing-protocol.md` for dry-run, raw artifact inspection, and failure triage
+- `reference/testing-protocol.md` for the config -> test -> analyze -> fix -> scale loop, raw artifact inspection, and failure triage
 
 ## MANDATORY: Dry-Run Before Full Generation
 
@@ -81,6 +81,21 @@ checks.
 
 Treat judge-less scenarios as explicit smoke/plumbing exceptions, not the
 default production pattern.
+
+For production-bound environment-backed datasets, use the iterative scaling
+ladder before any large run: author declarative scenario/config only, run an
+environment-only probe, run a tiny rollout smoke, inspect raw JSONL/debug
+artifacts, fix config/rubric/schema issues, repeat the probe, then scale in
+stages. If a large staged run has a small number of failures, create a
+passed-only artifact and optionally run a make-up slice rather than changing
+runtime code for a scenario-specific miss. See `reference/testing-protocol.md`.
+
+When the failure is trace-level and mechanically checkable, prefer a
+deterministic gate over more judge prose. For example, if the generated
+environment includes an expected command sequence, use a config-driven gate
+that renders expected and executed tool calls from configured templates and
+compares coverage/order. The gate must stay generic: tool names, argument paths,
+required order, and render templates belong in scenario/config YAML, not code.
 
 For environment-backed multi-turn tool data, response rubrics are not optional.
 If an assistant turn fails response schema validation, the in-loop turn judge
@@ -232,6 +247,14 @@ split in scenario YAML (`environment_generation.provider/model`,
 rerun env-generation-only first, then a small full smoke, because a pass in one
 stage does not prove the other stages are healthy.
 
+For training data, stage model choice should be judged by trace quality, not
+just pass rate. If a rollout model repeatedly reaches a passing final state only
+after recoverable tool syntax errors, skipped required commands, or judge-forced
+repairs, treat that as noisy data. First tighten the scenario gates/rubric so
+the valid command shape is explicit; if the active rollout model still cannot
+emit brittle structured CLI arguments reliably, route only that scenario or
+stage to a stronger teacher model in YAML and rerun the small smoke.
+
 For OpenRouter or other routed providers, choose the environment-generation
 response format per stage. Use `response_format: json_object` for loose dynamic
 maps. Use `response_format: json_schema` when the scenario supplies an inline
@@ -258,6 +281,12 @@ Likewise, generated `task_context.expected_command_sequence` should be gated
 against shell syntax or stale command examples when the trained surface is a
 configured CLI/tool wrapper. Reject those through scenario gates/config, not
 runtime string repairs.
+
+After a stage passes, still inspect accepted examples for hidden quality
+problems: non-empty environment issues, recoverable tool errors, unexpected
+tools, repeated corrective turns, and mismatched expected-vs-executed command
+forms. A 100% pass run is not necessarily a clean GRPO/SFT source if every row
+teaches the model to make an avoidable invalid call before recovering.
 
 **Validate then fix:**
 ```bash

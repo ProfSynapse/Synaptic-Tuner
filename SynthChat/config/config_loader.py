@@ -21,6 +21,7 @@ class ScopeExtractionConfig:
     patterns: Optional[Dict] = None
     flags: Optional[List[str]] = None
     exclude: Optional[List[str]] = None
+    message_selection: str = "first"
 
 
 @dataclass
@@ -170,7 +171,8 @@ class ConfigLoader:
                 pattern=extraction_data.get("pattern"),
                 patterns=extraction_data.get("patterns"),
                 flags=extraction_data.get("flags"),
-                exclude=extraction_data.get("exclude")
+                exclude=extraction_data.get("exclude"),
+                message_selection=extraction_data.get("message_selection", "first"),
             )
 
             markers_data = scope_data.get("markers", {})

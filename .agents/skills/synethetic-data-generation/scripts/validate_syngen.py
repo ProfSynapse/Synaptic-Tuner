@@ -187,8 +187,9 @@ def validate_ids_match_system_prompt(
                 f"Tool call #{tool_call_num} ({tool_name}): workspaceId '{tool_workspace_id}' "
                 f"does not match system prompt (expected one of: {valid_workspace_ids})")
 
-    # For workspace operations, validate the target workspace ID
-    if "id" in args and tool_name.startswith("memoryManager_"):
+    # For workspace operations, validate the target workspace ID. Keep this
+    # heuristic generic because tool namespaces are format/config-specific.
+    if "id" in args and "workspace" in tool_name.lower():
         target_id = args.get("id")
         if target_id and system_ctx.available_workspace_ids:
             # For loadWorkspace, createWorkspace, etc. the target should be in available list

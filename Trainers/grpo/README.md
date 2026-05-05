@@ -29,8 +29,8 @@ For real multi-step environment-backed GRPO, use the separate cloud-first entryp
 
 ```bash
 cd Trainers/grpo
-python3 train_env_grpo.py --config ./configs/env_config.yaml --dry-run
-python3 train_env_grpo.py --config ./configs/env_config.yaml --print-cloud-bootstrap
+python3 train_env_grpo.py --config ./configs/<run-name>_env_grpo.yaml --dry-run
+python3 train_env_grpo.py --config ./configs/<run-name>_env_grpo.yaml --print-cloud-bootstrap
 ```
 
 This path is intentionally separate from the current static projected-dataset
@@ -43,6 +43,8 @@ GRPO trainer:
   local LoRA checkpoint path
 - it is wired for stock TRL `rollout_func` multi-step environment episodes,
   not the older single-step projected dataset reward path
+- it requires an explicit run-specific config; rewards, tool/environment
+  semantics, model, dataset, and runtime settings should live in that YAML
 
 ## Configuration
 

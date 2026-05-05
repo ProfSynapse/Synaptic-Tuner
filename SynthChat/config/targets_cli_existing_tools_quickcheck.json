@@ -1,4 +1,5 @@
 {
-  "contentManager_replace": 1,
-  "promptManager_executePrompts": 1
+  "content replace": 1,
+  "prompt execute": 1
 }
+

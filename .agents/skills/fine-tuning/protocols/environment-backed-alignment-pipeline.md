@@ -72,7 +72,7 @@ KTO is still an offline stored-data stage.
 Env-backed GRPO is the online stage.
 
 During training:
-- the model receives a prompt for a real environment task
+- the model receives the user task request as the prompt
 - it acts for multiple turns
 - tools execute against the live environment
 - it receives tool results and runtime errors back
@@ -88,6 +88,13 @@ This is the intended final RL stage for environment-backed agent behavior.
 - KTO uses stored rollout data
 - true GRPO should use the live environment loop, not only a projected static
   prompt/completion dataset
+- env-GRPO should not train on SynthChat system/tool-schema scaffolding as
+  prompt text; keep that context in the replay environment and configure
+  `dataset.prompt_message_roles` to include only the intended prompt roles,
+  normally `["user"]`
+- env-GRPO rewards must be config-driven: reward field paths, pass/fail
+  semantics, stop reasons, weights, and clamps belong in the run YAML, not in
+  trainer/reward code
 - cloud env-GRPO should keep the Unsloth image as the base runtime, while newer
   TRL/OpenEnv dependencies live in an isolated runtime layer on top
 
@@ -120,7 +127,9 @@ Where:
 - KTO / cloud orchestration: `python tuner.py ...`
 - merge/upload jobs: config-driven HF Jobs under `Trainers/cloud/jobs/*.yaml`
 - env-GRPO entrypoint: `Trainers/grpo/train_env_grpo.py`
-- env-GRPO config: `Trainers/grpo/configs/env_config.yaml`
+- env-GRPO config: a run-specific YAML, for example
+  `Trainers/grpo/configs/<run-name>_env_grpo.yaml`; do not rely on a shared
+  global environment config
 
 ## Operational Checklist
 
@@ -128,7 +137,14 @@ Before launching cloud work:
 
 1. Confirm the worktree is clean and the exact commit is pushed
 2. Confirm the source SFT artifact exists in the HF bucket
-3. Merge and publish the SFT model under the correct Nexus name
-4. Point KTO and env-GRPO at that merged/published SFT model
-5. Use cloud for env-GRPO, not the local Mac runtime
+3. Merge the SFT adapter inside the matched Docker training runtime/container
+   when the run was produced by local Docker. Host-side Python merge is a
+   fallback only because host torch/Transformers/PEFT/Unsloth may not match the
+   training job or support the current model family.
+4. Evaluate the merged SFT model before GRPO so failures are caught at the SFT
+   boundary rather than during online RL.
+5. Publish the SFT model under the correct Nexus name when it is the selected
+   downstream base.
+6. Point KTO and env-GRPO at that merged/published SFT model
+7. Use cloud for env-GRPO, not the local Mac runtime
 

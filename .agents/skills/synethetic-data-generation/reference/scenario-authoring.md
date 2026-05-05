@@ -95,6 +95,40 @@ environment:
       path: "archive/today.md"
 ```
 
+For non-filesystem tools, generated environments can provide declarative mock
+responses instead of relying on runtime-specific code. Use
+`environment.mock_tool_outputs` when a tool should return structured context
+that drives later actions:
+
+```yaml
+environment:
+  allowed_tools:
+    - memory load-workspace
+    - content read
+  mock_tool_outputs:
+    - tool: memory load-workspace
+      match:
+        id: "Team Workspace"
+      output:
+        context:
+          name: "Team Workspace"
+          purpose: "Project delivery"
+        keyFiles:
+          - reports/status.md
+        workflows:
+          - name: Weekly review
+            steps:
+              - Read the status note
+              - Summarize blockers
+```
+
+Mock rules are generic and config-driven. `tool`, `name`, or `command` may
+identify the configured tool; `match` is an exact subset of parsed tool
+arguments; `output`, `status`, `error`, and `recoverable` define the response
+shown back to the model. Environment-generation prompts can ask the fixture
+author to create these mock outputs dynamically, as long as the scenario gates
+and judges verify that the expected command sequence and mock response agree.
+
 `allowed_tools`, `expected_tools`, scoring paths, and prose examples should use
 the configured model-facing tool surface. The runtime may internally expand
 those names for execution, but the scenario should not leak a different
@@ -158,6 +192,88 @@ judge:
     model: turn_review_model
 ```
 
+When a configured CLI argument is itself structured data, such as a JSON array
+passed to a flag, make the accepted shape unambiguous in scenario YAML. Put the
+exact command form in `task_context.expected_command_sequence`, add a
+deterministic stage gate for that command pattern when possible, and make mock
+tool `match` objects agree with the executor's parsed arguments. Do not rely on
+LLM judges to infer whether `"value"`, `["value"]`, and
+`[{"prompt":"value"}]` are equivalent; the environment should teach the one
+shape the configured tool actually accepts.
+
+Structured generation stages can tune their sampling range independently from
+the global generation temperature. Use this when a generated environment is
+valid but repeats the same fixture shape, vocabulary, or domain too often:
+
+```yaml
+environment_generation:
+  schema: canonical_environment
+  response_format: json_object
+  temperature_range:
+    min: 0.6
+    max: 1.0
+```
+
+Test this with `env-generate` before running full rollouts. Higher ranges can
+increase fixture diversity, but they can also raise schema/gate failures. If
+outputs still collapse around one domain, split the scenario into explicit
+config variants or palette slices instead of relying on temperature alone.
+
+For broader diversity without duplicating a scenario into many variants, add a
+generic `seed_context_generation` stage. This runs before
+`environment_generation`, stores the result on the seed bundle, and exposes it
+to later prompts as `{seed_context_json}`. The target loop can also expose
+seed metadata such as `{seed_number}` and `{seed_count}` so the prompt can
+spread flavors across the requested seeds:
+
+```yaml
+seed_context_generation:
+  provider: your_provider
+  model: flavor_model
+  response_format: json_object
+  temperature_range:
+    min: 0.6
+    max: 1.0
+  output_schema:
+    type: object
+    required: [domain, vocabulary]
+    properties:
+      domain:
+        type: string
+      vocabulary:
+        type: array
+        items:
+          type: string
+  gates:
+    - type: json_schema
+      field: value
+      schema:
+        type: object
+        required: [domain, vocabulary]
+  prompt: |
+    Generate one seed-level flavor for seed {seed_number} of {seed_count}.
+    Return only JSON.
+
+environment_generation:
+  prompt: |
+    Use this seed flavor as the source of truth:
+    {seed_context_json}
+
+    Generate the environment...
+```
+
+Use `seed_context_generation` when temperature alone creates shallow variation
+but still repeats the same domain or vocabulary. Keep the stage generic: it
+should emit reusable flavor/context fields, while the environment prompt and
+stage gates decide how those fields constrain the final fixture.
+
+Constrain seed fields for the style they are supposed to represent. If a field
+is a natural-language answer phrase, gate out identifier artifacts such as
+snake_case. If a field is a path, gate it as a path and prompt for
+domain-specific filenames instead of generic repeated names. The seed stage is
+often where diversity problems enter the run; fixing that in schema/prompt
+config is cheaper than repairing generated environments or rollout traces.
+
 Validate each stage separately. Run `env-generate` to prove fixture shape and
 hidden answer keys before running an agentic rollout. Then inspect the rollout
 trace to decide whether failures came from environment authoring, the
@@ -200,6 +316,29 @@ surfaces. If the trained interface is a configured tool wrapper or CLI, reject
 shell examples such as `grep`, `cat`, pipes, semicolons, and chained shell
 operators in `task_context.expected_command_sequence` with
 `no_placeholder_strings` or an inline schema/pattern gate.
+
+For multi-step rollouts, final judges should be backed by deterministic trace
+gates when the desired path is mechanically knowable. A common pattern is to
+generate an expected command sequence in `task_context`, execute the assistant
+trajectory in the environment, then compare expected commands to executed
+tools with config-defined renderers:
+
+```yaml
+final_judge:
+  gates:
+    - type: expected_cli_commands_executed
+      expected_field: task_context.expected_command_sequence
+      executed_field: environment_result.executed_tools
+      require_order: true
+      renderers:
+        content read: content read {arguments.path} {arguments.startLine}
+        storage move: storage move {arguments.path} {arguments.newPath}
+```
+
+The scenario supplies all semantics: which metadata fields to read, whether
+order matters, and how each model-facing or executor-facing tool name renders
+to a comparable command string. This keeps the runtime reusable while making
+the acceptance criteria stricter than an LLM judge alone.
 
 For CLI-style tools, keep raw command validation config-driven. If debug
 artifacts show model-emitted commands with non-ASCII whitespace, markdown

@@ -20,11 +20,12 @@ Datasets/tools_datasets/
 
 ## Current Canonical Versions
 
-- `non_thinking/contentManager/tools_v2.3.jsonl`
-- `non_thinking/memoryManager/tools_v2.4.jsonl`
-- `non_thinking/promptManager/tools_v2.6.jsonl`
-- `non_thinking/searchManager/tools_v2.2.jsonl`
-- `non_thinking/storageManager/tools_v2.4.jsonl`
+- `non_thinking/contentManager/tools_v2.7.jsonl`
+- `non_thinking/memoryManager/tools_v2.7.jsonl`
+- `non_thinking/promptManager/tools_v2.10.jsonl`
+- `non_thinking/searchManager/tools_v2.5.jsonl`
+- `non_thinking/storageManager/tools_v2.6.jsonl`
+- `non_thinking/text_only/text_only_v1.2.jsonl`
 
 ## Dataset Format
 
@@ -58,12 +59,23 @@ Each example is a ChatML conversation. Tool-calling examples use an OpenAI-style
 
 Inventory:
 ```bash
-python3 tools/migrations/05_inventory_cli_schema_datasets.py
+python3 Tools/migrations/05_inventory_cli_schema_datasets.py
 ```
 
 Rewrite non-thinking datasets into the CLI-first wrapper:
 ```bash
-python3 tools/migrations/06_migrate_cli_schema_datasets.py
+python3 Tools/migrations/06_migrate_cli_schema_datasets.py
+```
+
+Align SFT system prompts to a configured prompt profile:
+```bash
+python3 Tools/migrations/09_align_sft_system_prompts.py \
+  --profile Datasets/tools_datasets/system_prompt_profiles/lean_use_tools_sft.json
+```
+
+Then merge the latest individual versions:
+```bash
+python3 Datasets/tools/merge_nonthinking_datasets.py --date MM.DD.YY
 ```
 
 Inspect reports:

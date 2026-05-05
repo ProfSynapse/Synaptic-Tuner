@@ -17,7 +17,7 @@ import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Mapping, Sequence
+from typing import Callable, Dict, List, Optional, Any, Tuple, Mapping, Sequence
 from dataclasses import dataclass
 from copy import deepcopy
 
@@ -93,8 +93,10 @@ from .services.privacy_preprocess import PrivacyPreprocessor
 
 try:
     from shared.environments import EnvironmentValidator
+    from shared.environments.tool_executor import format_environment_payload_for_model
 except ImportError:
     EnvironmentValidator = None
+    format_environment_payload_for_model = None
 
 try:
     from shared.agentic_loop import run_environment_episode
@@ -112,6 +114,22 @@ class GenerationResult:
     iterations: int
     success: bool
     stage_failures: List[str]  # Stages that failed to pass
+
+
+def _model_facing_environment_trace(
+    environment_trace: Any,
+    environment_config: Optional[Dict[str, Any]],
+    tool_schema: Optional[Dict[str, Any]],
+) -> Any:
+    loop_cfg = (
+        environment_config.get("loop")
+        if isinstance(environment_config, dict) and isinstance(environment_config.get("loop"), dict)
+        else {}
+    )
+    name_format = str(loop_cfg.get("tool_result_name_format") or "executor")
+    if format_environment_payload_for_model is None:
+        return environment_trace
+    return format_environment_payload_for_model(environment_trace, tool_schema, name_format)
 
 
 class ScenarioLoader:
@@ -172,6 +190,7 @@ class SynthChatGenerator:
         logger=None,
         privacy_settings: Optional[Dict[str, Any]] = None,
         privacy_preprocessor_factory=None,
+        debug_event_writer: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
     ):
         """
         Initialize generator.
@@ -188,12 +207,14 @@ class SynthChatGenerator:
             logger: Logger instance (optional)
             privacy_settings: Optional privacy preprocess settings from settings.yaml / CLI.
             privacy_preprocessor_factory: Optional factory for test injection.
+            debug_event_writer: Optional callback for streaming verbose debug events.
         """
         self.config_dir = Path(config_dir)
         self.llm_client = llm_client
         self.logger = logger
         self.enable_stage_validation = enable_stage_validation
         self.environment_validator = environment_validator
+        self.debug_event_writer = debug_event_writer
         self.client_pool = LLMClientPool(llm_client, client_factory=create_client)
         self._llm_client_cache = self.client_pool._cache
 
@@ -296,6 +317,12 @@ class SynthChatGenerator:
                     scenario=shared_scenario,
                     randomize_params=randomize_params,
                     doc_context=doc_context,
+                    seed_metadata={
+                        "seed_id": shared_seed_id,
+                        "seed_index": shared_seed_index,
+                        "seed_number": shared_seed_index + 1,
+                        "seed_count": shared_seed_count,
+                    },
                 )
 
                 for scenario_key, scenario, target_spec in applicable_targets:
@@ -347,6 +374,12 @@ class SynthChatGenerator:
                         scenario=scenario,
                         randomize_params=randomize_params,
                         doc_context=doc_context,
+                        seed_metadata={
+                            "seed_id": seed_id,
+                            "seed_index": seed_index,
+                            "seed_number": seed_index + 1,
+                            "seed_count": seed_count,
+                        },
                     )
 
                     for rollout_index in range(rollouts_per_seed):
@@ -390,6 +423,12 @@ class SynthChatGenerator:
                     scenario=scenario,
                     randomize_params=randomize_params,
                     doc_context=doc_context,
+                    seed_metadata={
+                        "seed_id": seed_id,
+                        "seed_index": seed_index,
+                        "seed_number": seed_index + 1,
+                        "seed_count": seed_count,
+                    },
                 )
 
                 for rollout_index in range(rollouts_per_seed):
@@ -429,6 +468,7 @@ class SynthChatGenerator:
         scenario: Dict[str, Any],
         randomize_params: bool,
         doc_context: Optional[DocFile] = None,
+        seed_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Prepare a reusable environment/system-context seed for one or more rollouts."""
         prompts = scenario.get("prompts", {})
@@ -437,6 +477,12 @@ class SynthChatGenerator:
         if doc_seed is not None:
             template_vars["doc_content"] = doc_seed["content"]
             template_vars["doc_path"] = doc_context.path
+        resolved_seed_metadata = dict(seed_metadata or {})
+        if seed_id:
+            resolved_seed_metadata.setdefault("seed_id", seed_id)
+        for key, value in resolved_seed_metadata.items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                template_vars[str(key)] = "" if value is None else str(value)
 
         def render_prompt(prompt: str) -> str:
             result = prompt
@@ -446,8 +492,84 @@ class SynthChatGenerator:
 
         environment_mode = self._resolve_environment_mode(scenario)
         generated_environment = {}
+        seed_context: Dict[str, Any] = {}
         stage_reviews: Dict[str, Any] = {}
         seed_stage_failures: List[str] = []
+        seed_context_cfg = scenario.get("seed_context_generation") or {}
+        if seed_context_cfg:
+            trace_label = ":".join(
+                part for part in [scenario_key, "seed_context_generation", seed_id] if part
+            ) or "seed_context_generation"
+            if scenario_key:
+                self._log_stage(
+                    scenario_key,
+                    "seed_context_generation",
+                    "start",
+                    extra=f"seed_id={seed_id}" if seed_id else "seed_prepare",
+                )
+            review = None
+            review_feedback = None
+            review_attempts = max(
+                1,
+                int(seed_context_cfg.get("review_retries", seed_context_cfg.get("max_retries", 3)) or 1),
+            )
+            for review_attempt in range(1, review_attempts + 1):
+                seed_context = self._generate_seed_context_spec(
+                    scenario=scenario,
+                    render_prompt=render_prompt,
+                    randomize_params=randomize_params,
+                    trace_label=trace_label,
+                    review_feedback=review_feedback,
+                )
+                review = self._run_stage_review(
+                    stage_name="seed_context_generation",
+                    stage_config=seed_context_cfg,
+                    scenario_key=scenario_key or seed_id or "seed_context_generation",
+                    scenario=scenario,
+                    task_context=seed_context,
+                    payload={
+                        "value": seed_context,
+                        "seed_context": seed_context,
+                        "seed_metadata": resolved_seed_metadata,
+                    },
+                )
+                if not (
+                    review is not None
+                    and review.get("passed") is False
+                    and review.get("enforce", True)
+                    and review_attempt < review_attempts
+                ):
+                    break
+                review_feedback = self._format_stage_review_feedback(review)
+                if scenario_key:
+                    self._log_stage(
+                        scenario_key,
+                        "seed_context_generation",
+                        "retry",
+                        extra=f"seed_id={seed_id} attempt={review_attempt} failed_review",
+                    )
+            if review is not None:
+                stage_reviews["seed_context_generation"] = review
+                if review.get("passed") is False and review.get("enforce", True):
+                    seed_stage_failures.append("seed_context_generation")
+            if seed_context:
+                template_vars["seed_context_json"] = json.dumps(seed_context, indent=2, ensure_ascii=False)
+                for key, value in seed_context.items():
+                    if isinstance(value, (str, int, float, bool)) or value is None:
+                        template_vars[f"seed_context_{key}"] = "" if value is None else str(value)
+            if scenario_key:
+                self._log_stage(
+                    scenario_key,
+                    "seed_context_generation",
+                    "done",
+                    extra=(
+                        f"seed_id={seed_id} keys={sorted(seed_context.keys())}"
+                        if seed_context
+                        else f"seed_id={seed_id} empty"
+                    ) if seed_id else (
+                        f"keys={sorted(seed_context.keys())}" if seed_context else "empty"
+                    ),
+                )
         if environment_mode in {"generated", "hybrid"}:
             generation_cfg = scenario.get("environment_generation") or {}
             trace_label = ":".join(
@@ -460,23 +582,43 @@ class SynthChatGenerator:
                     "start",
                     extra=f"seed_id={seed_id}" if seed_id else "seed_prepare",
                 )
-            generated_environment = self._generate_environment_spec(
-                scenario=scenario,
-                render_prompt=render_prompt,
-                randomize_params=randomize_params,
-                trace_label=trace_label,
-            )
-            review = self._run_stage_review(
-                stage_name="environment_generation",
-                stage_config=generation_cfg,
-                scenario_key=scenario_key or seed_id or "environment_generation",
-                scenario=scenario,
-                task_context={},
-                payload=self._build_environment_generation_review_payload(
-                    generated_environment=generated_environment,
-                    seed_id=seed_id,
-                ),
-            )
+            review = None
+            review_feedback = None
+            review_attempts = max(1, int(generation_cfg.get("review_retries", generation_cfg.get("max_retries", 3)) or 1))
+            for review_attempt in range(1, review_attempts + 1):
+                generated_environment = self._generate_environment_spec(
+                    scenario=scenario,
+                    render_prompt=render_prompt,
+                    randomize_params=randomize_params,
+                    trace_label=trace_label,
+                    review_feedback=review_feedback,
+                )
+                review = self._run_stage_review(
+                    stage_name="environment_generation",
+                    stage_config=generation_cfg,
+                    scenario_key=scenario_key or seed_id or "environment_generation",
+                    scenario=scenario,
+                    task_context={},
+                    payload=self._build_environment_generation_review_payload(
+                        generated_environment=generated_environment,
+                        seed_id=seed_id,
+                    ),
+                )
+                if not (
+                    review is not None
+                    and review.get("passed") is False
+                    and review.get("enforce", True)
+                    and review_attempt < review_attempts
+                ):
+                    break
+                review_feedback = self._format_stage_review_feedback(review)
+                if scenario_key:
+                    self._log_stage(
+                        scenario_key,
+                        "environment_generation",
+                        "retry",
+                        extra=f"seed_id={seed_id} attempt={review_attempt} failed_review",
+                    )
             if review is not None:
                 stage_reviews["environment_generation"] = review
                 if review.get("passed") is False and review.get("enforce", True):
@@ -517,6 +659,7 @@ class SynthChatGenerator:
         )
         return {
             "environment_mode": environment_mode,
+            "seed_context": seed_context,
             "generated_environment": generated_environment,
             "resolved_environment_config": resolved_environment_config,
             "resolved_system_context": resolved_system_context,
@@ -528,6 +671,83 @@ class SynthChatGenerator:
         }
 
     def generate_single(
+        self,
+        scenario_key: str,
+        scenario: Dict,
+        max_iterations: int,
+        randomize_params: bool,
+        doc_context: Optional[DocFile] = None,
+        seed_bundle: Optional[Dict[str, Any]] = None,
+        rollout_metadata: Optional[Dict[str, Any]] = None,
+    ) -> GenerationResult:
+        """Generate one example, retrying failed examples when config asks for it."""
+        max_attempts = self._resolve_failed_example_retry_attempts(scenario, max_iterations)
+        last_result: Optional[GenerationResult] = None
+        for attempt_index in range(1, max_attempts + 1):
+            self._debug_event(
+                "example_attempt_start",
+                {
+                    "scenario_key": scenario_key,
+                    "attempt": attempt_index,
+                    "max_attempts": max_attempts,
+                    "rollout_metadata": rollout_metadata,
+                },
+            )
+            result = self._generate_single_once(
+                scenario_key=scenario_key,
+                scenario=scenario,
+                max_iterations=max_iterations,
+                randomize_params=randomize_params,
+                doc_context=doc_context,
+                seed_bundle=seed_bundle,
+                rollout_metadata=rollout_metadata,
+            )
+            result.example.setdefault("metadata", {})["generation_retry"] = {
+                "attempt": attempt_index,
+                "max_attempts": max_attempts,
+                "enabled": max_attempts > 1,
+            }
+            result.iterations += attempt_index - 1
+            last_result = result
+            self._debug_event(
+                "example_attempt_done",
+                {
+                    "scenario_key": scenario_key,
+                    "attempt": attempt_index,
+                    "max_attempts": max_attempts,
+                    "success": result.success,
+                    "stage_failures": result.stage_failures,
+                    "example": result.example,
+                },
+            )
+            if result.success:
+                return result
+            if attempt_index < max_attempts:
+                self._log_stage(
+                    scenario_key,
+                    "example_retry",
+                    "retry",
+                    extra=f"attempt={attempt_index} failures={result.stage_failures}",
+                )
+        return last_result if last_result is not None else GenerationResult(
+            example={"conversations": [], "metadata": {}},
+            scenario_key=scenario_key,
+            iterations=0,
+            success=False,
+            stage_failures=["generation"],
+        )
+
+    def _resolve_failed_example_retry_attempts(self, scenario: Dict[str, Any], max_iterations: int) -> int:
+        retry_cfg = scenario.get("retry") if isinstance(scenario.get("retry"), dict) else {}
+        env_cfg = scenario.get("environment") if isinstance(scenario.get("environment"), dict) else {}
+        loop_cfg = env_cfg.get("loop") if isinstance(env_cfg.get("loop"), dict) else {}
+        enabled = bool(retry_cfg.get("enabled", loop_cfg.get("retry_failed_examples", False)))
+        if not enabled:
+            return 1
+        attempts = retry_cfg.get("max_attempts", loop_cfg.get("retry_attempts", max_iterations))
+        return max(1, int(attempts or max_iterations or 1))
+
+    def _generate_single_once(
         self,
         scenario_key: str,
         scenario: Dict,
@@ -578,8 +798,10 @@ class SynthChatGenerator:
         stage_failures = []
         total_iterations = 0
         stage_reviews: Dict[str, Any] = {}
+        seed_context: Dict[str, Any] = {}
         if seed_bundle is not None:
             environment_mode = seed_bundle.get("environment_mode", self._resolve_environment_mode(scenario))
+            seed_context = deepcopy(seed_bundle.get("seed_context") or {})
             generated_environment = deepcopy(seed_bundle.get("generated_environment") or {})
             resolved_environment_config = _deep_merge_dicts(
                 deepcopy(seed_bundle.get("resolved_environment_config")),
@@ -603,22 +825,41 @@ class SynthChatGenerator:
             if environment_mode in {"generated", "hybrid"}:
                 self._log_stage(scenario_key, "environment_generation", "start")
                 generation_cfg = scenario.get("environment_generation") or {}
-                generated_environment = self._generate_environment_spec(
-                    scenario=scenario,
-                    render_prompt=render_prompt,
-                    randomize_params=randomize_params,
-                    trace_label=f"{scenario_key}:environment_generation",
-                )
-                review = self._run_stage_review(
-                    stage_name="environment_generation",
-                    stage_config=generation_cfg,
-                    scenario_key=scenario_key,
-                    scenario=scenario,
-                    task_context={},
-                    payload=self._build_environment_generation_review_payload(
-                        generated_environment=generated_environment,
-                    ),
-                )
+                review = None
+                review_feedback = None
+                review_attempts = max(1, int(generation_cfg.get("review_retries", generation_cfg.get("max_retries", 3)) or 1))
+                for review_attempt in range(1, review_attempts + 1):
+                    generated_environment = self._generate_environment_spec(
+                        scenario=scenario,
+                        render_prompt=render_prompt,
+                        randomize_params=randomize_params,
+                        trace_label=f"{scenario_key}:environment_generation",
+                        review_feedback=review_feedback,
+                    )
+                    review = self._run_stage_review(
+                        stage_name="environment_generation",
+                        stage_config=generation_cfg,
+                        scenario_key=scenario_key,
+                        scenario=scenario,
+                        task_context={},
+                        payload=self._build_environment_generation_review_payload(
+                            generated_environment=generated_environment,
+                        ),
+                    )
+                    if not (
+                        review is not None
+                        and review.get("passed") is False
+                        and review.get("enforce", True)
+                        and review_attempt < review_attempts
+                    ):
+                        break
+                    review_feedback = self._format_stage_review_feedback(review)
+                    self._log_stage(
+                        scenario_key,
+                        "environment_generation",
+                        "retry",
+                        extra=f"attempt={review_attempt} failed_review",
+                    )
                 if review is not None:
                     stage_reviews["environment_generation"] = review
                     if review.get("passed") is False and review.get("enforce", True):
@@ -1047,7 +1288,15 @@ class SynthChatGenerator:
 
         # Validate/improve response stage (config-driven)
         response_rubrics = scenario_rubrics.get("response", [])
-        if self.enable_stage_validation and response_rubrics:
+        run_response_stage = bool(
+            self.enable_stage_validation
+            and response_rubrics
+            and (
+                not use_agentic_loop
+                or bool(loop_cfg.get("post_loop_response_validation", False))
+            )
+        )
+        if run_response_stage:
             improved, iterations, passed = self._improve_stage(
                 example,
                 stage="response",
@@ -1090,22 +1339,30 @@ class SynthChatGenerator:
 
         if (
             self.environment_validator is not None
-            and self.enable_stage_validation
-            and response_rubrics
+            and run_response_stage
             and isinstance(environment_trace, dict)
             and environment_trace.get("passed") is False
+            and (
+                not use_agentic_loop
+                or bool(loop_cfg.get("post_environment_repair", False))
+            )
         ):
             stage_failures = [failure for failure in stage_failures if failure != "response"]
             response_retry_passed = False
 
             for _ in range(max_iterations):
+                model_environment_trace = _model_facing_environment_trace(
+                    environment_trace,
+                    resolved_environment_config,
+                    (self.environment_validator.tool_schema if self.environment_validator else None),
+                )
                 issue_messages = [
                     str(issue.get("message") or "").strip()
-                    for issue in (environment_trace.get("issues") or [])
+                    for issue in ((model_environment_trace or {}).get("issues") or [])
                     if isinstance(issue, dict) and str(issue.get("message") or "").strip()
                 ]
                 prompt_context = {
-                    "environment_result": environment_trace,
+                    "environment_result": model_environment_trace,
                     "environment_passed": False,
                     "environment_issue_summary": "\n".join(f"- {message}" for message in issue_messages),
                 }
@@ -1113,7 +1370,7 @@ class SynthChatGenerator:
                     example,
                     stage="response",
                     rubrics=response_rubrics,
-                    max_iterations=1,
+                    max_iterations=max_iterations,
                     prompt_context=prompt_context,
                 )
                 example = improved
@@ -1165,6 +1422,8 @@ class SynthChatGenerator:
         }
         if rollout_metadata:
             example["metadata"]["environment_seed"] = dict(rollout_metadata)
+        if seed_context:
+            example["metadata"]["seed_context"] = seed_context
         if generated_environment:
             example["metadata"]["generated_environment"] = generated_environment
         if resolved_environment_config:
@@ -1199,7 +1458,11 @@ class SynthChatGenerator:
                 "user_text": user_content,
                 "assistant_response": assistant_msg,
                 "assistant_response_json": json.dumps(_make_json_safe(assistant_msg), ensure_ascii=False, indent=2),
-                "environment_result": environment_trace or {},
+                "environment_result": _model_facing_environment_trace(
+                    environment_trace or {},
+                    resolved_environment_config,
+                    (self.environment_validator.tool_schema if self.environment_validator else None),
+                ),
                 "environment_passed": bool((environment_trace or {}).get("passed")) if environment_trace is not None else None,
                 "final_text_required": (environment_trace or {}).get("final_text_required") if isinstance(environment_trace, dict) else None,
                 "final_text_satisfied": (environment_trace or {}).get("final_text_satisfied") if isinstance(environment_trace, dict) else None,
@@ -1258,7 +1521,17 @@ class SynthChatGenerator:
         task_context: Dict[str, Any],
         payload: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        return run_stage_review(
+        self._debug_event(
+            "stage_review_start",
+            {
+                "stage": stage_name,
+                "scenario_key": scenario_key,
+                "stage_config": stage_config,
+                "task_context": task_context,
+                "payload": payload,
+            },
+        )
+        review = run_stage_review(
             stage_name=stage_name,
             stage_config=stage_config,
             scenario_key=scenario_key,
@@ -1269,6 +1542,15 @@ class SynthChatGenerator:
             get_stage_llm_clients=self._get_stage_llm_clients,
             logger=self.logger,
         )
+        self._debug_event(
+            "stage_review_done",
+            {
+                "stage": stage_name,
+                "scenario_key": scenario_key,
+                "review": review,
+            },
+        )
+        return review
 
     def _build_environment_generation_review_payload(
         self,
@@ -1280,6 +1562,23 @@ class SynthChatGenerator:
             generated_environment=generated_environment,
             seed_id=seed_id,
         )
+
+    def _format_stage_review_feedback(self, review: Optional[Dict[str, Any]]) -> str:
+        if not isinstance(review, dict):
+            return "The prior review failed without structured details."
+        feedback: List[str] = []
+        for gate in review.get("gates") or []:
+            if not isinstance(gate, dict) or gate.get("passed") is not False:
+                continue
+            gate_type = gate.get("gate_type") or gate.get("type") or "gate"
+            message = gate.get("message") or "failed"
+            feedback.append(f"- {gate_type}: {message}")
+        judge = review.get("judge")
+        if isinstance(judge, dict) and judge.get("passed") is False:
+            message = judge.get("feedback") or judge.get("feedback_for_trace") or judge.get("feedback_to_model")
+            if message:
+                feedback.append(f"- judge: {message}")
+        return "\n".join(feedback) or "The prior review failed; regenerate with all required fields and no placeholders."
 
     def _get_stage_llm_clients(self, stage_config: Optional[Dict[str, Any]]) -> List[Any]:
         return self.client_pool.get_stage_clients(stage_config)
@@ -1367,6 +1666,7 @@ class SynthChatGenerator:
             parse_response=self._parse_assistant_response,
             stringify_response=self._stringify_assistant_message,
             logger=self.logger,
+            debug_event_writer=self.debug_event_writer,
         )
 
     def _build_turn_judge(
@@ -1432,12 +1732,66 @@ class SynthChatGenerator:
             return "generated"
         return "provided"
 
+    def _generate_seed_context_spec(
+        self,
+        scenario: Dict,
+        render_prompt,
+        randomize_params: bool,
+        trace_label: Optional[str] = None,
+        review_feedback: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate arbitrary seed-level context for later prompt templating."""
+        prompts = scenario.get("prompts", {})
+        generation_cfg = scenario.get("seed_context_generation") or {}
+        context_prompt = generation_cfg.get("prompt") or prompts.get("seed_context")
+        if not context_prompt:
+            return {}
+
+        context_system = generation_cfg.get("system") or prompts.get("seed_context_system")
+        user_prompt = render_prompt(str(context_prompt))
+        system_prompt = render_prompt(str(context_system)) if context_system else None
+        if review_feedback:
+            user_prompt = (
+                f"{user_prompt}\n\n"
+                "The previous seed context failed deterministic review checks.\n"
+                "Regenerate the full seed context JSON from scratch and correct every issue below:\n"
+                f"{review_feedback}"
+            )
+        response_format = str(generation_cfg.get("response_format") or "json_object").strip() or "json_object"
+        max_tokens = generation_cfg.get("max_tokens")
+        schema = generation_cfg.get("json_schema") or generation_cfg.get("output_schema")
+        if not isinstance(schema, dict):
+            schema = {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": True,
+            }
+        parsed = self._call_llm_structured(
+            prompt=user_prompt,
+            schema=schema,
+            randomize=randomize_params,
+            system_prompt=system_prompt,
+            trace_label=trace_label,
+            max_tokens=max_tokens,
+            llm_clients=self._get_stage_llm_clients(generation_cfg),
+            max_retries=int(generation_cfg.get("max_retries", 3) or 3),
+            response_format=response_format,
+            temperature_range=generation_cfg.get(
+                "temperature_range",
+                generation_cfg.get("structured_temperature_range"),
+            ),
+        )
+        if not isinstance(parsed, dict):
+            return {}
+        return _make_json_safe(parsed)
+
     def _generate_environment_spec(
         self,
         scenario: Dict,
         render_prompt,
         randomize_params: bool,
         trace_label: Optional[str] = None,
+        review_feedback: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate structured environment/system-context data before other stages."""
         prompts = scenario.get("prompts", {})
@@ -1449,7 +1803,15 @@ class SynthChatGenerator:
         environment_system = generation_cfg.get("system") or prompts.get("environment_system")
         user_prompt = render_prompt(str(environment_prompt))
         system_prompt = render_prompt(str(environment_system)) if environment_system else None
+        if review_feedback:
+            user_prompt = (
+                f"{user_prompt}\n\n"
+                "The previous generated environment failed deterministic review checks.\n"
+                "Regenerate the full environment JSON from scratch and correct every issue below:\n"
+                f"{review_feedback}"
+            )
         schema_name = str(generation_cfg.get("schema") or "").strip()
+        response_format = str(generation_cfg.get("response_format") or "json_schema").strip() or "json_schema"
         max_tokens = generation_cfg.get("max_tokens")
 
         if schema_name == "canonical_environment":
@@ -1463,6 +1825,11 @@ class SynthChatGenerator:
                 max_tokens=max_tokens,
                 llm_clients=self._get_stage_llm_clients(generation_cfg),
                 max_retries=int(generation_cfg.get("max_retries", 3) or 3),
+                response_format=response_format,
+                temperature_range=generation_cfg.get(
+                    "temperature_range",
+                    generation_cfg.get("structured_temperature_range"),
+                ),
             )
         else:
             prompt_parts = []
@@ -1502,6 +1869,7 @@ class SynthChatGenerator:
         if not schema_name and str(scenario.get("type") or "").strip().lower() == "tool":
             schema_name = "use_tools_response"
         max_tokens = generation_cfg.get("max_tokens")
+        response_format = str(generation_cfg.get("response_format") or "json_schema").strip() or "json_schema"
         llm_clients = self._get_stage_llm_clients(generation_cfg)
         max_retries = int(generation_cfg.get("max_retries", 3) or 3)
         prompt = f"{assistant_context}\n\n{assistant_prompt}"
@@ -1551,6 +1919,11 @@ class SynthChatGenerator:
                 max_tokens=max_tokens,
                 llm_clients=llm_clients,
                 max_retries=max_retries,
+                response_format=response_format,
+                temperature_range=generation_cfg.get(
+                    "temperature_range",
+                    generation_cfg.get("structured_temperature_range"),
+                ),
             )
             return json.dumps(payload)
 
@@ -1770,12 +2143,32 @@ class SynthChatGenerator:
 
     def _log_stage(self, scenario_key: str, stage: str, event: str, extra: Optional[str] = None) -> None:
         """Emit lightweight stage progress logs when a logger is available."""
+        self._debug_event(
+            "stage",
+            {
+                "scenario_key": scenario_key,
+                "stage": stage,
+                "event": event,
+                "extra": extra,
+            },
+        )
         if not self.logger:
             return
         message = f"[{scenario_key}] {stage} {event}"
         if extra:
             message = f"{message} ({extra})"
         self.logger.info(message)
+
+    def _debug_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        """Emit a best-effort structured debug event when configured."""
+        debug_event_writer = getattr(self, "debug_event_writer", None)
+        if not debug_event_writer:
+            return
+        try:
+            debug_event_writer(event_type, _make_json_safe(payload))
+        except Exception:
+            if self.logger:
+                self.logger.warning(f"Failed to write debug event: {event_type}")
 
     def _call_llm(
         self,
@@ -1787,16 +2180,51 @@ class SynthChatGenerator:
         max_retries: int = 3,
     ) -> str:
         """Call LLM for generation with retry and client-chain fallback."""
-        return call_llm(
-            prompt=prompt,
-            default_client=self.llm_client,
-            logger=self.logger,
-            randomize=randomize,
-            trace_label=trace_label,
-            max_tokens=max_tokens,
-            llm_clients=llm_clients,
-            max_retries=max_retries,
+        self._debug_event(
+            "llm_chat_start",
+            {
+                "trace_label": trace_label,
+                "prompt": prompt,
+                "randomize": randomize,
+                "max_tokens": max_tokens,
+                "max_retries": max_retries,
+                "clients": [
+                    getattr(client, "model_name", "unknown")
+                    for client in (llm_clients or [self.llm_client])
+                ],
+            },
         )
+        started_at = time.monotonic()
+        try:
+            response = call_llm(
+                prompt=prompt,
+                default_client=self.llm_client,
+                logger=self.logger,
+                randomize=randomize,
+                trace_label=trace_label,
+                max_tokens=max_tokens,
+                llm_clients=llm_clients,
+                max_retries=max_retries,
+            )
+        except Exception as exc:
+            self._debug_event(
+                "llm_chat_error",
+                {
+                    "trace_label": trace_label,
+                    "elapsed_s": round(time.monotonic() - started_at, 3),
+                    "error": str(exc),
+                },
+            )
+            raise
+        self._debug_event(
+            "llm_chat_done",
+            {
+                "trace_label": trace_label,
+                "elapsed_s": round(time.monotonic() - started_at, 3),
+                "response": response,
+            },
+        )
+        return response
 
     def _call_llm_structured(
         self,
@@ -1809,20 +2237,63 @@ class SynthChatGenerator:
         max_tokens: Optional[int] = None,
         llm_clients: Optional[Sequence[Any]] = None,
         max_retries: int = 3,
+        response_format: str = "json_schema",
+        temperature_range: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Call structured output if available, retrying transient empty failures."""
-        return call_llm_structured(
-            prompt=prompt,
-            schema=schema,
-            default_client=self.llm_client,
-            logger=self.logger,
-            randomize=randomize,
-            system_prompt=system_prompt,
-            trace_label=trace_label,
-            max_tokens=max_tokens,
-            llm_clients=llm_clients,
-            max_retries=max_retries,
+        self._debug_event(
+            "llm_structured_start",
+            {
+                "trace_label": trace_label,
+                "system_prompt": system_prompt,
+                "prompt": prompt,
+                "schema": schema,
+                "randomize": randomize,
+                "max_tokens": max_tokens,
+                "max_retries": max_retries,
+                "response_format": response_format,
+                "temperature_range": temperature_range,
+                "clients": [
+                    getattr(client, "model_name", "unknown")
+                    for client in (llm_clients or [self.llm_client])
+                ],
+            },
         )
+        started_at = time.monotonic()
+        try:
+            payload = call_llm_structured(
+                prompt=prompt,
+                schema=schema,
+                default_client=self.llm_client,
+                logger=self.logger,
+                randomize=randomize,
+                system_prompt=system_prompt,
+                trace_label=trace_label,
+                max_tokens=max_tokens,
+                llm_clients=llm_clients,
+                max_retries=max_retries,
+                response_format=response_format,
+                temperature_range=temperature_range,
+            )
+        except Exception as exc:
+            self._debug_event(
+                "llm_structured_error",
+                {
+                    "trace_label": trace_label,
+                    "elapsed_s": round(time.monotonic() - started_at, 3),
+                    "error": str(exc),
+                },
+            )
+            raise
+        self._debug_event(
+            "llm_structured_done",
+            {
+                "trace_label": trace_label,
+                "elapsed_s": round(time.monotonic() - started_at, 3),
+                "payload": payload,
+            },
+        )
+        return payload
 
     def _build_user_context(self, example: Dict) -> str:
         """Build context for user generation from current example."""
@@ -1857,10 +2328,18 @@ class SynthChatGenerator:
         for message in messages:
             role = str(message.get("role", "")).strip() or "unknown"
             content = message.get("content")
+            tool_calls = message.get("tool_calls")
             if isinstance(content, dict):
                 content_str = json.dumps(content)
             else:
                 content_str = str(content or "")
+            if tool_calls:
+                rendered_tool_calls = json.dumps(tool_calls, ensure_ascii=False)
+                content_str = (
+                    f"{content_str.strip()}\n\nTool calls: {rendered_tool_calls}"
+                    if content_str.strip()
+                    else f"Tool calls: {rendered_tool_calls}"
+                )
             if not content_str.strip():
                 continue
             parts.append(f"{role.upper()}:\n{content_str}")

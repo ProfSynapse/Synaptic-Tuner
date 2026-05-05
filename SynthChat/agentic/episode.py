@@ -30,9 +30,13 @@ def validate_agentic_synthchat_response(message: Any):
     """Relax eval-only generator-format checks for synthetic loop rollouts."""
     result = validate_assistant_response(message, None)
     filtered_issues = []
+    has_text_content = isinstance(message, dict) and isinstance(message.get("content"), str) and bool(message["content"].strip())
+    empty_tool_calls = isinstance(message, dict) and message.get("tool_calls") in (None, [])
     for issue in result.issues:
         message_text = str(issue.message)
         if "does not match generator format" in message_text:
+            continue
+        if has_text_content and empty_tool_calls and "tool_calls array must not be empty if present" in message_text:
             continue
         filtered_issues.append(issue)
 
@@ -124,9 +128,20 @@ def build_turn_judge(
         temperature=float(judge_config.get("temperature", 0.2) or 0.2),
         max_tokens=judge_config.get("max_tokens"),
         max_retries=int(judge_config.get("max_retries", 3) or 3),
+        response_format=str(judge_config.get("response_format") or "json_schema"),
     )
 
     def run_judge(turn_payload: Dict[str, Any]):
+        if logger:
+            client_labels = [
+                f"{getattr(client, 'provider_name', None)}/{getattr(client, 'model_name', None)}"
+                for client in judge.llm_clients
+            ]
+            logger.info(
+                f"[{scenario_key}] turn_judge start "
+                f"(turn={turn_payload.get('turn_index')} max_retries={judge.max_retries} "
+                f"clients={client_labels})"
+            )
         template_vars = build_turn_judge_template_vars(
             scenario_key=scenario_key,
             scenario=scenario,
@@ -210,6 +225,7 @@ def generate_agentic_episode(
     parse_response: Callable,
     stringify_response: Callable,
     logger: Any = None,
+    debug_event_writer: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
     """Generate a multi-turn agentic rollout using the shared episode runner."""
     loop_cfg = resolved_environment_config.get("loop") if isinstance(resolved_environment_config, dict) else {}
@@ -224,9 +240,13 @@ def generate_agentic_episode(
     continue_on_execution_error = bool(
         loop_cfg.get("continue_on_execution_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
     )
+    continue_on_validation_error = bool(
+        loop_cfg.get("continue_on_validation_error", str(loop_cfg.get("mode", "strict")).strip().lower() == "agentic")
+    )
     stuck_repeat_limit = int(loop_cfg.get("stuck_repeat_limit", 2) or 2)
     no_progress_window = int(loop_cfg.get("no_progress_window", 3) or 3)
     tool_result_format = str(loop_cfg.get("tool_result_format", "json") or "json")
+    tool_result_name_format = str(loop_cfg.get("tool_result_name_format", "executor") or "executor")
     judge_cfg = scenario.get("judge") if isinstance(scenario.get("judge"), dict) else {}
     in_loop_judge_cfg = judge_cfg.get("in_loop") if isinstance(judge_cfg.get("in_loop"), dict) else {}
     judge_feedback_visible_to_model = bool(in_loop_judge_cfg.get("feedback_visible_to_model", False))
@@ -279,9 +299,11 @@ def generate_agentic_episode(
             stop_on_text_response=stop_on_text_response,
             stop_on_environment_pass=stop_on_environment_pass,
             continue_on_execution_error=continue_on_execution_error,
+            continue_on_validation_error=continue_on_validation_error,
             stuck_repeat_limit=stuck_repeat_limit,
             no_progress_window=no_progress_window,
             tool_result_format=tool_result_format,
+            tool_result_name_format=tool_result_name_format,
             expected_tools=scenario.get("expected_tools") or ([scenario.get("tool")] if scenario.get("tool") else None),
             require_expected_tools=bool(resolved_environment_config.get("require_expected_tools")),
             stringify_response=stringify_response,
@@ -290,6 +312,7 @@ def generate_agentic_episode(
             judge_stop_on_hard_failure=judge_stop_on_hard_failure,
             require_final_text_after_pass=require_final_text_after_pass,
             final_text_prompt=final_text_prompt,
+            debug_event_writer=debug_event_writer,
         )
     finally:
         session.close()
@@ -301,12 +324,13 @@ def generate_agentic_episode(
         "schema_validation_failed",
         "final_text_tool_calls_emitted",
         "final_text_missing",
+        "final_text_judge_failed",
         "judge_hard_failure",
         "judge_requested_stop",
     }:
         stage_failures.append("response")
 
-    example["conversations"] = [dict(message) for message in episode.messages]
+    example["conversations"] = _messages_with_terminal_assistant(episode)
     example["conversation_trace"] = episode.conversation_trace
     final_response = episode.final_response if isinstance(episode.final_response, dict) else {"role": "assistant", "content": str(episode.final_response or "")}
     log_stage(
@@ -322,3 +346,21 @@ def generate_agentic_episode(
         **environment_trace,
         "judge_trace": list(episode.judge_trace),
     }
+
+
+def _messages_with_terminal_assistant(episode) -> list[dict]:
+    """Preserve an unappended terminal assistant turn for repair/evaluation."""
+    messages = [dict(message) for message in episode.messages]
+    trace_assistant_count = sum(
+        1 for item in episode.conversation_trace
+        if item.get("role") == "assistant" and item.get("kind") == "assistant_response"
+    )
+    message_assistant_count = sum(1 for message in messages if message.get("role") == "assistant")
+    if episode.final_response is not None and message_assistant_count < trace_assistant_count:
+        if isinstance(episode.final_response, dict):
+            final_message = dict(episode.final_response)
+            final_message.setdefault("role", "assistant")
+        else:
+            final_message = {"role": "assistant", "content": str(episode.final_response or "")}
+        messages.append(final_message)
+    return messages

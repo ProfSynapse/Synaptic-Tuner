@@ -89,6 +89,66 @@ class StreamingResultWriter:
         return self._count
 
 
+class DebugEventWriter:
+    """Append debug events to JSONL as generation progresses."""
+
+    def __init__(self, output_file: Path, settings: Dict):
+        self._output_file = output_file
+        self._settings = settings
+        self._lock = threading.Lock()
+        self._file = None
+        self._count = 0
+
+    def __enter__(self):
+        self._output_file.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self._output_file, "w", encoding="utf-8")
+        metadata = {
+            "_meta": {
+                "synthchat_version": "1.0.0",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "streaming": True,
+                "artifact_type": "debug_events",
+            }
+        }
+        privacy_settings = self._settings.get("privacy_preprocess") or {}
+        if privacy_settings.get("enabled") and privacy_settings.get("profile"):
+            metadata["_meta"]["privacy_preprocess"] = {
+                "profile": privacy_settings.get("profile"),
+                "apply_to": dict(privacy_settings.get("apply_to") or {}),
+            }
+        self._file.write(json.dumps(metadata, ensure_ascii=False) + "\n")
+        self._file.flush()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._file and not self._file.closed:
+            self._file.flush()
+            self._file.close()
+        return False
+
+    def write_event(self, event_type: str, payload: Dict[str, Any]) -> bool:
+        """Write one debug event immediately."""
+        event = {
+            "type": str(event_type),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": payload,
+        }
+        try:
+            line = json.dumps(event, ensure_ascii=False) + "\n"
+            with self._lock:
+                self._file.write(line)
+                self._file.flush()
+                self._count += 1
+            return True
+        except (IOError, OSError, TypeError) as e:
+            print(f"\nError writing debug event to {self._output_file}: {e}")
+            return False
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+
 def generate_output_path(settings: Dict, input_path: Optional[Path] = None) -> Path:
     """Generate output file path with datetime versioning.
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from SynthChat.generator import SynthChatGenerator
+from SynthChat.generator import GenerationResult, SynthChatGenerator
 from SynthChat.schemas.tool_response_schema import build_tool_generation_prompt, build_tool_response_schema
 from SynthChat.config.format_resolver import get_default_tool_call_format
 from shared.agentic_judge import AgenticTurnJudge
@@ -445,6 +445,40 @@ def test_use_tools_generation_prompt_explicitly_allows_text_or_tools():
     assert "either call tools or respond via text" in prompt
     assert "set tool_calls to null or []" in prompt
     assert "When the task is already complete" in prompt
+
+
+def test_generate_single_retries_failed_examples_when_loop_config_enabled():
+    generator = object.__new__(SynthChatGenerator)
+    attempts = []
+
+    def fake_once(**kwargs):
+        attempts.append(kwargs)
+        success = len(attempts) == 2
+        return GenerationResult(
+            example={"conversations": [], "metadata": {}},
+            scenario_key=kwargs["scenario_key"],
+            iterations=0,
+            success=success,
+            stage_failures=[] if success else ["environment"],
+        )
+
+    generator._generate_single_once = fake_once
+    generator._log_stage = lambda *args, **kwargs: None
+
+    result = generator.generate_single(
+        scenario_key="retry_case",
+        scenario={"environment": {"loop": {"retry_failed_examples": True, "retry_attempts": 3}}},
+        max_iterations=3,
+        randomize_params=False,
+    )
+
+    assert result.success is True
+    assert len(attempts) == 2
+    assert result.example["metadata"]["generation_retry"] == {
+        "attempt": 2,
+        "max_attempts": 3,
+        "enabled": True,
+    }
 
 
 def test_synthchat_generator_loads_environment_generation_scenarios():

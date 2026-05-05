@@ -16,7 +16,7 @@ from ..utils.logger import get_logger
 from ..engine import ImprovementEngine
 from ..generator import SynthChatGenerator
 from ..targets import _extract_shared_seed_spec, _normalize_target_spec
-from ..result_writer import StreamingResultWriter, generate_output_path, print_summary
+from ..result_writer import DebugEventWriter, StreamingResultWriter, generate_output_path, print_summary
 from ..parallel.workers import (
     run_parallel_generation,
     serialize_environment_options,
@@ -71,19 +71,6 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
         config_path=validation_config,
         logger=logger,
         enable_interactions=settings["logging"]["save_interactions"]
-    )
-
-    # Create generator
-    generator = SynthChatGenerator(
-        config_dir=config_dir,
-        scenarios_dir=scenarios_dir,
-        rubrics_dir=rubrics_dir,
-        llm_client=gen_client,
-        engine=engine,
-        environment_validator=environment_validator,
-        enable_stage_validation=settings["generation"]["stage_validation"],
-        logger=logger,
-        privacy_settings=settings.get("privacy_preprocess"),
     )
 
     # Load targets
@@ -148,8 +135,39 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
 
     # Determine output path early so we can stream results to disk
     output_file = Path(args.output) if args.output else generate_output_path(settings)
+    debug_path = _resolve_debug_artifact_path(args.debug_artifacts, output_file)
 
-    with StreamingResultWriter(output_file, settings) as writer:
+    with StreamingResultWriter(output_file, settings) as writer, _optional_debug_writer(debug_path, settings) as debug_writer:
+        # Create generator after debug writer is open so every subsequent stage can stream events.
+        generator = SynthChatGenerator(
+            config_dir=config_dir,
+            scenarios_dir=scenarios_dir,
+            rubrics_dir=rubrics_dir,
+            llm_client=gen_client,
+            engine=engine,
+            environment_validator=environment_validator,
+            enable_stage_validation=settings["generation"]["stage_validation"],
+            logger=logger,
+            privacy_settings=settings.get("privacy_preprocess"),
+            debug_event_writer=(debug_writer.write_event if debug_writer else None),
+        )
+        if debug_writer:
+            print(f"Debug artifacts enabled: {debug_path}")
+            debug_writer.write_event(
+                "generate_start",
+                {
+                    "targets_file": args.targets_file,
+                    "targets": targets,
+                    "output": str(output_file),
+                    "provider": args.provider,
+                    "model": args.model,
+                    "env_backend": getattr(environment_validator, "backend", None),
+                    "env_tool_schema": getattr(environment_validator, "tool_schema_path", None) and str(environment_validator.tool_schema_path),
+                    "env_exec_config": getattr(environment_validator, "execution_config_path", None) and str(environment_validator.execution_config_path),
+                    "max_iterations": max_iterations,
+                    "workers": num_workers,
+                },
+            )
         if docs and num_workers > 1:
             # Parallel docs-based generation with multiple workers
             print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
@@ -196,9 +214,41 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
             )
 
         print(f"\nStreamed {writer.count} examples to {output_file}")
+        if debug_writer:
+            debug_writer.write_event(
+                "generate_done",
+                {
+                    "output": str(output_file),
+                    "streamed_examples": writer.count,
+                    "debug_events": debug_writer.count,
+                },
+            )
+            print(f"Streamed {debug_writer.count} debug events to {debug_path}")
 
     # Print summary
     print_summary(results, output_file)
+
+
+class _NullDebugWriter:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+def _optional_debug_writer(debug_path: Optional[Path], settings: Dict[str, Any]):
+    if debug_path is None:
+        return _NullDebugWriter()
+    return DebugEventWriter(debug_path, settings)
+
+
+def _resolve_debug_artifact_path(raw_value: Optional[str], output_file: Path) -> Optional[Path]:
+    if raw_value is None:
+        return None
+    if raw_value == "auto" or not str(raw_value).strip():
+        return output_file.with_name(f"{output_file.stem}.debug_events.jsonl")
+    return Path(raw_value)
 
 
 def _build_docs_work_items(docs, args, generator, targets, shared_seed_spec,
@@ -228,6 +278,12 @@ def _build_docs_work_items(docs, args, generator, targets, shared_seed_spec,
                         scenario=shared_scenario,
                         randomize_params=True,
                         doc_context=doc,
+                        seed_metadata={
+                            "seed_id": shared_seed_id,
+                            "seed_index": shared_seed_index,
+                            "seed_number": shared_seed_index + 1,
+                            "seed_count": shared_seed_spec["seed_count"],
+                        },
                     )
                     for scenario_key, raw_target in targets.items():
                         if shared_targets and scenario_key not in shared_targets:
@@ -271,6 +327,12 @@ def _build_docs_work_items(docs, args, generator, targets, shared_seed_spec,
                         scenario=scenario,
                         randomize_params=True,
                         doc_context=doc,
+                        seed_metadata={
+                            "seed_id": seed_id,
+                            "seed_index": seed_index,
+                            "seed_number": seed_index + 1,
+                            "seed_count": target_spec["seed_count"],
+                        },
                     )
                     for rollout_index in range(target_spec["rollouts_per_seed"]):
                         work_items.append((
@@ -316,6 +378,12 @@ def _build_nodocs_work_items(generator, targets, shared_seed_spec,
                 seed_id=shared_seed_id,
                 scenario=shared_scenario,
                 randomize_params=True,
+                seed_metadata={
+                    "seed_id": shared_seed_id,
+                    "seed_index": shared_seed_index,
+                    "seed_number": shared_seed_index + 1,
+                    "seed_count": shared_seed_spec["seed_count"],
+                },
             )
             for scenario_key, raw_target in targets.items():
                 if shared_targets and scenario_key not in shared_targets:
@@ -359,6 +427,12 @@ def _build_nodocs_work_items(generator, targets, shared_seed_spec,
                 seed_id=seed_id,
                 scenario=scenario,
                 randomize_params=True,
+                seed_metadata={
+                    "seed_id": seed_id,
+                    "seed_index": seed_index,
+                    "seed_number": seed_index + 1,
+                    "seed_count": target_spec["seed_count"],
+                },
             )
             for rollout_index in range(target_spec["rollouts_per_seed"]):
                 work_items.append((

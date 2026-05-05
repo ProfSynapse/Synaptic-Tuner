@@ -438,7 +438,11 @@ class ImprovementEngine:
         conversation = self.conversation_parser.parse(example)
         system_msg = conversation.get_system_message()
         user_msg = conversation.get_user_message()
-        assistant_msg = conversation.get_assistant_message()
+        target_scope = rubrics[0].get("scope", "response") if rubrics else "response"
+        assistant_msg = conversation.get_by_role(
+            "assistant",
+            selection=self._message_selection_for_scope(target_scope),
+        )
 
         system_content = system_msg.content if system_msg and system_msg.content else ""
         user_content = user_msg.content if user_msg and user_msg.content else ""
@@ -488,12 +492,10 @@ class ImprovementEngine:
 
         # Include tool_calls if present (critical for tool-calling rubrics)
         import json
-        conversations = example.get("conversations", [])
-        for conv in conversations:
-            if conv.get("role") == "assistant" and "tool_calls" in conv:
-                tool_calls = conv["tool_calls"]
-                user_parts.extend(["", "**Tool Calls:**", "```json", json.dumps(tool_calls, indent=2), "```"])
-                break
+        assistant_conv = self._select_conversation_for_scope(example, target_scope, "assistant")
+        if assistant_conv and assistant_conv.get("tool_calls"):
+            tool_calls = assistant_conv["tool_calls"]
+            user_parts.extend(["", "**Tool Calls:**", "```json", json.dumps(tool_calls, indent=2), "```"])
 
         if isinstance(prompt_context, dict) and prompt_context.get("environment_result"):
             user_parts.extend([
@@ -505,6 +507,24 @@ class ImprovementEngine:
             ])
 
         return "\n".join(system_parts), "\n".join(user_parts)
+
+    def _message_selection_for_scope(self, scope: str) -> str:
+        scope_def = self.scope_config.get_scope(scope)
+        if not scope_def:
+            return "first"
+        return getattr(scope_def.extraction, "message_selection", "first") or "first"
+
+    def _select_conversation_for_scope(self, example: Dict, scope: str, role: str) -> Optional[Dict]:
+        selection = self._message_selection_for_scope(scope)
+        conversations = [
+            conv for conv in example.get("conversations", [])
+            if conv.get("role") == role
+        ]
+        if not conversations:
+            return None
+        if str(selection).strip().lower() == "last":
+            return conversations[-1]
+        return conversations[0]
 
     def _parse_judgment(
         self,

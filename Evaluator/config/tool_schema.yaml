@@ -129,9 +129,13 @@ tools:
     - canvas write "path-value" --nodes "value-1,value-2" --edges "value-1,value-2"
   composer:
   - name: compose
-    description: 'Merge multiple vault files of the same type into a single output. Supports markdown (.md), PDF (.pdf), and audio (.mp3, .wav, .ogg, .webm). Audio supports concat (sequential) and mix (layered tracks with volume/fade) modes. Note: WebM audio encoding runs at real-time speed (encoding time equals audio duration).'
+    description: 'Merge multiple vault files of the same type into a single output. Supports markdown (.md), PDF (.pdf), and audio (.mp3, .wav, .ogg, .webm). Audio
+      supports concat (sequential) and mix (layered tracks with volume/fade) modes. Note: WebM audio encoding runs at real-time speed (encoding time equals audio
+      duration).'
     command: composer compose
-    usage: composer compose [--files <files>] <format> <outputPath> [--separator <separator>] [--include-headers] [--header-level <headerLevel>] [--frontmatter-handling <frontmatterHandling>] [--max-file-size-mb <maxFileSizeMb>] [--max-total-size-mb <maxTotalSizeMb>] [--audio-mode <audioMode>] [--tracks <tracks>] [--output-format <outputFormat>] [--duration <duration>] [--overwrite]
+    usage: composer compose [--files <files>] <format> <outputPath> [--separator <separator>] [--include-headers] [--header-level <headerLevel>] [--frontmatter-handling
+      <frontmatterHandling>] [--max-file-size-mb <maxFileSizeMb>] [--max-total-size-mb <maxTotalSizeMb>] [--audio-mode <audioMode>] [--tracks <tracks>] [--output-format
+      <outputFormat>] [--duration <duration>] [--overwrite]
     params:
       required:
       - format
@@ -191,7 +195,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Markdown only: how to handle YAML frontmatter. "first" keeps only the first file''s frontmatter. "merge" shallow-merges all. "strip" removes all. Default: "first" (One of: ["first", "merge", "strip"])'
+      description: '[OPTIONAL] Markdown only: how to handle YAML frontmatter. "first" keeps only the first file''s frontmatter. "merge" shallow-merges all. "strip"
+        removes all. Default: "first" (One of: ["first", "merge", "strip"])'
     - name: maxFileSizeMb
       flag: --max-file-size-mb
       type: number
@@ -209,7 +214,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Audio only: "concat" joins files sequentially. "mix" layers tracks with individual volume/offset/fade. Default: "concat" (One of: ["concat", "mix"])'
+      description: '[OPTIONAL] Audio only: "concat" joins files sequentially. "mix" layers tracks with individual volume/offset/fade. Default: "concat" (One of: ["concat",
+        "mix"])'
     - name: tracks
       flag: --tracks
       type: array<object>
@@ -235,7 +241,8 @@ tools:
       positional: false
       description: '[OPTIONAL] If true, overwrite existing file at outputPath. Default: false (boolean)'
     examples:
-    - composer compose --files "value-1,value-2" "format-value" "outputPath-value" --separator "separator-value" --header-level 1 --frontmatter-handling "frontmatterHandling-value" --max-file-size-mb 1 --max-total-size-mb 1 --audio-mode "audioMode-value" --tracks "value-1,value-2" --output-format "outputFormat-value" --duration 1
+    - composer compose --files "value-1,value-2" "format-value" "outputPath-value" --separator "separator-value" --header-level 1 --frontmatter-handling "frontmatterHandling-value"
+      --max-file-size-mb 1 --max-total-size-mb 1 --audio-mode "audioMode-value" --tracks "value-1,value-2" --output-format "outputFormat-value" --duration 1
   - name: listFormats
     description: List supported composition formats, their file extensions, and platform availability.
     command: composer list-formats
@@ -248,9 +255,9 @@ tools:
     - composer list-formats
   contentManager:
   - name: insert
-    description: "Insert new content into a note at a specific position. Does not modify existing content \u2014 use replace for that."
+    description: Insert new content into a note at a specific position. Does not modify existing content — use replace for that.
     command: content insert
-    usage: content insert --path <path> --content <content> --start-line <startLine>
+    usage: content insert <path> <content> <startLine>
     params:
       required:
       - path
@@ -262,22 +269,24 @@ tools:
       flag: --path
       type: string
       required: true
-      positional: false
+      positional: true
       description: '[REQUIRED] Path to the note to modify (e.g. "folder/note.md"). Do not include a leading slash. (string)'
     - name: content
       flag: --content
       type: string
       required: true
-      positional: false
-      description: '[REQUIRED] The text to insert into the note. For multi-line content, use newline characters (\n). This content is added without modifying any existing text. (string)'
+      positional: true
+      description: '[REQUIRED] The text to insert into the note. For multi-line content, use newline characters (\n). This content is added without modifying any
+        existing text. (string)'
     - name: startLine
       flag: --start-line
       type: number
       required: true
-      positional: false
-      description: '[REQUIRED] Where to insert the content (1-indexed). Use -1 to append to the end of the note. Use 1 to prepend at the beginning. Any other number inserts before that line, pushing existing content down. (number)'
+      positional: true
+      description: '[REQUIRED] Where to insert the content (1-indexed). Use -1 to append to the end of the note. Use 1 to prepend at the beginning. Any other number
+        inserts before that line, pushing existing content down. (number)'
     examples:
-    - content insert --path "path-value" --content "content-value" --start-line 1
+    - content insert "path-value" "content-value" 1
   - name: read
     description: Read content from a file with line range
     command: content read
@@ -310,9 +319,10 @@ tools:
     examples:
     - content read "path-value" 1 --end-line 1
   - name: replace
-    description: Replace or delete existing content in a note. Validates that the content at the specified lines matches before making changes. If the content has moved, returns the new line numbers.
+    description: Replace or delete existing content in a note. Validates that the content at the specified lines matches before making changes. If the content has
+      moved, returns the new line numbers.
     command: content replace
-    usage: content replace --path <path> --old-content <oldContent> --new-content <newContent> --start-line <startLine> --end-line <endLine>
+    usage: content replace <path> <oldContent> <newContent> <startLine> <endLine>
     params:
       required:
       - path
@@ -326,34 +336,37 @@ tools:
       flag: --path
       type: string
       required: true
-      positional: false
+      positional: true
       description: '[REQUIRED] Path to the note to modify (e.g. "folder/note.md"). Do not include a leading slash. (string)'
     - name: oldContent
       flag: --old-content
       type: string
       required: true
-      positional: false
-      description: "[REQUIRED] The exact text currently at lines startLine through endLine that you want to replace. This is validated before any changes are made \u2014 if the content at those lines doesn't match, the tool will search the entire note to find where your content actually is and tell you the correct line numbers. To delete content, set newContent to an empty string. (string)"
+      positional: true
+      description: '[REQUIRED] The exact text currently at lines startLine through endLine that you want to replace. This is validated before any changes are made
+        — if the content at those lines doesn''t match, the tool will search the entire note to find where your content actually is and tell you the correct line
+        numbers. To delete content, set newContent to an empty string. (string)'
     - name: newContent
       flag: --new-content
       type: string
       required: true
-      positional: false
+      positional: true
       description: '[REQUIRED] The text to replace oldContent with. Set to an empty string to delete the content at the specified lines. (string)'
     - name: startLine
       flag: --start-line
       type: number
       required: true
-      positional: false
-      description: "[REQUIRED] The line number (1-indexed) where oldContent begins. Required \u2014 ensures the correct occurrence is targeted when identical content appears multiple times in a note. (number)"
+      positional: true
+      description: '[REQUIRED] The line number (1-indexed) where oldContent begins. Required — ensures the correct occurrence is targeted when identical content appears
+        multiple times in a note. (number)'
     - name: endLine
       flag: --end-line
       type: number
       required: true
-      positional: false
-      description: "[REQUIRED] The line number (1-indexed) where oldContent ends (inclusive). Required \u2014 defines the exact range to validate and replace. (number)"
+      positional: true
+      description: '[REQUIRED] The line number (1-indexed) where oldContent ends (inclusive). Required — defines the exact range to validate and replace. (number)'
     examples:
-    - content replace --path "path-value" --old-content "oldContent-value" --new-content "newContent-value" --start-line 1 --end-line 1
+    - content replace "path-value" "oldContent-value" "newContent-value" 1 1
   - name: setProperty
     description: Set a frontmatter property on a note. Supports "replace" (default) and "merge" (array union with dedup) modes.
     command: content set-property
@@ -380,7 +393,7 @@ tools:
       description: '[REQUIRED] Frontmatter property name (e.g. "tags", "aliases", "status") (string)'
     - name: value
       flag: --value
-      type: unknown
+      type: oneOfArray
       required: true
       positional: true
       description: '[REQUIRED] Value to set. Can be a string, number, boolean, or array of strings.'
@@ -389,7 +402,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] How to apply the value. ''replace'' overwrites (default). ''merge'' performs array union with dedup for list fields; equivalent to replace for scalars. (One of: ["replace", "merge"])'
+      description: '[OPTIONAL] How to apply the value. ''replace'' overwrites (default). ''merge'' performs array union with dedup for list fields; equivalent to
+        replace for scalars. (One of: ["replace", "merge"])'
     examples:
     - content set-property "path-value" "property-value" "value-value" --mode "mode-value"
   - name: write
@@ -442,7 +456,8 @@ tools:
       type: string
       required: true
       positional: true
-      description: '[REQUIRED] Text description of the music to generate. Can define genre, mood, instruments, vocals, tempo, structure, and lyrics (max 4100 chars). Do NOT reference copyrighted artists or lyrics. (string)'
+      description: '[REQUIRED] Text description of the music to generate. Can define genre, mood, instruments, vocals, tempo, structure, and lyrics (max 4100 chars).
+        Do NOT reference copyrighted artists or lyrics. (string)'
     - name: musicLengthMs
       flag: --music-length-ms
       type: number
@@ -527,7 +542,8 @@ tools:
   - name: textToSpeech
     description: Convert text to speech audio using ElevenLabs voices. Saves MP3 to vault.
     command: elevenlabs text-to-speech
-    usage: elevenlabs text-to-speech <prompt> [--voice-id <voiceId>] [--model-id <modelId>] [--output-path <outputPath>] [--stability <stability>] [--similarity-boost <similarityBoost>]
+    usage: elevenlabs text-to-speech <prompt> [--voice-id <voiceId>] [--model-id <modelId>] [--output-path <outputPath>] [--stability <stability>] [--similarity-boost
+      <similarityBoost>]
     params:
       required:
       - prompt
@@ -575,12 +591,24 @@ tools:
       positional: false
       description: '[OPTIONAL] Voice similarity boost 0.0-1.0 (default: 0.75) (number)'
     examples:
-    - elevenlabs text-to-speech "prompt-value" --voice-id "voiceId-value" --model-id "modelId-value" --output-path "outputPath-value" --stability 1 --similarity-boost 1
+    - elevenlabs text-to-speech "prompt-value" --voice-id "voiceId-value" --model-id "modelId-value" --output-path "outputPath-value" --stability 1 --similarity-boost
+      1
   ingestManager:
-  - name: ingest
-    description: 'Ingest a PDF or audio file into a structured markdown note. PDF: text extraction (default) or vision OCR. Audio: speech transcription using explicit ingest-supported models. Output note created alongside the original file.'
-    command: ingest ingest
-    usage: ingest ingest <filePath> [--mode <mode>] [--ocr-provider <ocrProvider>] [--ocr-model <ocrModel>]
+  - name: capabilities
+    description: List available OCR models and audio transcription models that the ingest pipeline supports. Use before ingest to discover valid provider/model options.
+    command: ingest capabilities
+    usage: ingest capabilities
+    params:
+      required: []
+      optional: []
+    arguments: []
+    examples:
+    - ingest capabilities
+  - name: run
+    description: 'Ingest a PDF or audio file into a structured markdown note. PDF: text extraction (default) or vision OCR. Audio: speech transcription using explicit
+      ingest-supported models. Output note created alongside the original file.'
+    command: ingest run
+    usage: ingest run <filePath> [--mode <mode>] [--ocr-provider <ocrProvider>] [--ocr-model <ocrModel>]
     params:
       required:
       - filePath
@@ -600,7 +628,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] PDF processing mode only. "text" = free text extraction (default). "vision" = OCR via LLM vision (requires ocrProvider + ocrModel). (One of: ["text", "vision"])'
+      description: '[OPTIONAL] PDF processing mode only. "text" = free text extraction (default). "vision" = OCR via LLM vision (requires ocrProvider + ocrModel).
+        (One of: ["text", "vision"])'
     - name: ocrProvider
       flag: --ocr-provider
       type: string
@@ -614,17 +643,7 @@ tools:
       positional: false
       description: '[OPTIONAL] Model for vision-based OCR (e.g., "gpt-4o", "claude-sonnet-4-6"). Required when mode="vision". (string)'
     examples:
-    - ingest ingest "filePath-value" --mode "mode-value" --ocr-provider "ocrProvider-value" --ocr-model "ocrModel-value"
-  - name: listCapabilities
-    description: List available OCR models and audio transcription models that the ingest pipeline supports. Use before ingest to discover valid provider/model options.
-    command: ingest list-capabilities
-    usage: ingest list-capabilities
-    params:
-      required: []
-      optional: []
-    arguments: []
-    examples:
-    - ingest list-capabilities
+    - ingest run "filePath-value" --mode "mode-value" --ocr-provider "ocrProvider-value" --ocr-model "ocrModel-value"
   memoryManager:
   - name: archiveWorkspace
     description: Archive a workspace (soft delete). Workspace will be hidden from lists but can be restored.
@@ -723,11 +742,12 @@ tools:
       positional: false
       description: '[OPTIONAL] Optional tags for categorization (Array of a string)'
     examples:
-    - memory create-state "name-value" "conversationContext-value" "activeTask-value" --active-files "[\"docs/plan.md\",\"src/main.ts\"]" --next-steps "[\"Create checkpoint\",\"Start refactor\"]" --tags "[\"checkpoint\",\"refactor\"]"
+    - memory create-state "name-value" "conversationContext-value" "activeTask-value" --active-files "value-1,value-2" --next-steps "value-1,value-2" --tags "value-1,value-2"
   - name: createWorkspace
     description: Create a new workspace with structured context data
     command: memory create-workspace
-    usage: memory create-workspace <name> <description> <rootFolder> <purpose> [--workflows <workflows>] [--key-files <keyFiles>] [--preferences <preferences>] [--dedicated-agent-id <dedicatedAgentId>] [--related-folders <relatedFolders>] [--related-files <relatedFiles>] [--key-file-instructions <keyFileInstructions>]
+    usage: memory create-workspace <name> <description> <rootFolder> <purpose> [--workflows <workflows>] [--key-files <keyFiles>] [--preferences <preferences>] [--dedicated-agent-id
+      <dedicatedAgentId>] [--related-folders <relatedFolders>] [--related-files <relatedFiles>] [--key-file-instructions <keyFileInstructions>]
     params:
       required:
       - name
@@ -748,7 +768,8 @@ tools:
       type: string
       required: true
       positional: true
-      description: '[REQUIRED] Workspace name (string)'
+      description: '[REQUIRED] Workspace name. This name can be used directly in follow-up workspace commands such as load-workspace and update-workspace; the UUID
+        is not required unless you prefer it. (string)'
     - name: description
       flag: --description
       type: string
@@ -810,7 +831,9 @@ tools:
       positional: false
       description: '[OPTIONAL] Instructions for working with key files (string)'
     examples:
-    - memory create-workspace "name-value" "description-value" "rootFolder-value" "purpose-value" --workflows "value-1,value-2" --key-files "value-1,value-2" --preferences "preferences-value" --dedicated-agent-id "dedicatedAgentId-value" --related-folders "value-1,value-2" --related-files "value-1,value-2" --key-file-instructions "keyFileInstructions-value"
+    - memory create-workspace "name-value" "description-value" "rootFolder-value" "purpose-value" --workflows "value-1,value-2" --key-files "value-1,value-2" --preferences
+      "preferences-value" --dedicated-agent-id "dedicatedAgentId-value" --related-folders "value-1,value-2" --related-files "value-1,value-2" --key-file-instructions
+      "keyFileInstructions-value"
   - name: listStates
     description: List states with optional filtering and sorting
     command: memory list-states
@@ -895,7 +918,7 @@ tools:
     examples:
     - memory list-workspaces --sort-by "sortBy-value" --order "order-value" --limit 1
   - name: loadState
-    description: Load a saved state and optionally create a continuation session with restored context
+    description: Load a saved workspace-scoped state with restored context
     command: memory load-state
     usage: memory load-state <name>
     params:
@@ -927,7 +950,8 @@ tools:
       type: string
       required: true
       positional: true
-      description: '[REQUIRED] Workspace ID or name to load (REQUIRED). Accepts either the unique workspace ID or the workspace name. (string)'
+      description: '[REQUIRED] Workspace ID or name to load (REQUIRED). Accepts either the unique workspace ID or the workspace name. Using the name returned by create-workspace
+        is fine; you do not need to call list-workspaces just to find the UUID. (string)'
     - name: limit
       flag: --limit
       type: number
@@ -939,13 +963,14 @@ tools:
       type: boolean
       required: false
       positional: false
-      description: '[OPTIONAL] Show full recursive file structure (true) or top-level folders only (false). Default: false (top-level only, folders marked with trailing /) (boolean)'
+      description: '[OPTIONAL] Show full recursive file structure (true) or top-level folders only (false). Default: false (top-level only, folders marked with trailing
+        /) (boolean)'
     examples:
     - memory load-workspace "id-value" --limit 1
-  - name: runWorkflow
+  - name: run
     description: Run a workflow immediately and create a fresh conversation for it.
-    command: memory run-workflow
-    usage: memory run-workflow [--workflow-id <workflowId>] [--workflow-name <workflowName>] [--open-in-chat]
+    command: memory run
+    usage: memory run [--workflow-id <workflowId>] [--workflow-name <workflowName>] [--open-in-chat]
     params:
       required: []
       optional:
@@ -972,13 +997,15 @@ tools:
       positional: false
       description: '[OPTIONAL] Open and focus the new conversation in chat. Defaults to false for tool-driven runs. (boolean)'
     examples:
-    - memory run-workflow --workflow-id "workflowId-value" --workflow-name "workflowName-value"
+    - memory run --workflow-id "workflowId-value" --workflow-name "workflowName-value"
   - name: updateWorkspace
     description: Update workspace properties. Pass only fields to change - others remain unchanged.
     command: memory update-workspace
-    usage: memory update-workspace [--name <name>] [--description <description>] [--root-folder <rootFolder>] [--purpose <purpose>] [--workflows <workflows>] [--key-files <keyFiles>] [--preferences <preferences>] [--dedicated-agent-id <dedicatedAgentId>]
+    usage: memory update-workspace <id> [--name <name>] [--description <description>] [--root-folder <rootFolder>] [--purpose <purpose>] [--workflows <workflows>]
+      [--key-files <keyFiles>] [--preferences <preferences>] [--dedicated-agent-id <dedicatedAgentId>]
     params:
-      required: []
+      required:
+      - id
       optional:
       - name
       - description
@@ -989,12 +1016,19 @@ tools:
       - preferences
       - dedicatedAgentId
     arguments:
+    - name: id
+      flag: --id
+      type: string
+      required: true
+      positional: true
+      description: '[REQUIRED] Workspace ID or name to update (REQUIRED). This selects the target workspace; using the workspace name is fine and the UUID is not
+        required. (string)'
     - name: name
       flag: --name
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] New workspace name (optional) (string)'
+      description: '[OPTIONAL] New workspace name (optional). This renames the workspace; it is not the target identifier. (string)'
     - name: description
       flag: --description
       type: string
@@ -1036,14 +1070,16 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] ID of custom agent to set as workspace dedicated agent (optional, updates context.dedicatedAgent). Pass empty string to remove dedicated agent. (string)'
+      description: '[OPTIONAL] ID of custom agent to set as workspace dedicated agent (optional, updates context.dedicatedAgent). Pass empty string to remove dedicated
+        agent. (string)'
     examples:
-    - memory update-workspace --name "name-value" --description "description-value" --root-folder "rootFolder-value" --purpose "purpose-value" --workflows "[{\"name\":\"Weekly Review\",\"description\":\"Run weekly workspace review\"}]" --key-files "[\"docs/plan.md\",\"reports/q4.md\"]" --preferences "preferences-value" --dedicated-agent-id "dedicatedAgentId-value"
+    - memory update-workspace "id-value" --name "name-value" --description "description-value" --root-folder "rootFolder-value" --purpose "purpose-value" --workflows
+      "value-1,value-2" --key-files "value-1,value-2" --preferences "preferences-value" --dedicated-agent-id "dedicatedAgentId-value"
   promptManager:
-  - name: archivePrompt
+  - name: archive
     description: Archive a custom prompt by disabling it (preserves configuration for restoration)
-    command: prompt archive-prompt
-    usage: prompt archive-prompt <name>
+    command: prompt archive
+    usage: prompt archive <name>
     params:
       required:
       - name
@@ -1054,13 +1090,14 @@ tools:
       type: string
       required: true
       positional: true
-      description: '[REQUIRED] Name or ID of the prompt to archive. Prompt will be disabled but configuration preserved for restoration via updatePrompt. (string) [min length: 1]'
+      description: '[REQUIRED] Name or ID of the prompt to archive. Prompt will be disabled but configuration preserved for restoration via updatePrompt. (string)
+        [min length: 1]'
     examples:
-    - prompt archive-prompt "name-value"
-  - name: createPrompt
+    - prompt archive "name-value"
+  - name: create
     description: Create a new custom prompt
-    command: prompt create-prompt
-    usage: prompt create-prompt <name> <description> <prompt> [--is-enabled]
+    command: prompt create
+    usage: prompt create <name> <description> <prompt> [--is-enabled]
     params:
       required:
       - name
@@ -1094,11 +1131,12 @@ tools:
       positional: false
       description: '[OPTIONAL] Whether the prompt is enabled (boolean)'
     examples:
-    - prompt create-prompt "name-value" "description-value" "prompt-value"
-  - name: executePrompts
-    description: 'Execute one or more LLM prompts. For single: pass one item. For multiple: supports sequencing (sequence: 0,1,2), parallel groups, and result forwarding (includePreviousResults: true).'
-    command: prompt execute-prompts
-    usage: prompt execute-prompts --prompts <prompts> [--merge-responses]
+    - prompt create "name-value" "description-value" "prompt-value"
+  - name: execute
+    description: 'Execute one or more LLM prompts. For single: pass one item. For multiple: supports sequencing (sequence: 0,1,2), parallel groups, and result forwarding
+      (includePreviousResults: true).'
+    command: prompt execute
+    usage: prompt execute --prompts <prompts> [--merge-responses]
     params:
       required:
       - prompts
@@ -1118,11 +1156,12 @@ tools:
       positional: false
       description: '[OPTIONAL] Whether to merge all responses into a single result (boolean)'
     examples:
-    - prompt execute-prompts --prompts '[{"agentId":"researcher","prompt":"Summarize Docs/brief.md in 3 bullets."}]'
+    - prompt execute --prompts "value-1,value-2"
   - name: generateImage
     description: Generate images using Google Nano Banana models (direct or via OpenRouter). Supports reference images for style/composition guidance.
     command: prompt generate-image
-    usage: prompt generate-image <prompt> [--provider <provider>] [--model <model>] [--aspect-ratio <aspectRatio>] [--number-of-images <numberOfImages>] [--image-size <imageSize>] [--reference-images <referenceImages>] <savePath>
+    usage: prompt generate-image <prompt> [--provider <provider>] [--model <model>] [--aspect-ratio <aspectRatio>] [--number-of-images <numberOfImages>] [--image-size
+      <imageSize>] [--reference-images <referenceImages>] <savePath>
     params:
       required:
       - prompt
@@ -1152,13 +1191,16 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Image generation model (default: gemini-2.5-flash-image). Available: gemini-2.5-flash-image, gemini-3-pro-image-preview, gemini-3.1-flash-image-preview, gpt-5-image, flux-2-pro, flux-2-flex (One of: ["gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gpt-5-image", "flux-2-pro", "flux-2-flex"])'
+      description: '[OPTIONAL] Image generation model (default: gemini-2.5-flash-image). Available: gemini-2.5-flash-image, gemini-3-pro-image-preview, gemini-3.1-flash-image-preview,
+        gpt-5-image, flux-2-pro, flux-2-flex (One of: ["gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gpt-5-image", "flux-2-pro",
+        "flux-2-flex"])'
     - name: aspectRatio
       flag: --aspect-ratio
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Aspect ratio for the generated image (One of: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"])'
+      description: '[OPTIONAL] Aspect ratio for the generated image (One of: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1",
+        "1:8", "8:1"])'
     - name: numberOfImages
       flag: --number-of-images
       type: number
@@ -1170,7 +1212,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Image resolution. 512px only for gemini-3.1-flash-image-preview. 4K available for gemini-3-pro-image-preview and gemini-3.1-flash-image-preview (One of: ["512px", "1K", "2K", "4K"])'
+      description: '[OPTIONAL] Image resolution. 512px only for gemini-3.1-flash-image-preview. 4K available for gemini-3-pro-image-preview and gemini-3.1-flash-image-preview
+        (One of: ["512px", "1K", "2K", "4K"])'
     - name: referenceImages
       flag: --reference-images
       type: array<string>
@@ -1184,11 +1227,12 @@ tools:
       positional: true
       description: '[REQUIRED] Vault-relative path for the image. Extension may change based on API response format. (string) [pattern: ^[^/].*\.(png|jpg|jpeg|webp)$]'
     examples:
-    - prompt generate-image "prompt-value" --provider "provider-value" --model "model-value" --aspect-ratio "aspectRatio-value" --number-of-images 1 --image-size "imageSize-value" --reference-images "value-1,value-2" "savePath-value"
-  - name: getPrompt
+    - prompt generate-image "prompt-value" --provider "provider-value" --model "model-value" --aspect-ratio "aspectRatio-value" --number-of-images 1 --image-size
+      "imageSize-value" --reference-images "value-1,value-2" "savePath-value"
+  - name: get
     description: Get a custom prompt for persona adoption - does NOT execute tasks automatically
-    command: prompt get-prompt
-    usage: prompt get-prompt [--id <id>] [--name <name>]
+    command: prompt get
+    usage: prompt get [--id <id>] [--name <name>]
     params:
       required: []
       optional:
@@ -1208,21 +1252,11 @@ tools:
       positional: false
       description: '[OPTIONAL] Name of the prompt to retrieve for persona adoption (string)'
     examples:
-    - prompt get-prompt --id "id-value" --name "name-value"
-  - name: listModels
-    description: List available LLM models grouped by provider
-    command: prompt list-models
-    usage: prompt list-models
-    params:
-      required: []
-      optional: []
-    arguments: []
-    examples:
-    - prompt list-models
-  - name: listPrompts
+    - prompt get --id "id-value" --name "name-value"
+  - name: list
     description: List all custom prompts
-    command: prompt list-prompts
-    usage: prompt list-prompts [--enabled-only] [--include-archived]
+    command: prompt list
+    usage: prompt list [--enabled-only] [--include-archived]
     params:
       required: []
       optional:
@@ -1242,7 +1276,17 @@ tools:
       positional: false
       description: '[OPTIONAL] If true, include archived (disabled) prompts in results. Default false filters out archived prompts. (boolean)'
     examples:
-    - prompt list-prompts
+    - prompt list
+  - name: listModels
+    description: List available LLM models grouped by provider
+    command: prompt list-models
+    usage: prompt list-models
+    params:
+      required: []
+      optional: []
+    arguments: []
+    examples:
+    - prompt list-models
   - name: subagent
     description: 'Spawn an autonomous subagent to work on a task in the background.
 
@@ -1266,7 +1310,7 @@ tools:
 
       To continue a subagent that hit max iterations, provide continueBranchId.'
     command: prompt sub
-    usage: prompt sub <task> [-- <agent>] [--tools <tools>] [--context-files <contextFiles>] [--max-iterations <maxIterations>] [--continue-branch-id <continueBranchId>]
+    usage: prompt sub <task> [-- <agent>] [-- <tools>] [--context-files <contextFiles>] [--max-iterations <maxIterations>] [--continue-branch-id <continueBranchId>]
     params:
       required:
       - task
@@ -1290,11 +1334,12 @@ tools:
       positional: false
       description: '[OPTIONAL] Optional custom agent/persona name to use (string)'
     - name: tools
-      flag: --tools
+      flag: --
       type: object
       required: false
       positional: false
-      description: '[OPTIONAL] Hand off specific tools to the subagent. Format: { "agentName": ["tool1", "tool2"] }. Tool schemas are pre-filled in subagent system prompt so it can use useTool directly without calling getTools first. (object)'
+      description: '[OPTIONAL] Hand off specific tools to the subagent. Format: { "agentName": ["tool1", "tool2"] }. Tool schemas are pre-filled in subagent system
+        prompt so it can use useTool directly without calling getTools first. (object)'
     - name: contextFiles
       flag: --context-files
       type: array<string>
@@ -1314,11 +1359,11 @@ tools:
       positional: false
       description: '[OPTIONAL] Branch ID to continue from max_iterations state (string)'
     examples:
-    - prompt sub "task-value" -- "agent-value" --tools '{"key":"value"}' --context-files "value-1,value-2" --max-iterations 1 --continue-branch-id "continueBranchId-value"
-  - name: updatePrompt
+    - prompt sub "task-value" -- "agent-value" -- '{"key":"value"}' --context-files "value-1,value-2" --max-iterations 1 --continue-branch-id "continueBranchId-value"
+  - name: update
     description: Update an existing custom prompt
-    command: prompt update-prompt
-    usage: prompt update-prompt <id> [--name <name>] [--description <description>] [--prompt <prompt>] [--is-enabled]
+    command: prompt update
+    usage: prompt update <id> [--name <name>] [--description <description>] [--prompt <prompt>] [--is-enabled]
     params:
       required:
       - id
@@ -1359,12 +1404,14 @@ tools:
       positional: false
       description: '[OPTIONAL] Whether the prompt is enabled (boolean)'
     examples:
-    - prompt update-prompt "id-value" --name "name-value" --description "description-value" --prompt "prompt-value"
+    - prompt update "id-value" --name "name-value" --description "description-value" --prompt "prompt-value"
   searchManager:
-  - name: searchContent
-    description: Search vault files. Set semantic=true for AI-powered conceptual search using local embeddings (best for concepts/related ideas), or semantic=false for keyword/fuzzy search (best for exact matches). Semantic search is desktop-only and becomes available once the embedding system initializes in the background (first run may take longer while the model downloads).
-    command: search search-content
-    usage: search search-content <query> [--semantic] [--limit <limit>] [--include-content] [--snippet-length <snippetLength>] [--paths <paths>]
+  - name: content
+    description: Search vault files. Set semantic=true for AI-powered conceptual search using local embeddings (best for concepts/related ideas), or semantic=false
+      for keyword/fuzzy search (best for exact matches). Semantic search is desktop-only and becomes available once the embedding system initializes in the background
+      (first run may take longer while the model downloads).
+    command: search content
+    usage: search content <query> [--semantic] [--limit <limit>] [--include-content] [--snippet-length <snippetLength>] [--paths <paths>]
     params:
       required:
       - query
@@ -1386,7 +1433,8 @@ tools:
       type: boolean
       required: false
       positional: false
-      description: '[OPTIONAL] true = AI-powered conceptual search (desktop only, best for concepts/related ideas). false = keyword/fuzzy search (default, best for exact matches). (boolean)'
+      description: '[OPTIONAL] true = AI-powered conceptual search (desktop only, best for concepts/related ideas). false = keyword/fuzzy search (default, best for
+        exact matches). (boolean)'
     - name: limit
       flag: --limit
       type: number
@@ -1412,11 +1460,13 @@ tools:
       positional: false
       description: '[OPTIONAL] Restrict search to specific folder paths. Supports glob patterns. (Array of a string)'
     examples:
-    - search search-content "query-value" --limit 1 --snippet-length 1 --paths "[\"Projects\",\"Q4\"]"
-  - name: searchDirectory
-    description: 'FOCUSED directory search with REQUIRED paths parameter. Search for files and/or folders within specific directory paths using fuzzy matching and optional workspace context. Requires: query (search terms) and paths (directory paths to search - cannot be empty).'
-    command: search search-directory
-    usage: search search-directory <query> --paths <paths> [--search-type <searchType>] [--file-types <fileTypes>] [--depth <depth>] [--pattern <pattern>] [--date-range <dateRange>] [--limit <limit>] [--include-content]
+    - search content "query-value" --limit 1 --snippet-length 1 --paths "value-1,value-2"
+  - name: directory
+    description: 'FOCUSED directory search with REQUIRED paths parameter. Search for files and/or folders within specific directory paths using fuzzy matching and
+      optional workspace context. Requires: query (search terms) and paths (directory paths to search - cannot be empty).'
+    command: search directory
+    usage: search directory <query> --paths <paths> [--search-type <searchType>] [--file-types <fileTypes>] [--depth <depth>] [--pattern <pattern>] [--date-range
+      <dateRange>] [--limit <limit>] [--include-content]
     params:
       required:
       - query
@@ -1485,8 +1535,9 @@ tools:
       positional: false
       description: '[OPTIONAL] Include content snippets from files (boolean)'
     examples:
-    - search search-directory "query-value" --paths "[\"Docs\",\"Runbooks\"]" --search-type "searchType-value" --file-types "[\"md\",\"txt\"]" --depth 1 --pattern "pattern-value" --date-range '{"key":"value"}' --limit 1
-  - name: searchMemory
+    - search directory "query-value" --paths "value-1,value-2" --search-type "searchType-value" --file-types "value-1,value-2" --depth 1 --pattern "pattern-value"
+      --date-range '{"key":"value"}' --limit 1
+  - name: memory
     description: 'Search workspace memory for past conversations, tool execution history, and workspace state snapshots.
 
 
@@ -1494,7 +1545,8 @@ tools:
 
       - Discovery (default): Search all memory across a workspace. Best for finding past discussions, tool usage, or workspace context.
 
-      - Scoped (provide sessionId): Search within a specific session and get surrounding message context around each match. Best for recovering what happened in a particular session.
+      - Scoped (provide sessionId or sessionName): Search within a specific session and get surrounding message context around each match. Best for recovering what
+      happened in a particular session.
 
 
       TIPS:
@@ -1503,19 +1555,21 @@ tools:
 
       - Use specific terms for tool history (e.g., agent or tool names).
 
-      - Narrow results with memoryTypes if you know what you''re looking for.
+      - Narrow results with memoryTypes if you know what you need.
 
-      - Use sessionId + windowSize to get full context around a match.
+      - Use sessionName + windowSize to get full context around a named session match.
 
 
-      REQUIRES: query. Optional: workspaceId (defaults to global workspace if omitted; available from your useTools context, or use MemoryManager listWorkspaces).'
-    command: search search-memory
-    usage: search search-memory <query> [--memory-types <memoryTypes>] [--window-size <windowSize>] [--date-range <dateRange>] [--limit <limit>] [--tool-call-filters <toolCallFilters>] [--search-method <searchMethod>]
+      REQUIRES: query. Optional: workspaceId accepts the workspace name from load-workspace; omit it to search the global workspace.'
+    command: search memory
+    usage: search memory <query> [--memory-types <memoryTypes>] [--session-name <sessionName>] [--window-size <windowSize>] [--date-range <dateRange>] [--limit <limit>]
+      [--tool-call-filters <toolCallFilters>] [--search-method <searchMethod>]
     params:
       required:
       - query
       optional:
       - memoryTypes
+      - sessionName
       - windowSize
       - dateRange
       - limit
@@ -1527,19 +1581,29 @@ tools:
       type: string
       required: true
       positional: true
-      description: '[REQUIRED] What to search for. Use natural language for conversations (''how did we handle auth?'') or specific terms for tool history (''contentManager read''). Examples: ''authentication implementation'', ''database migration error'', ''what tools were used for file editing'' (string) [min length: 1]'
+      description: '[REQUIRED] What to search for. Use natural language for conversations (''how did we handle auth?'') or specific terms for tool history (''contentManager
+        read''). Examples: ''authentication implementation'', ''database migration error'', ''what tools were used for file editing'' (string) [min length: 1]'
     - name: memoryTypes
       flag: --memory-types
       type: array<string>
       required: false
       positional: false
-      description: '[OPTIONAL] Which memory to search. ''conversations'' = past chat Q&A pairs, ''traces'' = tool execution history, ''states'' = workspace snapshots. Defaults to all three. Narrow to specific types if you know what you need. (Array of a string)'
+      description: '[OPTIONAL] Which memory to search. ''conversations'' = past chat Q&A pairs, ''traces'' = tool execution history, ''sessions'' = named work sessions,
+        ''states'' = workspace snapshots. Defaults to all available types. Narrow to specific types if you know what you need. (Array of a string)'
+    - name: sessionName
+      flag: --session-name
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Human-readable session name returned by load-workspace. Use this to scope search to a named session without changing the top-level
+        chat sessionId. (string)'
     - name: windowSize
       flag: --window-size
       type: number
       required: false
       positional: false
-      description: '[OPTIONAL] Number of conversation turns before/after each match to include. Default 3. Only used in scoped mode (when sessionId is provided). (number) [min: 1, max: 20]'
+      description: '[OPTIONAL] Number of conversation turns before/after each match to include. Default 3. Only used in scoped mode (when sessionId is provided).
+        (number) [min: 1, max: 20]'
     - name: dateRange
       flag: --date-range
       type: object
@@ -1563,9 +1627,11 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] How to match results. ''mixed'' (default, recommended) combines approaches for best coverage. ''semantic'' prioritizes meaning-based matching. ''exact'' requires literal keyword matches. (One of: ["semantic", "exact", "mixed"])'
+      description: '[OPTIONAL] How to match results. ''mixed'' (default, recommended) combines approaches for best coverage. ''semantic'' prioritizes meaning-based
+        matching. ''exact'' requires literal keyword matches. (One of: ["semantic", "exact", "mixed"])'
     examples:
-    - search search-memory "query-value" --memory-types "value-1,value-2" --window-size 1 --date-range '{"key":"value"}' --limit 1 --tool-call-filters '{"key":"value"}' --search-method "searchMethod-value"
+    - search memory "query-value" --memory-types "value-1,value-2" --session-name "sessionName-value" --window-size 1 --date-range '{"key":"value"}' --limit 1 --tool-call-filters
+      '{"key":"value"}' --search-method "searchMethod-value"
   storageManager:
   - name: archive
     description: Safely archive a file or folder (moves to .archive/ with timestamp)
@@ -1653,7 +1719,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Optional filter pattern. Supports glob patterns (* for any chars, ? for single char) or regular expressions. Examples: "*deep*", "test*", ".*regex.*" (string)'
+      description: '[OPTIONAL] Optional filter pattern. Supports glob patterns (* for any chars, ? for single char) or regular expressions. Examples: "*deep*", "test*",
+        ".*regex.*" (string)'
     examples:
     - storage list --path "path-value" --filter "filter-value"
   - name: move
@@ -1720,7 +1787,8 @@ tools:
     - storage open "path-value" --mode "mode-value"
   taskManager:
   - name: archiveProject
-    description: Archive a project by setting its status to 'archived' (soft-delete). The project and its tasks remain queryable but are excluded from active listings. Requires a projectId (from createProject or listProjects).
+    description: Archive a project by setting its status to 'archived' (soft-delete). The project and its tasks remain queryable but are excluded from active listings.
+      Requires a projectId (from createProject or listProjects).
     command: task archive-project
     usage: task archive-project <projectId>
     params:
@@ -1733,44 +1801,16 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Project ID to archive (REQUIRED \u2014 from createProject or listProjects) (string)"
+      description: '[REQUIRED] Project ID to archive (REQUIRED — from createProject or listProjects) (string)'
     examples:
     - task archive-project "projectId-value"
-  - name: createProject
-    description: Create a new project within a workspace. Projects organize tasks and must have a unique name per workspace. Requires a workspaceId (from loadWorkspace or createWorkspace). Returns the new projectId.
-    command: task create-project
-    usage: task create-project <name> [--description <description>] [--metadata <metadata>]
-    params:
-      required:
-      - name
-      optional:
-      - description
-      - metadata
-    arguments:
-    - name: name
-      flag: --name
-      type: string
-      required: true
-      positional: true
-      description: "[REQUIRED] Project name (REQUIRED \u2014 must be unique within the workspace) (string)"
-    - name: description
-      flag: --description
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Project description (optional) (string)'
-    - name: metadata
-      flag: --metadata
-      type: object
-      required: false
-      positional: false
-      description: '[OPTIONAL] Custom metadata key-value pairs (optional) (object)'
-    examples:
-    - task create-project "name-value" --description "description-value" --metadata '{"key":"value"}'
-  - name: createTask
-    description: Create a task within a project. Requires a projectId (from createProject or listProjects). Supports optional priority (critical/high/medium/low), assignee, dueDate, tags, dependsOn[] for DAG edges (cycles rejected), parentTaskId for subtask nesting, and linkedNotes[] for vault note links. Returns the new taskId.
-    command: task create-task
-    usage: task create-task <projectId> <title> [--description <description>] [--parent-task-id <parentTaskId>] [--priority <priority>] [--due-date <dueDate>] [--assignee <assignee>] [--tags <tags>] [--depends-on <dependsOn>] [--linked-notes <linkedNotes>] [--metadata <metadata>]
+  - name: create
+    description: Create a task within a project. Requires a projectId (from createProject or listProjects). Supports optional priority (critical/high/medium/low),
+      assignee, dueDate, tags, dependsOn[] for DAG edges (cycles rejected), parentTaskId for subtask nesting, and linkedNotes[] for vault note links. Returns the
+      new taskId.
+    command: task create
+    usage: task create <projectId> <title> [--description <description>] [--parent-task-id <parentTaskId>] [--priority <priority>] [--due-date <dueDate>] [--assignee
+      <assignee>] [--tags <tags>] [--depends-on <dependsOn>] [--linked-notes <linkedNotes>] [--metadata <metadata>]
     params:
       required:
       - projectId
@@ -1791,7 +1831,7 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Project ID to create the task in (REQUIRED \u2014 from createProject or listProjects) (string)"
+      description: '[REQUIRED] Project ID to create the task in (REQUIRED — from createProject or listProjects) (string)'
     - name: title
       flag: --title
       type: string
@@ -1809,7 +1849,7 @@ tools:
       type: string
       required: false
       positional: false
-      description: "[OPTIONAL] Parent task ID to nest this task under as a subtask (optional \u2014 from createTask or listTasks) (string)"
+      description: '[OPTIONAL] Parent task ID to nest this task under as a subtask (optional — from createTask or listTasks) (string)'
     - name: priority
       flag: --priority
       type: string
@@ -1839,7 +1879,8 @@ tools:
       type: array<string>
       required: false
       positional: false
-      description: "[OPTIONAL] Task IDs this task depends on \u2014 creates DAG edges. Task cannot start until all dependencies are done. Cycles are rejected with an error. (Array of a string)"
+      description: '[OPTIONAL] Task IDs this task depends on — creates DAG edges. Task cannot start until all dependencies are done. Cycles are rejected with an error.
+        (Array of a string)'
     - name: linkedNotes
       flag: --linked-notes
       type: array<string>
@@ -1853,9 +1894,43 @@ tools:
       positional: false
       description: '[OPTIONAL] Custom metadata key-value pairs (optional) (object)'
     examples:
-    - task create-task "projectId-value" "title-value" --description "description-value" --parent-task-id "parentTaskId-value" --priority "priority-value" --due-date 1 --assignee "assignee-value" --tags "value-1,value-2" --depends-on "value-1,value-2" --linked-notes "value-1,value-2" --metadata '{"key":"value"}'
+    - task create "projectId-value" "title-value" --description "description-value" --parent-task-id "parentTaskId-value" --priority "priority-value" --due-date 1
+      --assignee "assignee-value" --tags "value-1,value-2" --depends-on "value-1,value-2" --linked-notes "value-1,value-2" --metadata '{"key":"value"}'
+  - name: createProject
+    description: Create a new project within a workspace. Projects organize tasks and must have a unique name per workspace. Requires a workspaceId (from loadWorkspace
+      or createWorkspace). Returns the new projectId.
+    command: task create-project
+    usage: task create-project <name> [--description <description>] [--metadata <metadata>]
+    params:
+      required:
+      - name
+      optional:
+      - description
+      - metadata
+    arguments:
+    - name: name
+      flag: --name
+      type: string
+      required: true
+      positional: true
+      description: '[REQUIRED] Project name (REQUIRED — must be unique within the workspace) (string)'
+    - name: description
+      flag: --description
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Project description (optional) (string)'
+    - name: metadata
+      flag: --metadata
+      type: object
+      required: false
+      positional: false
+      description: '[OPTIONAL] Custom metadata key-value pairs (optional) (object)'
+    examples:
+    - task create-project "name-value" --description "description-value" --metadata '{"key":"value"}'
   - name: linkNote
-    description: 'Create or remove a bidirectional link between a vault note and a task. Link types: reference (related note), output (task produces this note), input (task consumes this note). Use action=unlink to remove an existing link.'
+    description: 'Create or remove a bidirectional link between a vault note and a task. Link types: reference (related note), output (task produces this note), input
+      (task consumes this note). Use action=unlink to remove an existing link.'
     command: task link-note
     usage: task link-note <taskId> <notePath> [--link-type <linkType>] [--action <action>]
     params:
@@ -1871,7 +1946,7 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Task ID to link the note to (REQUIRED \u2014 from createTask or listTasks) (string)"
+      description: '[REQUIRED] Task ID to link the note to (REQUIRED — from createTask or listTasks) (string)'
     - name: notePath
       flag: --note-path
       type: string
@@ -1883,7 +1958,8 @@ tools:
       type: string
       required: false
       positional: false
-      description: '[OPTIONAL] Type of link (default: reference). reference=related note, output=task produces this note, input=task consumes this note (One of: ["reference", "output", "input"])'
+      description: '[OPTIONAL] Type of link (default: reference). reference=related note, output=task produces this note, input=task consumes this note (One of: ["reference",
+        "output", "input"])'
     - name: action
       flag: --action
       type: string
@@ -1892,41 +1968,12 @@ tools:
       description: '[OPTIONAL] Action to perform (default: link) (One of: ["link", "unlink"])'
     examples:
     - task link-note "taskId-value" "notePath-value" --link-type "linkType-value" --action "action-value"
-  - name: listProjects
-    description: List projects in a workspace with optional status filter (active/completed/archived). Returns paginated project objects with id, name, description, status, and timestamps. Use to discover projectIds for task operations.
-    command: task list-projects
-    usage: task list-projects [--status <status>] [--page <page>] [--page-size <pageSize>]
-    params:
-      required: []
-      optional:
-      - status
-      - page
-      - pageSize
-    arguments:
-    - name: status
-      flag: --status
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Filter by project status (One of: ["active", "completed", "archived"])'
-    - name: page
-      flag: --page
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Page number (0-indexed, default: 0) (number) [min: 0]'
-    - name: pageSize
-      flag: --page-size
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Items per page (default: 20) (number) [min: 1, max: 100]'
-    examples:
-    - task list-projects --status "status-value" --page 1 --page-size 1
-  - name: listTasks
-    description: List tasks in a project with optional filters for status (todo/in_progress/done/cancelled), priority, assignee, and parentTaskId. Returns paginated task objects with full metadata including dependencies and timestamps.
-    command: task list-tasks
-    usage: task list-tasks <projectId> [--status <status>] [--priority <priority>] [--assignee <assignee>] [--parent-task-id <parentTaskId>] [--include-subtasks] [--sort-by <sortBy>] [--sort-order <sortOrder>] [--page <page>] [--page-size <pageSize>]
+  - name: list
+    description: List tasks in a project with optional filters for status (todo/in_progress/done/cancelled), priority, assignee, and parentTaskId. Returns paginated
+      task objects with full metadata including dependencies and timestamps.
+    command: task list
+    usage: task list <projectId> [--status <status>] [--priority <priority>] [--assignee <assignee>] [--parent-task-id <parentTaskId>] [--include-subtasks] [--sort-by
+      <sortBy>] [--sort-order <sortOrder>] [--page <page>] [--page-size <pageSize>]
     params:
       required:
       - projectId
@@ -1946,7 +1993,7 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Project ID (REQUIRED \u2014 from createProject or listProjects) (string)"
+      description: '[REQUIRED] Project ID (REQUIRED — from createProject or listProjects) (string)'
     - name: status
       flag: --status
       type: string
@@ -2002,11 +2049,45 @@ tools:
       positional: false
       description: '[OPTIONAL] Items per page (default: 20) (number) [min: 1, max: 100]'
     examples:
-    - task list-tasks "projectId-value" --status "status-value" --priority "priority-value" --assignee "assignee-value" --parent-task-id "parentTaskId-value" --sort-by "sortBy-value" --sort-order "sortOrder-value" --page 1 --page-size 1
-  - name: moveTask
-    description: Move a task to a different project within the same workspace, or change its parent task (set parentTaskId to nest as subtask, null to make top-level). Requires a taskId (from createTask or listTasks).
-    command: task move-task
-    usage: task move-task <taskId> [--project-id <projectId>] [--parent-task-id <parentTaskId>]
+    - task list "projectId-value" --status "status-value" --priority "priority-value" --assignee "assignee-value" --parent-task-id "parentTaskId-value" --sort-by
+      "sortBy-value" --sort-order "sortOrder-value" --page 1 --page-size 1
+  - name: listProjects
+    description: List projects in a workspace with optional status filter (active/completed/archived). Returns paginated project objects with id, name, description,
+      status, and timestamps. Use to discover projectIds for task operations.
+    command: task list-projects
+    usage: task list-projects [--status <status>] [--page <page>] [--page-size <pageSize>]
+    params:
+      required: []
+      optional:
+      - status
+      - page
+      - pageSize
+    arguments:
+    - name: status
+      flag: --status
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Filter by project status (One of: ["active", "completed", "archived"])'
+    - name: page
+      flag: --page
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Page number (0-indexed, default: 0) (number) [min: 0]'
+    - name: pageSize
+      flag: --page-size
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Items per page (default: 20) (number) [min: 1, max: 100]'
+    examples:
+    - task list-projects --status "status-value" --page 1 --page-size 1
+  - name: move
+    description: Move a task to a different project within the same workspace, or change its parent task (set parentTaskId to nest as subtask, null to make top-level).
+      Requires a taskId (from createTask or listTasks).
+    command: task move
+    usage: task move <taskId> [--project-id <projectId>] [--parent-task-id <parentTaskId>]
     params:
       required:
       - taskId
@@ -2019,13 +2100,13 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Task ID to move (REQUIRED \u2014 from createTask or listTasks) (string)"
+      description: '[REQUIRED] Task ID to move (REQUIRED — from createTask or listTasks) (string)'
     - name: projectId
       flag: --project-id
       type: string
       required: false
       positional: false
-      description: "[OPTIONAL] Target project ID to move the task to (from createProject or listProjects \u2014 must be in the same workspace) (string)"
+      description: '[OPTIONAL] Target project ID to move the task to (from createProject or listProjects — must be in the same workspace) (string)'
     - name: parentTaskId
       flag: --parent-task-id
       type: unknown
@@ -2033,11 +2114,12 @@ tools:
       positional: false
       description: '[OPTIONAL] New parent task ID (null to make top-level, string to nest under another task) (string | null)'
     examples:
-    - task move-task "taskId-value" --project-id "projectId-value" --parent-task-id "parentTaskId-value"
-  - name: openTasks
-    description: Open the native Task Board workspace view in Obsidian. Optional filters let you preselect a workspace, project, or search query before the board is shown.
-    command: task open-tasks
-    usage: task open-tasks [--project-id <projectId>] [--search <search>] [--mode <mode>]
+    - task move "taskId-value" --project-id "projectId-value" --parent-task-id "parentTaskId-value"
+  - name: open
+    description: Open the native Task Board workspace view in Obsidian. Optional filters let you preselect a workspace, project, or search query before the board
+      is shown.
+    command: task open
+    usage: task open [--project-id <projectId>] [--search <search>] [--mode <mode>]
     params:
       required: []
       optional:
@@ -2064,11 +2146,13 @@ tools:
       positional: false
       description: '[OPTIONAL] Where to open the task board view. (One of: ["tab", "split", "current", "sidebar"])'
     examples:
-    - task open-tasks --project-id "projectId-value" --search "search-value" --mode "mode-value"
-  - name: queryTasks
-    description: 'DAG-aware queries on a project''s tasks. Three query types: nextActions returns tasks ready to start (status=todo and all dependencies done), blockedTasks returns tasks waiting on incomplete dependencies with their blocker details, dependencyTree returns the full upstream/downstream dependency graph for a specific task. Requires projectId; dependencyTree also requires taskId.'
-    command: task query-tasks
-    usage: task query-tasks <projectId> <query> [--task-id <taskId>]
+    - task open --project-id "projectId-value" --search "search-value" --mode "mode-value"
+  - name: query
+    description: 'DAG-aware queries on a project''s tasks. Three query types: nextActions returns tasks ready to start (status=todo and all dependencies done), blockedTasks
+      returns tasks waiting on incomplete dependencies with their blocker details, dependencyTree returns the full upstream/downstream dependency graph for a specific
+      task. Requires projectId; dependencyTree also requires taskId.'
+    command: task query
+    usage: task query <projectId> <query> [--task-id <taskId>]
     params:
       required:
       - projectId
@@ -2081,70 +2165,30 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Project ID to query (REQUIRED \u2014 from createProject or listProjects) (string)"
+      description: '[REQUIRED] Project ID to query (REQUIRED — from createProject or listProjects) (string)'
     - name: query
       flag: --query
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Query type (REQUIRED). nextActions: tasks with status=todo whose dependencies are all done \u2014 these are ready to start. blockedTasks: tasks waiting on incomplete dependencies, returned with their blocker details. dependencyTree: full upstream/downstream dependency graph for a specific task (requires taskId). (One of: [\"nextActions\", \"blockedTasks\", \"dependencyTree\"])"
+      description: '[REQUIRED] Query type (REQUIRED). nextActions: tasks with status=todo whose dependencies are all done — these are ready to start. blockedTasks:
+        tasks waiting on incomplete dependencies, returned with their blocker details. dependencyTree: full upstream/downstream dependency graph for a specific task
+        (requires taskId). (One of: ["nextActions", "blockedTasks", "dependencyTree"])'
     - name: taskId
       flag: --task-id
       type: string
       required: false
       positional: false
-      description: "[OPTIONAL] Task ID (REQUIRED for dependencyTree query \u2014 from createTask or listTasks) (string)"
+      description: '[OPTIONAL] Task ID (REQUIRED for dependencyTree query — from createTask or listTasks) (string)'
     examples:
-    - task query-tasks "projectId-value" "query-value" --task-id "taskId-value"
-  - name: updateProject
-    description: Update a project's name, description, status (active/completed/archived), or custom metadata. Requires a projectId (from createProject or listProjects).
-    command: task update-project
-    usage: task update-project <projectId> [--name <name>] [--description <description>] [--status <status>] [--metadata <metadata>]
-    params:
-      required:
-      - projectId
-      optional:
-      - name
-      - description
-      - status
-      - metadata
-    arguments:
-    - name: projectId
-      flag: --project-id
-      type: string
-      required: true
-      positional: true
-      description: "[REQUIRED] Project ID to update (REQUIRED \u2014 from createProject or listProjects) (string)"
-    - name: name
-      flag: --name
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] New project name (string)'
-    - name: description
-      flag: --description
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] New project description (string)'
-    - name: status
-      flag: --status
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] New project status (One of: ["active", "completed", "archived"])'
-    - name: metadata
-      flag: --metadata
-      type: object
-      required: false
-      positional: false
-      description: '[OPTIONAL] Custom metadata to merge (object)'
-    examples:
-    - task update-project "projectId-value" --name "name-value" --description "description-value" --status "status-value" --metadata '{"key":"value"}'
-  - name: updateTask
-    description: Update task fields (title, description, status, priority, dueDate, assignee, tags), manage DAG dependencies (addDependencies/removeDependencies), and manage note links (addNoteLinks/removeNoteLinks). Dependency additions are validated for cycles. Requires a taskId (from createTask or listTasks).
-    command: task update-task
-    usage: task update-task <taskId> [--title <title>] [--description <description>] [--status <status>] [--priority <priority>] [--due-date <dueDate>] [--assignee <assignee>] [--tags <tags>] [--add-dependencies <addDependencies>] [--remove-dependencies <removeDependencies>] [--add-note-links <addNoteLinks>] [--remove-note-links <removeNoteLinks>] [--metadata <metadata>]
+    - task query "projectId-value" "query-value" --task-id "taskId-value"
+  - name: update
+    description: Update task fields (title, description, status, priority, dueDate, assignee, tags), manage DAG dependencies (addDependencies/removeDependencies),
+      and manage note links (addNoteLinks/removeNoteLinks). Dependency additions are validated for cycles. Requires a taskId (from createTask or listTasks).
+    command: task update
+    usage: task update <taskId> [--title <title>] [--description <description>] [--status <status>] [--priority <priority>] [--due-date <dueDate>] [--assignee <assignee>]
+      [--tags <tags>] [--add-dependencies <addDependencies>] [--remove-dependencies <removeDependencies>] [--add-note-links <addNoteLinks>] [--remove-note-links <removeNoteLinks>]
+      [--metadata <metadata>]
     params:
       required:
       - taskId
@@ -2167,7 +2211,7 @@ tools:
       type: string
       required: true
       positional: true
-      description: "[REQUIRED] Task ID to update (REQUIRED \u2014 from createTask or listTasks) (string)"
+      description: '[REQUIRED] Task ID to update (REQUIRED — from createTask or listTasks) (string)'
     - name: title
       flag: --title
       type: string
@@ -2215,7 +2259,7 @@ tools:
       type: array<string>
       required: false
       positional: false
-      description: "[OPTIONAL] Task IDs to add as DAG dependencies \u2014 this task cannot start until these are done. Cycles are rejected with an error. (Array of a string)"
+      description: '[OPTIONAL] Task IDs to add as DAG dependencies — this task cannot start until these are done. Cycles are rejected with an error. (Array of a string)'
     - name: removeDependencies
       flag: --remove-dependencies
       type: array<string>
@@ -2241,102 +2285,59 @@ tools:
       positional: false
       description: '[OPTIONAL] Custom metadata to merge (keys are merged, not replaced) (object)'
     examples:
-    - task update-task "taskId-value" --title "title-value" --description "description-value" --status "status-value" --priority "priority-value" --due-date 1 --assignee "assignee-value" --tags "value-1,value-2" --add-dependencies "value-1,value-2" --remove-dependencies "value-1,value-2" --add-note-links "value-1,value-2" --remove-note-links "value-1,value-2" --metadata '{"key":"value"}'
+    - task update "taskId-value" --title "title-value" --description "description-value" --status "status-value" --priority "priority-value" --due-date 1 --assignee
+      "assignee-value" --tags "value-1,value-2" --add-dependencies "value-1,value-2" --remove-dependencies "value-1,value-2" --add-note-links "value-1,value-2" --remove-note-links
+      "value-1,value-2" --metadata '{"key":"value"}'
+  - name: updateProject
+    description: Update a project's name, description, status (active/completed/archived), or custom metadata. Requires a projectId (from createProject or listProjects).
+    command: task update-project
+    usage: task update-project <projectId> [--name <name>] [--description <description>] [--status <status>] [--metadata <metadata>]
+    params:
+      required:
+      - projectId
+      optional:
+      - name
+      - description
+      - status
+      - metadata
+    arguments:
+    - name: projectId
+      flag: --project-id
+      type: string
+      required: true
+      positional: true
+      description: '[REQUIRED] Project ID to update (REQUIRED — from createProject or listProjects) (string)'
+    - name: name
+      flag: --name
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] New project name (string)'
+    - name: description
+      flag: --description
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] New project description (string)'
+    - name: status
+      flag: --status
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] New project status (One of: ["active", "completed", "archived"])'
+    - name: metadata
+      flag: --metadata
+      type: object
+      required: false
+      positional: false
+      description: '[OPTIONAL] Custom metadata to merge (object)'
+    examples:
+    - task update-project "projectId-value" --name "name-value" --description "description-value" --status "status-value" --metadata '{"key":"value"}'
   webTools:
-  - name: capturePagePdf
-    description: Print the current Web Viewer page to PDF and save it to the vault. Desktop only.
-    command: web-tools capture-page-pdf
-    usage: web-tools capture-page-pdf [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
-    params:
-      required:
-      - outputPath
-      optional:
-      - url
-      - mode
-      - timeoutMs
-      - settleMs
-    arguments:
-    - name: url
-      flag: --url
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Optional URL to open in Web Viewer before capturing. (string)'
-    - name: mode
-      flag: --mode
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Where to open the Web Viewer tab when url is provided. (One of: ["tab", "split", "window", "current"])'
-    - name: outputPath
-      flag: --output-path
-      type: string
-      required: true
-      positional: true
-      description: '[REQUIRED] Destination PDF path in the vault. Required so the caller explicitly chooses where the document is saved. (string)'
-    - name: timeoutMs
-      flag: --timeout-ms
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Maximum time to wait for page load. (number)'
-    - name: settleMs
-      flag: --settle-ms
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Extra delay after page load before printing. (number)'
-    examples:
-    - web-tools capture-page-pdf --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
-  - name: capturePagePng
-    description: Capture the current Web Viewer page as a PNG image and save it to the vault. Desktop only.
-    command: web-tools capture-page-png
-    usage: web-tools capture-page-png [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
-    params:
-      required:
-      - outputPath
-      optional:
-      - url
-      - mode
-      - timeoutMs
-      - settleMs
-    arguments:
-    - name: url
-      flag: --url
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Optional URL to open in Web Viewer before capturing. (string)'
-    - name: mode
-      flag: --mode
-      type: string
-      required: false
-      positional: false
-      description: '[OPTIONAL] Where to open the Web Viewer tab when url is provided. (One of: ["tab", "split", "window", "current"])'
-    - name: outputPath
-      flag: --output-path
-      type: string
-      required: true
-      positional: true
-      description: '[REQUIRED] Destination PNG path in the vault. Required so the caller explicitly chooses where the image is saved. (string)'
-    - name: timeoutMs
-      flag: --timeout-ms
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Maximum time to wait for page load. (number)'
-    - name: settleMs
-      flag: --settle-ms
-      type: number
-      required: false
-      positional: false
-      description: '[OPTIONAL] Extra delay after page load before capturing. (number)'
-    examples:
-    - web-tools capture-page-png --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
-  - name: captureToMarkdown
+  - name: capture-markdown
     description: Save the active Web Viewer page to the vault as Markdown using Obsidian Web Viewer. Desktop only.
-    command: web-tools capture-to-markdown
-    usage: web-tools capture-to-markdown [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    command: web capture-markdown
+    usage: web capture-markdown [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
     params:
       required:
       - outputPath
@@ -2377,11 +2378,101 @@ tools:
       positional: false
       description: '[OPTIONAL] Extra delay after page load before invoking Save to vault. (number)'
     examples:
-    - web-tools capture-to-markdown --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
-  - name: extractLinks
+    - web capture-markdown --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
+  - name: capture-pdf
+    description: Print the current Web Viewer page to PDF and save it to the vault. Desktop only.
+    command: web capture-pdf
+    usage: web capture-pdf [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required:
+      - outputPath
+      optional:
+      - url
+      - mode
+      - timeoutMs
+      - settleMs
+    arguments:
+    - name: url
+      flag: --url
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Optional URL to open in Web Viewer before capturing. (string)'
+    - name: mode
+      flag: --mode
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Where to open the Web Viewer tab when url is provided. (One of: ["tab", "split", "window", "current"])'
+    - name: outputPath
+      flag: --output-path
+      type: string
+      required: true
+      positional: true
+      description: '[REQUIRED] Destination PDF path in the vault. Required so the caller explicitly chooses where the document is saved. (string)'
+    - name: timeoutMs
+      flag: --timeout-ms
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Maximum time to wait for page load. (number)'
+    - name: settleMs
+      flag: --settle-ms
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Extra delay after page load before printing. (number)'
+    examples:
+    - web capture-pdf --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
+  - name: capture-png
+    description: Capture the current Web Viewer page as a PNG image and save it to the vault. Desktop only.
+    command: web capture-png
+    usage: web capture-png [--url <url>] [--mode <mode>] <outputPath> [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    params:
+      required:
+      - outputPath
+      optional:
+      - url
+      - mode
+      - timeoutMs
+      - settleMs
+    arguments:
+    - name: url
+      flag: --url
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Optional URL to open in Web Viewer before capturing. (string)'
+    - name: mode
+      flag: --mode
+      type: string
+      required: false
+      positional: false
+      description: '[OPTIONAL] Where to open the Web Viewer tab when url is provided. (One of: ["tab", "split", "window", "current"])'
+    - name: outputPath
+      flag: --output-path
+      type: string
+      required: true
+      positional: true
+      description: '[REQUIRED] Destination PNG path in the vault. Required so the caller explicitly chooses where the image is saved. (string)'
+    - name: timeoutMs
+      flag: --timeout-ms
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Maximum time to wait for page load. (number)'
+    - name: settleMs
+      flag: --settle-ms
+      type: number
+      required: false
+      positional: false
+      description: '[OPTIONAL] Extra delay after page load before capturing. (number)'
+    examples:
+    - web capture-png --url "url-value" --mode "mode-value" "outputPath-value" --timeout-ms 1 --settle-ms 1
+  - name: links
     description: Extract links from the current Web Viewer page. Desktop only.
-    command: web-tools extract-links
-    usage: web-tools extract-links [--url <url>] [--mode <mode>] [--max-links <maxLinks>] [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    command: web links
+    usage: web links [--url <url>] [--mode <mode>] [--max-links <maxLinks>] [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
     params:
       required: []
       optional:
@@ -2422,11 +2513,11 @@ tools:
       positional: false
       description: '[OPTIONAL] Extra delay after page load before extracting links. (number)'
     examples:
-    - web-tools extract-links --url "url-value" --mode "mode-value" --max-links 1 --timeout-ms 1 --settle-ms 1
-  - name: openWebpage
+    - web links --url "url-value" --mode "mode-value" --max-links 1 --timeout-ms 1 --settle-ms 1
+  - name: open
     description: Open a webpage in Obsidian Web Viewer. Desktop only.
-    command: web-tools open-webpage
-    usage: web-tools open-webpage <url> [--mode <mode>] [--focus] [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
+    command: web open
+    usage: web open <url> [--mode <mode>] [--focus] [--timeout-ms <timeoutMs>] [--settle-ms <settleMs>]
     params:
       required:
       - url
@@ -2467,7 +2558,7 @@ tools:
       positional: false
       description: '[OPTIONAL] Extra delay after load before returning, to allow client-side rendering to settle. (number)'
     examples:
-    - web-tools open-webpage "url-value" --mode "mode-value" --timeout-ms 1 --settle-ms 1
+    - web open "url-value" --mode "mode-value" --timeout-ms 1 --settle-ms 1
 validation:
   wrapper_required: true
   allow_unknown_tools: false

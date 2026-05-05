@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional
 from ..schemas.tool_response_schema import resolve_wrapper_name
 
 
-def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
+def _render_available_workspaces(
+    workspaces: List[Dict[str, Any]],
+    instruction: Optional[str] = None,
+) -> str:
     if not isinstance(workspaces, list) or not workspaces:
         return ""
     lines: List[str] = []
@@ -27,8 +30,9 @@ def _render_available_workspaces(workspaces: List[Dict[str, Any]]) -> str:
         if root_folder is not None:
             lines.append(f"  Root folder: {root_folder}")
         lines.append("")
-    if lines:
-        lines.append("Use memoryManager with loadWorkspace mode to get full workspace context.")
+    clean_instruction = str(instruction or "").strip()
+    if lines and clean_instruction:
+        lines.append(clean_instruction)
     return "\n".join(lines).strip()
 
 
@@ -82,6 +86,21 @@ def _render_available_tools(
     context_csv = ", ".join(str(f) for f in context_required)
     instruction = str(instruction_template).replace("{context_required_csv}", context_csv)
 
+    detail = str(format_config.get("available_tools_detail") or "summary").lower()
+    include_description = bool(
+        format_config.get("available_tools_include_description", detail in {"detailed", "full"})
+    )
+    include_usage = bool(
+        format_config.get("available_tools_include_usage", detail in {"detailed", "full"})
+    )
+    include_arguments = bool(
+        format_config.get("available_tools_include_arguments", detail in {"detailed", "full"})
+    )
+    include_examples = bool(
+        format_config.get("available_tools_include_examples", detail == "full")
+    )
+    max_examples = int(format_config.get("available_tools_max_examples", 2) or 0)
+
     lines: List[str] = [
         f"Use the `{wrapper_name}` wrapper for tool calls.",
         instruction,
@@ -103,6 +122,35 @@ def _render_available_tools(
             optional = ", ".join(str(item) for item in params.get("optional") or []) or "-"
             if tool_name:
                 lines.append(f"- {tool_name}: required [{required}] optional [{optional}]")
+                command = str(tool.get("command") or "").strip()
+                usage = str(tool.get("usage") or "").strip()
+                description = str(tool.get("description") or "").strip()
+                if command:
+                    lines.append(f"  Command: {command}")
+                if include_description and description:
+                    lines.append(f"  Description: {description}")
+                if include_usage and usage:
+                    lines.append(f"  Usage: {usage}")
+                if include_arguments:
+                    for argument in tool.get("arguments") or []:
+                        if not isinstance(argument, dict):
+                            continue
+                        arg_name = str(argument.get("name") or "").strip()
+                        if not arg_name:
+                            continue
+                        required_label = "required" if argument.get("required") else "optional"
+                        position_label = "positional" if argument.get("positional") else str(argument.get("flag") or "flag").strip()
+                        arg_type = str(argument.get("type") or "value").strip()
+                        arg_description = str(argument.get("description") or "").strip()
+                        suffix = f": {arg_description}" if arg_description else ""
+                        lines.append(
+                            f"  - {arg_name} ({required_label}, {arg_type}, {position_label}){suffix}"
+                        )
+                if include_examples and max_examples > 0:
+                    for example in (tool.get("examples") or [])[:max_examples]:
+                        example_text = str(example or "").strip()
+                        if example_text:
+                            lines.append(f"  Example: {example_text}")
         lines.append("")
 
     return "\n".join(lines).strip()

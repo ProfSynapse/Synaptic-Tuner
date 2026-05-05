@@ -113,13 +113,11 @@ class ValidationService:
 
         # For response scope, also extract tool_calls
         if scope == "response":
-            conversations = example.get("conversations", [])
-            for conv in conversations:
-                if conv.get("role") == "assistant":
-                    tool_calls = conv.get("tool_calls", [])
-                    if tool_calls:
-                        data["tool_calls"] = tool_calls
-                    break
+            conv = self._select_conversation_for_scope(example, scope, "assistant")
+            if conv:
+                tool_calls = conv.get("tool_calls", [])
+                if tool_calls:
+                    data["tool_calls"] = tool_calls
 
         return data
 
@@ -142,9 +140,9 @@ class ValidationService:
                     return conv.get("content", "")
 
         elif scope == "response":
-            for conv in conversations:
-                if conv.get("role") == "assistant":
-                    return conv.get("content") or ""
+            conv = self._select_conversation_for_scope(example, scope, "assistant")
+            if conv:
+                return conv.get("content") or ""
 
         elif scope == "user":
             for conv in conversations:
@@ -152,3 +150,18 @@ class ValidationService:
                     return conv.get("content", "")
 
         return None
+
+    def _select_conversation_for_scope(self, example: Dict, scope: str, role: str) -> Optional[Dict]:
+        scope_def = self.scope_config.get_scope(scope)
+        selection = "first"
+        if scope_def:
+            selection = getattr(scope_def.extraction, "message_selection", "first") or "first"
+        conversations = [
+            conv for conv in example.get("conversations", [])
+            if conv.get("role") == role
+        ]
+        if not conversations:
+            return None
+        if str(selection).strip().lower() == "last":
+            return conversations[-1]
+        return conversations[0]

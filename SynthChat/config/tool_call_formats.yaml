@@ -7,6 +7,7 @@ formats:
   # -- Current Synaptic useTools wrapper (default active format) --
   default:
     wrapper_name: useTools
+    generation_argument_mode: object
 
     # Top-level fields required inside function.arguments
     argument_fields:
@@ -39,13 +40,14 @@ formats:
       - "Your job is to either call tools or respond via text."
       - "If tools are needed, use exactly one tool_calls entry whose function.name is '{wrapper_name}'."
       - "If no tool call is needed, respond with normal text in content and set tool_calls to null or []."
-      - "The function.arguments value must be a single JSON object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy."
+      - "For generation, set function.arguments to an object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy. The final saved message will serialize that object into the OpenAI function.arguments JSON string."
       - "The tool field must be a CLI command string, not a nested object."
-      - "Use CLI command names like 'storage move', 'content read', 'prompt execute-prompts', 'memory load-workspace', and 'search search-content'."
+      - "The tool field must use ordinary ASCII spaces, configured CLI command names, and double quotes around paths or arguments when the command option shows quotes."
+      - "Use CLI command names like 'storage move', 'content read', 'prompt execute', 'memory load-workspace', and 'search content'."
       - "When multiple commands are needed, join them in the tool field as a comma-separated sequence."
-      - "Do not use context/calls wrappers, params objects, agent/tool arrays, or direct per-tool function names."
-      - "Good: {\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect notes.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"
-      - "Bad: {\"context\": {...}, \"calls\": [...]}, {\"tool_calls\": [...]}, or function.name='contentManager_read'"
+      - "Use only the configured wrapper payload fields; do not add extra wrapper layers or nested tool arrays."
+      - 'Good function.arguments object: {"workspaceId":"default","sessionId":"session_123","memory":"Need to inspect notes.","goal":"Move a note and read it back.","constraints":"Do not touch unrelated files.","tool":"storage move \"notes/today.md\" \"archive/today.md\", content read \"archive/today.md\" 1","strategy":"serial"}'
+
       - "Use content as null when the response is tool-only."
       - "When the task is already complete, when clarification is needed, or when you are asked for a final confirmation, respond with text instead of calling tools."
 
@@ -74,8 +76,8 @@ formats:
       - "The function.arguments value must be a valid JSON object string containing ONLY that tool's actual parameters."
       - "Do not put a full assistant message, tool_calls array, function object, or wrapper object inside function.arguments."
       - "Do not include keys like tool_calls, function, id, type, tool, name, or arguments unless they are actual tool parameters from the schema."
-      - "Good: function.name='contentManager_replace' with function.arguments='{\"path\":\"notes/a.md\",\"oldContent\":\"x\",\"newContent\":\"y\",\"startLine\":3,\"endLine\":3}'"
-      - "Bad: function.arguments='{\"tool_calls\":[...]}', function.arguments='{\"name\":\"contentManager_replace\",\"arguments\":{...}}', or function.arguments='{\"function\":{...}}'"
+      - "Good: function.name set to a configured native tool with function.arguments containing only that tool's parameters."
+      - "Keep function.arguments limited to the selected tool's parameter object."
       - "Close every JSON string and every brace. Do not truncate the arguments object."
 
     available_tools_instruction: >-
@@ -106,3 +108,4 @@ formats:
 
     available_tools_instruction: >-
       Call tools using the MCP format. Specify server_name and tool_name.
+

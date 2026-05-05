@@ -4,8 +4,8 @@
 # Usage: ./dry_run.sh <scenario_key> [count] [extra_args...]
 #
 # Examples:
-#   ./dry_run.sh storageManager_createFolder          # 3 examples (default)
-#   ./dry_run.sh contentManager_write_blog 5          # 5 examples
+#   ./dry_run.sh workspace_create_folder              # 3 examples (default)
+#   ./dry_run.sh workspace_write_note 5               # 5 examples
 #   ./dry_run.sh essay_outline 2 --docs "essays/"     # 2 with docs
 
 set -euo pipefail

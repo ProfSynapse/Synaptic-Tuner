@@ -18,7 +18,7 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 | Upload merged 16-bit | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit` |
 | Upload with GGUF | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit --create-gguf` |
 | Upload LoRA only | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method lora` |
-| Merge LoRA manually | `./run.sh` → Merge LoRA |
+| Merge LoRA manually | Prefer the matched local Docker training runtime, then `./run.sh` → Merge LoRA or the shared merge utility inside that container |
 | Convert to GGUF only | `./run.sh` → Convert |
 | Cloud GGUF conversion | `python tuner.py cloud-run --job-config Trainers/cloud/jobs/gguf_conversion.yaml --yes` |
 | Full pipeline | `./run.sh` → Full Pipeline (Train → Upload → Eval) |
@@ -74,7 +74,8 @@ python3 scripts/upload_model.py \
 
 **Merge LoRA for GRPO continuation:**
 ```bash
-# Use shared merge utility
+# Prefer the matched local Docker training runtime/container.
+# Then use the shared merge utility or menu from inside that runtime.
 ./run.sh → Merge LoRA
 # Or the GRPO trainer auto-merges when lora_path is set in config
 ```
@@ -141,6 +142,19 @@ HF_TOKEN=hf_...                       # Required for uploads
 - Vision-language models auto-get an `mmproj.gguf` for the vision projector
 - On macOS, bucket-backed cloud adapters are often easiest to handle one model at a time: pull the `final_model`, merge locally, create the quant you actually need first, then clean temp files before moving to the next model
 - If the local machine lacks `unsloth`, a plain `transformers` + `peft` merge venv is an acceptable fallback for text models before llama.cpp conversion
+- For local Docker-trained adapters, prefer merging inside the same Docker
+  training runtime/container used for training. Host-side Python is a fallback:
+  it may have CPU-only torch, older Transformers that cannot load new model
+  architectures, or different PEFT/Unsloth behavior than the training job.
+- On Windows PowerShell, avoid long inline `python -c` merge commands through
+  nested `docker exec bash -lc`; quoting and semicolon parsing can silently
+  break or surface as access-denied/process-launch errors. Prefer a checked-in
+  CLI/job path, or a small run-local launcher that imports the existing shared
+  merge utility and is executed with `docker exec -w /workspace/repo ... python
+  path/to/launcher.py`.
+- Verify merged models in the same runtime that supports the model family. A
+  host tokenizer/config load failure can be caused by stale host Transformers
+  even when the merged artifact is valid in the Docker runtime.
 - For merged local models, call the lower-level llama.cpp conversion path directly; the current reliable converter's top-level `convert()` flow assumes it starts from a LoRA adapter
 - LM Studio on this repo owner's Mac uses `~/.lmstudio/models/<publisher>/<model-folder>/`; placing the `.gguf` there plus an optional `config.json` is enough for local testing after refresh/restart
 - Qwen 3.5 adapters may need a `ConditionalGeneration` merge path instead of `AutoModelForCausalLM`; if the adapter keys live under `language_model.*`, inspect the base architecture before merging

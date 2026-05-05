@@ -74,6 +74,15 @@ def render_workspace_prompt(
     if not note_contents:
         note_contents = _note_entries_from_fixture(fixture, note_paths=note_paths)
 
+    available_tools_format = dict(tool_call_format or {})
+    available_tools_format.update(
+        {
+            key: value
+            for key, value in format_config.items()
+            if str(key).startswith("available_tools_")
+        }
+    )
+
     # Template variables for {placeholder} substitution
     template_vars = dict(system_context)
     template_vars["session_id"] = session_id
@@ -82,9 +91,12 @@ def render_workspace_prompt(
     # Built-in source renderers
     source_renderers = {
         "vault_structure": lambda: _vault_structure_text_from_fixture(fixture),
-        "available_workspaces": lambda: _render_available_workspaces(available_workspaces),
+        "available_workspaces": lambda: _render_available_workspaces(
+            available_workspaces,
+            instruction=format_config.get("available_workspaces_instruction"),
+        ),
         "available_prompts": lambda: _render_available_prompts(available_prompts),
-        "available_tools": lambda: _render_available_tools(tool_schema, tool_call_format),
+        "available_tools": lambda: _render_available_tools(tool_schema, available_tools_format),
         "selected_workspace": lambda: selected_workspace_json,
         "note_contents": lambda: _render_note_contents(note_contents),
         "extra_sections": lambda: _render_extra_sections(extra_sections),
@@ -216,5 +228,3 @@ def _build_selected_workspace_json(
             payload[field_str] = None
 
     return json.dumps(payload, indent=2)
-
-

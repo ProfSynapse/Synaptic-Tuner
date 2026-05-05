@@ -1,4 +1,4 @@
-# Tool-based scenarios for SynthChat
+﻿# Tool-based scenarios for SynthChat
 # Each scenario is self-contained with embedded prompts
 
 shared_tool_final_review: &shared_tool_final_review
@@ -38,10 +38,10 @@ shared_tool_final_review: &shared_tool_final_review
 
 scenarios:
   # VaultManager tools
-  storageManager_createFolder:
+  storage create-folder:
     type: tool
-    agent: storageManager
-    tool: storageManager_createFolder
+    agent: storage
+    tool: storage create-folder
     system: true
     tool_call_format: default
 
@@ -51,7 +51,7 @@ scenarios:
         - <session_context> with workspace_id and path
         - <vault_structure> showing existing folders
         - <available_workspaces> with at least 2-3 workspaces
-        - <available_prompts> listing storageManager and others
+        - <available_prompts> listing storage and others
         - <selected_workspace> with name, path, and workflows
         Make the vault structure realistic with typical project folders.
 
@@ -72,13 +72,13 @@ scenarios:
         The tool field must be a CLI command string such as:
         storage create-folder "Projects/Q4 Planning"
         The tool field must begin with the exact literal command prefix `storage create-folder`.
-        Never use legacy tool names like `storageManager_createFolder` inside the tool string.
-        Do not use context/calls wrappers or direct function.name="storageManager_createFolder".
+        Never use legacy tool names like `storage create-folder` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storage create-folder".
 
-  storageManager_archive:
+  storage archive:
     type: tool
-    agent: storageManager
-    tool: storageManager_archive
+    agent: storage
+    tool: storage archive
     system: true
     tool_call_format: default
     flags:
@@ -108,13 +108,13 @@ scenarios:
         The tool field must be a CLI command string such as:
         storage archive "Archive/Deprecated Sprint Notes"
         The tool field must begin with the exact literal command prefix `storage archive`.
-        Never use legacy tool names like `storageManager_archive` inside the tool string.
-        Do not use context/calls wrappers or direct function.name="storageManager_archive".
+        Never use legacy tool names like `storage archive` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storage archive".
 
-  storageManager_move:
+  storage move:
     type: tool
-    agent: storageManager
-    tool: storageManager_move
+    agent: storage
+    tool: storage move
     environment_mode: generated
     system_template: mocked_workspace_vault
     tool_call_format: default
@@ -186,14 +186,14 @@ scenarios:
         The tool field must be a CLI command string such as:
         storage move "Inbox/Q4 Brainstorm.md" "Projects/Q4/Brainstorm.md"
         The tool field must begin with the exact literal command prefix `storage move`.
-        Never use legacy tool names like `storageManager_move` inside the tool string.
+        Never use legacy tool names like `storage move` inside the tool string.
         Use an existing source path exactly as written in the system prompt.
-        Do not use context/calls wrappers or direct function.name="storageManager_move".
+        Do not use context/calls wrappers or direct function.name="storage move".
 
-  storageManager_list:
+  storage list:
     type: tool
-    agent: storageManager
-    tool: storageManager_list
+    agent: storage
+    tool: storage list
     system: true
     tool_call_format: default
 
@@ -218,14 +218,14 @@ scenarios:
         The tool field must be a CLI command string such as:
         storage list --path "Projects"
         The tool field must begin with the exact literal command prefix `storage list`.
-        Never use legacy tool names like `storageManager_list` inside the tool string.
-        Do not use context/calls wrappers or direct function.name="storageManager_list".
+        Never use legacy tool names like `storage list` inside the tool string.
+        Do not use context/calls wrappers or direct function.name="storage list".
 
-  # ContentManager tools
-  contentManager_write:
+  # Content tools
+  content write:
     type: tool
-    agent: contentManager
-    tool: contentManager_write
+    agent: content
+    tool: content write
     system: true
     tool_call_format: default
 
@@ -250,12 +250,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         content write "Projects/kickoff-notes.md" "# Kickoff Notes\n\n- Agenda item 1"
         Include realistic markdown content in the command.
-        Do not use context/calls wrappers or direct function.name="contentManager_write".
+        Do not use context/calls wrappers or direct function.name="content write".
 
-  contentManager_insert:
+  content insert:
     type: tool
-    agent: contentManager
-    tool: contentManager_insert
+    agent: content
+    tool: content insert
     system: true
     tool_call_format: default
 
@@ -280,12 +280,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         content insert --path "Meetings/team-sync.md" --content "- New action item" --start-line -1
         Use --start-line -1 for append style requests or --start-line 1 for prepend style requests.
-        Do not use context/calls wrappers or direct function.name="contentManager_insert".
+        Do not use context/calls wrappers or direct function.name="content insert".
 
-  contentManager_read:
+  content read:
     type: tool
-    agent: contentManager
-    tool: contentManager_read
+    agent: content
+    tool: content read
     environment_mode: generated
     system_template: mocked_workspace_vault
     tool_call_format: default
@@ -360,17 +360,17 @@ scenarios:
         Use an existing file path exactly as written in the system prompt.
         Do not invent filenames, rewrite spaces as underscores, or normalize the path.
         Include path and a valid start line.
-        Do not use context/calls wrappers or direct function.name="contentManager_read".
+        Do not use context/calls wrappers or direct function.name="content read".
 
-  contentManager_replace:
+  content replace:
     type: tool
-    agent: contentManager
-    tool: contentManager_replace
+    agent: content
+    tool: content replace
     system: true
     tool_call_format: default
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment, contentManager_tools]
+      response: [tool_alignment, content_tools]
     final_judge: *shared_tool_final_review
 
     prompts:
@@ -400,12 +400,12 @@ scenarios:
         content replace --path "notes/meeting-notes.md" --old-content "> old line" --new-content "new line" --start-line 24 --end-line 24
         Include --old-content, --new-content, --start-line, and --end-line in every content replace command.
         Do not use wildcards like "Status: *" for old content; use the exact text shown in the system prompt.
-        Do not use context/calls wrappers or direct function.name="contentManager_replace".
+        Do not use context/calls wrappers or direct function.name="content replace".
 
-  contentManager_setProperty:
+  content set-property:
     type: tool
-    agent: contentManager
-    tool: contentManager_setProperty
+    agent: content
+    tool: content set-property
     system: true
     tool_call_format: default
 
@@ -429,13 +429,13 @@ scenarios:
         The tool field must be a CLI command string such as:
         content set-property --path "Projects/roadmap.md" --property "status" --value "triaged"
         Include path, property, value, and optionally mode when merge semantics make sense.
-        Do not use context/calls wrappers or direct function.name="contentManager_setProperty".
+        Do not use context/calls wrappers or direct function.name="content set-property".
 
-  # PromptManager tools
-  promptManager_createPrompt:
+  # Prompt tools
+  prompt create:
     type: tool
-    agent: promptManager
-    tool: promptManager_createPrompt
+    agent: prompt
+    tool: prompt create
     system: true
     tool_call_format: default
 
@@ -458,21 +458,21 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt create-prompt "Daily Summarizer" "Summarizes daily notes" "You summarize daily notes into concise bullets."
-        The tool field must begin with the exact literal command prefix `prompt create-prompt`.
-        Never use legacy tool names like `promptManager_createPrompt` inside the tool string.
+        prompt create "Daily Summarizer" "Summarizes daily notes" "You summarize daily notes into concise bullets."
+        The tool field must begin with the exact literal command prefix `prompt create`.
+        Do not use legacy command names such as `prompt create-prompt`.
         Include name, description, and prompt.
-        Do not use context/calls wrappers or direct function.name="promptManager_createPrompt".
+        Do not use context/calls wrappers or direct function.name="prompt create".
 
-  promptManager_executePrompts:
+  prompt execute:
     type: tool
-    agent: promptManager
-    tool: promptManager_executePrompts
+    agent: prompt
+    tool: prompt execute
     system: true
     tool_call_format: default
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [tool_alignment, promptManager_tools]
+      response: [tool_alignment, prompt_tools]
     final_judge: *shared_tool_final_review
 
     prompts:
@@ -493,18 +493,18 @@ scenarios:
         2. One useTools call using the CLI-oriented payload
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt execute-prompts --prompts "[{\"agentId\":\"researcher\",\"prompt\":\"Find recent EV adoption statistics in the US and provide APA-style citations.\"}]"
-        The tool field must begin with the exact literal command prefix `prompt execute-prompts`.
+        prompt execute --prompts "[{\"agentId\":\"researcher\",\"prompt\":\"Find recent EV adoption statistics in the US and provide APA-style citations.\"}]"
+        The tool field must begin with the exact literal command prefix `prompt execute`.
         Prefer a short single-item JSON array for --prompts, for example:
-        prompt execute-prompts --prompts '[{"agentId":"researcher","prompt":"Summarize Docs/brief.md in 3 bullets."}]'
+        prompt execute --prompts '[{"agentId":"researcher","prompt":"Summarize Docs/brief.md in 3 bullets."}]'
         The value passed to --prompts must be valid JSON, not placeholder text and not comma-separated values.
         Keep the embedded prompt concise and avoid nested quotes, YAML frontmatter, or long multi-clause instructions unless the user explicitly asks for them.
-        Do not use context/calls wrappers or direct function.name="promptManager_executePrompts".
+        Do not use context/calls wrappers or direct function.name="prompt execute".
 
-  promptManager_archivePrompt:
+  prompt archive:
     type: tool
-    agent: promptManager
-    tool: promptManager_archivePrompt
+    agent: prompt
+    tool: prompt archive
     system: true
     tool_call_format: default
 
@@ -526,14 +526,14 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt archive-prompt "Legacy Release Writer"
+        prompt archive "Legacy Release Writer"
         Include the prompt name.
-        Do not use context/calls wrappers or direct function.name="promptManager_archivePrompt".
+        Do not use context/calls wrappers or direct function.name="prompt archive".
 
-  promptManager_generateImage:
+  prompt generate-image:
     type: tool
-    agent: promptManager
-    tool: promptManager_generateImage
+    agent: prompt
+    tool: prompt generate-image
     system: true
     tool_call_format: default
 
@@ -557,12 +557,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         prompt generate-image "A cinematic hero image for a launch note" "assets/launch-hero.png"
         Include prompt and savePath, plus optional provider/model settings when useful.
-        Do not use context/calls wrappers or direct function.name="promptManager_generateImage".
+        Do not use context/calls wrappers or direct function.name="prompt generate-image".
 
-  promptManager_getPrompt:
+  prompt get:
     type: tool
-    agent: promptManager
-    tool: promptManager_getPrompt
+    agent: prompt
+    tool: prompt get
     system: true
     tool_call_format: default
 
@@ -584,16 +584,16 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt get-prompt --name "Weekly Review Helper"
-        The tool field must begin with the exact literal command prefix `prompt get-prompt`.
-        Never use legacy tool names like `promptManager_getPrompt` inside the tool string.
+        prompt get --name "Weekly Review Helper"
+        The tool field must begin with the exact literal command prefix `prompt get`.
+        Do not use legacy command names such as `prompt get-prompt`.
         Include either id or name.
-        Do not use context/calls wrappers or direct function.name="promptManager_getPrompt".
+        Do not use context/calls wrappers or direct function.name="prompt get".
 
-  promptManager_listModels:
+  prompt list-models:
     type: tool
-    agent: promptManager
-    tool: promptManager_listModels
+    agent: prompt
+    tool: prompt list-models
     system: true
     tool_call_format: default
 
@@ -617,13 +617,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         prompt list-models
         The tool field must begin with the exact literal command prefix `prompt list-models`.
-        Never use legacy tool names like `promptManager_listModels` inside the tool string.
-        Do not use context/calls wrappers or direct function.name="promptManager_listModels".
+                Do not use context/calls wrappers or direct function.name="prompt list-models".
 
-  promptManager_listPrompts:
+  prompt list:
     type: tool
-    agent: promptManager
-    tool: promptManager_listPrompts
+    agent: prompt
+    tool: prompt list
     system: true
     tool_call_format: default
 
@@ -645,14 +644,14 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt list-prompts --include-archived
+        prompt list --include-archived
         Include --enabled-only or --include-archived when appropriate.
-        Do not use context/calls wrappers or direct function.name="promptManager_listPrompts".
+        Do not use context/calls wrappers or direct function.name="prompt list".
 
-  promptManager_subagent:
+  prompt sub:
     type: tool
-    agent: promptManager
-    tool: promptManager_subagent
+    agent: prompt
+    tool: prompt sub
     system: true
     tool_call_format: default
 
@@ -670,13 +669,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about the delegated task boundary
-        2. Tool call to promptManager_subagent
+        2. Tool call to prompt sub
         Include task and any relevant optional fields like agent, tools, or contextFiles.
 
-  promptManager_updatePrompt:
+  prompt update:
     type: tool
-    agent: promptManager
-    tool: promptManager_updatePrompt
+    agent: prompt
+    tool: prompt update
     system: true
     tool_call_format: default
 
@@ -698,17 +697,17 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        prompt update-prompt "prompt_123" --name "Launch Writer" --prompt "You write launch communications with citations."
-        The tool field must begin with the exact literal command prefix `prompt update-prompt`.
-        Never use legacy tool names like `promptManager_updatePrompt` inside the tool string.
+        prompt update "prompt_123" --name "Launch Writer" --prompt "You write launch communications with citations."
+        The tool field must begin with the exact literal command prefix `prompt update`.
+        Do not use legacy command names such as `prompt update-prompt`.
         Include the prompt id and whichever fields are being updated.
-        Do not use context/calls wrappers or direct function.name="promptManager_updatePrompt".
+        Do not use context/calls wrappers or direct function.name="prompt update".
 
-  # MemoryManager tools
-  memoryManager_createWorkspace:
+  # Memory tools
+  memory create-workspace:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_createWorkspace
+    agent: memory
+    tool: memory create-workspace
     system: true
     tool_call_format: default
 
@@ -733,12 +732,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory create-workspace "Client Alpha" "Workspace for client delivery notes" "Clients/Alpha" "Track delivery work for Client Alpha"
         Include name, description, root folder, and purpose.
-        Do not use context/calls wrappers or direct function.name="memoryManager_createWorkspace".
+        Do not use context/calls wrappers or direct function.name="memory create-workspace".
 
-  memoryManager_archiveWorkspace:
+  memory archive-workspace:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_archiveWorkspace
+    agent: memory
+    tool: memory archive-workspace
     system: true
     tool_call_format: default
 
@@ -762,14 +761,14 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory archive-workspace "Old Client Workspace"
         The tool field must begin with the exact literal command prefix `memory archive-workspace`.
-        Never use legacy tool names like `memoryManager_archiveWorkspace` inside the tool string.
+        Never use legacy tool names like `memory archive-workspace` inside the tool string.
         Include the workspace name.
-        Do not use context/calls wrappers or direct function.name="memoryManager_archiveWorkspace".
+        Do not use context/calls wrappers or direct function.name="memory archive-workspace".
 
-  memoryManager_createState:
+  memory create-state:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_createState
+    agent: memory
+    tool: memory create-state
     system: true
     tool_call_format: default
 
@@ -795,12 +794,12 @@ scenarios:
         The tool field must begin with the exact literal command prefix `memory create-state`.
         The values passed to --active-files and --next-steps must be valid JSON arrays of strings.
         Include name, conversation context, active task, active files, and next steps.
-        Do not use context/calls wrappers or direct function.name="memoryManager_createState".
+        Do not use context/calls wrappers or direct function.name="memory create-state".
 
-  memoryManager_listStates:
+  memory list-states:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_listStates
+    agent: memory
+    tool: memory list-states
     system: true
     tool_call_format: default
 
@@ -823,12 +822,12 @@ scenarios:
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
         memory list-states --include-archived
-        Do not use context/calls wrappers or direct function.name="memoryManager_listStates".
+        Do not use context/calls wrappers or direct function.name="memory list-states".
 
-  memoryManager_listWorkspaces:
+  memory list-workspaces:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_listWorkspaces
+    agent: memory
+    tool: memory list-workspaces
     system: true
     tool_call_format: default
 
@@ -852,12 +851,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory list-workspaces --sort-by "lastUsedAt" --order "desc" --limit 10
         Include includeArchived, sortBy, order, or limit when appropriate.
-        Do not use context/calls wrappers or direct function.name="memoryManager_listWorkspaces".
+        Do not use context/calls wrappers or direct function.name="memory list-workspaces".
 
-  memoryManager_loadState:
+  memory load-state:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_loadState
+    agent: memory
+    tool: memory load-state
     system: true
     tool_call_format: default
 
@@ -881,12 +880,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory load-state "Pre-Launch Checkpoint"
         Include the state name.
-        Do not use context/calls wrappers or direct function.name="memoryManager_loadState".
+        Do not use context/calls wrappers or direct function.name="memory load-state".
 
-  memoryManager_loadWorkspace:
+  memory load-workspace:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_loadWorkspace
+    agent: memory
+    tool: memory load-workspace
     system: true
     tool_call_format: default
 
@@ -910,12 +909,12 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory load-workspace "ws_client_alpha"
         Include the workspace id.
-        Do not use context/calls wrappers or direct function.name="memoryManager_loadWorkspace".
+        Do not use context/calls wrappers or direct function.name="memory load-workspace".
 
-  memoryManager_runWorkflow:
+  memory run-workflow:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_runWorkflow
+    agent: memory
+    tool: memory run-workflow
     system: true
     tool_call_format: default
 
@@ -933,13 +932,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which workflow matches the request
-        2. Tool call to memoryManager_runWorkflow
+        2. Tool call to memory run-workflow
         Include workflowId or workflowName.
 
-  memoryManager_updateWorkspace:
+  memory update-workspace:
     type: tool
-    agent: memoryManager
-    tool: memoryManager_updateWorkspace
+    agent: memory
+    tool: memory update-workspace
     system: true
     tool_call_format: default
 
@@ -963,18 +962,18 @@ scenarios:
         The tool field must be a CLI command string such as:
         memory update-workspace --name "Analytics Project" --description "Workspace for analytics planning and delivery" --key-files "[\"docs/plan.md\",\"reports/q4.md\"]"
         The tool field must begin with the exact literal command prefix `memory update-workspace`.
-        Never use legacy tool names like `memoryManager_updateWorkspace` inside the tool string.
+        Never use legacy tool names like `memory update-workspace` inside the tool string.
         If key files or workflows are provided, they must be valid JSON arrays.
         Prefer simple string fields like --description, --purpose, and --key-files.
         Do not emit JSON object literals inside --preferences or other string flags.
         Include only the fields being updated.
-        Do not use context/calls wrappers or direct function.name="memoryManager_updateWorkspace".
+        Do not use context/calls wrappers or direct function.name="memory update-workspace".
 
-  # SearchManager tools
-  searchManager_searchContent:
+  # Search tools
+  search content:
     type: tool
-    agent: searchManager
-    tool: searchManager_searchContent
+    agent: search
+    tool: search content
     system: true
     tool_call_format: default
 
@@ -997,16 +996,16 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        search search-content "Q4 project" --limit 10 --paths "[\"Projects\",\"Q4\"]"
-        The tool field must begin with the exact literal command prefix `search search-content`.
+        search content "Q4 project" --limit 10 --paths "[\"Projects\",\"Q4\"]"
+        The tool field must begin with the exact literal command prefix `search content`.
         The value passed to --paths must be a valid JSON array of strings.
         Include the search query and optional filters.
-        Do not use context/calls wrappers or direct function.name="searchManager_searchContent".
+        Do not use context/calls wrappers or direct function.name="search content".
 
-  searchManager_searchDirectory:
+  search directory:
     type: tool
-    agent: searchManager
-    tool: searchManager_searchDirectory
+    agent: search
+    tool: search directory
     system: true
     tool_call_format: default
 
@@ -1028,16 +1027,16 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        search search-directory "deployment" --paths "[\"Docs\",\"Runbooks\"]" --file-types "[\"md\"]"
-        The tool field must begin with the exact literal command prefix `search search-directory`.
+        search directory "deployment" --paths "[\"Docs\",\"Runbooks\"]" --file-types "[\"md\"]"
+        The tool field must begin with the exact literal command prefix `search directory`.
         The values passed to --paths and --file-types must be valid JSON arrays of strings.
         Include query, paths, and optional searchType or fileTypes.
-        Do not use context/calls wrappers or direct function.name="searchManager_searchDirectory".
+        Do not use context/calls wrappers or direct function.name="search directory".
 
-  searchManager_searchMemory:
+  search memory:
     type: tool
-    agent: searchManager
-    tool: searchManager_searchMemory
+    agent: search
+    tool: search memory
     system: true
     tool_call_format: default
 
@@ -1059,15 +1058,15 @@ scenarios:
         This scenario should produce a tool-only response with content set to null.
         Put workspaceId, sessionId, memory, goal, constraints, tool, and optional strategy at the top level of function.arguments.
         The tool field must be a CLI command string such as:
-        search search-memory "database migration decision" --limit 5
+        search memory "database migration decision" --limit 5
         Include query and optional memoryTypes, searchMethod, or limit.
-        Do not use context/calls wrappers or direct function.name="searchManager_searchMemory".
+        Do not use context/calls wrappers or direct function.name="search memory".
 
-  # StorageManager tools
-  storageManager_copy:
+  # Storage tools
+  storage copy:
     type: tool
-    agent: storageManager
-    tool: storageManager_copy
+    agent: storage
+    tool: storage copy
     environment_mode: generated
     system_template: mocked_workspace_vault
     tool_call_format: default
@@ -1139,12 +1138,12 @@ scenarios:
         The tool field must begin with the exact literal command prefix `storage copy`.
         Use an existing source path exactly as written in the system prompt.
         Include path and newPath, plus overwrite only when clearly intended.
-        Do not use context/calls wrappers or direct function.name="storageManager_copy".
+        Do not use context/calls wrappers or direct function.name="storage copy".
 
-  storageManager_open:
+  storage open:
     type: tool
-    agent: storageManager
-    tool: storageManager_open
+    agent: storage
+    tool: storage open
     environment_mode: generated
     system_template: mocked_workspace_vault
     tool_call_format: default
@@ -1219,13 +1218,13 @@ scenarios:
         Use an existing file path exactly as written in the system prompt.
         Do not invent filenames, rewrite spaces as underscores, or normalize the path.
         Include path and optional mode or focus when justified.
-        Do not use context/calls wrappers or direct function.name="storageManager_open".
+        Do not use context/calls wrappers or direct function.name="storage open".
 
-  # CanvasManager tools
-  canvasManager_list:
+  # Canvas tools
+  canvas list:
     type: tool
-    agent: canvasManager
-    tool: canvasManager_list
+    agent: canvas
+    tool: canvas list
     system: true
     tool_call_format: default
 
@@ -1243,13 +1242,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. Optional <thinking> about canvas scope or folder filtering
-        2. Tool call to canvasManager_list
+        2. Tool call to canvas list
         Include folder and recursive when useful.
 
-  canvasManager_read:
+  canvas read:
     type: tool
-    agent: canvasManager
-    tool: canvasManager_read
+    agent: canvas
+    tool: canvas read
     system: true
     tool_call_format: default
 
@@ -1267,13 +1266,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about which canvas file the user means
-        2. Tool call to canvasManager_read
+        2. Tool call to canvas read
         Include the canvas path.
 
-  canvasManager_update:
+  canvas update:
     type: tool
-    agent: canvasManager
-    tool: canvasManager_update
+    agent: canvas
+    tool: canvas update
     system: true
     tool_call_format: default
 
@@ -1292,13 +1291,13 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about whether nodes, edges, or both should change
-        2. Tool call to canvasManager_update
+        2. Tool call to canvas update
         Include path and whichever of nodes or edges are being updated.
 
-  canvasManager_write:
+  canvas write:
     type: tool
-    agent: canvasManager
-    tool: canvasManager_write
+    agent: canvas
+    tool: canvas write
     system: true
     tool_call_format: default
 
@@ -1316,7 +1315,7 @@ scenarios:
       assistant: |
         Generate response with:
         1. <thinking> about the initial canvas structure
-        2. Tool call to canvasManager_write
+        2. Tool call to canvas write
         Include path and optional initial nodes or edges.
 
   # TaskManager tools
@@ -1583,3 +1582,5 @@ scenarios:
         1. <thinking> about which task fields should change
         2. Tool call to taskManager_updateTask
         Include taskId and the requested updates.
+
+

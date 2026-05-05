@@ -53,7 +53,10 @@ class ScopeExtractor:
         conversation = self.parser.parse(example)
 
         # Get message for this scope's role
-        message = conversation.get_by_role(scope_def.conversation_role)
+        message = conversation.get_by_role(
+            scope_def.conversation_role,
+            selection=getattr(scope_def.extraction, "message_selection", "first"),
+        )
         if not message:
             return None
 

@@ -74,6 +74,7 @@ def create_client(
             model=config.model,
             provider=config.provider_routing,  # Pass provider routing (e.g., {"order": ["Groq"]})
             timeout_seconds=config.openrouter_timeout_seconds,
+            plugins=config.openrouter_plugins,
         )
 
     elif config.provider == "lmstudio":

@@ -112,10 +112,15 @@ class EnvironmentSession:
     action_hints: Dict[str, str] = field(init=False, default_factory=dict)
     key_hints: Dict[str, List[str]] = field(init=False, default_factory=dict)
     verb_rules: Dict[str, List[str]] = field(init=False, default_factory=dict)
+    invalid_cli_patterns: List[Dict[str, Any]] = field(init=False, default_factory=list)
+    mock_tool_outputs: List[Dict[str, Any]] = field(init=False, default_factory=list)
     strict_schema: bool = field(init=False, default=False)
     default_action: str = field(init=False, default="simulate")
     loop_mode: str = field(init=False, default="strict")
     continue_on_execution_error: bool = field(init=False, default=False)
+    require_all_tools_ok: bool = field(init=False, default=False)
+    require_expected_tool_order: bool = field(init=False, default=False)
+    forbid_unexpected_tools: bool = field(init=False, default=False)
     issues: List[EnvironmentIssue] = field(init=False, default_factory=list)
     executed_tools: List[ExecutedToolCall] = field(init=False, default_factory=list)
     steps: List[EnvironmentStepResult] = field(init=False, default_factory=list)
@@ -167,7 +172,13 @@ class EnvironmentSession:
             self.validator.execution_config.get("verb_rules", {}),
             override_verb_rules,
         )
-
+        override_invalid_cli_patterns = execution_overrides.get("invalid_cli_patterns")
+        self.invalid_cli_patterns = _merge_rule_items(
+            self.validator.execution_config.get("invalid_cli_patterns", []),
+            override_invalid_cli_patterns if isinstance(override_invalid_cli_patterns, list) else [],
+        )
+        configured_mocks = config.get("mock_tool_outputs")
+        self.mock_tool_outputs = configured_mocks if isinstance(configured_mocks, list) else []
         self.runtime = self.validator._create_runtime()
         loop_cfg = config.get("loop") if isinstance(config.get("loop"), dict) else {}
         self.loop_mode = str(loop_cfg.get("mode", "strict") or "strict").strip().lower()
@@ -177,6 +188,9 @@ class EnvironmentSession:
                 self.loop_mode == "agentic",
             )
         )
+        self.require_all_tools_ok = bool(config.get("require_all_tools_ok", False))
+        self.require_expected_tool_order = bool(config.get("require_expected_tool_order", False))
+        self.forbid_unexpected_tools = bool(config.get("forbid_unexpected_tools", False))
 
         fixture = merge_environment_fixture(
             parse_environment_fixture(self.system_prompt),
@@ -199,8 +213,10 @@ class EnvironmentSession:
                 tool_schema=self.validator.tool_schema,
                 action_hints=self.action_hints,
                 strict_schema=self.strict_schema,
+                invalid_cli_patterns=self.invalid_cli_patterns,
                 key_hints=self.key_hints,
                 verb_rules=self.verb_rules,
+                mock_tool_outputs=self.mock_tool_outputs,
                 default_action=self.default_action,
             )
         except Exception as exc:
@@ -248,9 +264,20 @@ class EnvironmentSession:
                 )
             )
 
+        if self.require_all_tools_ok:
+            failed_tools = [tool for tool in self.executed_tools if str(tool.status).lower() != "ok"]
+            if failed_tools:
+                names = ", ".join(tool.name for tool in failed_tools)
+                final_issues.append(
+                    EnvironmentIssue(
+                        "error",
+                        f"Executed tool(s) did not complete successfully: {names}",
+                    )
+                )
+
         if expected_tools:
-            expected = set(expected_tools)
-            called = {tool.name for tool in self.executed_tools}
+            expected = {str(tool).strip() for tool in expected_tools if str(tool).strip()}
+            called = _called_tool_identifiers(self.executed_tools, self.validator.tool_schema)
             missing = sorted(expected - called)
             if missing:
                 final_issues.append(
@@ -259,6 +286,27 @@ class EnvironmentSession:
                         f"Expected tool(s) not executed in environment simulation: {', '.join(missing)}",
                     )
                 )
+            if self.forbid_unexpected_tools:
+                unexpected = [
+                    tool.name
+                    for tool in self.executed_tools
+                    if not (_called_tool_identifiers([tool], self.validator.tool_schema) & expected)
+                ]
+                if unexpected:
+                    final_issues.append(
+                        EnvironmentIssue(
+                            "error",
+                            f"Unexpected tool(s) executed in environment simulation: {', '.join(unexpected)}",
+                        )
+                    )
+            if self.require_expected_tool_order:
+                order_issue = _expected_tool_order_issue(
+                    self.executed_tools,
+                    expected_tools,
+                    self.validator.tool_schema,
+                )
+                if order_issue is not None:
+                    final_issues.append(order_issue)
 
         if isinstance(self.assertions, list):
             assertion_issues = _run_assertions(self.runtime, self.assertions)
@@ -298,6 +346,60 @@ class EnvironmentSession:
             self.runtime.teardown()
         except Exception as exc:
             self.issues.append(EnvironmentIssue("warning", f"Environment teardown warning: {exc}"))
+
+
+def _called_tool_identifiers(
+    executed_tools: Iterable[ExecutedToolCall],
+    tool_schema: Optional[Dict[str, Any]],
+) -> set[str]:
+    """Return every configured identifier that describes executed tools."""
+    names = {tool.name for tool in executed_tools}
+    if not isinstance(tool_schema, dict):
+        return names
+
+    command_by_name: Dict[str, str] = {}
+    for agent, tools in (tool_schema.get("tools") or {}).items():
+        if not isinstance(tools, list):
+            continue
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            tool_name = str(tool.get("name") or "").strip()
+            command = str(tool.get("command") or "").strip()
+            if not tool_name or not command:
+                continue
+            command_by_name[f"{agent}_{tool_name}"] = command
+            command_by_name.setdefault(tool_name, command)
+
+    identifiers = set(names)
+    for name in names:
+        command = command_by_name.get(name)
+        if command:
+            identifiers.add(command)
+    return identifiers
+
+
+def _expected_tool_order_issue(
+    executed_tools: List[ExecutedToolCall],
+    expected_tools: Iterable[str],
+    tool_schema: Optional[Dict[str, Any]],
+) -> Optional[EnvironmentIssue]:
+    expected = [str(tool).strip() for tool in expected_tools if str(tool).strip()]
+    if not expected:
+        return None
+
+    expected_index = 0
+    for tool in executed_tools:
+        identifiers = _called_tool_identifiers([tool], tool_schema)
+        if expected[expected_index] in identifiers:
+            expected_index += 1
+            if expected_index >= len(expected):
+                return None
+
+    return EnvironmentIssue(
+        "error",
+        f"Expected tool order not satisfied: {' -> '.join(expected)}",
+    )
 
 
 def _run_assertions(runtime: EnvironmentRuntime, assertions: List[Dict[str, Any]]) -> List[EnvironmentIssue]:
@@ -649,6 +751,7 @@ def _load_execution_config(path: Path) -> Dict[str, Any]:
         "verb_rules": {},
         "key_hints": {},
         "tool_action_hints": {},
+        "invalid_cli_patterns": [],
     }
     data = _load_yaml_file(path)
     section = data.get("environment_execution") if isinstance(data.get("environment_execution"), dict) else data
@@ -662,6 +765,9 @@ def _load_execution_config(path: Path) -> Dict[str, Any]:
     merged["tool_action_hints"] = (
         section.get("tool_action_hints", {}) if isinstance(section.get("tool_action_hints"), dict) else {}
     )
+    merged["invalid_cli_patterns"] = (
+        section.get("invalid_cli_patterns", []) if isinstance(section.get("invalid_cli_patterns"), list) else []
+    )
     return merged
 
 
@@ -673,6 +779,16 @@ def _merge_rule_lists(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[st
     for key, values in (override or {}).items():
         if isinstance(values, list):
             out[key] = [str(v) for v in values]
+    return out
+
+
+def _merge_rule_items(base: List[Any], override: List[Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for item in list(base or []) + list(override or []):
+        if isinstance(item, dict):
+            out.append(dict(item))
+        elif isinstance(item, str) and item.strip():
+            out.append({"pattern": item.strip()})
     return out
 
 

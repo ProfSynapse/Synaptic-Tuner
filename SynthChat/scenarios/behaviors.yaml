@@ -1,4 +1,4 @@
-# Behavioral scenarios for SynthChat
+﻿# Behavioral scenarios for SynthChat
 # Focus on specific AI behaviors we want to train
 
 scenarios:
@@ -171,7 +171,7 @@ scenarios:
     prompts:
       system: |
         Generate workspace with multiple agents available.
-        Include contentManager, storageManager, searchManager.
+        Include content, storage, search.
 
       user: |
         Generate request that could use different tools:
@@ -209,3 +209,4 @@ scenarios:
         1. Brief <thinking> (2-3 lines max) OR no thinking if obvious
         2. Direct tool call without over-explanation
         Avoid verbosity - be concise and action-oriented.
+

@@ -1,4 +1,4 @@
-# System Prompt Templates
+﻿# System Prompt Templates
 # Reusable system prompts for evaluation scenarios
 # Placeholders use {variable} syntax
 
@@ -57,7 +57,7 @@ templates:
         - Inbox/
         - Meetings/
         - README.md
-      available_tools: "{{auto_from_tool_schema}}"
+      available_tools: ""
 
   # Minimal prompt for quick tests
   minimal:
@@ -89,7 +89,7 @@ templates:
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant that can coordinate with other agents. Use promptManager tools to delegate tasks to specialized agents when appropriate.
+      You are an AI assistant that can coordinate with other agents. Use prompt tools to delegate tasks to specialized agents when appropriate.
 
     defaults:
       session_id: "session_multi_agent"
@@ -120,7 +120,7 @@ templates:
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant with persistent memory. Use the CLI-first memory and search tools to persist and recover context across conversations. When the user asks you to remember something, create or update state with the memory commands. When they reference past conversations or saved context, use `search search-memory ...`, `memory list-states ...`, or `memory load-state ...` as appropriate.
+      You are an AI assistant with persistent memory. Use the CLI-first memory and search tools to persist and recover context across conversations. When the user asks you to remember something, create or update state with the memory commands. When they reference past conversations or saved context, use `search memory ...`, `memory list-states ...`, or `memory load-state ...` as appropriate.
 
     defaults:
       session_id: "session_memory"
@@ -184,7 +184,51 @@ templates:
 
       {selected_workspace_section}
 
+      <available_tools>
+      {available_tools}
+      </available_tools>
+
       {note_contents_section}
+
+      {extra_sections}
+
+      When using tools, emit an OpenAI-style tool call where:
+      - `function.name` is `useTools`
+      - `function.arguments` is a JSON string with top-level wrapper fields
+
+      Required wrapper payload fields:
+      - `workspaceId`: current workspace id
+      - `sessionId`: current session id
+      - `memory`: relevant context from the conversation
+      - `goal`: what you are trying to accomplish
+      - `tool`: CLI command string, for example `search content "query"` or `content read "path.md" 1`
+
+      You may issue multiple CLI commands in one `tool` string separated by commas when they should run serially.
+
+      {assistant_instructions}
+    defaults:
+      session_context_section: ""
+      vault_structure_section: ""
+      available_workspaces_section: ""
+      available_prompts_section: ""
+      selected_workspace_section: ""
+      available_tools: "{{auto_from_tool_schema}}"
+      note_contents_section: ""
+      extra_sections: ""
+      assistant_instructions: "You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests."
+
+  environmental_workspace_vault:
+    description: "Workspace prompt that exposes only environmental context, not tool docs or hidden file contents"
+    content: |
+      {session_context_section}
+
+      {vault_structure_section}
+
+      {available_workspaces_section}
+
+      {available_prompts_section}
+
+      {selected_workspace_section}
 
       {extra_sections}
 
@@ -195,9 +239,8 @@ templates:
       available_workspaces_section: ""
       available_prompts_section: ""
       selected_workspace_section: ""
-      note_contents_section: ""
       extra_sections: ""
-      assistant_instructions: "You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests."
+      assistant_instructions: "You are an AI assistant helping manage an Obsidian-style workspace. Use your available workspace tools when you need to inspect or change files."
 
 # ============================================================
 # AUTO-GENERATION
@@ -216,3 +259,4 @@ auto_generated:
         - {{tool_name}}: {{description}}
         {{/each}}
       {{/each}}
+

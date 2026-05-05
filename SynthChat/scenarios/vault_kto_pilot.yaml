@@ -1,4 +1,4 @@
-# Environment-backed pilot pack for KTO/GRPO data generation.
+﻿# Environment-backed pilot pack for KTO/GRPO data generation.
 # Focus: retrieval-first behavior, structure preservation, destructive safety,
 # context continuity, and clarify-vs-act decisions.
 
@@ -17,8 +17,8 @@ shared_agentic_environment: &agentic_loop_env
 scenarios:
   envfs_promote_inbox_note_with_example:
     type: tool
-    tool: contentManager_write
-    expected_tools: [contentManager_read, contentManager_write, storageManager_archive]
+    tool: content write
+    expected_tools: [content read, content write, storage archive]
     environment_mode: generated
     tags: [vault, workflow, frontmatter, retrieval]
     system_template: mocked_workspace_vault
@@ -89,16 +89,16 @@ scenarios:
         then write the promoted note and remove or archive the original inbox note.
 
         Preferred behavior:
-        - contentManager.read
-        - contentManager.write
-        - storageManager.archive
+        - content.read
+        - content.write
+        - storage.archive
     assistant_generation:
       schema: use_tools_response
 
   envfs_create_daily_note_from_template:
     type: tool
-    tool: contentManager_write
-    expected_tools: [searchManager_searchDirectory, contentManager_read, contentManager_write]
+    tool: content write
+    expected_tools: [search directory, content read, content write]
     environment_mode: generated
     tags: [vault, template, frontmatter, retrieval]
     system_template: mocked_workspace_vault
@@ -156,16 +156,16 @@ scenarios:
         JSON text.
 
         Use useTools with:
-        - searchManager.searchDirectory first
-        - contentManager.read second
-        - contentManager.write last
+        - search.searchDirectory first
+        - content.read second
+        - content.write last
     assistant_generation:
       schema: use_tools_response
 
   envfs_triage_correct_note_after_search:
     type: tool
-    tool: contentManager_setProperty
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_setProperty]
+    tool: content set-property
+    expected_tools: [search content, content read, content set-property]
     environment_mode: generated
     tags: [vault, retrieval, triage]
     system_template: mocked_workspace_vault
@@ -218,16 +218,16 @@ scenarios:
         JSON text.
 
         Use useTools with:
-        - searchManager.searchContent
-        - contentManager.read
-        - contentManager.setProperty
+        - search.searchContent
+        - content.read
+        - content.setProperty
     assistant_generation:
       schema: use_tools_response
 
   envfs_update_production_config_preserve_structure:
     type: tool
-    tool: contentManager_replace
-    expected_tools: [searchManager_searchContent, contentManager_read, contentManager_replace]
+    tool: content replace
+    expected_tools: [search content, content read, content replace]
     environment_mode: generated
     tags: [vault, config, retrieval, preservation]
     system_template: mocked_workspace_vault
@@ -289,8 +289,8 @@ scenarios:
 
   envfs_read_before_replace_settings_yaml:
     type: tool
-    tool: contentManager_replace
-    expected_tools: [contentManager_read, contentManager_replace]
+    tool: content replace
+    expected_tools: [content read, content replace]
     environment_mode: generated
     tags: [vault, settings, preservation]
     system_template: mocked_workspace_vault
@@ -344,14 +344,14 @@ scenarios:
         response. Do not rely on native provider tool-calling output outside the
         JSON text.
 
-        Use useTools with contentManager.read followed by contentManager.replace.
+        Use useTools with content.read followed by content.replace.
     assistant_generation:
       schema: use_tools_response
 
   envfs_archive_empty_folder_after_verification:
     type: tool
-    tool: storageManager_archive
-    expected_tools: [storageManager_list, storageManager_archive]
+    tool: storage archive
+    expected_tools: [storage list, storage archive]
     environment_mode: generated
     tags: [vault, destructive, verification]
     system_template: mocked_workspace_vault
@@ -402,15 +402,15 @@ scenarios:
         JSON text.
 
         Use useTools with:
-        - storageManager.list
-        - storageManager.archive
+        - storage.list
+        - storage.archive
     assistant_generation:
       schema: use_tools_response
 
   envfs_archive_only_deprecated_notes:
     type: tool
-    tool: storageManager_archive
-    expected_tools: [searchManager_searchContent, contentManager_read, storageManager_archive]
+    tool: storage archive
+    expected_tools: [search content, content read, storage archive]
     environment_mode: generated
     tags: [vault, destructive, selective, retrieval]
     system_template: mocked_workspace_vault
@@ -469,8 +469,8 @@ scenarios:
 
   envfs_continue_inbox_organization:
     type: tool
-    tool: storageManager_move
-    expected_tools: [storageManager_createFolder, storageManager_move]
+    tool: storage move
+    expected_tools: [storage create-folder, storage move]
     environment_mode: generated
     tags: [vault, continuity, workflow]
     system_template: mocked_workspace_vault
@@ -629,3 +629,5 @@ scenarios:
 
         Ask for confirmation, mention the scope of the deletion, and do not call
         tools.
+
+

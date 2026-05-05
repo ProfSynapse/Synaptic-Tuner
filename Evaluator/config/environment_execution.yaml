@@ -13,6 +13,17 @@ environment_execution:
   strict_schema: false
   default_action: simulate
 
+  # Optional raw CLI rejection rules applied before any executor normalization.
+  # Keep these generic and config-driven so scenarios can opt into stricter or
+  # looser command surfaces without changing runtime code.
+  invalid_cli_patterns:
+    - name: non_ascii_whitespace
+      pattern: "[\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]"
+      message: "CLI command contains non-ASCII whitespace; use ordinary spaces."
+    - name: markdown_backticks
+      pattern: "`"
+      message: "CLI command contains markdown backticks; use raw paths or quoted arguments instead."
+
   key_hints:
     source_path:
       - path
@@ -31,6 +42,19 @@ environment_execution:
       - text
       - body
       - value
+    old_content:
+      - oldContent
+      - old_content
+      - old
+      - oldText
+      - old_text
+    new_content:
+      - newContent
+      - new_content
+      - new
+      - replacement
+      - newText
+      - new_text
     query:
       - query
       - search
@@ -48,8 +72,9 @@ environment_execution:
     write:
       - write
       - update
-      - replace
       - createcontent
+    replace:
+      - replace
     read:
       - read
       - open

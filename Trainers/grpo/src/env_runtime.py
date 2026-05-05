@@ -10,9 +10,10 @@ import json
 import inspect
 import subprocess
 import sys
+import traceback
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List
 
 
@@ -38,7 +39,7 @@ def build_cloud_bootstrap_commands(
         f"python -m virtualenv --no-download {_shell_quote(venv_dir)}",
         f". {_shell_quote(venv_dir)}/bin/activate",
         f"python -m pip install --upgrade {install_args}",
-        f"cd {_shell_quote(str(Path(cloud_repo_root) / 'Trainers' / 'grpo'))}",
+        f"cd {_shell_quote(_container_path(cloud_repo_root, 'Trainers', 'grpo'))}",
         f"python train_env_grpo.py --config {_shell_quote(config_path)}",
     ]
 
@@ -63,7 +64,9 @@ def detect_openenv_runtime_support() -> Dict[str, Any]:
             support["has_rollout_func"] = "rollout_func" in signature.parameters
             support["has_environment_factory"] = "environment_factory" in signature.parameters
     except Exception as exc:
-        support["errors"].append(f"trl import failed: {exc}")
+        support["errors"].append(
+            f"trl import failed: {exc}\n{traceback.format_exc()}"
+        )
         return support
 
     for module_path in (
@@ -137,6 +140,10 @@ def _shell_quote(value: str) -> str:
     return f"'{escaped}'"
 
 
+def _container_path(*parts: str) -> str:
+    return str(PurePosixPath(str(parts[0]), *[str(part) for part in parts[1:]]))
+
+
 def _resolve_local_venv_dir(runtime_cfg: Dict[str, Any], *, repo_root: str) -> Path:
     configured = str(runtime_cfg.get("local_venv_dir") or ".venvs/grpo-openenv")
     path = Path(configured)
@@ -155,6 +162,7 @@ def _probe_runtime_support(python_executable: str) -> Dict[str, Any]:
     probe_script = """
 import json
 import inspect
+import traceback
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 
@@ -182,7 +190,7 @@ try:
         support["has_rollout_func"] = "rollout_func" in signature.parameters
         support["has_environment_factory"] = "environment_factory" in signature.parameters
 except Exception as exc:
-    support["errors"].append(f"trl import failed: {exc}")
+    support["errors"].append(f"trl import failed: {exc}\\n{traceback.format_exc()}")
 
 for module_path in (
     "trl.experimental.openenv",

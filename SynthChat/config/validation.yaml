@@ -67,6 +67,7 @@ scopes:
     conversation_role: "assistant"
     extraction:
       method: "exclusion"  # Extract by excluding other scopes
+      message_selection: "last"
       exclude:
         - thinking
         - tool_calls

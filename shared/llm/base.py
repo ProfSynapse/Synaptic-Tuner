@@ -44,6 +44,7 @@ class BaseLLMClient(ABC):
         schema: Dict[str, Any],
         temperature: float = 0.3,
         max_tokens: Optional[int] = None,
+        response_format: str = "json_schema",
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -54,6 +55,9 @@ class BaseLLMClient(ABC):
             schema: JSON Schema for structured output
             temperature: Sampling temperature (lower for structured output)
             max_tokens: Optional maximum tokens to generate
+            response_format: Provider response format hint, such as
+                "json_schema" for strict schema mode or "json_object" for
+                provider JSON mode with local validation.
             **kwargs: Provider-specific parameters
 
         Returns:

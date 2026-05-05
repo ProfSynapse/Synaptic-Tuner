@@ -26,7 +26,7 @@ def load_env_rollout_dataset(
     """Load canonical rollout rows for env-GRPO."""
     cache_dir = os.environ.get("HF_DATASETS_CACHE")
     if local_file:
-        dataset = load_dataset("json", data_files=local_file, split="train", cache_dir=cache_dir)
+        dataset = _load_local_jsonl(local_file)
     elif dataset_name:
         if data_files:
             dataset = load_dataset(
@@ -42,6 +42,32 @@ def load_env_rollout_dataset(
     return dataset
 
 
+def _load_local_jsonl(local_file: str) -> Dataset:
+    """Load JSONL without Arrow inferring heterogeneous nested metadata.
+
+    Canonical rollout rows often contain rich, model-generated nested metadata
+    whose shape can vary row to row. Store those nested values as JSON strings
+    and decode them in the env formatting helpers.
+    """
+    rows: List[Dict[str, Any]] = []
+    with open(local_file, "r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                raw = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSONL row {line_number} in {local_file}: {exc}") from exc
+            rows.append(
+                {
+                    "conversations": _json_text(raw.get("conversations") or []),
+                    "metadata": _json_text(raw.get("metadata") or {}),
+                    "scenario": raw.get("scenario") or (raw.get("metadata") or {}).get("scenario") or "",
+                }
+            )
+    return Dataset.from_list(rows)
+
+
 def filter_env_rollout_dataset(
     dataset: Dataset,
     *,
@@ -53,7 +79,7 @@ def filter_env_rollout_dataset(
     required_reviews = list(required_stage_reviews or [])
 
     def _keep(example: Dict[str, Any]) -> bool:
-        metadata = example.get("metadata") or {}
+        metadata = _as_mapping(example.get("metadata"))
         if not isinstance(metadata, dict):
             return False
 
@@ -78,13 +104,31 @@ def filter_env_rollout_dataset(
     return dataset.filter(_keep, desc="Filtering env rollout rows")
 
 
-def format_dataset_for_env_grpo(dataset: Dataset) -> Dataset:
+def format_dataset_for_env_grpo(
+    dataset: Dataset,
+    *,
+    prompt_message_roles: Optional[Iterable[str]] = None,
+    user_prompt_prefix: Optional[str] = None,
+    user_prompt_suffix: Optional[str] = None,
+) -> Dataset:
     """Project canonical rollout rows into replay-ready env examples."""
+    allowed_roles = None
+    if prompt_message_roles is not None:
+        allowed_roles = {
+            str(role).strip()
+            for role in prompt_message_roles
+            if str(role).strip()
+        }
 
     def _format(example: Dict[str, Any]) -> Dict[str, Any]:
-        metadata = example.get("metadata") or {}
-        conversations = example.get("conversations") or []
-        initial_messages = _extract_initial_messages(conversations)
+        metadata = _as_mapping(example.get("metadata"))
+        conversations = _as_list(example.get("conversations"))
+        initial_messages = _extract_initial_messages(
+            conversations,
+            allowed_roles=allowed_roles,
+            user_prompt_prefix=user_prompt_prefix,
+            user_prompt_suffix=user_prompt_suffix,
+        )
         task_context = metadata.get("task_context") or {}
         environment_config = _resolve_environment_config(metadata) or {}
         scenario = metadata.get("scenario") or "unknown"
@@ -107,7 +151,35 @@ def format_dataset_for_env_grpo(dataset: Dataset) -> Dataset:
     return dataset.map(_format, desc="Formatting env rollout dataset")
 
 
-def _extract_initial_messages(conversations: Any) -> List[Dict[str, Any]]:
+def _json_text(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, list) else []
+    return []
+
+
+def _extract_initial_messages(
+    conversations: Any,
+    *,
+    allowed_roles: Optional[set[str]] = None,
+    user_prompt_prefix: Optional[str] = None,
+    user_prompt_suffix: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     if not isinstance(conversations, list):
         return []
 
@@ -118,12 +190,12 @@ def _extract_initial_messages(conversations: Any) -> List[Dict[str, Any]]:
         role = str(item.get("role", "")).strip()
         if role == "assistant":
             break
-        prompt_messages.append(
-            {
-                "role": role,
-                "content": item.get("content", ""),
-            }
-        )
+        if allowed_roles is not None and role not in allowed_roles:
+            continue
+        content = item.get("content", "")
+        if role == "user" and isinstance(content, str):
+            content = f"{user_prompt_prefix or ''}{content}{user_prompt_suffix or ''}"
+        prompt_messages.append({"role": role, "content": content})
     return prompt_messages
 
 

@@ -141,7 +141,7 @@ class ModelOpsHandler(BaseHandler):
         # Available operations
         operations = [
             {"id": "run", "name": "Run Model", "description": "Chat with trained model"},
-            {"id": "merge", "name": "Merge LoRA", "description": "Combine adapters with base model"},
+            {"id": "merge", "name": "Merge LoRA", "description": "Combine adapters with base model; prefer matched Docker training runtime"},
             {"id": "gguf", "name": "Convert GGUF", "description": "Quantize to GGUF format"},
             {"id": "webllm", "name": "Convert WebLLM", "description": "Prepare for browser"},
             {"id": "upload", "name": "Upload to HF", "description": "Push to HuggingFace"},
@@ -193,7 +193,7 @@ class ModelOpsHandler(BaseHandler):
         # Define menu options with descriptions
         menu_options = [
             ("run", f"{BOX['star']} Run Model - Chat with your trained model"),
-            ("merge", f"{BOX['bullet']} Merge LoRA - Combine adapters with base model"),
+            ("merge", f"{BOX['bullet']} Merge LoRA - Prefer matched Docker training runtime"),
             ("gguf", f"{BOX['bullet']} Convert GGUF - Quantize to GGUF format"),
             ("webllm", f"{BOX['bullet']} Convert WebLLM - Prepare for browser"),
             ("upload", f"{BOX['bullet']} Upload to HF - Push to HuggingFace"),

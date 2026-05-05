@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 
 from shared.environments import EnvironmentValidator
+from shared.environments.types import ExecutedToolCall
+from shared.environments.tool_executor import _expand_allowed_tool_identifiers
+from shared.environments.validator import _called_tool_identifiers
 from shared.environments.fixture_parser import EnvironmentFixture, merge_environment_fixture
 
 
@@ -198,6 +201,287 @@ Need to compare RAG vs fine-tune for support.
 
     assert result.passed is True
     assert [tool.name for tool in result.executed_tools] == ["contentManager_write"]
+
+
+def test_environment_validator_replace_edits_old_content_without_clobbering_file():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_replace",
+                    "arguments": json.dumps(
+                        {
+                            "path": "Projects/Alpha/status.md",
+                            "oldContent": "pending",
+                            "newContent": "completed",
+                            "startLine": 5,
+                            "endLine": 5,
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {
+                "directories": ["Projects/Alpha"],
+                "notes": [
+                    {
+                        "path": "Projects/Alpha/status.md",
+                        "frontmatter": {"title": "Alpha Status"},
+                        "body": "Release 1.2 status: pending",
+                    }
+                ],
+            },
+            "assertions": [
+                {
+                    "type": "file_contains",
+                    "path": "Projects/Alpha/status.md",
+                    "text": "Release 1.2 status",
+                },
+                {"type": "file_contains", "path": "Projects/Alpha/status.md", "text": "completed"},
+                {
+                    "type": "file_not_contains",
+                    "path": "Projects/Alpha/status.md",
+                    "text": "pending",
+                },
+            ],
+        },
+    )
+
+    assert result.passed is True
+    assert [tool.name for tool in result.executed_tools] == ["contentManager_replace"]
+
+
+def test_environment_validator_uses_configured_mock_tool_output_for_non_filesystem_tool():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "memoryManager_loadWorkspace",
+                    "arguments": json.dumps({"id": "Team Workspace", "limit": 5, "recursive": True}),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "allowed_tools": ["memory load-workspace"],
+            "mock_tool_outputs": [
+                {
+                    "tool": "memory load-workspace",
+                    "match": {"id": "Team Workspace"},
+                    "output": {
+                        "context": {"name": "Team Workspace", "purpose": "Project delivery"},
+                        "keyFiles": ["reports/status.md"],
+                        "workflows": [{"name": "Weekly review", "steps": ["Read status", "Summarize blockers"]}],
+                    },
+                }
+            ],
+        },
+        expected_tools=["memory load-workspace"],
+    )
+
+    assert result.passed is True
+    assert [tool.name for tool in result.executed_tools] == ["memoryManager_loadWorkspace"]
+    assert result.executed_tools[0].status == "ok"
+    assert '"keyFiles"' in result.executed_tools[0].output
+    assert "simulated" not in result.executed_tools[0].output
+
+
+def test_environment_validator_surfaces_configured_mock_tool_error():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "memoryManager_loadState",
+                    "arguments": json.dumps({"name": "missing-state"}),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "allowed_tools": ["memory load-state"],
+            "mock_tool_outputs": [
+                {
+                    "tool": "memory load-state",
+                    "match": {"name": "missing-state"},
+                    "status": "error",
+                    "error": "State not found: missing-state",
+                }
+            ],
+        },
+        expected_tools=["memory load-state"],
+    )
+
+    assert result.passed is False
+    assert result.executed_tools[0].status == "error"
+    assert any("State not found" in issue.message for issue in result.issues)
+
+
+def test_environment_validator_can_require_all_tool_statuses_ok():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_replace",
+                    "arguments": json.dumps(
+                        {
+                            "path": "status.md",
+                            "oldContent": "missing",
+                            "newContent": "completed",
+                            "startLine": 1,
+                            "endLine": 1,
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "require_all_tools_ok": True,
+            "loop": {"continue_on_execution_error": True},
+            "fixture": {"files": {"status.md": "already completed"}},
+            "assertions": [{"type": "file_contains", "path": "status.md", "text": "already completed"}],
+        },
+    )
+
+    assert result.passed is False
+    assert any("did not complete successfully" in issue.message for issue in result.issues)
+
+
+def test_environment_validator_can_require_expected_tool_order():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_read",
+                    "arguments": json.dumps({"path": "target.md", "startLine": 1}),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "searchManager_searchContent",
+                    "arguments": json.dumps({"query": "answer"}),
+                },
+            },
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        expected_tools=["search search-content", "content read"],
+        environment_config={
+            "require_expected_tool_order": True,
+            "fixture": {"files": {"target.md": "answer: 42"}},
+            "assertions": [{"type": "file_contains", "path": "target.md", "text": "answer: 42"}],
+        },
+    )
+
+    assert result.passed is False
+    assert any("Expected tool order not satisfied" in issue.message for issue in result.issues)
+
+
+def test_environment_validator_can_forbid_unexpected_tools():
+    validator = EnvironmentValidator(backend="local")
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "searchManager_searchContent",
+                    "arguments": json.dumps({"query": "answer"}),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_replace",
+                    "arguments": json.dumps(
+                        {
+                            "path": "target.md",
+                            "oldContent": "answer: 42",
+                            "newContent": "answer: changed",
+                            "startLine": 1,
+                            "endLine": 1,
+                        }
+                    ),
+                },
+            },
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        expected_tools=["search search-content"],
+        environment_config={
+            "forbid_unexpected_tools": True,
+            "fixture": {"files": {"target.md": "answer: 42"}},
+        },
+    )
+
+    assert result.passed is False
+    assert any("Unexpected tool(s) executed" in issue.message for issue in result.issues)
+
+
+def test_called_tool_identifiers_include_cli_commands_from_schema():
+    identifiers = _called_tool_identifiers(
+        [ExecutedToolCall(name="storageManager_list")],
+        {
+            "tools": {
+                "storageManager": [
+                    {"name": "list", "command": "storage list"},
+                ]
+            }
+        },
+    )
+
+    assert "storageManager_list" in identifiers
+    assert "storage list" in identifiers
+
+
+def test_allowed_tool_identifiers_include_schema_expanded_executor_names():
+    identifiers = _expand_allowed_tool_identifiers(
+        {"storage list"},
+        {
+            "tools": {
+                "storageManager": [
+                    {"name": "list", "command": "storage list"},
+                ]
+            }
+        },
+    )
+
+    assert "storage list" in identifiers
+    assert "storageManager_list" in identifiers
 
 
 def test_environment_validator_session_persists_runtime_across_multiple_steps():
