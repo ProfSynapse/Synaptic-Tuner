@@ -36,19 +36,21 @@ defaults:
         - Read current contents
         - Update only what is needed
       sessions: []
-    assistant_instructions: You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests. Always include proper context (sessionId, workspaceId, memory, goal) in your tool calls.
+    assistant_instructions: Use workspace tools when you need to inspect or change vault files. Gather context with search, list, or read before
+      changing existing notes. Include sessionId, workspaceId, memory, goal, and the CLI command string in useTools calls. Finish with concise
+      text after tool work.
   environment:
     allowed_tools:
-    - storageManager_createFolder
-    - storageManager_open
-    - storageManager_move
-    - storageManager_archive
-    - storageManager_list
-    - contentManager_read
-    - contentManager_write
-    - contentManager_replace
-    - searchManager_searchContent
-    - searchManager_searchDirectory
+    - storage create-folder
+    - storage open
+    - storage move
+    - storage archive
+    - storage list
+    - content read
+    - content write
+    - content replace
+    - search content
+    - search directory
     max_steps: 6
     execution:
       strict_schema: true
@@ -62,7 +64,8 @@ defaults:
       stop_on_environment_pass: true
 tests:
 - id: vault_promote_inbox_note
-  question: 'Promote the Alpha prototype idea into the active project folder. Put it in `Projects/Alpha/alpha-prototype.md`, keep the body text, and make sure the note front matter has `status: active` and `type: project`. Match the format used by the existing project note.'
+  question: 'Promote the Alpha prototype idea into the active project folder. Put it in `Projects/Alpha/alpha-prototype.md`, keep the body text,
+    and make sure the note front matter has `status: active` and `type: project`. Match the format used by the existing project note.'
   tags:
   - vault
   - notes
@@ -119,17 +122,18 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - contentManager_read
-      - contentManager_write
+      - content read
+      - content write
       require_environment_pass: true
     - name: direct-promote
       tier: acceptable
       score: 0.7
       all_tools:
-      - contentManager_write
+      - content write
       require_environment_pass: true
 - id: vault_create_daily_note
-  question: 'Create today''s daily note at `Journal/Daily/2026-03-15.md`. Find the daily note template in the vault and match its front matter and structure. Set `mood: focused` and include a link to `[[Projects/Alpha/meeting-notes]]`.'
+  question: 'Create today''s daily note at `Journal/Daily/2026-03-15.md`. Find the daily note template in the vault and match its front matter
+    and structure. Set `mood: focused` and include a link to `[[Projects/Alpha/meeting-notes]]`.'
   tags:
   - vault
   - notes
@@ -198,32 +202,33 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - searchManager_searchDirectory
-      - contentManager_read
-      - contentManager_write
+      - search directory
+      - content read
+      - content write
       require_environment_pass: true
     - name: read-template-then-write
       tier: acceptable
       score: 0.8
       ordered_tools:
-      - contentManager_read
-      - contentManager_write
+      - content read
+      - content write
       require_environment_pass: true
     - name: direct-write-daily-note
       tier: partial
       score: 0.4
       all_tools:
-      - contentManager_write
+      - content write
       require_environment_pass: true
 - id: vault_triage_rate_limit_note
-  question: 'Find the note about the 429 rate-limit issue and mark it as triaged by updating its front matter to `status: triaged`. Leave the unrelated note alone.'
+  question: 'Find the note about the 429 rate-limit issue and mark it as triaged by updating its front matter to `status: triaged`. Leave the
+    unrelated note alone.'
   tags:
   - vault
   - notes
   - search
   - triage
   expected_tools:
-  - searchManager_searchContent
+  - search content
   system_context:
     session_id: session_1732300800000_vault003
     selected_workspace:
@@ -270,16 +275,16 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - searchManager_searchContent
-      - contentManager_read
-      - contentManager_replace
+      - search content
+      - content read
+      - content replace
       require_environment_pass: true
     - name: search-then-update-correct-note
       tier: acceptable
       score: 0.8
       ordered_tools:
-      - searchManager_searchContent
-      - contentManager_replace
+      - search content
+      - content replace
       require_environment_pass: true
 - id: vault_archive_empty_test_folder
   question: Archive the empty `Projects/test/` folder. Verify that it is empty before removing it, and leave the other project folders untouched.
@@ -330,18 +335,19 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - storageManager_list
-      - storageManager_archive
+      - storage list
+      - storage archive
       require_environment_pass: true
     - name: search-then-archive-empty-folder
       tier: acceptable
       score: 0.7
       ordered_tools:
-      - searchManager_searchDirectory
-      - storageManager_archive
+      - search directory
+      - storage archive
       require_environment_pass: true
 - id: vault_update_production_endpoint_note
-  question: Find the production config note and update its `api_base_url` to `https://api.prod.example.com`. Keep the rest of the note intact and leave the staging config note unchanged.
+  question: Find the production config note and update its `api_base_url` to `https://api.prod.example.com`. Keep the rest of the note intact
+    and leave the staging config note unchanged.
   tags:
   - vault
   - verification
@@ -414,19 +420,20 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - searchManager_searchContent
-      - contentManager_read
-      - contentManager_replace
+      - search content
+      - content read
+      - content replace
       require_environment_pass: true
     - name: read-update-production-config
       tier: acceptable
       score: 0.75
       ordered_tools:
-      - contentManager_read
-      - contentManager_replace
+      - content read
+      - content replace
       require_environment_pass: true
 - id: vault_archive_only_deprecated_api_notes
-  question: In `Docs/API/`, archive only the deprecated API notes. Verify which notes are deprecated before removing them, and leave the active API notes in place.
+  question: In `Docs/API/`, archive only the deprecated API notes. Verify which notes are deprecated before removing them, and leave the active
+    API notes in place.
   tags:
   - vault
   - verification
@@ -491,21 +498,22 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - searchManager_searchDirectory
-      - contentManager_read
-      - storageManager_archive
+      - search directory
+      - content read
+      - storage archive
       min_tool_calls: 4
       require_environment_pass: true
     - name: search-selective-archive
       tier: acceptable
       score: 0.75
       ordered_tools:
-      - searchManager_searchDirectory
-      - storageManager_archive
+      - search directory
+      - storage archive
       min_tool_calls: 3
       require_environment_pass: true
 - id: vault_read_before_replace_settings
-  question: Update `Settings/settings.yaml` so its `database_url` is `postgresql://prod-user:prod-pass@db.prod.internal:5432/app`. Read the file first so you only change the connection string, keep the existing feature flags intact, and leave `Settings/database.yaml` unchanged.
+  question: Update `Settings/settings.yaml` so its `database_url` is `postgresql://prod-user:prod-pass@db.prod.internal:5432/app`. Read the file
+    first so you only change the connection string, keep the existing feature flags intact, and leave `Settings/database.yaml` unchanged.
   tags:
   - vault
   - verification
@@ -522,7 +530,8 @@ tests:
   environment:
     fixture:
       files:
-        Settings/settings.yaml: "database_url: postgresql://dev-user:dev-pass@localhost:5432/app\nfeature_flags:\n  - sync\n  - beta-ui\nlog_level: info\n"
+        Settings/settings.yaml: "database_url: postgresql://dev-user:dev-pass@localhost:5432/app\nfeature_flags:\n  - sync\n  - beta-ui\nlog_level:\
+          \ info\n"
         Settings/database.yaml: 'pool_size: 15
 
           ssl: false
@@ -550,15 +559,15 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - contentManager_read
-      - contentManager_replace
+      - content read
+      - content replace
       require_environment_pass: true
     - name: read-then-write-settings
       tier: acceptable
       score: 0.8
       ordered_tools:
-      - contentManager_read
-      - contentManager_write
+      - content read
+      - content write
       require_environment_pass: true
 - id: vault_continue_inbox_organization
   question: Now organize those files by topic.
@@ -649,14 +658,14 @@ tests:
       tier: preferred
       score: 1.0
       ordered_tools:
-      - storageManager_createFolder
-      - storageManager_move
+      - storage create-folder
+      - storage move
       min_tool_calls: 6
       require_environment_pass: true
     - name: move-files-without-folder-discovery
       tier: acceptable
       score: 0.7
       all_tools:
-      - storageManager_move
+      - storage move
       min_tool_calls: 3
       require_environment_pass: true

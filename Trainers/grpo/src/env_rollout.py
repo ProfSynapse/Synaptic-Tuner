@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
@@ -40,6 +43,10 @@ class EpisodeRolloutResult:
     # result / user feedback) that the model conditioned on but did not emit.
     # Empty when the legacy flattened representation is used.
     env_mask: List[int] = field(default_factory=list)
+    executed_tool_names: List[str] = field(default_factory=list)
+    executed_tool_statuses: List[str] = field(default_factory=list)
+    environment_issue_levels: List[str] = field(default_factory=list)
+    expected_tool_names: List[str] = field(default_factory=list)
 
 
 # A single generated turn: (prompt_ids, completion_ids, logprobs). prompt_ids is
@@ -204,6 +211,10 @@ def build_rollout_func(
             "total_turns": [item.total_turns for item in results],
             "total_tool_calls": [item.total_tool_calls for item in results],
             "final_text_satisfied": [item.final_text_satisfied for item in results],
+            "executed_tool_names": [item.executed_tool_names for item in results],
+            "executed_tool_statuses": [item.executed_tool_statuses for item in results],
+            "environment_issue_levels": [item.environment_issue_levels for item in results],
+            "expected_tool_names": [item.expected_tool_names for item in results],
             "completion_text": [item.completion_text for item in results],
         }
         if faithful:
@@ -233,13 +244,23 @@ def _run_single_episode(
         environment_config=spec.environment_config,
     )
 
-    max_turns = int(env_training_cfg.get("max_turns", 6))
-    max_tool_steps = int(env_training_cfg.get("max_tool_steps", 0))
-    stop_on_text_response = bool(env_training_cfg.get("stop_on_text_response", True))
-    stop_on_environment_pass = bool(env_training_cfg.get("stop_on_environment_pass", True))
-    require_final_text_after_pass = bool(env_training_cfg.get("require_final_text_after_pass", True))
+    loop_cfg = spec.environment_config.get("loop")
+    if not isinstance(loop_cfg, Mapping):
+        loop_cfg = {}
+    max_turns = int(env_training_cfg.get("max_turns", loop_cfg.get("max_turns", 6)))
+    max_tool_steps = int(env_training_cfg.get("max_tool_steps", loop_cfg.get("max_tool_steps", 0)))
+    stop_on_text_response = bool(env_training_cfg.get("stop_on_text_response", loop_cfg.get("stop_on_text_response", True)))
+    stop_on_environment_pass = bool(env_training_cfg.get("stop_on_environment_pass", loop_cfg.get("stop_on_environment_pass", True)))
+    require_final_text_after_pass = bool(
+        env_training_cfg.get("require_final_text_after_pass", loop_cfg.get("require_final_text_after_pass", True))
+    )
+    expected_tools = spec.environment_config.get("expected_tools")
+    if not isinstance(expected_tools, list):
+        expected_tools = None
+    require_expected_tools = bool(spec.environment_config.get("require_expected_tools"))
     final_text_prompt = str(
         env_training_cfg.get("final_text_prompt")
+        or loop_cfg.get("final_text_prompt")
         or "The task is complete. Reply to the user with a brief final text-only response. Do not call any more tools."
     )
 
@@ -297,7 +318,7 @@ def _run_single_episode(
                 break
 
             environment_preview = session.finalize(
-                expected_tools=None,
+                expected_tools=expected_tools if require_expected_tools else None,
                 total_turns=turn_index,
                 stop_reason="preview",
             )
@@ -332,7 +353,7 @@ def _run_single_episode(
                     break
 
         environment_result = session.finalize(
-            expected_tools=None,
+            expected_tools=expected_tools if require_expected_tools else None,
             total_turns=len(session.steps),
             stop_reason=stop_reason,
         )
@@ -342,6 +363,40 @@ def _run_single_episode(
     env_passed = bool(environment_result.passed)
     env_reward = 1.0 if env_passed else 0.0
     completion_text = "\n".join(part for part in completion_text_parts if part.strip())
+    executed_tool_names = [
+        str(getattr(item, "name", "")).strip()
+        for item in session.executed_tools
+        if str(getattr(item, "name", "")).strip()
+    ]
+    executed_tool_statuses = [
+        str(getattr(item, "status", "")).strip()
+        for item in session.executed_tools
+        if str(getattr(item, "status", "")).strip()
+    ]
+    environment_issue_levels = [
+        str(getattr(item, "level", "")).strip()
+        for item in getattr(environment_result, "issues", [])
+        if str(getattr(item, "level", "")).strip()
+    ]
+    expected_tool_names = [
+        str(item).strip()
+        for item in (expected_tools or [])
+        if str(item).strip()
+    ]
+
+    _write_debug_rollout(
+        env_training_cfg=env_training_cfg,
+        spec=spec,
+        completion_text=completion_text,
+        env_passed=env_passed,
+        stop_reason=stop_reason,
+        total_turns=len(session.steps),
+        total_tool_calls=len(session.executed_tools),
+        final_text_satisfied=final_text_satisfied,
+        expected_tool_names=expected_tool_names,
+        environment_result=environment_result,
+        executed_tools=session.executed_tools,
+    )
 
     if faithful:
         prompt_ids, completion_ids, env_mask, logprobs = _assemble_faithful_sequence(turn_segments)
@@ -361,6 +416,10 @@ def _run_single_episode(
         total_tool_calls=len(session.executed_tools),
         final_text_satisfied=final_text_satisfied,
         env_mask=env_mask,
+        executed_tool_names=executed_tool_names,
+        executed_tool_statuses=executed_tool_statuses,
+        environment_issue_levels=environment_issue_levels,
+        expected_tool_names=expected_tool_names,
     )
 
 
@@ -373,7 +432,55 @@ def _align_logprobs(logprobs: List[float], target_len: int) -> List[float]:
     return logprobs[:target_len]
 
 
+def _write_debug_rollout(
+    *,
+    env_training_cfg: Dict[str, Any],
+    spec: EpisodeSpec,
+    completion_text: str,
+    env_passed: bool,
+    stop_reason: str,
+    total_turns: int,
+    total_tool_calls: int,
+    final_text_satisfied: bool,
+    expected_tool_names: List[str],
+    environment_result: Any,
+    executed_tools: Any,
+) -> None:
+    debug_path = env_training_cfg.get("debug_rollouts_path")
+    if not debug_path:
+        return
+
+    record = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "scenario": spec.scenario,
+        "env_passed": env_passed,
+        "stop_reason": stop_reason,
+        "total_turns": total_turns,
+        "total_tool_calls": total_tool_calls,
+        "final_text_satisfied": final_text_satisfied,
+        "expected_tool_names": expected_tool_names,
+        "environment_issues": getattr(environment_result, "issues", []),
+        "executed_tools": [
+            getattr(item, "__dict__", item)
+            for item in (executed_tools or [])
+        ],
+        "task_context": spec.task_context,
+        "completion_text": completion_text,
+    }
+    try:
+        path = Path(str(debug_path))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception as exc:
+        print(f"[env-grpo] failed to write debug rollout to {debug_path}: {exc}", flush=True)
+        return
+
+
 def _generate_one_completion(*, trainer, generate_rollout_completions, prompt_text: str) -> Dict[str, Any]:
+    if not bool(getattr(trainer, "use_vllm", False)):
+        return _generate_one_completion_transformers(trainer=trainer, prompt_text=prompt_text)
+
     signature = inspect.signature(generate_rollout_completions)
     if len(signature.parameters) == 2:
         outputs = generate_rollout_completions(trainer, [prompt_text])
@@ -391,6 +498,47 @@ def _generate_one_completion(*, trainer, generate_rollout_completions, prompt_te
     if not isinstance(first, Mapping):
         raise RuntimeError("generate_rollout_completions returned invalid output shape")
     return dict(first)
+
+
+def _generate_one_completion_transformers(*, trainer, prompt_text: str) -> Dict[str, Any]:
+    import torch
+
+    tokenizer = trainer.processing_class
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    device = trainer.accelerator.device
+    inputs = {key: value.to(device) for key, value in inputs.items()}
+    prompt_ids_tensor = inputs["input_ids"]
+    prompt_length = prompt_ids_tensor.shape[1]
+
+    generation_kwargs = {
+        "generation_config": trainer.generation_config,
+    }
+    if "disable_compile" in inspect.signature(trainer.model.generate).parameters:
+        generation_kwargs["disable_compile"] = True
+
+    was_training = bool(trainer.model.training)
+    trainer.model.eval()
+    try:
+        with torch.no_grad():
+            generated = trainer.model.generate(**inputs, **generation_kwargs)
+    finally:
+        if was_training:
+            trainer.model.train()
+
+    completion_tensor = generated[0, prompt_length:]
+    eos_token_id = getattr(trainer, "eos_token_id", None)
+    pad_token_id = getattr(trainer, "pad_token_id", None)
+    completion_ids = completion_tensor.tolist()
+    for index, token_id in enumerate(completion_ids):
+        if token_id in {eos_token_id, pad_token_id}:
+            completion_ids = completion_ids[: index + 1]
+            break
+
+    return {
+        "prompt_ids": prompt_ids_tensor[0].tolist(),
+        "completion_ids": completion_ids,
+        "logprobs": None,
+    }
 
 
 def _first_system_prompt(messages: Sequence[Mapping[str, Any]]) -> str:
@@ -414,4 +562,3 @@ def _import_openenv_helpers():
         if hasattr(module, "generate_rollout_completions"):
             return module
     raise ImportError("Could not import TRL OpenEnv helpers with generate_rollout_completions")
-

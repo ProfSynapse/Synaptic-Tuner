@@ -25,13 +25,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.env_dataset import (
     filter_env_rollout_dataset,
-    format_dataset_for_env_grpo,
+    format_dataset_for_env_grpo_with_options,
     load_env_rollout_dataset,
 )
 from src.env_rewards import build_env_reward_function
 from src.env_rollout import build_prompt_registry, build_rollout_func
 from src.env_runtime import build_cloud_bootstrap_commands, detect_openenv_runtime_support
 from src.training_callbacks import DASHBOARD_AVAILABLE, RICH_AVAILABLE, LiveDashboardCallback, MetricsTableCallback
+
+
+def build_grpo_trainer_class(*, allow_transformers_rollout_func: bool):
+    from trl import GRPOTrainer
+
+    if not allow_transformers_rollout_func:
+        return GRPOTrainer
+
+    class TransformersRolloutGRPOTrainer(GRPOTrainer):
+        def _generate_single_turn(self, prompts):
+            if self.rollout_func is not None and not self.use_vllm:
+                rollout = self.rollout_func(prompts, self)
+                extra_fields = {
+                    key: value
+                    for key, value in rollout.items()
+                    if key not in {"prompt_ids", "completion_ids", "logprobs"}
+                }
+                return (
+                    rollout["prompt_ids"],
+                    rollout["completion_ids"],
+                    rollout.get("logprobs"),
+                    extra_fields,
+                )
+            return super()._generate_single_turn(prompts)
+
+    return TransformersRolloutGRPOTrainer
 
 
 def load_config(config_path: str | None = None) -> Dict[str, Any]:
@@ -74,6 +100,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     model_cfg = config.get("model") or {}
     dataset_cfg = config.get("dataset") or {}
     training_cfg = config.get("training") or {}
+    lora_cfg = config.get("lora") or {}
 
     if args.model_name:
         model_cfg["model_name"] = args.model_name
@@ -130,7 +157,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     )
     if args.max_examples and len(filtered_dataset) > args.max_examples:
         filtered_dataset = filtered_dataset.select(range(args.max_examples))
-    formatted_dataset = format_dataset_for_env_grpo(filtered_dataset)
+    formatted_dataset = format_dataset_for_env_grpo_with_options(
+        filtered_dataset,
+        prompt_augmentation=env_cfg.get("prompt_augmentation"),
+    )
 
     runtime_support = detect_openenv_runtime_support()
     summary = {
@@ -168,7 +198,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         raise RuntimeError("Set model.model_name in env_config.yaml to the published bucketed SFT model repo")
 
     from transformers import AutoTokenizer
-    from trl import GRPOConfig, GRPOTrainer
+    from trl import GRPOConfig
 
     output_root = Path(training_cfg.get("output_dir") or "./env_grpo_output").resolve()
     run_dir = Path(args.output_dir).resolve() if args.output_dir else output_root / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -208,12 +238,31 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         desc="Rendering chat prompts",
     )
     registry = build_prompt_registry(formatted_dataset)
+    debug_rollouts_path = env_cfg.get("debug_rollouts_path")
+    if debug_rollouts_path:
+        env_cfg["debug_rollouts_path"] = str(Path(str(debug_rollouts_path).format(run_dir=run_dir)).resolve())
     rollout_func = build_rollout_func(
         registry=registry,
         env_training_cfg=env_cfg,
         runtime_support=runtime_support,
     )
     reward_func = build_env_reward_function(config.get("rewards") or {})
+    trainer_cls = build_grpo_trainer_class(
+        allow_transformers_rollout_func=bool(env_cfg.get("allow_transformers_rollout_func", False)),
+    )
+
+    peft_config = None
+    if bool(lora_cfg.get("enabled", False)):
+        from peft import LoraConfig
+
+        peft_config = LoraConfig(
+            r=int(lora_cfg.get("r", 16)),
+            lora_alpha=int(lora_cfg.get("lora_alpha", 32)),
+            lora_dropout=float(lora_cfg.get("lora_dropout", 0.05)),
+            bias=str(lora_cfg.get("bias", "none")),
+            task_type=str(lora_cfg.get("task_type", "CAUSAL_LM")),
+            target_modules=list(lora_cfg.get("target_modules") or []),
+        )
 
     grpo_kwargs = {
         "output_dir": str(checkpoints_dir),
@@ -260,7 +309,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             )
         ]
 
-    trainer = GRPOTrainer(
+    trainer = trainer_cls(
         model=model_name,
         processing_class=tokenizer,
         reward_funcs=reward_func,
@@ -268,6 +317,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         rollout_func=rollout_func,
         args=grpo_args,
         callbacks=callbacks,
+        peft_config=peft_config,
     )
     if use_dashboard:
         from transformers.trainer_callback import PrinterCallback

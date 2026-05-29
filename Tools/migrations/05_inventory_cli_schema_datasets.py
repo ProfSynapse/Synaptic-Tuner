@@ -34,7 +34,7 @@ def parse_agents(raw_agents: str | None) -> List[str]:
 
 
 def build_inventory(repo_root: Path, agents: List[str]) -> Dict[str, Any]:
-    schema_path = repo_root / "tool-schemas.json"
+    schema_path = repo_root / "cli-first-tool-schemas.json"
     datasets_root = repo_root / "Datasets" / "tools_datasets"
     reports_root = datasets_root / "reports" / "cli_schema"
 

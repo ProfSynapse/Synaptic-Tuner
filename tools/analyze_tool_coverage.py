@@ -2,7 +2,7 @@
 """Analyze tool coverage using the current CLI-first schema.
 
 This script is intentionally schema-driven:
-- Valid tools come from tool-schemas.json
+- Valid tools come from cli-first-tool-schemas.json
 - CLI commands inside useTools.tool are parsed from schema command metadata
 - The active dataset path is expected to use CLI-first useTools payloads
 """
@@ -251,7 +251,7 @@ def main(argv: Iterable[str]) -> int:
 
     dataset_path = Path(args[1]).resolve()
     repo_root = Path(__file__).resolve().parents[1]
-    schema_path = repo_root / "tool-schemas.json"
+    schema_path = repo_root / "cli-first-tool-schemas.json"
 
     valid_tools, tools_by_agent, command_lookup = load_tool_schema(schema_path)
     results = analyze_coverage(dataset_path, valid_tools, tools_by_agent, command_lookup)

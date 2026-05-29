@@ -27,6 +27,7 @@ SUPPORTED_ACTIONS = {
     "mkdir",
     "append",
     "write",
+    "replace",
     "read",
     "list",
     "move",
@@ -49,6 +50,7 @@ def execute_response_tool_calls(
     verb_rules: Optional[Dict[str, List[str]]] = None,
     key_hints: Optional[Dict[str, List[str]]] = None,
     default_action: str = "simulate",
+    read_output: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[ExecutedToolCall], List[EnvironmentIssue]]:
     """Parse a model response and execute supported tool calls."""
     parsed = parse_response(response)
@@ -147,7 +149,13 @@ def execute_response_tool_calls(
                 key_hints=normalized_key_hints,
                 default_action=normalized_default_action,
             )
-            output = _execute_action(runtime, action, args, key_hints=normalized_key_hints)
+            output = _execute_action(
+                runtime,
+                action,
+                args,
+                key_hints=normalized_key_hints,
+                read_output=read_output or {},
+            )
             record.output = output
             record.status = "ok"
             record.recoverable = False
@@ -221,7 +229,7 @@ def _looks_like_cli_wrapper_call(call) -> bool:
 
 @lru_cache(maxsize=1)
 def _load_cli_command_catalog() -> Dict[str, Tuple[str, List[Dict[str, Any]]]]:
-    schema_path = Path(__file__).resolve().parents[2] / "tool-schemas.json"
+    schema_path = Path(__file__).resolve().parents[2] / "cli-first-tool-schemas.json"
     if not schema_path.exists():
         return {}
 
@@ -616,6 +624,8 @@ def _infer_action_from_schema_signature(schema_entry: Optional[Dict[str, Any]]) 
 
     if {"path", "content"}.issubset(required):
         return "write"
+    if {"path", "oldContent", "newContent", "startLine", "endLine"}.issubset(required):
+        return "replace"
     if {"query"}.issubset(required) or "query" in keys:
         return "search"
     if "path" in required and any(key in keys for key in {"startLine", "endLine", "mode", "focus"}):
@@ -630,6 +640,12 @@ def _action_args_look_compatible(action: str, args: Dict[str, Any], key_hints: D
         return _extract_source_path(args, key_hints) is not None
     if action in {"write", "append"}:
         return _extract_source_path(args, key_hints) is not None
+    if action == "replace":
+        return (
+            _extract_source_path(args, key_hints) is not None
+            and _extract_old_content(args) is not None
+            and _extract_new_content(args) is not None
+        )
     if action in {"move", "copy"}:
         return (
             _extract_source_path(args, key_hints) is not None
@@ -645,6 +661,7 @@ def _execute_action(
     action: str,
     args: Dict[str, Any],
     key_hints: Dict[str, List[str]],
+    read_output: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     if action == "mkdir":
         runtime.mkdir(_require_path(_extract_source_path(args, key_hints), "path"))
@@ -653,12 +670,26 @@ def _execute_action(
         path = _extract_source_path(args, key_hints) or "."
         return json.dumps(runtime.list_dir(path))
     if action == "read":
-        return runtime.read_text(_require_path(_extract_source_path(args, key_hints), "path"))
+        path = _require_path(_extract_source_path(args, key_hints), "path")
+        content = runtime.read_text(path)
+        return _format_read_output(content, args=args, options=read_output or {})
     if action == "write":
         path = _require_path(_extract_source_path(args, key_hints), "path")
         content = _extract_content(args, key_hints)
         runtime.write_text(path, "" if content is None else content)
         return "written"
+    if action == "replace":
+        path = _require_path(_extract_source_path(args, key_hints), "path")
+        content = runtime.read_text(path)
+        updated = _replace_text_range(
+            content,
+            old_content=_require_text(_extract_old_content(args), "oldContent"),
+            new_content=_require_text(_extract_new_content(args), "newContent"),
+            start_line=_extract_line_number(args, ["startLine", "start_line", "start", "line"]),
+            end_line=_extract_line_number(args, ["endLine", "end_line", "end"]),
+        )
+        runtime.write_text(path, updated)
+        return "replaced"
     if action == "append":
         path = _require_path(_extract_source_path(args, key_hints), "path")
         existing = runtime.read_text(path) if runtime.exists(path) else ""
@@ -693,6 +724,122 @@ def _execute_action(
         return "simulated"
 
     raise ValueError(f"Unsupported inferred action: {action}")
+
+
+def _format_read_output(content: str, args: Dict[str, Any], options: Dict[str, Any]) -> str:
+    include_line_numbers = bool(options.get("include_line_numbers", False))
+    honor_line_range = bool(options.get("honor_line_range", False))
+    if not include_line_numbers and not honor_line_range:
+        return content
+
+    lines = content.splitlines()
+    start_line = _extract_line_number(args, ["startLine", "start_line", "start", "line"]) or 1
+    end_line = _extract_line_number(args, ["endLine", "end_line", "end"])
+
+    start_line = max(1, start_line)
+    if end_line is None:
+        end_line = len(lines)
+    end_line = max(start_line, end_line)
+
+    selected = lines[start_line - 1 : end_line] if honor_line_range else lines
+    first_rendered_line = start_line if honor_line_range else 1
+
+    if not include_line_numbers:
+        rendered = "\n".join(selected)
+        if content.endswith("\n") and end_line >= len(lines):
+            rendered += "\n"
+        return rendered
+
+    separator = str(options.get("line_number_separator", ": "))
+    width = int(options.get("line_number_width", 0) or 0)
+    rendered_lines = []
+    for offset, line in enumerate(selected):
+        line_number = first_rendered_line + offset
+        label = str(line_number).rjust(width) if width > 0 else str(line_number)
+        rendered_lines.append(f"{label}{separator}{line}")
+    return "\n".join(rendered_lines)
+
+
+def _extract_line_number(args: Dict[str, Any], keys: List[str]) -> Optional[int]:
+    for key in keys:
+        value = args.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate.isdigit():
+                return int(candidate)
+    return None
+
+
+def _replace_text_range(
+    content: str,
+    *,
+    old_content: str,
+    new_content: str,
+    start_line: Optional[int],
+    end_line: Optional[int],
+) -> str:
+    if start_line is None or end_line is None:
+        raise ValueError("Replace action requires startLine and endLine")
+    if start_line < 1 or end_line < start_line:
+        raise ValueError(f"Invalid replace line range: {start_line}-{end_line}")
+
+    lines = content.splitlines(keepends=True)
+    if start_line > len(lines):
+        raise ValueError(f"Replace startLine {start_line} exceeds file length {len(lines)}")
+    end_line = min(end_line, len(lines))
+    selected = "".join(lines[start_line - 1 : end_line])
+    selected_compare = selected[:-1] if selected.endswith("\n") and not old_content.endswith("\n") else selected
+
+    if selected_compare != old_content:
+        found_line = _find_text_line(content, old_content)
+        suffix = f"; matching text starts at line {found_line}" if found_line is not None else ""
+        raise ValueError(f"Content at lines {start_line}-{end_line} did not match oldContent{suffix}")
+
+    replacement = new_content
+    if selected.endswith("\n") and replacement and not replacement.endswith("\n"):
+        replacement += "\n"
+    replacement_lines = replacement.splitlines(keepends=True)
+    if replacement and not replacement_lines:
+        replacement_lines = [replacement]
+    updated_lines = lines[: start_line - 1] + replacement_lines + lines[end_line:]
+    return "".join(updated_lines)
+
+
+def _find_text_line(content: str, needle: str) -> Optional[int]:
+    if not needle:
+        return None
+    index = content.find(needle)
+    if index < 0:
+        return None
+    return content.count("\n", 0, index) + 1
+
+
+def _extract_old_content(args: Dict[str, Any]) -> Optional[str]:
+    return _extract_first_string(args, ["oldContent", "old_content", "old", "findText", "find_text"])
+
+
+def _extract_new_content(args: Dict[str, Any]) -> Optional[str]:
+    return _extract_first_string(args, ["newContent", "new_content", "new", "replaceText", "replace_text"])
+
+
+def _extract_first_string(args: Dict[str, Any], keys: List[str]) -> Optional[str]:
+    for key in keys:
+        value = args.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def _require_text(value: Optional[str], label: str) -> str:
+    if value is None:
+        raise ValueError(f"Missing required text argument: {label}")
+    return value
 
 
 def _extract_source_path(args: Dict[str, Any], key_hints: Dict[str, List[str]]) -> Optional[str]:

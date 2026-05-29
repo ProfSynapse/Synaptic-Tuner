@@ -122,6 +122,21 @@ Use `tool_result_name_format` when the model-facing feedback should display
 configured command/tool names rather than internal executor identifiers. This
 keeps generated conversations aligned with the surface being trained.
 
+When a scenario requires a final natural-language answer after tool work, make
+that behavior a positive completion rule in the model-facing prompt, not only a
+negative prohibition in the judge. For example, tell the model that once the
+needed tool results answer the request or confirm the action is complete, it
+should stop calling tools and send concise text summarizing the answer or
+completed action. Keep the exact transport/wrapper details in config, but make
+the completion behavior clear in shared assistant instructions, tool-options
+sections, or equivalent scenario prompt blocks.
+
+For GRPO curriculum design, consider separating "environment solved" from
+"final text emitted correctly." Early shaped rewards can give credit for
+correct tool/environment completion while applying a penalty for missing final
+text. Once the model reliably acts in the environment, tighten final gates or
+reward config so extra post-completion tool calls become clear failures.
+
 For generated environments, prefer deterministic stage gates for structural
 validity: payload shape, canonical schema, placeholder scans, and minimum
 fixture size. Use an LLM environment-generation judge only for semantic checks
@@ -195,6 +210,9 @@ answer-key fields and an inline `json_schema` gate for constraints such as
 "expected_command_sequence has exactly two commands" or "assertion types may
 only be `path_exists` and `file_contains`." This catches bad generated
 environments before the agent loop wastes turns on impossible assertions.
+If a scenario references a deterministic gate type that the runner does not
+support, either express the check with supported gates or add a generic gate
+implementation. Do not add scenario-specific validation logic to runtime code.
 Also gate generated answer-key commands against stale or unsupported command
 surfaces. If the trained interface is a configured tool wrapper or CLI, reject
 shell examples such as `grep`, `cat`, pipes, semicolons, and chained shell

@@ -390,7 +390,7 @@ def main() -> None:
 
     repo_root = get_repo_root()
     reports_dir = repo_root / args.reports_dir
-    catalog = load_target_catalog(repo_root / "tool-schemas.json")
+    catalog = load_target_catalog(repo_root / "cli-first-tool-schemas.json")
     agents = parse_agents(args.agents)
     latest_files = discover_latest_nonthinking_dataset_files(repo_root / "Datasets" / "tools_datasets", agents)
     source_overrides = parse_source_overrides(args.source, repo_root)

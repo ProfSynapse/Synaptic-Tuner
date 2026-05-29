@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Embed tool schemas from tool-schemas.json into agent rubric YAMLs.
+Embed tool schemas from cli-first-tool-schemas.json into agent rubric YAMLs.
 
 Reads the JSON Schema format and converts to simplified YAML format
 that StructureValidator can use for tool call validation.
@@ -40,7 +40,7 @@ def convert_json_schema_to_simple(json_schema: Dict) -> Dict:
         path: string
 
     NOTE: The actual training data uses a different context format than
-    tool-schemas.json. We use the training data format here:
+    cli-first-tool-schemas.json. We use the training data format here:
     - sessionId, workspaceId, sessionDescription, sessionMemory,
       toolContext, primaryGoal, subgoal
     """
@@ -49,7 +49,7 @@ def convert_json_schema_to_simple(json_schema: Dict) -> Dict:
     properties = json_schema.get("properties", {})
 
     # Use the ACTUAL context format from training data
-    # (not the format in tool-schemas.json)
+    # (not the format in cli-first-tool-schemas.json)
     simple["context"] = {
         "sessionId": "string",
         "workspaceId": "string",
@@ -116,7 +116,7 @@ def main():
     """Main entry point."""
     # Paths
     repo_root = Path(__file__).parent.parent.parent
-    schema_file = repo_root / "tool-schemas.json"
+    schema_file = repo_root / "cli-first-tool-schemas.json"
     rubrics_dir = repo_root / "SynthChat" / "rubrics"
 
     print(f"Loading schemas from: {schema_file}")

@@ -832,7 +832,7 @@ Deliverables:
 | `shared/ui/evaluation.py` | Replay and display assertion result vocabulary instead of behavior-specific metrics. |
 | `Evaluator/config/scenarios/*.yaml` | Convert to `correct.any[].assertions`. Remove manager-style expected IDs. |
 | `Evaluator/config/tool_schema.yaml` | Treat CLI command metadata as prompt/config source data only, not evaluator semantic truth. |
-| `tool-schemas.json` | Remains a source of tool command metadata. It can help generate scenario examples or templates, but evaluator correctness still comes from case assertions. |
+| `cli-first-tool-schemas.json` | Remains a source of tool command metadata. It can help generate scenario examples or templates, but evaluator correctness still comes from case assertions. |
 | `.skills/evaluation/**` | Update canonical evaluation authoring guidance first, then sync `.agents/skills` and `.claude/skills` and verify with `--check`. |
 | `docs/architecture/llm-judge-integration.md` | Update judge architecture docs to describe configured prompt/parser/assertion contracts instead of expected-tools context. |
 

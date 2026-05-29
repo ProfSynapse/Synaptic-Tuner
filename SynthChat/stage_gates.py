@@ -7,6 +7,8 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+import jsonschema
+
 
 @dataclass
 class StageGateResult:
@@ -145,6 +147,156 @@ def _gate_field_equals(payload: Mapping[str, Any], gate: Mapping[str, Any]) -> S
     )
 
 
+def _gate_json_schema(payload: Mapping[str, Any], gate: Mapping[str, Any]) -> StageGateResult:
+    field = str(gate.get("field") or "value")
+    value = _resolve_dotted(payload, field)
+    schema_config = gate.get("schema")
+    if isinstance(schema_config, str):
+        if schema_config != "canonical_environment":
+            return StageGateResult(
+                gate_type="json_schema",
+                passed=False,
+                message=f"Unknown JSON schema reference: {schema_config}",
+                metadata={"field": field},
+            )
+        from SynthChat.schemas.environment_schema import _build_canonical_environment_schema
+
+        schema = _build_canonical_environment_schema()
+    elif isinstance(schema_config, Mapping):
+        schema = dict(schema_config)
+    else:
+        return StageGateResult(
+            gate_type="json_schema",
+            passed=False,
+            message="JSON schema gate requires a mapping schema or known schema reference.",
+            metadata={"field": field},
+        )
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.Draft202012Validator(schema).validate(value)
+    except jsonschema.ValidationError as exc:
+        path = ".".join(str(part) for part in exc.absolute_path)
+        location = f" at {path}" if path else ""
+        return StageGateResult(
+            gate_type="json_schema",
+            passed=False,
+            message=f"Field '{field}' failed JSON schema{location}: {exc.message}",
+            metadata={"field": field, "path": path},
+        )
+    except jsonschema.SchemaError as exc:
+        return StageGateResult(
+            gate_type="json_schema",
+            passed=False,
+            message=f"Configured JSON schema is invalid: {exc.message}",
+            metadata={"field": field},
+        )
+    return StageGateResult(gate_type="json_schema", passed=True, metadata={"field": field})
+
+
+def _gate_no_placeholder_strings(payload: Mapping[str, Any], gate: Mapping[str, Any]) -> StageGateResult:
+    field = str(gate.get("field") or "value")
+    value = _resolve_dotted(payload, field)
+    patterns = [
+        r"\{\{[^}]+\}\}",
+        r"<[^>\n]+>",
+        r"\bTODO\b",
+        r"\bTBD\b",
+        r"\.\.\.",
+        r"```",
+    ]
+    configured_patterns = gate.get("patterns")
+    if isinstance(configured_patterns, list):
+        patterns.extend(str(pattern) for pattern in configured_patterns if str(pattern or "").strip())
+    compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    matches: List[str] = []
+    for text in _collect_strings(value):
+        for pattern in compiled:
+            if pattern.search(text):
+                matches.append(text[:120])
+                break
+    matches = matches[:5]
+    return StageGateResult(
+        gate_type="no_placeholder_strings",
+        passed=not matches,
+        message=None if not matches else f"Field '{field}' contains placeholder or banned strings.",
+        metadata={"field": field, "matches": matches},
+    )
+
+
+def _gate_min_fixture_items(payload: Mapping[str, Any], gate: Mapping[str, Any]) -> StageGateResult:
+    field = str(gate.get("field") or "value.environment.fixture")
+    fixture = _resolve_dotted(payload, field)
+    if not isinstance(fixture, Mapping):
+        return StageGateResult(
+            gate_type="min_fixture_items",
+            passed=False,
+            message=f"Field '{field}' is not a fixture mapping.",
+            metadata={"field": field},
+        )
+    directory_count = _count_fixture_collection(fixture.get("directories"))
+    file_count = _count_fixture_collection(fixture.get("files"))
+    note_count = _count_fixture_collection(fixture.get("notes"))
+    total = directory_count + file_count + note_count
+    requirements = {
+        "min_directories": int(gate.get("min_directories") or 0),
+        "min_files": int(gate.get("min_files") or 0),
+        "min_notes": int(gate.get("min_notes") or 0),
+        "min_total": int(gate.get("min_total") or 0),
+    }
+    failures = []
+    if directory_count < requirements["min_directories"]:
+        failures.append(f"directories {directory_count} < {requirements['min_directories']}")
+    if file_count < requirements["min_files"]:
+        failures.append(f"files {file_count} < {requirements['min_files']}")
+    if note_count < requirements["min_notes"]:
+        failures.append(f"notes {note_count} < {requirements['min_notes']}")
+    if total < requirements["min_total"]:
+        failures.append(f"total {total} < {requirements['min_total']}")
+    return StageGateResult(
+        gate_type="min_fixture_items",
+        passed=not failures,
+        message=None if not failures else "Fixture item minimums not met: " + "; ".join(failures),
+        metadata={
+            "field": field,
+            "directories": directory_count,
+            "files": file_count,
+            "notes": note_count,
+            "total": total,
+            **requirements,
+        },
+    )
+
+
+def _gate_required_mapping_keys(payload: Mapping[str, Any], gate: Mapping[str, Any]) -> StageGateResult:
+    field = str(gate.get("field") or "value")
+    value = _resolve_dotted(payload, field)
+    keys = gate.get("keys")
+    if not isinstance(keys, list):
+        keys = []
+    if not isinstance(value, Mapping):
+        return StageGateResult(
+            gate_type="required_mapping_keys",
+            passed=False,
+            message=f"Field '{field}' is not a mapping.",
+            metadata={"field": field, "missing": list(keys)},
+        )
+    missing = [str(key) for key in keys if str(key) not in value]
+    return StageGateResult(
+        gate_type="required_mapping_keys",
+        passed=not missing,
+        message=None if not missing else f"Field '{field}' is missing required keys: {', '.join(missing)}",
+        metadata={"field": field, "missing": missing},
+    )
+
+
+def _count_fixture_collection(value: Any) -> int:
+    if isinstance(value, Mapping):
+        return len(value)
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    return 0
+
+
 def _resolve_dotted(value: Any, dotted: str) -> Any:
     current = value
     for part in [piece for piece in str(dotted or "").split(".") if piece]:
@@ -204,4 +356,8 @@ _GATE_HANDLERS = {
     "no_exact_paths_from_context": _gate_no_exact_paths_from_context,
     "environment_payload_shape": _gate_environment_payload_shape,
     "field_equals": _gate_field_equals,
+    "json_schema": _gate_json_schema,
+    "no_placeholder_strings": _gate_no_placeholder_strings,
+    "min_fixture_items": _gate_min_fixture_items,
+    "required_mapping_keys": _gate_required_mapping_keys,
 }

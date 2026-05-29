@@ -1,149 +1,89 @@
-# Response Types Configuration
-# Defines what valid responses look like
-# Used to validate response format without hardcoding in Python
-
-# ============================================================
-# RESPONSE TYPE DEFINITIONS
-# ============================================================
-
 response_types:
-  # Tool call only - no explanatory text
   tool_only:
-    description: "Response contains only tool call(s), minimal or no explanation"
+    description: Response contains only tool call(s), minimal or no explanation
     requirements:
       has_tool_calls: true
       text_content:
-        max_length: 50  # Allow minimal formatting/acknowledgment
-        # e.g., "Done." or "Here you go:" is fine
-
-  # Tool call with explanation
+        max_length: 50
   tool_with_explanation:
-    description: "Tool call accompanied by explanation before/after"
+    description: Tool call accompanied by explanation before/after
     requirements:
       has_tool_calls: true
       text_content:
-        min_length: 30  # Must have meaningful explanation
-
-  # Text only - no tool calls
+        min_length: 30
   text_only:
-    description: "Pure text response, no tool calls"
+    description: Pure text response, no tool calls
     requirements:
       has_tool_calls: false
       text_content:
         min_length: 10
-
-  # Clarification request
   clarification:
-    description: "Asking user for more information before acting"
+    description: Asking user for more information before acting
     requirements:
       has_tool_calls: false
       text_content:
         contains_any:
-          - "?"
-          - "which"
-          - "what"
-          - "could you"
-          - "can you clarify"
-          - "please specify"
-          - "would you like"
-          - "do you mean"
-          - "did you mean"
-
-  # Confirmation before destructive action
+        - '?'
+        - which
+        - what
+        - could you
+        - can you clarify
+        - please specify
+        - would you like
+        - do you mean
+        - did you mean
   confirmation_request:
-    description: "Asking for confirmation before proceeding with destructive action"
+    description: Asking for confirmation before proceeding with destructive action
     requirements:
       has_tool_calls: false
       text_content:
         contains_any:
-          - "confirm"
-          - "are you sure"
-          - "proceed"
-          - "this will delete"
-          - "this action"
-          - "cannot be undone"
-          - "irreversible"
-
-  # Multi-tool batch operation
+        - confirm
+        - are you sure
+        - proceed
+        - this will delete
+        - this action
+        - cannot be undone
+        - irreversible
   batch_operation:
-    description: "Response with multiple tool calls (batch)"
+    description: Response with multiple tool calls (batch)
     requirements:
       has_tool_calls: true
       min_tool_calls: 2
       text_content:
-        optional: true  # May or may not have explanation
-
-  # Information gathering (search/read before action)
+        optional: true
   information_gathering:
-    description: "Using search/read tools to gather information first"
+    description: Using search/read tools to gather information first
     requirements:
       has_tool_calls: true
       tool_categories:
         any_of:
-          - search    # searchManager_search*
-          - read      # contentManager_read
-          - list      # storageManager_list
-
-  # Error recovery response
+        - search
+        - read
+        - list
   error_recovery:
-    description: "Response after encountering an error"
+    description: Response after encountering an error
     requirements:
       text_content:
         contains_any:
-          - "error"
-          - "failed"
-          - "couldn't"
-          - "unable"
-          - "try"
-          - "instead"
-          - "alternative"
-
-# ============================================================
-# RESPONSE TYPE ALIASES
-# ============================================================
-# Shorthand for common combinations
-
+        - error
+        - failed
+        - couldn't
+        - unable
+        - try
+        - instead
+        - alternative
 aliases:
-  # Model should act directly
   direct_action: tool_only
-
-  # Model should think then act
   thoughtful_action: tool_with_explanation
-
-  # Model should ask first
   ask_first: clarification
-
-  # Model should verify before destructive action
   verify_first: confirmation_request
-
-  # Model doing batch work
   batch: batch_operation
-
-  # Model gathering info
   research: information_gathering
-
-# ============================================================
-# PSEUDO-TOOLS
-# ============================================================
-# Special markers that aren't real tools but indicate valid responses
-
 pseudo_tools:
-  TEXT_ONLY: "Indicates text-only response is acceptable (no tool call)"
-
-# ============================================================
-# DEFAULT BEHAVIORS
-# ============================================================
-# What to expect when response_type not specified
-
+  TEXT_ONLY: Indicates text-only response is acceptable (no tool call)
 defaults:
-  # Default expected response type if not specified
   default_type: tool_with_explanation
-
-  # How strict to be about text length requirements
-  text_length_tolerance: 0.2  # 20% tolerance
-
-  # Whether to fail on unexpected response type
+  text_length_tolerance: 0.2
   strict_type_matching: false
-
-  # Pseudo-tool for text-only responses
   text_only_marker: TEXT_ONLY

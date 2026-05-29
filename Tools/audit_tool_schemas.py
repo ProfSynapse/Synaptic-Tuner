@@ -3,7 +3,7 @@
 Audit CLI-first tool schemas and regenerate evaluator config.
 
 This script:
-1. Parses tool-schemas.json (source of truth)
+1. Parses cli-first-tool-schemas.json (source of truth)
 2. Compares against Evaluator/config/tool_schema.yaml
 3. Generates corrected Evaluator/config/tool_schema_corrected.yaml
 4. Audits test case questions for non-existent params
@@ -18,7 +18,7 @@ import yaml
 
 
 def load_tool_schemas(path: Path) -> Dict[str, Any]:
-    """Load tool-schemas.json (source of truth)."""
+    """Load cli-first-tool-schemas.json (source of truth)."""
     with open(path) as f:
         return json.load(f)
 
@@ -38,7 +38,7 @@ def load_test_cases(path: Path) -> List[Dict[str, Any]]:
 
 def extract_tools_from_json_schema(schemas: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """
-    Extract tool definitions from tool-schemas.json.
+    Extract tool definitions from cli-first-tool-schemas.json.
 
     Returns:
         Dict mapping tool_name -> {agent, tool, required_params, optional_params, all_params}
@@ -291,7 +291,7 @@ def main():
     repo_root = Path(__file__).parent.parent
 
     # Paths
-    json_schema_path = repo_root / "tool-schemas.json"
+    json_schema_path = repo_root / "cli-first-tool-schemas.json"
     yaml_schema_path = repo_root / "Evaluator" / "config" / "tool_schema.yaml"
     tool_prompts_path = repo_root / "Evaluator" / "config" / "scenarios" / "tool_prompts.yaml"
     output_yaml_path = repo_root / "Evaluator" / "config" / "tool_schema_corrected.yaml"
@@ -310,7 +310,7 @@ def main():
     test_cases = load_test_cases(tool_prompts_path)
 
     # Extract tools from JSON
-    print("[2/4] Parsing tool-schemas.json...")
+    print("[2/4] Parsing cli-first-tool-schemas.json...")
     json_tools = extract_tools_from_json_schema(json_schemas)
     print(f"      Found {len(json_tools)} tools")
 
@@ -351,8 +351,8 @@ def main():
     corrected_yaml = generate_corrected_yaml(json_tools, yaml_config)
 
     with open(output_yaml_path, 'w') as f:
-        f.write("# Tool Schema Configuration (AUTO-GENERATED from tool-schemas.json)\n")
-        f.write("# Source of truth: tool-schemas.json\n")
+        f.write("# Tool Schema Configuration (AUTO-GENERATED from cli-first-tool-schemas.json)\n")
+        f.write("# Source of truth: cli-first-tool-schemas.json\n")
         f.write("# Do not edit manually - regenerate with: python tools/audit_tool_schemas.py\n\n")
         f.write(corrected_yaml)
 

@@ -31,6 +31,61 @@ def _first_message(conversations: List[Dict[str, Any]], role: str) -> Optional[s
     return None
 
 
+def _trace_message_content(turn: Dict[str, Any]) -> Optional[str]:
+    content = turn.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    return None
+
+
+def _trace_prompt_messages(
+    trace: List[Dict[str, Any]],
+    stop_index: int,
+    prompt_context: str,
+) -> List[Dict[str, str]]:
+    messages: List[Dict[str, str]] = []
+    for turn in trace[:stop_index]:
+        role = turn.get("role")
+        kind = turn.get("kind")
+        content = _trace_message_content(turn)
+        if role not in {"user", "assistant"} or not content:
+            continue
+        if role == "system":
+            continue
+        if kind in {"judge_feedback", "validation_feedback", "final_text_request"}:
+            continue
+        if prompt_context == "user_only" and kind != "prompt_message":
+            continue
+        messages.append({"role": role, "content": content})
+    return messages
+
+
+def _assistant_tool_calls(turn: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw = turn.get("raw") or {}
+    tool_calls = raw.get("tool_calls") or []
+    if not isinstance(tool_calls, list):
+        return []
+    return [call for call in tool_calls if isinstance(call, dict)]
+
+
+def _tool_call_name_and_args(tool_call: Dict[str, Any]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    function = tool_call.get("function") or {}
+    name = function.get("name")
+    args_raw = function.get("arguments")
+    if not isinstance(name, str) or not name.strip():
+        return None, None
+    if isinstance(args_raw, dict):
+        return name.strip(), args_raw
+    if isinstance(args_raw, str):
+        try:
+            parsed = json.loads(args_raw)
+        except json.JSONDecodeError:
+            return None, None
+        if isinstance(parsed, dict):
+            return name.strip(), parsed
+    return None, None
+
+
 def _stage_failures(metadata: Dict[str, Any]) -> List[str]:
     reviews = metadata.get("stage_reviews") or {}
     failures = []
@@ -169,6 +224,60 @@ def _build_grpo_row(path: Path, line_index: int, row: Dict[str, Any]) -> Optiona
     }
 
 
+def _build_grpo_tool_turn_rows(
+    path: Path,
+    line_index: int,
+    row: Dict[str, Any],
+    prompt_context: str,
+) -> List[Dict[str, Any]]:
+    metadata = row.get("metadata") or {}
+    if not _is_quality_positive(metadata):
+        return []
+
+    trace = row.get("conversation_trace") or []
+    if not isinstance(trace, list):
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for turn_index, turn in enumerate(trace):
+        if turn.get("kind") != "assistant_response":
+            continue
+        tool_calls = _assistant_tool_calls(turn)
+        if not tool_calls:
+            continue
+        tool_name, tool_args = _tool_call_name_and_args(tool_calls[0])
+        if not tool_name or tool_args is None:
+            continue
+        prompt = _trace_prompt_messages(trace, turn_index, prompt_context)
+        if not prompt:
+            continue
+        rows.append({
+            "prompt": prompt,
+            "scenario_id": str(metadata.get("scenario") or "unknown"),
+            "scenario_family": _scenario_family(metadata),
+            "source_example_id": f"{path.name}:{line_index}:turn:{turn_index}",
+            "allowed_tools": [tool_name],
+            "environment_passed": True,
+            "schema_passed": True,
+            "score_value": 1.0,
+            "score_tier": "acceptable",
+            "stop_reason": ((metadata.get("environment") or {}).get("episode_trace") or {}).get("stop_reason"),
+            "tool_call_count": int(((metadata.get("environment") or {}).get("episode_trace") or {}).get("total_tool_calls") or 0),
+            "failure_labels": _issue_labels(metadata),
+            "ground_truth_tool": tool_name,
+            "ground_truth_args_json": json.dumps(tool_args, sort_keys=True) if tool_args is not None else None,
+            "metadata": {
+                "source_artifact": path.name,
+                "seed_id": ((metadata.get("environment_seed") or {}).get("seed_id")),
+                "scenario": metadata.get("scenario"),
+                "projection": "tool_turns",
+                "source_turn_index": turn_index,
+                "prompt_context": prompt_context,
+            },
+        })
+    return rows
+
+
 def _write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -185,6 +294,18 @@ def main() -> int:
     parser.add_argument("--canonical-output", required=True, help="Output JSONL path for aggregated canonical records.")
     parser.add_argument("--kto-output", required=True, help="Output JSONL path for projected KTO records.")
     parser.add_argument("--grpo-output", required=True, help="Output JSONL path for projected GRPO records.")
+    parser.add_argument(
+        "--grpo-projection",
+        choices=["first_tool", "tool_turns"],
+        default="first_tool",
+        help="How to project successful rollouts into GRPO rows.",
+    )
+    parser.add_argument(
+        "--grpo-prompt-context",
+        choices=["user_only", "prior_real_messages"],
+        default="user_only",
+        help="Prompt context for tool_turns projection. prior_real_messages keeps user/assistant/tool-feedback turns and drops system/judge/validation turns.",
+    )
     args = parser.parse_args()
 
     input_paths = [Path(item).expanduser().resolve() for item in args.input]
@@ -197,9 +318,12 @@ def main() -> int:
         kto_row = _build_kto_row(path, line_index, row)
         if kto_row is not None:
             kto_rows.append(kto_row)
-        grpo_row = _build_grpo_row(path, line_index, row)
-        if grpo_row is not None:
-            grpo_rows.append(grpo_row)
+        if args.grpo_projection == "tool_turns":
+            grpo_rows.extend(_build_grpo_tool_turn_rows(path, line_index, row, args.grpo_prompt_context))
+        else:
+            grpo_row = _build_grpo_row(path, line_index, row)
+            if grpo_row is not None:
+                grpo_rows.append(grpo_row)
 
     canonical_count = _write_jsonl(Path(args.canonical_output), canonical_rows)
     kto_count = _write_jsonl(Path(args.kto_output), kto_rows)
@@ -212,6 +336,8 @@ def main() -> int:
         "kto_count": kto_count,
         "grpo_output": str(Path(args.grpo_output)),
         "grpo_count": grpo_count,
+        "grpo_projection": args.grpo_projection,
+        "grpo_prompt_context": args.grpo_prompt_context,
     }, indent=2))
     return 0
 

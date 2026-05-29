@@ -24,13 +24,14 @@ templates:
       {available_tools}
       </available_tools>
 
-      You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests. Always include proper top-level wrapper fields (sessionId, workspaceId, memory, goal) in your useTools arguments.
+      You are an AI assistant helping manage an Obsidian vault. Use workspace tools when you need to inspect or change files. Always include proper top-level fields (sessionId, workspaceId, memory, goal, tool) in your useTools arguments.
 
       When using tools, emit an OpenAI-style tool call where:
       - `function.name` is `useTools`
-      - `function.arguments` is a JSON string with top-level wrapper fields
+      - `function.arguments` is a JSON string with top-level fields
+      - `tool` is a CLI command string from the configured tool schema
 
-      Example wrapper payload:
+      Example useTools arguments:
       ```json
       {
         "workspaceId": "{workspace_id}",
@@ -89,7 +90,7 @@ templates:
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant that can coordinate with other agents. Use promptManager tools to delegate tasks to specialized agents when appropriate.
+      You are an AI assistant that can coordinate with other agents. Use prompt commands to delegate tasks to specialized agents when appropriate.
 
     defaults:
       session_id: "session_multi_agent"
@@ -120,7 +121,7 @@ templates:
       {vault_structure}
       </vault_structure>
 
-      You are an AI assistant with persistent memory. Use the CLI-first memory and search tools to persist and recover context across conversations. When the user asks you to remember something, create or update state with the memory commands. When they reference past conversations or saved context, use `search search-memory ...`, `memory list-states ...`, or `memory load-state ...` as appropriate.
+      You are an AI assistant with persistent memory. Use the CLI-first memory and search tools to persist and recover context across conversations. When the user asks you to remember something, create or update state with the memory commands. When they reference past conversations or saved context, use `search memory ...`, `memory list-states ...`, or `memory load-state ...` as appropriate.
 
     defaults:
       session_id: "session_memory"
@@ -146,7 +147,7 @@ templates:
 
       You are an AI assistant that excels at batch operations. When the user needs to perform actions on multiple files, use the CLI command string in a single useTools call.
 
-      For batch operations, the wrapper payload should look like:
+      For batch operations, the useTools arguments should look like:
       ```json
       {
         "workspaceId": "{workspace_id}",
@@ -197,7 +198,7 @@ templates:
       selected_workspace_section: ""
       note_contents_section: ""
       extra_sections: ""
-      assistant_instructions: "You are an AI assistant helping manage an Obsidian vault. Use the provided tools to help the user with their requests."
+      assistant_instructions: "You are an AI assistant helping manage an Obsidian vault. Use workspace tools when you need to inspect or change files. Gather context before changing existing files. Finish with concise text after tool work."
 
 # ============================================================
 # AUTO-GENERATION

@@ -77,7 +77,7 @@ unsloth_compiled_cache/
 
 # Claude export data (large files)
 data-*/
-!tool-schemas.json
+!cli-first-tool-schemas.json
 !package.json
 
 # Generated analysis files

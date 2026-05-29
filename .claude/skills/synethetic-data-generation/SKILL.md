@@ -89,6 +89,15 @@ turn. The response rubric is the repair path that receives validation errors,
 judge feedback, and environment issues, then produces the corrected assistant
 message. The `final_judge` is a terminal acceptance gate, not the improver.
 
+Environment-backed rows should persist the complete replay bundle by default:
+generated fixture, assertions, resolved environment config, task context,
+stage reviews, and enough source metadata to reconstruct the episode later.
+When projecting rollouts into per-turn training rows, keep a pointer to the
+canonical replay row or carry the replay bundle forward. A tool-turn-only
+projection is useful for static supervised examples, but it is not enough for
+later live environment replay unless the original environment artifact is still
+available.
+
 Use at least 3 retries/iterations for the response repair stages by default:
 set CLI `--max-iterations 3`, keep scenario judge/final_judge `max_retries: 3`,
 and make response rubrics strict enough to fail runtime misses such as missing

@@ -5,7 +5,7 @@
 
 ## Summary
 
-The tool schema for Synaptic Tuner has shifted from older wrapper-era and partially renamed tool formats to a more CLI-oriented catalog defined in [tool-schemas.json](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/tool-schemas.json). The existing canonical tool datasets under [Datasets/tools_datasets](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/Datasets/tools_datasets) are only partially aligned to that new contract.
+The tool schema for Synaptic Tuner has shifted from older wrapper-era and partially renamed tool formats to a more CLI-oriented catalog defined in [cli-first-tool-schemas.json](../../../cli-first-tool-schemas.json). The existing canonical tool datasets under [Datasets/tools_datasets](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/Datasets/tools_datasets) are only partially aligned to that new contract.
 
 This plan defines a repo-native refresh workflow that:
 
@@ -64,7 +64,7 @@ The `thinking` sets have enough semantic drift that they should not complicate t
 
 ### Target Schema
 
-The new catalog in [tool-schemas.json](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/tool-schemas.json) defines 60 tools across 11 agents:
+The new catalog in [cli-first-tool-schemas.json](../../../cli-first-tool-schemas.json) defines 60 tools across 11 agents:
 
 - `canvasManager`
 - `composer`
@@ -385,7 +385,7 @@ Recommended validation artifacts:
 ## Pseudocode
 
 ```python
-target_catalog = load_target_catalog("tool-schemas.json")
+target_catalog = load_target_catalog("cli-first-tool-schemas.json")
 source_sets = discover_latest_dataset_files("Datasets/tools_datasets")
 
 inventory = []
