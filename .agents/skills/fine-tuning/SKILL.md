@@ -30,6 +30,8 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
+| Standalone prompt optimization | `python tuner.py prompt-optimize --prompt-opt-config configs/prompt_optimization/NAME.yaml` |
+| Prompt-optimize SynthChat generation | `python -m SynthChat.run generate --prompt-opt-config configs/prompt_optimization/NAME.yaml [options]` |
 | Analyze bucket-backed run | `python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/` |
 | Read bucket artifact | `python tuner.py bucket read --path runs/.../logs/training_latest.jsonl --jsonl-latest --pretty` |
 | List bucket prefix | `python tuner.py bucket list --path runs/hf_jobs/sft/<run-prefix>/ --limit 20` |
@@ -195,6 +197,36 @@ python tuner.py local-run \
 ```
 
 For a different local SFT run, copy a recipe under `Trainers/recipes/` (one with `target: local` or `target: both`) and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
+
+**Generate a dataset with prompt optimization provenance:**
+```bash
+python -m SynthChat.run generate \
+  --prompt-opt-config configs/prompt_optimization/synthchat_smoke.yaml \
+  --output Datasets/synthchat/prompt_opt_dryrun.jsonl
+```
+
+Use prompt optimization as an opt-in dataset-generation step before training,
+not as an implicit trainer behavior. SynthChat records the optimizer artifact
+path and selected candidate ID in row metadata and leaves source YAML unchanged.
+
+**Run prompt optimization before dataset generation:**
+```bash
+python tuner.py prompt-optimize \
+  --prompt-opt-config configs/prompt_optimization/labkit_epistemic_humility_evaluator_smoke.yaml
+```
+
+Prompt optimization is a config-first workflow. Keep subjects, operators,
+evaluation scenarios, objectives, and stopping rules in
+`configs/prompt_optimization/*.yaml`; promote an optimized prompt into canonical
+scenario/config YAML only after human review. The practical evaluator threshold
+default is `stopping.target_score: 0.8`.
+
+The checked-in evaluator smoke config should stay dry-run safe:
+`configs/prompt_optimization/labkit_epistemic_humility_evaluator_smoke.yaml`
+uses `evaluation.evaluator.dry_run: true`. For a real LM Studio smoke, use an
+explicit local override or temporary manual copy rather than changing the
+checked-in config. Keep that real smoke minimal: `population_size: 3` and
+`max_generations: 1`.
 
 **KTO with local dataset:**
 ```bash

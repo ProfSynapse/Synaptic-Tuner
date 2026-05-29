@@ -1,0 +1,46 @@
+prompt_optimization:
+  schema_version: 2
+  strategy: evolutionary
+  run_id: synthchat-evolutionary-smoke
+  seed: 29
+  output_dir: .tracking/prompt_optimization/synthchat-evolutionary-smoke
+  population_size: 4
+  max_generations: 3
+  elite_count: 1
+  mutation_rate: 0.75
+  crossover_rate: 0.25
+  stopping:
+    target_score: 1.0
+    max_stagnation: 2
+    min_delta: 0.01
+
+  subjects:
+    - id: synthchat_default_generation_instructions
+      path: SynthChat/config/tool_call_formats.yaml
+      dotted_path: formats.default.generation_instructions
+      join_with: "\n"
+
+  operators:
+    - type: append
+      values:
+        - "Preserve the configured response format and return a valid JSON object."
+        - "Do not invent a tool wrapper unless the selected format explicitly requires one."
+    - type: replace
+      replacements:
+        - old: "format"
+          new: "configured format"
+
+  evaluation:
+    assertions:
+      - id: preserves_json_requirement
+        type: regex
+        pattern: "JSON object"
+        weight: 2.0
+      - id: avoids_unconfigured_wrapper_assumption
+        type: not_contains
+        text: "hardcoded wrapper"
+        weight: 1.0
+      - id: keeps_response_format_focus
+        type: contains
+        text: "format"
+        weight: 1.0

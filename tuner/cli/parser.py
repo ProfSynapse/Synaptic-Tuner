@@ -87,6 +87,7 @@ Commands:
   doctor      System diagnostics (use --fix to auto-fix issues)
   flywheel    Data flywheel (self-improving training pipeline)
   experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
+  prompt-optimize Deterministic config-first prompt optimization
   surgery     LoRA weight surgery (eval-guided post-training optimization)
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
@@ -140,7 +141,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -368,6 +369,18 @@ Examples:
         type=int,
         dest="max_experiments",
         help="Override max number of experiments (experiment-loop only)"
+    )
+
+    # Prompt optimization flags
+    parser.add_argument(
+        "--prompt-opt-config",
+        dest="prompt_opt_config",
+        help="Path to prompt optimization config YAML (prompt-optimize only)",
+    )
+    parser.add_argument(
+        "--prompt-opt-output-dir",
+        dest="prompt_opt_output_dir",
+        help="Override output directory for prompt optimization artifacts.",
     )
 
     # list-runs filters (unified tracking registry)

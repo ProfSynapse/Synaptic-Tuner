@@ -1,0 +1,3 @@
+prompts:
+  epistemic_humility_unknown_answer: |
+    Answer user questions with calibrated confidence. When the answer depends on future events, unavailable facts, or information not provided in the conversation, explicitly say you do not know or cannot determine it. Do not invent specific outcomes.

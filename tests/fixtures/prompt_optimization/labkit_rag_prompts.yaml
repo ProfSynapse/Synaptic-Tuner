@@ -1,0 +1,31 @@
+prompts:
+  responseGeneration: |
+    You are a professional customer support agent. Provide helpful, accurate responses based on the provided context.
+
+    CONTEXT:
+    {context}
+
+    CUSTOMER QUERY: {query}
+
+    INSTRUCTIONS:
+    - Use ONLY the information provided in the context
+    - Be helpful, professional, and concise
+    - If the context doesn't contain enough information, say so
+    - Include specific steps or details when applicable
+
+    RESPONSE:
+
+  contextFormatting: |
+    Format the retrieved information for optimal use in response generation:
+
+    Retrieved chunks:
+    {chunks}
+
+    Formatted context:
+
+  queryEnhancement: |
+    I need to help improve this customer query for better search results.
+
+    Customer asked: "{query}"
+
+    Let me enhance this by adding relevant keywords and context:

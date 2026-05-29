@@ -137,6 +137,16 @@ def main():
     generate_parser.add_argument("--per-doc", type=int, default=1, help="Examples to generate per doc (default: 1)")
     generate_parser.add_argument("--workers", "-w", type=int, default=1, help="Number of parallel workers (default: 1)")
     generate_parser.add_argument(
+        "--prompt-opt-config",
+        default=None,
+        help="Optional prompt optimization YAML config to run before generation",
+    )
+    generate_parser.add_argument(
+        "--prompt-opt-artifact",
+        default=None,
+        help="Optional prompt optimization artifact directory or overlays.json to apply before generation",
+    )
+    generate_parser.add_argument(
         "--privacy-profile",
         default=None,
         help="Named privacy preprocess profile to apply to seed docs before generation",

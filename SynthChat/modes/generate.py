@@ -8,6 +8,7 @@ Usage: Called by SynthChat.run.main() when command is 'generate'.
 """
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +86,12 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
         logger=logger,
         privacy_settings=settings.get("privacy_preprocess"),
     )
+    prompt_opt_metadata = _prepare_prompt_optimization(
+        args=args,
+        generator=generator,
+        scenarios_dir=scenarios_dir,
+        config_dir=config_dir,
+    )
 
     # Load targets
     if args.targets_file:
@@ -144,12 +151,17 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
     max_iterations = args.max_iterations or settings["improvement"]["max_iterations"]
     args.workers = max(1, args.workers)
     num_workers = args.workers
+    if prompt_opt_metadata and num_workers > 1:
+        print("Prompt optimization overlays are applied in memory; using 1 worker for this generation run.")
+        num_workers = 1
+        args.workers = 1
     results = []
 
     # Determine output path early so we can stream results to disk
     output_file = Path(args.output) if args.output else generate_output_path(settings)
 
     with StreamingResultWriter(output_file, settings) as writer:
+        result_writer = _PromptOptimizationResultWriter(writer.write, prompt_opt_metadata)
         if docs and num_workers > 1:
             # Parallel docs-based generation with multiple workers
             print(f"Using {num_workers} parallel workers for {len(docs)} doc(s)\n")
@@ -158,7 +170,7 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
                 environment_validator, create_llm_client, settings,
                 max_iterations,
             )
-            results.extend(run_parallel_generation(work_items, num_workers, writer))
+            results.extend(run_parallel_generation(work_items, num_workers, result_writer))
         elif docs:
             # Sequential docs-based generation (single worker)
             total_docs = len(docs)
@@ -172,7 +184,7 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
                         max_iterations=max_iterations,
                         randomize_params=True,
                         doc_context=doc,
-                        on_result=writer.write,
+                        on_result=result_writer.write,
                         shared_seed_spec=shared_seed_spec,
                     )
                     results.extend(batch_results)
@@ -184,14 +196,14 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
                 args, settings, environment_validator, create_llm_client,
                 max_iterations,
             )
-            results.extend(run_parallel_generation(work_items, num_workers, writer))
+            results.extend(run_parallel_generation(work_items, num_workers, result_writer))
         else:
             # Standard sequential generation (no docs)
             results = generator.generate_batch(
                 targets=targets,
                 max_iterations=max_iterations,
                 randomize_params=True,
-                on_result=writer.write,
+                on_result=result_writer.write,
                 shared_seed_spec=shared_seed_spec,
             )
 
@@ -199,6 +211,246 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
 
     # Print summary
     print_summary(results, output_file)
+
+
+def _prepare_prompt_optimization(args, *, generator, scenarios_dir: Path, config_dir: Path) -> Optional[Dict[str, Any]]:
+    """Run or load prompt optimization artifacts and apply overlays in memory."""
+    config_path = getattr(args, "prompt_opt_config", None)
+    artifact_path = getattr(args, "prompt_opt_artifact", None)
+    if not config_path and not artifact_path:
+        return None
+
+    result = None
+    if config_path:
+        try:
+            from shared.prompt_optimization import PromptOptimizationService
+        except ImportError as exc:
+            raise RuntimeError(
+                "Prompt optimization requested, but shared.prompt_optimization is not importable."
+            ) from exc
+        result = PromptOptimizationService.from_config(config_path, overrides=None).run()
+        artifact_path = result.output_dir
+        print(f"Prompt optimization artifact: {artifact_path}")
+
+    overlay_path = _resolve_prompt_overlay_path(Path(artifact_path))
+    overlays = _load_prompt_overlays(overlay_path)
+    applied_subjects = _apply_prompt_overlays(
+        overlays=overlays,
+        generator=generator,
+        scenarios_dir=scenarios_dir,
+        config_dir=config_dir,
+    )
+    if overlays.get("subjects") and not applied_subjects:
+        raise ValueError(
+            "Prompt optimization was requested, but none of the overlay subjects "
+            "matched the loaded SynthChat scenario/config surfaces."
+        )
+    selected_candidate_id = overlays.get("selected_candidate_id")
+    metadata = {
+        "artifact_path": str(overlay_path.parent),
+        "overlays_path": str(overlay_path),
+        "selected_candidate_id": selected_candidate_id,
+        "applied_subjects": applied_subjects,
+    }
+    if result is not None:
+        metadata["run_id"] = result.run_id
+        metadata["candidate_count"] = result.candidate_count
+
+    print(
+        "Applied prompt optimization overlays: "
+        f"{len(applied_subjects)} subject(s)"
+        + (f", selected_candidate_id={selected_candidate_id}" if selected_candidate_id else "")
+    )
+    return metadata
+
+
+def _resolve_prompt_overlay_path(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved.is_dir():
+        resolved = resolved / "overlays.json"
+    if not resolved.exists():
+        raise FileNotFoundError(f"Prompt optimization overlays not found: {resolved}")
+    if resolved.name != "overlays.json":
+        raise ValueError(
+            "Prompt optimization artifact must be a directory containing overlays.json "
+            "or a direct path to overlays.json."
+        )
+    return resolved
+
+
+def _load_prompt_overlays(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Prompt optimization overlays must be a JSON object: {path}")
+    if not isinstance(payload.get("subjects"), dict):
+        raise ValueError(f"Prompt optimization overlays missing subjects mapping: {path}")
+    return payload
+
+
+def _apply_prompt_overlays(
+    *,
+    overlays: Dict[str, Any],
+    generator,
+    scenarios_dir: Path,
+    config_dir: Path,
+) -> List[str]:
+    applied: List[str] = []
+    for subject_id, overlay in (overlays.get("subjects") or {}).items():
+        if not isinstance(overlay, dict):
+            raise ValueError(f"Prompt optimization overlay subject must be an object: {subject_id}")
+        dotted_path = str(overlay.get("dotted_path") or "").strip()
+        if not dotted_path:
+            raise ValueError(f"Prompt optimization overlay missing dotted_path: {subject_id}")
+        if "optimized_prompt" not in overlay:
+            raise ValueError(f"Prompt optimization overlay missing optimized_prompt: {subject_id}")
+
+        target = _resolve_overlay_target(
+            source_path=str(overlay.get("source_path") or ""),
+            source_path_absolute=str(overlay.get("source_path_absolute") or ""),
+            source_path_repo_relative=str(overlay.get("source_path_repo_relative") or ""),
+            dotted_path=dotted_path,
+            generator=generator,
+            scenarios_dir=scenarios_dir,
+            config_dir=config_dir,
+        )
+        if target is None:
+            print(
+                "Warning: Prompt optimization overlay target not loaded in SynthChat generate; "
+                f"skipping subject={subject_id} source={overlay.get('source_path')} path={dotted_path}"
+            )
+            continue
+
+        container, key = target
+        container[key] = _coerce_overlay_value(container.get(key), overlay["optimized_prompt"])
+        applied.append(str(subject_id))
+    return applied
+
+
+def _resolve_overlay_target(
+    *,
+    source_path: str,
+    dotted_path: str,
+    source_path_absolute: str = "",
+    source_path_repo_relative: str = "",
+    generator,
+    scenarios_dir: Path,
+    config_dir: Path,
+):
+    normalized_sources = _normalized_source_candidates(
+        source_path=source_path,
+        source_path_absolute=source_path_absolute,
+        source_path_repo_relative=source_path_repo_relative,
+        config_dir=config_dir,
+    )
+    scenarios_prefix = _normalize_repo_path(str(scenarios_dir))
+
+    if any(source.startswith(scenarios_prefix + "/") for source in normalized_sources):
+        parts = dotted_path.split(".")
+        if parts and parts[0] == "scenarios":
+            parts = parts[1:]
+        return _resolve_container(generator.scenario_loader.scenarios, parts)
+
+    if _normalize_repo_path(str(config_dir / "tool_call_formats.yaml")) in normalized_sources:
+        parts = dotted_path.split(".")
+        if parts and parts[0] == "formats":
+            parts = parts[1:]
+        return _resolve_container(generator._tool_call_formats, parts)
+
+    if _normalize_repo_path(str(config_dir / "workspace_formats.yaml")) in normalized_sources:
+        parts = dotted_path.split(".")
+        if parts and parts[0] == "formats":
+            parts = parts[1:]
+        return _resolve_container(generator._workspace_formats, parts)
+
+    if _normalize_repo_path(str(config_dir / "label_mappings.yaml")) in normalized_sources:
+        return _resolve_container(generator._label_mappings, dotted_path.split("."))
+
+    return None
+
+
+def _normalized_source_candidates(
+    *,
+    source_path: str,
+    source_path_absolute: str,
+    source_path_repo_relative: str,
+    config_dir: Path,
+) -> set[str]:
+    candidates = set()
+    for value in [source_path_absolute, source_path]:
+        normalized = _normalize_repo_path(value)
+        if normalized:
+            candidates.add(normalized)
+
+    repo_root = _find_repo_root(config_dir)
+    for value in [source_path_repo_relative, source_path]:
+        if value and not Path(value).expanduser().is_absolute():
+            candidates.add(_normalize_repo_path(str(repo_root / value)))
+    return candidates
+
+
+def _find_repo_root(start: Path) -> Path:
+    for candidate in [start.resolve(), *start.resolve().parents]:
+        if (candidate / "tuner.py").exists():
+            return candidate
+    return Path.cwd().resolve()
+
+
+def _resolve_container(root: Any, parts: List[str]):
+    current = root
+    for part in parts[:-1]:
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+        if current is None:
+            return None
+
+    if not parts:
+        return None
+    key = parts[-1]
+    if isinstance(current, dict):
+        if key not in current:
+            return None
+        return current, key
+    if isinstance(current, list):
+        try:
+            index = int(key)
+        except ValueError:
+            return None
+        if index < 0 or index >= len(current):
+            return None
+        return current, index
+    return None
+
+
+def _coerce_overlay_value(existing: Any, optimized_prompt: Any) -> Any:
+    if isinstance(existing, list) and isinstance(optimized_prompt, str):
+        return optimized_prompt.splitlines()
+    return deepcopy(optimized_prompt)
+
+
+def _normalize_repo_path(path: str) -> str:
+    if not path:
+        return ""
+    return str(Path(path).expanduser().resolve()).replace("\\", "/").lower()
+
+
+class _PromptOptimizationResultWriter:
+    def __init__(self, write_fn, metadata: Optional[Dict[str, Any]]):
+        self._write_fn = write_fn
+        self._metadata = metadata
+
+    def write(self, result) -> bool:
+        if self._metadata and getattr(result, "example", None):
+            metadata = result.example.setdefault("metadata", {})
+            metadata["prompt_optimization"] = deepcopy(self._metadata)
+        return self._write_fn(result)
 
 
 def _build_docs_work_items(docs, args, generator, targets, shared_seed_spec,

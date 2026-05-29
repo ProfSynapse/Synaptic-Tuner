@@ -1,0 +1,47 @@
+prompt_optimization:
+  run_id: synthchat-smoke
+  seed: 17
+  output_dir: .tracking/prompt_optimization/synthchat-smoke
+  include_baseline: true
+  candidates_per_subject: 1
+  llm:
+    provider: lmstudio
+    model: gpt-oss-20b
+    temperature: 0.1
+    max_tokens: 2048
+    system_prompt: |
+      You rewrite prompt instructions for a dataset generation system.
+      Preserve the original behavioral requirements and output only the rewritten prompt text.
+    prompt_template: |
+      Rewrite this prompt subject for clarity and format discipline.
+
+      Subject: {subject_id}
+      Source path: {source_path}
+      Dotted path: {dotted_path}
+
+      Current prompt:
+      {prompt}
+
+  subjects:
+    - id: synthchat_default_generation_instructions
+      path: SynthChat/config/tool_call_formats.yaml
+      dotted_path: formats.default.generation_instructions
+      join_with: "\n"
+
+  operators:
+    - type: llm_rewrite
+
+  evaluation:
+    assertions:
+      - id: preserves_json_requirement
+        type: regex
+        pattern: "JSON object"
+        weight: 2.0
+      - id: avoids_unconfigured_wrapper_assumption
+        type: not_contains
+        text: "hardcoded wrapper"
+        weight: 1.0
+      - id: keeps_response_format_focus
+        type: contains
+        text: "format"
+        weight: 1.0
