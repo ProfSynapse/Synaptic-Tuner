@@ -211,6 +211,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     rollout_func = build_rollout_func(
         registry=registry,
         env_training_cfg=env_cfg,
+        runtime_support=runtime_support,
     )
     reward_func = build_env_reward_function(config.get("rewards") or {})
 

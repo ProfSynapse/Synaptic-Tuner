@@ -1,9 +1,34 @@
 # Token-Faithful Multi-Turn GRPO Rollout Plan
 
 **Date:** 2026-05-29
-**Status:** Proposed
+**Status:** Implemented (Phases 0–3)
 **Paper / Prior Art:** NVIDIA POLAR — [arXiv:2605.24220](https://arxiv.org/html/2605.24220v1) ([MarkTechPost writeup](https://www.marktechpost.com/2026/05/27/nvidia-releases-polar-a-token-faithful-rollout-framework-for-grpo-training-across-codex-claude-code-and-qwen-code/))
 **Branch:** `claude/polar-token-rollout-MTzCp`
+
+---
+
+## Phase 0 — TRL Contract (RESOLVED)
+
+Verified directly against TRL wheels (no guessing):
+
+- **Hook:** TRL's GRPO `rollout_func` accepts an extra `env_mask` key in its
+  output dict. `grpo_trainer.py` does `tool_mask = extra_fields.pop("env_mask", None)`
+  ("marks model tokens (1) vs external tokens (0)") and the loss uses
+  `loss_mask = completion_mask if "tool_mask" not in inputs else completion_mask * inputs["tool_mask"]`.
+  So **design (A)** — one record per episode, full interleaved sequence in
+  `completion_ids`, masked via `env_mask` — is supported. Turn-level records
+  (design B) are unnecessary.
+- **Contract:** `rollout_func` must return `prompt_ids`, `completion_ids`,
+  `logprobs`; `env_mask` is an optional extra. `env_mask` and `logprobs` must each
+  be the same length as `completion_ids` (TRL pads `env_mask` with 1 and
+  `logprobs` with 0.0). Context tokens are still attended to (they sit in
+  `completion_ids` with `completion_mask=1`) but contribute nothing to the loss.
+- **Version floor:** `env_mask` is honored from **trl 0.28.0** (wired into the loss
+  at `grpo_trainer.py`). `0.24.0`–`0.27.x` have no `env_mask`. Config floor bumped
+  to `trl>=0.28.0`; the rollout builder also probes the live trainer source via
+  `detect_openenv_runtime_support()['has_env_mask']` and falls back to the legacy
+  flattened path (with a warning) on older runtimes, so it never trains on context
+  tokens.
 
 ---
 

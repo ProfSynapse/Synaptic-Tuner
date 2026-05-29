@@ -53,6 +53,19 @@ env_training:
   max_turns: 6
   max_tool_steps: 8
 
+  # Token-faithful (POLAR-style) multi-turn rollout serialization.
+  # When true, the rollout preserves the full interleaved token sequence and
+  # emits a per-token env_mask (model tokens=1, external context tokens=0) so
+  # GRPO trains on exactly the tokens the model sampled while still conditioning
+  # on the real tool-result / user-feedback context. Single-turn episodes are
+  # byte-identical either way. Requires trl>=0.28.0 (env_mask support); the
+  # rollout builder auto-falls back to the legacy flattened path otherwise.
+  token_faithful: true
+  # "mask" = faithful interleaved sequence + env_mask. "drop" = legacy flattened
+  # behavior (assistant turns concatenated, context tokens dropped). Use "drop"
+  # only for A/B comparison.
+  context_token_policy: mask
+
   runtime:
     # Keep using the shared Unsloth image for cloud jobs, but isolate modern
     # env-GRPO deps in a venv so we don't destabilize existing trainers.
@@ -67,7 +80,7 @@ env_training:
       - "datasets"
     python_packages:
       - "huggingface_hub<1.0"
-      - "trl>=0.24.0"
+      - "trl>=0.28.0"  # env_mask loss-mask support for token-faithful rollouts
       - "transformers>=4.56.0"
       - "accelerate>=1.6.0"
       - "peft>=0.15.0"
