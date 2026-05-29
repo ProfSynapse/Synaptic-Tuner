@@ -55,6 +55,43 @@ def _scrub_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return scrubbed
 
 
+def _extract_completion_token_logprobs(
+    choice: dict[str, Any],
+) -> tuple[list[int] | None, list[float] | None]:
+    """Best-effort extraction of completion token ids + per-token logprobs.
+
+    Reads the OpenAI/vLLM chat-completions ``logprobs.content`` array. Per-token
+    logprobs are taken directly. Token ids are only available when vLLM was asked
+    with ``return_tokens_as_token_ids: true`` (then each ``token`` is rendered as
+    ``"token_id:<int>"``); if any token is not in that form, token ids are
+    reported as None (logprobs may still be returned). Never raises — capture is
+    best-effort and absence is normal.
+    """
+    logprobs_obj = choice.get("logprobs") or {}
+    content = logprobs_obj.get("content")
+    if not content:
+        return None, None
+
+    logprob_values: list[float] = []
+    token_ids: list[int] = []
+    token_ids_ok = True
+    for entry in content:
+        if not isinstance(entry, dict):
+            return None, None
+        lp = entry.get("logprob")
+        logprob_values.append(float(lp) if lp is not None else 0.0)
+        token = entry.get("token", "")
+        if isinstance(token, str) and token.startswith("token_id:"):
+            try:
+                token_ids.append(int(token.split(":", 1)[1]))
+            except ValueError:
+                token_ids_ok = False
+        else:
+            token_ids_ok = False
+
+    return (token_ids if token_ids_ok and token_ids else None), (logprob_values or None)
+
+
 class InferenceLogger:
     """Async JSONL writer for inference request/response pairs.
 
@@ -166,12 +203,16 @@ class InferenceLogger:
         tool_calls_list: list[dict] = []
         finish_reason = "stop"
 
+        completion_token_ids: list[int] | None = None
+        completion_logprobs: list[float] | None = None
         if choices:
             choice = choices[0]
             message = choice.get("message", {})
             response_content = message.get("content", "") or ""
             tool_calls_list = message.get("tool_calls", []) or []
             finish_reason = choice.get("finish_reason", "stop") or "stop"
+            if getattr(self._config, "capture_token_ids", False):
+                completion_token_ids, completion_logprobs = _extract_completion_token_logprobs(choice)
 
         # Extract usage
         usage = response.get("usage", {})
@@ -193,6 +234,8 @@ class InferenceLogger:
             finish_reason=finish_reason,
             prompt_tokens=prompt_toks,
             completion_tokens=completion_toks,
+            completion_token_ids=completion_token_ids,
+            completion_logprobs=completion_logprobs,
             latency_ms=latency_ms,
         )
 

@@ -29,6 +29,9 @@ class ProxyConfig:
     proxy_port: int = 8080
     proxy_timeout_seconds: float = 120.0
     flush_interval_seconds: float = 1.0
+    # When true, inject logprobs + return_tokens_as_token_ids into forwarded
+    # chat-completion requests so the logger can capture token-faithful rollouts.
+    inject_logprobs: bool = False
 
     @classmethod
     def from_env(cls) -> ProxyConfig:
@@ -52,6 +55,8 @@ class ProxyConfig:
             flush_interval_seconds=float(
                 os.environ.get("FLYWHEEL_FLUSH_INTERVAL", "1.0")
             ),
+            inject_logprobs=os.environ.get("FLYWHEEL_INJECT_LOGPROBS", "0")
+            in ("1", "true", "True"),
         )
 
     @classmethod
@@ -73,4 +78,5 @@ class ProxyConfig:
             proxy_port=config.proxy_port,
             proxy_timeout_seconds=config.proxy_timeout_seconds,
             flush_interval_seconds=config.flush_interval_seconds,
+            inject_logprobs=getattr(config, "proxy_inject_logprobs", False),
         )

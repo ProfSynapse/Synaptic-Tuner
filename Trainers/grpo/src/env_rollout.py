@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 from shared.environments import EnvironmentValidator
 from shared.environments.tool_executor import format_tool_results_message
@@ -32,6 +35,89 @@ class EpisodeRolloutResult:
     total_turns: int
     total_tool_calls: int
     final_text_satisfied: bool
+    # Token-faithful (POLAR-style) loss mask aligned 1:1 with completion_ids:
+    # 1 = model-sampled token (trainable), 0 = external context token (tool
+    # result / user feedback) that the model conditioned on but did not emit.
+    # Empty when the legacy flattened representation is used.
+    env_mask: List[int] = field(default_factory=list)
+
+
+# A single generated turn: (prompt_ids, completion_ids, logprobs). prompt_ids is
+# the re-tokenized conversation prefix rendered for that turn's generation;
+# completion_ids / logprobs are the actual sampled tokens and their sampling
+# log-probabilities.
+TurnSegment = Tuple[List[int], List[int], List[float]]
+
+
+def _assemble_flat_sequence(turn_segments: Sequence[TurnSegment]) -> Tuple[List[int], List[int], List[float]]:
+    """Legacy representation: first turn's prompt, all assistant turns concatenated.
+
+    Intermediate tool-result / user-feedback tokens are dropped entirely. This is
+    the historical behavior and is not token-faithful for multi-turn episodes, but
+    it is exactly correct (and identical to the faithful path) for single-turn
+    episodes.
+    """
+    if not turn_segments:
+        return [], [], []
+    base_prompt = list(turn_segments[0][0])
+    completion: List[int] = []
+    logprobs: List[float] = []
+    for _prompt_ids, completion_ids, turn_logprobs in turn_segments:
+        completion.extend(completion_ids)
+        logprobs.extend(turn_logprobs)
+    return base_prompt, completion, logprobs
+
+
+def _assemble_faithful_sequence(
+    turn_segments: Sequence[TurnSegment],
+) -> Tuple[List[int], List[int], List[int], List[float]]:
+    """Token-faithful representation: full interleaved sequence + per-token mask.
+
+    Returns ``(base_prompt_ids, completion_ids, env_mask, logprobs)`` where
+    ``completion_ids`` is everything after the initial prompt — assistant turns
+    interleaved with the exact tool-result / user-feedback context tokens the
+    model saw between turns. ``env_mask`` is 1 on assistant-sampled tokens and 0
+    on external context tokens; ``logprobs`` carries the sampling log-prob on
+    assistant tokens and 0.0 on context tokens. All three lists are the same
+    length, matching TRL's ``env_mask`` contract (mask is multiplied into the
+    completion loss mask, so context tokens contribute nothing to the loss while
+    still being attended to).
+
+    Context tokens for the transition into turn ``t`` are recovered as the tail of
+    turn ``t``'s rendered prompt that extends past ``prompt(t-1) + completion(t-1)``
+    — the same length-delta slicing TRL's own internal tool loop uses. Assistant
+    spans use the raw sampled token ids (not re-templated text) so the trained
+    tokens stay byte-faithful to what was sampled.
+    """
+    if not turn_segments:
+        return [], [], [], []
+
+    base_prompt = list(turn_segments[0][0])
+    completion: List[int] = []
+    env_mask: List[int] = []
+    logprobs: List[float] = []
+
+    _first_prompt, first_completion, first_logprobs = turn_segments[0]
+    completion.extend(first_completion)
+    env_mask.extend([1] * len(first_completion))
+    logprobs.extend(first_logprobs)
+
+    for idx in range(1, len(turn_segments)):
+        prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+        cur_prompt, cur_completion, cur_logprobs = turn_segments[idx]
+
+        ext_len = len(cur_prompt) - len(prev_prompt) - len(prev_completion)
+        if ext_len > 0:
+            ext_ids = list(cur_prompt[-ext_len:])
+            completion.extend(ext_ids)
+            env_mask.extend([0] * ext_len)
+            logprobs.extend([0.0] * ext_len)
+
+        completion.extend(cur_completion)
+        env_mask.extend([1] * len(cur_completion))
+        logprobs.extend(cur_logprobs)
+
+    return base_prompt, completion, env_mask, logprobs
 
 
 def build_prompt_registry(dataset) -> Dict[str, EpisodeSpec]:
@@ -53,13 +139,44 @@ def build_prompt_registry(dataset) -> Dict[str, EpisodeSpec]:
     return registry
 
 
+def _resolve_faithful_mode(
+    env_training_cfg: Mapping[str, Any],
+    runtime_support: Optional[Mapping[str, Any]],
+) -> bool:
+    """Decide whether to emit the token-faithful representation + env_mask.
+
+    Faithful mode requires (a) the config opting in (default on), (b) the mask
+    policy, and (c) the installed TRL actually honoring ``env_mask`` as a loss
+    mask. If faithful is requested but the runtime cannot honor the mask, we fall
+    back to the safe legacy flattened path rather than silently stuffing
+    untrainable context tokens into ``completion_ids`` (which an older TRL would
+    train on). This is the Phase 0 capability gate.
+    """
+    token_faithful = bool(env_training_cfg.get("token_faithful", True))
+    context_policy = str(env_training_cfg.get("context_token_policy", "mask"))
+    if not token_faithful or context_policy != "mask":
+        return False
+
+    supports_env_mask = bool((runtime_support or {}).get("has_env_mask"))
+    if not supports_env_mask:
+        logger.warning(
+            "token_faithful requested but the installed TRL does not honor "
+            "env_mask (requires trl>=0.28.0). Falling back to the legacy "
+            "flattened rollout representation to avoid training on context tokens."
+        )
+        return False
+    return True
+
+
 def build_rollout_func(
     *,
     registry: Dict[str, EpisodeSpec],
     env_training_cfg: Dict[str, Any],
+    runtime_support: Optional[Mapping[str, Any]] = None,
 ) -> Any:
     openenv_module = _import_openenv_helpers()
     generate_rollout_completions = getattr(openenv_module, "generate_rollout_completions")
+    faithful = _resolve_faithful_mode(env_training_cfg, runtime_support)
 
     def rollout_func(prompts: List[str], trainer) -> Dict[str, List[Any]]:
         results: List[EpisodeRolloutResult] = []
@@ -73,10 +190,11 @@ def build_rollout_func(
                     generate_rollout_completions=generate_rollout_completions,
                     spec=spec,
                     env_training_cfg=env_training_cfg,
+                    faithful=faithful,
                 )
             )
 
-        return {
+        output: Dict[str, List[Any]] = {
             "prompt_ids": [item.prompt_ids for item in results],
             "completion_ids": [item.completion_ids for item in results],
             "logprobs": [item.logprobs for item in results],
@@ -88,6 +206,11 @@ def build_rollout_func(
             "final_text_satisfied": [item.final_text_satisfied for item in results],
             "completion_text": [item.completion_text for item in results],
         }
+        if faithful:
+            # TRL pops env_mask from the rollout output and multiplies it into the
+            # completion loss mask (model tokens=1, external context tokens=0).
+            output["env_mask"] = [item.env_mask for item in results]
+        return output
 
     return rollout_func
 
@@ -98,6 +221,7 @@ def _run_single_episode(
     generate_rollout_completions,
     spec: EpisodeSpec,
     env_training_cfg: Dict[str, Any],
+    faithful: bool = False,
 ) -> EpisodeRolloutResult:
     tokenizer = trainer.processing_class
     env_backend = str(env_training_cfg.get("env_backend") or "local")
@@ -119,9 +243,7 @@ def _run_single_episode(
         or "The task is complete. Reply to the user with a brief final text-only response. Do not call any more tools."
     )
 
-    all_completion_ids: List[int] = []
-    all_logprobs: List[float] = []
-    first_prompt_ids: Optional[List[int]] = None
+    turn_segments: List[TurnSegment] = []
     completion_text_parts: List[str] = []
     stop_reason = "max_turns_reached"
     awaiting_final_text = False
@@ -144,10 +266,12 @@ def _run_single_episode(
             logprobs = [float(value) for value in (outputs.get("logprobs") or [])]
             completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
 
-            if first_prompt_ids is None:
-                first_prompt_ids = prompt_ids
-            all_completion_ids.extend(completion_ids)
-            all_logprobs.extend(logprobs)
+            # Keep logprobs aligned 1:1 with completion_ids. TRL pads/uses the
+            # sampling logprobs positionally, so a per-turn mismatch would
+            # corrupt downstream alignment. Pad short, truncate long.
+            logprobs = _align_logprobs(logprobs, len(completion_ids))
+
+            turn_segments.append((prompt_ids, completion_ids, logprobs))
             completion_text_parts.append(completion_text)
 
             parsed = parse_response(completion_text)
@@ -219,10 +343,16 @@ def _run_single_episode(
     env_reward = 1.0 if env_passed else 0.0
     completion_text = "\n".join(part for part in completion_text_parts if part.strip())
 
+    if faithful:
+        prompt_ids, completion_ids, env_mask, logprobs = _assemble_faithful_sequence(turn_segments)
+    else:
+        prompt_ids, completion_ids, logprobs = _assemble_flat_sequence(turn_segments)
+        env_mask = []
+
     return EpisodeRolloutResult(
-        prompt_ids=first_prompt_ids or [],
-        completion_ids=all_completion_ids,
-        logprobs=all_logprobs,
+        prompt_ids=prompt_ids,
+        completion_ids=completion_ids,
+        logprobs=logprobs,
         completion_text=completion_text,
         env_passed=env_passed,
         env_reward=env_reward,
@@ -230,7 +360,17 @@ def _run_single_episode(
         total_turns=len(session.steps),
         total_tool_calls=len(session.executed_tools),
         final_text_satisfied=final_text_satisfied,
+        env_mask=env_mask,
     )
+
+
+def _align_logprobs(logprobs: List[float], target_len: int) -> List[float]:
+    """Force ``logprobs`` to length ``target_len`` (pad with 0.0, truncate excess)."""
+    if len(logprobs) == target_len:
+        return logprobs
+    if len(logprobs) < target_len:
+        return logprobs + [0.0] * (target_len - len(logprobs))
+    return logprobs[:target_len]
 
 
 def _generate_one_completion(*, trainer, generate_rollout_completions, prompt_text: str) -> Dict[str, Any]:

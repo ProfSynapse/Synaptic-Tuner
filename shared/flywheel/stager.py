@@ -308,10 +308,23 @@ class DatasetStager:
     def _format_grpo_example(
         self, record: InferenceLogRecord, content: dict,
     ) -> dict:
-        """Format a log as a GRPO training example."""
+        """Format a log as a GRPO training example.
+
+        When the log carries token-faithful rollout capture (completion token
+        ids + per-token logprobs, from a logprobs-enabled proxy), those fields
+        are passed through alongside the conversational form so a downstream
+        token-faithful / replay GRPO consumer can use the exact sampled tokens.
+        Records without capture are unchanged.
+        """
         conversations = self._build_conversations(content)
         reward = (record.fitness_score or 0.0) * self._config.grpo_reward_scale
-        return {"conversations": conversations, "reward": reward}
+        example: dict[str, Any] = {"conversations": conversations, "reward": reward}
+
+        for key in ("prompt_token_ids", "completion_token_ids", "completion_logprobs"):
+            value = content.get(key)
+            if value is not None:
+                example[key] = value
+        return example
 
     @staticmethod
     def _build_conversations(content: dict) -> list[dict[str, str]]:

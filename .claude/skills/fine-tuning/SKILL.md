@@ -501,6 +501,7 @@ Provider-native storage defaults:
 - SFT with `packing: true` is much faster.
 - KTO datasets must be interleaved True/False.
 - GRPO rewards are YAML-driven; edit `configs/rewards/`, not Python.
+- Env-GRPO multi-turn rollouts are token-faithful by default (`env_training.token_faithful: true`, requires `trl>=0.28.0`); it emits a per-token `env_mask` so GRPO trains only on sampled tokens. See `reference/grpo-training.md` → "Token-Faithful Multi-Turn Rollout".
 - `fitness.yaml` uses `FitnessEvaluator` for structural validation.
 - After training, use surgery only after you have a stable baseline and evaluation scenario.
 - `training_lineage.json` tracks full provenance for reproducibility.

@@ -148,6 +148,11 @@ class InferenceLogRecord:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    # Token-faithful rollout capture (optional; off by default)
+    prompt_token_ids: list[int] | None = None
+    completion_token_ids: list[int] | None = None
+    completion_logprobs: list[float] | None = None
+
     # Pipeline metadata (populated during processing)
     latency_ms: float = 0.0
     fitness_score: float | None = None   # Set by DataCleaner
@@ -168,6 +173,19 @@ class InferenceLogRecord:
         """Deserialize from dict, ignoring unknown fields."""
         ...
 ```
+
+**Token-faithful rollout capture (optional).** When `capture_token_ids: true`,
+the logger records the completion's per-token logprobs (and token ids when vLLM
+was asked with `return_tokens_as_token_ids`) into the JSONL — enabling a future
+token-faithful GRPO/replay feed (POLAR-style; see
+`docs/plans/proxy-token-capture-grpo-feed-plan.md`). The three fields are **omitted
+from `to_json()` when unset**, so existing log lines and readers are unaffected,
+and the catalog index is unchanged (token data lives only in the JSONL). Set
+`proxy_inject_logprobs: true` to have the proxy add `logprobs` +
+`return_tokens_as_token_ids` to forwarded chat-completion requests so capture has
+data to read; both flags default off to avoid changing latency/payload for normal
+SFT/KTO logging. The stager passes any captured token fields through the GRPO
+training example. Consuming these as on-policy/replay GRPO is future work.
 
 #### LogFilter
 

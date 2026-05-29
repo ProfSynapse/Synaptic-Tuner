@@ -52,6 +52,7 @@ def detect_openenv_runtime_support() -> Dict[str, Any]:
         "has_rollout_func": False,
         "has_environment_factory": False,
         "has_generate_rollout_completions": False,
+        "has_env_mask": False,
         "errors": [],
     }
 
@@ -62,6 +63,7 @@ def detect_openenv_runtime_support() -> Dict[str, Any]:
             signature = inspect.signature(trainer_cls.__init__)
             support["has_rollout_func"] = "rollout_func" in signature.parameters
             support["has_environment_factory"] = "environment_factory" in signature.parameters
+        support["has_env_mask"] = _detect_env_mask_support()
     except Exception as exc:
         support["errors"].append(f"trl import failed: {exc}")
         return support
@@ -125,6 +127,22 @@ def ensure_local_openenv_runtime(
     return str(venv_python)
 
 
+def _detect_env_mask_support() -> bool:
+    """True when the installed TRL GRPO trainer honors a custom ``env_mask``.
+
+    ``env_mask`` (from a rollout_func output) is multiplied into the completion
+    loss mask, which is what makes token-faithful multi-turn rollouts trainable.
+    It landed in trl 0.28.0. We probe the trainer source directly rather than
+    trusting a version string, so the capability flag tracks the real runtime.
+    """
+    try:
+        from trl.trainer import grpo_trainer as _grpo_trainer
+
+        return "env_mask" in inspect.getsource(_grpo_trainer)
+    except Exception:
+        return False
+
+
 def _safe_version(package_name: str) -> str | None:
     try:
         return version(package_name)
@@ -171,6 +189,7 @@ support = {
     "has_rollout_func": False,
     "has_environment_factory": False,
     "has_generate_rollout_completions": False,
+    "has_env_mask": False,
     "errors": [],
 }
 
@@ -181,6 +200,11 @@ try:
         signature = inspect.signature(trainer_cls.__init__)
         support["has_rollout_func"] = "rollout_func" in signature.parameters
         support["has_environment_factory"] = "environment_factory" in signature.parameters
+    try:
+        from trl.trainer import grpo_trainer as _grpo_trainer
+        support["has_env_mask"] = "env_mask" in inspect.getsource(_grpo_trainer)
+    except Exception:
+        support["has_env_mask"] = False
 except Exception as exc:
     support["errors"].append(f"trl import failed: {exc}")
 
@@ -213,6 +237,7 @@ print(json.dumps(support))
             "has_rollout_func": False,
             "has_environment_factory": False,
             "has_generate_rollout_completions": False,
+            "has_env_mask": False,
             "errors": [result.stderr.strip() or result.stdout.strip() or "probe failed"],
         }
     return json.loads(result.stdout)
