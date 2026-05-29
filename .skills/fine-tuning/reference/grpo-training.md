@@ -343,6 +343,29 @@ logprobs)` from `generate_rollout_completions`, then assembles:
   `completion_ids`).
 - `logprobs` = sampling log-probs on assistant tokens, 0.0 on context tokens.
 
+### What TRL does with it (verified against trl source)
+
+`completion_mask` is all-ones over `completion_ids`, so the full interleaved
+sequence (assistant + context) is **attended** — the model, the `old`/reference
+logprobs, and the importance-sampling ratio are all computed conditioned on the
+real context. The loss uses `mask = completion_mask * tool_mask`, and every loss
+variant normalizes by `mask.sum()`, so context tokens contribute **zero to the
+loss and are excluded from the denominator** (no dilution). Our supplied per-token
+`logprobs` only feed the vLLM importance-sampling correction and are themselves
+multiplied by the mask, so the `0.0` placeholders on context tokens are inert.
+Reward grouping is unchanged (one record per episode → `rewards.view(-1,
+num_generations)`), and length metrics count only model tokens (`sum(env_mask)`).
+
+### Caveat — sequence-length budget
+
+In faithful mode the tool-result / user-feedback tokens live **inside**
+`completion_ids` (masked), so the trained completion spans all turns *plus* their
+context. `max_completion_length` caps each turn's generation, not the episode
+total, so the full sequence can be several times `max_completion_length`. Size
+`max_seq_length` / VRAM for the whole interleaved episode. (Legacy `drop` mode
+already concatenated assistant turns; faithful mode adds the context tokens on
+top.)
+
 ### Verifying
 
 `tests/trainers/grpo/test_env_rollout_faithful.py` covers single-turn parity, the
