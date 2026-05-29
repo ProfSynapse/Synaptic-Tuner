@@ -64,6 +64,17 @@ class FlywheelConfig:
     proxy_timeout_seconds: float = 120.0
     flush_interval_seconds: float = 1.0
 
+    # -- Token-faithful rollout capture (off by default) --
+    # When true, the inference logger persists completion token ids + per-token
+    # logprobs from the vLLM response (when present). Required for any future
+    # GRPO/rollout feed; SFT/KTO do not need it and it grows log size.
+    capture_token_ids: bool = False
+    # When true, the proxy injects `logprobs: true` + `return_tokens_as_token_ids:
+    # true` into forwarded chat-completion requests so capture has data to read.
+    # Off by default to avoid changing latency/payload for callers that did not
+    # ask for logprobs.
+    proxy_inject_logprobs: bool = False
+
     # -- vLLM --
     vllm_adapter_name: str = "current-adapter"
     vllm_adapter_path: str | None = None

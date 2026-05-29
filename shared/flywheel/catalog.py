@@ -47,6 +47,13 @@ class InferenceLogRecord:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    # Token-faithful rollout capture (optional; only populated when the proxy
+    # requested logprobs and the response carried them — see capture_token_ids).
+    # These ride in the JSONL only; the catalog index does not store them.
+    prompt_token_ids: list[int] | None = None
+    completion_token_ids: list[int] | None = None
+    completion_logprobs: list[float] | None = None
+
     # Pipeline metadata (populated during processing)
     latency_ms: float = 0.0
     fitness_score: float | None = None
@@ -62,9 +69,21 @@ class InferenceLogRecord:
     source_file: str = ""
     line_number: int = 0
 
+    # Optional token-capture fields are omitted from the JSONL when unset, so
+    # records without rollout capture stay byte-compatible with existing readers.
+    _OPTIONAL_TOKEN_FIELDS = (
+        "prompt_token_ids",
+        "completion_token_ids",
+        "completion_logprobs",
+    )
+
     def to_json(self) -> str:
-        """Serialize to JSON string."""
-        return json.dumps(asdict(self), ensure_ascii=False, separators=(",", ":"))
+        """Serialize to JSON string (omitting unset token-capture fields)."""
+        data = asdict(self)
+        for key in self._OPTIONAL_TOKEN_FIELDS:
+            if data.get(key) is None:
+                data.pop(key, None)
+        return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
     @classmethod
     def from_dict(cls, data: dict) -> InferenceLogRecord:

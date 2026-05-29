@@ -1,9 +1,42 @@
 # Proxy Token Capture → GRPO Feed Plan
 
 **Date:** 2026-05-29
-**Status:** Proposed (secondary; depends on `token-faithful-grpo-rollout-plan.md` landing first)
+**Status:** Implemented (capture path); consumer-side GRPO replay is future work
 **Paper / Prior Art:** NVIDIA POLAR — [arXiv:2605.24220](https://arxiv.org/html/2605.24220v1) ([MarkTechPost writeup](https://www.marktechpost.com/2026/05/27/nvidia-releases-polar-a-token-faithful-rollout-framework-for-grpo-training-across-codex-claude-code-and-qwen-code/))
 **Branch:** `claude/polar-token-rollout-MTzCp`
+
+---
+
+## Findings from the codebase (revise the plan)
+
+Investigating the real flywheel code changed two plan assumptions:
+
+- **No catalog migration needed.** `catalog.py` only *indexes* lightweight fields
+  (`log_id`, `model_id`, `has_tool_calls`, score, tag, `source_file`/`line_number`,
+  …) — it never stored `messages` or `response_content`. Full content (and now
+  token ids/logprobs) lives in the date-partitioned JSONL; the stager reads it
+  back via `read_log_content()` using `source_file`/`line_number`. So token
+  capture is purely additive JSONL fields — Phase 1's catalog work is dropped.
+- **A GRPO staging path already exists.** `stager._write_grpo` /
+  `_format_grpo_example` already emit `{conversations, reward}`. Rather than a
+  parallel rollout file, token fields are passed through that existing example
+  when present — additive and back-compatible.
+
+## Phase 0 — vLLM capture contract (resolved by reading vLLM behavior)
+
+- **Logprobs:** request `logprobs: true`; vLLM returns
+  `choices[].logprobs.content[]` with per-token `{token, logprob, bytes}`. We read
+  `logprob` directly.
+- **Token ids:** the OpenAI schema has no token-id field. vLLM's
+  `return_tokens_as_token_ids: true` renders each `token` as `"token_id:<int>"`,
+  which we parse. If any token isn't in that form, token ids are reported `None`
+  (logprobs may still be captured).
+- **Prompt token ids:** not reliably returned by chat-completions; left `None`
+  for now (a downstream consumer can re-tokenize the logged messages, accepting
+  drift — documented as future work, design fallback B).
+- **Caveat:** exact `return_tokens_as_token_ids` behavior is vLLM-version
+  dependent and must be confirmed against the running server (like Plan #1's GPU
+  smoke). The capture is best-effort and never fails the request.
 
 ---
 

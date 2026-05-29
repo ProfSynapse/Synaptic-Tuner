@@ -34,6 +34,16 @@ vllm_host: localhost
 vllm_port: 8000
 proxy_timeout_seconds: 120
 
+# Token-faithful rollout capture (off by default)
+# capture_token_ids: persist completion token ids + per-token logprobs from the
+#   vLLM response (when present) into the JSONL, for a future GRPO/rollout feed.
+# proxy_inject_logprobs: have the proxy add logprobs + return_tokens_as_token_ids
+#   to forwarded chat-completion requests so capture has data to read. Requires a
+#   vLLM that supports return_tokens_as_token_ids. Adds payload/latency, so off
+#   unless you are actively collecting rollouts.
+capture_token_ids: false
+proxy_inject_logprobs: false
+
 # vLLM
 vllm_adapter_name: current-adapter
 vllm_max_lora_rank: 64

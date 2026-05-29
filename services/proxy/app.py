@@ -171,13 +171,19 @@ async def proxy(request: Request, path: str) -> Response:
     # Read request body (needed for forwarding and potentially logging)
     body = await request.body()
 
+    is_chat_completion = request.method == "POST" and path.strip("/") == _CHAT_COMPLETIONS_PATH
+
+    # Optionally enrich chat-completion requests so the logger can capture
+    # token-faithful rollouts (token ids + per-token logprobs).
+    if is_chat_completion and getattr(request.app.state.config, "inject_logprobs", False):
+        body = _inject_logprobs(body)
+
     # Build headers to forward (pass auth through, set content type)
     forward_headers = _build_forward_headers(request)
 
     # Determine if this is a loggable request
     should_log = (
-        request.method == "POST"
-        and path.strip("/") == _CHAT_COMPLETIONS_PATH
+        is_chat_completion
         and request.app.state.inference_logger is not None
     )
 
@@ -242,6 +248,28 @@ def _load_config() -> ProxyConfig:
     except ImportError:
         logger.info("FlywheelConfig not available, loading from environment")
         return ProxyConfig.from_env()
+
+
+def _inject_logprobs(body: bytes) -> bytes:
+    """Add logprobs + return_tokens_as_token_ids to a chat-completion body.
+
+    Enables token-faithful rollout capture without the caller opting in. Best
+    effort: if the body is not parseable JSON, it is forwarded unchanged. Does
+    not override values the caller already set.
+    """
+    import json
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+
+    payload.setdefault("logprobs", True)
+    # vLLM extension: renders each logprob token as "token_id:<int>".
+    payload.setdefault("return_tokens_as_token_ids", True)
+    return json.dumps(payload).encode("utf-8")
 
 
 def _build_forward_headers(request: Request) -> dict[str, str]:
