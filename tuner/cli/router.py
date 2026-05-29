@@ -136,7 +136,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, experiment-loop, prompt-optimize, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()
@@ -182,6 +182,11 @@ def route_command(args: Namespace) -> int:
     # Autonomous experiment loop
     if command == 'experiment-loop':
         return _handle_experiment_loop(args, json_mode)
+
+    if command == 'prompt-optimize':
+        from tuner.handlers.prompt_optimize_handler import PromptOptimizeHandler
+        handler = PromptOptimizeHandler(args=args)
+        return handler.handle()
 
     # Surgery command
     if command == 'surgery':

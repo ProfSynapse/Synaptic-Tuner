@@ -143,8 +143,9 @@ def run_environment_episode(
             stop_reason = "environment_execution_failed"
             break
 
+        expected_tools_for_check = expected_tools if require_expected_tools else None
         environment_preview = session.finalize(
-            expected_tools=None,
+            expected_tools=expected_tools_for_check,
             total_turns=turn_index,
             stop_reason="preview",
         )

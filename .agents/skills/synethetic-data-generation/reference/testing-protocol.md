@@ -38,6 +38,22 @@ stdout, stderr, JSONL, and debug JSONL paths. Poll the logs early. If the first
 30-60 seconds already show a deterministic gate failure or provider timeout,
 stop and fix the config before burning retries.
 
+Prefer checked-in JSON target manifests for repeatable smoke runs. If you need
+a temporary manifest from PowerShell, write it without a BOM, for example with
+`Set-Content -Encoding Ascii`, because some JSON loaders reject BOM-prefixed
+files. For longer PowerShell background runs, use an argument array with
+`Start-Process` instead of hand-escaped command strings when quoting becomes
+fragile.
+
+For prompt nudges, test like a controlled experiment. Regenerate a small
+dataset after the prompt/config change, run the same short smoke as before,
+then compare:
+- environment pass rate
+- final text pass rate
+- stop reasons, especially post-completion tool-call emissions
+- unexpected tool/action names
+- reward mean and reward standard deviation when the smoke is a training run
+
 For privacy preprocessing changes, the first smoke is usually `sanitize`, not a
 full dataset run. Prove the OPF checkpoint, tokenizer cache, and replacement
 behavior on the checked-in privacy fixtures before you run a larger SynthChat
@@ -150,6 +166,10 @@ This produces a clean Markdown file with:
   in-loop judge feedback to isolate whether the rollout model missed a tool
   step, the judge pushed after completion, or final text handling was too
   strict.
+- If the environment passes but final text fails, inspect whether the model
+  emitted another tool call after task completion. A prompt nudge that frames
+  final text as the normal completion action is often worth testing before
+  changing reward code.
 - If expected command sequences contain stale command surfaces such as shell
   commands while the trained surface is a configured tool wrapper/CLI, add
   scenario gates that reject those generated answer keys before the rollout.
@@ -164,6 +184,18 @@ This produces a clean Markdown file with:
   tool names, not unrelated executor or implementation identifiers.
 - Confirm successful in-loop judge feedback does not cause another assistant
   turn after a correct final text answer.
+- Confirm tool feedback exposes the fields the assistant must use later. For
+  example, if a later edit requires exact line numbers, inspect whether the read
+  result is line-numbered or raw text. If it is raw text, make sure the expected
+  answer is derivable from the visible text and that the scenario/reward design
+  treats wrong line selection as a partial failure with useful diagnostics.
+- Confirm generated answer keys are supported by the actual fixture. For line
+  or offset based edits, count against the saved fixture content and verify the
+  expected ranges target the intended text before scaling generation.
+- When a scenario depends on a newly added execution config option, smoke both
+  the global config path and the per-scenario override path. A passing override
+  test does not prove the global loader is carrying that option into normal
+  runs.
 
 The `jsonl_to_markdown.sh` script also supports line ranges for reviewing subsets of larger files:
 

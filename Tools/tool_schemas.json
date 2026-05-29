@@ -3,7 +3,7 @@
                      "tool_name":  "useTools",
                      "agent":  "wrapper",
                      "mode":  "useTools",
-                     "description":  "CLI-first wrapper tool call. Validate the wrapper fields here; validate available CLI commands against the root tool-schemas.json catalog.",
+                     "description":  "CLI-first wrapper tool call. Validate the wrapper fields here; validate available CLI commands against the root cli-first-tool-schemas.json catalog.",
                      "parameters":  [
                                         {
                                             "name":  "workspaceId",
@@ -64,7 +64,7 @@
                                                               "serial",
                                                               "parallel"
                                                           ],
-                                     "cli_schema_source":  "tool-schemas.json"
+                                     "cli_schema_source":  "cli-first-tool-schemas.json"
                                  }
                  }
 }

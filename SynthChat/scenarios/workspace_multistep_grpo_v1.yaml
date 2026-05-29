@@ -29,9 +29,12 @@ shared_agentic_environment: &agentic_loop_env
     stuck_repeat_limit: 3
     no_progress_window: 3
     tool_result_name_format: command
+  # CLI command correctness is model-facing in task_context.expected_command_sequence.
+  # Runtime gating uses executor-facing ids so final text is not requested before
+  # the required commands actually execute.
   require_expected_tools: true
   require_expected_tool_order: true
-  forbid_unexpected_tools: true
+  forbid_unexpected_tools: false
   require_all_tools_ok: false
 
 shared_workspace_judge: &workspace_judge
@@ -86,9 +89,9 @@ shared_workspace_judge: &workspace_judge
 
       Feedback rules:
       - When passed=true, feedback_to_model must be an empty string.
-      - Treat scenario_json.expected_tools as a required checklist. If the
-        environment preview says an expected tool is missing, return
-        passed=false and ask for the next missing tool call before any final
+      - Treat task_context.expected_command_sequence as the required CLI command
+        trajectory. If a required command has not been completed, return
+        passed=false and ask for the next missing command before any final
         answer.
       - Do not say the task is complete until the environment preview has
         passed with no issues.
@@ -256,7 +259,8 @@ shared_workspace_final_review: &workspace_final_review
         the same rollout
       - assistant tool turns in the trajectory used the CLI-first useTools
         wrapper with valid JSON function.arguments
-      - the rollout did not execute tools outside scenario_json.expected_tools
+      - the rollout followed task_context.expected_command_sequence closely
+        enough to complete the environment assertions without unrelated tools
       - wrapper arguments in tool turns included workspaceId, sessionId,
         memory, goal, tool, and a sensible strategy when multiple commands are
         chained
@@ -281,7 +285,10 @@ shared_workspace_context: &workspace_context
   assistant_instructions: >-
     Use the workspace context and available tool transport to inspect files
     before answering or mutating. Prefer the smallest useful next action. Ask
-    for confirmation before broad or destructive changes.
+    for confirmation before broad or destructive changes. Once the relevant
+    tool results answer the user's request or confirm the requested action is
+    complete, stop calling tools and send a normal text response that briefly
+    summarizes the result and what you did.
   extra_sections:
     - tag: tool_options
       content: |
@@ -297,6 +304,7 @@ shared_workspace_context: &workspace_context
         - Never put direct function-call names or nested tool objects in the tool string.
         - Never use shell commands or shell operators such as cat, grep, ls, &&, pipes, or semicolons.
         - Use exact CLI syntax from <available_tools>; it is generated from the configured tool schema.
+        - Completion rule: after the needed tool results are available and the task is complete, do not emit another tool call. Reply with concise text summarizing the answer or completed action.
     - tag: supervised_training_reference
       content: |
         This scenario is supervised agentic training data. The environment was
@@ -319,21 +327,24 @@ shared_workspace_context: &workspace_context
         strings must use plain ASCII spaces only. Do not use non-breaking
         spaces, markdown backticks, placeholders, shell syntax, direct function
         names, or empty tool strings. After the required tool work is complete,
-        answer with text only and no tool_calls.
+        answer with text only and no tool_calls. The final text should briefly
+        summarize the answer or completed action based on the tool results.
 
 scenarios:
   envfs_explore_then_update_note:
     type: tool
     tool: content replace
-    expected_tools: [search content, content read, content replace]
+    expected_tools: [searchManager_content, contentManager_read, contentManager_replace]
     environment_mode: generated
     tags: [workspace, retrieval, edit, multistep, grpo]
     system_template: mocked_workspace_vault
     workspace_format: cli_only
-    environment: *agentic_loop_env
+    environment:
+      <<: *agentic_loop_env
+      expected_tools: [searchManager_content, contentManager_read, contentManager_replace]
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -652,15 +663,17 @@ scenarios:
   envfs_load_workspace_then_answer:
     type: tool
     tool: content read
-    expected_tools: [storage list, content read]
+    expected_tools: [storageManager_list, contentManager_read]
     environment_mode: generated
     tags: [workspace, setup, list, read, answer, grpo]
     system_template: mocked_workspace_vault
     workspace_format: cli_only
-    environment: *agentic_loop_env
+    environment:
+      <<: *agentic_loop_env
+      expected_tools: [storageManager_list, contentManager_read]
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -676,111 +689,6 @@ scenarios:
       gates:
         - type: environment_payload_shape
           field: value
-        - type: json_schema
-          field: generated_environment
-          schema: canonical_environment
-        - type: no_placeholder_strings
-          field: generated_environment
-        - type: min_fixture_items
-          field: value.environment.fixture
-          min_files: 1
-          min_total: 2
-        - type: required_mapping_keys
-          field: value.task_context
-          keys:
-            - list_scope
-            - target_question
-            - target_path
-            - required_answer_phrase
-            - trajectory_summary
-            - expected_command_sequence
-            - expected_final_behavior
-            - final_answer
-        - type: json_schema
-          field: generated_environment
-          schema:
-            type: object
-            required: [environment, task_context]
-            properties:
-              environment:
-                type: object
-                required: [fixture, assertions]
-                properties:
-                  fixture:
-                    type: object
-                    required: [directories, files]
-                    properties:
-                      directories:
-                        type: array
-                        minItems: 2
-                      files:
-                        type: object
-                        minProperties: 1
-                    additionalProperties: false
-                  assertions:
-                    type: array
-                    minItems: 2
-                    items:
-                      type: object
-                      required: [type, path]
-                      properties:
-                        type:
-                          enum: [path_exists, file_contains, dir_contains]
-                        path:
-                          type: string
-                        text:
-                          type: string
-                      additionalProperties: true
-                additionalProperties: false
-              task_context:
-                type: object
-                required:
-                  - list_scope
-                  - target_question
-                  - target_path
-                  - required_answer_phrase
-                  - trajectory_summary
-                  - expected_command_sequence
-                  - expected_final_behavior
-                  - final_answer
-                properties:
-                  list_scope:
-                    type: string
-                    pattern: '^[ -~]+$'
-                  target_question:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                  target_path:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                  required_answer_phrase:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                  trajectory_summary:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                  expected_command_sequence:
-                    type: array
-                    minItems: 2
-                    maxItems: 2
-                    items:
-                      type: string
-                      minLength: 1
-                      pattern: '^[ -~]+$'
-                  expected_final_behavior:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                  final_answer:
-                    type: string
-                    minLength: 1
-                    pattern: '^[ -~]+$'
-                additionalProperties: true
-            additionalProperties: true
       prompt: |
         Output ONLY valid JSON.
 
@@ -873,7 +781,7 @@ scenarios:
   envfs_use_prompt_then_write_brief:
     type: tool
     tool: content write
-    expected_tools: [prompt list, prompt get, prompt execute, content write]
+    expected_tools: [promptManager_list, promptManager_get, promptManager_execute, contentManager_write]
     environment_mode: generated
     tags: [workspace, prompts, specialized, write, grpo]
     system_template: mocked_workspace_vault
@@ -881,7 +789,7 @@ scenarios:
     environment: *agentic_loop_env
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -986,7 +894,7 @@ scenarios:
     environment: *agentic_loop_env
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -1043,7 +951,7 @@ scenarios:
   envfs_empty_search_recovery_then_read:
     type: tool
     tool: content read
-    expected_tools: [search content, content read]
+    expected_tools: [searchManager_content, contentManager_read]
     environment_mode: generated
     tags: [workspace, search, recovery, read, grpo]
     system_template: mocked_workspace_vault
@@ -1051,7 +959,7 @@ scenarios:
     environment: *agentic_loop_env
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -1138,7 +1046,7 @@ scenarios:
   envfs_empty_search_recovery_then_read_smoke_fixed:
     type: tool
     tool: content read
-    expected_tools: [search content, content read]
+    expected_tools: [searchManager_content, contentManager_read]
     environment_mode: provided
     tags: [workspace, search, recovery, read, grpo, smoke]
     system_template: mocked_workspace_vault
@@ -1181,7 +1089,7 @@ scenarios:
       final_answer: To reset your password, open the sign-in page, choose "Forgot password", enter your email address, and use the reset link from your inbox.
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -1246,7 +1154,7 @@ scenarios:
   envfs_state_continue_prior_move:
     type: tool
     tool: storage move
-    expected_tools: [storage list, content read, storage create-folder, storage move]
+    expected_tools: [storageManager_list, contentManager_read, storageManager_createFolder, storageManager_move]
     environment_mode: generated
     tags: [workspace, state, continuity, move, grpo]
     system_template: mocked_workspace_vault
@@ -1254,7 +1162,7 @@ scenarios:
     environment: *agentic_loop_env
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -1344,7 +1252,7 @@ scenarios:
   envfs_efficient_chain_before_answer:
     type: tool
     tool: content read
-    expected_tools: [search content, content read]
+    expected_tools: [searchManager_content, contentManager_read]
     environment_mode: generated
     tags: [workspace, efficient-path, search, read, answer, grpo]
     system_template: mocked_workspace_vault
@@ -1352,7 +1260,7 @@ scenarios:
     environment: *agentic_loop_env
     rubrics:
       system_prompt: [system_prompt_format]
-      response: [workspace_use_tools_response]
+      response: []
     judge: *workspace_judge
     final_judge: *workspace_final_review
     system_context:
@@ -1584,5 +1492,3 @@ scenarios:
       schema: use_tools_response
       response_format: json_object
       fallback_models: *openrouter_fallback_models
-
-

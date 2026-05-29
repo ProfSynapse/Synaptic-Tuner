@@ -320,6 +320,187 @@ def test_environment_validator_supports_precise_regex_and_line_assertions():
     assert result.passed is True
 
 
+def test_environment_validator_can_return_line_numbered_read_output():
+    validator = EnvironmentValidator(backend="local")
+
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "contentManager_read",
+                    "arguments": json.dumps(
+                        {
+                            "path": "Docs/example.md",
+                            "startLine": 2,
+                            "endLine": 3,
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {
+                "files": {
+                    "Docs/example.md": "first\nsecond\nthird\nfourth\n",
+                },
+            },
+            "execution": {
+                "read_output": {
+                    "include_line_numbers": True,
+                    "honor_line_range": True,
+                },
+            },
+        },
+    )
+
+    assert result.passed is True
+    assert result.executed_tools[0].output == "2: second\n3: third"
+
+
+def test_environment_validator_line_numbers_cli_wrapper_reads():
+    validator = EnvironmentValidator(backend="local")
+
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": json.dumps(
+                        {
+                            "workspaceId": "default",
+                            "sessionId": "session_test",
+                            "memory": "Need to inspect a file.",
+                            "goal": "Read the example file.",
+                            "tool": "content read Docs/example.md 1",
+                            "strategy": "serial",
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {
+                "files": {
+                    "Docs/example.md": "first\nsecond\nthird\n",
+                },
+            },
+        },
+    )
+
+    assert result.passed is True
+    assert [tool.name for tool in result.executed_tools] == ["contentManager_read"]
+    assert result.executed_tools[0].output == "1: first\n2: second\n3: third"
+
+
+def test_environment_validator_replaces_line_range_from_cli_wrapper():
+    validator = EnvironmentValidator(backend="local")
+
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": json.dumps(
+                        {
+                            "workspaceId": "default",
+                            "sessionId": "session_test",
+                            "memory": "Need to update one line.",
+                            "goal": "Replace the target setting.",
+                            "tool": (
+                                "content replace Docs/example.md "
+                                "\"status=draft\" \"status=ready\" 3 3"
+                            ),
+                            "strategy": "serial",
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {
+                "files": {
+                    "Docs/example.md": "# Example\nanchor\nstatus=draft\nkeep\n",
+                },
+            },
+            "assertions": [
+                {"type": "file_contains", "path": "Docs/example.md", "text": "status=ready"},
+                {"type": "file_not_contains", "path": "Docs/example.md", "text": "status=draft"},
+                {"type": "file_contains", "path": "Docs/example.md", "text": "anchor"},
+            ],
+        },
+    )
+
+    assert result.passed is True
+    assert [tool.name for tool in result.executed_tools] == ["contentManager_replace"]
+    assert result.executed_tools[0].output == "replaced"
+
+
+def test_environment_validator_rejects_replace_wrong_line_with_found_line_hint():
+    validator = EnvironmentValidator(backend="local")
+
+    response = {
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "useTools",
+                    "arguments": json.dumps(
+                        {
+                            "workspaceId": "default",
+                            "sessionId": "session_test",
+                            "memory": "Need to update one line.",
+                            "goal": "Replace the target setting.",
+                            "tool": (
+                                "content replace Docs/example.md "
+                                "\"status=draft\" \"status=ready\" 1 1"
+                            ),
+                            "strategy": "serial",
+                        }
+                    ),
+                },
+            }
+        ]
+    }
+
+    result = validator.validate_response(
+        system_prompt="",
+        response=response,
+        environment_config={
+            "fixture": {
+                "files": {
+                    "Docs/example.md": "# Example\nanchor\nstatus=draft\nkeep\n",
+                },
+            },
+            "loop": {"continue_on_execution_error": True},
+            "assertions": [
+                {"type": "file_contains", "path": "Docs/example.md", "text": "status=ready"},
+            ],
+        },
+    )
+
+    assert result.passed is False
+    assert result.executed_tools[0].status == "error"
+    assert "matching text starts at line 3" in (result.executed_tools[0].error or "")
+
+
 def test_environment_validator_supports_invariant_style_contains_any_assertions():
     validator = EnvironmentValidator(backend="local")
 

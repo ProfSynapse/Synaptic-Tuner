@@ -1,0 +1,54 @@
+prompt_optimization:
+  run_id: labkit-rag-customer-support
+  seed: 23
+  output_dir: .tracking/prompt_optimization/labkit-rag-customer-support
+  include_baseline: true
+  candidates_per_subject: 9
+
+  subjects:
+    - id: responseGeneration
+      path: tests/fixtures/prompt_optimization/labkit_rag_prompts.yaml
+      dotted_path: prompts.responseGeneration
+    - id: contextFormatting
+      path: tests/fixtures/prompt_optimization/labkit_rag_prompts.yaml
+      dotted_path: prompts.contextFormatting
+    - id: queryEnhancement
+      path: tests/fixtures/prompt_optimization/labkit_rag_prompts.yaml
+      dotted_path: prompts.queryEnhancement
+
+  operators:
+    - type: append
+      values:
+        - "State limitations clearly when the provided information is insufficient."
+        - "Use only the provided context or retrieved chunks; do not add outside facts."
+    - type: prepend
+      values:
+        - "Customer support prompt:"
+    - type: replace
+      replacements:
+        - old: "provide you with the best assistance possible"
+          new: "provide assistance grounded only in the supplied context"
+        - old: "add relevant keywords and context"
+          new: "add relevant keywords without changing the customer's intent"
+    - type: remove_line_contains
+      values:
+        - "best assistance possible"
+
+  evaluation:
+    assertions:
+      - id: customer_support_domain
+        type: regex
+        pattern: "(?i)(customer|support|retrieved|query|context)"
+        weight: 1.0
+      - id: keeps_limitation_language
+        type: regex
+        pattern: "(?i)(insufficient|limitations|only|provided|retrieved)"
+        weight: 2.0
+      - id: does_not_invite_outside_facts
+        type: not_contains
+        text: "outside facts are okay"
+        weight: 1.0
+      - id: bounded_prompt_size
+        type: max_length
+        value: 1400
+        weight: 1.0

@@ -80,11 +80,21 @@ def filter_env_rollout_dataset(
 
 def format_dataset_for_env_grpo(dataset: Dataset) -> Dataset:
     """Project canonical rollout rows into replay-ready env examples."""
+    return format_dataset_for_env_grpo_with_options(dataset)
+
+
+def format_dataset_for_env_grpo_with_options(
+    dataset: Dataset,
+    *,
+    prompt_augmentation: Optional[Dict[str, Any]] = None,
+) -> Dataset:
+    """Project canonical rollout rows into replay-ready env examples."""
 
     def _format(example: Dict[str, Any]) -> Dict[str, Any]:
         metadata = example.get("metadata") or {}
         conversations = example.get("conversations") or []
         initial_messages = _extract_initial_messages(conversations)
+        initial_messages = _apply_prompt_augmentation(initial_messages, prompt_augmentation)
         task_context = metadata.get("task_context") or {}
         environment_config = _resolve_environment_config(metadata) or {}
         scenario = metadata.get("scenario") or "unknown"
@@ -105,6 +115,30 @@ def format_dataset_for_env_grpo(dataset: Dataset) -> Dataset:
         return result
 
     return dataset.map(_format, desc="Formatting env rollout dataset")
+
+
+def _apply_prompt_augmentation(
+    messages: List[Dict[str, Any]],
+    prompt_augmentation: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not isinstance(prompt_augmentation, dict):
+        return messages
+
+    system_append = str(prompt_augmentation.get("system_append") or "").strip()
+    if not system_append:
+        return messages
+
+    updated = [dict(message) for message in messages]
+    insert_if_missing = bool(prompt_augmentation.get("insert_if_missing", True))
+    for message in updated:
+        if str(message.get("role", "")).strip() == "system":
+            content = str(message.get("content") or "")
+            message["content"] = f"{content.rstrip()}\n\n{system_append}"
+            return updated
+
+    if insert_if_missing:
+        return [{"role": "system", "content": system_append}, *updated]
+    return updated
 
 
 def _extract_initial_messages(conversations: Any) -> List[Dict[str, Any]]:

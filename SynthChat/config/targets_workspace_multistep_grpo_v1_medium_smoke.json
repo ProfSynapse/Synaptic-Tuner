@@ -1,0 +1,6 @@
+{
+  "envfs_load_workspace_then_answer": {
+    "seed_count": 8,
+    "rollouts_per_seed": 1
+  }
+}

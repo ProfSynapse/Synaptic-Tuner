@@ -1,0 +1,10 @@
+{
+  "envfs_load_workspace_then_answer": {
+    "seed_count": 4,
+    "rollouts_per_seed": 1
+  },
+  "envfs_confirm_before_destructive_archive": {
+    "seed_count": 4,
+    "rollouts_per_seed": 1
+  }
+}

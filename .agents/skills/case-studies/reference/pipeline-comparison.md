@@ -8,7 +8,7 @@ Side-by-side comparison of how the two training pipelines differ at each stage o
 
 | Aspect | Tool Calling | Essay Style |
 |--------|-------------|-------------|
-| **Source of truth** | `tool-schemas.json` — JSON schema per tool | Essay corpus in `Meditations on Alignment/` |
+| **Source of truth** | `cli-first-tool-schemas.json` — JSON schema per tool | Essay corpus in `Meditations on Alignment/` |
 | **Format spec** | OpenAI function calling format with `tool_calls` field | Markdown outline with title, overview, sections, tone, themes |
 | **Behavioral spec** | 6 YAML behavior rubrics (intellectual humility, verification, etc.) | 2 quality rubrics (brainstorm quality, outline quality) |
 | **"Correct" defined as** | Right tool + right arguments + right context | Accurate structure + dialectical challenge + specific details |

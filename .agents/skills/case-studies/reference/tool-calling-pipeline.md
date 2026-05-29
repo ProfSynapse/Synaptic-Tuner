@@ -47,7 +47,7 @@ The inner wrapper payload is:
 }
 ```
 
-The command catalog comes from [`tool-schemas.json`](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/tool-schemas.json).
+The command catalog comes from [`cli-first-tool-schemas.json`](../../../cli-first-tool-schemas.json).
 
 ---
 
@@ -91,7 +91,7 @@ IMPORTANT: When using tools, include these values as top-level fields in your us
 
 ## Dataset Creation Flow
 
-1. Start from `tool-schemas.json`.
+1. Start from `cli-first-tool-schemas.json`.
 2. Generate evaluator YAML with:
    ```bash
    python3 tools/audit_tool_schemas.py

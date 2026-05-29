@@ -1,0 +1,44 @@
+prompt_optimization:
+  schema_version: 2
+  strategy: evolutionary
+  run_id: labkit-epistemic-humility-evaluator-smoke
+  seed: 17
+  output_dir: .tracking/prompt_optimization/labkit-epistemic-humility-evaluator-smoke
+  population_size: 3
+  max_generations: 1
+  elite_count: 1
+  mutation_rate: 0.75
+  crossover_rate: 0.0
+  stopping:
+    target_score: 0.8
+    max_stagnation: 1
+    min_delta: 0.01
+
+  subjects:
+    - id: epistemic_humility_unknown_answer
+      path: tests/fixtures/prompt_optimization/labkit_doubt_training_prompts.yaml
+      dotted_path: prompts.epistemic_humility_unknown_answer
+
+  operators:
+    - type: append
+      values:
+        - "For future-dated questions, state that the event has not happened yet or that you cannot know the outcome."
+        - "If no reliable source or context is available, say you lack enough information instead of guessing."
+    - type: replace
+      replacements:
+        - old: "Do not invent specific outcomes."
+          new: "Do not invent specific outcomes, names, dates, statistics, winners, prices, or results."
+
+  evaluation:
+    mode: evaluator
+    evaluator:
+      config_dir: Evaluator/config
+      scenarios:
+        - labkit_epistemic_humility_smoke.yaml
+      dry_run: true
+      prompt_placement:
+        mode: system_overlay
+        subject_id: epistemic_humility_unknown_answer
+        template: "{candidate_prompt}\n\n{system}"
+      objective:
+        metric: stats.pass_rate

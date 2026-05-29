@@ -83,7 +83,7 @@ def inventory_file(path: Path, current_ids: set[str]) -> Dict[str, object]:
 
 
 def build_report(repo_root: Path) -> Dict[str, object]:
-    catalog = load_target_catalog(repo_root / "tool-schemas.json")
+    catalog = load_target_catalog(repo_root / "cli-first-tool-schemas.json")
     current_ids = {f"{agent}_{tool}" for agent, tool in catalog}
 
     files_report = []

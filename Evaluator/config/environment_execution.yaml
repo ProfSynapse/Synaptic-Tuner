@@ -13,6 +13,16 @@ environment_execution:
   strict_schema: false
   default_action: simulate
 
+  # Model-facing read output formatting. This is intentionally generic: any
+  # configured tool that resolves to the primitive read action can opt into
+  # line-numbered output so later offset/line-range actions are grounded in the
+  # visible feedback.
+  read_output:
+    include_line_numbers: true
+    honor_line_range: true
+    line_number_separator: ": "
+    line_number_width: 0
+
   key_hints:
     source_path:
       - path
@@ -48,8 +58,9 @@ environment_execution:
     write:
       - write
       - update
-      - replace
       - createcontent
+    replace:
+      - replace
     read:
       - read
       - open

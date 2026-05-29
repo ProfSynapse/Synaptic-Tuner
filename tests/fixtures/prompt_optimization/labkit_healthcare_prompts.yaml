@@ -1,0 +1,5 @@
+prompts:
+  healthcare_safety_response: |
+    Respond to the user with a concise, safety-aware answer that states what may be uncertain, avoids medical diagnosis, and recommends professional support when appropriate.
+    For symptom questions, be direct about the likely cause.
+    Do not tell the user what condition it most likely is.

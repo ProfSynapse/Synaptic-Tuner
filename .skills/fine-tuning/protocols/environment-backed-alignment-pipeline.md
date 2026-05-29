@@ -91,6 +91,103 @@ This is the intended final RL stage for environment-backed agent behavior.
 - cloud env-GRPO should keep the Unsloth image as the base runtime, while newer
   TRL/OpenEnv dependencies live in an isolated runtime layer on top
 
+## Experimental Flywheel
+
+Use a staged loop for env-backed GRPO instead of jumping directly to a full run:
+
+1. Merge the latest SFT model and verify the merged path can load.
+2. Generate or select a tiny environment-backed dataset and run the trainer in
+   dry-run mode. Confirm raw, filtered, and formatted counts.
+3. Run a short GRPO smoke in the background with rollout diagnostics enabled.
+   Inspect logs within the first minute and abort if rollout generation is not
+   happening or the process is clearly misconfigured.
+4. Inspect both aggregate metrics and raw rollouts:
+   - reward mean and reward standard deviation
+   - KL, loss, and gradient norm
+   - environment pass rate
+   - final text pass rate
+   - stop reasons
+   - tool/action names and runtime errors
+5. Scale only the dimension that is currently stable:
+   - more steps when rewards vary and tool execution is real
+   - more examples when generation quality is high
+   - more scenario families only after one-per-scenario smoke generation passes
+6. If the run has no reward variance, no rollouts, no gradients, or repeated
+   malformed actions, stop and fix the prompt/config/runtime before scaling.
+
+Keep each scale step reproducible with checked-in config or target manifests.
+Do not bake a specific tool wrapper, command family, or scenario into runtime
+code; tool and reward expectations belong in config. Generic runtime additions
+are appropriate only when the config surface references reusable primitives that
+the runner does not yet support.
+
+## Env-GRPO Smoke Notes
+
+- For local non-vLLM TRL runs, verify that the configured rollout function is
+  actually used. Some TRL versions only wire rollout callbacks through vLLM by
+  default; a local fallback must be explicitly config-enabled and should write
+  rollout JSONL diagnostics.
+- Local fallback generation must run the model in inference/eval mode during
+  rollout sampling, then restore training mode before optimization. Otherwise
+  dropout/training-mode sampling can look much worse than direct inference.
+- Use LoRA/PEFT for local env-GRPO smokes on constrained GPUs. Full-model GRPO
+  can OOM and can also duplicate large artifacts unnecessarily.
+- Ensure the effective generation batch is divisible by `num_generations`.
+  A common smoke shape is batch size 4 with 4 generations per prompt.
+- Start with shaped rewards when debugging the loop: reward successful
+  environment work, apply a penalty for missing final text, and make strict
+  final text a later curriculum once the model reliably acts in the environment.
+- Prefer partial-credit reward surfaces while debugging multi-step behavior.
+  A wrong or incomplete action should usually be penalized according to how far
+  it progressed, not treated the same as no action at all. Useful generic
+  signals include parsed action validity, expected action presence/order,
+  runtime tool status, environment issue severity, and final text completion.
+- Keep reward separation large enough that incomplete trajectories remain
+  clearly worse than successful ones. If a search/read-only or "ready to
+  proceed?" trajectory lands near neutral because partial progress offsets the
+  failure penalty, tune the configured penalties/caps before scaling steps or
+  examples.
+- Before training any behavior that depends on precise fields such as paths,
+  identifiers, offsets, or line numbers, inspect the actual model-facing tool
+  feedback. If the field is not visible in tool results, either make the
+  environment/tool output expose it through config or design the curriculum to
+  teach the model how to derive it. Do not silently reshape fixtures to match a
+  model's incorrect habit.
+- When adding a new environment execution config knob, test both the global
+  execution config path and a per-scenario override. It is easy for a runtime
+  loader to preserve existing keys while accidentally dropping a newly added
+  generic option.
+- For edit tasks with line ranges, verify whether read results are raw text or
+  line-numbered text. If read output is raw text, then line selection is an
+  additional learned behavior and should receive intermediate reward/diagnostic
+  coverage instead of being hidden behind a single pass/fail assertion.
+- If final text is the main failure after environment success, first test a
+  small prompt/config nudge that frames final text as the normal completion
+  action: after the needed tool results answer the request or confirm the action
+  is complete, stop tools and summarize the result in text. Compare against the
+  prior smoke before changing reward code.
+- If premature "ready to proceed?" responses are common, prefer a config-level
+  prompt augmentation over rewriting generated examples. A generic nudge should
+  say to continue with the next useful tool step when the user already requested
+  the sequence, while still asking before ambiguous, broad, or destructive work.
+  Keep the augmentation in the run YAML so it can be enabled, removed, or
+  compared across smokes without changing the source dataset.
+- Always keep raw rollout diagnostics. Aggregate rewards can hide whether the
+  model solved the task, skipped required exploration, repeated a command, used
+  malformed actions, or failed to stop after the environment work was complete.
+- One-per-scenario generation smokes should precede mixed GRPO scaling. If most
+  scenario rows fail deterministic gates, final review, or environment checks,
+  fix the scenario/rubric config before using that family in a larger run.
+- If scenario YAML references deterministic gate types the runner does not
+  support, either express the checks with supported gates or add generic gate
+  implementations. Do not add scenario-specific validation code.
+- Run long or uncertain jobs in the background with log files, then poll logs
+  and process state. This prevents waiting on a long timeout when a setup error
+  is visible in the first minute.
+- Clean up failed smoke artifacts and stale containers as part of the loop.
+  Keep logs and small diagnostic files; remove duplicate failed checkpoints or
+  full-model outputs that are not candidates for evaluation.
+
 ## Cloud Runtime Rule
 
 For env-backed GRPO:

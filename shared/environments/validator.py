@@ -112,6 +112,7 @@ class EnvironmentSession:
     action_hints: Dict[str, str] = field(init=False, default_factory=dict)
     key_hints: Dict[str, List[str]] = field(init=False, default_factory=dict)
     verb_rules: Dict[str, List[str]] = field(init=False, default_factory=dict)
+    read_output: Dict[str, Any] = field(init=False, default_factory=dict)
     strict_schema: bool = field(init=False, default=False)
     default_action: str = field(init=False, default="simulate")
     loop_mode: str = field(init=False, default="strict")
@@ -168,6 +169,14 @@ class EnvironmentSession:
             override_verb_rules,
         )
 
+        override_read_output = execution_overrides.get("read_output")
+        if not isinstance(override_read_output, dict):
+            override_read_output = {}
+        self.read_output = _merge_dicts(
+            self.validator.execution_config.get("read_output", {}),
+            override_read_output,
+        )
+
         self.runtime = self.validator._create_runtime()
         loop_cfg = config.get("loop") if isinstance(config.get("loop"), dict) else {}
         self.loop_mode = str(loop_cfg.get("mode", "strict") or "strict").strip().lower()
@@ -202,6 +211,7 @@ class EnvironmentSession:
                 key_hints=self.key_hints,
                 verb_rules=self.verb_rules,
                 default_action=self.default_action,
+                read_output=self.read_output,
             )
         except Exception as exc:
             executions = []
@@ -649,6 +659,7 @@ def _load_execution_config(path: Path) -> Dict[str, Any]:
         "verb_rules": {},
         "key_hints": {},
         "tool_action_hints": {},
+        "read_output": {},
     }
     data = _load_yaml_file(path)
     section = data.get("environment_execution") if isinstance(data.get("environment_execution"), dict) else data
@@ -662,6 +673,7 @@ def _load_execution_config(path: Path) -> Dict[str, Any]:
     merged["tool_action_hints"] = (
         section.get("tool_action_hints", {}) if isinstance(section.get("tool_action_hints"), dict) else {}
     )
+    merged["read_output"] = section.get("read_output", {}) if isinstance(section.get("read_output"), dict) else {}
     return merged
 
 

@@ -13,6 +13,8 @@ Generate, improve, validate, sanitize, and evaluate synthetic training datasets 
 | Task | Command |
 |------|---------|
 | Generate dataset | `python -m SynthChat.run generate [options]` |
+| Generate with prompt optimization overlay | `python -m SynthChat.run generate --prompt-opt-config configs/prompt_optimization/NAME.yaml [options]` |
+| Standalone prompt optimization | `python tuner.py prompt-optimize --prompt-opt-config configs/prompt_optimization/NAME.yaml` |
 | Generate with environment runtime checks | `python -m SynthChat.run generate --env-backend local [options]` |
 | Generate with custom tool schema/rules | `python -m SynthChat.run generate --env-backend local --env-tool-schema path/to/tool_schema.yaml --env-exec-config path/to/environment_execution.yaml [options]` |
 | Debug environment generation only | `python -m SynthChat.run env-generate --scenario SCENARIO --debug-artifacts [path] [options]` |
@@ -89,6 +91,15 @@ turn. The response rubric is the repair path that receives validation errors,
 judge feedback, and environment issues, then produces the corrected assistant
 message. The `final_judge` is a terminal acceptance gate, not the improver.
 
+Environment-backed rows should persist the complete replay bundle by default:
+generated fixture, assertions, resolved environment config, task context,
+stage reviews, and enough source metadata to reconstruct the episode later.
+When projecting rollouts into per-turn training rows, keep a pointer to the
+canonical replay row or carry the replay bundle forward. A tool-turn-only
+projection is useful for static supervised examples, but it is not enough for
+later live environment replay unless the original environment artifact is still
+available.
+
 Use at least 3 retries/iterations for the response repair stages by default:
 set CLI `--max-iterations 3`, keep scenario judge/final_judge `max_retries: 3`,
 and make response rubrics strict enough to fail runtime misses such as missing
@@ -164,6 +175,41 @@ python -m SynthChat.run improve \
 ```bash
 python -m SynthChat.run generate --provider openrouter --model MODEL_ID
 ```
+
+**Generate with prompt optimization overlays:**
+```bash
+python -m SynthChat.run generate \
+  --prompt-opt-config configs/prompt_optimization/synthchat_smoke.yaml \
+  --targets-file SynthChat/config/targets_cli_existing_tools_quickcheck.json \
+  --output Datasets/synthchat/prompt_opt_dryrun.jsonl
+```
+
+`--prompt-opt-config` runs the prompt optimizer as an optional pre-generation
+step, loads the produced `overlays.json`, applies matching prompt overlays in
+memory, and records the artifact path plus selected candidate ID in each
+generated row's metadata. Use
+`--prompt-opt-artifact path/to/artifact_or_overlays.json` to reuse an existing
+artifact without rerunning optimization. This is opt-in only: SynthChat does not
+write optimized prompt text back into scenario/config YAML.
+
+**Run prompt optimization standalone:**
+```bash
+python tuner.py prompt-optimize \
+  --prompt-opt-config configs/prompt_optimization/labkit_epistemic_humility_evaluator_smoke.yaml
+```
+
+Prompt optimization is config-first. Keep prompt subjects, operators, evaluator
+scenarios, objective metrics, and stopping thresholds in
+`configs/prompt_optimization/*.yaml`; do not hardcode dataset-specific prompt
+surfaces into runtime code. The practical evaluator target threshold is
+`stopping.target_score: 0.8`.
+
+The checked-in evaluator smoke
+`configs/prompt_optimization/labkit_epistemic_humility_evaluator_smoke.yaml`
+must remain CI/local safe with `evaluation.evaluator.dry_run: true`. It is sized
+for a minimal real smoke (`population_size: 3`, `max_generations: 1`), but real
+LM Studio/evaluator execution should be done with an explicit local override or
+manual copy that flips `dry_run` outside the checked-in smoke config.
 
 **Generate from docs:**
 ```bash
@@ -353,6 +399,8 @@ Important discipline for this repo:
 - do not encode wrapper names, top-level fields, or command assumptions in parser/executor/judge code unless that behavior is driven from config
 - if a generation/eval issue seems specific to the current toy/example format, fix config, scenarios, rubrics, or format definitions first
 - environment/runtime failures should be lifted into judge/improver context as structured payload data, not handled primarily with ad hoc format-specific code repairs
+- prompt optimization overlays are an in-memory generation aid; promote them
+  into canonical YAML only after explicit human review
 
 Key config files:
 - `SynthChat/config/tool_call_formats.yaml` — Tool-call response schemas (wrapper name, context fields, call structure)

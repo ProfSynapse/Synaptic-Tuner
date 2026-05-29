@@ -122,7 +122,7 @@ def discover_default_sources(repo_root: Path, agents: List[str]) -> Dict[str, Pa
 def rebuild_queue_from_sources(repo_root: Path, agents: List[str], source_overrides: Dict[str, Path]) -> List[Dict]:
     migrate_mod = load_migration_module()
     rewrite_example = migrate_mod.rewrite_example
-    catalog = load_target_catalog(repo_root / "tool-schemas.json")
+    catalog = load_target_catalog(repo_root / "cli-first-tool-schemas.json")
     default_sources = discover_default_sources(repo_root, agents)
     rows: List[Dict] = []
 

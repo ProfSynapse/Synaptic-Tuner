@@ -5,7 +5,7 @@ Utilities for tool-schema auditing, dataset migration, and dataset analysis.
 ## Active Files
 
 ### `audit_tool_schemas.py`
-Regenerates the evaluator-facing YAML schema from the canonical CLI-first catalog in [`tool-schemas.json`](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/tool-schemas.json).
+Regenerates the evaluator-facing YAML schema from the canonical CLI-first catalog in [`cli-first-tool-schemas.json`](../cli-first-tool-schemas.json).
 
 Usage:
 ```bash
@@ -37,7 +37,7 @@ python3 tools/analyze_tool_coverage.py Datasets/tools_datasets/non_thinking/cont
 
 ## Canonical Schema
 
-### `tool-schemas.json`
+### `cli-first-tool-schemas.json`
 Current source of truth for the CLI-first tool surface.
 
 The catalog is organized as:
