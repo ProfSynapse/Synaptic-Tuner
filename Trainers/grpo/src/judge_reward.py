@@ -16,32 +16,18 @@ from typing import Any, Callable, Dict, List
 
 from shared.judge import (
     JudgeConfig,
-    JudgeResult,
     JudgeService,
     RubricDef,
     RubricLoader,
 )
 from shared.llm import LLMConfig, create_client
+from shared.verifiers.builtins.llm_judge import (
+    AGGREGATIONS as _AGGREGATIONS,
+    aggregate,
+    render_combined_prompt,
+)
 
 logger = logging.getLogger(__name__)
-
-_AGGREGATIONS = ("mean_score", "mean_passed", "min_score", "all_pass")
-
-
-def _aggregate(result: JudgeResult, strategy: str) -> float:
-    if not result.scores:
-        return 0.0
-    if strategy == "mean_score":
-        return sum(s.score for s in result.scores) / len(result.scores)
-    if strategy == "mean_passed":
-        return sum(1.0 if s.passed else 0.0 for s in result.scores) / len(result.scores)
-    if strategy == "min_score":
-        return min(s.score for s in result.scores)
-    if strategy == "all_pass":
-        return 1.0 if all(s.passed for s in result.scores) else 0.0
-    raise ValueError(
-        f"Unknown aggregation '{strategy}'. Must be one of: {', '.join(_AGGREGATIONS)}"
-    )
 
 
 def _coerce_completion_text(completion: Any) -> str:
@@ -106,23 +92,6 @@ def _build_judge_service(judge_cfg: Dict[str, Any]) -> JudgeService:
         max_tokens=int(judge_cfg.get("max_tokens", 2048)),
     )
     return JudgeService(llm_client, judge_config)
-
-
-def _render_combined_prompt(
-    rubrics: List[RubricDef],
-    template_vars: Dict[str, str],
-) -> str:
-    """Concatenate per-rubric judge_prompt templates after substituting vars."""
-    parts: List[str] = []
-    for rubric in rubrics:
-        rendered = rubric.judge_prompt
-        for k, v in template_vars.items():
-            rendered = rendered.replace(f"{{{k}}}", str(v))
-        if len(rubrics) == 1:
-            parts.append(rendered)
-        else:
-            parts.append(f"=== {rubric.name} ===\n{rendered}")
-    return "\n\n".join(parts)
 
 
 def build_judge_rubric_reward(
@@ -197,7 +166,7 @@ def build_judge_rubric_reward(
                 "user_prompt": prompt_text,
                 "response": response_text,
             }
-            rendered = _render_combined_prompt(rubrics, template_vars)
+            rendered = render_combined_prompt(rubrics, template_vars)
 
             result = judge_service.judge(prompt=rendered, rubrics=rubrics)
             if result.error:
@@ -205,7 +174,7 @@ def build_judge_rubric_reward(
                 rewards.append(0.0)
                 continue
 
-            rewards.append(_aggregate(result, aggregation))
+            rewards.append(aggregate(result, aggregation))
 
         return rewards
 
