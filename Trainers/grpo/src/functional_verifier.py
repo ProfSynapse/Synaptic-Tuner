@@ -8,36 +8,13 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.verifiers.extraction import extract
+from shared.verifiers.builtins.args_match import (
+    compare_args_overlap,
+    normalize_tool_call,
+    normalize_value,
+)
 
 logger = logging.getLogger(__name__)
-
-def _normalize_value(value: Any) -> Any:
-    """Normalise a scalar/collection for comparison."""
-    if isinstance(value, dict):
-        return {k: _normalize_value(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_normalize_value(v) for v in value]
-    if not isinstance(value, str):
-        return value
-    stripped = value.strip()
-    if stripped.lower() == "true":
-        return True
-    if stripped.lower() == "false":
-        return False
-    try:
-        return int(stripped)
-    except ValueError:
-        pass
-    try:
-        return float(stripped)
-    except ValueError:
-        pass
-    return stripped.replace("\\", "/")
-
-
-def _normalize_tool_call(tool_name: str, args: Dict) -> Tuple[str, Dict]:
-    """Return normalised (tool_name, sorted_args) tuple."""
-    return tool_name.strip().lower(), {k: _normalize_value(v) for k, v in sorted(args.items())}
 
 
 def _extract_tool_call(text: str) -> Optional[Tuple[str, Dict]]:
@@ -46,30 +23,6 @@ def _extract_tool_call(text: str) -> Optional[Tuple[str, Dict]]:
     if ea.found:
         return ea.tool_name, ea.arguments
     return None
-
-
-def _compare_args(predicted: Dict, expected: Dict) -> float:
-    """Compare argument dicts: ``key_overlap * 0.4 + value_match * 0.6``."""
-    if not predicted and not expected:
-        return 1.0
-    if not predicted or not expected:
-        return 0.0
-    pred_keys, exp_keys = set(predicted.keys()), set(expected.keys())
-    all_keys = pred_keys | exp_keys
-    common = pred_keys & exp_keys
-    key_overlap = len(common) / len(all_keys) if all_keys else 0.0
-    if not common:
-        return key_overlap * 0.4
-    value_scores: List[float] = []
-    for key in common:
-        pv, ev = _normalize_value(predicted[key]), _normalize_value(expected[key])
-        if pv == ev:
-            value_scores.append(1.0)
-        elif isinstance(pv, str) and isinstance(ev, str) and (pv in ev or ev in pv):
-            value_scores.append(0.5)
-        else:
-            value_scores.append(0.0)
-    return key_overlap * 0.4 + (sum(value_scores) / len(value_scores)) * 0.6
 
 
 def functional_equivalence_reward(
@@ -103,10 +56,10 @@ def functional_equivalence_reward(
                 gt_args = parsed if isinstance(parsed, dict) else {}
             except (json.JSONDecodeError, ValueError):
                 gt_args = {}
-        norm_pred_name, norm_pred_args = _normalize_tool_call(pred_name, pred_args)
-        norm_gt_name, norm_gt_args = _normalize_tool_call(gt_tool, gt_args)
+        norm_pred_name, norm_pred_args = normalize_tool_call(pred_name, pred_args)
+        norm_gt_name, norm_gt_args = normalize_tool_call(gt_tool, gt_args)
         if norm_pred_name != norm_gt_name:
             scores.append(0.0)
             continue
-        scores.append(_compare_args(norm_pred_args, norm_gt_args))
+        scores.append(compare_args_overlap(norm_pred_args, norm_gt_args))
     return scores

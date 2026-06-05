@@ -5,8 +5,8 @@ These tests prove:
 - The three builtins (substring/structure/llm_judge) behave per contract and
   hold parity with the existing source logic they consolidate:
     * structure  -> parity with FitnessEvaluator directly.
-    * llm_judge  -> aggregate() parity with judge_reward._aggregate (the copy
-      that Phase 3 will delete in favor of this canonical one).
+    * llm_judge  -> aggregate() pins the canonical aggregation scalars (the
+      GRPO copy ``judge_reward._aggregate`` was deleted in Phase 3).
 - The registry builds verifiers by spec and rejects unknown types.
 """
 
@@ -17,9 +17,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-# judge_reward._aggregate lives under the GRPO src tree; add it for the ONE
-# allowed cross-import (parity assertion only).
-sys.path.insert(0, str(ROOT / "Trainers" / "grpo" / "src"))
 
 from shared.verifiers import (
     CompositeVerifier,
@@ -281,23 +278,32 @@ def _make_judge_result() -> JudgeResult:
 
 
 class TestLLMJudgeAggregationParity:
-    """Canonical aggregate() must match judge_reward._aggregate exactly."""
+    """Canonical aggregate() must produce the expected per-strategy scalars.
 
+    Phase 3 deleted ``judge_reward._aggregate`` (its math now lives only in the
+    canonical ``shared.verifiers.builtins.llm_judge.aggregate``). The expected
+    values below are the SAME numbers the old parity assertion checked against
+    that now-removed copy, hardcoded to pin canonical behavior.
+    """
+
+    # _make_judge_result() scores: 0.8 (pass), 0.2 (fail), 0.6 (pass).
     @pytest.mark.parametrize(
-        "strategy", ["mean_score", "mean_passed", "min_score", "all_pass"]
+        "strategy, expected",
+        [
+            ("mean_score", (0.8 + 0.2 + 0.6) / 3),  # 0.5333...
+            ("mean_passed", 2.0 / 3.0),
+            ("min_score", 0.2),
+            ("all_pass", 0.0),
+        ],
     )
-    def test_aggregate_parity(self, strategy):
-        from judge_reward import _aggregate as grpo_aggregate
-
+    def test_aggregate_values(self, strategy, expected):
         result = _make_judge_result()
-        assert canonical_aggregate(result, strategy) == grpo_aggregate(result, strategy)
+        assert canonical_aggregate(result, strategy) == expected
 
     def test_aggregate_empty_scores(self):
-        from judge_reward import _aggregate as grpo_aggregate
-
         empty = JudgeResult(passed=False, scores=[])
         for strategy in ("mean_score", "mean_passed", "min_score", "all_pass"):
-            assert canonical_aggregate(empty, strategy) == grpo_aggregate(empty, strategy)
+            assert canonical_aggregate(empty, strategy) == 0.0
 
     def test_unknown_aggregation_raises(self):
         with pytest.raises(ValueError):

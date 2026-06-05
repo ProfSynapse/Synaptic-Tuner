@@ -31,6 +31,11 @@ except ImportError:
     StructureValidator = None
 
 from shared.verifiers.extraction import extract
+from shared.verifiers.builtins.args_match import (
+    compare_values,
+    score_legacy_fields,
+    score_mappings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,136 +244,38 @@ class RewardRubric:
         if not mappings:
             return self._score_weighted_legacy(data, gt_args, comparison, kwargs)
 
-        # Score based on explicit field mappings
-        total_score = 0.0
-        total_weight = 0.0
+        # Score based on explicit field mappings (delegated to canonical home).
         pred_args = data.get("parsed_args", {})
-
-        for mapping in mappings:
-            pred_path = mapping.get("pred_path", "")
-            gt_path = mapping.get("gt_path", "")
-            weight = float(mapping.get("weight", 1.0))
-            strategy = mapping.get("strategy", "equals")
-
-            # Special case: tool_name comparison uses different fields
-            if mapping.get("use_tool_name"):
-                pred_val = data.get("tool_name", "")
-                gt_val = kwargs.get("ground_truth_tool", "")
-            elif pred_path == "" and strategy == "key_overlap":
-                # Empty pred_path with key_overlap means compare all parsed args
-                pred_val = pred_args
-                gt_val = self._get_nested_value(gt_args, gt_path)
-            else:
-                # Extract values using paths
-                pred_val = self._get_nested_value(pred_args, pred_path)
-                gt_val = self._get_nested_value(gt_args, gt_path)
-
-            # Compare based on strategy
-            field_score = self._compare_values(pred_val, gt_val, strategy)
-            total_score += weight * field_score
-            total_weight += weight
-
-        # Normalize score
-        return total_score / total_weight if total_weight > 0 else 0.0
-
-    def _get_nested_value(self, obj: Any, path: str) -> Any:
-        """Get value from nested dict using dot notation path."""
-        if not path or not obj:
-            return None
-
-        parts = path.split(".")
-        current = obj
-
-        for part in parts:
-            if isinstance(current, dict):
-                current = current.get(part)
-            elif isinstance(current, list) and part.isdigit():
-                idx = int(part)
-                current = current[idx] if idx < len(current) else None
-            else:
-                return None
-
-            if current is None:
-                return None
-
-        return current
+        return score_mappings(
+            pred_args=pred_args,
+            pred_tool=data.get("tool_name", ""),
+            gt_args=gt_args,
+            gt_tool=kwargs.get("ground_truth_tool", ""),
+            mappings=mappings,
+        )
 
     def _compare_values(self, pred: Any, gt: Any, strategy: str) -> float:
-        """Compare two values using the specified strategy."""
-        if pred is None or gt is None:
-            return 0.0
+        """Compare two values using the specified strategy.
 
-        if strategy == "equals":
-            return 1.0 if str(pred) == str(gt) else 0.0
-
-        elif strategy == "contains":
-            return 1.0 if str(gt) in str(pred) else 0.0
-
-        elif strategy == "key_overlap":
-            if isinstance(pred, dict) and isinstance(gt, dict) and gt:
-                overlap = len(set(pred.keys()) & set(gt.keys()))
-                return overlap / len(gt)
-            return 0.0
-
-        elif strategy == "tool_name_match":
-            # Compare tool names (handle agent_tool format)
-            pred_str = str(pred)
-            gt_str = str(gt)
-            if pred_str == gt_str:
-                return 1.0
-            # Partial: same agent
-            if "_" in pred_str and "_" in gt_str:
-                if pred_str.split("_")[0] == gt_str.split("_")[0]:
-                    return 0.3
-            return 0.0
-
-        return 0.0
+        Thin delegation to the canonical implementation in
+        ``shared.verifiers.builtins.args_match.compare_values``.
+        """
+        return compare_values(pred, gt, strategy)
 
     def _score_weighted_legacy(self, data: Dict, gt_args: Dict, comparison: Dict, kwargs: Dict) -> float:
-        """Legacy weighted scoring using field lists (backwards compatible)."""
-        context_fields = comparison.get("context_fields", [])
-        call_fields = comparison.get("call_fields", [])
+        """Legacy weighted scoring using field lists (backwards compatible).
 
-        weights = self.scoring.get("weights", {})
-        context_weight = weights.get("context_match", 0.4)
-        tool_weight = weights.get("tool_match", 0.3)
-        params_weight = weights.get("params_match", 0.3)
-
-        total_score = 0.0
-        pred_args = data.get("parsed_args", {})
-
-        # Context field matching
-        if context_fields:
-            gt_context = gt_args.get("context", {}) if isinstance(gt_args, dict) else {}
-            if isinstance(gt_context, dict) and gt_context:
-                matches = sum(
-                    1 for f in context_fields
-                    if str(pred_args.get(f, "")) == str(gt_context.get(f, ""))
-                )
-                total_score += context_weight * (matches / len(context_fields))
-
-        # Tool name matching
-        pred_tool = data.get("tool_name", "")
-        gt_tool = kwargs.get("ground_truth_tool", "")
-        if pred_tool and gt_tool:
-            if pred_tool == gt_tool:
-                total_score += tool_weight * 1.0
-            elif "_" in pred_tool and "_" in gt_tool:
-                if pred_tool.split("_")[0] == gt_tool.split("_")[0]:
-                    total_score += tool_weight * 0.3
-
-        # Params matching (key overlap)
-        gt_calls = gt_args.get("calls", []) if isinstance(gt_args, dict) else []
-        if gt_calls and isinstance(gt_calls, list) and gt_calls:
-            gt_params = gt_calls[0].get("params", {}) if isinstance(gt_calls[0], dict) else {}
-            if isinstance(gt_params, dict) and gt_params:
-                gt_keys = set(gt_params.keys())
-                pred_keys = set(k for k in pred_args.keys() if k not in ["sessionId", "workspaceId"])
-                if gt_keys:
-                    overlap = len(gt_keys & pred_keys)
-                    total_score += params_weight * (overlap / len(gt_keys))
-
-        return total_score
+        Thin delegation to the canonical implementation in
+        ``shared.verifiers.builtins.args_match.score_legacy_fields``.
+        """
+        return score_legacy_fields(
+            pred_args=data.get("parsed_args", {}),
+            pred_tool=data.get("tool_name", ""),
+            gt_args=gt_args,
+            gt_tool=kwargs.get("ground_truth_tool", ""),
+            comparison=comparison,
+            weights=self.scoring.get("weights", {}),
+        )
 
     def _get_required_fields(self) -> List[str]:
         """Get required context fields from schema config."""
