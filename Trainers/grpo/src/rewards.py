@@ -30,6 +30,8 @@ except ImportError:
     # Fallback for standalone testing
     StructureValidator = None
 
+from shared.verifiers.extraction import extract
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,55 +101,17 @@ class RewardRubric:
         """
         Extract structured data from completion text.
 
-        Directly extracts from model's native format (e.g., Qwen's <tool_call> tags).
-        No unnecessary format conversion - just get the arguments and compare.
+        Delegates to the canonical tool-call parser via the shared
+        ``extract`` abstraction. The returned dict preserves the original
+        shape: ``tool_name`` / ``parsed_args`` keys are present only when a
+        tool call was found.
         """
         result = {"raw_text": text}
 
-        # Try Qwen format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
-        tool_call_match = re.search(
-            r'<tool_call>\s*([\s\S]*?)\s*</tool_call>',
-            text,
-            re.IGNORECASE
-        )
-
-        if tool_call_match:
-            json_content = tool_call_match.group(1).strip()
-            try:
-                tool_obj = json.loads(json_content)
-                if isinstance(tool_obj, dict):
-                    result["tool_name"] = tool_obj.get("name", "")
-                    args = tool_obj.get("arguments", {})
-                    # Arguments might be JSON string or dict
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-                    result["parsed_args"] = args if isinstance(args, dict) else {}
-                    return result
-            except json.JSONDecodeError:
-                pass
-
-        # Fallback: Try Mistral format [TOOL_CALLS] [...]
-        if "[TOOL_CALLS]" in text:
-            match = re.search(r'\[TOOL_CALLS\]\s*(\[[\s\S]*?\])', text)
-            if match:
-                try:
-                    tool_calls = json.loads(match.group(1))
-                    if isinstance(tool_calls, list) and tool_calls:
-                        tc = tool_calls[0]
-                        result["tool_name"] = tc.get("name", "")
-                        args = tc.get("arguments", {})
-                        if isinstance(args, str):
-                            try:
-                                args = json.loads(args)
-                            except json.JSONDecodeError:
-                                args = {}
-                        result["parsed_args"] = args if isinstance(args, dict) else {}
-                        return result
-                except json.JSONDecodeError:
-                    pass
+        ea = extract(text, mode="tool_call")
+        if ea.found:
+            result["tool_name"] = ea.tool_name
+            result["parsed_args"] = ea.arguments
 
         return result
 

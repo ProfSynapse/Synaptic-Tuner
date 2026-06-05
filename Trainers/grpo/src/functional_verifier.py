@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Dict, List, Optional, Tuple
+
+from shared.verifiers.extraction import extract
 
 logger = logging.getLogger(__name__)
 
@@ -39,50 +40,11 @@ def _normalize_tool_call(tool_name: str, args: Dict) -> Tuple[str, Dict]:
     return tool_name.strip().lower(), {k: _normalize_value(v) for k, v in sorted(args.items())}
 
 
-def _parse_args(raw: Any) -> Dict:
-    """Coerce raw arguments to dict."""
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            return parsed if isinstance(parsed, dict) else {}
-        except (json.JSONDecodeError, ValueError):
-            return {}
-    return {}
-
-
 def _extract_tool_call(text: str) -> Optional[Tuple[str, Dict]]:
-    """Extract (tool_name, arguments_dict) from Qwen/Mistral/plain output."""
-    # Qwen format
-    m = re.search(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>", text, re.IGNORECASE)
-    if m:
-        try:
-            obj = json.loads(m.group(1).strip())
-            if isinstance(obj, dict):
-                return obj.get("name", ""), _parse_args(obj.get("arguments", {}))
-        except (json.JSONDecodeError, ValueError):
-            pass
-    # Mistral format
-    if "[TOOL_CALLS]" in text:
-        m = re.search(r"\[TOOL_CALLS\]\s*(\[[\s\S]*?\])", text)
-        if m:
-            try:
-                calls = json.loads(m.group(1))
-                if isinstance(calls, list) and calls:
-                    tc = calls[0]
-                    return tc.get("name", ""), _parse_args(tc.get("arguments", {}))
-            except (json.JSONDecodeError, ValueError):
-                pass
-    # Plain format
-    m = re.search(r"tool_call:\s*(\S+)\s*\narguments:\s*(\{[\s\S]*?\})", text)
-    if m:
-        try:
-            args = json.loads(m.group(2).strip())
-            if isinstance(args, dict):
-                return m.group(1).strip(), args
-        except (json.JSONDecodeError, ValueError):
-            pass
+    """Extract (tool_name, arguments_dict) via the canonical tool-call parser."""
+    ea = extract(text, mode="tool_call")
+    if ea.found:
+        return ea.tool_name, ea.arguments
     return None
 
 
