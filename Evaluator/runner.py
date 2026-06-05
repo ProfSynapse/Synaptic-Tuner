@@ -12,7 +12,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-from .assertions import CorrectnessResult, evaluate_correctness, has_correctness_config
+from shared.verifiers.builtins.assertion_verifier import (
+    CorrectnessResult,
+    evaluate_correctness,
+    has_correctness_config,
+)
+from shared.verifiers.builtins.tool_sequence import evaluate_tool_sequence
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
 from .response_view import build_response_view
@@ -734,37 +739,7 @@ def _matches_scoring_path(
     environment_result: Optional["EnvironmentValidationResult"],
     judge_result: Optional["JudgeValidationResult"],
 ) -> tuple[bool, List[str]]:
-    reasons: List[str] = []
-
-    all_tools = _string_list(path_cfg.get("all_tools"))
-    if all_tools:
-        missing = [tool for tool in all_tools if tool not in tool_names]
-        if missing:
-            reasons.append(f"missing tools: {', '.join(missing)}")
-
-    any_tools = _string_list(path_cfg.get("any_tools"))
-    if any_tools and not any(tool in tool_names for tool in any_tools):
-        reasons.append(f"needs any of: {', '.join(any_tools)}")
-
-    ordered_tools = _string_list(path_cfg.get("ordered_tools"))
-    if ordered_tools and not _contains_subsequence(tool_names, ordered_tools):
-        reasons.append(f"ordered tools not matched: {', '.join(ordered_tools)}")
-
-    first_tool = str(path_cfg.get("first_tool", "")).strip()
-    if first_tool and (not tool_names or tool_names[0] != first_tool):
-        reasons.append(f"first tool should be {first_tool}")
-
-    first_tool_any_of = _string_list(path_cfg.get("first_tool_any_of"))
-    if first_tool_any_of and (not tool_names or tool_names[0] not in first_tool_any_of):
-        reasons.append(f"first tool should be one of: {', '.join(first_tool_any_of)}")
-
-    max_tool_calls = path_cfg.get("max_tool_calls")
-    if max_tool_calls is not None and len(tool_names) > int(max_tool_calls):
-        reasons.append(f"too many tool calls: {len(tool_names)} > {int(max_tool_calls)}")
-
-    min_tool_calls = path_cfg.get("min_tool_calls")
-    if min_tool_calls is not None and len(tool_names) < int(min_tool_calls):
-        reasons.append(f"too few tool calls: {len(tool_names)} < {int(min_tool_calls)}")
+    _matched, reasons = evaluate_tool_sequence(tool_names, path_cfg)
 
     if path_cfg.get("require_schema_pass") and not (validator_result and validator_result.passed):
         reasons.append("schema validation did not pass")
@@ -779,26 +754,3 @@ def _matches_scoring_path(
         reasons.append("judge validation did not pass")
 
     return len(reasons) == 0, reasons
-
-
-def _contains_subsequence(items: List[str], subsequence: List[str]) -> bool:
-    if not subsequence:
-        return True
-    pos = 0
-    for item in items:
-        if item == subsequence[pos]:
-            pos += 1
-            if pos == len(subsequence):
-                return True
-    return False
-
-
-def _string_list(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        clean = value.strip()
-        return [clean] if clean else []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return []

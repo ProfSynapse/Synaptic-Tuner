@@ -27,6 +27,7 @@ from shared.judge import (
 )
 from shared.llm import BaseLLMClient
 from shared.validation.parsing import ParsedResponse
+from shared.verifiers.builtins.llm_judge import render_combined_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -163,38 +164,12 @@ class JudgeValidator:
         """
         template_vars = self._build_template_vars(parsed_response, case_metadata)
 
-        if len(self.rubrics) == 1:
-            return self._render_single_prompt(self.rubrics[0], template_vars)
-
-        # Multiple rubrics: concatenate with separators
-        parts = []
-        for rubric in self.rubrics:
-            rendered = self._render_single_prompt(rubric, template_vars)
-            parts.append(f"=== {rubric.name} ===\n{rendered}")
-        return "\n\n".join(parts)
-
-    @staticmethod
-    def _render_single_prompt(
-        rubric: RubricDef,
-        template_vars: Dict[str, str],
-    ) -> str:
-        """Fill template variables in a single rubric's judge_prompt.
-
-        Uses simple string replacement (str.replace) for each known variable,
-        avoiding str.format_map which could allow Python attribute access via
-        format strings. Missing variables are left as-is.
-
-        Args:
-            rubric: The rubric whose prompt to render.
-            template_vars: Dict of variable name -> value.
-
-        Returns:
-            Rendered prompt string.
-        """
-        prompt = rubric.judge_prompt
-        for key, val in template_vars.items():
-            prompt = prompt.replace(f"{{{key}}}", str(val))
-        return prompt
+        # Delegate the per-rubric substitution + concatenation to the shared
+        # canonical helper. It is byte-identical to the previous inline logic:
+        # single rubric renders bare; multiple rubrics get `=== <name> ===`
+        # headers joined by blank lines. Both do `str.replace("{k}", str(v))`
+        # over the same template_vars dict, avoiding str.format_map for safety.
+        return render_combined_prompt(self.rubrics, template_vars)
 
     def _build_template_vars(
         self,

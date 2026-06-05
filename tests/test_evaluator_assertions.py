@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from Evaluator.assertions import evaluate_correctness, select_path
+from shared.verifiers.builtins.assertion_verifier import evaluate_correctness, select_path
 from Evaluator.config_loader import ConfigLoader
 from Evaluator.prompt_sets import PromptCase
 from Evaluator.protocols import BackendResponse
