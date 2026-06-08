@@ -15,6 +15,7 @@ class LLMConfig:
     model: str  # Model name or path to LoRA adapter (for unsloth)
     temperature: float = 0.7
     max_tokens: int = 2048
+    thinking_effort: Optional[str] = None
 
     # OpenRouter config
     openrouter_api_key: Optional[str] = None
@@ -59,6 +60,8 @@ class LLMConfig:
             OPENAI_RESPONSES_TIMEOUT_SECONDS: Optional OpenAI Responses timeout
             OPENAI_RESPONSES_STORE: Optional response storage opt-in (default false)
             OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT: Optional JSON Schema strict opt-in
+            OPENROUTER_THINKING_EFFORT: Optional OpenRouter reasoning effort
+            OPENAI_RESPONSES_THINKING_EFFORT: Optional OpenAI Responses reasoning effort
             LMSTUDIO_HOST: LM Studio host (default: localhost)
             LMSTUDIO_PORT: LM Studio port (default: 1234)
             OLLAMA_HOST: Ollama host (default: localhost)
@@ -89,6 +92,7 @@ class LLMConfig:
         model = cfg.get("model", os.getenv(f"{env_prefix}_MODEL", "openai/gpt-5-mini"))
         temperature = float(cfg.get("temperature", 0.7))
         max_tokens = int(cfg.get("max_tokens", 2048))
+        thinking_effort = _config_thinking_effort(cfg, provider)
 
         # Build provider routing config for OpenRouter
         provider_routing = None
@@ -109,6 +113,7 @@ class LLMConfig:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            thinking_effort=thinking_effort,
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
             provider_routing=provider_routing,
             openrouter_timeout_seconds=float(
@@ -237,3 +242,16 @@ def _coerce_bool(value: Any) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _config_thinking_effort(cfg: Dict[str, Any], provider: str) -> Optional[str]:
+    value = cfg.get("thinking_effort", cfg.get("reasoning_effort"))
+    if value is None:
+        if str(provider).lower() == "openrouter":
+            value = os.getenv("OPENROUTER_THINKING_EFFORT")
+        elif str(provider).lower() == "openai_responses":
+            value = os.getenv("OPENAI_RESPONSES_THINKING_EFFORT")
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    return value or None

@@ -61,6 +61,9 @@ def create_llm_client(config: Dict, mode: str = "generation",
         "temperature": llm_config.get("temperature", 0.7),
         "max_tokens": llm_config.get("max_tokens", 2048),
     }
+    thinking_effort = llm_config.get("thinking_effort", llm_config.get("reasoning_effort"))
+    if thinking_effort is not None:
+        config_defaults["thinking_effort"] = thinking_effort
 
     # Provider-specific config
     if provider == "unsloth":

@@ -13,6 +13,7 @@ class _FakeClient:
         self._model_name = model_name
         self.provider = None
         self.timeout_seconds = 60.0
+        self.thinking_effort = None
         self.default_max_tokens = None
 
     @property
@@ -66,6 +67,10 @@ class TestLLMClientPool:
         result = LLMClientPool.normalize_stage_spec({"model": "gpt-4", "provider": "OpenRouter"})
         assert result == {"model": "gpt-4", "provider": "openrouter"}
 
+    def test_normalize_stage_spec_thinking_effort_alias(self):
+        result = LLMClientPool.normalize_stage_spec({"reasoning_effort": "high"})
+        assert result == {"thinking_effort": "high"}
+
     def test_normalize_stage_spec_empty_dict(self):
         result = LLMClientPool.normalize_stage_spec({})
         assert result is None
@@ -93,6 +98,19 @@ class TestLLMClientPool:
         c2 = pool.get_or_create({"model": "other/model"})
         assert c1 is c2
         assert len(created_clients) == 1
+
+    def test_get_or_create_passes_thinking_effort(self):
+        default = _FakeClient()
+        captured = {}
+
+        def factory(provider, model, config_defaults=None):
+            captured["config_defaults"] = config_defaults
+            return _FakeClient(provider_name=provider, model_name=model)
+
+        pool = LLMClientPool(default, client_factory=factory)
+        pool.get_or_create({"model": "other/model", "thinking_effort": "medium"})
+
+        assert captured["config_defaults"]["thinking_effort"] == "medium"
 
     def test_different_specs_create_different_clients(self):
         default = _FakeClient()

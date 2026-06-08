@@ -52,13 +52,12 @@ def create_client(
     """
     # Load config if not provided
     if config is None:
-        config = LLMConfig.from_env(env_prefix=env_prefix, config_defaults=config_defaults)
-
-        # Override with explicit parameters if provided
+        resolved_defaults = dict(config_defaults or {})
         if provider:
-            config.provider = provider.lower()
+            resolved_defaults["provider"] = provider.lower()
         if model:
-            config.model = model
+            resolved_defaults["model"] = model
+        config = LLMConfig.from_env(env_prefix=env_prefix, config_defaults=resolved_defaults)
 
     # Validate config
     config.validate()
@@ -75,6 +74,7 @@ def create_client(
             model=config.model,
             provider=config.provider_routing,  # Pass provider routing (e.g., {"order": ["Groq"]})
             timeout_seconds=config.openrouter_timeout_seconds,
+            thinking_effort=config.thinking_effort,
         )
 
     elif config.provider == "openai_responses":
@@ -90,6 +90,7 @@ def create_client(
             timeout_seconds=config.openai_responses_timeout_seconds,
             store=config.openai_responses_store,
             structured_output_strict=config.openai_responses_structured_output_strict,
+            thinking_effort=config.thinking_effort,
         )
 
     elif config.provider == "lmstudio":

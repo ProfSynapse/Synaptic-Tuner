@@ -59,6 +59,7 @@ llm:
     model: openai/gpt-oss-120b
     temperature: 0.7
     max_tokens: 4096
+    thinking_effort: low          # Optional for OpenRouter/OpenAI reasoning models
     provider_routing:
       order: ["Groq"]
       allow_fallbacks: true
@@ -68,6 +69,7 @@ llm:
     provider: openrouter
     model: openai/gpt-4o
     temperature: 0.1              # Low for deterministic judging
+    thinking_effort: medium       # Optional for OpenRouter/OpenAI reasoning models
 
 improvement:
   max_iterations: 10              # Max improvement loops per example

@@ -17,6 +17,7 @@ class OpenRouterClient(BaseLLMClient):
         model: str,
         provider: Dict[str, Any] = None,
         timeout_seconds: float = 60.0,
+        thinking_effort: str | None = None,
     ):
         """
         Initialize OpenRouter client.
@@ -35,6 +36,7 @@ class OpenRouterClient(BaseLLMClient):
         self.provider = provider
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.timeout_seconds = float(timeout_seconds)
+        self.thinking_effort = _normalize_thinking_effort(thinking_effort)
 
     @property
     def provider_name(self) -> str:
@@ -82,6 +84,8 @@ class OpenRouterClient(BaseLLMClient):
         # Add provider routing if configured
         if self.provider:
             payload["provider"] = self.provider
+        if self.thinking_effort:
+            payload["reasoning"] = {"effort": self.thinking_effort}
 
         try:
             data = self._make_request(payload)
@@ -135,6 +139,8 @@ class OpenRouterClient(BaseLLMClient):
         # Add provider routing if configured
         if self.provider:
             payload["provider"] = self.provider
+        if self.thinking_effort:
+            payload["reasoning"] = {"effort": self.thinking_effort}
 
         try:
             data = self._make_request(payload)
@@ -209,3 +215,10 @@ def _truncate_response(content: Any, limit: int = 1200) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}...<truncated>"
+
+
+def _normalize_thinking_effort(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    return value or None

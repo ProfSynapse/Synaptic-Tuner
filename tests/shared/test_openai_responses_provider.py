@@ -71,6 +71,25 @@ def test_openai_responses_chat_omits_default_temperature(monkeypatch):
     assert "temperature" not in captured["json"]
 
 
+def test_openai_responses_chat_sends_reasoning_effort(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return _FakeResponse({"output_text": "hello"})
+
+    monkeypatch.setattr("shared.llm.providers.openai_responses.requests.post", fake_post)
+
+    client = OpenAIResponsesClient(
+        api_key="test-key",
+        model="gpt-test",
+        thinking_effort="HIGH",
+    )
+
+    assert client.chat([{"role": "user", "content": "Hello"}]) == "hello"
+    assert captured["json"]["reasoning"] == {"effort": "high"}
+
+
 def test_openai_responses_chat_extracts_typed_output(monkeypatch):
     def fake_post(url, headers, json, timeout):
         return _FakeResponse(
@@ -181,6 +200,30 @@ def test_openai_responses_structured_output_strict_opt_in(monkeypatch):
     assert captured["json"]["text"]["format"]["strict"] is False
 
 
+def test_openai_responses_structured_output_sends_reasoning_effort(monkeypatch):
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["json"] = json
+        return _FakeResponse({"output_text": '{"answer": "yes"}'})
+
+    monkeypatch.setattr("shared.llm.providers.openai_responses.requests.post", fake_post)
+
+    client = OpenAIResponsesClient(
+        api_key="test-key",
+        model="gpt-test",
+        thinking_effort="minimal",
+    )
+
+    result = client.structured_output(
+        [{"role": "user", "content": "Return JSON"}],
+        schema={"name": "response", "type": "object"},
+    )
+
+    assert result == {"answer": "yes"}
+    assert captured["json"]["reasoning"] == {"effort": "minimal"}
+
+
 @pytest.mark.parametrize("field", ["store", "previous_response_id", "conversation"])
 def test_openai_responses_rejects_stateful_kwargs(field):
     client = OpenAIResponsesClient(api_key="test-key", model="gpt-test")
@@ -217,6 +260,7 @@ def test_openai_responses_factory_registration():
         openai_responses_timeout_seconds=5,
         openai_responses_store=True,
         openai_responses_structured_output_strict=True,
+        thinking_effort="low",
     )
 
     client = create_client(config=config)
@@ -227,7 +271,21 @@ def test_openai_responses_factory_registration():
     assert client.timeout_seconds == 5
     assert client.store is True
     assert client.structured_output_strict is True
+    assert client.thinking_effort == "low"
     assert "openai_responses" in list_providers()
+
+
+def test_openai_responses_explicit_provider_uses_openai_thinking_effort_env(monkeypatch):
+    monkeypatch.setattr("shared.llm.config._load_env_file", lambda: False)
+    monkeypatch.setenv("IMPROVEMENT_BACKEND", "openrouter")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("OPENAI_RESPONSES_THINKING_EFFORT", "high")
+    monkeypatch.setenv("OPENROUTER_THINKING_EFFORT", "low")
+
+    client = create_client(provider="openai_responses", model="gpt-test")
+
+    assert isinstance(client, OpenAIResponsesClient)
+    assert client.thinking_effort == "high"
 
 
 def test_openai_responses_config_requires_openai_api_key():
@@ -300,4 +358,36 @@ def test_evaluator_openai_responses_adapter_passes_timeout_to_shared_client(monk
         "provider": "openai_responses",
         "model": "gpt-test",
         "config_defaults": {"timeout_seconds": 17.5},
+    }
+
+
+def test_evaluator_openai_responses_adapter_passes_thinking_effort(monkeypatch):
+    from Evaluator.config import OpenAIResponsesSettings
+    from Evaluator.shared_llm_adapters import SharedOpenAIResponsesAdapter
+
+    captured = {}
+
+    class FakeClient:
+        provider_name = "openai_responses"
+
+    def fake_create_client(provider=None, model=None, config_defaults=None):
+        captured["provider"] = provider
+        captured["model"] = model
+        captured["config_defaults"] = config_defaults
+        return FakeClient()
+
+    monkeypatch.setattr("Evaluator.shared_llm_adapters.create_client", fake_create_client)
+
+    SharedOpenAIResponsesAdapter(
+        settings=OpenAIResponsesSettings(model="gpt-test", thinking_effort="medium"),
+        timeout=17.5,
+    )
+
+    assert captured == {
+        "provider": "openai_responses",
+        "model": "gpt-test",
+        "config_defaults": {
+            "timeout_seconds": 17.5,
+            "thinking_effort": "medium",
+        },
     }

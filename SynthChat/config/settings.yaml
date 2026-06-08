@@ -9,6 +9,7 @@ llm:
     model: openai/gpt-oss-120b
     temperature: 0.7
     max_tokens: 4096  # Increased for content writing scenarios
+    # thinking_effort: low  # Optional for OpenRouter/OpenAI reasoning models
     provider_routing:
       order: ["Groq"]  # Prioritize Groq for speed
       allow_fallbacks: true  # Fall back to others if Groq unavailable
@@ -37,6 +38,7 @@ llm:
     model: openai/gpt-oss-120b
     temperature: 0.1  # Deterministic judging
     max_tokens: 2048
+    # thinking_effort: medium  # Optional for OpenRouter/OpenAI reasoning models
     # Provider routing - prioritize specific providers
     provider_routing:
       order: ["Groq"]  # Prioritize Groq for speed
