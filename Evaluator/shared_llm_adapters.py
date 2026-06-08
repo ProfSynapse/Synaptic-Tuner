@@ -50,11 +50,16 @@ class SharedLLMAdapter:
 
         # Create shared LLM client
         # Note: API keys/hosts come from environment
+        config_defaults = {"timeout_seconds": timeout}
+        thinking_effort = getattr(settings, "thinking_effort", None)
+        if thinking_effort is not None:
+            config_defaults["thinking_effort"] = thinking_effort
+
         try:
             self.client: BaseLLMClient = create_client(
                 provider=provider,
                 model=settings.model,
-                config_defaults={"timeout_seconds": timeout},
+                config_defaults=config_defaults,
             )
         except LLMError as e:
             raise self._create_error(f"Failed to create {provider} client: {e}")

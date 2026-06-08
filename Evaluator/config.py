@@ -311,6 +311,7 @@ class OpenRouterSettings:
     temperature: float = 0.2
     top_p: float = 0.9
     max_tokens: int = 1024
+    thinking_effort: Optional[str] = None
     seed: Optional[int] = None
 
     # Required by BackendSettings protocol but not used for API
@@ -333,6 +334,7 @@ class OpenAIResponsesSettings:
     temperature: float = 0.2
     top_p: float = 0.9
     max_tokens: int = 1024
+    thinking_effort: Optional[str] = None
     seed: Optional[int] = None
 
     # Required by BackendSettings protocol but not used for direct API routing.

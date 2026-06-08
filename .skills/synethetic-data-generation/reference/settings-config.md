@@ -12,10 +12,11 @@ Two separate LLM configs — generation (raw examples) and improvement (judge/im
 llm:
   # Generation model — creates raw examples. Local models work fine.
   generation:
-    provider: openrouter          # openrouter | lmstudio | ollama | unsloth
+    provider: openrouter          # openrouter | openai_responses | lmstudio | ollama | unsloth
     model: MODEL_ID
     temperature: 0.7              # Higher = more variety in generated examples
     max_tokens: 4096
+    thinking_effort: low          # Optional for OpenRouter/OpenAI reasoning models
     provider_routing:
       order: ["PROVIDER_NAME"]    # Optional hosted-provider preference
       allow_fallbacks: true       # Fall back if preferred unavailable
@@ -38,12 +39,13 @@ llm:
     model: MODEL_ID
     temperature: 0.1              # Low = deterministic judging
     max_tokens: 2048
+    thinking_effort: medium       # Optional for OpenRouter/OpenAI reasoning models
     provider_routing:             # OpenRouter-specific
       order: ["PROVIDER_NAME"]   # Optional hosted-provider preference
       allow_fallbacks: true      # Fall back if preferred unavailable
 ```
 
-**Providers:** `openrouter`, `lmstudio`, `ollama`, `unsloth`
+**Providers:** `openrouter`, `openai_responses`, `lmstudio`, `ollama`, `unsloth`
 
 CLI flags `--provider` and `--model` override these at runtime.
 

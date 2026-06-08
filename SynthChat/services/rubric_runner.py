@@ -97,6 +97,10 @@ class RubricRunner:
                 provider_routing["order"] = pr["order"]
             if "allow_fallbacks" in pr:
                 provider_routing["allow_fallbacks"] = pr["allow_fallbacks"]
+        thinking_effort = improvement_config.get(
+            "thinking_effort",
+            improvement_config.get("reasoning_effort"),
+        )
 
         config = LLMConfig(
             provider=backend,
@@ -104,6 +108,7 @@ class RubricRunner:
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             provider_routing=provider_routing,
+            thinking_effort=thinking_effort,
             lmstudio_host=lmstudio_host,
             lmstudio_port=lmstudio_port,
             ollama_host=ollama_host,

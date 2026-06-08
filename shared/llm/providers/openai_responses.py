@@ -22,6 +22,7 @@ class OpenAIResponsesClient(BaseLLMClient):
         timeout_seconds: float = 60.0,
         store: bool = False,
         structured_output_strict: bool = False,
+        thinking_effort: str | None = None,
     ):
         self.api_key = api_key
         self.model = model
@@ -30,6 +31,7 @@ class OpenAIResponsesClient(BaseLLMClient):
         self.timeout_seconds = float(timeout_seconds)
         self.store = bool(store)
         self.structured_output_strict = bool(structured_output_strict)
+        self.thinking_effort = _normalize_thinking_effort(thinking_effort)
 
     @property
     def provider_name(self) -> str:
@@ -67,6 +69,8 @@ class OpenAIResponsesClient(BaseLLMClient):
         }
         if temperature is not None:
             payload["temperature"] = temperature
+        if self.thinking_effort:
+            payload["reasoning"] = {"effort": self.thinking_effort}
         payload.update(kwargs)
 
         try:
@@ -109,6 +113,8 @@ class OpenAIResponsesClient(BaseLLMClient):
             payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_output_tokens"] = max_tokens
+        if self.thinking_effort:
+            payload["reasoning"] = {"effort": self.thinking_effort}
         payload.update(kwargs)
 
         content = ""
@@ -216,3 +222,10 @@ def _truncate_response(content: Any, limit: int = 1200) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}...<truncated>"
+
+
+def _normalize_thinking_effort(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    return value or None

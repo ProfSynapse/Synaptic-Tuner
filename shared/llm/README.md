@@ -47,6 +47,7 @@ IMPROVEMENT_MODEL=openai/gpt-5-mini
 
 # OpenRouter (cloud)
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
+OPENROUTER_THINKING_EFFORT=medium  # Optional: none, minimal, low, medium, high, xhigh
 
 # OpenAI Responses (cloud)
 OPENAI_API_KEY=sk-your-key-here
@@ -54,6 +55,7 @@ OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
 OPENAI_RESPONSES_TIMEOUT_SECONDS=60
 OPENAI_RESPONSES_STORE=false
 OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT=false
+OPENAI_RESPONSES_THINKING_EFFORT=medium  # Optional: model-dependent reasoning effort
 
 # LM Studio (local)
 LMSTUDIO_HOST=localhost
@@ -99,6 +101,8 @@ response = client.chat([{"role": "user", "content": "Hello!"}])
 ```
 
 The provider calls `POST /v1/responses`, sends `store: false` by default, maps the shared `max_tokens` argument to `max_output_tokens`, and uses `text.format` for JSON Schema structured output. Structured-output strict mode defaults to false for schema compatibility and can be enabled with `OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT=true` or explicit config.
+
+For reasoning models, set `thinking_effort` in config defaults or `OPENAI_RESPONSES_THINKING_EFFORT` in the environment. The provider maps it to Responses API `reasoning.effort`.
 
 #### **3. LM Studio (Local)**
 

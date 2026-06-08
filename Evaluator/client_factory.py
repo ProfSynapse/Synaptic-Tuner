@@ -101,6 +101,7 @@ def create_settings(
     temperature: float = 0.2,
     top_p: float = 0.9,
     max_tokens: int = 1024,
+    thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
 ) -> BackendSettings:
     """Create backend settings for the specified backend type.
@@ -116,6 +117,7 @@ def create_settings(
         temperature: Sampling temperature
         top_p: Top-p sampling parameter
         max_tokens: Maximum output tokens
+        thinking_effort: Optional reasoning effort for supported cloud providers
         seed: Optional random seed for reproducibility
 
     Returns:
@@ -153,6 +155,8 @@ def create_settings(
         "max_tokens": max_tokens,
         "seed": seed,
     }
+    if backend in {BackendType.OPENROUTER, BackendType.OPENAI_RESPONSES}:
+        kwargs["thinking_effort"] = thinking_effort
     if host is not None:
         kwargs["host"] = host
     if port is not None:
@@ -169,6 +173,7 @@ def create_client_from_args(
     temperature: float = 0.2,
     top_p: float = 0.9,
     max_tokens: int = 1024,
+    thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
     timeout: float = 60.0,
     retries: int = 2,
@@ -209,6 +214,7 @@ def create_client_from_args(
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
+        thinking_effort=thinking_effort,
         seed=seed,
     )
     return create_client(
