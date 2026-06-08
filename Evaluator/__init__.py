@@ -45,7 +45,7 @@ from .config import (
 from .prompt_sets import PromptCase, filter_prompts, load_prompt_cases
 
 # Validation
-from .assertions import CorrectnessResult, evaluate_correctness
+from shared.verifiers.builtins.assertion_verifier import CorrectnessResult, evaluate_correctness
 from .schema_validator import ValidationResult, validate_assistant_response
 from .rubric_validator import (
     RubricValidator,

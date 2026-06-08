@@ -11,11 +11,13 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "Trainers" / "grpo" / "src"))
 
 from functional_verifier import (
-    _normalize_value,
-    _normalize_tool_call,
     _extract_tool_call,
-    _compare_args,
     functional_equivalence_reward,
+)
+from shared.verifiers.builtins.args_match import (
+    normalize_value as _normalize_value,
+    normalize_tool_call as _normalize_tool_call,
+    compare_args_overlap as _compare_args,
 )
 
 

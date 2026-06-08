@@ -1,9 +1,26 @@
-"""Generic config-driven assertion engine for evaluator correctness."""
+"""Generic config-driven assertion engine, wired as an ``assertions`` verifier.
+
+This module is the canonical home for the assertion engine (moved verbatim from
+``Evaluator/assertions.py``): the result dataclasses, ``evaluate_correctness``,
+``select_path`` and the small JSONPath-subset helpers. The Evaluator CONSUMES
+these symbols; it no longer owns them.
+
+The :class:`AssertionsVerifier` (registered under ``assertions``) wires the
+engine into the shared verifier contract. It is fully config-driven: the
+``correct`` config block and the field paths it references come from the spec /
+sample, nothing is hardcoded.
+
+``shared.verifiers`` MUST NOT import ``Evaluator/`` or ``Trainers/`` — the
+engine here is stdlib-only so consumers can depend on it (and not the reverse).
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+
+from ..contract import VerifierInput, VerifierOutput
+from ..registry import register
 
 
 _MISSING = object()
@@ -423,4 +440,67 @@ def _is_subset(expected: Any, actual: Any) -> bool:
             return False
         return all(any(_is_subset(expected_item, actual_item) for actual_item in actual) for expected_item in expected)
     return expected == actual
+
+
+# ---------------------------------------------------------------------------
+# Verifier wiring
+# ---------------------------------------------------------------------------
+
+def _minimal_response_view(sample: VerifierInput) -> Mapping[str, Any]:
+    """Build a minimal response view from ``parsed`` / ``completion_text``.
+
+    Used only when no ``response_view`` signal is supplied. The Evaluator's own
+    ``build_response_view`` produces a richer view; this fallback keeps the
+    shared package free of any Evaluator import while still exposing the common
+    ``content`` / ``tool_calls`` fields config assertions reference.
+    """
+    parsed = sample.parsed
+    content = getattr(parsed, "text_content", None)
+    if content is None:
+        content = sample.completion_text
+    tool_calls = getattr(parsed, "tool_calls", None)
+    return {
+        "content": content if isinstance(content, str) else str(content or ""),
+        "tool_calls": list(tool_calls) if isinstance(tool_calls, list) else [],
+    }
+
+
+class AssertionsVerifier:
+    """Verifier that evaluates a config-driven ``correct`` block.
+
+    The ``correct`` config (the same structure consumed by
+    :func:`evaluate_correctness`) is read from the spec ``params`` under the
+    ``correct`` key. The response view is read from
+    ``sample.signals['response_view']`` when present, falling back to a minimal
+    view built from ``sample.parsed`` / ``sample.completion_text``.
+
+    Scoring follows :class:`CorrectnessResult`: ``passed`` maps to ``1.0`` /
+    ``0.0`` (``CorrectnessResult`` carries no numeric score of its own).
+    """
+
+    def __init__(self, name: str = "assertions", correct: Mapping[str, Any] | None = None):
+        self.name = name
+        self.correct = dict(correct) if correct else {}
+
+    def verify(self, sample: VerifierInput) -> VerifierOutput:
+        response_view = sample.signals.get("response_view")
+        if not isinstance(response_view, Mapping):
+            response_view = _minimal_response_view(sample)
+
+        result = evaluate_correctness(self.correct, response_view)
+        score = 1.0 if result.passed else 0.0
+        return VerifierOutput(
+            score=score,
+            passed=result.passed,
+            detail=result.to_dict(),
+        )
+
+
+@register("assertions")
+def _build_assertions(spec: Mapping) -> AssertionsVerifier:
+    params = spec.get("params", spec)
+    return AssertionsVerifier(
+        name=spec.get("name", "assertions"),
+        correct=params.get("correct"),
+    )
 
