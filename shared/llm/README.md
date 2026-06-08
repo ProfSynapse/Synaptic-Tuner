@@ -7,6 +7,7 @@ Unified interface to multiple LLM providers used throughout the codebase.
 | Provider | Type | Use Case |
 |----------|------|----------|
 | **OpenRouter** | Cloud | Access to GPT-5-mini, Claude, etc. via API |
+| **OpenAI Responses** | Cloud | Direct OpenAI Responses API for text and structured output |
 | **LM Studio** | Local | Run models locally on your machine |
 | **Ollama** | Local | Run models locally via Ollama |
 
@@ -41,11 +42,18 @@ Set environment variables in `.env`:
 
 ```bash
 # Default provider for improvement engine
-IMPROVEMENT_BACKEND=openrouter  # or lmstudio, ollama
+IMPROVEMENT_BACKEND=openrouter  # or openai_responses, lmstudio, ollama
 IMPROVEMENT_MODEL=openai/gpt-5-mini
 
 # OpenRouter (cloud)
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
+
+# OpenAI Responses (cloud)
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
+OPENAI_RESPONSES_TIMEOUT_SECONDS=60
+OPENAI_RESPONSES_STORE=false
+OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT=false
 
 # LM Studio (local)
 LMSTUDIO_HOST=localhost
@@ -74,7 +82,25 @@ client = create_client()
 response = client.chat([{"role": "user", "content": "Hello!"}])
 ```
 
-#### **2. LM Studio (Local)**
+#### **2. OpenAI Responses (Cloud)**
+
+```bash
+# .env
+IMPROVEMENT_BACKEND=openai_responses
+IMPROVEMENT_MODEL=gpt-5-mini
+OPENAI_API_KEY=sk-...
+```
+
+```python
+from shared.llm import create_client
+
+client = create_client()
+response = client.chat([{"role": "user", "content": "Hello!"}])
+```
+
+The provider calls `POST /v1/responses`, sends `store: false` by default, maps the shared `max_tokens` argument to `max_output_tokens`, and uses `text.format` for JSON Schema structured output. Structured-output strict mode defaults to false for schema compatibility and can be enabled with `OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT=true` or explicit config.
+
+#### **3. LM Studio (Local)**
 
 ```bash
 # .env
@@ -91,7 +117,7 @@ client = create_client()
 response = client.chat([{"role": "user", "content": "Hello!"}])
 ```
 
-#### **3. Ollama (Local)**
+#### **4. Ollama (Local)**
 
 ```bash
 # .env
@@ -108,7 +134,7 @@ client = create_client()
 response = client.chat([{"role": "user", "content": "Hello!"}])
 ```
 
-#### **4. Explicit Configuration**
+#### **5. Explicit Configuration**
 
 ```python
 from shared.llm import create_client
@@ -226,7 +252,8 @@ model_name: str = client.model_name
 ### **Notes**
 
 - **Structured output support varies by provider**:
-  - OpenRouter: Full JSON Schema support
+  - OpenRouter: Full JSON Schema support via Chat Completions response format
+  - OpenAI Responses: JSON Schema support via Responses `text.format`
   - LM Studio: Basic JSON object format
   - Ollama: JSON format hint
 

@@ -3,6 +3,7 @@ Shared LLM client system for Toolset-Training.
 
 Provides unified interface to multiple LLM providers:
 - OpenRouter (cloud)
+- OpenAI Responses API (cloud)
 - LM Studio (local)
 - Ollama (local)
 
@@ -34,9 +35,10 @@ Usage:
     result = client.structured_output(messages, schema)
 
 Environment variables:
-    IMPROVEMENT_BACKEND=openrouter  # or lmstudio, ollama
+    IMPROVEMENT_BACKEND=openrouter  # or openai_responses, lmstudio, ollama
     IMPROVEMENT_MODEL=openai/gpt-5-mini
     OPENROUTER_API_KEY=sk-or-v1-...
+    OPENAI_API_KEY=sk-...
     LMSTUDIO_HOST=localhost
     LMSTUDIO_PORT=1234
     OLLAMA_HOST=localhost

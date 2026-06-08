@@ -60,6 +60,9 @@ class BackendType(str, Enum):
     OPENROUTER = "openrouter"
     """OpenRouter API (cloud inference with multiple model providers)."""
 
+    OPENAI_RESPONSES = "openai_responses"
+    """OpenAI Responses API (cloud inference via direct OpenAI API)."""
+
     MLC = "mlc"
     """MLC-LLM inference (WebGPU/MLC format models via mlc_llm serve)."""
 

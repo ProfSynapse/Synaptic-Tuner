@@ -55,7 +55,7 @@ SynthChat/config/settings.yaml
 llm:
   # Generation LLM (creates raw examples)
   generation:
-    provider: openrouter          # lmstudio | ollama | openrouter | unsloth
+    provider: openrouter          # lmstudio | ollama | openrouter | openai_responses | unsloth
     model: openai/gpt-oss-120b
     temperature: 0.7
     max_tokens: 4096
@@ -84,6 +84,7 @@ generation:
 | Provider | Use Case | Config |
 |----------|----------|--------|
 | `openrouter` | Cloud models (recommended) | Requires `OPENROUTER_API_KEY` in `.env` |
+| `openai_responses` | Direct OpenAI Responses API | Requires `OPENAI_API_KEY` in `.env` |
 | `lmstudio` | Local models | Set `host` and `port` |
 | `ollama` | Local models | Set `host` (default: localhost:11434) |
 | `unsloth` | Fine-tuned LoRA | Set `model` to adapter path |
@@ -107,7 +108,7 @@ PYTHONPATH=. python3 -m SynthChat.run generate [options]
 | `--targets-file` | JSON with scenario counts | Uses `defaults.targets` from settings |
 | `--scenarios` | Filter to specific scenarios | All in targets |
 | `--max-iterations` | Override max improvement loops | From settings.yaml |
-| `--provider` | LLM provider (lmstudio, ollama, openrouter) | From settings.yaml |
+| `--provider` | LLM provider (lmstudio, ollama, openrouter, openai_responses) | From settings.yaml |
 | `--model` | Model name | From settings.yaml |
 | `--docs` | Seed docs for generation | None |
 | `--per-doc` | Examples per doc | 1 |
@@ -191,7 +192,7 @@ PYTHONPATH=. python3 -m SynthChat.run improve [options]
 | `--start-line` | Start line (1-indexed) | 1 |
 | `--end-line` | End line (inclusive) | Last line |
 | `--max-iterations` | Max improvement loops | From settings.yaml |
-| `--provider` | LLM provider (lmstudio, ollama, openrouter) | From settings.yaml |
+| `--provider` | LLM provider (lmstudio, ollama, openrouter, openai_responses) | From settings.yaml |
 | `--model` | Model name | From settings.yaml |
 
 **Example: Improve lines 1-10 with specific rubrics**
@@ -218,7 +219,7 @@ PYTHONPATH=. python3 -m SynthChat.run validate [options]
 |----------|-------------|---------|
 | `--input, -i` | Input JSONL file (required) | - |
 | `--rubrics` | Comma-separated rubric names | From settings.yaml |
-| `--provider` | LLM provider (lmstudio, ollama, openrouter) | From settings.yaml |
+| `--provider` | LLM provider (lmstudio, ollama, openrouter, openai_responses) | From settings.yaml |
 | `--model` | Model name | From settings.yaml |
 
 **Example: Validate all examples**

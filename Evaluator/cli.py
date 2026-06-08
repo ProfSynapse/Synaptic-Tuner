@@ -305,7 +305,7 @@ def _compute_optional_loss_outputs(
 def parse_args(argv: List[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Evaluate tool-calling models via Ollama, LM Studio, vLLM, or llama.cpp.",
+        description="Evaluate tool-calling models via Ollama, LM Studio, vLLM, llama.cpp, OpenRouter, or OpenAI Responses.",
         epilog="""
 Backend Configuration:
   Ollama:    OLLAMA_HOST (default: 127.0.0.1), OLLAMA_PORT (default: 11434)
@@ -315,7 +315,7 @@ Backend Configuration:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "lmstudio", "vllm", "llamacpp", "unsloth", "openrouter", "mlc"],
+        choices=["ollama", "lmstudio", "vllm", "llamacpp", "unsloth", "openrouter", "openai_responses", "mlc"],
         default=None,  # Auto-detect based on model path
         help="Backend to use for evaluation (auto-detects MLC models, default: ollama)",
     )
@@ -399,7 +399,7 @@ Backend Configuration:
     )
     judge_group.add_argument(
         "--judge-provider",
-        choices=["openrouter", "lmstudio", "ollama"],
+        choices=["openrouter", "openai_responses", "lmstudio", "ollama"],
         help="LLM provider for judge (default: same as eval backend)",
     )
     judge_group.add_argument(
@@ -589,7 +589,7 @@ def main(argv: List[str] | None = None) -> int:
         retries=config.retries,
     )
 
-    safe_parallel_backends = {"vllm", "lmstudio", "ollama", "openrouter", "mlc"}
+    safe_parallel_backends = {"vllm", "lmstudio", "ollama", "openrouter", "openai_responses", "mlc"}
     eval_parallel = bool(run_config.parallel and args.backend in safe_parallel_backends and not args.dry_run)
     eval_max_workers = recommend_eval_max_workers(
         backend=args.backend,

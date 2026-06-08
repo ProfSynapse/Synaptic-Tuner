@@ -15,7 +15,7 @@ from typing import Any, Dict, Mapping, Sequence
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
 
-from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, UnslothSettings
+from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, OpenAIResponsesSettings, UnslothSettings
 from .protocols import BackendError, BackendResponse
 from .base_client import extract_message_content
 
@@ -32,7 +32,7 @@ class SharedLLMAdapter:
     def __init__(
         self,
         provider: str,
-        settings: LMStudioSettings | OllamaSettings,
+        settings: LMStudioSettings | OllamaSettings | OpenRouterSettings | OpenAIResponsesSettings,
         timeout: float = 60.0,
         retries: int = 2,
     ):
@@ -53,7 +53,8 @@ class SharedLLMAdapter:
         try:
             self.client: BaseLLMClient = create_client(
                 provider=provider,
-                model=settings.model
+                model=settings.model,
+                config_defaults={"timeout_seconds": timeout},
             )
         except LLMError as e:
             raise self._create_error(f"Failed to create {provider} client: {e}")
@@ -241,6 +242,40 @@ class SharedOpenRouterAdapter(SharedLLMAdapter):
                 print("\n⚠ OPENROUTER_API_KEY environment variable not set")
                 print("Set it in your .env file or export it:")
                 print("  export OPENROUTER_API_KEY=sk-or-...")
+        return is_running
+
+
+class SharedOpenAIResponsesAdapter(SharedLLMAdapter):
+    """OpenAI Responses adapter using shared LLM client."""
+
+    settings: OpenAIResponsesSettings
+
+    def __init__(
+        self,
+        settings: OpenAIResponsesSettings,
+        timeout: float = 60.0,
+        retries: int = 2,
+    ):
+        super().__init__(
+            provider="openai_responses",
+            settings=settings,
+            timeout=timeout,
+            retries=retries,
+        )
+
+    @property
+    def _client_name(self) -> str:
+        return "OpenAI Responses"
+
+    def is_server_running(self) -> bool:
+        """Check if OpenAI Responses API is accessible."""
+        is_running = super().is_server_running()
+        if not is_running:
+            import os
+            if not os.environ.get("OPENAI_API_KEY"):
+                print("\nWarning: OPENAI_API_KEY environment variable not set")
+                print("Set it in your .env file or export it:")
+                print("  export OPENAI_API_KEY=sk-...")
         return is_running
 
 
