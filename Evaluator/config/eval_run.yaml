@@ -29,7 +29,7 @@ run:
 # ============================================================
 
 model:
-  # Backend to use: lmstudio, ollama, openrouter, unsloth
+  # Backend to use: lmstudio, ollama, openrouter, openai_responses, unsloth
   backend: lmstudio
 
   # Model name (backend-specific)
@@ -41,6 +41,8 @@ model:
     port: 1234
     # For openrouter:
     # api_key: "${OPENROUTER_API_KEY}"
+    # For openai_responses:
+    # api_key: "${OPENAI_API_KEY}"
 
   # Inference settings
   inference:

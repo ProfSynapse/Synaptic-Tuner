@@ -11,7 +11,7 @@ class LLMConfig:
     """Configuration for LLM clients."""
 
     # Provider selection
-    provider: str  # 'openrouter', 'lmstudio', 'ollama', or 'unsloth'
+    provider: str  # 'openrouter', 'openai_responses', 'lmstudio', 'ollama', or 'unsloth'
     model: str  # Model name or path to LoRA adapter (for unsloth)
     temperature: float = 0.7
     max_tokens: int = 2048
@@ -20,6 +20,13 @@ class LLMConfig:
     openrouter_api_key: Optional[str] = None
     provider_routing: Optional[Dict[str, Any]] = None  # OpenRouter provider routing
     openrouter_timeout_seconds: float = 60.0
+
+    # OpenAI Responses API config
+    openai_api_key: Optional[str] = None
+    openai_responses_base_url: str = "https://api.openai.com/v1"
+    openai_responses_timeout_seconds: float = 60.0
+    openai_responses_store: bool = False
+    openai_responses_structured_output_strict: bool = False
 
     # LM Studio config
     lmstudio_host: str = "localhost"
@@ -44,9 +51,14 @@ class LLMConfig:
             config_defaults: Optional dict with defaults (provider/model/temperature/max_tokens)
 
         Environment variables:
-            {PREFIX}_BACKEND: Provider name (openrouter, lmstudio, ollama)
+            {PREFIX}_BACKEND: Provider name (openrouter, openai_responses, lmstudio, ollama)
             {PREFIX}_MODEL: Model name
             OPENROUTER_API_KEY: API key for OpenRouter
+            OPENAI_API_KEY: API key for OpenAI Responses
+            OPENAI_RESPONSES_BASE_URL: Optional OpenAI-compatible Responses base URL
+            OPENAI_RESPONSES_TIMEOUT_SECONDS: Optional OpenAI Responses timeout
+            OPENAI_RESPONSES_STORE: Optional response storage opt-in (default false)
+            OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT: Optional JSON Schema strict opt-in
             LMSTUDIO_HOST: LM Studio host (default: localhost)
             LMSTUDIO_PORT: LM Studio port (default: 1234)
             OLLAMA_HOST: Ollama host (default: localhost)
@@ -59,6 +71,11 @@ class LLMConfig:
             IMPROVEMENT_BACKEND=openrouter
             IMPROVEMENT_MODEL=openai/gpt-5-mini
             OPENROUTER_API_KEY=sk-or-v1-...
+
+            # Or use OpenAI Responses:
+            IMPROVEMENT_BACKEND=openai_responses
+            IMPROVEMENT_MODEL=gpt-5-mini
+            OPENAI_API_KEY=sk-...
 
             # Or use LM Studio:
             IMPROVEMENT_BACKEND=lmstudio
@@ -100,6 +117,29 @@ class LLMConfig:
                     os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"),
                 )
             ),
+            openai_api_key=_env_secret("OPENAI_API_KEY"),
+            openai_responses_base_url=cfg.get(
+                "base_url",
+                os.getenv("OPENAI_RESPONSES_BASE_URL", "https://api.openai.com/v1"),
+            ),
+            openai_responses_timeout_seconds=float(
+                cfg.get(
+                    "timeout_seconds",
+                    os.getenv("OPENAI_RESPONSES_TIMEOUT_SECONDS", "60"),
+                )
+            ),
+            openai_responses_store=_coerce_bool(
+                cfg.get(
+                    "store",
+                    _env_bool("OPENAI_RESPONSES_STORE", False),
+                )
+            ),
+            openai_responses_structured_output_strict=_coerce_bool(
+                cfg.get(
+                    "structured_output_strict",
+                    _env_bool("OPENAI_RESPONSES_STRUCTURED_OUTPUT_STRICT", False),
+                )
+            ),
             lmstudio_host=os.getenv("LMSTUDIO_HOST", "localhost"),
             lmstudio_port=int(os.getenv("LMSTUDIO_PORT", "1234")),
             ollama_host=os.getenv("OLLAMA_HOST", "localhost"),
@@ -117,7 +157,7 @@ class LLMConfig:
         Raises:
             ValueError: If configuration is invalid
         """
-        valid_providers = ["openrouter", "lmstudio", "ollama", "unsloth"]
+        valid_providers = ["openrouter", "openai_responses", "lmstudio", "ollama", "unsloth"]
         if self.provider not in valid_providers:
             raise ValueError(
                 f"Invalid provider '{self.provider}'. "
@@ -127,6 +167,11 @@ class LLMConfig:
         if self.provider == "openrouter" and not self.openrouter_api_key:
             raise ValueError(
                 "OPENROUTER_API_KEY environment variable is required for OpenRouter"
+            )
+
+        if self.provider == "openai_responses" and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable is required for OpenAI Responses"
             )
 
         if self.provider == "unsloth":
@@ -168,3 +213,27 @@ def _load_env_file() -> bool:
     except Exception:
         # Best-effort load; ignore parsing errors
         return False
+
+
+def _env_secret(var_name: str) -> Optional[str]:
+    """Return a non-empty environment secret without exposing its value."""
+    value = os.getenv(var_name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _env_bool(var_name: str, default: bool) -> bool:
+    value = os.getenv(var_name)
+    if value is None:
+        return default
+    return _coerce_bool(value)
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}

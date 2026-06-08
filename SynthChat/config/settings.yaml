@@ -3,7 +3,7 @@
 
 llm:
   # Generation (local is fine - just creating raw examples)
-  # Options: lmstudio, ollama, openrouter, unsloth
+  # Options: lmstudio, ollama, openrouter, openai_responses, unsloth
   generation:
     provider: openrouter
     model: openai/gpt-oss-120b

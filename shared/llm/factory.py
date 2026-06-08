@@ -6,6 +6,7 @@ from .base import BaseLLMClient
 from .config import LLMConfig
 from .exceptions import LLMConfigError
 from .providers.openrouter import OpenRouterClient
+from .providers.openai_responses import OpenAIResponsesClient
 from .providers.lmstudio import LMStudioClient
 from .providers.ollama import OllamaClient
 from .providers.unsloth import UnslothClient
@@ -22,7 +23,7 @@ def create_client(
     Create an LLM client based on configuration.
 
     Args:
-        provider: Provider name ('openrouter', 'lmstudio', 'ollama')
+        provider: Provider name ('openrouter', 'openai_responses', 'lmstudio', 'ollama')
                  If None, loads from env using env_prefix
         model: Model name. If None, loads from env using env_prefix
         config: Pre-configured LLMConfig. If provided, overrides provider/model
@@ -76,6 +77,21 @@ def create_client(
             timeout_seconds=config.openrouter_timeout_seconds,
         )
 
+    elif config.provider == "openai_responses":
+        if not config.openai_api_key:
+            raise LLMConfigError(
+                "OpenAI API key is required. "
+                "Set OPENAI_API_KEY environment variable."
+            )
+        return OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.model,
+            base_url=config.openai_responses_base_url,
+            timeout_seconds=config.openai_responses_timeout_seconds,
+            store=config.openai_responses_store,
+            structured_output_strict=config.openai_responses_structured_output_strict,
+        )
+
     elif config.provider == "lmstudio":
         return LMStudioClient(
             host=config.lmstudio_host,
@@ -101,7 +117,7 @@ def create_client(
     else:
         raise LLMConfigError(
             f"Unknown provider: {config.provider}. "
-            f"Supported: openrouter, lmstudio, ollama, unsloth"
+            f"Supported: openrouter, openai_responses, lmstudio, ollama, unsloth"
         )
 
 
@@ -112,4 +128,4 @@ def list_providers() -> list:
     Returns:
         List of provider names
     """
-    return ["openrouter", "lmstudio", "ollama", "unsloth"]
+    return ["openrouter", "openai_responses", "lmstudio", "ollama", "unsloth"]

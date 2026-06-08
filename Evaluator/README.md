@@ -182,7 +182,7 @@ python -m Evaluator.cli \
 
 | Option | Description |
 |--------|-------------|
-| `--backend` | `unsloth`, `llamacpp`, `ollama`, `lmstudio`, `openrouter` |
+| `--backend` | `unsloth`, `llamacpp`, `ollama`, `lmstudio`, `openrouter`, `openai_responses` |
 | `--model` | Model name or path |
 | `--scenario` | YAML scenario file (can specify multiple) |
 | `--preset` | Preset from eval_run.yaml |

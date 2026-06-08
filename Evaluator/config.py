@@ -322,6 +322,28 @@ class OpenRouterSettings:
         return "https://openrouter.ai/api/v1"
 
 
+@dataclass
+class OpenAIResponsesSettings:
+    """Settings for OpenAI Responses API.
+
+    Requires OPENAI_API_KEY environment variable for shared LLM client creation.
+    """
+
+    model: str
+    temperature: float = 0.2
+    top_p: float = 0.9
+    max_tokens: int = 1024
+    seed: Optional[int] = None
+
+    # Required by BackendSettings protocol but not used for direct API routing.
+    host: str = field(default="api.openai.com")
+    port: int = field(default=443)
+
+    def base_url(self) -> str:
+        """Return OpenAI Responses API base URL."""
+        return _env_str("OPENAI_RESPONSES_BASE_URL", "https://api.openai.com/v1")
+
+
 def _env_mlc_host() -> str:
     return _env_str("MLC_HOST", "127.0.0.1")
 

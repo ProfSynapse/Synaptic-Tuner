@@ -49,7 +49,7 @@ class RubricRunner:
 
         Args:
             rubrics_dir: Directory containing rubric YAML files
-            backend: LLM backend ("lmstudio", "ollama", "openrouter")
+            backend: LLM backend ("lmstudio", "ollama", "openrouter", "openai_responses")
             host: LLM host (optional)
             port: LLM port (optional)
             config_path: Path to scope_config.yaml (optional)
@@ -75,10 +75,12 @@ class RubricRunner:
             model = "local-model"  # LM Studio uses whatever model is loaded in UI
         elif backend == "ollama":
             model = llm_config_data.get("generation", {}).get("model", "qwen2.5:latest")
-        else:  # openrouter
+        else:  # openrouter or openai_responses
             # Read from llm.improvement.model in settings.yaml
-            model = improvement_config.get("model", "anthropic/claude-3.5-sonnet")
-            self.logger.info(f"Using OpenRouter model: {model}")
+            default_model = "gpt-5-mini" if backend == "openai_responses" else "anthropic/claude-3.5-sonnet"
+            model = improvement_config.get("model", default_model)
+            label = "OpenAI Responses" if backend == "openai_responses" else "OpenRouter"
+            self.logger.info(f"Using {label} model: {model}")
 
         # Get host/port from CLI args or environment variables
         lmstudio_host = host if host and backend == "lmstudio" else os.getenv("LMSTUDIO_HOST", "localhost")
@@ -100,6 +102,7 @@ class RubricRunner:
             provider=backend,
             model=model,
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
             provider_routing=provider_routing,
             lmstudio_host=lmstudio_host,
             lmstudio_port=lmstudio_port,
@@ -575,7 +578,7 @@ Examples:
     parser.add_argument("--start-line", type=int, default=1, help="Start line (1-indexed)")
     parser.add_argument("--end-line", type=int, help="End line (1-indexed)")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max iterations")
-    parser.add_argument("--backend", default="lmstudio", choices=["lmstudio", "ollama", "openrouter"])
+    parser.add_argument("--backend", default="lmstudio", choices=["lmstudio", "ollama", "openrouter", "openai_responses"])
     parser.add_argument("--host", help="LLM host")
     parser.add_argument("--port", type=int, help="LLM port")
     parser.add_argument("--config", type=Path, help="Path to scope_config.yaml")

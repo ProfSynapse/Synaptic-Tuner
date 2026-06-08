@@ -11,17 +11,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Type, Union
 
-from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings, MLCSettings
+from .config import LMStudioSettings, OllamaSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings, OpenAIResponsesSettings, MLCSettings
 from .enums import BackendType
 from .vllm_client import VLLMClient
 from .llamacpp_client import LlamaCppClient
 from .mlc_client import MLCClient
 from .protocols import BackendClient, BackendSettings
-from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter, SharedOpenRouterAdapter, SharedUnslothAdapter
+from .shared_llm_adapters import SharedLMStudioAdapter, SharedOllamaAdapter, SharedOpenRouterAdapter, SharedOpenAIResponsesAdapter, SharedUnslothAdapter
 
 # Type alias for settings types
-SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings, MLCSettings]
-ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, SharedUnslothAdapter, SharedOpenRouterAdapter, MLCClient]
+SettingsType = Union[OllamaSettings, LMStudioSettings, VLLMSettings, LlamaCppSettings, UnslothSettings, OpenRouterSettings, OpenAIResponsesSettings, MLCSettings]
+ClientType = Union[SharedOllamaAdapter, SharedLMStudioAdapter, VLLMClient, LlamaCppClient, SharedUnslothAdapter, SharedOpenRouterAdapter, SharedOpenAIResponsesAdapter, MLCClient]
 
 
 # Registry mapping backend types to their client and settings classes
@@ -33,6 +33,7 @@ _CLIENT_REGISTRY: Dict[BackendType, Type[BackendClient]] = {
     BackendType.LLAMACPP: LlamaCppClient,
     BackendType.UNSLOTH: SharedUnslothAdapter,
     BackendType.OPENROUTER: SharedOpenRouterAdapter,
+    BackendType.OPENAI_RESPONSES: SharedOpenAIResponsesAdapter,
     BackendType.MLC: MLCClient,
 }
 
@@ -43,6 +44,7 @@ _SETTINGS_REGISTRY: Dict[BackendType, Type[BackendSettings]] = {
     BackendType.LLAMACPP: LlamaCppSettings,
     BackendType.UNSLOTH: UnslothSettings,
     BackendType.OPENROUTER: OpenRouterSettings,
+    BackendType.OPENAI_RESPONSES: OpenAIResponsesSettings,
     BackendType.MLC: MLCSettings,
 }
 
