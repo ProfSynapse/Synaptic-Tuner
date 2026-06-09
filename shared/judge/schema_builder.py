@@ -73,6 +73,11 @@ class SchemaBuilder:
         return {
             "type": "object",
             "properties": properties,
-            "required": list(set(required)),  # deduplicate
+            # Deduplicate while PRESERVING first-seen order. list(set(...)) would
+            # randomize the order of required fields, which scrambles the
+            # reason-first-then-score field ordering the per-dimension contract
+            # depends on (some structured-output providers honor property order).
+            # dict.fromkeys is the order-preserving dedup idiom.
+            "required": list(dict.fromkeys(required)),
             "additionalProperties": False,
         }

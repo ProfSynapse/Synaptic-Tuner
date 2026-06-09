@@ -80,6 +80,8 @@ class RubricLoader:
             judge_prompt=data["judge_prompt"],
             output_schema=data["output_schema"],
             improver_prompt=data.get("improver_prompt"),
+            dimensions=data.get("dimensions"),
+            weights_ratified=bool(data.get("weights_ratified", False)),
         )
 
     def load_many(self, rubric_keys: List[str]) -> List[RubricDef]:
