@@ -368,3 +368,94 @@ papers:
   year: 2026
   area: methods
   status: candidate
+- arxiv: '2606.03969'
+  slug: faithful-calibration-framework
+  title: 'Faithful Calibration framework (Gani et al., Yale): expressed confidence vs internal state; estimator fragility'
+  year: 2026
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2508.15050'
+  slug: dont-think-twice
+  title: 'Don''t Think Twice: more reasoning time impairs calibration (Lacombe, Wu, Dilworth)'
+  year: 2025
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2506.18183'
+  slug: reasoning-models-dont-know
+  title: Reasoning models do not know when they don't know (Mei et al.)
+  year: 2025
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2511.07477'
+  slug: epistemic-pathology-polite-liar
+  title: 'Epistemic pathology / the polite liar: structural dishonesty from RLHF (DeVilling)'
+  year: 2025
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2605.21127'
+  slug: silent-reasoning-trace-suppression
+  title: Additional training silently suppresses reasoning traces (Twist et al.)
+  year: 2026
+  area: methods
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2604.03147'
+  slug: sycophancy-internal-representations
+  title: Sycophancy encoded in internal representations (Sun)
+  year: 2026
+  area: sycophancy
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2606.08571'
+  slug: structured-ignorance-certificates
+  title: Structured Ignorance Certificates + Unknown-Unknown dataset, 7347 cross-domain questions (Sahoo)
+  year: 2026
+  area: abstention-finetuning
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2603.24967'
+  slug: uncertainty-source-decomposition
+  title: 'Three sources of LLM uncertainty: input ambiguity / knowledge gaps / stochasticity (Taparia et al.)'
+  year: 2026
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2604.13991'
+  slug: adaptive-conformal-factuality
+  title: Adaptive conformal prediction guarantees for factuality (Rubashevskii et al.)
+  year: 2026
+  area: calibration
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2606.08543'
+  slug: rl-diversity-collapse
+  title: RL training narrows output diversity — risk for gap-naming training (Yang et al.)
+  year: 2026
+  area: methods
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2606.05145'
+  slug: distributional-failure-signatures
+  title: Distributional signatures of failed reasoning traces; 4 failure regimes incl. Steerable-Hard (Islah et al., Mila)
+  year: 2026
+  area: knowledge-boundary
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2606.06475'
+  slug: stepwise-trace-scoring
+  title: Step-level scoring within reasoning traces for failure localization (Ielanskyi et al.)
+  year: 2026
+  area: knowledge-boundary
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2606.03962'
+  slug: reward-uncertainty-behavioral-diversity
+  title: Reward uncertainty produces calibrated behavioral diversity; anti-sycophancy (GX-Chen et al.)
+  year: 2026
+  area: methods
+  status: candidate
+  note: cited in essays/01 — ID needs verification on enrich
