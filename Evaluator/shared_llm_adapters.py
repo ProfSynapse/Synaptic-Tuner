@@ -9,8 +9,9 @@ to provide the Evaluator's specialized BackendClient interface with:
 """
 from __future__ import annotations
 
+import json
 import time
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
@@ -79,11 +80,14 @@ class SharedLLMAdapter:
         try:
             start = time.perf_counter()
 
-            # Use shared client's chat method
+            # Use shared client's chat method. Reasoning effort is carried as
+            # the client's instance thinking_effort (set at construction from
+            # settings.thinking_effort, the upstream #98 path), so no per-call
+            # effort argument is needed here.
             response_text = self.client.chat(
                 messages=list(messages),
                 temperature=self.settings.temperature,
-                max_tokens=self.settings.max_tokens
+                max_tokens=self.settings.max_tokens,
             )
 
             latency_s = time.perf_counter() - start
@@ -271,6 +275,68 @@ class SharedOpenAIResponsesAdapter(SharedLLMAdapter):
     @property
     def _client_name(self) -> str:
         return "OpenAI Responses"
+
+    def structured_chat(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        schema: Mapping[str, Any],
+        schema_name: Optional[str] = None,
+    ) -> BackendResponse:
+        """Route the target call through the provider's structured-output path.
+
+        Mirrors production's wire format: the OpenAI Responses API with
+        ``text.format = {type: json_schema, name, strict: true, schema}``
+        (baseline-fidelity spec §4.2). Output tokens are UNCAPPED
+        (``max_tokens=None``) to match production and to avoid medium-reasoning
+        starving the response (§4.4). Reasoning effort is carried by the client's
+        instance thinking_effort (set at construction from settings, upstream
+        #98 path), so it is not passed per-call here.
+
+        The parsed JSON object is wrapped as a string in ``message`` so
+        ``build_response_view`` populates BOTH ``$.content`` and
+        ``$.content_json`` identically to the chat() path (it JSON-parses a
+        string ``content``); a raw dict would leave ``$.content`` empty.
+
+        Args:
+            messages: Chat messages (typically a single assembled user message).
+            schema: The json_schema BODY (verbatim from the production task).
+            schema_name: Schema name (e.g. "GenerateHashtagsSchema"); merged into
+                the schema under "name" only when the body does not already set it.
+
+        Returns:
+            BackendResponse whose message is the serialized JSON object.
+
+        Raises:
+            BackendError: If the structured request fails.
+        """
+        try:
+            start = time.perf_counter()
+
+            payload_schema = dict(schema)
+            if schema_name and "name" not in payload_schema:
+                payload_schema["name"] = schema_name  # provider reads schema.get("name")
+
+            result = self.client.structured_output(
+                messages=list(messages),
+                schema=payload_schema,
+                temperature=self.settings.temperature,
+                max_tokens=None,  # UNCAPPED — production parity (§4.4)
+                strict=True,  # production parity (provider default is False)
+            )
+
+            latency_s = time.perf_counter() - start
+
+            # Serialize back to a string so $.content and $.content_json both
+            # populate via build_response_view's string branch.
+            text = json.dumps(result)
+            return BackendResponse(
+                message=text,
+                raw={"content": text, "content_json": result},
+                latency_s=latency_s,
+            )
+
+        except LLMError as e:
+            raise self._create_error(f"Structured chat request failed: {e}")
 
     def is_server_running(self) -> bool:
         """Check if OpenAI Responses API is accessible."""

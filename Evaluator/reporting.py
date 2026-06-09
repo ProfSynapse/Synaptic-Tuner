@@ -10,6 +10,38 @@ from typing import Any, Dict, List, Optional, Sequence
 from .runner import EvaluationRecord
 
 
+def _judge_case_composite(record: EvaluationRecord) -> Optional[float]:
+    """Per-case judge composite = mean of that case's per-rubric judge scores.
+
+    Returns None when the case has no judge result or no numeric rubric scores
+    (so the caller can distinguish "no judge" from a real 0.0). For the single-
+    rubric case (e.g. compelling_source_request) this degenerates to that one
+    score; for a future multi-rubric judge it is the across-rubric mean. If a
+    weighted/rubric-defined composite is ever introduced, prefer the judge
+    layer's own aggregation here rather than this plain mean.
+    """
+    judge = record.judge
+    if judge is None:
+        return None
+    scores = [s.score for s in judge.judge_result.scores]
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
+
+
+def _judge_normalized_score(records: Sequence[EvaluationRecord]) -> Optional[float]:
+    """Run-level judge gradient = mean across cases of each case's composite.
+
+    None when no case carries a judge composite (so a non-judge run never gets
+    a judge-sourced normalized_score). This is the value that fills the judged
+    CLI path's reporting gap where the PathScoringResult channel is empty.
+    """
+    composites = [c for record in records if (c := _judge_case_composite(record)) is not None]
+    if not composites:
+        return None
+    return sum(composites) / len(composites)
+
+
 def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     total = len(records)
     errors = sum(1 for record in records if record.error)
@@ -33,6 +65,12 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     scoring_tested = sum(1 for record in records if record.scoring is not None)
     score_total = sum(record.scoring.awarded_score for record in records if record.scoring is not None)
     score_max_total = sum(record.scoring.max_score for record in records if record.scoring is not None)
+    # Judged CLI path: the rubric-judge path never populates record.scoring, so
+    # the path-scoring channel above is empty (score_max_total == 0) even though
+    # the judge produced a real gradient in record.judge. Derive the run-level
+    # judge composite so normalized_score can reflect it when path-scoring is
+    # absent. None when no case has a judge (non-judge runs are unaffected).
+    judge_normalized_score = _judge_normalized_score(records)
     episode_recoveries = sum(
         1
         for record in records
@@ -59,6 +97,10 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
             "scoring_tested": 0,
             "score_total": 0.0,
             "score_max_total": 0.0,
+            # Per-tag judge composites (parallel to the run-level fix) so a
+            # tag's normalized_score also reflects the judge gradient when the
+            # path-scoring channel is empty for that tag.
+            "judge_composites": [],
         }
     )
     for record in records:
@@ -91,6 +133,9 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                 bucket["judge_tested"] += 1
                 if record.judge.passed:
                     bucket["judge_passed"] += 1
+                composite = _judge_case_composite(record)
+                if composite is not None:
+                    bucket["judge_composites"].append(composite)
             if record.scoring is not None:
                 bucket["scoring_tested"] += 1
                 bucket["score_total"] += record.scoring.awarded_score
@@ -161,7 +206,23 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         "score_total": score_total,
         "score_max_total": score_max_total,
         "average_score": (score_total / scoring_tested) if scoring_tested else 0,
-        "normalized_score": (score_total / score_max_total) if score_max_total else 0,
+        # Path-scoring channel takes precedence (byte-identical to before when
+        # populated). ONLY when it is empty AND a judge gradient exists do we
+        # source normalized_score from the judge composite — this is the judged
+        # CLI path. The optimizer adapter (since #47) can ALSO populate
+        # record.judge when a judge block is configured, but it selects on the
+        # judge gradient by pointing objective.metric at stats.judge_normalized_score
+        # (below) rather than relying on this normalized_score precedence — so this
+        # branch's behavior is unchanged regardless of whether the optimizer judges.
+        # Non-judge / structural / dry-run runs likewise unchanged.
+        "normalized_score": (
+            (score_total / score_max_total)
+            if score_max_total
+            else (judge_normalized_score if judge_normalized_score is not None else 0)
+        ),
+        # Surfaced separately so the report shows the judge gradient's provenance
+        # (None when no judge ran).
+        "judge_normalized_score": judge_normalized_score,
         "episode_recoveries": episode_recoveries,
         "by_tag": {
             tag: {
@@ -203,10 +264,17 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
                     if bucket["scoring_tested"]
                     else 0
                 ),
+                # Same precedence as the run-level field: path-scoring wins;
+                # judge composite fills the gap only when path-scoring is empty
+                # for this tag and the tag has judge composites.
                 "normalized_score": (
                     (bucket["score_total"] / bucket["score_max_total"])
                     if bucket["score_max_total"]
-                    else 0
+                    else (
+                        sum(bucket["judge_composites"]) / len(bucket["judge_composites"])
+                        if bucket["judge_composites"]
+                        else 0
+                    )
                 ),
             }
             for tag, bucket in sorted(by_tag.items())

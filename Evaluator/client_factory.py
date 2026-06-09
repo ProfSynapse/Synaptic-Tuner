@@ -98,11 +98,12 @@ def create_settings(
     model: str,
     host: Optional[str] = None,
     port: Optional[int] = None,
-    temperature: float = 0.2,
+    temperature: Optional[float] = None,
     top_p: float = 0.9,
     max_tokens: int = 1024,
     thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> BackendSettings:
     """Create backend settings for the specified backend type.
 
@@ -114,11 +115,17 @@ def create_settings(
         model: Model name/ID
         host: Optional host override (uses env var default if not specified)
         port: Optional port override (uses env var default if not specified)
-        temperature: Sampling temperature
+        temperature: Sampling temperature; None omits it from the request
+            (required for gpt-5-family reasoning models, which reject temperature)
         top_p: Top-p sampling parameter
         max_tokens: Maximum output tokens
-        thinking_effort: Optional reasoning effort for supported cloud providers
+        thinking_effort: gpt-5-family reasoning effort (the canonical engine
+            knob from upstream #98). Only applied to cloud providers that
+            support it (openai_responses, openrouter); None omits the field.
         seed: Optional random seed for reproducibility
+        reasoning_effort: DEPRECATED alias for thinking_effort, retained so
+            callers/configs using the old name keep working; folded into
+            thinking_effort below (explicit thinking_effort wins if both set).
 
     Returns:
         Configured settings object
@@ -155,8 +162,12 @@ def create_settings(
         "max_tokens": max_tokens,
         "seed": seed,
     }
+    # Fold the deprecated reasoning_effort alias into the canonical
+    # thinking_effort knob (explicit thinking_effort wins). Only thinking_effort
+    # is forwarded to the settings classes that define it (the cloud providers).
+    effective_effort = thinking_effort if thinking_effort is not None else reasoning_effort
     if backend in {BackendType.OPENROUTER, BackendType.OPENAI_RESPONSES}:
-        kwargs["thinking_effort"] = thinking_effort
+        kwargs["thinking_effort"] = effective_effort
     if host is not None:
         kwargs["host"] = host
     if port is not None:
@@ -170,11 +181,12 @@ def create_client_from_args(
     model: str,
     host: Optional[str] = None,
     port: Optional[int] = None,
-    temperature: float = 0.2,
+    temperature: Optional[float] = None,
     top_p: float = 0.9,
     max_tokens: int = 1024,
     thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
+    reasoning_effort: Optional[str] = None,
     timeout: float = 60.0,
     retries: int = 2,
 ) -> BackendClient:
@@ -192,6 +204,7 @@ def create_client_from_args(
         top_p: Top-p sampling parameter
         max_tokens: Maximum output tokens
         seed: Optional random seed
+        reasoning_effort: gpt-5-family reasoning effort (minimal|low|medium|high)
         timeout: HTTP request timeout
         retries: Number of retry attempts
 
@@ -216,6 +229,7 @@ def create_client_from_args(
         max_tokens=max_tokens,
         thinking_effort=thinking_effort,
         seed=seed,
+        reasoning_effort=reasoning_effort,
     )
     return create_client(
         backend=backend,
