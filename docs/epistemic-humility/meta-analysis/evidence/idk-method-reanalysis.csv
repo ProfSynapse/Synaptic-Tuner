@@ -1,0 +1,6 @@
+method,n,n_unknown_labeled,n_known_labeled,refusal_recall_pct,answer_on_unknown_pct,over_refusal_pct,refusal_rate_pct,approx_correct_on_known_pct_INTERIM,approx_truthful_pct_INTERIM
+idk-sft,11313,6216,5097,84.06,15.94,42.71,65.43,18.87,51.06
+idk-dpo,11313,6216,5097,71.19,28.81,23.27,49.6,36.79,51.83
+idk-ppo,11313,6216,5097,73.89,26.11,30.86,54.5,30.25,50.02
+idk-bon,11313,6216,5097,73.95,26.05,25.64,52.19,31.16,51.07
+idk-hir,11313,6216,5097,88.37,11.63,45.16,68.9,51.02,61.16
