@@ -1,0 +1,142 @@
+# Paper library manifest — source of truth for the epistemic-humility research program.
+# Each entry drives note-stub generation and (once network allows) PDF/abstract fetch
+# via scripts/fetch_library.py.
+#
+# status lifecycle: candidate -> stubbed -> fetched -> extracted -> verified
+#   candidate  = identified from search, arXiv ID not yet confirmed against primary source
+#   stubbed    = note created from manifest metadata
+#   fetched    = abstract + PDF pulled from arXiv
+#   extracted  = quantitative results pulled into evidence CSVs
+#   verified   = numbers cross-checked against primary source by a second pass
+#
+# area taxonomy: calibration | abstention-finetuning | hallucination |
+#                sycophancy | datasets-benchmarks | methods | surveys
+
+papers:
+  - arxiv: "2207.05221"
+    slug: lms-mostly-know-what-they-know
+    title: "Language Models (Mostly) Know What They Know"
+    year: 2022
+    area: calibration
+    status: stubbed
+  - arxiv: "2205.14334"
+    slug: teaching-models-uncertainty-in-words
+    title: "Teaching Models to Express Their Uncertainty in Words"
+    year: 2022
+    area: calibration
+    status: stubbed
+  - arxiv: "2305.14975"
+    slug: just-ask-for-calibration
+    title: "Just Ask for Calibration: Strategies for Eliciting Calibrated Confidence Scores from Language Models Fine-Tuned with Human Feedback"
+    year: 2023
+    area: calibration
+    status: stubbed
+  - arxiv: "2306.13063"
+    slug: can-llms-express-uncertainty
+    title: "Can LLMs Express Their Uncertainty? An Empirical Evaluation of Confidence Elicitation in LLMs"
+    year: 2023
+    area: calibration
+    status: stubbed
+  - arxiv: "2303.08774"
+    slug: gpt4-technical-report
+    title: "GPT-4 Technical Report"
+    year: 2023
+    area: calibration
+    status: stubbed
+    note: "Calibration plot: pretrained ECE vs post-RLHF ECE on MMLU"
+  - arxiv: "2311.09677"
+    slug: r-tuning-say-i-dont-know
+    title: "R-Tuning: Instructing Large Language Models to Say 'I Don't Know'"
+    year: 2023
+    area: abstention-finetuning
+    status: stubbed
+  - arxiv: "2312.07000"
+    slug: alignment-for-honesty
+    title: "Alignment for Honesty"
+    year: 2023
+    area: abstention-finetuning
+    status: stubbed
+  - arxiv: "2401.13275"
+    slug: can-ai-assistants-know-what-they-dont-know
+    title: "Can AI Assistants Know What They Don't Know?"
+    year: 2024
+    area: abstention-finetuning
+    status: stubbed
+  - arxiv: "2405.20974"
+    slug: sayself-self-reflective-confidence
+    title: "SaySelf: Teaching LLMs to Express Confidence with Self-Reflective Rationales"
+    year: 2024
+    area: abstention-finetuning
+    status: stubbed
+  - arxiv: "2404.00474"
+    slug: linguistic-calibration-long-form
+    title: "Linguistic Calibration of Long-Form Generations"
+    year: 2024
+    area: abstention-finetuning
+    status: stubbed
+  - arxiv: "2405.05904"
+    slug: finetuning-new-knowledge-hallucinations
+    title: "Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations?"
+    year: 2024
+    area: hallucination
+    status: stubbed
+  - arxiv: "2403.05612"
+    slug: unfamiliar-finetuning-examples
+    title: "Unfamiliar Finetuning Examples Control How Language Models Hallucinate"
+    year: 2024
+    area: hallucination
+    status: stubbed
+  - arxiv: "2109.07958"
+    slug: truthfulqa
+    title: "TruthfulQA: Measuring How Models Mimic Human Falsehoods"
+    year: 2021
+    area: datasets-benchmarks
+    status: stubbed
+  - arxiv: "2305.18153"
+    slug: selfaware-know-what-they-dont-know
+    title: "Do Large Language Models Know What They Don't Know?"
+    year: 2023
+    area: datasets-benchmarks
+    status: stubbed
+  - arxiv: "2310.13548"
+    slug: towards-understanding-sycophancy
+    title: "Towards Understanding Sycophancy in Language Models"
+    year: 2023
+    area: sycophancy
+    status: stubbed
+  - arxiv: "2212.09251"
+    slug: model-written-evals
+    title: "Discovering Language Model Behaviors with Model-Written Evaluations"
+    year: 2022
+    area: sycophancy
+    status: stubbed
+  - arxiv: "2308.03958"
+    slug: synthetic-data-reduces-sycophancy
+    title: "Simple Synthetic Data Reduces Sycophancy in Large Language Models"
+    year: 2023
+    area: sycophancy
+    status: stubbed
+  - arxiv: "2402.01306"
+    slug: kto-prospect-theoretic
+    title: "KTO: Model Alignment as Prospect Theoretic Optimization"
+    year: 2024
+    area: methods
+    status: stubbed
+  - arxiv: "2311.08401"
+    slug: finetuning-for-factuality
+    title: "Fine-tuning Language Models for Factuality"
+    year: 2023
+    area: methods
+    status: stubbed
+  - arxiv: "2409.18786"
+    slug: survey-honesty-of-llms
+    title: "A Survey on the Honesty of Large Language Models"
+    year: 2024
+    area: surveys
+    status: stubbed
+  - arxiv: "2407.18418"
+    slug: know-your-limits-abstention-survey
+    title: "Know Your Limits: A Survey of Abstention in Large Language Models"
+    year: 2024
+    area: surveys
+    status: stubbed
