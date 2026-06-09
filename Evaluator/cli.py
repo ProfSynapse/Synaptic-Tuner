@@ -337,9 +337,22 @@ Backend Configuration:
     )
     parser.add_argument("--tags", help="Comma-separated tag filter")
     parser.add_argument("--limit", type=int, help="Max prompts to evaluate")
-    parser.add_argument("--temperature", type=float, default=0.2)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature. Omitted from the request when not set "
+        "(required for gpt-5-family reasoning models, which reject temperature).",
+    )
     parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["minimal", "low", "medium", "high"],
+        default="minimal",
+        help="gpt-5-family reasoning effort (default: minimal). minimal frees the "
+        "max-tokens budget for output text; only applies to gpt-5 backends.",
+    )
     parser.add_argument("--seed", type=int, help="Optional generation seed")
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
@@ -419,6 +432,13 @@ Backend Configuration:
         "--no-judge-log",
         action="store_true",
         help="Disable KTO interaction logging for judge calls",
+    )
+    judge_group.add_argument(
+        "--judge-reasoning-effort",
+        choices=["minimal", "low", "medium", "high"],
+        default="minimal",
+        help="gpt-5-family reasoning effort for the judge (default: minimal); "
+        "only applies to gpt-5 judge backends.",
     )
 
     # Lineage and HuggingFace options
@@ -580,6 +600,7 @@ def main(argv: List[str] | None = None) -> int:
         top_p=args.top_p,
         max_tokens=args.max_tokens,
         seed=args.seed,
+        reasoning_effort=args.reasoning_effort,
         **settings_kwargs,
     )
     client = create_client(
@@ -677,8 +698,9 @@ def main(argv: List[str] | None = None) -> int:
                 model=args.judge_model,
                 rubrics=parse_tags(args.judge_rubrics) if args.judge_rubrics else [],
                 rubrics_dir=args.judge_rubrics_dir,
-                temperature=0.3,
+                temperature=None,
                 max_tokens=2048,
+                reasoning_effort=args.judge_reasoning_effort,
                 log_interactions=not args.no_judge_log,
             )
 
@@ -721,6 +743,7 @@ def main(argv: List[str] | None = None) -> int:
             judge_config = JudgeConfig(
                 temperature=judge_cfg.temperature,
                 max_tokens=judge_cfg.max_tokens,
+                reasoning_effort=judge_cfg.reasoning_effort,
             )
             judge_validator = JudgeValidator(
                 llm_client=judge_llm_client,

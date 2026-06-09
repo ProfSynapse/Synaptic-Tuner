@@ -35,6 +35,19 @@ def _env_int(var_name: str, default: int) -> int:
         raise ValueError(f"{var_name} must be an integer") from exc
 
 
+# Valid OpenAI Responses API reasoning-effort levels (None = omit the field).
+REASONING_EFFORT_CHOICES = ("minimal", "low", "medium", "high")
+
+
+def _validate_reasoning_effort(value: Optional[str]) -> None:
+    """Raise ValueError if reasoning_effort is set but not a valid level."""
+    if value is not None and value not in REASONING_EFFORT_CHOICES:
+        raise ValueError(
+            f"reasoning_effort must be one of {REASONING_EFFORT_CHOICES} or None, "
+            f"got {value!r}"
+        )
+
+
 def _is_wsl() -> bool:
     """Check if running in Windows Subsystem for Linux."""
     try:
@@ -173,7 +186,9 @@ class BaseBackendSettings(ABC):
     auth_scheme: str = field(default="Bearer")
     host: str = field(default="127.0.0.1")
     port: int = field(default=0)
-    temperature: float = 0.2
+    # None omits temperature from the request (required for gpt-5-family
+    # reasoning models, which reject the temperature parameter entirely).
+    temperature: Optional[float] = None
     top_p: float = 0.9
     max_tokens: int = 1024
     seed: Optional[int] = None
@@ -275,7 +290,7 @@ class UnslothSettings:
     model: str  # Path to LoRA adapter directory
     max_seq_length: int = 4096
     load_in_4bit: bool = True
-    temperature: float = 0.2
+    temperature: Optional[float] = None  # None omits temperature from the request
     top_p: float = 0.9
     max_tokens: int = 1024
     seed: Optional[int] = None
@@ -308,7 +323,7 @@ class OpenRouterSettings:
     """
 
     model: str  # OpenRouter model ID
-    temperature: float = 0.2
+    temperature: Optional[float] = None  # None omits temperature from the request
     top_p: float = 0.9
     max_tokens: int = 1024
     thinking_effort: Optional[str] = None
@@ -331,9 +346,17 @@ class OpenAIResponsesSettings:
     """
 
     model: str
-    temperature: float = 0.2
+    # None omits temperature from the Responses API payload (required for
+    # gpt-5-family reasoning models, which reject the temperature parameter).
+    temperature: Optional[float] = None
     top_p: float = 0.9
     max_tokens: int = 1024
+    # gpt-5-family reasoning effort, the canonical engine knob from upstream
+    # #98. None omits the reasoning field entirely (the safe default: callers
+    # opt in per model, sidestepping the per-model 'minimal'-unsupported gap).
+    # Our former separate reasoning_effort field was dropped in the #98
+    # reconcile in favor of this single knob; the YAML alias
+    # (reasoning_effort -> thinking_effort) is preserved by shared/llm/config.py.
     thinking_effort: Optional[str] = None
     seed: Optional[int] = None
 
@@ -378,7 +401,7 @@ class MLCSettings:
     model: str  # Path to MLC model directory
     host: str = field(default_factory=_env_mlc_host)
     port: int = field(default_factory=_env_mlc_port)
-    temperature: float = 0.2
+    temperature: Optional[float] = None  # None omits temperature from the request
     top_p: float = 0.9
     max_tokens: int = 1024
     seed: Optional[int] = None
@@ -412,7 +435,7 @@ class LlamaCppSettings:
     chat_template: str = "chatml"
     context_size: int = 4096
     gpu_layers: int = -1  # -1 = auto (all layers)
-    temperature: float = 0.2
+    temperature: Optional[float] = None  # None omits temperature from the request
     top_p: float = 0.9
     max_tokens: int = 1024
     seed: Optional[int] = None
@@ -444,8 +467,11 @@ class EvalJudgeConfig:
         model: LLM model for judge calls (defaults to eval model).
         rubrics: Rubric keys to apply (empty = all available).
         rubrics_dir: Path to rubrics YAML directory.
-        temperature: Sampling temperature for judge calls.
+        temperature: Sampling temperature for judge calls; None omits it from
+            the request (required for gpt-5-family reasoning models).
         max_tokens: Maximum tokens for judge LLM response.
+        reasoning_effort: gpt-5-family reasoning effort (minimal|low|medium|high)
+            for judge calls; None omits the reasoning field.
         log_interactions: Whether to log judge calls for KTO training.
     """
 
@@ -455,9 +481,17 @@ class EvalJudgeConfig:
     model: Optional[str] = None
     rubrics: List[str] = field(default_factory=list)
     rubrics_dir: Optional[str] = None
-    temperature: float = 0.3
+    # None omits temperature from the judge request (required for gpt-5-family
+    # reasoning models, which reject the temperature parameter entirely).
+    temperature: Optional[float] = None
     max_tokens: int = 2048
+    # gpt-5-family reasoning effort for the judge; "minimal" by default for
+    # cost/consistency. None omits the reasoning field entirely.
+    reasoning_effort: Optional[str] = "minimal"
     log_interactions: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_reasoning_effort(self.reasoning_effort)
 
 
 # ---------------------------------------------------------------------------

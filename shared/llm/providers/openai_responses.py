@@ -57,9 +57,21 @@ class OpenAIResponsesClient(BaseLLMClient):
         messages: List[Dict[str, str]],
         temperature: float | None = None,
         max_tokens: int = 1024,
+        reasoning_effort: str | None = None,
         **kwargs,
     ) -> str:
-        """Send a stateless Responses request and return text."""
+        """Send a stateless Responses request and return text.
+
+        Reasoning effort resolves as a per-call override over the instance
+        default: the explicit ``reasoning_effort`` argument wins; otherwise the
+        client's ``thinking_effort`` (set at construction, the upstream #98
+        mechanism) applies; if neither is set the ``reasoning`` field is omitted
+        entirely. When present it is sent as ``reasoning: {effort: ...}``
+        (minimal|low|medium|high). gpt-5-family reasoning models default to
+        medium effort server-side, which can consume the entire
+        max_output_tokens budget and return an empty message item, so callers
+        wanting short outputs should pass "minimal".
+        """
         _reject_stateful_kwargs(kwargs)
         payload = {
             "model": self.model,
@@ -69,8 +81,9 @@ class OpenAIResponsesClient(BaseLLMClient):
         }
         if temperature is not None:
             payload["temperature"] = temperature
-        if self.thinking_effort:
-            payload["reasoning"] = {"effort": self.thinking_effort}
+        effort = reasoning_effort if reasoning_effort is not None else self.thinking_effort
+        if effort:
+            payload["reasoning"] = {"effort": effort}
         payload.update(kwargs)
 
         try:
@@ -90,9 +103,15 @@ class OpenAIResponsesClient(BaseLLMClient):
         schema: Dict[str, Any],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """Send request with Responses API JSON Schema structured output."""
+        """Send request with Responses API JSON Schema structured output.
+
+        Reasoning effort resolves identically to chat(): the per-call
+        ``reasoning_effort`` argument overrides the instance ``thinking_effort``
+        default; if neither is set the ``reasoning`` field is omitted.
+        """
         schema_name = str(schema.get("name") or "response")
         strict = bool(kwargs.pop("strict", self.structured_output_strict))
         _reject_stateful_kwargs(kwargs)
@@ -113,8 +132,9 @@ class OpenAIResponsesClient(BaseLLMClient):
             payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_output_tokens"] = max_tokens
-        if self.thinking_effort:
-            payload["reasoning"] = {"effort": self.thinking_effort}
+        effort = reasoning_effort if reasoning_effort is not None else self.thinking_effort
+        if effort:
+            payload["reasoning"] = {"effort": effort}
         payload.update(kwargs)
 
         content = ""

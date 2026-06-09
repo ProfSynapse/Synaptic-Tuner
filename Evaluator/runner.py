@@ -320,9 +320,21 @@ def _evaluate_single_case(
             environment_config=environment_config,
         )
 
-    # Make request to backend
+    # Make request to backend.
+    # Baseline-fidelity spec §4.3: when the scenario carries a response_schema
+    # AND the client supports structured output, route the TARGET call through
+    # the provider's json_schema strict path (mirrors production). Absent a
+    # schema, behavior is byte-identical to the legacy chat() path — zero
+    # regression for every non-structured scenario.
     try:
-        response = client.chat(case.chat_messages())
+        response_schema = case.metadata.get("response_schema")
+        response_schema_name = case.metadata.get("response_schema_name")
+        if response_schema and hasattr(client, "structured_chat"):
+            response = client.structured_chat(
+                case.chat_messages(), response_schema, response_schema_name
+            )
+        else:
+            response = client.chat(case.chat_messages())
     except Exception as exc:
         return EvaluationRecord(
             case=case,

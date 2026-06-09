@@ -35,7 +35,13 @@ class EvalRunConfig:
     exclude_tags: List[str] = field(default_factory=list)
     model_backend: str = "lmstudio"
     model_name: str = ""
-    temperature: float = 0.7
+    # Opt-in: None = no temperature requested (the request omits it entirely).
+    # A value is only ever sent when an eval_run.yaml explicitly sets one. This
+    # lets gpt-5-family reasoning targets (which reject temperature with HTTP
+    # 400) run via the default path, while non-reasoning backends can still pin
+    # a temperature explicitly. Was a non-optional float (0.7); the default
+    # changed to omitted per the full-opt-in directive.
+    temperature: Optional[float] = None
     max_tokens: int = 2048
     seed: Optional[int] = None
     pass_threshold: float = 0.8
@@ -114,7 +120,9 @@ class ConfigLoader:
             exclude_tags=run.get("exclude_tags", []),
             model_backend=model_config.get("backend", "lmstudio"),
             model_name=model_config.get("name", ""),
-            temperature=inference.get("temperature", 0.7),
+            # Opt-in: preserve None when the YAML omits temperature (no 0.7
+            # default) so the downstream request omits the field entirely.
+            temperature=inference.get("temperature"),
             max_tokens=inference.get("max_tokens", 2048),
             seed=inference.get("seed"),
             pass_threshold=run.get("scoring", {}).get("pass_threshold", 0.8),
@@ -267,6 +275,21 @@ class ConfigLoader:
         scoring_cfg = _deep_merge_dicts(defaults.get("scoring"), test.get("scoring"))
         if scoring_cfg:
             metadata["scoring"] = scoring_cfg
+
+        # Optional structured-output passthrough (baseline-fidelity spec §4.1).
+        # When present, the runner routes the TARGET call through the provider's
+        # structured_output() path (json_schema, strict:true) instead of chat().
+        # BODY (response_schema) and NAME (response_schema_name) are kept
+        # separable: the provider reads the name from schema.get("name"), so the
+        # adapter merges the name in. Per-test value wins over scenario default;
+        # the schema body is a whole object (not deep-merged) so precedence is
+        # simple override.
+        response_schema = test.get("response_schema") or defaults.get("response_schema")
+        if isinstance(response_schema, dict):
+            metadata["response_schema"] = response_schema
+        response_schema_name = test.get("response_schema_name") or defaults.get("response_schema_name")
+        if response_schema_name:
+            metadata["response_schema_name"] = str(response_schema_name)
 
         return PromptCase(
             case_id=test.get("id", ""),

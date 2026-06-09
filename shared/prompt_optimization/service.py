@@ -296,13 +296,20 @@ class PromptOptimizationService:
                 }
             )
             for candidate in evaluated:
-                lineage["candidates"][candidate.id] = {
+                lineage_entry = {
                     "generation": candidate.generation,
                     "parents": list(candidate.parents),
                     "operator": candidate.operator,
                     "score": candidate.score,
                     "selected": candidate.selected,
                 }
+                # Surface the named llm_rewrite strategy (if any) alongside the
+                # operator label so lineage.json directly answers "which strategy
+                # produced this candidate?" without cross-referencing metadata.
+                strategy_name = candidate.metadata.get("strategy")
+                if strategy_name:
+                    lineage_entry["strategy"] = strategy_name
+                lineage["candidates"][candidate.id] = lineage_entry
 
             if best.score >= target_score:
                 stop_reason = "target_score"
@@ -507,7 +514,21 @@ class PromptOptimizationService:
         model = _required_text(llm_config, "model", "llm")
         prompt_template = _required_text(llm_config, "prompt_template", "llm")
         system_prompt = _required_text(llm_config, "system_prompt", "llm")
-        temperature = float(llm_config.get("temperature", 0.2))
+        # Omit temperature by default: gpt-5 reasoning models (e.g.
+        # gpt-5-mini-2025-08-07) reject any temperature with HTTP 400, and the
+        # provider already omits the field when None. An explicitly-configured
+        # temperature is still forwarded (preserves control for non-reasoning
+        # rewriter models); only the default changes from 0.2 to omitted.
+        temp = llm_config.get("temperature")
+        temperature = float(temp) if temp is not None else None
+        # Default reasoning effort to "minimal" so reasoning models don't spend
+        # the whole max_output_tokens budget on hidden reasoning and return an
+        # empty message item. Overridable via operator/llm config; the provider
+        # omits the field when None and forwards reasoning:{effort:...} when set.
+        # Production rewrite quality may warrant bumping this per config later.
+        reasoning_effort = llm_config.get("reasoning_effort", "minimal")
+        if reasoning_effort is not None:
+            reasoning_effort = str(reasoning_effort)
         max_tokens = int(llm_config.get("max_tokens", 1024))
         env_prefix = str(llm_config.get("env_prefix") or "PROMPT_OPT")
 
@@ -525,18 +546,28 @@ class PromptOptimizationService:
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
         )
         rewritten = _clean_llm_prompt_response(response)
         if not rewritten:
             raise PromptOptimizationError("llm_rewrite returned an empty prompt.")
-        return rewritten, {
+        metadata: dict[str, Any] = {
             "operator": "llm_rewrite",
             "source": "llm",
             "provider": provider,
             "model": model,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
         }
+        # The dispatch key (spec["type"]) is always "llm_rewrite", so the named
+        # strategy (spec["name"], e.g. "concise"/"output_contract_harden") is
+        # otherwise lost. Carry it on the candidate metadata so the winning
+        # strategy intent is recoverable from the lineage/candidate artifacts.
+        strategy_name = spec.get("name")
+        if strategy_name:
+            metadata["strategy"] = str(strategy_name)
+        return rewritten, metadata
 
     def _get_llm_client(
         self,
