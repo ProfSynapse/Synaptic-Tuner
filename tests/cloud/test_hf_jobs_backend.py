@@ -418,6 +418,75 @@ class TestBuildTrainingCommand:
         assert "--evolutionary-no-log-candidates" in cmd
         assert "--evolutionary-log-selected" in cmd
 
+    def test_command_includes_seed_when_set(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(seed=1234)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed 1234" in cmd
+
+    def test_command_includes_seed_zero(self, repo_root):
+        # seed=0 is a legitimate seed; emission uses `is not None`, not a truthy
+        # guard, so it must reach the trainer command rather than being dropped.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(seed=0)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed 0" in cmd
+
+    def test_command_omits_seed_when_absent(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config()  # seed defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed" not in cmd
+
+    def test_command_includes_beta_for_dpo(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="dpo", beta=0.5)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta 0.5" in cmd
+
+    def test_command_includes_beta_for_kto(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="kto", beta=0.1)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta 0.1" in cmd
+
+    def test_command_omits_beta_for_sft(self, repo_root):
+        # beta is a DPO/KTO-only parameter; SFT has no --beta flag, so even a
+        # set beta value must not be emitted for an SFT run.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="sft", beta=0.5)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta" not in cmd
+
+    def test_command_omits_beta_when_absent(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="dpo")  # beta defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta" not in cmd
+
+    def test_cloud_training_config_exposes_seed_and_beta(self):
+        # Regression guard: CloudTrainingConfig must carry seed/beta so recipe
+        # values are not silently dropped before the command builder runs.
+        config = _cloud_config()
+        assert hasattr(config, "seed")
+        assert hasattr(config, "beta")
+        assert config.seed is None
+        assert config.beta is None
+
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
         config = _cloud_config(repo_url="")

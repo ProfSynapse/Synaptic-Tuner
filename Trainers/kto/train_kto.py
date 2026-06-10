@@ -326,6 +326,11 @@ def main():
         help="Override learning rate"
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        help="Override the training random seed (config.seed)"
+    )
+    parser.add_argument(
         "--beta",
         type=float,
         help="Override KTO beta parameter (controls KL divergence penalty)"
@@ -377,6 +382,14 @@ def main():
         type=str,
         help="W&B run name"
     )
+
+    # LoRA budget (same surface as DPO/SFT, so the recipe's LoRA budget flows
+    # end-to-end rather than silently falling back to the trainer config default).
+    parser.add_argument("--lora-r", type=int, help="Override LoRA rank (config.lora.r)")
+    parser.add_argument("--lora-alpha", type=int, help="Override LoRA alpha (config.lora.lora_alpha)")
+    parser.add_argument("--lora-dropout", type=float, help="Override LoRA dropout (config.lora.lora_dropout)")
+    parser.add_argument("--lora-target-modules", type=str, help="Override LoRA target modules (comma-separated)")
+    parser.add_argument("--init-lora-weights", type=str, help="Override LoRA weight initialization scheme")
 
     # LoRA technique variants
     parser.add_argument("--use-dora", action="store_true",
@@ -540,6 +553,19 @@ def main():
     if args.use_rslora:
         config.lora.use_rslora = True
 
+    # LoRA budget overrides. is not None so an explicit 0 (e.g. --lora-dropout 0.0)
+    # is honored, not silently dropped — the recipe's LoRA budget is the SSOT.
+    if args.lora_r is not None:
+        config.lora.r = args.lora_r
+    if args.lora_alpha is not None:
+        config.lora.lora_alpha = args.lora_alpha
+    if args.lora_dropout is not None:
+        config.lora.lora_dropout = args.lora_dropout
+    if args.lora_target_modules is not None:
+        config.lora.target_modules = [m.strip() for m in args.lora_target_modules.split(",") if m.strip()]
+    if args.init_lora_weights is not None:
+        config.lora.init_lora_weights = args.init_lora_weights
+
     # Apply command-line overrides
     if args.model_name:
         config.model.model_name = args.model_name
@@ -579,7 +605,11 @@ def main():
         config.training.gradient_accumulation_steps = args.gradient_accumulation
     if args.learning_rate:
         config.training.learning_rate = args.learning_rate
-    if args.beta:
+    # is not None so seed=0 and beta=0.0 are honored, not silently swapped for the
+    # config default — the handler forwards explicit zeros (provenance: no silent override).
+    if args.seed is not None:
+        config.seed = args.seed
+    if args.beta is not None:
         config.training.beta = args.beta
     if args.num_epochs:
         config.training.num_train_epochs = args.num_epochs

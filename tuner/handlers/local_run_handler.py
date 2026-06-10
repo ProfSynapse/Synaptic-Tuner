@@ -475,7 +475,14 @@ class LocalRunHandler(BaseHandler):
             return {str(k): self._render_value(v, variables) for k, v in value.items()}
         return value
 
-    def _build_sft_command(self, cfg: dict[str, Any], variables: dict[str, str]) -> tuple[list[str], str, Path]:
+    def _build_trainer_command(
+        self, cfg: dict[str, Any], variables: dict[str, str], method: str
+    ) -> tuple[list[str], str, Path]:
+        # Builds the trainer invocation for any registered method. The trainer
+        # script is selected by run.trainer; the per-method flag dialect differs,
+        # so SFT-only flags (LoRA scalars, dashboard/quiet toggles, 4bit, save
+        # cadence) are gated to sft, beta is gated to dpo/kto, and the shared
+        # hyperparameter flags forward for all methods. See _flag_dialect below.
         model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
         dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
         training_cfg = cfg.get("training", {}) if isinstance(cfg.get("training"), dict) else {}
@@ -483,15 +490,21 @@ class LocalRunHandler(BaseHandler):
         run_cfg = cfg.get("run", {}) if isinstance(cfg.get("run"), dict) else {}
         artifacts_cfg = cfg.get("artifacts", {}) if isinstance(cfg.get("artifacts"), dict) else {}
 
-        trainer_path = Path(str(run_cfg.get("trainer", "Trainers/sft/train_sft.py")))
+        default_trainer = f"Trainers/{method}/train_{method}.py"
+        trainer_path = Path(str(run_cfg.get("trainer", default_trainer)))
         trainer_dir = trainer_path.parent
         trainer_file = trainer_path.name
         workdir = "/workspace/repo/" + trainer_dir.as_posix()
 
+        # Flags the dpo/kto trainers do not expose as CLI args (they read these
+        # from their YAML config instead). Emitting them would make argparse
+        # reject the command, so they are forwarded only for sft.
+        sft_only = method == "sft"
+
         command = ["python", trainer_file]
         _append_flag(command, "model_name", model_cfg.get("name") or model_cfg.get("model_name"))
         _append_flag(command, "model_size", model_cfg.get("size"))
-        if "load_in_4bit" in model_cfg:
+        if sft_only and "load_in_4bit" in model_cfg:
             command.append("--load-in-4bit" if bool(model_cfg["load_in_4bit"]) else "--no-load-in-4bit")
         _append_flag(command, "max_seq_length", model_cfg.get("max_seq_length") or training_cfg.get("max_seq_length"))
 
@@ -510,24 +523,40 @@ class LocalRunHandler(BaseHandler):
             "batch_size",
             "gradient_accumulation",
             "learning_rate",
+            "seed",
             "num_epochs",
             "max_steps",
-            "save_steps",
-            "save_total_limit",
         ):
             _append_flag(command, key, training_cfg.get(key))
+        if sft_only:
+            for key in ("save_steps", "save_total_limit"):
+                _append_flag(command, key, training_cfg.get(key))
 
+        # beta forwards only for dpo/kto (sft has no --beta argparse). is not None
+        # so an explicit beta: 0.0 is honored, not silently swapped for the trainer
+        # default — mirroring the --seed semantics (provenance: no silent override).
+        if method in ("dpo", "kto"):
+            beta = training_cfg.get("beta")
+            if beta is not None:
+                _append_flag(command, "beta", beta)
+
+        # LoRA scalars forward for all methods: the recipe's lora budget is the
+        # SSOT and must flow end-to-end (gating these would silently run dpo/kto at
+        # the trainer-default budget, breaking the identical-LoRA-budget control).
+        # All three trainers accept these CLI flags.
         _append_flag(command, "lora_r", lora_cfg.get("r"))
         _append_flag(command, "lora_alpha", lora_cfg.get("alpha") or lora_cfg.get("lora_alpha"))
         _append_flag(command, "lora_dropout", lora_cfg.get("dropout") or lora_cfg.get("lora_dropout"))
         _append_flag(command, "lora_target_modules", lora_cfg.get("target_modules"))
+        _append_flag(command, "init_lora_weights", lora_cfg.get("init_lora_weights"))
         if bool(lora_cfg.get("use_dora", False)):
             command.append("--use-dora")
         if bool(lora_cfg.get("use_rslora", False)):
             command.append("--use-rslora")
-        _append_flag(command, "init_lora_weights", lora_cfg.get("init_lora_weights"))
 
-        output_root = artifacts_cfg.get("output_root", "toolset-training-artifacts/runs/local_docker/sft/{name}")
+        output_root = artifacts_cfg.get(
+            "output_root", "toolset-training-artifacts/runs/local_docker/" + method + "/{name}"
+        )
         output_root = str(self._render_value(output_root, variables))
         run_timestamp = str(
             self._render_value(
@@ -542,10 +571,12 @@ class LocalRunHandler(BaseHandler):
             _append_flag(command, key, training_cfg.get(key))
         if bool(run_cfg.get("dry_run", False)):
             command.append("--dry-run")
-        if not bool(run_cfg.get("dashboard", False)):
-            command.append("--no-dashboard")
-        if bool(run_cfg.get("quiet", True)):
-            command.append("--quiet")
+        # --no-dashboard / --quiet are sft-only CLI toggles; dpo/kto do not expose them.
+        if sft_only:
+            if not bool(run_cfg.get("dashboard", False)):
+                command.append("--no-dashboard")
+            if bool(run_cfg.get("quiet", True)):
+                command.append("--quiet")
         command.extend(_as_list(run_cfg.get("extra_args")))
 
         host_artifact_path = self._rel_path(Path(output_root) / run_timestamp)
@@ -577,10 +608,12 @@ class LocalRunHandler(BaseHandler):
             host_artifact_path = self._rel_path(
                 artifacts_cfg.get("host_path", f"toolset-training-artifacts/runs/local_docker/custom/{name}")
             )
-        elif method == "sft":
-            command, workdir, host_artifact_path = self._build_sft_command(cfg, variables)
+        elif method in ("sft", "dpo", "kto"):
+            command, workdir, host_artifact_path = self._build_trainer_command(cfg, variables, method)
         else:
-            raise LocalRunError("local-run currently supports run.method: sft or an explicit run.command list.")
+            raise LocalRunError(
+                "local-run supports run.method: sft, dpo, kto, or an explicit run.command list."
+            )
 
         transfer_mode = str(job_cfg.get("transfer", "auto")).lower()
         if transfer_mode == "auto":
@@ -592,7 +625,10 @@ class LocalRunHandler(BaseHandler):
 
         copy_paths = [Path(path) for path in _as_list(setup_cfg.get("copy"))]
         if transfer_mode == "copy" and not copy_paths:
-            copy_paths = [Path("Trainers/sft"), Path("shared"), Path("tuner")]
+            # Copy the trainer directory the dispatched method actually runs from
+            # (run.trainer selects it per method) rather than always Trainers/sft.
+            trainer_dir = Path(str(run_cfg.get("trainer", f"Trainers/{method}/train_{method}.py"))).parent
+            copy_paths = [trainer_dir, Path("shared"), Path("tuner")]
             dataset_cfg = cfg.get("dataset", {}) if isinstance(cfg.get("dataset"), dict) else {}
             if dataset_cfg.get("local_file"):
                 copy_paths.append(Path(str(dataset_cfg["local_file"])))

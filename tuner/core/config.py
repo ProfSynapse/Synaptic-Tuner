@@ -257,6 +257,8 @@ class CloudTrainingConfig(TrainingConfig):
     repo_commit: Optional[str] = None
     dataset_name: Optional[str] = None
     gradient_accumulation_steps: Optional[int] = None
+    seed: Optional[int] = None
+    beta: Optional[float] = None
     save_steps: Optional[int] = None
     save_total_limit: Optional[int] = None
     max_steps: Optional[int] = None

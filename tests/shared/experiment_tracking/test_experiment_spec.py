@@ -62,6 +62,62 @@ def test_load_experiment_spec_round_trip(tmp_path):
     assert spec.execution.selected_stages() == ["evaluation", "loss", "analysis", "recommendation"]
 
 
+def test_load_experiment_spec_carries_seed_and_beta(tmp_path):
+    # Recipe-set training.seed/training.beta must populate the spec so they can
+    # be forwarded to the trainer instead of silently defaulting.
+    spec_path = tmp_path / "experiment.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: dpo-seed-beta
+              provider: hf_jobs
+              method: dpo
+              dataset:
+                source: org/dataset
+                file: sample.jsonl
+              training:
+                model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+                max_steps: 20
+                seed: 7
+                beta: 0.5
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    spec = load_experiment_spec(spec_path)
+
+    assert spec.training.seed == 7
+    assert spec.training.beta == 0.5
+
+
+def test_load_experiment_spec_seed_beta_default_none(tmp_path):
+    spec_path = tmp_path / "experiment.yaml"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            experiment:
+              name: no-seed-beta
+              provider: hf_jobs
+              method: sft
+              dataset:
+                source: org/dataset
+                file: sample.jsonl
+              training:
+                model_name: HuggingFaceTB/SmolLM2-1.7B-Instruct
+                max_steps: 20
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    spec = load_experiment_spec(spec_path)
+
+    assert spec.training.seed is None
+    assert spec.training.beta is None
+
+
 def test_load_experiment_spec_rejects_invalid_provider(tmp_path):
     spec_path = tmp_path / "bad_experiment.yaml"
     spec_path.write_text(

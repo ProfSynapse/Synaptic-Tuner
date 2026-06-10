@@ -137,6 +137,10 @@ class HFCommandBuilderMixin:
             training_args.extend(["--gradient-accumulation", str(config.gradient_accumulation_steps)])
         if config.learning_rate:
             training_args.extend(["--learning-rate", str(config.learning_rate)])
+        if config.seed is not None:
+            training_args.extend(["--seed", str(config.seed)])
+        if config.method in ("dpo", "kto") and config.beta is not None:
+            training_args.extend(["--beta", str(config.beta)])
         if config.epochs is not None:
             training_args.extend(["--num-epochs", str(config.epochs)])
         if config.max_steps is not None:

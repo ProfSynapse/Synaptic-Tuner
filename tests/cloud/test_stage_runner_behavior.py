@@ -168,6 +168,46 @@ class TestTrainingRunnerHappyPath:
         backend.execute.assert_called_once()
 
     @patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry")
+    def test_run_maps_seed_and_beta_onto_config(self, mock_registry, tmp_path):
+        """spec.training.seed/beta must be mapped onto the loaded cloud config."""
+        service = TrackingService(tmp_path)
+        runner = HFTrainingStageRunner(repo_root=tmp_path, tracking_service=service)
+
+        experiment = _make_experiment()
+        spec = _make_spec(method="dpo")
+        spec.training.seed = 7
+        spec.training.beta = 0.5
+        backend = _mock_backend(exit_code=0)
+        backend.load_config.return_value.method = "dpo"
+        mock_registry.get.return_value = backend
+        runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
+
+        runner.run(spec, experiment)
+
+        config = backend.load_config.return_value
+        assert config.seed == 7
+        assert config.beta == 0.5
+
+    @patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry")
+    def test_run_does_not_map_beta_for_sft(self, mock_registry, tmp_path):
+        """beta is DPO/KTO-only; an SFT run must not have beta mapped onto config."""
+        service = TrackingService(tmp_path)
+        runner = HFTrainingStageRunner(repo_root=tmp_path, tracking_service=service)
+
+        experiment = _make_experiment()
+        spec = _make_spec(method="sft")
+        spec.training.beta = 0.5
+        backend = _mock_backend(exit_code=0)
+        backend.load_config.return_value.method = "sft"
+        mock_registry.get.return_value = backend
+        runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
+
+        runner.run(spec, experiment)
+
+        config = backend.load_config.return_value
+        assert "beta" not in config.__dict__
+
+    @patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry")
     def test_run_records_failure_on_nonzero_exit(self, mock_registry, tmp_path):
         """run() should return failed StageResult when backend returns exit_code=1."""
         service = TrackingService(tmp_path)

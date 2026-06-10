@@ -372,6 +372,8 @@ def parse_args(argv=None):
                        help="Override gradient accumulation steps")
     parser.add_argument("--learning-rate", type=float,
                        help="Override learning rate")
+    parser.add_argument("--seed", type=int,
+                       help="Override the training random seed (config.seed)")
     parser.add_argument("--num-epochs", type=int,
                        help="Override number of training epochs")
     parser.add_argument("--max-steps", type=int, default=None,
@@ -579,6 +581,9 @@ def run(args: argparse.Namespace):
         config.training.gradient_accumulation_steps = args.gradient_accumulation
     if args.learning_rate:
         config.training.learning_rate = args.learning_rate
+    # is not None so seed=0 is honored (a truthy guard would silently drop the valid seed 0)
+    if args.seed is not None:
+        config.seed = args.seed
     if args.num_epochs:
         config.training.num_train_epochs = args.num_epochs
     if args.max_seq_length:
@@ -749,7 +754,7 @@ def run(args: argparse.Namespace):
     model_name_lower = config.model.model_name.lower()
     if getattr(tokenizer, "chat_template", None):
         chat_template_name = "pretrained"
-        print("✓ Using pretrained chat template from tokenizer")
+        print("✓ Using pretrained chat template from the loaded text encoder")
     else:
         if "qwen" in model_name_lower:
             chat_template_name = "chatml"
@@ -884,7 +889,7 @@ def run(args: argparse.Namespace):
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
     print(f"\nSFT-specific:")
-    print("  Packing: False (explicit tokenized dataset path)")
+    print("  Packing: False (explicit pre-encoded dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
     print(f"\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
@@ -950,7 +955,7 @@ def run(args: argparse.Namespace):
         # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
         logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 
-    print("Initializing trainer on explicit tokenized dataset...")
+    print("Initializing trainer on explicit pre-encoded dataset...")
     trainer_kwargs = {
         "model": model,
         "args": training_args,
@@ -967,7 +972,7 @@ def run(args: argparse.Namespace):
         from transformers.trainer_callback import PrinterCallback
         trainer.remove_callback(PrinterCallback)
 
-    print("[OK] Trainer initialized with explicit tokenized dataset contract")
+    print("[OK] Trainer initialized with explicit pre-encoded dataset contract")
 
     # Check if evolutionary training is enabled
     evo_wrapper = None

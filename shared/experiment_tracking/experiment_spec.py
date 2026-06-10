@@ -34,6 +34,8 @@ class TrainingStageSpec:
     batch_size: Optional[int] = None
     gradient_accumulation: Optional[int] = None
     learning_rate: Optional[float] = None
+    seed: Optional[int] = None
+    beta: Optional[float] = None
     num_epochs: Optional[int] = None
     max_steps: Optional[int] = None
     max_seq_length: Optional[int] = None
@@ -206,7 +208,7 @@ class ExperimentSpec:
             issues.append("experiment.name is required")
         if self.provider not in {"hf_jobs", "modal", "runpod", "local"}:
             issues.append(f"unsupported provider '{self.provider}'")
-        if self.method not in {"sft", "kto", "grpo"}:
+        if self.method not in {"sft", "kto", "grpo", "dpo"}:
             issues.append(f"unsupported method '{self.method}'")
         if not self.dataset.source:
             issues.append("experiment.dataset.source is required")

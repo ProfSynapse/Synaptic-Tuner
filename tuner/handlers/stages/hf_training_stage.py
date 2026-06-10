@@ -150,6 +150,10 @@ class HFTrainingStageRunner:
             config.gradient_accumulation_steps = spec.training.gradient_accumulation
         if spec.training.learning_rate is not None:
             config.learning_rate = spec.training.learning_rate
+        if spec.training.seed is not None:
+            config.seed = spec.training.seed
+        if spec.method in ("dpo", "kto") and spec.training.beta is not None:
+            config.beta = spec.training.beta
         if spec.training.num_epochs is not None:
             config.epochs = spec.training.num_epochs
         if spec.training.max_steps is not None:
