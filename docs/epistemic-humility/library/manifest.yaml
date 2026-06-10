@@ -433,11 +433,11 @@ papers:
   note: cited in essays/01 — ID needs verification on enrich
 - arxiv: '2606.08543'
   slug: rl-diversity-collapse
-  title: RL training narrows output diversity — risk for gap-naming training (Yang et al.)
+  title: 'PAEC: Position-Aware Entropy Calibration for LLM Reasoning in RLVR'
   year: 2026
   area: methods
-  status: not-found
-  note: NOT FOUND on arXiv (essay citation) — re-source; Kirk 2310.06452 covers RLHF diversity reduction
+  status: candidate
+  note: USER-CONFIRMED + title provided (2026-06-10); RLVR entropy-collapse/diversity context for the essay's diversity-collapse claim; authors pending --enrich
 - arxiv: '2606.05145'
   slug: distributional-failure-signatures
   title: Distributional signatures of failed reasoning traces; 4 failure regimes incl. Steerable-Hard (Islah et al., Mila)

@@ -563,3 +563,12 @@ Semantic-level Reward (2605.15588); Blockwise Advantage Estimation for Multi-Obj
    once the network allowlist includes arxiv.org. LESSON for the verification protocol:
    "not found via WebSearch" is NOT sufficient evidence of non-existence for 2026 preprints —
    only a direct arXiv fetch (or user confirmation) can settle existence.
+
+5. **2606.08543 THIRD CORRECTION (2026-06-10): the paper EXISTS — same index blind spot.**
+   User provided the title directly: "PAEC: Position-Aware Entropy Calibration for LLM
+   Reasoning in RLVR" (https://arxiv.org/abs/2606.08543). This sits in the RLVR
+   entropy-collapse line, which matches the essay's diversity-collapse claim. Restored to
+   manifest with title; authors/numbers pending --enrich. Both essay IDs flagged NOT-FOUND
+   by the search pass have now been confirmed real by the user — the WebSearch-only
+   verification protocol has a 2/2 false-negative rate on June-2026 preprints and must not
+   be used to assert non-existence.
