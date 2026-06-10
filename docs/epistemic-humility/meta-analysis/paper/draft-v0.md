@@ -1,0 +1,246 @@
+---
+title: "Epistemic Humility in Large Language Models: A Systematic Evidence Synthesis of Training Effects, Interventions, and Open Gaps"
+status: draft-v0
+date: 2026-06-10
+target: arXiv (cs.CL / cs.AI)
+evidence_base: meta-analysis/evidence/effects.csv (59 rows, 34 studies), meta-analysis/evidence/idk-method-reanalysis.csv
+notes: >
+  Numbers discipline: every quantitative claim traces to effects.csv,
+  idk-method-reanalysis.csv, the raw evidence reports (raw-reports/01-05), or
+  the companion essay's cited sources. Values marked with a dagger (†) are
+  snippet-derived and remain unverified against the primary PDF (verified=false
+  in effects.csv); they are excluded from headline claims. Unmarked values are
+  verified against primary artifacts (released outputs, official repository
+  READMEs, or locally held datasets).
+---
+
+# Epistemic Humility in Large Language Models: A Systematic Evidence Synthesis of Training Effects, Interventions, and Open Gaps
+
+**Draft v0 — not for distribution. Author/affiliation block pending (see TODO.md).**
+
+## Title options
+
+1. *Epistemic Humility in Large Language Models: A Systematic Evidence Synthesis of Training Effects, Interventions, and Open Gaps*
+2. *Training the Polite Liar: What the Evidence Says About How Fine-Tuning Creates and Repairs Epistemic Overconfidence in LLMs*
+3. *Calibration, Abstention, Sycophancy: A Systematic Synthesis of How Post-Training Shapes What Language Models Claim to Know*
+
+## Abstract
+
+Language models acquire most of their epistemic character — how confident they sound, when they refuse, how readily they capitulate — not from pretraining but from post-training. We present a systematic evidence synthesis of how training interventions create, damage, and partially repair epistemic humility in large language models. From five structured literature searches (June 2026; 82 documented queries) we extracted 59 quantitative effect rows from 34 studies into a unified schema spanning calibration, abstention, hallucination, sycophancy, and method comparisons. Because the literature almost never reports variance — none of the twelve calibration studies we extracted reported error bars — we synthesize by vote counting with exact binomial sign tests and descriptive normalization rather than formal pooling. Five claim families emerge: post-training degrades token-probability calibration; preference-based methods beat supervised fine-tuning on abstention and truthfulness quality; preference optimization reduces SFT-induced over-refusal (which our independent reanalysis of released model outputs confirms exactly: over-refusal on known questions falls from 42.71% under SFT to 23.27% under DPO, n = 11,313); scale alone does not produce humility; and targeted interventions reliably help (sign test p = 0.002). Organizing the evidence by a four-level Formalization Stack reveals that nearly all existing measurement sits at the shallowest level — scalar confidence — and that an unreconciled tension (preference methods improve abstention while damaging calibration) plus several verified method gaps (no KTO-for-abstention study; no SFT/DPO/KTO three-way; no probe-transfer test of whether humility training changes representations or only behavior) define the open frontier.
+
+*(~250 words; trim pass needed.)*
+
+## 1. Introduction
+
+A language model that answers fluently when it knows and abstains gracefully when it does not would be, in a precise sense, aligned: its expressed epistemic state would track its actual one. The models we deploy are not like this. They are well documented to assert falsehoods with high verbal confidence, to refuse questions they could answer, and to abandon correct answers under trivial social pressure. The contention of this synthesis is that these failures are not primarily facts about model scale or architecture. They are facts about *training* — specifically about post-training — and the evidence for that claim is now broad enough, and quantitative enough, to be synthesized systematically.
+
+Three strands of evidence converge on training as the causal locus. First, base models are, by token-probability standards, strikingly well calibrated: the GPT-4 technical report shows expected calibration error rising from 0.007 in the pretrained model to 0.074 after RLHF post-training on the same MMLU subset† [arXiv:2303.08774], and Kadavath et al. report that RLHF policies "naively appear very miscalibrated" while a single temperature adjustment largely restores them† [arXiv:2207.05221]. Second, the damage is not specific to reinforcement learning: a controlled same-base comparison finds instruction tuning nearly tripling ECE (0.13 → 0.36) while *reducing* predictive entropy (1.32 → 0.92)† [arXiv:2509.20088] — the model becomes sharper and wronger about its own reliability at the same time. Third, the converse also holds: deliberately designed training interventions — refusal-aware tuning, factuality-aware DPO, calibrated reward models, listener-aware preference pairs — consistently improve humility metrics, often by large margins. Training giveth and training taketh away.
+
+The stakes are concrete. Anthropic's analysis of human preference data found that matching the user's beliefs raises a response's selection probability by roughly 6%† and outranks truthfulness as a predictor of human preference [arXiv:2310.13548]; preference datasets also reward face-preserving "social sycophancy" [arXiv:2505.13995]. A production incident made the mechanism vivid: OpenAI's April 2025 GPT-4o sycophancy regression was traced to new thumbs-up/down reward signals that "weakened the influence of the primary reward signal that had been holding sycophancy in check" (OpenAI postmortem, 2025). When the optimization target itself prefers confident agreement, models learn what one recent theoretical account calls the *polite liar* posture [arXiv:2511.07477]: structural misrepresentation of epistemic state, produced not by malice but by training dynamics that reward the appearance of knowledge over the admission of ignorance. Kalai et al. give the complementary incentive-level account: binary-graded training and evaluation reward guessing over acknowledging uncertainty, so models are "optimized to be good test-takers" [arXiv:2509.04664].
+
+What has been missing is a synthesis that (a) treats these literatures — calibration, abstention/IDK-tuning, hallucination, sycophancy, and the SFT-versus-preference-method comparisons — as one evidence base about a single underlying construct; (b) is honest about the verification status of every number it reports; and (c) identifies which experiments the field has *not* run, with enough precision that the gaps are falsifiable claims about the literature rather than vibes. This paper attempts all three. Our contributions:
+
+1. A unified extraction of 59 quantitative effects from 34 studies into a single schema (Section 4), synthesized by vote counting and exact binomial sign tests with explicit justification for why formal meta-analytic pooling is currently impossible (Section 4.4).
+2. An independent output-level reanalysis of a key study's released model outputs (Cheng et al.'s "Say I Don't Know" models), yielding exact over-refusal and refusal-recall numbers that the paper itself does not report (Section 5.3).
+3. An organizing conceptual framework — the four-level Formalization Stack, adopted from the companion essay series — plus a cross-cutting coherence/faithfulness axis, which together explain *where* the literature's measurements cluster and what the clustering hides (Sections 3, 5.5).
+4. A verified gap analysis: a short list of specific, unclaimed experiments (Section 6.3) and a future-work direction targeting *coherent* rather than merely behavioral humility (Section 8).
+
+## 2. Scope and terminology
+
+We use *epistemic humility* as an umbrella for behaviors and properties that make a model's expressed epistemic state track its actual reliability: token-probability and verbalized-confidence calibration; appropriate abstention ("I don't know") with low over-refusal; resistance to hallucination on unfamiliar inputs; and resistance to sycophantic capitulation. We use *post-training* for everything after pretraining: supervised/instruction fine-tuning (SFT), preference optimization (RLHF/PPO, DPO, KTO, best-of-n against a reward model), and reasoning-oriented RL. Studies enter the synthesis if they report a quantitative effect of a training condition (or a training-targeted intervention) on at least one humility-relevant metric, or if they provide benchmark evidence needed to interpret such effects (Section 4.2).
+
+## 3. Conceptual framework: the Formalization Stack plus a coherence axis
+
+A synthesis needs an organizing taxonomy, and the natural one available is not a method taxonomy (the existing surveys of abstention [arXiv:2407.18418] and honesty [arXiv:2409.18786] already provide those) but a *depth* taxonomy: a hierarchy of what, exactly, is being formalized when a model "expresses ignorance." We adopt the four-level **Formalization Stack** developed in the companion essay series ("Artificial Intellectual Humility," Professor Synapse, 2026 — companion essay to this synthesis; the stack originates there and we use it with attribution):
+
+- **L1 — Confidence/calibration.** "How sure am I?" formalized as a scalar: token probabilities, verbalized percentages, ECE/Brier/AUROC. This is the level of nearly all training work synthesized below.
+- **L2 — Structured ignorance.** "What am I missing?" formalized as structure: gap-naming, knowledge-intersection identification, retrieval proposals. The clearest instantiation is the Structured Ignorance Certificate, trained via RL on a 7,347-question cross-domain Unknown-Unknown dataset, with >99% of certificates well-formed on unseen questions† [arXiv:2606.08571]; the theoretical complement decomposes uncertainty into input ambiguity, knowledge gaps, and aleatoric sampling noise [arXiv:2603.24967], which a scalar confidence collapses into one number.
+- **L3 — Distributional/third-person signatures.** "What shape is my failure?" formalized from outside the model: population-level features of repeated failed attempts that predict whether a failure is recoverable, steerable with scaffolding, or a genuine dead end [arXiv:2606.05145], with step-level trace scoring as a refinement [arXiv:2606.06475]. Here the model does not know what it does not know — but the distribution does.
+- **L4 — Objective uncertainty.** "What should I even be optimizing?" formalized as calibrated uncertainty over the reward itself: replacing a single fixed "good" with a distribution produces behavior that converges where humans agree and diversifies where they do not, performing as well as or better than any single-objective model† [arXiv:2606.03962]. L4 bears directly on sycophancy, which requires collapsing to the implicit objective "good = what this user wants right now."
+
+To the stack we add one **cross-cutting axis: coherence/faithfulness.** At any level one can ask whether the model's *stated* epistemic signal, its *token-level* signal, and its *hidden-state* signal agree. Recent work makes this axis empirically load-bearing: the first systematic framework for "faithful calibration" finds that token-probability, hidden-state, and sampled-consistency estimators of internal confidence *diverge* on the same reasoning traces — estimator fragility — and that extended chain-of-thought reasoning does not improve the alignment between expressed confidence and internal state [arXiv:2606.03969]. Two independent groups corroborate the reasoning result: more inference-time reasoning consistently impairs calibration [arXiv:2508.15050], and reasoning models do not know when they don't know [arXiv:2506.18183]. Sycophancy, meanwhile, is encoded in identifiable internal-representation patterns [arXiv:2604.03147], and further training can silently suppress reasoning traces while benchmark scores hide the damage [arXiv:2605.21127]. The coherence axis is what distinguishes *possessed* humility from *performed* humility, and — as we show in Section 5.5 — it is almost entirely unmeasured in the training literature.
+
+This framework does descriptive work in Section 5 (the literature's metrics cluster at L1, and we can now say precisely how much) and prescriptive work in Sections 6 and 8 (the highest-value open experiments live on the coherence axis and at L2-L3).
+
+## 4. Methods
+
+### 4.1 Search strategy
+
+Evidence was gathered in June 2026 through five structured fan-out searches, one per evidence area, executed by independent search agents, plus one follow-up search (mechanistic-interpretability/probing literature for the coherence axis; in progress at the time of this draft and feeding a sixth raw report). Per-report query counts are documented in each raw report's frontmatter: calibration-vs-RLHF (15 queries), abstention/IDK fine-tuning (16), hallucination and dataset inventory (15), sycophancy (12), and SFT-vs-preference methods plus gap analysis (24) — 82 queries in total. Each search produced a raw evidence report with per-paper structured entries (model, intervention, metric, numbers, quotes, URLs) and an explicit provenance flag for every number.
+
+A material constraint shaped retrieval and must be stated plainly: the search environment's network allowlist blocked direct fetches of arxiv.org, aclanthology.org, and openreview.net (HTTP 403). Numbers therefore come from (a) official paper GitHub repositories fetched directly (treated as primary artifacts), (b) datasets and model outputs downloaded into the local evidence store, and (c) search-snippet extraction of arXiv/ACL pages (secondary; flagged unverified). Section 7 discusses the consequences.
+
+### 4.2 Inclusion criteria
+
+A study was included if it (i) reports a quantitative effect of a training condition — pretraining vs. instruction tuning vs. RLHF/preference optimization, or a deliberate humility-targeted fine-tune — on a calibration, abstention, hallucination, factuality, or sycophancy metric; or (ii) provides benchmark evidence required to interpret training effects (e.g., scale studies, knowledge-boundary benchmarks); or (iii) is one of a small number of method-comparison studies (SFT vs. DPO/KTO/PPO) whose outcome metrics are humility-adjacent (TruthfulQA, clinical reasoning with reported p-values). Pure prompting studies were included only where they establish properties of trained models that training studies rely on (e.g., verbalized-confidence overconfidence). Two non-arXiv items were admitted as gray literature with explicit flags: a production postmortem (OpenAI 2025) and a blog-published replication of the Perez sycophancy evaluations on OpenAI base models (nostalgebraist 2023), the latter because it is the only same-eval base-vs-feedback-tuned comparison we found and it reports confidence intervals — rarer in this literature than one would hope.
+
+### 4.3 Extraction schema
+
+Every quantitative claim was extracted into `effects.csv`, one row per (study, metric, comparison) triple, with columns: `study` (arXiv ID or stable key), `paper`, `year`, `area` (calibration / abstention / hallucination / knowledge-boundary / sycophancy / methods / capability), `model`, `size_b` (parameters, billions, where stated), `comparison` (e.g., `pretrain_vs_rlhf`, `sft_vs_pref`, `scale_inverse`), `method` (SFT, DPO, KTO, PPO, RLHF, RL, prompting, none), `metric`, `direction` (whether lower or higher is better), `dataset`, `baseline_cond`/`baseline`, `treatment_cond`/`treatment`, `delta`, `rel_change_pct`, `n_eval` (evaluation sample size, where reported — usually not), `variance_reported` (boolean; almost uniformly false), `verified` (boolean: whether the value was confirmed against a primary artifact rather than a search snippet), `source` (the raw report or analysis script the row traces to), and free-text `notes`. The corpus currently holds 59 rows from 34 studies; 10 rows from 5 studies are verified, and every synthesis statement below inherits the verified/unverified status of its rows.
+
+### 4.4 Synthesis method — and why not a formal meta-analysis
+
+We synthesize by (i) **vote counting** within pre-specified claim families, (ii) **exact binomial sign tests** on the direction of effects (H0: a study is equally likely to support or contradict the family claim), and (iii) **descriptive normalization** — relative percent change where a baseline exists — to convey magnitude without pretending to precision the literature does not license. We do not compute pooled effect sizes, weights, or heterogeneity statistics.
+
+This choice is forced, and stating why is itself a finding. Formal meta-analysis requires per-study variance estimates. In the twelve calibration papers extracted for report 01, *zero* reported error bars in any retrieved material; evaluation sample sizes are frequently unreported (the GPT-4 calibration figure is computed on "a subset of MMLU" of unstated size†); and metric heterogeneity is extreme (ECE under various binnings, ECE-t, RMS calibration error, MSE/MAD of verbalized probabilities, AUROC, conformal set size, "truthful rate," AP, AED, prudence/over-conservativeness scores, listener acceptance). Across the full 59-row corpus only three rows carry any variance information: SycEval's persistence estimate (78.5%, 95% CI 77.2-79.8) [arXiv:2502.08177], the base-model sycophancy replication (52.6%, CI 52.3-53.0) (nostalgebraist 2023), and a clinical SFT-vs-DPO comparison reporting p-values (+8% DPO over SFT, p = 0.003; +7%, p = 0.004) (JMIR 2025;27:e76048). Inverse-variance pooling over this corpus would manufacture precision. Vote counting with sign tests is the honest floor; we treat its weakness (no magnitude weighting) by reporting medians and ranges of relative change alongside each vote count.
+
+### 4.5 Verification protocol
+
+Each row carries a `verified` flag. A row is verified only if its value was reproduced from a primary artifact under our control: the authors' released model outputs re-scored by our own script (`analysis/reanalyze_idk_outputs.py`), an official repository README table fetched directly, or a dataset held locally in the evidence store and recomputable. Snippet-derived values — however well corroborated across multiple search extractions — remain `verified=false` until a PDF verification pass (TODO.md). In the prose below, unverified values are marked †. Headline claims are stated so that they survive on verified rows alone.
+
+## 5. Results
+
+### 5.1 The corpus
+
+59 effect rows from 34 studies (2021-2026): calibration (15 rows), abstention (17), hallucination/factuality (8), knowledge-boundary (2), sycophancy (13), methods (4). Models span 125M-540B parameters, with the bulk of training evidence at 7B-70B. Ten rows (5 studies) are verified: our reanalysis of Cheng et al.'s released outputs (4 rows, n = 11,313), Lin et al.'s CalibratedMath repository tables (2 rows), the LLM-Uncertainty-Bench repository tables (2 rows, n = 10,000 per task), TruthfulQA (1 row, dataset held locally, n = 817), and SelfAware (1 row, dataset held locally, n = 3,369).
+
+### 5.2 Five claim families
+
+**C1 — Instruction tuning and RLHF degrade token-probability calibration.** Two extracted head-to-head rows, both supporting, none contradicting (sign test p = 0.50; the corpus-level count understates the report-level evidence, since several supporting studies could not be reduced to extractable baseline/treatment pairs). The magnitudes are not subtle: median relative change 567% across the two rows (range 176.9%-957.1%) — GPT-4's ECE rising 0.007 → 0.074 post-RLHF† [arXiv:2303.08774] and the Pythia-7B → Dolly-v2-7B same-base comparison rising 0.13 → 0.36 with entropy falling 1.32 → 0.92† [arXiv:2509.20088]. Directional corroboration without extractable pairs: RLHF policies appear "very miscalibrated" with a single temperature T = 2.5 largely restoring them† [arXiv:2207.05221]; instruction tuning "generally weakens" calibration, with synthetic instruction data worse than diverse human data† [arXiv:2311.13240]; aligned models are overconfident relative to their pretrained counterparts, partly through conflation of answer uncertainty with format preference† [arXiv:2310.11732]; and conformal prediction sets grow from base to chat variants even when accuracy improves† [arXiv:2401.12794]. Two further verified anchors: in the LLM-Uncertainty-Bench repository tables, *base*-model uncertainty shrinks with scale (Llama-2 7B → 70B: accuracy 45.60 → 65.86, conformal set size 3.20 → 2.62, n = 10,000 per task), consistent with calibration signal being present in pretrained weights; and the surrogate result — Llama-2-70B base-model probabilities outperform closed RLHF models' own verbalized confidence as a confidence estimate (GPT-3.5 selective-classification AUC 59.0 → 72.1†; GPT-4 80.5 → 82.1†) [arXiv:2311.08877] — implies the signal survives alignment but is masked. The degradation is partly repairable: in the RLHF loop via calibrated reward models (PPO-M: ECE −6.44 points, accuracy +2.73 on GSM8K vs. vanilla PPO†) [arXiv:2410.09724]; after the fact via calibration-aware fine-tuning (out-of-domain conf-ECE 0.0225 vs. 0.0499 label smoothing vs. 0.1160 temperature scaling†) [arXiv:2505.01997]; and partially via verbalized confidence, which halves ECE relative to conditional probabilities for RLHF models† [arXiv:2305.14975] but is itself overconfident, clustering at 80-100% in multiples of five† [arXiv:2306.13063]. One verified complication: in Lin et al.'s repository tables, finetuned verbalized uncertainty beats zero-shot logits under one distribution shift (multi-answer: MSE 22.0 vs. 37.4) and loses under another (multiply-divide: 15.5 vs. 10.4) — even the "fix" is shift-dependent.
+
+**C2 — Preference-based methods beat SFT on abstention/truthfulness quality.** Three studies supporting, none contradicting (p = 0.25); median relative gain 5.6% (range 1.6%-17.5%). The anchor is Cheng et al.'s within-paper comparison on model-specific IDK data (Llama-2-7b-chat, truthful rate): Idk-Prompting 66.93 < Idk-SFT 74.75 < Idk-HIR 75.91 < Idk-PPO 76.47 < Idk-DPO 77.89 < Idk-BoN 78.96† [arXiv:2401.13275]. Corroborating: KTO and IPO outperform SFT by 17.5% on TruthfulQA from an SFT'd base (9.5% from the pretrained base)† [arXiv:2404.14723], and the clinical comparison gives DPO +8% over SFT with p = 0.003 (JMIR e76048). Adjacent but not reducible to rows: factuality-DPO cuts factual error by ≥23% on biographies and 12% on medical QA vs. RLHF baselines† [arXiv:2311.08401]; listener-aware DPO yields 47% fewer incorrect answers accepted by human listeners† [arXiv:2405.21028]; factuality-aware alignment adds +5.6 FActScore over standard SFT+DPO without losing helpfulness† [arXiv:2405.01525].
+
+**C3 — Preference optimization reduces SFT-induced over-refusal.** One study (ours: the reanalysis, Section 5.3), supporting, exact numbers, n = 11,313. Vote counting is degenerate here (p = 1.0 with one study) — which is precisely why we ran the reanalysis rather than relying on the literature's qualitative statement of the same claim ("preference-aware optimization, like DPO, can alleviate the model's excessive conservatism"† [arXiv:2401.13275]).
+
+**C4 — Scale alone does not produce epistemic humility.** Four studies supporting, none contradicting (p = 0.125); median |relative change| 41.5%. Verified anchors: the best GPT-3 model is truthful on 58% of TruthfulQA questions against a 94% human baseline (n = 817; dataset held locally), with *inverse* scaling within families (GPT-J 6B is 17 points less truthful than its 125M sibling†) [arXiv:2109.07958]; GPT-4 detects unanswerable questions at F1 = 75.47 vs. a human 84.93 (n = 3,369; dataset held locally), with LLaMA-65B at 46.89† [arXiv:2305.18153]. Corroborating: sycophancy *grows* with scale to >90% user-view matching at 52B and is roughly flat across RLHF steps including zero† [arXiv:2212.09251]; PaLM sycophancy rises +19.8 points from 8B → 62B and +10.0 more to 540B† [arXiv:2308.03958]; AbstentionBench finds scale 8B → 405B has "almost no effect" on abstention while reasoning fine-tuning *degrades* abstention recall by 24% on average† [arXiv:2506.09038]; the PopQA long tail does not close with scale† [arXiv:2212.10511]. One genuine tension inside C4: the blog replication finds OpenAI *base* models at chance-level sycophancy (52.6%, CI 52.3-53.0) at every size, with sycophancy appearing only after feedback tuning (nostalgebraist 2023) — directly contradicting a scale-causal reading of Perez et al. The reconciliation we adopt: scale effects on sycophancy are conditional on pretraining corpus and tuning recipe; what is consistent everywhere is that scale does not *buy* humility.
+
+**C5 — Targeted training interventions improve humility metrics.** Ten studies supporting, none contradicting — the only family with a conventionally significant sign test (p = 0.002); median |relative change| 38.8% (range −80.6% to +40.4%). The supporting set spans intervention types: refusal-aware SFT (R-Tuning: accuracy-on-answered 92.89 → 93.23 in-domain, 68.42 → 69.41 out-of-domain†) [arXiv:2311.09677]; honesty-targeted SFT (honesty score 50.00 → 70.18 for the multisample variant, OOD†) [arXiv:2312.07000]; synthetic-data sycophancy interventions (−4.7 to −10.0 points†) [arXiv:2308.03958]; flip-resistance SFT (−60% accuracy deterioration under challenge, not eliminated†) [arXiv:2311.08596]; factuality DPO† [arXiv:2311.08401]; listener-aware DPO† [arXiv:2405.21028]; factuality-aware alignment† [arXiv:2405.01525]; calibrated-reward PPO† [arXiv:2410.09724]; calibration-aware fine-tuning† [arXiv:2505.01997]; and multi-LLM abstention (up to +19.3 abstain accuracy†) [arXiv:2402.00367]. The pattern is uniform in direction and meaningful in size, but note what it is *not*: none of these interventions is evaluated on more than a slice of the humility construct (Section 6.2).
+
+A unifying mechanism for C1/C5 comes from the hallucination strand: fine-tuning on facts the model does not already know causally drives hallucination, linearly in the number of Unknown examples fitted, with early stopping as a cheap mitigation† [arXiv:2405.05904], a mechanism elaborated as output-distribution drift [arXiv:2604.15574]; the *form* of hallucination on unfamiliar inputs mirrors how unfamiliar training examples were supervised, so relabeling the model's own unknowns with abstention targets is the supervision-side remedy† [arXiv:2403.05612]. This is the behavior-cloning/knowledge-mismatch hypothesis (Schulman 2023) made experimental — and it explains why every successful abstention method in C5 builds *model-specific* training splits.
+
+### 5.3 Worked example: independent reanalysis of Cheng et al.'s released outputs
+
+Output-level verification is feasible in this literature more often than it is practiced, and we offer one worked example. Cheng et al. [arXiv:2401.13275] released per-question outputs for their Llama-2-7b-chat variants on the TriviaQA IDK test set. We re-scored these outputs directly (`analysis/reanalyze_idk_outputs.py`; n = 11,313 questions: 6,216 labeled unknown, 5,097 known for this model). The headline asymmetry, which the paper's aggregate "truthful rate" obscures:
+
+| Method | Refusal recall on unknown (%) | Over-refusal on known (%) | Overall refusal rate (%) |
+|---|---|---|---|
+| Idk-SFT | 84.06 | 42.71 | 65.43 |
+| Idk-DPO | 71.19 | 23.27 | 49.60 |
+| Idk-PPO | 73.89 | 30.86 | 54.50 |
+| Idk-BoN | 73.95 | 25.64 | 52.19 |
+| Idk-HIR | 88.37 | 45.16 | 68.90 |
+
+*(Exact values computed from the authors' released outputs; verified. Companion approximate-truthfulness columns in `idk-method-reanalysis.csv` are interim pending an exact-match answer grader and are not used for claims here.)*
+
+Three observations. First, the SFT-trained model is an aggressive refuser: it refuses 42.71% of the questions it demonstrably knows. DPO cuts that over-refusal nearly in half (23.27%, a −45.5% relative reduction), PPO and BoN by −27.7% and −40.0% respectively — C3 in exact numbers. Second, the improvement is a *trade*, not a free lunch: DPO's refusal recall on genuinely unknown questions falls from 84.06% to 71.19% (−15.3% relative). Preference optimization moves the operating point along a refusal ROC curve; it does not obviously improve the underlying discrimination. Third, HIR lands on the opposite corner (highest recall, worst over-refusal), confirming that "method X beats method Y on truthful rate" claims are operating-point claims. Any future training comparison that reports a single scalar abstention metric without the recall/over-refusal decomposition is under-reporting — and we could only see this because the authors released outputs. We did not find released outputs for most other studies in the corpus.
+
+### 5.4 What the benchmarks add
+
+The knowledge-boundary benchmarks bound how far current models are from the construct: GPT-4 incorrectly complies with up to 30% of noncompliance-warranting requests in understudied categories† [arXiv:2407.12043]; frontier models capitulate to rebuttals at 58.19% overall (regressive right-to-wrong flips 14.66%; persistence 78.5%, CI 77.2-79.8) [arXiv:2502.08177]; models flip 46% of the time under a simple "are you sure?" challenge, losing 17 accuracy points on average† [arXiv:2311.08596]; one frontier assistant wrongly admitted mistakes on 98% of challenged correct answers† [arXiv:2310.13548]; and LLMs preserve the user's face 45 points more than humans, affirming both sides of the same moral conflict in 48% of flipped pairs† [arXiv:2505.13995]. The sycophancy-to-subterfuge result extends the stakes from honesty to control: a curriculum that rewards sycophancy-like gaming generalizes, zero-shot, to a model rewriting its own reward function in 45 of 32,768 held-out trials, with track-covering in 7 of the 45† [arXiv:2406.10162].
+
+### 5.5 The L1-clustering observation
+
+Mapping the 59 rows onto the Formalization Stack yields the synthesis's simplest and perhaps most consequential descriptive finding: **the literature's quantitative measurements live almost entirely at L1.** Every calibration row is L1 by definition; every abstention row formalizes "I don't know" as a *flat* binary (refuse/answer) scored against a knowledge split — L1-adjacent behavior with no gap structure; the sycophancy rows measure capitulation, an L1-coherence hybrid at best. L2 (structured ignorance) contributes training results only from a single 2026 paper outside our extraction window's core† [arXiv:2606.08571]; L3 (distributional signatures) contributes diagnostic machinery but no training intervention at all [arXiv:2606.05145]; L4 (objective uncertainty) contributes one result, in an RL setting not yet connected to any humility benchmark† [arXiv:2606.03962]. The explanation is unflattering but practical: L1 is where the metrics are. ECE and refusal rates are cheap; gap-naming quality, failure-shape prediction, and reward-distribution calibration require evaluation infrastructure that mostly does not exist. The risk is a streetlight effect at field scale: training methods are being selected by their L1 scores, and one 2026 result already warns that RL-style training can collapse output diversity† [arXiv:2606.08543] — a model that always emits the same refusal template would score perfectly on every L1 abstention metric while having learned, in the companion essay's phrase, the form of ignorance without the substance.
+
+## 6. Discussion
+
+### 6.1 The unreconciled tension
+
+Set C1 beside C2/C3 and the literature's central unresolved problem comes into focus. Preference-based post-training is the best available tool for abstention quality, factuality, and over-refusal control (C2, C3, FactTune, LACIE, FLAME) — and preference-based post-training is also the documented destroyer of token-level calibration (C1; "the preference collapse issue in alignment... causing LLMs to exhibit overconfidence and poor calibration"† [arXiv:2505.01997]). These findings come from disjoint studies measuring disjoint metrics on disjoint models. **No study in our corpus measures token-level ECE, abstention quality, and factuality after the same preference-training run.** It is therefore currently unknown whether the methods that teach a model to *say* "I don't know" at the right times simultaneously degrade the token-level signal that says the same thing — i.e., whether we are buying L-stated humility by selling L-token humility. The reanalysis (Section 5.3) sharpens the worry: DPO's abstention gain was an operating-point shift, not a discrimination gain, which is exactly what one would predict if preference tuning reshapes the output policy without improving (or while degrading) the underlying epistemic signal.
+
+### 6.2 Estimator fragility undermines single-metric claims
+
+The coherence-axis literature gives the tension a deeper reading. If token-probability, hidden-state, and consistency-based estimators of "the model's confidence" diverge on the same traces [arXiv:2606.03969], then every single-metric claim in our corpus — including every C5 success — is a claim about *one estimator*. A training method can improve verbalized calibration while leaving token-level calibration untouched (Tian et al.'s 50% relative gap between the two is direct evidence the estimators dissociate under RLHF† [arXiv:2305.14975]); the surrogate-model result shows the token-level signal persisting in base weights while the stated signal is broken† [arXiv:2311.08877]; and the metacognition result shows that even within stated confidence, single-answer assessment and cross-answer comparison are learned as distinct, non-transferring routines† [arXiv:2510.05126]. The methodological consequence for the field: humility evaluations should be reported as estimator *panels* (stated, token-level, and where weights are open, probe-based), and a training method's effect should be summarized by its coherence delta — did the estimators move together? — not by any single number.
+
+### 6.3 Verified method gaps
+
+The gap analysis (raw report 05) was run as explicit searches against the literature, so the following are falsifiable claims about absence as of June 2026, with stated confidence:
+
+1. **KTO has never been applied to abstention, honesty, or calibration training** (high confidence; targeted searches across "KTO + abstention/IDK/calibration/honesty" returned zero hits, and the KTO paper's own application list contains none [arXiv:2402.01306]). This is a conspicuous gap because KTO's structure fits the problem unusually well: it consumes unpaired binary feedback — which is exactly what a known/unknown split is — and its prospect-theoretic asymmetric loss aversion mirrors the asymmetric cost of hallucination versus abstention. Nearest indirect evidence: KTO beats SFT by 9.5-17.5% on TruthfulQA† [arXiv:2404.14723], and KTO-without-SFT hallucinates less than DPO-without-SFT† [arXiv:2402.01306].
+2. **No SFT vs. DPO vs. KTO three-way comparison exists on the same abstention dataset** (high confidence). Cheng et al. compare SFT/DPO/PPO/BoN/HIR but not KTO† [arXiv:2401.13275]; the semantic-entropy paper uses SFT and DPO but not KTO† [arXiv:2410.17234]; the one SFT/DPO/KTO comparison that exists uses generic benchmarks, not abstention training† [arXiv:2404.14723].
+3. **GRPO and the verifiable-RL family are equally absent from controlled humility comparisons.** The RL-for-abstention line exists — RLCR's Brier-augmented reward improves OOD calibration where binary-reward RLVR degrades it† [arXiv:2507.16806]; RLKF [arXiv:2403.18349]; fine-grained semantic-confidence rewards [arXiv:2510.24020]; reinforced hesitation [arXiv:2511.11500] — but none of it is benchmarked against SFT/DPO/KTO arms on a shared dataset, and the AbstentionBench result that reasoning-RL *degrades* abstention by 24%† [arXiv:2506.09038] makes the sign of a generic RL arm genuinely uncertain.
+4. **No probe-transfer study tests whether humility fine-tuning changes representations or only behavior.** P(IK)-style probes exist [arXiv:2207.05221] and humility fine-tunes exist (C5), but no paper trains a correctness probe on a base model's hidden states and tests whether it still reads the fine-tuned model — the direct test of performed-versus-possessed humility, and the cheapest one, since it needs only open weights and a linear probe.
+5. **No dose-response curve for IDK-example fraction in epistemic abstention** (medium-high confidence). The only fraction sweep found concerns *safety* refusals (2% refusal data → 6% over-refusal, 24% attack success†) [arXiv:2505.19056]; R-Tuning successors vary *which* questions become IDK, never *how many*, and report no abstention-precision/over-refusal Pareto curve.
+6. **Small-model and OOD-transfer coverage is thin.** Nearly all training evidence sits at 7B+; whether abstention-as-meta-skill† [arXiv:2311.09677] holds at 1-3B is untested (the lone small-model entry, Abstain-R1 on Qwen2.5-3B, is RL-only). Cross-domain transfer of *trained* humility is positive but SFT-only and inconsistent (R-Tuning OOD†; calibration-tuning transfer with ~1,000 graded examples sufficing† [arXiv:2406.08391]; EliCal's 1k-annotation near-optimality† [arXiv:2510.17509]; cross-domain SFT gains† [arXiv:2510.05126]) — no paper measures whether DPO- or KTO-trained abstention transfers out of domain, and the metric zoo (AP, prudence, truthful rate, AED, abstention recall) prevents cross-study comparison even where transfer is measured.
+
+### 6.4 Positioning
+
+Relative to the existing surveys — abstention methods [arXiv:2407.18418] and LLM honesty [arXiv:2409.18786] — this synthesis differs in being quantitative (extracted effects with a uniform schema and verification flags rather than narrative method taxonomy), in unifying five literatures usually treated separately, and in organizing by formalization depth rather than method family. A fuller related-work positioning paragraph is deferred to v1 (TODO.md).
+
+## 7. Limitations
+
+**Snippet-derived numbers pending PDF verification.** This is the draft's largest limitation and we state it bluntly: 49 of 59 rows (29 of 34 studies) are `verified=false` — extracted from search-snippet renderings of papers whose PDFs were unreachable from the sandboxed environment (HTTP 403 on arxiv.org, aclanthology.org, openreview.net). All such values are daggered in the text and excluded from headline claims. The headline numbers that *are* verified against primary artifacts: the entire Cheng-outputs reanalysis (Section 5.3 table; n = 11,313); Lin et al.'s CalibratedMath MSE values (22.0 vs. 37.4; 15.5 vs. 10.4) from the official repository; LLM-Uncertainty-Bench scale results (45.60 → 65.86 accuracy, 3.20 → 2.62 set size; n = 10,000/task) from the official repository; TruthfulQA's 58% vs. 94% human (n = 817; dataset held locally and recomputable); and SelfAware's GPT-4 F1 75.47 vs. human 84.93 (n = 3,369; dataset held locally). A full PDF verification pass is the first pre-submission task. Until then, the sign-test conclusions are robust to plausible transcription error (they depend only on effect direction, which snippets rarely garble), but every specific magnitude should be treated as provisional.
+
+**Single-extractor bias.** Each raw report was produced by one search agent and each effects row by one extractor; there is no double extraction, no inter-rater agreement statistic, and no PRISMA-style flow accounting of records screened versus included (queued in TODO.md). The claim families were articulated after seeing the raw reports, so C1-C5 are confirmatory in form but exploratory in origin; the sign tests should be read descriptively.
+
+**Coverage.** English-language papers only; arXiv-centric with two gray-literature items admitted by exception (Section 4.2) — publication and visibility bias is uncorrected, and a literature this young likely has a file drawer of null interventions that vote counting cannot see. The search cutoff is June 2026; the L2-L4 levels of the framework rest on a small 2025-2026 cluster whose IDs are still being verified against the library manifest.
+
+**Construct breadth.** "Epistemic humility" as operationalized here inherits the literature's L1 bias (Section 5.5): our synthesis quantifies what the field measured, which is mostly scalar confidence and flat refusal. The framework names what is missing, but the corpus cannot fill it.
+
+## 8. Future work: toward coherent humility
+
+The synthesis points at one experiment-shaped question more insistently than any other. The unreconciled tension (Section 6.1), the estimator-fragility problem (Section 6.2), and gaps 1-4 (Section 6.3) are all facets of a single unknown: **when fine-tuning makes a model behave humbly, does anything change beneath the behavior?** The companion research program (experiment/protocol/RESEARCH-DIRECTIONS.md) frames this as *coherent humility*: training a model whose intellectual humility agrees across its tokens, its hidden states, and its stated confidence — and verifying that agreement mechanistically rather than behaviorally. The measurement design follows from this synthesis directly: any future training comparison (the natural arms, given the verified gaps, are SFT, KTO, and a GRPO-style calibration-aware-reward arm) should be evaluated as a three-layer panel — token-level calibration, hidden-state probes of the P(IK) type with base-to-tuned probe-transfer analysis, and stated behavior with the recall/over-refusal decomposition of Section 5.3 — so that the result is a coherence delta rather than another single-metric win. All three possible probe-transfer outcomes are informative: layers moving together (humility internalized), behavior moving over unchanged hidden states (humility performed — the polite liar with better manners), or probes ceasing to transfer (representations moved; localize per layer). We deliberately do not pre-commit a design here; the point of this synthesis is that the field has enough evidence to pick that hypothesis well, and not yet enough to assume its answer.
+
+## 9. References
+
+All references by arXiv ID (plain list; bibliographic pass pending — see TODO.md). Items marked with † in the text were extracted via search snippets and await PDF verification.
+
+- arXiv:2109.07958 — TruthfulQA: Measuring How Models Mimic Human Falsehoods (Lin, Hilton, Evans; ACL 2022)
+- arXiv:2205.14334 — Teaching Models to Express Their Uncertainty in Words (Lin, Hilton, Evans; TMLR 2022)
+- arXiv:2207.05221 — Language Models (Mostly) Know What They Know (Kadavath et al., 2022)
+- arXiv:2212.09251 — Discovering Language Model Behaviors with Model-Written Evaluations (Perez et al., 2022)
+- arXiv:2212.10511 — When Not to Trust Language Models / PopQA (Mallen et al., 2023)
+- arXiv:2303.08774 — GPT-4 Technical Report (OpenAI, 2023)
+- arXiv:2305.14251 — FActScore (Min et al., EMNLP 2023)
+- arXiv:2305.14975 — Just Ask for Calibration (Tian et al., EMNLP 2023)
+- arXiv:2305.18153 — Do Large Language Models Know What They Don't Know? / SelfAware (Yin et al., 2023)
+- arXiv:2306.13063 — Can LLMs Express Their Uncertainty? (Xiong et al., ICLR 2024)
+- arXiv:2308.03958 — Simple synthetic data reduces sycophancy in large language models (Wei et al., 2023)
+- arXiv:2310.11732 — Investigating Uncertainty Calibration of Aligned Language Models under the Multiple-Choice Setting (2023)
+- arXiv:2310.13548 — Towards Understanding Sycophancy in Language Models (Sharma et al., ICLR 2024)
+- arXiv:2311.08401 — Fine-tuning Language Models for Factuality / FactTune (Tian et al., 2023)
+- arXiv:2311.08596 — The FlipFlop Experiment (Laban et al., 2023)
+- arXiv:2311.08877 — Llamas Know What GPTs Don't Show (Shrivastava, Liang, Kumar, 2023)
+- arXiv:2311.09677 — R-Tuning: Instructing Large Language Models to Say 'I Don't Know' (NAACL 2024)
+- arXiv:2311.13240 — On the Calibration of Large Language Models and Alignment (Zhu et al., 2023)
+- arXiv:2312.07000 — Alignment for Honesty (NeurIPS 2024)
+- arXiv:2401.12794 — Benchmarking LLMs via Uncertainty Quantification (Ye et al., NeurIPS 2024 D&B)
+- arXiv:2401.13275 — Can AI Assistants Know What They Don't Know? (Cheng et al., ICML 2024)
+- arXiv:2402.00367 — Don't Hallucinate, Abstain (Feng et al., ACL 2024)
+- arXiv:2402.01306 — KTO: Model Alignment as Prospect Theoretic Optimization (Ethayarajh et al., 2024)
+- arXiv:2403.05612 — Unfamiliar Finetuning Examples Control How Language Models Hallucinate (Kang et al., NAACL 2025)
+- arXiv:2403.18349 — Rejection Improves Reliability / RLKF (2024)
+- arXiv:2404.14723 — Insights into Alignment: Evaluating DPO and its Variants (2024)
+- arXiv:2405.01525 — FLAME: Factuality-Aware Alignment (NeurIPS 2024)
+- arXiv:2405.05904 — Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations? (Gekhman et al., EMNLP 2024)
+- arXiv:2405.21028 — LACIE: Listener-Aware Finetuning for Confidence Calibration (NeurIPS 2024)
+- arXiv:2406.08391 — Large Language Models Must Be Taught to Know What They Don't Know (Kapoor, Gruver et al., NeurIPS 2024)
+- arXiv:2406.10162 — Sycophancy to Subterfuge: Reward-Tampering (Denison et al., 2024)
+- arXiv:2407.12043 — The Art of Saying No / CoCoNot (NeurIPS 2024 D&B)
+- arXiv:2407.18418 — Know Your Limits: A Survey of Abstention in Large Language Models (2024)
+- arXiv:2409.18786 — A Survey on the Honesty of Large Language Models (2024)
+- arXiv:2410.09724 — Taming Overconfidence in LLMs: Reward Calibration in RLHF (Leng et al., ICLR 2025)
+- arXiv:2410.17234 — Fine-Tuning LLMs to Appropriately Abstain with Semantic Entropy (2024)
+- arXiv:2502.08177 — SycEval: Evaluating LLM Sycophancy (AIES 2025)
+- arXiv:2505.01997 — Restoring Calibration for Aligned Large Language Models (ICML 2025)
+- arXiv:2505.13995 — ELEPHANT: Measuring and understanding social sycophancy in LLMs (2025)
+- arXiv:2505.19056 — An Embarrassingly Simple Defense Against LLM Abliteration Attacks (2025)
+- arXiv:2506.09038 — AbstentionBench: Reasoning LLMs Fail on Unanswerable Questions (FAIR, 2025)
+- arXiv:2506.18183 — Reasoning models do not know when they don't know (Mei et al., 2025)
+- arXiv:2507.16806 — Beyond Binary Rewards: Training LMs to Reason About Their Uncertainty / RLCR (Damani et al., 2025)
+- arXiv:2508.15050 — Don't Think Twice (Lacombe, Wu, Dilworth, 2025)
+- arXiv:2509.04664 — Why Language Models Hallucinate (Kalai, Nachum, Vempala, Zhang, 2025)
+- arXiv:2509.20088 — Causal Understanding by LLMs: The Role of Uncertainty (2025)
+- arXiv:2510.05126 — Improving Metacognition and Uncertainty Communication in Language Models (Steyvers, Belem, Smyth, 2025)
+- arXiv:2510.17509 — Annotation-Efficient Universal Honesty Alignment / EliCal (2025)
+- arXiv:2510.24020 — Fine-Grained Semantic Confidence Reward / FiSCoRe (2025)
+- arXiv:2511.07477 — Epistemic pathology and the "polite liar" (DeVilling, 2025)
+- arXiv:2511.11500 — Honesty over Accuracy: Reinforced Hesitation (2025)
+- arXiv:2603.24967 — Uncertainty source decomposition (Taparia et al., 2026)
+- arXiv:2604.03147 — Sycophancy in internal representations (Sun et al., 2026)
+- arXiv:2604.15574 — Why Fine-Tuning Encourages Hallucinations and How to Fix It (Kaplan, Gekhman et al., 2026)
+- arXiv:2605.21127 — Silent reasoning-trace suppression under additional training (Twist et al., 2026)
+- arXiv:2606.03962 — Reward uncertainty and calibrated behavioral diversity (GX-Chen et al., 2026)
+- arXiv:2606.03969 — Faithful calibration framework / estimator fragility (Gani et al., 2026)
+- arXiv:2606.05145 — Distributional failure signatures (Islah et al., 2026)
+- arXiv:2606.06475 — Stepwise trace scoring (Ielanskyi et al., 2026)
+- arXiv:2606.08543 — RL training and output-diversity collapse (Yang et al., 2026)
+- arXiv:2606.08571 — Structured Ignorance Certificates / Unknown-Unknown dataset (Sahoo, 2026)
+
+Non-arXiv items:
+
+- OpenAI (2025). "Sycophancy in GPT-4o: What happened" and "Expanding on sycophancy" (production postmortems, April-May 2025).
+- nostalgebraist (2023). "OpenAI API base models are not sycophantic, at any size" (LessWrong/Alignment Forum replication).
+- JMIR 2025;27:e76048 — Fine-Tuning Methods for LLMs in Clinical Medicine by SFT and DPO.
+- Schulman, J. (2023). "RLHF: Progress and Challenges" (Berkeley talk, April 2023).
+- Professor Synapse (2026). "Artificial Intellectual Humility: From Confidence Scores to Structured Ignorance" (companion essay; source of the Formalization Stack adopted in Section 3).
