@@ -554,3 +554,12 @@ Semantic-level Reward (2605.15588); Blockwise Advantage Estimation for Multi-Obj
    incentives (2512.00218 "Reasoning Under Pressure"; Baker et al. 2025 obfuscated reward
    hacking; METR 2026-04 fine-tuning CoT controllability blog). Essay should re-check its
    source for this claim.
+
+4. **2605.21127 SECOND CORRECTION (2026-06-10): the paper EXISTS.** User confirmed by
+   directly opening https://arxiv.org/abs/2605.21127. The earlier NOT-FOUND verdict was a
+   web-search-index blind spot (recent preprint, not yet indexed), compounded by the
+   environment's network block on arxiv.org preventing direct verification. Restored to the
+   manifest as candidate; title/authors/abstract to be pulled by fetch_library.py --enrich
+   once the network allowlist includes arxiv.org. LESSON for the verification protocol:
+   "not found via WebSearch" is NOT sufficient evidence of non-existence for 2026 preprints —
+   only a direct arXiv fetch (or user confirmation) can settle existence.

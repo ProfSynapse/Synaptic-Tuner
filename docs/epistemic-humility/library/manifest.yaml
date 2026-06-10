@@ -401,8 +401,8 @@ papers:
   title: Additional training silently suppresses reasoning traces (Twist et al.)
   year: 2026
   area: methods
-  status: not-found
-  note: NOT FOUND on arXiv (essay citation) — re-source
+  status: candidate
+  note: USER-CONFIRMED to exist at arxiv.org/abs/2605.21127 (2026-06-10); not yet indexed by web search; title/abstract pending --enrich
 - arxiv: '2604.03147'
   slug: sycophancy-internal-representations
   title: 'Valence-Arousal Subspace in LLMs: Circular Emotion Geometry and Multi-Behavioral Control'
