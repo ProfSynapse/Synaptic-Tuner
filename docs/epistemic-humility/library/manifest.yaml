@@ -405,11 +405,11 @@ papers:
   note: NOT FOUND on arXiv (essay citation) — re-source
 - arxiv: '2604.03147'
   slug: sycophancy-internal-representations
-  title: Sycophancy encoded in internal representations (Sun)
+  title: 'Valence-Arousal Subspace in LLMs: Circular Emotion Geometry and Multi-Behavioral Control'
   year: 2026
   area: sycophancy
-  status: mis-cited
-  note: ID resolves to a valence-arousal paper, NOT sycophancy representations — essay needs rewording
+  status: candidate
+  note: 'essay citation CONFIRMED on re-check (initially mis-flagged): arousal steering moves sycophancy 61->84% (Political Typology); Llama-3.1-8B, Qwen3-8B/14B; authors TBD'
 - arxiv: '2606.08571'
   slug: structured-ignorance-certificates
   title: Structured Ignorance Certificates + Unknown-Unknown dataset, 7347 cross-domain questions (Sahoo)
@@ -564,3 +564,24 @@ papers:
   area: methods
   status: candidate
   note: from raw-reports/06 verification pass
+- arxiv: '2604.16027'
+  slug: posttraining-diversity-collapse
+  title: Where does output diversity collapse in post-training?
+  year: 2026
+  area: methods
+  status: candidate
+  note: Karouzos/Tan/Aletras, Sheffield; Olmo-3 lineages; likely intended target of essay's diversity-collapse cite
+- arxiv: '2512.00218'
+  slug: reasoning-under-pressure-monitorability
+  title: 'Reasoning Under Pressure: How do Training Incentives Influence Chain-of-Thought Monitorability?'
+  year: 2025
+  area: verification
+  status: candidate
+  note: nearest verified literature to essay's trace-suppression claim
+- arxiv: '2509.07430'
+  slug: choice-of-divergence-rlvr-diversity
+  title: 'The Choice of Divergence: A Neglected Key to Mitigating Diversity Collapse in RLVR'
+  year: 2025
+  area: methods
+  status: candidate
+  note: RLVR diversity collapse + mitigation

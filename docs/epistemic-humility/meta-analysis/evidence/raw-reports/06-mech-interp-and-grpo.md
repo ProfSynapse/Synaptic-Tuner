@@ -529,3 +529,28 @@ Semantic-level Reward (2605.15588); Blockwise Advantage Estimation for Multi-Obj
    2606.08543), 1 is title-only (2606.03969 — no findings extractable), 1 is topic-mismatched
    (2604.03147). Recommend the essay cite 2606.03969 by confirmed title only, drop or re-source
    the two NOT-FOUND IDs, and re-describe 2604.03147.
+
+
+---
+
+## POST-HOC CORRECTION (2026-06-10, orchestrator re-check of essay-cited IDs)
+
+1. **2604.03147 verdict REVERSED — the essay citation is CORRECT.** The "valence-arousal"
+   paper IS a sycophancy paper: "Valence-Arousal Subspace in LLMs: Circular Emotion Geometry
+   and Multi-Behavioral Control" — steering along the arousal axis gives near-monotonic
+   bidirectional control over sycophancy (78% baseline -> 61% at low arousal, 84% at high
+   arousal, Political Typology benchmark; replicated on Llama-3.1-8B, Qwen3-8B, Qwen3-14B).
+   The essay's paraphrase ("how positively and how intensely the model frames its responses")
+   maps exactly onto valence/arousal. Authorship ("Sun") still unconfirmed.
+   URL: https://arxiv.org/abs/2604.03147
+2. **2606.08543 (Yang, diversity collapse): ID confirmed wrong, but the CLAIM is
+   well-supported by real literature.** Best-match: "Where does output diversity collapse in
+   post-training?" (arXiv 2604.16027, Karouzos/Tan/Aletras — SFT/DPO/RL lineages of Olmo 3,
+   15 tasks, 4 diversity metrics); plus the RLVR diversity-collapse line (2509.07430,
+   2605.00365, entropy-collapse work). No "Yang" authorship match found — essay should
+   re-source or re-attribute.
+3. **2605.21127 (Twist, silent trace suppression): still NOT FOUND** under any searched
+   phrasing. Nearest verified literature: CoT-monitorability degradation under training
+   incentives (2512.00218 "Reasoning Under Pressure"; Baker et al. 2025 obfuscated reward
+   hacking; METR 2026-04 fine-tuning CoT controllability blog). Essay should re-check its
+   source for this claim.
