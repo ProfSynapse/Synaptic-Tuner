@@ -1,0 +1,55 @@
+# RTX 3090 DPO Training Requirements - STABLE VERSIONS
+# Hardware: NVIDIA RTX 3090 (24GB, Ampere, CUDA Capability 8.6)
+# Last Updated: November 2025
+#
+# DPO/TRL VERSION NOTE: the trl==0.11.4 pin below is the local RTX-3090 stable
+# baseline (DPOTrainer takes `tokenizer=` there). train_dpo.py is written for
+# modern TRL (>=0.22.x, used by the cloud recipes under Trainers/recipes/) where
+# DPOTrainer takes `processing_class=`. For local runs on the old pin, the
+# trainer's `processing_class=tokenizer` call must be adjusted to `tokenizer=`,
+# or upgrade trl in this file to match the cloud recipes.
+
+# IMPORTANT: Do NOT install Unsloth from this file
+# Unsloth requires special installation - see setup.sh
+
+# PyTorch with CUDA 12.1 support (stable for RTX 3090)
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+# Core ML libraries (tested compatible versions)
+transformers==4.45.2
+datasets==2.16.1
+accelerate==0.27.0
+
+# Quantization and LoRA
+bitsandbytes==0.43.0
+peft==0.7.1
+
+# TRL for KTO Training (compatible with transformers 4.45.2)
+trl==0.11.4
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.65.0
+
+# CRITICAL: huggingface-hub 0.25.0 required for Unsloth 2024.9 compatibility
+# DO NOT upgrade - newer versions break Unsloth due to missing _token module
+huggingface-hub==0.25.0
+
+# Additional dependencies for datasets and transformers
+tokenizers>=0.20,<0.21
+fsspec[http]>=2023.1.0,<=2023.10.0
+pyarrow>=14.0.0
+pyarrow_hotfix
+sentencepiece>=0.1.99  # Required for tokenizer
+protobuf<4.0.0  # Required by Unsloth
+
+# Optional: Weights & Biases
+# wandb>=0.16.0
+
+# Note: Flash Attention is optional but recommended
+# Install separately: MAX_JOBS=4 pip install flash-attn==2.5.9.post1 --no-build-isolation
+python-dotenv

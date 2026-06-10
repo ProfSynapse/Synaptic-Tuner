@@ -62,7 +62,7 @@ class MergeHandler(BaseHandler):
 
         checkpoints = []
 
-        for trainer_type in ['sft', 'kto', 'grpo']:
+        for trainer_type in ['sft', 'kto', 'grpo', 'dpo']:
             runs = discovery.discover(trainer_type, limit=20)
 
             for run_path in runs:

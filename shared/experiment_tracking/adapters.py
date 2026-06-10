@@ -94,6 +94,19 @@ def kto_lineage_to_run_record(
     )
 
 
+def dpo_lineage_to_run_record(
+    lineage: dict[str, Any],
+    run_dir: str,
+    *,
+    run_id: str | None = None,
+    cloud: bool = False,
+) -> RunRecord:
+    """Convert a DPO training_lineage.json dict to a RunRecord."""
+    return _training_lineage_to_run_record(
+        lineage, run_dir, "dpo", run_id=run_id, cloud=cloud,
+    )
+
+
 def ml_tracking_to_run_record(
     tracking_data: dict[str, Any],
     run_dir: str,

@@ -219,7 +219,7 @@ Examples:
 
     # Cloud-specific flags
     parser.add_argument("--run", help="Cloud run slug or prefix to use (cloud-eval, cloud-gym only). Use 'latest' for newest.")
-    parser.add_argument("--method", choices=["sft", "kto", "grpo"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
+    parser.add_argument("--method", choices=["sft", "kto", "grpo", "dpo"], help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym/bucket.")
     parser.add_argument("--path", help="Bucket-relative, hf://, or local path for bucket commands.")
     parser.add_argument("--dest", help="Destination for bucket pull/push. Local dir for pull, remote bucket path for push.")

@@ -197,14 +197,16 @@ def main():
     )
 
     # Friendly model selection shortcuts
-    # 3B models (fast iteration)
+    # 3-4B models (fast iteration)
     parser.add_argument("--qwen-3b", action="store_true", help="Use Qwen2.5 3B Instruct (fast iteration)")
     parser.add_argument("--llama-3b", action="store_true", help="Use Llama 3.2 3B Instruct (fast iteration)")
+    parser.add_argument("--qwen3-4b", action="store_true", help="Use Qwen3 4B Instruct (Phase 1 pilot pin)")
 
     # 7-8B models (production quality)
     parser.add_argument("--mistral-7b", action="store_true", help="Use Mistral 7B v0.3 (production quality)")
     parser.add_argument("--llama-8b", action="store_true", help="Use Llama 3.1 8B Instruct")
     parser.add_argument("--qwen-7b", action="store_true", help="Use Qwen2.5 7B Instruct")
+    parser.add_argument("--qwen3-8b", action="store_true", help="Use Qwen3 8B Instruct (Phase 1 confirm pin)")
     parser.add_argument("--magistral", action="store_true", help="Use Magistral Small 2509 (~7B)")
     parser.add_argument("--deepseek-7b", action="store_true", help="Use DeepSeek R1 Distill Qwen 7B (reasoning)")
     parser.add_argument("--qwen-vl-8b", action="store_true", help="Use Qwen3 VL 8B Instruct (vision-language)")
@@ -416,14 +418,16 @@ def main():
 
     # Process friendly model selection flags
     model_map = {
-        # 3B models
+        # 3-4B models
         'qwen_3b': ('3b', 'unsloth/Qwen2.5-3B-Instruct-bnb-4bit'),
         'llama_3b': ('3b', 'unsloth/Llama-3.2-3B-Instruct-bnb-4bit'),
+        'qwen3_4b': ('3b', 'unsloth/Qwen3-4B-Instruct-bnb-4bit'),
 
         # 7-8B models
         'mistral_7b': ('7b', 'unsloth/mistral-7b-v0.3-bnb-4bit'),
         'llama_8b': ('7b', 'unsloth/llama-3.1-8b-instruct-bnb-4bit'),
         'qwen_7b': ('7b', 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit'),
+        'qwen3_8b': ('7b', 'unsloth/Qwen3-8B-Instruct-bnb-4bit'),
         'magistral': ('7b', 'unsloth/Magistral-Small-2509-unsloth-bnb-4bit'),
         'deepseek_7b': ('7b', 'unsloth/DeepSeek-R1-Distill-Qwen-7B-unsloth-bnb-4bit'),
         'qwen_vl_8b': ('7b', 'unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit'),
@@ -1085,7 +1089,7 @@ def main():
             sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
 
     print("\nTo upload to HuggingFace:")
-    print(f"  model.push_to_hub_merged('username/model-name', tokenizer, save_method='merged_16bit')")
+    print("  model.push_to_hub_merged('username/model-name', <text-encoder>, save_method='merged_16bit')")
     print(f"  # Or use: python src/upload_to_hf.py {output_path} username/model-name")
     if debugger:
         debugger.close()

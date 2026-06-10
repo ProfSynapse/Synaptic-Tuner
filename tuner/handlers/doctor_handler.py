@@ -649,7 +649,7 @@ class DoctorHandler(BaseHandler):
                 ))
 
         # Training output folders
-        for trainer in ["sft", "kto", "grpo"]:
+        for trainer in ["sft", "kto", "grpo", "dpo"]:
             for output_folder in iter_training_output_dirs(trainer, self.repo_root):
                 if output_folder.exists():
                     run_count = len([d for d in output_folder.iterdir() if d.is_dir()])

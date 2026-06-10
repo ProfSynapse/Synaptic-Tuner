@@ -1,0 +1,11 @@
+# Thorough tier: maximum quality training
+# ~2-4 hours, best results on sufficient data
+# Note: DPO uses a low LR and few epochs even at the thorough tier; only the
+# LoRA budget grows relative to standard.
+r: 128
+lora_alpha: 256
+learning_rate: 5e-6
+num_train_epochs: 1
+warmup_ratio: 0.1
+batch_size: 4
+gradient_accumulation_steps: 8

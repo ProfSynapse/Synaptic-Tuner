@@ -63,7 +63,7 @@ class TestHFJobsBackendProperties:
 
     def test_available_methods(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        assert backend.get_available_methods() == ["sft", "kto", "grpo"]
+        assert backend.get_available_methods() == ["sft", "kto", "grpo", "dpo"]
 
 
 class TestHFJobsValidateEnvironment:
@@ -157,7 +157,7 @@ class TestHFJobsLoadConfig:
     def test_raises_on_unknown_method(self, repo_root):
         backend = HFJobsBackend(repo_root)
         with pytest.raises(ConfigurationError, match="Unknown method"):
-            backend.load_config("dpo")
+            backend.load_config("orpo")
 
     def test_raises_on_missing_config(self, tmp_path):
         backend = HFJobsBackend(tmp_path)

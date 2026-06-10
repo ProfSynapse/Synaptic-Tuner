@@ -120,9 +120,9 @@ class HFJobsBackend(
         the scripts run unchanged in the cloud environment.
 
         Returns:
-            List of method names: ['sft', 'kto', 'grpo']
+            List of method names: ['sft', 'kto', 'grpo', 'dpo']
         """
-        return ["sft", "kto", "grpo"]
+        return ["sft", "kto", "grpo", "dpo"]
 
     def validate_environment(self) -> Tuple[bool, str]:
         """
