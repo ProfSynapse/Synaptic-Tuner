@@ -370,11 +370,11 @@ papers:
   status: candidate
 - arxiv: '2606.03969'
   slug: faithful-calibration-framework
-  title: 'Faithful Calibration framework (Gani et al., Yale): expressed confidence vs internal state; estimator fragility'
+  title: Quantifying Faithful Confidence Expression in Large Reasoning Models
   year: 2026
   area: calibration
   status: candidate
-  note: cited in essays/01 — ID needs verification on enrich
+  note: title confirmed; numbers not retrievable — cite framework only
 - arxiv: '2508.15050'
   slug: dont-think-twice
   title: 'Don''t Think Twice: more reasoning time impairs calibration (Lacombe, Wu, Dilworth)'
@@ -401,15 +401,15 @@ papers:
   title: Additional training silently suppresses reasoning traces (Twist et al.)
   year: 2026
   area: methods
-  status: candidate
-  note: cited in essays/01 — ID needs verification on enrich
+  status: not-found
+  note: NOT FOUND on arXiv (essay citation) — re-source
 - arxiv: '2604.03147'
   slug: sycophancy-internal-representations
   title: Sycophancy encoded in internal representations (Sun)
   year: 2026
   area: sycophancy
-  status: candidate
-  note: cited in essays/01 — ID needs verification on enrich
+  status: mis-cited
+  note: ID resolves to a valence-arousal paper, NOT sycophancy representations — essay needs rewording
 - arxiv: '2606.08571'
   slug: structured-ignorance-certificates
   title: Structured Ignorance Certificates + Unknown-Unknown dataset, 7347 cross-domain questions (Sahoo)
@@ -436,8 +436,8 @@ papers:
   title: RL training narrows output diversity — risk for gap-naming training (Yang et al.)
   year: 2026
   area: methods
-  status: candidate
-  note: cited in essays/01 — ID needs verification on enrich
+  status: not-found
+  note: NOT FOUND on arXiv (essay citation) — re-source; Kirk 2310.06452 covers RLHF diversity reduction
 - arxiv: '2606.05145'
   slug: distributional-failure-signatures
   title: Distributional signatures of failed reasoning traces; 4 failure regimes incl. Steerable-Hard (Islah et al., Mila)
@@ -459,3 +459,108 @@ papers:
   area: methods
   status: candidate
   note: cited in essays/01 — ID needs verification on enrich
+- arxiv: '2304.13734'
+  slug: internal-state-knows-lying
+  title: The Internal State of an LLM Knows When It's Lying
+  year: 2023
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2212.03827'
+  slug: ccs-discovering-latent-knowledge
+  title: Discovering Latent Knowledge in Language Models Without Supervision
+  year: 2022
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2306.03341'
+  slug: inference-time-intervention
+  title: 'Inference-Time Intervention: Eliciting Truthful Answers from a Language Model'
+  year: 2023
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2310.01405'
+  slug: representation-engineering
+  title: 'Representation Engineering: A Top-Down Approach to AI Transparency'
+  year: 2023
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2406.11717'
+  slug: refusal-single-direction
+  title: Refusal in Language Models Is Mediated by a Single Direction
+  year: 2024
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2310.06824'
+  slug: geometry-of-truth
+  title: 'The Geometry of Truth: Emergent Linear Structure in LLM Truth Representations'
+  year: 2023
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2410.02707'
+  slug: llms-know-more-than-they-show
+  title: 'LLMs Know More Than They Show: Intrinsic Representation of Hallucinations'
+  year: 2024
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2406.15927'
+  slug: semantic-entropy-probes
+  title: 'Semantic Entropy Probes: Robust and Cheap Hallucination Detection in LLMs'
+  year: 2024
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2510.09033'
+  slug: probes-read-recall-not-truth
+  title: Probes may read knowledge-recall rather than truth-tracking (title per search)
+  year: 2025
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2407.08582'
+  slug: generalizable-truth-probes
+  title: Truthfulness probes generalize only with diverse training data (title per search)
+  year: 2024
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2511.12991'
+  slug: finetuned-llms-know-they-dont-know
+  title: 'Fine-Tuned LLMs Know They Don''t Know: probe transfer after task SFT'
+  year: 2025
+  area: verification
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2604.17073'
+  slug: abstain-r1
+  title: 'Abstain-R1: GRPO with clarification-aware reward for abstention (Qwen2.5-3B)'
+  year: 2026
+  area: abstention-finetuning
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2601.20126'
+  slug: rewarding-intellectual-humility
+  title: Rewarding Intellectual Humility (GRPO-family abstention)
+  year: 2026
+  area: abstention-finetuning
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2402.03300'
+  slug: deepseekmath-grpo
+  title: 'DeepSeekMath: GRPO origin paper'
+  year: 2024
+  area: methods
+  status: candidate
+  note: from raw-reports/06 verification pass
+- arxiv: '2310.06452'
+  slug: rlhf-generalisation-diversity
+  title: Understanding the Effects of RLHF on LLM Generalisation and Diversity (Kirk et al.)
+  year: 2023
+  area: methods
+  status: candidate
+  note: from raw-reports/06 verification pass
