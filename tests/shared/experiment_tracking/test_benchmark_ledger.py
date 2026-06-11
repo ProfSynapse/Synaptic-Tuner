@@ -236,3 +236,157 @@ def test_upsert_benchmark_ledger_prefers_stage_lineage_payloads(tmp_path: Path, 
     assert rows[0]["eval_passed"] == "45"
     assert rows[0]["loss_examples"] == "9378"
     assert rows[0]["loss_mean"] == "0.42"
+
+
+def test_neutralize_csv_cell_prefixes_formula_triggers_only():
+    """The cell-level helper single-quotes every spreadsheet formula trigger and
+    leaves everything else byte-identical (and non-strings untouched)."""
+    for trigger in ("=", "+", "-", "@", "\t", "\r"):
+        payload = f"{trigger}SUM(A1:A9)"
+        assert benchmark_ledger._neutralize_csv_cell(payload) == "'" + payload
+
+    # Normal text, empty string, and non-string scalars must pass through as-is so
+    # numeric columns stay numeric and well-formed cells are unchanged.
+    assert benchmark_ledger._neutralize_csv_cell("a100-large") == "a100-large"
+    assert benchmark_ledger._neutralize_csv_cell("") == ""
+    assert benchmark_ledger._neutralize_csv_cell(0.42) == 0.42
+    assert benchmark_ledger._neutralize_csv_cell(13) == 13
+    assert benchmark_ledger._neutralize_csv_cell(None) is None
+
+    # Numeric strings with a leading sign (read back from a prior CSV row) keep
+    # their value — the +/- is a numeric sign, not a formula trigger.
+    assert benchmark_ledger._neutralize_csv_cell("-0.5") == "-0.5"
+    assert benchmark_ledger._neutralize_csv_cell("-5") == "-5"
+    assert benchmark_ledger._neutralize_csv_cell("+1.0") == "+1.0"
+    # But a sign-led NON-number (formula payload) is still neutralized.
+    assert benchmark_ledger._neutralize_csv_cell("-cmd|calc") == "'-cmd|calc"
+    assert benchmark_ledger._neutralize_csv_cell("+SUM(A1)") == "'+SUM(A1)"
+
+
+def test_upsert_benchmark_ledger_preserves_negative_numeric_across_roundtrip(tmp_path: Path, monkeypatch):
+    """A negative numeric cell (e.g. a -0.5 loss_mean) must survive a second
+    upsert un-neutralized — the round-trip read-back as the string "-0.5" must
+    NOT be mistaken for a formula trigger (regression guard for the leading-'-'
+    collision)."""
+    monkeypatch.setattr(benchmark_ledger, "load_live_hf_hardware_rows", lambda: [])
+
+    negative_loss = [
+        LossResult(index=0, loss=-0.5, num_completion_tokens=5, num_total_tokens=10, jsonl_hash="a"),
+    ]
+    first = Experiment(
+        experiment_id="exp_negative",
+        name="neg",
+        created_at="2026-03-22T20:00:00+00:00",
+        dataset_path="repo/dataset_variant.jsonl",
+        dataset_hash="hash",
+        base_model_name="Qwen/Qwen3-4B",
+        provider="hf_jobs",
+        method="sft",
+        objective="speed_cost_round",
+        status="completed",
+    )
+    benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=tmp_path, experiment=first, runs=[], loss_results=negative_loss
+    )
+
+    # A second upsert of a DIFFERENT experiment rewrites the whole file, so the
+    # first row's -0.5 is read back as a string and re-passed through the writer.
+    second = Experiment(
+        experiment_id="exp_other_row",
+        name="other",
+        created_at="2026-03-22T20:00:00+00:00",
+        dataset_path="repo/dataset_variant.jsonl",
+        dataset_hash="hash",
+        base_model_name="Qwen/Qwen3-4B",
+        provider="hf_jobs",
+        method="sft",
+        objective="speed_cost_round",
+        status="completed",
+    )
+    ledger_path = benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=tmp_path, experiment=second, runs=[]
+    )
+
+    with Path(ledger_path).open("r", encoding="utf-8", newline="") as handle:
+        rows = {r["experiment_id"]: r for r in csv.DictReader(handle)}
+
+    assert rows["exp_negative"]["loss_mean"] == "-0.5"  # NOT "'-0.5"
+
+
+def test_upsert_benchmark_ledger_neutralizes_formula_injection_in_notes(tmp_path: Path, monkeypatch):
+    """A notes value originating from a stage error_message that begins with a
+    formula trigger round-trips NEUTRALIZED (single-quote-prefixed), while the
+    dedup key and normal cells are unchanged (FS1, PR #1 security review)."""
+    monkeypatch.setattr(benchmark_ledger, "load_live_hf_hardware_rows", lambda: [])
+
+    injection = "=SUM(1+9)*cmd|'/c calc'!A1"
+    experiment = Experiment(
+        experiment_id="exp_injection",
+        name="injection",
+        created_at="2026-03-22T20:00:00+00:00",
+        dataset_path="repo/dataset_variant.jsonl",
+        dataset_hash="hash",
+        base_model_name="Qwen/Qwen3-4B",
+        provider="hf_jobs",
+        method="sft",
+        objective="speed_cost_round",
+        status="failed",
+        stage_details={
+            # A failed stage routes its error_message into the notes column
+            # (build_benchmark_ledger_row :263-270) — the realistic free-text sink.
+            "loss": {"status": "failed", "error_message": injection},
+        },
+    )
+
+    ledger_path = benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=tmp_path,
+        experiment=experiment,
+        runs=[],
+    )
+
+    with Path(ledger_path).open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == 1
+    # The dangerous notes cell is neutralized: the spreadsheet sees literal text.
+    assert rows[0]["notes"] == "'" + injection
+    # The dedup key (never a free-text trigger) round-trips untouched, so upsert
+    # matching is unaffected.
+    assert rows[0]["experiment_id"] == "exp_injection"
+
+
+def test_upsert_benchmark_ledger_dedup_survives_neutralization(tmp_path: Path, monkeypatch):
+    """Upserting the same experiment_id twice replaces (not appends) even though
+    the notes column carries a neutralized formula trigger — confirms the write-
+    boundary neutralization does not perturb the experiment_id dedup key."""
+    monkeypatch.setattr(benchmark_ledger, "load_live_hf_hardware_rows", lambda: [])
+
+    def _experiment_with_note(note: str) -> Experiment:
+        return Experiment(
+            experiment_id="exp_dedup",
+            name="dedup",
+            created_at="2026-03-22T20:00:00+00:00",
+            dataset_path="repo/dataset_variant.jsonl",
+            dataset_hash="hash",
+            base_model_name="Qwen/Qwen3-4B",
+            provider="hf_jobs",
+            method="sft",
+            objective="speed_cost_round",
+            status="failed",
+            stage_details={"loss": {"status": "failed", "error_message": note}},
+        )
+
+    benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=tmp_path, experiment=_experiment_with_note("=first"), runs=[]
+    )
+    ledger_path = benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=tmp_path, experiment=_experiment_with_note("=second"), runs=[]
+    )
+
+    with Path(ledger_path).open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    # Exactly one row (replaced, not duplicated), carrying the latest neutralized note.
+    assert len(rows) == 1
+    assert rows[0]["experiment_id"] == "exp_dedup"
+    assert rows[0]["notes"] == "'=second"

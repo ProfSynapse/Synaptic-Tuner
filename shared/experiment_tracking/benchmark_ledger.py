@@ -206,6 +206,56 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
+# Leading characters a spreadsheet (Excel / Google Sheets / LibreOffice) treats as
+# the start of a formula when it appears as the first character of a CSV cell. A
+# crafted cell like ``=cmd|'/c calc'!A1`` would execute on open. Tab and carriage
+# return are included because some importers strip a leading whitespace run and
+# then re-interpret the following formula trigger.
+_CSV_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _is_numeric_string(value: str) -> bool:
+    """True if the string is a plain number (incl. a leading +/- sign).
+
+    Used to spare legitimate negative/explicitly-signed numeric cells (e.g. a
+    -0.5 loss, written as a float but read back from CSV as the string "-0.5")
+    from formula-injection neutralization — those leading +/- chars are numeric
+    signs, not formula triggers, and prefixing them would corrupt the value.
+    """
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _neutralize_csv_cell(value: Any) -> Any:
+    """Neutralize CSV formula-injection on a single cell value (OWASP guidance).
+
+    Generic, content-agnostic: any string whose first character is a spreadsheet
+    formula trigger is prefixed with a single quote so the spreadsheet renders it
+    as literal text instead of evaluating it. Two carve-outs keep the ledger's
+    numeric columns intact:
+
+    * Non-string values (ints, floats, None) are returned unchanged — they keep
+      their native type so numeric columns stay numeric.
+    * A string that is itself a plain number (e.g. "-0.5", read back from a prior
+      row by csv.DictReader) is left alone: its leading +/- is a numeric sign, not
+      a formula trigger. Without this, a round-trip upsert would corrupt a
+      negative numeric cell into "'-0.5".
+
+    Values that do not start with a trigger are returned byte-identical, so this
+    is a no-op for every well-formed cell.
+    """
+    if (
+        isinstance(value, str)
+        and value.startswith(_CSV_FORMULA_TRIGGERS)
+        and not _is_numeric_string(value)
+    ):
+        return "'" + value
+    return value
+
+
 def build_benchmark_ledger_row(
     *,
     experiment: Experiment,
@@ -341,9 +391,18 @@ def upsert_benchmark_ledger(
     if not replaced:
         existing.append({header: row.get(header, "") for header in _LEDGER_HEADERS})
 
+    # Neutralize CSV formula-injection at the write boundary so EVERY string cell
+    # across EVERY row is covered generically (notes/error text are the realistic
+    # vector, but applying it here is content-agnostic and future-proof). The
+    # dedup key column (experiment_id) is matched on the un-neutralized in-memory
+    # values ABOVE, before this pass, so neutralization never perturbs upsert
+    # matching even if a key value ever began with a trigger char.
     with ledger_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=_LEDGER_HEADERS)
         writer.writeheader()
-        writer.writerows(existing)
+        writer.writerows(
+            {key: _neutralize_csv_cell(value) for key, value in record.items()}
+            for record in existing
+        )
 
     return str(ledger_path)
