@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -14,6 +15,20 @@ from .schema import LossResult, RunRecord
 
 LEDGER_CSV_RELATIVE_PATH = Path("docs/benchmarks/model_hardware_benchmark_ledger.csv")
 LEDGER_MD_RELATIVE_PATH = Path("docs/benchmarks/model_hardware_benchmark_ledger.md")
+
+# Test-isolation seam: when BENCHMARK_LEDGER_DIR is set, the ledger is written
+# under that directory instead of repo_root, so a test run can never touch the
+# committed docs/benchmarks CSV (the conftest in tests/shared/experiment_tracking
+# sets this to a tmp dir for the whole package, belt-and-suspenders alongside any
+# repo_root=tmp_path a given test already passes).
+LEDGER_DIR_ENV_VAR = "BENCHMARK_LEDGER_DIR"
+
+
+def _ledger_root(repo_root: str | Path) -> Path:
+    override = os.environ.get(LEDGER_DIR_ENV_VAR)
+    if override:
+        return Path(override)
+    return Path(repo_root)
 
 _LEDGER_HEADERS = [
     "recorded_at",
@@ -302,8 +317,7 @@ def upsert_benchmark_ledger(
     eval_payload: Optional[dict[str, Any]] = None,
     loss_results: Optional[list[LossResult]] = None,
 ) -> str:
-    repo_root = Path(repo_root)
-    ledger_path = repo_root / LEDGER_CSV_RELATIVE_PATH
+    ledger_path = _ledger_root(repo_root) / LEDGER_CSV_RELATIVE_PATH
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     row = build_benchmark_ledger_row(
         experiment=experiment,

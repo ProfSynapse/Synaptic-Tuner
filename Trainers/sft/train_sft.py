@@ -570,23 +570,25 @@ def run(args: argparse.Namespace):
             configs_dir=Path(__file__).parent / "configs",
         )
 
-    # Apply CLI overrides
-    if args.batch_size:
+    # Apply CLI overrides. Numeric overrides use is not None so an explicit falsy
+    # value (e.g. 0) is honored instead of silently dropped to the config default —
+    # the same provenance discipline as seed/save_steps/lora (a run record must
+    # never claim a value the trainer did not actually use).
+    if args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
     if args.save_steps is not None:
         config.training.save_steps = args.save_steps
     if args.save_total_limit is not None:
         config.training.save_total_limit = args.save_total_limit
-    if args.gradient_accumulation:
+    if args.gradient_accumulation is not None:
         config.training.gradient_accumulation_steps = args.gradient_accumulation
-    if args.learning_rate:
+    if args.learning_rate is not None:
         config.training.learning_rate = args.learning_rate
-    # is not None so seed=0 is honored (a truthy guard would silently drop the valid seed 0)
     if args.seed is not None:
         config.seed = args.seed
-    if args.num_epochs:
+    if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
-    if args.max_seq_length:
+    if args.max_seq_length is not None:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
     if args.lora_r is not None:

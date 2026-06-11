@@ -30,6 +30,21 @@ def test_train_kto_beta_override_is_wired_with_is_not_none() -> None:
     assert "if args.beta:" not in source
 
 
+def test_train_kto_numeric_overrides_are_hardened_is_not_none() -> None:
+    # The fifth silent-substitution instance (focus item 7), hardened in #41:
+    # max_seq_length / batch_size / num_epochs override guards must use is not None
+    # so an explicit 0 forwards to config rather than being dropped to the default.
+    source = (REPO_ROOT / "Trainers" / "kto" / "train_kto.py").read_text(encoding="utf-8")
+
+    assert "if args.max_seq_length is not None:" in source
+    assert "elif args.batch_size is not None:" in source
+    assert "if args.num_epochs is not None:" in source
+    # The pre-hardening truthy guards must be gone for these three.
+    assert "if args.max_seq_length:" not in source
+    assert "elif args.batch_size:" not in source
+    assert "if args.num_epochs:" not in source
+
+
 def test_train_kto_lora_parity_flags_are_wired() -> None:
     # LoRA flag parity (§5.2 identical-budget confound control): the handler emits
     # --lora-* for dpo/kto, so the KTO trainer must accept them and thread the value

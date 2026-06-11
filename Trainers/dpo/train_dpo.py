@@ -12,7 +12,7 @@ KTO-specific); and the DPO config surface (loss_type, no per-class weights).
 
 Usage:
     python train_dpo.py --qwen3-4b --local-file ../../path/to/dpo_train.jsonl
-    python train_dpo.py --model-name unsloth/Qwen3-8B-Instruct-bnb-4bit --dry-run
+    python train_dpo.py --model-name unsloth/Qwen3-8B-bnb-4bit --dry-run
 
 DEVIATION FROM KTO (flagged): the --dry-run exit is placed BEFORE model load
 (KTO exits after loading the model). A dry-run here validates config + data +
@@ -169,7 +169,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-name",
         type=str,
-        help="Override model name (e.g., unsloth/Qwen3-8B-Instruct-bnb-4bit)"
+        help="Override model name (e.g., unsloth/Qwen3-8B-bnb-4bit)"
     )
 
     # Friendly model selection shortcuts (dests match configs/model_presets.MODEL_MAP keys)
@@ -306,7 +306,11 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     # Command-line overrides
     if args.model_name:
         config.model.model_name = args.model_name
-    if args.max_seq_length:
+    # Numeric overrides use is not None so an explicit falsy value (e.g. 0) is
+    # honored instead of silently dropped to the config default — the same
+    # provenance discipline as seed/beta/lora below (a run record must never
+    # claim a value the trainer did not actually use).
+    if args.max_seq_length is not None:
         config.model.max_seq_length = args.max_seq_length
         config.training.max_length = args.max_seq_length
         config.training.max_prompt_length = args.max_seq_length // 2
@@ -316,11 +320,11 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
     if args.dataset_file:
         config.dataset.dataset_file = args.dataset_file
 
-    if args.batch_size:
+    if args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
-    if args.gradient_accumulation:
+    if args.gradient_accumulation is not None:
         config.training.gradient_accumulation_steps = args.gradient_accumulation
-    if args.learning_rate:
+    if args.learning_rate is not None:
         config.training.learning_rate = args.learning_rate
     # is not None so seed=0 and beta=0.0 are honored, not silently swapped for the
     # config default — the handler forwards explicit zeros (provenance: no silent override).
@@ -330,7 +334,7 @@ def apply_cli_overrides(config: Config, args: argparse.Namespace) -> Config:
         config.training.beta = args.beta
     if args.loss_type:
         config.training.loss_type = args.loss_type
-    if args.num_epochs:
+    if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
 
     # LoRA budget overrides. is not None so an explicit 0 (e.g. --lora-dropout 0.0)

@@ -20,13 +20,13 @@ def _args(**flags):
 def test_qwen3_4b_resolves_to_pilot_pin():
     size, repo = model_presets.resolve_model_flag(_args(qwen3_4b=True))
     assert size == "3b"
-    assert repo == "unsloth/Qwen3-4B-Instruct-bnb-4bit"
+    assert repo == "unsloth/Qwen3-4B-bnb-4bit"
 
 
 def test_qwen3_8b_resolves_to_confirm_pin():
     size, repo = model_presets.resolve_model_flag(_args(qwen3_8b=True))
     assert size == "7b"
-    assert repo == "unsloth/Qwen3-8B-Instruct-bnb-4bit"
+    assert repo == "unsloth/Qwen3-8B-bnb-4bit"
 
 
 def test_no_flag_returns_none():

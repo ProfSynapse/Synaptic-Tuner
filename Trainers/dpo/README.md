@@ -48,8 +48,8 @@ Phase 1 pins are:
 
 | Flag | Model |
 |------|-------|
-| `--qwen3-4b` | `unsloth/Qwen3-4B-Instruct-bnb-4bit` (pilot) |
-| `--qwen3-8b` | `unsloth/Qwen3-8B-Instruct-bnb-4bit` (confirm) |
+| `--qwen3-4b` | `unsloth/Qwen3-4B-bnb-4bit` (pilot) |
+| `--qwen3-8b` | `unsloth/Qwen3-8B-bnb-4bit` (confirm) |
 
 Any model can also be set directly with `--model-name`.
 

@@ -9,6 +9,48 @@ from shared.experiment_tracking.experiment import Experiment
 from shared.experiment_tracking.schema import LossResult, RunRecord
 
 
+def _minimal_experiment() -> Experiment:
+    return Experiment(
+        experiment_id="exp_isolation",
+        name="isolation",
+        created_at="2026-03-22T20:00:00+00:00",
+        dataset_path="repo/dataset_variant.jsonl",
+        dataset_hash="hash",
+        base_model_name="Qwen/Qwen3-4B",
+        provider="hf_jobs",
+        method="sft",
+        objective="speed_cost_round",
+        status="completed",
+    )
+
+
+def test_ledger_dir_env_var_redirects_write_away_from_repo_root(tmp_path, monkeypatch):
+    """The BENCHMARK_LEDGER_DIR seam redirects the write off repo_root.
+
+    With the env override set, a real repo_root passed to upsert must NOT be
+    written under — the ledger lands in the override dir instead, so a test run
+    can never pollute the committed docs/benchmarks CSV. (The autouse
+    isolate_benchmark_ledger fixture already sets the var; this test pins the
+    contract directly with its own override dir.)
+    """
+    monkeypatch.setattr(benchmark_ledger, "load_live_hf_hardware_rows", lambda: [])
+    override_dir = tmp_path / "override"
+    fake_repo_root = tmp_path / "repo_root"
+    fake_repo_root.mkdir()
+    monkeypatch.setenv(benchmark_ledger.LEDGER_DIR_ENV_VAR, str(override_dir))
+
+    ledger_path = benchmark_ledger.upsert_benchmark_ledger(
+        repo_root=fake_repo_root,
+        experiment=_minimal_experiment(),
+        runs=[],
+    )
+
+    # Written under the override dir, not the passed repo_root.
+    assert Path(ledger_path) == override_dir / benchmark_ledger.LEDGER_CSV_RELATIVE_PATH
+    assert Path(ledger_path).exists()
+    assert not (fake_repo_root / benchmark_ledger.LEDGER_CSV_RELATIVE_PATH).exists()
+
+
 def test_upsert_benchmark_ledger_materializes_row(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(benchmark_ledger, "LEDGER_CSV_RELATIVE_PATH", Path("docs/benchmarks/model_hardware_benchmark_ledger.csv"))
     monkeypatch.setattr(benchmark_ledger, "load_live_hf_hardware_rows", lambda: [])

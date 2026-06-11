@@ -24,13 +24,13 @@ MODEL_MAP: Dict[str, Tuple[str, str]] = {
     # 3-4B models (fast iteration)
     'qwen_3b': ('3b', 'unsloth/Qwen2.5-3B-Instruct-bnb-4bit'),
     'llama_3b': ('3b', 'unsloth/Llama-3.2-3B-Instruct-bnb-4bit'),
-    'qwen3_4b': ('3b', 'unsloth/Qwen3-4B-Instruct-bnb-4bit'),
+    'qwen3_4b': ('3b', 'unsloth/Qwen3-4B-bnb-4bit'),
 
     # 7-8B models (production quality)
     'mistral_7b': ('7b', 'unsloth/mistral-7b-v0.3-bnb-4bit'),
     'llama_8b': ('7b', 'unsloth/llama-3.1-8b-instruct-bnb-4bit'),
     'qwen_7b': ('7b', 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit'),
-    'qwen3_8b': ('7b', 'unsloth/Qwen3-8B-Instruct-bnb-4bit'),
+    'qwen3_8b': ('7b', 'unsloth/Qwen3-8B-bnb-4bit'),
 
     # 11-14B models (advanced)
     'llama_13b': ('13b', 'unsloth/llama-2-13b-bnb-4bit'),
