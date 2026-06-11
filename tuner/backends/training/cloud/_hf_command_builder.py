@@ -10,6 +10,7 @@ the HF Jobs container: dependency installation, repo checkout, training
 script invocation, and GRPO virtual-env bootstrapping.
 """
 
+import json
 import shlex
 import yaml
 
@@ -147,6 +148,13 @@ class HFCommandBuilderMixin:
             training_args.extend(["--max-steps", str(config.max_steps)])
         if config.max_seq_length is not None:
             training_args.extend(["--max-seq-length", str(config.max_seq_length)])
+        # chat_template_kwargs is a nested mapping; serialize to the same JSON-string
+        # --chat-template-kwargs flag the local lane uses (one wire format, both
+        # lanes). sft-only: dpo/kto template internally via TRL and expose no flag.
+        if config.method == "sft" and config.chat_template_kwargs is not None:
+            training_args.extend(
+                ["--chat-template-kwargs", json.dumps(config.chat_template_kwargs)]
+            )
         if config.method == "sft" and config.load_in_4bit is not None:
             training_args.append("--load-in-4bit" if config.load_in_4bit else "--no-load-in-4bit")
         if config.method == "sft" and config.lora_r is not None:

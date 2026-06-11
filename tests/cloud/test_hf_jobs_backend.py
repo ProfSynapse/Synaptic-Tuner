@@ -478,6 +478,56 @@ class TestBuildTrainingCommand:
 
         assert "--beta" not in cmd
 
+    def test_command_includes_chat_template_kwargs_for_sft(self, repo_root):
+        # The cloud lane must forward chat_template_kwargs as the same JSON-string
+        # --chat-template-kwargs flag the local lane uses, so a protocol pin like
+        # enable_thinking=False reaches the trainer's preprocessing on the cloud
+        # path. One wire format across both lanes.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="sft", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        # The assembled command string shell-quotes each arg; the JSON payload
+        # (which contains spaces and braces) is therefore single-quoted so it
+        # reaches the trainer as one argv element.
+        assert "--chat-template-kwargs '{\"enable_thinking\": false}'" in cmd
+
+    def test_command_omits_chat_template_kwargs_for_dpo(self, repo_root):
+        # chat_template_kwargs is an SFT-only flag: DPO/KTO template internally via
+        # TRL and expose no --chat-template-kwargs argument, so even a set value
+        # must not be emitted for a DPO run.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="dpo", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
+    def test_command_omits_chat_template_kwargs_for_kto(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="kto", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
+    def test_command_omits_chat_template_kwargs_when_absent(self, repo_root):
+        # Default None ⇒ no flag ⇒ byte-identical command for every existing cloud
+        # config, preserving the tuner's generic default rendering.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="sft")  # chat_template_kwargs defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
     def test_cloud_training_config_exposes_seed_and_beta(self):
         # Regression guard: CloudTrainingConfig must carry seed/beta so recipe
         # values are not silently dropped before the command builder runs.

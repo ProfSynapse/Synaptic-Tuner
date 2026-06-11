@@ -235,6 +235,7 @@ class HFJobsBackend(
             batch_size=training_config.get("per_device_train_batch_size", 4),
             learning_rate=training_config.get("learning_rate", 0.0),
             gradient_accumulation_steps=training_config.get("gradient_accumulation_steps"),
+            chat_template_kwargs=training_config.get("chat_template_kwargs"),
             save_steps=training_config.get("save_steps"),
             save_total_limit=training_config.get("save_total_limit"),
             max_seq_length=training_config.get("max_seq_length") or training_config.get("max_prompt_length") or model_config.get("max_seq_length"),

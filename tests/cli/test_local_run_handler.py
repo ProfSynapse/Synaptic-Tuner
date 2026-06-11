@@ -1,3 +1,4 @@
+import json
 from argparse import Namespace
 
 import yaml
@@ -227,3 +228,36 @@ def test_local_run_rejects_unregistered_method(tmp_path):
             tmp_path, method="grpo", trainer="Trainers/grpo/train_grpo.py",
             training={"max_steps": 1},
         )
+
+
+def test_local_run_sft_serializes_chat_template_kwargs_as_json(tmp_path):
+    # chat_template_kwargs is a nested mapping, so it cannot ride the scalar
+    # _append_flag path; the handler JSON-encodes it onto --chat-template-kwargs.
+    # The trainer parses the JSON back into config.training.chat_template_kwargs.
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1, "chat_template_kwargs": {"enable_thinking": False}},
+    )
+    assert "--chat-template-kwargs" in command
+    payload = command[command.index("--chat-template-kwargs") + 1]
+    assert json.loads(payload) == {"enable_thinking": False}
+
+
+def test_local_run_sft_omits_chat_template_kwargs_when_absent(tmp_path):
+    # Byte-identical for recipes that do not set the key: no flag emitted.
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+    )
+    assert "--chat-template-kwargs" not in command
+
+
+def test_local_run_dpo_omits_chat_template_kwargs(tmp_path):
+    # --chat-template-kwargs is sft-only: the dpo/kto trainers template internally
+    # via TRL and expose no such flag, so a stray key in a dpo recipe must not be
+    # forwarded (argparse would reject it).
+    command = _compile_local_command(
+        tmp_path, method="dpo", trainer="Trainers/dpo/train_dpo.py",
+        training={"max_steps": 1, "beta": 0.05, "chat_template_kwargs": {"enable_thinking": False}},
+    )
+    assert "--chat-template-kwargs" not in command

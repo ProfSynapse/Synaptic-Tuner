@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -380,6 +381,10 @@ def parse_args(argv=None):
                        help="Maximum training steps (overrides epochs)")
     parser.add_argument("--max-seq-length", type=int,
                        help="Override maximum sequence length")
+    parser.add_argument("--chat-template-kwargs", type=str, default=None,
+                       help="JSON object of kwargs forwarded into the tokenizer chat "
+                            "template at preprocessing time "
+                            "(e.g. '{\"enable_thinking\": false}').")
     parser.add_argument("--lora-r", type=int,
                        help="Override LoRA rank")
     parser.add_argument("--lora-alpha", type=int,
@@ -591,6 +596,22 @@ def run(args: argparse.Namespace):
     if args.max_seq_length is not None:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
+    # chat_template_kwargs arrives as a JSON object string from the CLI (the
+    # recipe/handler path cannot pass a nested dict as a scalar flag). is not None
+    # so an unset flag preserves whatever the loaded config already carries.
+    if args.chat_template_kwargs is not None:
+        try:
+            parsed_chat_template_kwargs = json.loads(args.chat_template_kwargs)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"--chat-template-kwargs must be a JSON object string: {exc}"
+            ) from exc
+        if not isinstance(parsed_chat_template_kwargs, dict):
+            raise ValueError(
+                "--chat-template-kwargs must decode to a JSON object "
+                f"(got {type(parsed_chat_template_kwargs).__name__})."
+            )
+        config.training.chat_template_kwargs = parsed_chat_template_kwargs
     if args.lora_r is not None:
         config.lora.r = args.lora_r
     if args.lora_alpha is not None:
@@ -799,6 +820,7 @@ def run(args: argparse.Namespace):
         tokenizer=tokenizer,
         max_seq_length=config.training.max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        chat_template_kwargs=config.training.chat_template_kwargs,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None

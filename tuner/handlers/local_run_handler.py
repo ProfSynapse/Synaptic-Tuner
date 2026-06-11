@@ -531,6 +531,16 @@ class LocalRunHandler(BaseHandler):
         if sft_only:
             for key in ("save_steps", "save_total_limit"):
                 _append_flag(command, key, training_cfg.get(key))
+            # chat_template_kwargs is a nested mapping, not a scalar, so it cannot
+            # ride the _append_flag scalar/list path. Serialize to a JSON object
+            # string and forward via --chat-template-kwargs (sft-only: the dpo/kto
+            # trainers template internally via TRL and expose no such flag). Omitted
+            # entirely when unset so existing recipes are byte-identical.
+            chat_template_kwargs = training_cfg.get("chat_template_kwargs")
+            if chat_template_kwargs is not None:
+                command.extend(
+                    ["--chat-template-kwargs", json.dumps(chat_template_kwargs)]
+                )
 
         # beta forwards only for dpo/kto (sft has no --beta argparse). is not None
         # so an explicit beta: 0.0 is honored, not silently swapped for the trainer

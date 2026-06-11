@@ -80,6 +80,10 @@ class SFTTrainingConfig:
     group_by_length: bool
     eval_strategy: str
     eval_steps: int
+    # Generic kwargs forwarded into the tokenizer's chat template at SFT
+    # preprocessing time (e.g. {enable_thinking: false} for thinking-capable
+    # models). None ⇒ no kwargs ⇒ default rendering for every existing config.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
 
 @dataclass
