@@ -502,6 +502,10 @@ Provider-native storage defaults:
 
 - Launch from a clean tracked worktree and a pushed commit only; the remote container checks out that exact SHA.
 - Keep the main training interpreter compatible with Unsloth and Transformers; any Buckets-only `huggingface_hub` upgrade must stay isolated from the trainer runtime.
+- Keep the bucket-sync overlay self-contained for the Hub client stack: install
+  `huggingface_hub>=1.5.0`, `hf_transfer`, and `hf_xet` into the overlay. Do
+  not rely on the base Unsloth image's `hf_xet`; older system copies can fail
+  final sync with `ImportError: cannot import name 'SKIP_SHA256'`.
 - Pass `HF_TOKEN` into the cloud job explicitly; do not assume HF Jobs injects it automatically.
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `.
 - For post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`.

@@ -16,7 +16,7 @@ import yaml
 
 from shared.utilities.paths import get_canonical_trainer_dir_name
 from shared.utilities.unique_ids import unique_utc_timestamp
-from tuner.cloud import RepoCheckoutSpec, build_repo_checkout_steps
+from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES, RepoCheckoutSpec, build_repo_checkout_steps
 from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
 
@@ -92,9 +92,7 @@ class HFCommandBuilderMixin:
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
-        sync_deps = " ".join(
-            shlex.quote(dep) for dep in ("huggingface_hub>=1.5.0", "hf_transfer")
-        )
+        sync_deps = " ".join(shlex.quote(dep) for dep in HF_BUCKET_SYNC_OVERLAY_PACKAGES)
         checkout_steps = build_repo_checkout_steps(
             RepoCheckoutSpec(
                 url=config.repo_url,

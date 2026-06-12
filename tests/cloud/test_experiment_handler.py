@@ -922,6 +922,7 @@ def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path:
     assert "python3 -m shared.experiment_tracking.cloud_loss_job" in command
     assert "--dataset-name professorsynapse/claudesidian-synthetic-dataset" in command
     assert "--dataset-file train.jsonl" in command
+    assert "pip install --upgrade --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in command
     assert "pip install --upgrade transformers==5.3.0" in command
 
 

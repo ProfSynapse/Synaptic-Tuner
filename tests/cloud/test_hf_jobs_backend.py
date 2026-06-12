@@ -24,6 +24,7 @@ from tuner.backends.training.cloud.hf_jobs_backend import (
     HFJobsBackend,
     _parse_timeout,
 )
+from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 
@@ -327,7 +328,7 @@ class TestBuildTrainingCommand:
         assert "$(command -v python3 || command -v python) -m pip install --disable-pip-version-check" in cmd
         assert "$(command -v python3 || command -v python) -m pip install --upgrade pyyaml" not in cmd
         assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
-        assert "$(command -v python3 || command -v python) -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in cmd
         assert " huggingface_hub>=1.5.0 " not in cmd
         assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)" in cmd
         assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
@@ -341,6 +342,13 @@ class TestBuildTrainingCommand:
         assert "--artifact-backend hf_bucket" in cmd
         assert "--artifact-bucket toolset-training-artifacts" in cmd
         assert "--artifact-prefix runs/hf_jobs/sft/20260314_181946-abc12345" in cmd
+
+    def test_bucket_sync_overlay_packages_include_xet(self):
+        assert HF_BUCKET_SYNC_OVERLAY_PACKAGES == (
+            "huggingface_hub>=1.5.0",
+            "hf_transfer",
+            "hf_xet",
+        )
 
     def test_command_installs_stage_pip_packages(self, repo_root):
         backend = HFJobsBackend(repo_root)

@@ -21,12 +21,13 @@ Historical context from past development sessions. Non-obvious gotchas and runti
 **Key Lessons**:
 - HF Jobs runs the exact pushed commit; remote `HEAD` output is the fastest way to confirm whether you are debugging the right code
 - Hugging Face Buckets support and Unsloth/Transformers compatibility can require different `huggingface_hub` versions, so bucket sync must stay isolated from the training interpreter
+- The isolated bucket-sync overlay must include the Hub client's native xet helper dependency (`hf_xet`). If only `huggingface_hub>=1.5.0` is overlaid, the helper can import an incompatible base-image `hf_xet` and fail final sync with `ImportError: cannot import name 'SKIP_SHA256'`
 - Never assume HF Jobs injects the local `HF_TOKEN` into the container; pass it explicitly
 - Empty `HF_TOKEN` or `HF_API_KEY` values are worse than missing values because they generate `Authorization: Bearer ` and fail in `httpx` before the request reaches HF
 - Repeated bucket creation or `whoami-v2` checks during steady-state sync are enough to hit HF rate limits; resolve once, reuse the canonical bucket ID, and keep polling conservative
 - Local cloud TUI parity for HF Jobs depends on syncing training JSONL logs into the bucket during the run and replaying them locally
 
-**Decisions**: Resolve/create the bucket once before launch and normalize bare bucket names to the canonical namespaced bucket ID, remove the `HfFileSystem` fallback for bucket sync, keep the main Unsloth runtime on the image-compatible `huggingface_hub` version, isolate Buckets-only Hub functionality in a helper path installed with `pip --target`, pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets, normalize blank auth values to unset, cache bucket resolution to reduce identity calls, and slow HF Jobs dashboard polling to reduce rate-limit pressure.
+**Decisions**: Resolve/create the bucket once before launch and normalize bare bucket names to the canonical namespaced bucket ID, remove the `HfFileSystem` fallback for bucket sync, keep the main Unsloth runtime on the image-compatible `huggingface_hub` version, isolate Buckets-only Hub functionality in a helper path installed with `pip --target`, install `hf_xet` in that helper path with the Hub client and transfer helper, pass `HF_TOKEN` into `run_job(...)` explicitly via job secrets, normalize blank auth values to unset, cache bucket resolution to reduce identity calls, and slow HF Jobs dashboard polling to reduce rate-limit pressure.
 
 ---
 

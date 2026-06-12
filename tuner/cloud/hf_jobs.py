@@ -12,6 +12,12 @@ from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_env_var, get_hf_token
 from tuner.core.exceptions import CloudProviderError
 
+HF_BUCKET_SYNC_OVERLAY_PACKAGES: tuple[str, ...] = (
+    "huggingface_hub>=1.5.0",
+    "hf_transfer",
+    "hf_xet",
+)
+
 
 @dataclass(frozen=True)
 class RepoCheckoutSpec:
