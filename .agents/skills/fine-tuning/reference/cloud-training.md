@@ -247,7 +247,8 @@ For experiment orchestration:
 
 Same-job exact-loss gotcha:
 - `cloud-eval --with-loss` and `post_training.mode: same_job` should rely on the selected eval image's preinstalled ML stack for packages such as `peft`, `torch`, `transformers`, and `numpy`.
-- The overlay path is for lightweight evaluator and bucket-helper packages and should be installed with `--no-deps`; do not let it resolve a second ML runtime that shadows the base image.
+- Keep the evaluator runtime overlay separate from the bucket-sync helper overlay. The runtime overlay is the only one exported on evaluator `PYTHONPATH`; the bucket-sync overlay is exposed only through `HF_BUCKET_SYNC_PYTHONPATH`.
+- Do not put `huggingface_hub>=1.5.0`, `hf_transfer`, or `hf_xet` on the evaluator `PYTHONPATH`. Those packages are for Buckets only and can violate the base image's `transformers` Hub-version requirements.
 - If embedded exact loss fails with `peft is required to load LoRA adapter checkpoints for exact loss scoring`, first verify the eval image actually contains the expected ML stack. If a package must be added, use explicit image-compatible pins or `--no-deps` stage overrides rather than an unconstrained overlay install.
 
 Inspection workflow:

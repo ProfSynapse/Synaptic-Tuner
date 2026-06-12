@@ -509,10 +509,11 @@ Provider-native storage defaults:
 - Pass `HF_TOKEN` into the cloud job explicitly; do not assume HF Jobs injects it automatically.
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `.
 - For post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`.
-- Keep the cloud-eval overlay lightweight and non-transitive. Do not install
-  unconstrained ML stack packages such as `peft`, `torch`, `transformers`, or
-  `numpy` into `/tmp/hf-eval-site` on Unsloth images; they can shadow the image's
-  compatible runtime and break imports such as `TrainerCallback`.
+- Keep cloud-eval overlays split by responsibility. The evaluator runtime
+  `PYTHONPATH` may include lightweight evaluator deps only; Buckets-only
+  packages (`huggingface_hub>=1.5.0`, `hf_transfer`, `hf_xet`) must stay off the
+  evaluator `PYTHONPATH` and be exposed only through `HF_BUCKET_SYNC_PYTHONPATH`.
+  Otherwise base-image `transformers` can import an incompatible Hub client.
 - `run-experiment` now supports stage controls: `--only-stage`, `--from-stage`, and repeated `--skip-stage`.
 - `run-experiment --auto-hardware` uses a blind planner: model size, method, seq length, quantization, and live HF flavor pricing. It does not require prior telemetry.
 - `plan-hardware` is the inspection surface for that same planner.
@@ -529,7 +530,8 @@ Provider-native storage defaults:
 - For `cloud-eval --with-loss` or `post_training.mode: same_job`, first rely
   on the selected eval image's ML stack. If a truly missing package must be
   added, use explicit image-compatible pins or `--no-deps` stage overrides; do
-  not let pip resolve a fresh Torch/Transformers stack inside the eval overlay.
+  not let pip resolve a fresh Torch/Transformers stack inside the evaluator
+  runtime overlay.
 - Checkpoint-vs-checkpoint comparison is not automatic in smoke runs; you only get that if the trainer emitted multiple checkpoints and you intentionally run checkpoint evaluation / experiment-loop workflows.
 - For SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`.
 - When testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of upgrading packages in the old stable image.
