@@ -30,6 +30,13 @@ def test_train_kto_beta_override_is_wired_with_is_not_none() -> None:
     assert "if args.beta:" not in source
 
 
+def test_train_kto_imports_logging_when_using_get_logger() -> None:
+    source = (REPO_ROOT / "Trainers" / "kto" / "train_kto.py").read_text(encoding="utf-8")
+
+    assert "logging.getLogger(" in source
+    assert "import logging" in source
+
+
 def test_train_kto_numeric_overrides_are_hardened_is_not_none() -> None:
     # The fifth silent-substitution instance (focus item 7), hardened in #41:
     # max_seq_length / batch_size / num_epochs override guards must use is not None
