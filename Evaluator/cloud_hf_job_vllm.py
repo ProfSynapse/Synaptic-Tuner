@@ -15,6 +15,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -33,7 +34,7 @@ from shared.experiment_tracking.lineage_enrichment import (
 from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
 
-from .cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code
+from .cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code, _install_termination_handler
 
 
 def _parse_args() -> argparse.Namespace:
@@ -298,10 +299,19 @@ def main() -> int:
         run_prefix=args.run_prefix,
         job_ref=stage_logger.job_ref,
         bucket_id=args.bucket_id,
+        log_dir=progress_dir,
     )
     partial_output_json = results_dir / "evaluation_results.partial.json"
     partial_output_md = results_dir / "evaluation_results.partial.md"
     failure_json = results_dir / "evaluation_failure.json"
+
+    _install_termination_handler(
+        stage_logger=stage_logger,
+        results_dir=results_dir,
+        bucket_id=args.bucket_id,
+        eval_prefix=args.eval_prefix,
+        token=hf_token,
+    )
 
     stage_logger.emit("bootstrap_started", message="Cloud vLLM eval bootstrap started")
     _sync_from_bucket(args.bucket_id, f"{args.run_prefix}/final_model", model_dir, hf_token)
@@ -311,7 +321,7 @@ def main() -> int:
         details={"last_sync_path": f"hf://buckets/{args.bucket_id}/{args.run_prefix.strip('/')}/final_model"},
     )
     base_model_name = _load_base_model_name(model_dir)
-    stage_logger.emit("model_loaded", message="Resolved base model for vLLM", details={"model": base_model_name, "backend": "vllm"})
+    stage_logger.emit("model_resolved", message="Resolved base model for vLLM", details={"model": base_model_name, "backend": "vllm"})
 
     output_json = results_dir / "evaluation_results.json"
     output_md = results_dir / "evaluation_results.md"
@@ -325,12 +335,26 @@ def main() -> int:
         interval_seconds=15,
         stage_logger=stage_logger,
     )
+    _install_termination_handler(
+        stage_logger=stage_logger,
+        progress_syncer=progress_syncer,
+        results_dir=results_dir,
+        bucket_id=args.bucket_id,
+        eval_prefix=args.eval_prefix,
+        token=hf_token,
+    )
 
     server_started = False
     try:
         progress_syncer.start()
         stage_logger.emit("runtime_ready", message="Starting vLLM runtime", details={"backend": "vllm"})
         eval_started_at = datetime.now(timezone.utc).isoformat()
+        stage_logger.emit(
+            "model_load_started",
+            message="Starting vLLM server model load",
+            details={"backend": "vllm", "model": base_model_name, "timeout_seconds": args.vllm_timeout},
+        )
+        model_load_start = perf_counter()
         server_started = start_vllm_server(
             model=base_model_name,
             host=args.vllm_host,
@@ -343,6 +367,16 @@ def main() -> int:
         )
         if not server_started:
             raise RuntimeError("Failed to start the vLLM server in the cloud eval job.")
+        stage_logger.emit(
+            "model_load_completed",
+            message="vLLM server model load completed",
+            details={
+                "backend": "vllm",
+                "model": base_model_name,
+                "timeout_seconds": args.vllm_timeout,
+                "elapsed_seconds": round(perf_counter() - model_load_start, 3),
+            },
+        )
         stage_logger.emit("runtime_ready", message="vLLM server ready", details={"backend": "vllm"})
 
         cli_args = [

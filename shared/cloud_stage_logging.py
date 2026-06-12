@@ -19,6 +19,7 @@ ENV_STAGE_PROVIDER = "CLOUD_STAGE_PROVIDER"
 ENV_STAGE_RUN_PREFIX = "CLOUD_STAGE_RUN_PREFIX"
 ENV_STAGE_JOB_REF = "CLOUD_STAGE_JOB_REF"
 ENV_STAGE_BUCKET_ID = "CLOUD_STAGE_BUCKET_ID"
+ENV_STAGE_LOG_DIR = "CLOUD_STAGE_LOG_DIR"
 
 
 def _utcnow_iso() -> str:
@@ -47,6 +48,7 @@ def apply_stage_logging_env(
     run_prefix: Optional[str] = None,
     job_ref: Optional[str] = None,
     bucket_id: Optional[str] = None,
+    log_dir: Optional[Path | str] = None,
 ) -> None:
     os.environ[ENV_STAGE_NAME] = stage
     if provider:
@@ -57,6 +59,8 @@ def apply_stage_logging_env(
         os.environ[ENV_STAGE_JOB_REF] = job_ref
     if bucket_id:
         os.environ[ENV_STAGE_BUCKET_ID] = bucket_id
+    if log_dir:
+        os.environ[ENV_STAGE_LOG_DIR] = str(log_dir)
 
 
 def normalize_failure(
@@ -270,5 +274,8 @@ class CloudStageLogger:
 StageLogger = CloudStageLogger
 
 
-def stage_logger_from_env(log_dir: Path | str) -> CloudStageLogger:
-    return CloudStageLogger.from_env(log_dir)
+def stage_logger_from_env(log_dir: Optional[Path | str] = None) -> Optional[CloudStageLogger]:
+    resolved_log_dir = log_dir or str(os.environ.get(ENV_STAGE_LOG_DIR, "")).strip()
+    if not resolved_log_dir:
+        return None
+    return CloudStageLogger.from_env(resolved_log_dir)

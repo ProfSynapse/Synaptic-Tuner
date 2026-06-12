@@ -135,6 +135,35 @@ class CloudEvalHandler(BaseHandler):
     def _hf_eval_settings(self) -> dict:
         return self._hf_jobs_settings().get("evaluation", {})
 
+    @staticmethod
+    def _parse_timeout_hours(value, *, fallback: Optional[float] = None) -> Optional[float]:
+        if value is None:
+            return fallback
+        raw = str(value).strip().lower()
+        if not raw:
+            return fallback
+        try:
+            if raw.endswith("h"):
+                return float(raw[:-1])
+            if raw.endswith("m"):
+                return float(raw[:-1]) / 60.0
+            return float(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _resolve_eval_timeout_hours(self) -> float:
+        for value in (
+            getattr(self.args, "eval_timeout_hours", None),
+            getattr(self.args, "timeout_hours", None),
+            self._hf_eval_settings().get("timeout_hours"),
+            self._hf_eval_settings().get("timeout"),
+            self._hf_jobs_settings().get("timeout"),
+        ):
+            timeout_hours = self._parse_timeout_hours(value)
+            if timeout_hours is not None:
+                return timeout_hours
+        return 4.0
+
     def _validate_environment(self):
         hf_token = get_hf_token()
         if not hf_token:
@@ -716,7 +745,7 @@ class CloudEvalHandler(BaseHandler):
         upload_to_hf = getattr(self.args, "upload_to_hf", None)
         update_model_card = bool(getattr(self.args, "update_model_card", False))
         flavor = getattr(self.args, "gpu", None) or hf_settings.get("flavor", "a10g-small")
-        timeout_hours = float(getattr(self.args, "timeout_hours", None) or 4.0)
+        timeout_hours = self._resolve_eval_timeout_hours()
         eval_runtime = self._resolve_eval_runtime()
         helper_module = self._resolve_eval_helper_module(eval_runtime)
         eval_image, eval_image_profile = self._resolve_eval_image()
@@ -769,7 +798,7 @@ class CloudEvalHandler(BaseHandler):
                 "Run": selected_run["prefix"],
                 "Bucket": bucket_id,
                 "Runtime": eval_runtime,
-                "Backend": "unsloth",
+                "Backend": eval_runtime,
                 "Preset": preset or "-",
                 "Scenarios": ", ".join(display_scenarios) if display_scenarios else "-",
                 "Tags": tags or "-",

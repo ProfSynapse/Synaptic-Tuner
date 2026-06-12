@@ -15,6 +15,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 
 from shared.llm import create_client, LLMError
 from shared.llm.base import BaseLLMClient
+from shared.cloud_stage_logging import stage_logger_from_env
 
 from .config import LMStudioSettings, OllamaSettings, OpenRouterSettings, OpenAIResponsesSettings, UnslothSettings
 from .protocols import BackendError, BackendResponse
@@ -385,12 +386,34 @@ class SharedUnslothAdapter:
         try:
             from shared.llm.providers.unsloth import UnslothClient as SharedUnslothClient
 
+            stage_logger = stage_logger_from_env()
+            model_load_details = {
+                "backend": "unsloth",
+                "adapter_path": settings.model,
+                "max_seq_length": settings.max_seq_length,
+                "load_in_4bit": settings.load_in_4bit,
+            }
+            if stage_logger is not None:
+                stage_logger.emit(
+                    "model_load_started",
+                    message="Starting Unsloth model load",
+                    details=model_load_details,
+                )
+            model_load_start = time.perf_counter()
             self.client = SharedUnslothClient(
                 adapter_path=settings.model,
                 max_seq_length=settings.max_seq_length,
                 load_in_4bit=settings.load_in_4bit,
                 top_p=settings.top_p,
             )
+            if stage_logger is not None:
+                completed_details = dict(model_load_details)
+                completed_details["elapsed_seconds"] = round(time.perf_counter() - model_load_start, 3)
+                stage_logger.emit(
+                    "model_load_completed",
+                    message="Unsloth model load completed",
+                    details=completed_details,
+                )
         except LLMError as e:
             raise BackendError(f"Failed to create Unsloth client: {e}")
         except Exception as e:

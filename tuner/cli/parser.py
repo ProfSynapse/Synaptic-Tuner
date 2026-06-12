@@ -240,6 +240,7 @@ Examples:
     )
     parser.add_argument("--gpu", help="Override HF Jobs hardware flavor for cloud-eval/cloud-gym.")
     parser.add_argument("--timeout-hours", type=float, help="Override timeout in hours for cloud-eval/cloud-gym.")
+    parser.add_argument("--eval-timeout-hours", type=float, help="Override evaluation timeout in hours for cloud-eval/cloud-pipeline.")
     parser.add_argument(
         "--eval-runtime",
         choices=["unsloth", "vllm"],
@@ -247,11 +248,11 @@ Examples:
     )
     parser.add_argument(
         "--eval-image-profile",
-        help="Override the cloud evaluation image profile for cloud-eval (for example: stable_unsloth, latest_unsloth, fast_vllm).",
+        help="Override the cloud evaluation image profile for cloud-eval/cloud-pipeline (for example: stable_unsloth, latest_unsloth, fast_vllm).",
     )
     parser.add_argument(
         "--eval-cloud-image",
-        help="Override the exact cloud evaluation Docker image for cloud-eval.",
+        help="Override the exact cloud evaluation Docker image for cloud-eval/cloud-pipeline.",
     )
     parser.add_argument(
         "--with-loss",
