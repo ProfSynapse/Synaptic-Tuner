@@ -22,6 +22,7 @@ from shared.utilities.unique_ids import unique_utc_timestamp
 from Evaluator.config_loader import ConfigLoader
 from tuner.cloud import (
     CloudJobSpec,
+    HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
     RepoCheckoutSpec,
     build_bash_command,
@@ -62,8 +63,7 @@ _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
     "peft",
-    "huggingface_hub>=1.5.0",
-    "hf_transfer",
+    *HF_BUCKET_SYNC_OVERLAY_PACKAGES,
 ]
 
 

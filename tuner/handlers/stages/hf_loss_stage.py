@@ -25,6 +25,7 @@ from shared.utilities.env import get_hf_token
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.cloud import (
     CloudJobSpec,
+    HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
     RepoCheckoutSpec,
     build_bash_command,
@@ -62,10 +63,11 @@ class HFLossStageRunner:
             )
         )
 
+        sync_deps = " ".join(shlex.quote(dep) for dep in HF_BUCKET_SYNC_OVERLAY_PACKAGES)
         parts = [
             f"$(command -v python3 || command -v python) -m pip install --upgrade {' '.join(shlex.quote(dep) for dep in project_deps)}",
             "mkdir -p /tmp/hf-bucket-sync-site",
-            "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            f"$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site {sync_deps}",
             "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",

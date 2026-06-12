@@ -41,6 +41,8 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "--env-backend" in command
     assert "local" in command
     assert "huggingface_hub>=1.5.0" in command
+    assert "hf_transfer" in command
+    assert "hf_xet" in command
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m Evaluator.cloud_hf_job" in command
     assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" in command

@@ -2,6 +2,7 @@
 
 from .hf_jobs import (
     CloudJobSpec,
+    HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
     HFJobSubmission,
     RepoCheckoutSpec,
@@ -18,6 +19,7 @@ from .hf_jobs import (
 
 __all__ = [
     "CloudJobSpec",
+    "HF_BUCKET_SYNC_OVERLAY_PACKAGES",
     "HFJobExecutor",
     "HFJobSubmission",
     "RepoCheckoutSpec",

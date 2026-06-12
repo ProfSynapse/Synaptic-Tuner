@@ -13,6 +13,7 @@ from shared.utilities.unique_ids import unique_utc_timestamp
 from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps, resolve_repo_source
 from tuner.cloud import (
     CloudJobSpec,
+    HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
     RepoCheckoutSpec,
     build_bash_command,
@@ -180,10 +181,11 @@ class CloudRunHandler(BaseHandler):
             steps.append(f"cd {shlex.quote(repo_dir)} && python -m pip install --upgrade {quoted}")
 
         if resolved_bucket:
+            sync_deps = " ".join(shlex.quote(dep) for dep in HF_BUCKET_SYNC_OVERLAY_PACKAGES)
             steps.extend(
                 [
                     f"mkdir -p {_HF_SYNC_OVERLAY}",
-                    f"cd {shlex.quote(repo_dir)} && python -m pip install --upgrade --target {_HF_SYNC_OVERLAY} huggingface_hub>=1.5.0 hf_transfer",
+                    f"cd {shlex.quote(repo_dir)} && python -m pip install --upgrade --target {_HF_SYNC_OVERLAY} {sync_deps}",
                     f"mkdir -p {shlex.quote(output_dir)}",
                 ]
             )
