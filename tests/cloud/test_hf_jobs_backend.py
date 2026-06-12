@@ -327,7 +327,7 @@ class TestBuildTrainingCommand:
         assert "$(command -v python3 || command -v python) -m pip install --disable-pip-version-check" in cmd
         assert "$(command -v python3 || command -v python) -m pip install --upgrade pyyaml" not in cmd
         assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
-        assert "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer" in cmd
         assert " huggingface_hub>=1.5.0 " not in cmd
         assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)" in cmd
         assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
