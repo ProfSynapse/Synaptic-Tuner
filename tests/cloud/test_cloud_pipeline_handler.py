@@ -16,6 +16,16 @@ def test_cloud_pipeline_runs_training_then_eval(repo_root, clean_env):
         update_model_card=False,
         gpu=None,
         timeout_hours=2.0,
+        eval_timeout_hours=5.0,
+        eval_runtime="vllm",
+        eval_image_profile="fast_vllm",
+        eval_cloud_image="custom/eval:latest",
+        eval_pip_packages=["vllm==0.12.0"],
+        with_loss=True,
+        loss_dataset_name="test/dataset",
+        loss_dataset_file="train.jsonl",
+        loss_max_seq_length=1024,
+        loss_no_completion_only=True,
     )
     handler = CloudPipelineHandler(args=args)
     handler._repo_root = repo_root
@@ -53,6 +63,17 @@ def test_cloud_pipeline_runs_training_then_eval(repo_root, clean_env):
     assert eval_args.run == "runs/hf_jobs/sft/20260315_010000-abc12345"
     assert eval_args.method == "sft"
     assert eval_args.bucket == "test-user/toolset-training-artifacts"
+    assert eval_args.timeout_hours == 5.0
+    assert eval_args.eval_timeout_hours == 5.0
+    assert eval_args.eval_runtime == "vllm"
+    assert eval_args.eval_image_profile == "fast_vllm"
+    assert eval_args.eval_cloud_image == "custom/eval:latest"
+    assert eval_args.eval_pip_packages == ["vllm==0.12.0"]
+    assert eval_args.with_loss is True
+    assert eval_args.loss_dataset_name == "test/dataset"
+    assert eval_args.loss_dataset_file == "train.jsonl"
+    assert eval_args.loss_max_seq_length == 1024
+    assert eval_args.loss_no_completion_only is True
     assert eval_args.auto_confirm is True
 
 

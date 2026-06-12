@@ -78,7 +78,17 @@ class CloudPipelineHandler(BaseHandler):
             upload_to_hf=getattr(self.args, "upload_to_hf", None),
             update_model_card=bool(getattr(self.args, "update_model_card", False)),
             gpu=getattr(self.args, "gpu", None),
-            timeout_hours=getattr(self.args, "timeout_hours", None),
+            timeout_hours=getattr(self.args, "eval_timeout_hours", None) or getattr(self.args, "timeout_hours", None),
+            eval_timeout_hours=getattr(self.args, "eval_timeout_hours", None),
+            eval_runtime=getattr(self.args, "eval_runtime", None),
+            eval_image_profile=getattr(self.args, "eval_image_profile", None),
+            eval_cloud_image=getattr(self.args, "eval_cloud_image", None),
+            eval_pip_packages=getattr(self.args, "eval_pip_packages", None),
+            with_loss=bool(getattr(self.args, "with_loss", False)),
+            loss_dataset_name=getattr(self.args, "loss_dataset_name", None),
+            loss_dataset_file=getattr(self.args, "loss_dataset_file", None),
+            loss_max_seq_length=getattr(self.args, "loss_max_seq_length", None),
+            loss_no_completion_only=bool(getattr(self.args, "loss_no_completion_only", False)),
             auto_confirm=True,
         )
 

@@ -185,6 +185,15 @@ def test_cloud_method_flag_accepts_grpo():
     assert args.method == "grpo"
 
 
+def test_cloud_eval_timeout_flag_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(["cloud-pipeline", "--eval-timeout-hours", "7.5"])
+
+    assert args.command == "cloud-pipeline"
+    assert args.eval_timeout_hours == 7.5
+
+
 def test_bucket_command_parses():
     parser = create_parser()
 

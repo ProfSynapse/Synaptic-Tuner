@@ -93,6 +93,7 @@ cloud:
     evaluation:
       runtime: unsloth
       image_profile: stable_unsloth
+      timeout: 4h
 
   modal:
     gpu: L40S

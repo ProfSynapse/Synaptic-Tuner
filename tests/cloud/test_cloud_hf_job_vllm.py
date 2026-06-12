@@ -3,6 +3,9 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from Evaluator import cloud_hf_job_vllm
 from Evaluator.cloud_hf_job_vllm import _compute_exact_loss_outputs, _load_base_model_name, _parse_args
 from shared.cloud_stage_logging import StageLogger
 from shared.experiment_tracking.schema import LossResult
@@ -93,3 +96,52 @@ def test_compute_exact_loss_outputs_emits_progress_events(tmp_path: Path):
     assert summary["event"] == "progress"
     assert summary["details"]["phase"] == "exact_loss"
     assert summary["details"]["examples_done"] == 2
+
+
+def test_main_installs_termination_handler_before_initial_download(tmp_path: Path):
+    args = Namespace(
+        bucket_id="bucket-id",
+        run_prefix="runs/demo",
+        eval_prefix="runs/demo/evaluations/vllm/ts",
+        config_dir="Evaluator/config",
+        output_root=str(tmp_path / "eval_outputs"),
+        preset=None,
+        scenarios=None,
+        tags=None,
+        env_backend="none",
+        env_template=None,
+        env_tool_schema=None,
+        env_exec_config=None,
+        upload_to_hf=None,
+        update_model_card=False,
+        with_loss=False,
+        loss_dataset_path=None,
+        loss_dataset_name=None,
+        loss_dataset_file=None,
+        loss_max_seq_length=2048,
+        loss_no_completion_only=False,
+        vllm_host="127.0.0.1",
+        vllm_port=8000,
+        vllm_timeout=600,
+        vllm_gpu_memory_utilization=0.85,
+        vllm_tensor_parallel_size=0,
+        loss_workers=0,
+    )
+    installed = []
+
+    def _fake_install(**kwargs):
+        installed.append(kwargs.get("progress_syncer"))
+
+    def _fake_sync_from_bucket(*_args, **_kwargs):
+        assert installed == [None]
+        raise RuntimeError("stop after bootstrap ordering check")
+
+    with patch.object(cloud_hf_job_vllm, "_parse_args", return_value=args), patch.object(
+        cloud_hf_job_vllm, "get_hf_token", return_value="hf-token"
+    ), patch.object(cloud_hf_job_vllm, "_log_runtime_versions"), patch.object(
+        cloud_hf_job_vllm, "_install_termination_handler", side_effect=_fake_install
+    ), patch.object(
+        cloud_hf_job_vllm, "_sync_from_bucket", side_effect=_fake_sync_from_bucket
+    ):
+        with pytest.raises(RuntimeError, match="stop after bootstrap ordering check"):
+            cloud_hf_job_vllm.main()

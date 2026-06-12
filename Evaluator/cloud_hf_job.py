@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -126,6 +127,41 @@ def _finalize_cloud_exit_code(exit_code: int, output_json: Path) -> int:
     return 0 if output_json.exists() else exit_code
 
 
+def _install_termination_handler(
+    *,
+    stage_logger: StageLogger,
+    progress_syncer=None,
+    results_dir: Path,
+    bucket_id: str,
+    eval_prefix: str,
+    token: str,
+) -> None:
+    def _handle_signal(signum, _frame) -> None:
+        signal_name = signal.Signals(signum).name
+        message = f"Evaluation job terminated by {signal_name}"
+        print(message, flush=True)
+        try:
+            stage_logger.emit(
+                "terminated",
+                status="failed",
+                message=message,
+                details={"signal": signal_name, "signal_number": int(signum)},
+            )
+            if progress_syncer is not None:
+                progress_syncer.sync_once()
+            else:
+                _sync_bucket(
+                    str(results_dir),
+                    f"hf://buckets/{bucket_id}/{eval_prefix.strip('/')}",
+                    token=token,
+                )
+        finally:
+            raise SystemExit(128 + int(signum))
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+
 class _PeriodicBucketSyncer:
     """Best-effort periodic sync for incremental evaluation progress."""
 
@@ -223,11 +259,20 @@ def main() -> int:
         run_prefix=args.run_prefix,
         job_ref=stage_logger.job_ref,
         bucket_id=args.bucket_id,
+        log_dir=progress_dir,
     )
     partial_output_json = results_dir / "evaluation_results.partial.json"
     partial_output_md = results_dir / "evaluation_results.partial.md"
     failure_json = results_dir / "evaluation_failure.json"
     analysis_dir = results_dir / "analysis"
+
+    _install_termination_handler(
+        stage_logger=stage_logger,
+        results_dir=results_dir,
+        bucket_id=args.bucket_id,
+        eval_prefix=args.eval_prefix,
+        token=hf_token,
+    )
 
     # Download only the adapter payload needed for direct Unsloth LoRA evaluation.
     stage_logger.emit("bootstrap_started", message="Cloud eval bootstrap started")
@@ -309,6 +354,14 @@ def main() -> int:
         hf_token,
         interval_seconds=15,
         stage_logger=stage_logger,
+    )
+    _install_termination_handler(
+        stage_logger=stage_logger,
+        progress_syncer=progress_syncer,
+        results_dir=results_dir,
+        bucket_id=args.bucket_id,
+        eval_prefix=args.eval_prefix,
+        token=hf_token,
     )
 
     try:

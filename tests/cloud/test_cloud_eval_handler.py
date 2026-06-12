@@ -219,6 +219,31 @@ def test_resolve_eval_helper_module_supports_vllm(repo_root):
     assert handler._resolve_eval_helper_module("vllm") == "Evaluator.cloud_hf_job_vllm"
 
 
+def test_resolve_eval_timeout_prefers_explicit_eval_timeout(repo_root):
+    handler = CloudEvalHandler(args=Namespace(eval_timeout_hours=8.0, timeout_hours=2.0))
+    handler._repo_root = repo_root
+
+    assert handler._resolve_eval_timeout_hours() == 8.0
+
+
+def test_resolve_eval_timeout_uses_eval_config_before_provider(repo_root):
+    handler = CloudEvalHandler(args=Namespace(eval_timeout_hours=None, timeout_hours=None))
+    handler._repo_root = repo_root
+
+    with patch.object(handler, "_hf_eval_settings", return_value={"timeout": "90m"}):
+        with patch.object(handler, "_hf_jobs_settings", return_value={"timeout": "6h"}):
+            assert handler._resolve_eval_timeout_hours() == 1.5
+
+
+def test_resolve_eval_timeout_uses_provider_timeout(repo_root):
+    handler = CloudEvalHandler(args=Namespace(eval_timeout_hours=None, timeout_hours=None))
+    handler._repo_root = repo_root
+
+    with patch.object(handler, "_hf_eval_settings", return_value={}):
+        with patch.object(handler, "_hf_jobs_settings", return_value={"timeout": "6h"}):
+            assert handler._resolve_eval_timeout_hours() == 6.0
+
+
 def test_new_eval_timestamp_includes_nonce(repo_root):
     handler = CloudEvalHandler(args=Namespace())
     handler._repo_root = repo_root
@@ -245,6 +270,7 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
         update_model_card=False,
         gpu=None,
         timeout_hours=2.0,
+        eval_timeout_hours=None,
         eval_runtime=None,
         eval_image_profile=None,
         eval_cloud_image=None,
