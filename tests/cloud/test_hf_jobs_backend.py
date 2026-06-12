@@ -324,7 +324,8 @@ class TestBuildTrainingCommand:
         backend = HFJobsBackend(repo_root)
         config = _cloud_config()
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
-        assert "$(command -v python3 || command -v python) -m pip install --upgrade" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --disable-pip-version-check" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade pyyaml" not in cmd
         assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
         assert "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer" in cmd
         assert " huggingface_hub>=1.5.0 " not in cmd
