@@ -200,6 +200,18 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
   bash commands, an unquoted token like `huggingface_hub>=1.5.0` can be parsed
   as output redirection rather than a pip requirement. Use shell quoting, e.g.
   `'huggingface_hub>=1.5.0'`.
+- Keep bucket-sync overlay installs dependency-isolated. The overlay exists to
+  provide a newer Hub/Buckets client to the sync helper, not to replace the
+  training image's dependency graph; install it with `--target` and `--no-deps`
+  so global image packages remain authoritative.
+- Image-profile blockers should be classified before changing training
+  hyperparameters. In the Phase 1 HF Jobs smoke, `unsloth/unsloth:latest`
+  failed before trainer import with an Unsloth NumPy mid-session mismatch
+  (`loaded: 2.2.6, installed: 2.4.1`), while
+  `unsloth/unsloth:2026.2.1-pt2.9.0-cu12.8-fixed-numba-numpy-error` failed
+  before trainer import at `ModuleNotFoundError: numpy._core.tests` through
+  SciPy/Transformers. Treat those as image/runtime-profile failures, not
+  dataset or LoRA failures.
 
 If the training process itself is healthy but uploads fail, inspect bucket auth and sync isolation before touching trainer code.
 

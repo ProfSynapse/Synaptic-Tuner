@@ -109,7 +109,7 @@ class HFCommandBuilderMixin:
             # datasets, peft, and PyTorch are pre-installed in the Docker image
             f"{python_cmd} -m pip install --disable-pip-version-check {quoted_project_deps}",
             "mkdir -p /tmp/hf-bucket-sync-site",
-            f"{python_cmd} -m pip install --upgrade --target /tmp/hf-bucket-sync-site {sync_deps}",
+            f"{python_cmd} -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site {sync_deps}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             f"export CLOUD_PROVIDER={config.provider}",
