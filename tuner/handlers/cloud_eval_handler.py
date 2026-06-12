@@ -58,10 +58,13 @@ from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
 
-_HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
-_HF_EVAL_PIP_PACKAGES = [
+_HF_EVAL_RUNTIME_OVERLAY = "/tmp/hf-eval-runtime-site"
+_HF_EVAL_BUCKET_SYNC_OVERLAY = "/tmp/hf-eval-bucket-sync-site"
+_HF_EVAL_RUNTIME_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
+]
+_HF_EVAL_BUCKET_SYNC_PIP_PACKAGES = [
     *HF_BUCKET_SYNC_OVERLAY_PACKAGES,
 ]
 
@@ -257,7 +260,8 @@ class CloudEvalHandler(BaseHandler):
         cloud_config_path = self._cloud_config_path()
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
-        quoted_eval_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_PIP_PACKAGES)
+        quoted_eval_runtime_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_RUNTIME_PIP_PACKAGES)
+        quoted_bucket_sync_deps = " ".join(shlex.quote(dep) for dep in _HF_EVAL_BUCKET_SYNC_PIP_PACKAGES)
         checkout_steps = build_repo_checkout_steps(
             RepoCheckoutSpec(
                 url=repo_source.url,
@@ -270,11 +274,12 @@ class CloudEvalHandler(BaseHandler):
         parts = [
             *checkout_steps,
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
-            f"mkdir -p {_HF_EVAL_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
-            f"export PYTHONPATH={_HF_EVAL_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
+            f"mkdir -p {_HF_EVAL_RUNTIME_OVERLAY} {_HF_EVAL_BUCKET_SYNC_OVERLAY}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_RUNTIME_OVERLAY} {quoted_eval_runtime_deps}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_BUCKET_SYNC_OVERLAY} {quoted_bucket_sync_deps}",
+            f"export PYTHONPATH={_HF_EVAL_RUNTIME_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
-            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",
+            f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_BUCKET_SYNC_OVERLAY}",
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
         ]
         if pip_packages:

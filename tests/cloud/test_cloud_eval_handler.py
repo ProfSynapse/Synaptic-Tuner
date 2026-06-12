@@ -43,16 +43,26 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "huggingface_hub>=1.5.0" in command
     assert "hf_transfer" in command
     assert "hf_xet" in command
-    assert "pip install --upgrade --no-deps --target /tmp/hf-eval-site" in command
-    overlay_install = command.split("pip install --upgrade --no-deps --target /tmp/hf-eval-site", 1)[1].split(" && ", 1)[0]
-    assert " peft" not in overlay_install
-    assert " torch" not in overlay_install
-    assert " transformers" not in overlay_install
-    assert " numpy" not in overlay_install
+    assert "pip install --upgrade --no-deps --target /tmp/hf-eval-runtime-site -r Evaluator/requirements.txt" in command
+    assert (
+        "pip install --upgrade --no-deps --target /tmp/hf-eval-bucket-sync-site "
+        "'huggingface_hub>=1.5.0' hf_transfer hf_xet"
+    ) in command
+    runtime_install = command.split("pip install --upgrade --no-deps --target /tmp/hf-eval-runtime-site", 1)[1].split(" && ", 1)[0]
+    bucket_sync_install = command.split("pip install --upgrade --no-deps --target /tmp/hf-eval-bucket-sync-site", 1)[1].split(" && ", 1)[0]
+    assert "huggingface_hub" not in runtime_install
+    assert "hf_transfer" not in runtime_install
+    assert "hf_xet" not in runtime_install
+    for overlay_install in (runtime_install, bucket_sync_install):
+        assert " peft" not in overlay_install
+        assert " torch" not in overlay_install
+        assert " transformers" not in overlay_install
+        assert " numpy" not in overlay_install
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m Evaluator.cloud_hf_job" in command
-    assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" in command
-    assert "HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-site" in command or "/tmp/hf-eval-site" in command
+    assert "export PYTHONPATH=/tmp/hf-eval-runtime-site${PYTHONPATH:+:$PYTHONPATH}" in command
+    assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-eval-bucket-sync-site" in command
+    assert "export PYTHONPATH=/tmp/hf-eval-bucket-sync-site" not in command
     assert "vllm==0.11.0" not in command
 
 
@@ -87,7 +97,7 @@ def test_build_eval_command_can_include_same_job_loss(repo_root):
     assert "professorsynapse/claudesidian-synthetic-dataset" in command
     assert "--loss-dataset-file" in command
     assert "train.jsonl" in command
-    assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" in command
+    assert "export PYTHONPATH=/tmp/hf-eval-runtime-site${PYTHONPATH:+:$PYTHONPATH}" in command
 
 
 def test_build_eval_command_installs_stage_pip_packages(repo_root):
