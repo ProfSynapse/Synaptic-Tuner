@@ -43,6 +43,12 @@ def test_build_eval_command_uses_cloud_job_helper(repo_root):
     assert "huggingface_hub>=1.5.0" in command
     assert "hf_transfer" in command
     assert "hf_xet" in command
+    assert "pip install --upgrade --no-deps --target /tmp/hf-eval-site" in command
+    overlay_install = command.split("pip install --upgrade --no-deps --target /tmp/hf-eval-site", 1)[1].split(" && ", 1)[0]
+    assert " peft" not in overlay_install
+    assert " torch" not in overlay_install
+    assert " transformers" not in overlay_install
+    assert " numpy" not in overlay_install
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m Evaluator.cloud_hf_job" in command
     assert "export PYTHONPATH=/tmp/hf-eval-site${PYTHONPATH:+:$PYTHONPATH}" in command

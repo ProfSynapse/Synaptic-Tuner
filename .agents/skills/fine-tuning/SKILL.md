@@ -509,6 +509,10 @@ Provider-native storage defaults:
 - Pass `HF_TOKEN` into the cloud job explicitly; do not assume HF Jobs injects it automatically.
 - Treat blank `HF_TOKEN` / `HF_API_KEY` values as unset, otherwise bucket sync can fail with `Authorization: Bearer `.
 - For post-training cloud evaluation, prefer `python tuner.py cloud-eval --run latest --preset full`.
+- Keep the cloud-eval overlay lightweight and non-transitive. Do not install
+  unconstrained ML stack packages such as `peft`, `torch`, `transformers`, or
+  `numpy` into `/tmp/hf-eval-site` on Unsloth images; they can shadow the image's
+  compatible runtime and break imports such as `TrainerCallback`.
 - `run-experiment` now supports stage controls: `--only-stage`, `--from-stage`, and repeated `--skip-stage`.
 - `run-experiment --auto-hardware` uses a blind planner: model size, method, seq length, quantization, and live HF flavor pricing. It does not require prior telemetry.
 - `plan-hardware` is the inspection surface for that same planner.
@@ -522,7 +526,10 @@ Provider-native storage defaults:
 - `run-experiment` is the higher-level experiment loop: training stays provider-native, then evaluation and exact dataset loss run as separate sibling post-training jobs by default.
 - Use `evaluation.runtime: vllm` in experiment specs when you want the fast eval server path. The exact loss stage still uses a post-eval `transformers` forward pass.
 - If you explicitly want the older embedded path for a smoke run, set `post_training.mode: same_job` in the experiment spec. Default is `parallel`.
-- For `cloud-eval --with-loss` or `post_training.mode: same_job`, stage-local overlay packages such as `peft` must be on the evaluator process `PYTHONPATH`, not only the bucket-sync helper path. If exact loss says a package is "required" even though the command installed it into `/tmp/hf-eval-site`, inspect the runtime `PYTHONPATH` export first.
+- For `cloud-eval --with-loss` or `post_training.mode: same_job`, first rely
+  on the selected eval image's ML stack. If a truly missing package must be
+  added, use explicit image-compatible pins or `--no-deps` stage overrides; do
+  not let pip resolve a fresh Torch/Transformers stack inside the eval overlay.
 - Checkpoint-vs-checkpoint comparison is not automatic in smoke runs; you only get that if the trainer emitted multiple checkpoints and you intentionally run checkpoint evaluation / experiment-loop workflows.
 - For SFT model-comparison experiments, use `cloud-pipeline` with `--train-*` overrides so the experiment lands in canonical HF training storage instead of `runs/hf_jobs/custom/...`.
 - When testing newer upstream Unsloth runtimes, switch images with `--train-image-profile next` instead of upgrading packages in the old stable image.
