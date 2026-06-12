@@ -182,6 +182,18 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
 - Resolve and, if needed, create the bucket once before training starts. During steady-state log sync, use the resolved bucket ID directly.
 - Keep HF job labels conservative. Do not put slash-heavy values like raw `bucket_id` or `artifact_prefix` into labels; HF Jobs can reject submission. Recover those values from command args or other metadata instead.
 - Polling and identity checks should be conservative. Frequent bucket creation attempts or repeated `whoami-v2` calls can hit Hugging Face rate limits.
+- On Windows launch hosts, set `PYTHONIOENCODING=utf-8` for non-JSON cloud
+  launches. Rich UI output can contain glyphs such as `★`, and the default
+  `cp1252` console path can crash before job submission with
+  `UnicodeEncodeError`.
+- Keep HF Jobs launcher dependencies isolated from the trainer runtime. A
+  launcher-only venv with `huggingface_hub>=1.5.0`, `transformers` 5.x, and CPU
+  `torch` can satisfy local CLI imports and Buckets APIs without upgrading the
+  Unsloth/KTO training env, which may still require `huggingface_hub<1.0`.
+- Quote remote pip requirements that contain shell metacharacters. In HF Jobs
+  bash commands, an unquoted token like `huggingface_hub>=1.5.0` can be parsed
+  as output redirection rather than a pip requirement. Use shell quoting, e.g.
+  `'huggingface_hub>=1.5.0'`.
 
 If the training process itself is healthy but uploads fail, inspect bucket auth and sync isolation before touching trainer code.
 

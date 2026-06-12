@@ -326,7 +326,8 @@ class TestBuildTrainingCommand:
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
         assert "$(command -v python3 || command -v python) -m pip install --upgrade" in cmd
         assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
-        assert "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer" in cmd
+        assert " huggingface_hub>=1.5.0 " not in cmd
         assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)" in cmd
         assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
         assert "export CLOUD_PROVIDER=hf_jobs" in cmd

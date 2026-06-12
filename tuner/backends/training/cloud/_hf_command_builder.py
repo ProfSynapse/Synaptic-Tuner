@@ -91,6 +91,10 @@ class HFCommandBuilderMixin:
         # Read project-specific deps from cloud_config.yaml (single source of truth)
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         project_deps = load_project_deps(cloud_config_path)
+        quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
+        sync_deps = " ".join(
+            shlex.quote(dep) for dep in ("huggingface_hub>=1.5.0", "hf_transfer")
+        )
         checkout_steps = build_repo_checkout_steps(
             RepoCheckoutSpec(
                 url=config.repo_url,
@@ -103,9 +107,9 @@ class HFCommandBuilderMixin:
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
-            f"{python_cmd} -m pip install --upgrade {' '.join(project_deps)}",
+            f"{python_cmd} -m pip install --upgrade {quoted_project_deps}",
             "mkdir -p /tmp/hf-bucket-sync-site",
-            f"{python_cmd} -m pip install --upgrade --target /tmp/hf-bucket-sync-site huggingface_hub>=1.5.0 hf_transfer",
+            f"{python_cmd} -m pip install --upgrade --target /tmp/hf-bucket-sync-site {sync_deps}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
             f"export CLOUD_PROVIDER={config.provider}",
