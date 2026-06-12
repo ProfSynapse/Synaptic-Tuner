@@ -62,7 +62,6 @@ _HF_EVAL_OVERLAY = "/tmp/hf-eval-site"
 _HF_EVAL_PIP_PACKAGES = [
     "-r",
     "Evaluator/requirements.txt",
-    "peft",
     *HF_BUCKET_SYNC_OVERLAY_PACKAGES,
 ]
 
@@ -272,7 +271,7 @@ class CloudEvalHandler(BaseHandler):
             *checkout_steps,
             f"cd /workspace/repo && {python_cmd} -m pip install --upgrade {quoted_project_deps}",
             f"mkdir -p {_HF_EVAL_OVERLAY}",
-            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
+            f"cd /workspace/repo && {python_cmd} -m pip install --upgrade --no-deps --target {_HF_EVAL_OVERLAY} {quoted_eval_deps}",
             f"export PYTHONPATH={_HF_EVAL_OVERLAY}${{PYTHONPATH:+:$PYTHONPATH}}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
             f"export HF_BUCKET_SYNC_PYTHONPATH={_HF_EVAL_OVERLAY}",

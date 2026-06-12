@@ -246,9 +246,9 @@ For experiment orchestration:
 - use `post_training.mode: same_job` only when you intentionally want the older embedded eval+loss path for a smoke/fallback run
 
 Same-job exact-loss gotcha:
-- `cloud-eval --with-loss` and `post_training.mode: same_job` install stage-local helper packages such as `peft` into an overlay path.
-- Those packages must be available on the evaluator process `PYTHONPATH`, not just the bucket-sync helper subprocess path.
-- If embedded exact loss fails with `peft is required to load LoRA adapter checkpoints for exact loss scoring`, inspect the runtime `PYTHONPATH` wiring before debugging dataset or model artifacts.
+- `cloud-eval --with-loss` and `post_training.mode: same_job` should rely on the selected eval image's preinstalled ML stack for packages such as `peft`, `torch`, `transformers`, and `numpy`.
+- The overlay path is for lightweight evaluator and bucket-helper packages and should be installed with `--no-deps`; do not let it resolve a second ML runtime that shadows the base image.
+- If embedded exact loss fails with `peft is required to load LoRA adapter checkpoints for exact loss scoring`, first verify the eval image actually contains the expected ML stack. If a package must be added, use explicit image-compatible pins or `--no-deps` stage overrides rather than an unconstrained overlay install.
 
 Inspection workflow:
 1. Find the source training run under `runs/hf_jobs/{method}/{run_slug}/`
