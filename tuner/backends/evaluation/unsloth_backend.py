@@ -52,7 +52,7 @@ class UnslothBackend(IEvaluationBackend):
         """List available LoRA adapters from training outputs.
 
         Searches for final_model directories containing adapter_config.json in
-        the canonical SFT, KTO, and GRPO output directories.
+        the canonical SFT, KTO, GRPO, and DPO output directories.
 
         Returns:
             List of adapter directory paths (absolute paths)
@@ -60,7 +60,7 @@ class UnslothBackend(IEvaluationBackend):
         """
         models = []
 
-        for method in ("sft", "kto", "grpo"):
+        for method in ("sft", "kto", "grpo", "dpo"):
             for output_dir in iter_training_output_dirs(method, self._repo_root):
                 if not output_dir.exists():
                     continue

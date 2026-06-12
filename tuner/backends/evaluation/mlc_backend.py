@@ -66,7 +66,7 @@ class MLCBackend(IEvaluationBackend):
         """
         models = []
 
-        for method in ("sft", "kto", "grpo"):
+        for method in ("sft", "kto", "grpo", "dpo"):
             for output_dir in iter_training_output_dirs(method, self._repo_root):
                 if not output_dir.exists():
                     continue

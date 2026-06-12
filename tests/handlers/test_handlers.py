@@ -282,6 +282,32 @@ class TestCloudTrainHandler:
         assert mock_config.model_name == "new-model"
         assert mock_config.batch_size == 8
 
+    def test_apply_training_overrides_sets_seed(self):
+        # --train-seed wins over the recipe-loaded config.seed, including seed=0.
+        args = Namespace(json=True, train_seed=0)
+        handler = self._make_handler(args)
+        mock_config = MagicMock()
+        mock_config.method = "sft"
+        handler._apply_training_overrides(mock_config)
+        assert mock_config.seed == 0
+
+    def test_apply_training_overrides_sets_beta_for_dpo(self):
+        args = Namespace(json=True, train_beta=0.5)
+        handler = self._make_handler(args)
+        mock_config = MagicMock()
+        mock_config.method = "dpo"
+        handler._apply_training_overrides(mock_config)
+        assert mock_config.beta == 0.5
+
+    def test_apply_training_overrides_skips_beta_for_sft(self):
+        # beta is DPO/KTO-only; a --train-beta override must not touch an SFT config.
+        args = Namespace(json=True, train_beta=0.5)
+        handler = self._make_handler(args)
+        mock_config = MagicMock()
+        mock_config.method = "sft"
+        handler._apply_training_overrides(mock_config)
+        assert "beta" not in mock_config.__dict__
+
     def test_method_labels(self):
         args = Namespace(json=True)
         handler = self._make_handler(args)

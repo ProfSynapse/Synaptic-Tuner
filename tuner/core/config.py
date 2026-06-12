@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -257,6 +257,13 @@ class CloudTrainingConfig(TrainingConfig):
     repo_commit: Optional[str] = None
     dataset_name: Optional[str] = None
     gradient_accumulation_steps: Optional[int] = None
+    seed: Optional[int] = None
+    beta: Optional[float] = None
+    # Generic kwargs forwarded into the tokenizer chat template at preprocessing
+    # time (e.g. {"enable_thinking": False}). Mirrors the SFT local lane; the
+    # builder serializes it as the JSON-string --chat-template-kwargs flag. None
+    # ⇒ no flag ⇒ default rendering for every existing cloud config.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
     save_steps: Optional[int] = None
     save_total_limit: Optional[int] = None
     max_steps: Optional[int] = None

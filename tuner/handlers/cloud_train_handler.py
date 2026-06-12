@@ -317,6 +317,14 @@ class CloudTrainHandler(BaseHandler):
         if train_learning_rate is not None:
             config.learning_rate = train_learning_rate
 
+        train_seed = getattr(args, "train_seed", None)
+        if train_seed is not None:
+            config.seed = train_seed
+
+        train_beta = getattr(args, "train_beta", None)
+        if train_beta is not None and config.method in ("dpo", "kto"):
+            config.beta = train_beta
+
         train_num_epochs = getattr(args, "train_num_epochs", None)
         if train_num_epochs is not None:
             config.epochs = train_num_epochs

@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -197,14 +198,16 @@ def main():
     )
 
     # Friendly model selection shortcuts
-    # 3B models (fast iteration)
+    # 3-4B models (fast iteration)
     parser.add_argument("--qwen-3b", action="store_true", help="Use Qwen2.5 3B Instruct (fast iteration)")
     parser.add_argument("--llama-3b", action="store_true", help="Use Llama 3.2 3B Instruct (fast iteration)")
+    parser.add_argument("--qwen3-4b", action="store_true", help="Use Qwen3 4B Instruct (Phase 1 pilot pin)")
 
     # 7-8B models (production quality)
     parser.add_argument("--mistral-7b", action="store_true", help="Use Mistral 7B v0.3 (production quality)")
     parser.add_argument("--llama-8b", action="store_true", help="Use Llama 3.1 8B Instruct")
     parser.add_argument("--qwen-7b", action="store_true", help="Use Qwen2.5 7B Instruct")
+    parser.add_argument("--qwen3-8b", action="store_true", help="Use Qwen3 8B Instruct (Phase 1 confirm pin)")
     parser.add_argument("--magistral", action="store_true", help="Use Magistral Small 2509 (~7B)")
     parser.add_argument("--deepseek-7b", action="store_true", help="Use DeepSeek R1 Distill Qwen 7B (reasoning)")
     parser.add_argument("--qwen-vl-8b", action="store_true", help="Use Qwen3 VL 8B Instruct (vision-language)")
@@ -324,6 +327,11 @@ def main():
         help="Override learning rate"
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        help="Override the training random seed (config.seed)"
+    )
+    parser.add_argument(
         "--beta",
         type=float,
         help="Override KTO beta parameter (controls KL divergence penalty)"
@@ -376,6 +384,14 @@ def main():
         help="W&B run name"
     )
 
+    # LoRA budget (same surface as DPO/SFT, so the recipe's LoRA budget flows
+    # end-to-end rather than silently falling back to the trainer config default).
+    parser.add_argument("--lora-r", type=int, help="Override LoRA rank (config.lora.r)")
+    parser.add_argument("--lora-alpha", type=int, help="Override LoRA alpha (config.lora.lora_alpha)")
+    parser.add_argument("--lora-dropout", type=float, help="Override LoRA dropout (config.lora.lora_dropout)")
+    parser.add_argument("--lora-target-modules", type=str, help="Override LoRA target modules (comma-separated)")
+    parser.add_argument("--init-lora-weights", type=str, help="Override LoRA weight initialization scheme")
+
     # LoRA technique variants
     parser.add_argument("--use-dora", action="store_true",
                         help="Enable DoRA (Weight-Decomposed LoRA). Passes through to PEFT via Unsloth kwargs.")
@@ -416,14 +432,16 @@ def main():
 
     # Process friendly model selection flags
     model_map = {
-        # 3B models
+        # 3-4B models
         'qwen_3b': ('3b', 'unsloth/Qwen2.5-3B-Instruct-bnb-4bit'),
         'llama_3b': ('3b', 'unsloth/Llama-3.2-3B-Instruct-bnb-4bit'),
+        'qwen3_4b': ('3b', 'unsloth/Qwen3-4B-bnb-4bit'),
 
         # 7-8B models
         'mistral_7b': ('7b', 'unsloth/mistral-7b-v0.3-bnb-4bit'),
         'llama_8b': ('7b', 'unsloth/llama-3.1-8b-instruct-bnb-4bit'),
         'qwen_7b': ('7b', 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit'),
+        'qwen3_8b': ('7b', 'unsloth/Qwen3-8B-bnb-4bit'),
         'magistral': ('7b', 'unsloth/Magistral-Small-2509-unsloth-bnb-4bit'),
         'deepseek_7b': ('7b', 'unsloth/DeepSeek-R1-Distill-Qwen-7B-unsloth-bnb-4bit'),
         'qwen_vl_8b': ('7b', 'unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit'),
@@ -536,10 +554,27 @@ def main():
     if args.use_rslora:
         config.lora.use_rslora = True
 
+    # LoRA budget overrides. is not None so an explicit 0 (e.g. --lora-dropout 0.0)
+    # is honored, not silently dropped — the recipe's LoRA budget is the SSOT.
+    if args.lora_r is not None:
+        config.lora.r = args.lora_r
+    if args.lora_alpha is not None:
+        config.lora.lora_alpha = args.lora_alpha
+    if args.lora_dropout is not None:
+        config.lora.lora_dropout = args.lora_dropout
+    if args.lora_target_modules is not None:
+        config.lora.target_modules = [m.strip() for m in args.lora_target_modules.split(",") if m.strip()]
+    if args.init_lora_weights is not None:
+        config.lora.init_lora_weights = args.init_lora_weights
+
     # Apply command-line overrides
     if args.model_name:
         config.model.model_name = args.model_name
-    if args.max_seq_length:
+    # Numeric overrides use is not None so an explicit falsy value (e.g. 0) is
+    # honored instead of silently dropped to the config default — the same
+    # provenance discipline as seed/beta/lora below (a run record must never
+    # claim a value the trainer did not actually use).
+    if args.max_seq_length is not None:
         config.model.max_seq_length = args.max_seq_length
         config.training.max_length = args.max_seq_length
         config.training.max_prompt_length = args.max_seq_length // 2
@@ -568,16 +603,21 @@ def main():
         print(f"  Effective batch size: {adaptive_settings['batch_size'] * adaptive_settings['gradient_accumulation']}")
         print(f"  Gradient checkpointing: {adaptive_settings.get('gradient_checkpointing', False)}")
         print("="*60 + "\n")
-    # Allow manual overrides even with adaptive memory
-    elif args.batch_size:
+    # Allow manual overrides even with adaptive memory (is not None so an explicit
+    # --batch-size 0 still overrides; the elif keeps adaptive-memory precedence).
+    elif args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
-    if args.gradient_accumulation:
+    if args.gradient_accumulation is not None:
         config.training.gradient_accumulation_steps = args.gradient_accumulation
-    if args.learning_rate:
+    if args.learning_rate is not None:
         config.training.learning_rate = args.learning_rate
-    if args.beta:
+    # is not None so seed=0 and beta=0.0 are honored, not silently swapped for the
+    # config default — the handler forwards explicit zeros (provenance: no silent override).
+    if args.seed is not None:
+        config.seed = args.seed
+    if args.beta is not None:
         config.training.beta = args.beta
-    if args.num_epochs:
+    if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
 
     # Apply two-stage LR schedule overrides
@@ -1085,7 +1125,7 @@ def main():
             sync_directory_to_hf_bucket(run_dir, args.artifact_bucket, args.artifact_prefix, token=args.hf_token)
 
     print("\nTo upload to HuggingFace:")
-    print(f"  model.push_to_hub_merged('username/model-name', tokenizer, save_method='merged_16bit')")
+    print("  model.push_to_hub_merged('username/model-name', <text-encoder>, save_method='merged_16bit')")
     print(f"  # Or use: python src/upload_to_hf.py {output_path} username/model-name")
     if debugger:
         debugger.close()

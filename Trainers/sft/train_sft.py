@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -372,12 +373,18 @@ def parse_args(argv=None):
                        help="Override gradient accumulation steps")
     parser.add_argument("--learning-rate", type=float,
                        help="Override learning rate")
+    parser.add_argument("--seed", type=int,
+                       help="Override the training random seed (config.seed)")
     parser.add_argument("--num-epochs", type=int,
                        help="Override number of training epochs")
     parser.add_argument("--max-steps", type=int, default=None,
                        help="Maximum training steps (overrides epochs)")
     parser.add_argument("--max-seq-length", type=int,
                        help="Override maximum sequence length")
+    parser.add_argument("--chat-template-kwargs", type=str, default=None,
+                       help="JSON object of kwargs forwarded into the tokenizer chat "
+                            "template at preprocessing time "
+                            "(e.g. '{\"enable_thinking\": false}').")
     parser.add_argument("--lora-r", type=int,
                        help="Override LoRA rank")
     parser.add_argument("--lora-alpha", type=int,
@@ -568,22 +575,43 @@ def run(args: argparse.Namespace):
             configs_dir=Path(__file__).parent / "configs",
         )
 
-    # Apply CLI overrides
-    if args.batch_size:
+    # Apply CLI overrides. Numeric overrides use is not None so an explicit falsy
+    # value (e.g. 0) is honored instead of silently dropped to the config default —
+    # the same provenance discipline as seed/save_steps/lora (a run record must
+    # never claim a value the trainer did not actually use).
+    if args.batch_size is not None:
         config.training.per_device_train_batch_size = args.batch_size
     if args.save_steps is not None:
         config.training.save_steps = args.save_steps
     if args.save_total_limit is not None:
         config.training.save_total_limit = args.save_total_limit
-    if args.gradient_accumulation:
+    if args.gradient_accumulation is not None:
         config.training.gradient_accumulation_steps = args.gradient_accumulation
-    if args.learning_rate:
+    if args.learning_rate is not None:
         config.training.learning_rate = args.learning_rate
-    if args.num_epochs:
+    if args.seed is not None:
+        config.seed = args.seed
+    if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
-    if args.max_seq_length:
+    if args.max_seq_length is not None:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
+    # chat_template_kwargs arrives as a JSON object string from the CLI (the
+    # recipe/handler path cannot pass a nested dict as a scalar flag). is not None
+    # so an unset flag preserves whatever the loaded config already carries.
+    if args.chat_template_kwargs is not None:
+        try:
+            parsed_chat_template_kwargs = json.loads(args.chat_template_kwargs)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"--chat-template-kwargs must be a JSON object string: {exc}"
+            ) from exc
+        if not isinstance(parsed_chat_template_kwargs, dict):
+            raise ValueError(
+                "--chat-template-kwargs must decode to a JSON object "
+                f"(got {type(parsed_chat_template_kwargs).__name__})."
+            )
+        config.training.chat_template_kwargs = parsed_chat_template_kwargs
     if args.lora_r is not None:
         config.lora.r = args.lora_r
     if args.lora_alpha is not None:
@@ -749,7 +777,7 @@ def run(args: argparse.Namespace):
     model_name_lower = config.model.model_name.lower()
     if getattr(tokenizer, "chat_template", None):
         chat_template_name = "pretrained"
-        print("✓ Using pretrained chat template from tokenizer")
+        print("✓ Using pretrained chat template from the loaded text encoder")
     else:
         if "qwen" in model_name_lower:
             chat_template_name = "chatml"
@@ -792,6 +820,7 @@ def run(args: argparse.Namespace):
         tokenizer=tokenizer,
         max_seq_length=config.training.max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        chat_template_kwargs=config.training.chat_template_kwargs,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
@@ -884,7 +913,7 @@ def run(args: argparse.Namespace):
     print(f"  Alpha: {config.lora.lora_alpha}")
     print(f"  Dropout: {config.lora.lora_dropout}")
     print(f"\nSFT-specific:")
-    print("  Packing: False (explicit tokenized dataset path)")
+    print("  Packing: False (explicit pre-encoded dataset path)")
     print(f"  Completion-only loss: {config.training.completion_only_loss}")
     print(f"\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
@@ -950,7 +979,7 @@ def run(args: argparse.Namespace):
         # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
         logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 
-    print("Initializing trainer on explicit tokenized dataset...")
+    print("Initializing trainer on explicit pre-encoded dataset...")
     trainer_kwargs = {
         "model": model,
         "args": training_args,
@@ -967,7 +996,7 @@ def run(args: argparse.Namespace):
         from transformers.trainer_callback import PrinterCallback
         trainer.remove_callback(PrinterCallback)
 
-    print("[OK] Trainer initialized with explicit tokenized dataset contract")
+    print("[OK] Trainer initialized with explicit pre-encoded dataset contract")
 
     # Check if evolutionary training is enabled
     evo_wrapper = None

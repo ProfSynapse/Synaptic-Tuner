@@ -114,7 +114,15 @@ def materialize_sft_example(
     max_seq_length: int,
     assistant_only_loss: bool,
     source_hash: str | None = None,
+    chat_template_kwargs: dict[str, Any] | None = None,
 ) -> PreparedSFTExample:
+    # chat_template_kwargs is forwarded verbatim into apply_chat_template (e.g.
+    # {"enable_thinking": False} for thinking-capable models). Default None ⇒ empty
+    # dict ⇒ byte-identical rendering for callers that pass nothing. HF tokenizers
+    # forward unrecognized keys into the Jinja context and ignore them, so this is
+    # safe for any chat template that does not reference the supplied keys.
+    template_kwargs = chat_template_kwargs or {}
+
     messages, example_format = normalize_sft_messages(record)
     messages = sanitize_messages_for_chat_template(messages)
 
@@ -129,6 +137,7 @@ def materialize_sft_example(
         messages,
         tokenize=False,
         add_generation_prompt=False,
+        **template_kwargs,
     )
     full_tokens = _encoder.encode(full_str, add_special_tokens=False)
     truncation_applied = len(full_tokens) > max_seq_length
@@ -142,6 +151,7 @@ def materialize_sft_example(
             messages[:-1],
             tokenize=False,
             add_generation_prompt=True,
+            **template_kwargs,
         )
         prompt_tokens = _encoder.encode(prompt_str, add_special_tokens=False)
         mask_len = min(len(prompt_tokens), len(labels))

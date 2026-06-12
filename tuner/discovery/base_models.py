@@ -146,7 +146,7 @@ class BaseModelDiscovery:
         results: List[ModelInfo] = []
 
         # Trainer output directories
-        for trainer_type in ("sft", "kto", "grpo"):
+        for trainer_type in ("sft", "kto", "grpo", "dpo"):
             for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
                 if not output_dir.exists():
                     continue

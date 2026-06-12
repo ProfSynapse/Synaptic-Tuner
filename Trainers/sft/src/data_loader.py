@@ -154,6 +154,7 @@ def load_and_prepare_tokenized_dataset(
     tokenizer: Any = None,
     max_seq_length: int = 2048,
     loss_mask_mode: str = ASSISTANT_ONLY,
+    chat_template_kwargs: Optional[dict] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -209,6 +210,7 @@ def load_and_prepare_tokenized_dataset(
         loss_mask_mode=loss_mask_mode,
         num_proc=num_proc,
         include_text=False,
+        chat_template_kwargs=chat_template_kwargs,
     )
 
     eval_dataset = None

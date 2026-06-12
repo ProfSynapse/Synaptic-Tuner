@@ -139,7 +139,7 @@ class TrainHandler(BaseHandler):
             platforms.append({
                 "id": "rtx",
                 "name": "NVIDIA GPU (CUDA)",
-                "methods": ["sft", "kto", "grpo"]
+                "methods": ["sft", "kto", "grpo", "dpo"]
             })
         if has_mlx:
             platforms.append({

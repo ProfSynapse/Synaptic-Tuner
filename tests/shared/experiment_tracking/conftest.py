@@ -5,6 +5,21 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from shared.experiment_tracking.benchmark_ledger import LEDGER_DIR_ENV_VAR
+
+
+@pytest.fixture(autouse=True)
+def isolate_benchmark_ledger(tmp_path_factory, monkeypatch):
+    """Redirect every benchmark-ledger write under this package to a tmp dir.
+
+    The ledger writer honors BENCHMARK_LEDGER_DIR; setting it here guarantees no
+    test run touches the committed docs/benchmarks CSV even if a test forgets to
+    pass repo_root=tmp_path. Belt-and-suspenders for the isolation gap (#41).
+    """
+    ledger_dir = tmp_path_factory.mktemp("benchmark_ledger")
+    monkeypatch.setenv(LEDGER_DIR_ENV_VAR, str(ledger_dir))
+
+
 @pytest.fixture
 def tracking_fixtures_dir() -> Path:
     return Path(__file__).parent.parent.parent / "fixtures" / "tracking"

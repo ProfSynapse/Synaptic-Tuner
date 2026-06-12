@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 
-TRAINING_METHODS = ("sft", "kto", "grpo")
+TRAINING_METHODS = ("sft", "kto", "grpo", "dpo")
 
 CANONICAL_TRAINER_DIRS = {method: method for method in TRAINING_METHODS}
 LEGACY_TRAINER_DIRS = {method: f"rtx3090_{method}" for method in TRAINING_METHODS}

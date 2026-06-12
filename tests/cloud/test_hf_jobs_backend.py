@@ -63,7 +63,7 @@ class TestHFJobsBackendProperties:
 
     def test_available_methods(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        assert backend.get_available_methods() == ["sft", "kto", "grpo"]
+        assert backend.get_available_methods() == ["sft", "kto", "grpo", "dpo"]
 
 
 class TestHFJobsValidateEnvironment:
@@ -157,7 +157,7 @@ class TestHFJobsLoadConfig:
     def test_raises_on_unknown_method(self, repo_root):
         backend = HFJobsBackend(repo_root)
         with pytest.raises(ConfigurationError, match="Unknown method"):
-            backend.load_config("dpo")
+            backend.load_config("orpo")
 
     def test_raises_on_missing_config(self, tmp_path):
         backend = HFJobsBackend(tmp_path)
@@ -417,6 +417,125 @@ class TestBuildTrainingCommand:
         assert "--evolutionary-cache-baseline" in cmd
         assert "--evolutionary-no-log-candidates" in cmd
         assert "--evolutionary-log-selected" in cmd
+
+    def test_command_includes_seed_when_set(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(seed=1234)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed 1234" in cmd
+
+    def test_command_includes_seed_zero(self, repo_root):
+        # seed=0 is a legitimate seed; emission uses `is not None`, not a truthy
+        # guard, so it must reach the trainer command rather than being dropped.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(seed=0)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed 0" in cmd
+
+    def test_command_omits_seed_when_absent(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config()  # seed defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--seed" not in cmd
+
+    def test_command_includes_beta_for_dpo(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="dpo", beta=0.5)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta 0.5" in cmd
+
+    def test_command_includes_beta_for_kto(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="kto", beta=0.1)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta 0.1" in cmd
+
+    def test_command_omits_beta_for_sft(self, repo_root):
+        # beta is a DPO/KTO-only parameter; SFT has no --beta flag, so even a
+        # set beta value must not be emitted for an SFT run.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="sft", beta=0.5)
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta" not in cmd
+
+    def test_command_omits_beta_when_absent(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="dpo")  # beta defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--beta" not in cmd
+
+    def test_command_includes_chat_template_kwargs_for_sft(self, repo_root):
+        # The cloud lane must forward chat_template_kwargs as the same JSON-string
+        # --chat-template-kwargs flag the local lane uses, so a protocol pin like
+        # enable_thinking=False reaches the trainer's preprocessing on the cloud
+        # path. One wire format across both lanes.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="sft", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        # The assembled command string shell-quotes each arg; the JSON payload
+        # (which contains spaces and braces) is therefore single-quoted so it
+        # reaches the trainer as one argv element.
+        assert "--chat-template-kwargs '{\"enable_thinking\": false}'" in cmd
+
+    def test_command_omits_chat_template_kwargs_for_dpo(self, repo_root):
+        # chat_template_kwargs is an SFT-only flag: DPO/KTO template internally via
+        # TRL and expose no --chat-template-kwargs argument, so even a set value
+        # must not be emitted for a DPO run.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="dpo", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
+    def test_command_omits_chat_template_kwargs_for_kto(self, repo_root):
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(
+            method="kto", chat_template_kwargs={"enable_thinking": False}
+        )
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
+    def test_command_omits_chat_template_kwargs_when_absent(self, repo_root):
+        # Default None ⇒ no flag ⇒ byte-identical command for every existing cloud
+        # config, preserving the tuner's generic default rendering.
+        backend = HFJobsBackend(repo_root)
+        config = _cloud_config(method="sft")  # chat_template_kwargs defaults to None
+
+        cmd = backend._build_training_command(config, timestamp="20260314_181946")
+
+        assert "--chat-template-kwargs" not in cmd
+
+    def test_cloud_training_config_exposes_seed_and_beta(self):
+        # Regression guard: CloudTrainingConfig must carry seed/beta so recipe
+        # values are not silently dropped before the command builder runs.
+        config = _cloud_config()
+        assert hasattr(config, "seed")
+        assert hasattr(config, "beta")
+        assert config.seed is None
+        assert config.beta is None
 
     def test_raises_when_no_repo_url(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
