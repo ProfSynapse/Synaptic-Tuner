@@ -190,6 +190,12 @@ For `hf_jobs`, a few patterns matter enough to treat as hard rules:
   launcher-only venv with `huggingface_hub>=1.5.0`, `transformers` 5.x, and CPU
   `torch` can satisfy local CLI imports and Buckets APIs without upgrading the
   Unsloth/KTO training env, which may still require `huggingface_hub<1.0`.
+- Do not upgrade generic project dependencies in the active training image
+  during HF Jobs bootstrap. Install missing project deps only; curated Unsloth
+  images can carry tightly coupled NumPy/SciPy/Transformers/Unsloth stacks, and
+  in-place upgrades before `import unsloth` can leave C-extension packages in a
+  mixed state. Use explicit stage-local `pip_packages` only when a run is
+  intentionally testing a new runtime.
 - Quote remote pip requirements that contain shell metacharacters. In HF Jobs
   bash commands, an unquoted token like `huggingface_hub>=1.5.0` can be parsed
   as output redirection rather than a pip requirement. Use shell quoting, e.g.
