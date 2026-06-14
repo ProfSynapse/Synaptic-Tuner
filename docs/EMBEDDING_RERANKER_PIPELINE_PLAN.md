@@ -1,13 +1,14 @@
 # Embedding & Reranker Pipeline: Retrieval-Model Training Design
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Created:** 2026-06-14
 **Updated:** 2026-06-14
 **Status:** Proposal (awaiting review) — no code written yet
 **Purpose:** Blueprint for adding retrieval-model training to Synaptic-Tuner — bi-encoder embeddings, LoRA/frozen-head adapters over a base, and rerankers — covering the full path from synthetic data through fine-tuning to evaluation
 
-**Scope of v1:** Bi-encoder embedding training on `sentence-transformers` with a plug-and-play model registry
-**Training Focus:** Retrieval models (encoder + decoder-as-embedder), reusing the existing method-dispatch, LoRA, and evaluation seams
+**Scope of v1:** Bi-encoder embedding training on `sentence-transformers` (accelerated by Unsloth's `FastSentenceTransformer`) with a plug-and-play model registry
+**Training Focus:** Retrieval models (encoder + decoder-as-embedder), reusing the existing method-dispatch, LoRA, merge/upload, and evaluation seams
+**v1.1 change:** Incorporates the finding that Unsloth shipped a native embedding/reranker training path in its 2026 release (Section 2) — the trainer rides the existing Unsloth stack instead of a separate one. Adds a runnable skill + example fixtures with a test-and-refine loop (Section 9).
 
 ---
 
@@ -21,7 +22,7 @@
 6. [Pillar 3: Retrieval Evaluation](#6-pillar-3-retrieval-evaluation)
 7. [Pillar 4: Adapters and Rerankers Over a Frozen Base](#7-pillar-4-adapters-and-rerankers-over-a-frozen-base)
 8. [Dependencies and Isolation](#8-dependencies-and-isolation)
-9. [Documentation and Skill Updates](#9-documentation-and-skill-updates)
+9. [Skills, Examples, and the Test-Refine Loop](#9-skills-examples-and-the-test-refine-loop)
 10. [Phased Rollout](#10-phased-rollout)
 11. [Open Items for Sign-Off](#11-open-items-for-sign-off)
 
@@ -66,15 +67,53 @@ What we reuse versus what we build.
 - **Evaluator pluggable verifier seam.** `shared/verifiers/builtins/` (next to `assertion_verifier`,
   `llm_judge`) plus the `shared/experiment_tracking/` registry (`run_type="evaluation"`).
 
-### New work (and one correction)
-- ⚠️ **Embedding/reranker models are encoder (BERT-family) or decoder-as-embedder architectures
-  with pooling + contrastive/triplet/ranking losses. The Unsloth `FastLanguageModel` path used by
-  SFT/KTO does NOT apply.** v1 builds a genuinely separate trainer on `sentence-transformers`
-  (native PEFT/LoRA, native losses, native evaluators). PEFT works on encoders, so the *LoRA story*
-  survives — just not the Unsloth wrapper.
+### New work
+- **Embedding/reranker models are encoder (BERT-family) or decoder-as-embedder architectures with
+  pooling + contrastive/triplet/ranking losses.** This is a different training shape from the
+  causal-LM `FastLanguageModel` path used by SFT/KTO — it needs its own trainer, losses, and
+  evaluators. Crucially, Unsloth now provides that path directly (see below), so we build on
+  `sentence-transformers` accelerated by Unsloth rather than a fully separate stack.
 - **No retrieval metrics** anywhere (recall@k, MRR, nDCG, MAP). New module + verifier required.
-- **New deps** (`sentence-transformers`, `faiss-cpu`, optional `mteb`) must be **method-local**, not
-  global — the Unsloth/transformers pins are tightly version-locked (see SFT `requirements.txt`).
+- **New deps** (`sentence-transformers`, `faiss-cpu`, optional `mteb`) added **method-local**, not
+  global — the trainer-runtime pins are tightly version-locked (see SFT `requirements.txt`).
+
+### Unsloth has a native embedding/reranker path (2026 research finding)
+
+Research (June 2026) confirms Unsloth's first 2026 release added embedding training, built with
+Hugging Face, and this materially simplifies the design because the repo already runs on Unsloth
+images and drives Unsloth's save/merge API.
+
+- **`FastSentenceTransformer`** — a new class that mirrors the `sentence-transformers` API
+  (`from_pretrained(...)`, `for_inference=True` at inference) and integrates with the standard
+  `SentenceTransformerTrainer`. Supports training **embedding, classifier, BERT, and reranker**
+  models ~1.8–3.3x faster, with ~20% less VRAM and 2x context vs FA2, no accuracy loss.
+- **LoRA supported**; **QLoRA is WIP** (bitsandbytes 4-bit incompatibility with recent
+  `transformers`). EmbeddingGemma-300M trains with LoRA on ~6 GB VRAM (QLoRA ~3 GB once stable).
+- **Named support:** `BAAI/bge-large-en`, EmbeddingGemma, and **Matryoshka** embedding models.
+- **Save/export reuses what the repo already does:** `save_pretrained()` (adapters),
+  `save_pretrained_merged()`, `push_to_hub()`, `push_to_hub_merged()`, `push_to_hub_gguf()`. The
+  repo's `shared/model_loading/merge.py` already calls `save_pretrained_merged` for Unsloth models,
+  so the embedding merge/upload path drops straight into the existing strategies.
+- **Loss in examples:** `CachedMultipleNegativesRankingLoss` (memory-efficient in-batch negatives).
+- **Version floor:** `transformers==5.1.0`, `trl==0.27.1`, PyTorch 2.9+. The repo's modern Unsloth
+  image (`unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8`, already referenced in the fine-tuning skill)
+  satisfies this; the legacy SFT pin (`transformers 4.45.2`) does not, so embedding runs use the
+  modern image profile, not the legacy one.
+- **Deploy targets:** transformers, sentence-transformers, LangChain, Weaviate, TEI, vLLM,
+  llama.cpp — i.e. trained adapters/models slot into the existing vLLM/serving story.
+- **Caveat:** Unsloth warns that custom heads / nonstandard pooling need verification — relevant to
+  the `frozen_head` adapter mode (Section 5) and cross-encoder rerankers (Section 7), which should be
+  validated against a plain `SentenceTransformer` baseline.
+
+**Design consequence:** the trainer targets the `sentence-transformers` API and loads via
+`FastSentenceTransformer` when available (fast path on the Unsloth image), falling back to a plain
+`SentenceTransformer` otherwise (e.g. Mac/MPS, CPU dev). Same training code, two loaders.
+
+**Sources:**
+[Unsloth 2026 update](https://unslothai.substack.com/p/unsloth-2026-update-faster-moe) ·
+[Unsloth discussion #4020 (embedding support)](https://github.com/unslothai/unsloth/discussions/4020) ·
+[Unsloth embedding fine-tuning docs](https://unsloth.ai/docs/basics/embedding-finetuning) ·
+[sentence-transformers × Unsloth integration](https://sbert.net/examples/sentence_transformer/training/unsloth/README.html)
 
 ---
 
@@ -187,29 +226,44 @@ Trainers/embedding/
 │   └── model_registry.yaml     # plug-and-play base models (Section 3)
 └── src/
     ├── registry.py             # EmbeddingModelSpec loader
-    ├── model_loader.py         # ST load + adapter mode (full | lora | frozen_head)
+    ├── model_loader.py         # dual loader: FastSentenceTransformer (fast) | SentenceTransformer (fallback) + adapter mode
     ├── data_loader.py          # triplet/pairs JSONL → ST dataset + prompt prefixing
     ├── losses.py               # config → ST loss mapping
     ├── evaluation.py           # in-training ST IR evaluator (recall@k/MRR/nDCG on a dev split)
     └── callbacks.py            # adapt Trainers/shared/callbacks to the ST trainer
 ```
 
-### Adapter modes (the "don't fully fine-tune" axis)
+The trainer targets the standard `sentence-transformers` `SentenceTransformerTrainer` +
+`SentenceTransformerTrainingArguments`, so the training loop is identical regardless of loader.
+
+### Dual loader (fast path + fallback)
 
 In `src/model_loader.py`:
+- **Fast path:** `from unsloth import FastSentenceTransformer; FastSentenceTransformer.from_pretrained(spec.hf_id, ...)`
+  on the modern Unsloth image — 1.8–3.3x faster, ~20% less VRAM. Exposes `save_pretrained_merged` /
+  `push_to_hub*`, so it plugs straight into `shared/model_loading/merge.py` and the existing upload
+  strategies.
+- **Fallback:** plain `SentenceTransformer(spec.hf_id, ...)` for Mac/MPS and CPU dev, where Unsloth's
+  CUDA path isn't available. Selected automatically by capability probe.
+
+### Adapter modes (the "don't fully fine-tune" axis)
+
 - `full` — fine-tune the whole encoder.
-- `lora` — `peft.LoraConfig` applied via ST's PEFT integration using `spec.lora_target_modules`.
-  Output is a small adapter; reuses existing merge/upload strategies.
+- `lora` — `peft.LoraConfig` using `spec.lora_target_modules` (Unsloth LoRA on the fast path; PEFT on
+  the fallback). Output is a small adapter; reuses existing merge/upload strategies. *(QLoRA deferred
+  until Unsloth's 4-bit embedding path stabilizes — see Section 2.)*
 - `frozen_head` — freeze the base, train only an appended Dense projection/MLP. The literal "simple
-  thing you put over it." Smallest, cheapest, CPU-trainable.
+  thing you put over it." Smallest, cheapest, CPU-trainable. Validate output embeddings against a
+  plain-`SentenceTransformer` baseline (Unsloth's nonstandard-pooling caveat).
 
 ### Config-selectable losses
 
 In `src/losses.py`:
-- `MultipleNegativesRankingLoss` (in-batch negatives — the workhorse; pairs or triplets).
+- `CachedMultipleNegativesRankingLoss` / `MultipleNegativesRankingLoss` (in-batch negatives — the
+  workhorse; pairs or triplets; the cached variant is what Unsloth's example uses for memory).
 - `TripletLoss` (explicit margins).
 - `CoSENTLoss` / `CosineSimilarityLoss` (graded relevance data).
-- Optional `MatryoshkaLoss` wrapper when `matryoshka_dims` set.
+- Optional `MatryoshkaLoss` wrapper when `matryoshka_dims` set (Unsloth supports Matryoshka models).
 
 ### Default config shape
 
@@ -242,8 +296,8 @@ evaluation:
 | `shared/utilities/paths.py:11` | Add `"embedding"` to `TRAINING_METHODS`. |
 | `tuner/backends/training/rtx_backend.py` | `get_available_methods()` returns `[..., "embedding"]`; config-filename mapping if needed. |
 | `tuner/backends/training/mac_backend.py` | Same (MPS works for ST). |
-| `Trainers/recipes/embedding_bge_base_smoke.yaml` | **New** recipe (`method: embedding`, `target: local|both`) matching the existing recipe schema, with a dedicated `job.image` / `setup.pip` for the ST stack. |
-| `tuner/backends/training/cloud/` | New image profile / requirements overlay for the ST stack, isolated from the Unsloth trainer runtime. |
+| `Trainers/recipes/embedding_bge_base_smoke.yaml` | **New** recipe (`method: embedding`, `target: local|both`) matching the existing recipe schema, pinned to the modern Unsloth image with `setup.pip` adding `sentence-transformers` + `faiss-cpu`. |
+| `tuner/backends/training/cloud/` | Reuse the modern Unsloth image profile (`unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8` class) with an ST/faiss pip overlay — no separate base image needed. |
 
 Output layout reuses the canonical
 `embedding_output/YYYYMMDD_HHMMSS/{final_model,checkpoints,logs,training_lineage.json}`.
@@ -288,8 +342,9 @@ composable *inference* concept:
   re-scores → final ranking. Swap rerankers over the *same frozen base* and A/B them with no base
   retraining.
 - **`Trainers/reranker/`** trainer (cross-encoder pairwise/listwise) reusing the same registry,
-  data, and eval seams. Reranker quality is measured as **nDCG lift over base retrieval** in the
-  retrieval verifier.
+  data, and eval seams. Unsloth's 2026 path already lists **reranker** as a supported model type, so
+  this rides the same `FastSentenceTransformer`/ST stack as the embedding trainer. Reranker quality
+  is measured as **nDCG lift over base retrieval** in the retrieval verifier.
 
 This is intentionally deferred so v1 ships the foundation (a trained embedder + retrieval eval) that
 rerankers rank on top of.
@@ -299,22 +354,58 @@ rerankers rank on top of.
 ## 8. Dependencies and Isolation
 
 - `Trainers/embedding/requirements.txt`: `sentence-transformers`, `faiss-cpu` (or `faiss-gpu`),
-  `datasets`. **Method-local** — do not touch the global Unsloth/transformers pins.
+  `datasets`. **Method-local** — do not touch the legacy SFT pins.
 - `Evaluator/requirements.txt`: add `faiss-cpu` (+ optional `mteb`).
-- Cloud: a dedicated ST image profile / pip overlay, isolated from the Unsloth trainer runtime
-  (same discipline as the existing bucket-sync overlay split).
+- **Runtime/image:** ride the **modern Unsloth image** (`transformers>=5.1.0`, `trl>=0.27.1`,
+  torch 2.9+) that `FastSentenceTransformer` requires — the same image class the repo's current
+  Qwen3.5 recipes already use. Add `sentence-transformers` + `faiss-cpu` as a pip overlay; do not
+  perturb the legacy `transformers 4.45.2` SFT pin. Keep Buckets-only Hub packages off the trainer
+  `PYTHONPATH`, same discipline as the existing bucket-sync overlay split.
 
 ---
 
-## 9. Documentation and Skill Updates
+## 9. Skills, Examples, and the Test-Refine Loop
 
-So the workflow is canonical, not ad hoc:
+The workflow must be runnable and iterable by a researcher from day one — canonical skills plus tiny
+checked-in fixtures so we can train/evaluate/refine on examples before committing to a real dataset.
+`.skills/` is the canonical source; mirrors are regenerated, never hand-edited.
 
-- `.skills/fine-tuning/reference/dataset-formats.md` — add the triplet/graded-pairs schemas.
-- `.skills/fine-tuning/SKILL.md` — add the `embedding` method, recipe, and CLI examples.
-- `.skills/evaluation/` — document the retrieval verifier + scenario schema.
+### New canonical skill: `.skills/embedding-training/SKILL.md`
+A single end-to-end skill (in the spirit of `case-studies`) that ties the three subsystems together
+and is the entry point for "how do I train and test an embedding model here":
+- Generate triplets (SynthChat) → train (`embedding` method, pick base from the registry, pick
+  adapter mode) → evaluate retrieval → read metrics → refine (mine harder negatives, change loss,
+  swap base) → re-run. Each step a copy-pasteable CLI command, no ad hoc Python.
+- Documents the registry (how to add a base model), the adapter modes, and the dual loader
+  (Unsloth fast path vs ST fallback).
+- A **progressive reference** subtree mirroring the fine-tuning skill: `reference/embedding-training.md`,
+  `reference/retrieval-eval.md`, `reference/triplet-data.md`.
+
+### Targeted updates to existing skills
+- `.skills/fine-tuning/SKILL.md` + `reference/dataset-formats.md` — add the `embedding` method,
+  recipe, CLI examples, and the triplet/graded-pairs schemas.
+- `.skills/evaluation/` — document the `retrieval_metrics` verifier + scenario schema.
 - `.skills/synethetic-data-generation/` — document triplet scenarios + hard-negative mining.
-- Sync mirrors: `python3 .skills/scripts/sync_skill_trees.py`.
+- After edits: `python3 .skills/scripts/sync_skill_trees.py` to refresh `.agents/skills` and
+  `.claude/skills` mirrors.
+
+### Checked-in example fixtures (the "test and refine on examples" loop)
+Tiny, fast, committed so the whole pipeline runs in minutes on CPU/MPS and serves as both smoke test
+and the worked example in the skill:
+- `Datasets/embedding/examples/triplets_smoke.jsonl` — ~20 hand-written `{query, positive, negatives}`.
+- `Datasets/embedding/examples/{corpus,queries,qrels}.jsonl` — a tiny labeled retrieval set for eval.
+- `Trainers/recipes/embedding_bge_base_smoke.yaml` — `frozen_head` or small-`r` `lora`, a few steps.
+- `Evaluator/config/scenarios/embedding_retrieval_smoke.yaml` + `Evaluator/recipes/embedding_retrieval_eval.yaml`.
+- `tests/` smoke test asserting the trainer produces an adapter and the retrieval verifier emits
+  finite recall@k/MRR/nDCG — wired so it runs in CI like the existing trainer smoke tests.
+
+### The refine loop the skill teaches
+1. Train on `triplets_smoke.jsonl` (fast path or fallback).
+2. Evaluate against the smoke retrieval set → baseline recall@k / nDCG.
+3. Inspect failures (queries with low rank-of-positive).
+4. Refine: mine harder negatives, switch loss (e.g. MNRL → cached MNRL), bump `r`, or swap the
+   registry base — one knob at a time.
+5. Re-run; the experiment-tracking registry (Section 6) makes runs comparable.
 
 ---
 
@@ -322,10 +413,10 @@ So the workflow is canonical, not ad hoc:
 
 | Phase | Deliverable |
 |-------|-------------|
-| **1 (v1)** | Model registry + `Trainers/embedding/` trainer (full/LoRA/frozen-head) + `retrieval_metrics` + retrieval verifier/eval + experiment-tracking wiring + smoke recipe. Train & evaluate a bge/e5 model end-to-end on a hand-made tiny triplet set. |
+| **1 (v1)** | Model registry + `Trainers/embedding/` trainer (dual loader; full/LoRA/frozen-head) + `retrieval_metrics` + retrieval verifier/eval + experiment-tracking wiring + **`.skills/embedding-training/` skill + checked-in example fixtures + CI smoke test** (Section 9). Train & evaluate a bge/e5 model end-to-end on the smoke triplet set, then refine. |
 | **2** | SynthChat triplet generation + hard-negative mining; generate a real dataset and retrain. |
-| **3** | `Trainers/reranker/` cross-encoder + adapter/reranker serving registry + two-stage retrieve→rerank pipeline + nDCG-lift eval. |
-| **4** | Cloud HF Jobs image profile for the ST stack; MTEB/BEIR benchmarking adapter. |
+| **3** | `Trainers/reranker/` cross-encoder (Unsloth supports reranker training) + adapter/reranker serving registry + two-stage retrieve→rerank pipeline + nDCG-lift eval. |
+| **4** | Cloud HF Jobs runs on the modern Unsloth image + ST/faiss overlay; MTEB/BEIR benchmarking adapter. |
 
 ---
 
