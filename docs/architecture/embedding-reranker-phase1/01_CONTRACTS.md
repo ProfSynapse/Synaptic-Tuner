@@ -618,7 +618,7 @@ Trainers/embedding/
 │   └── model_registry.yaml     # §1 seed data
 └── src/
     ├── registry.py             # §1 EmbeddingModelSpec loader
-    ├── model_loader.py         # §2 dual loader + capability probe
+    ├── model_loader.py         # §2 dual loader + capability probe + ADAPTER APPLICATION (§2.4)
     ├── data_loader.py          # triplet/pairs JSONL → ST dataset + prompt prefixing
     ├── losses.py               # config → ST loss mapping (§6.1)
     ├── evaluation.py           # in-training ST IR evaluator (recall@k/MRR/nDCG on dev split)
@@ -630,6 +630,20 @@ Trainers/embedding/
 torch/unsloth import, then load registry spec → `load_embedding_model` →
 `SentenceTransformerTrainer` + `SentenceTransformerTrainingArguments`. The
 training loop is loader-agnostic.
+
+**Adapter-application ownership (§2.4) — the LOADER is the single authority.**
+`load_embedding_model` MUST return a model that already has the requested
+`adapter_mode` applied: for `lora` the returned model is PEFT/Unsloth-wrapped
+(a real adapter exists); for `frozen_head` the base is frozen and an appended
+head is the only trainable module; for `full` the base is fully trainable.
+`train_embedding.py` then trains *whatever it receives* and applies NO adapter
+logic itself. This keeps the loader-agnostic training loop honest and avoids a
+trainer/loader split-brain. *Rationale (B1, remediation cycle 1): the original
+v1 left the apply step unowned — the loader validated/carried the mode and the
+trainer consumed the base model, so neither applied it and `lora` (the default)
+silently trained full weights with no adapter emitted. Pinning the apply step to
+the loader closes that gap; validating the mode without applying it does not
+satisfy this contract.*
 
 ### 6.1 `losses.py` config → ST loss map
 
