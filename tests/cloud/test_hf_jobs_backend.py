@@ -64,7 +64,10 @@ class TestHFJobsBackendProperties:
 
     def test_available_methods(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        assert backend.get_available_methods() == ["sft", "kto", "grpo", "dpo"]
+        # 5-element list: "embedding" appended in the same commit as the
+        # method-wiring edit (CONTRACTS §5.1.1). HF Jobs runs the embedding
+        # cloud path (recipe + setup.pip overlay), so it must advertise it.
+        assert backend.get_available_methods() == ["sft", "kto", "grpo", "dpo", "embedding"]
 
 
 class TestHFJobsValidateEnvironment:
