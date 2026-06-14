@@ -1,0 +1,24 @@
+# Trainers/embedding/requirements.txt
+#
+# METHOD-LOCAL dependency island for the embedding trainer (01_CONTRACTS §7.1).
+#
+# This file is the embedding method's OWN pinned island. It must NEVER perturb
+# the legacy SFT transformers 4.45.2 pin (that lives elsewhere) — the embedding
+# stack is overlaid on top of the cloud image's transformers via the recipe's
+# setup.pip (WU-C owns the recipe overlay).
+#
+# Local verification (CODE smoke, this worktree): sentence-transformers 5.2.0 +
+# datasets are present and the modern SentenceTransformerTrainer API
+# (SentenceTransformerTrainer / SentenceTransformerTrainingArguments /
+# MultipleNegativesRankingLoss / MatryoshkaLoss / BatchSamplers.NO_DUPLICATES /
+# InformationRetrievalEvaluator) all import and run on the CPU fallback path.
+#
+# EXACT PINS ARE TBD-PENDING-CLOUD-SMOKE-TEST (lead-approved, 01_CONTRACTS §7.1):
+# the repo has a documented history of image/numpy mismatches, so the exact
+# cloud-overlay pins are produced by WU-C's overlay smoke test, NOT invented
+# here. Unpinned entries below declare the dependency set; the recipe overlay
+# pins them empirically. See the HANDOFF flag.
+
+sentence-transformers   # local smoke confirmed 5.2.0 works on the fallback path
+faiss-cpu               # retrieval/IR (eval-time); pin TBD by cloud overlay smoke
+datasets                # JSONL -> Dataset for the ST trainer

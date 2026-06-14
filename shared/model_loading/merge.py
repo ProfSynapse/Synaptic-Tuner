@@ -70,31 +70,29 @@ def find_merged_for_run(run_path: Path) -> Optional[Path]:
     return None
 
 
-def merge_lora_checkpoint(
+# Family literals for the merge seam. "causal_lm" is the historical default and
+# its dispatch path is held BEHAVIOR-IDENTICAL to the pre-seam code. "embedding"
+# dispatches to the sentence-transformers / FastSentenceTransformer merge path.
+# These literals match the canonical method/family strings used across the repo
+# (no variants). merge.py does NOT read the registry — the family is passed in by
+# the caller that knows it (keeps shared/ import-light and free of Trainers/ deps).
+MERGE_FAMILY_CAUSAL_LM = "causal_lm"
+MERGE_FAMILY_EMBEDDING = "embedding"
+SUPPORTED_MERGE_FAMILIES = (MERGE_FAMILY_CAUSAL_LM, MERGE_FAMILY_EMBEDDING)
+
+
+def _merge_causal_lm(
     lora_path: Path,
     output_path: Path,
-    max_seq_length: int = 2048,
-    load_in_4bit: bool = True,
-) -> Path:
-    """
-    Merge LoRA adapters into base model.
+    max_seq_length: int,
+    load_in_4bit: bool,
+) -> None:
+    """Causal-LM merge path (DEFAULT). Held behavior-identical to the pre-seam code.
 
-    Args:
-        lora_path: Path to LoRA checkpoint
-        output_path: Path to save merged model
-        max_seq_length: Maximum sequence length
-        load_in_4bit: Whether to load in 4-bit
-
-    Returns:
-        Path to merged model
+    Loads the LoRA checkpoint with unsloth.FastLanguageModel and saves a merged
+    16-bit model. SFT/KTO/GRPO merges flow through here unchanged.
     """
     from unsloth import FastLanguageModel
-
-    print("\n" + "=" * 60)
-    print("MERGING LORA CHECKPOINT")
-    print("=" * 60)
-    print(f"LoRA path: {lora_path}")
-    print(f"Output: {output_path}")
 
     print("\nLoading LoRA checkpoint...")
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -107,13 +105,99 @@ def merge_lora_checkpoint(
     output_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained_merged(str(output_path), tokenizer, save_method="merged_16bit")
 
-    print(f"✓ Merged model saved to: {output_path}")
-    print("=" * 60 + "\n")
-
     # Clear GPU memory
     del model
     del tokenizer
     torch.cuda.empty_cache()
+
+
+def _merge_embedding(
+    lora_path: Path,
+    output_path: Path,
+    max_seq_length: int,
+) -> None:
+    """Embedding merge path. Mirrors the causal-LM structure via the ST fast path.
+
+    Loads the LoRA checkpoint with unsloth.FastSentenceTransformer (which exposes
+    save_pretrained_merged, just like FastLanguageModel) and saves a merged
+    16-bit sentence-transformers model. `load_in_4bit` is intentionally NOT
+    accepted here: QLoRA is deferred for embedding in v1 (R8), and the ST loader
+    does not take a 4-bit flag — so the dispatch must never pass one through.
+    """
+    from unsloth import FastSentenceTransformer
+
+    print("\nLoading embedding LoRA checkpoint (sentence-transformers)...")
+    model = FastSentenceTransformer.from_pretrained(
+        str(lora_path),
+        max_seq_length=max_seq_length,
+    )
+
+    print("Saving merged 16-bit embedding model...")
+    output_path.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained_merged(str(output_path), save_method="merged_16bit")
+
+    # Clear GPU memory
+    del model
+    torch.cuda.empty_cache()
+
+
+def _merge_loader_for_family(family: str):
+    """Return the family-specific merge implementation.
+
+    "causal_lm" (default) -> _merge_causal_lm (unsloth FastLanguageModel path)
+    "embedding"           -> _merge_embedding (ST/FastSentenceTransformer path)
+    Unknown family        -> ValueError.
+    """
+    dispatch = {
+        MERGE_FAMILY_CAUSAL_LM: _merge_causal_lm,
+        MERGE_FAMILY_EMBEDDING: _merge_embedding,
+    }
+    if family not in dispatch:
+        raise ValueError(
+            f"Unknown merge family {family!r}; must be one of {list(SUPPORTED_MERGE_FAMILIES)}"
+        )
+    return dispatch[family]
+
+
+def merge_lora_checkpoint(
+    lora_path: Path,
+    output_path: Path,
+    max_seq_length: int = 2048,
+    load_in_4bit: bool = True,
+    family: str = MERGE_FAMILY_CAUSAL_LM,   # NEW PARAM, default preserves existing behavior
+) -> Path:
+    """
+    Merge LoRA adapters into base model.
+
+    Args:
+        lora_path: Path to LoRA checkpoint
+        output_path: Path to save merged model
+        max_seq_length: Maximum sequence length
+        load_in_4bit: Whether to load in 4-bit (causal_lm only; ignored for embedding)
+        family: Model family — "causal_lm" (default, behavior-identical to the
+            pre-seam code) or "embedding". The caller that knows the family
+            supplies it; merge.py does not read the registry.
+
+    Returns:
+        Path to merged model
+    """
+    print("\n" + "=" * 60)
+    print("MERGING LORA CHECKPOINT")
+    print("=" * 60)
+    print(f"LoRA path: {lora_path}")
+    print(f"Output: {output_path}")
+    print(f"Family: {family}")
+
+    merge_fn = _merge_loader_for_family(family)
+    if family == MERGE_FAMILY_EMBEDDING:
+        # load_in_4bit is ignored for embedding (QLoRA deferred, R8) — do not
+        # thread a 4-bit flag into the ST loader that does not support one.
+        merge_fn(lora_path, output_path, max_seq_length)
+    else:
+        merge_fn(lora_path, output_path, max_seq_length, load_in_4bit)
+
+    print(f"✓ Merged model saved to: {output_path}")
+    print("=" * 60 + "\n")
 
     return output_path
 

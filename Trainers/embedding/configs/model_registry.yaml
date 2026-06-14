@@ -1,0 +1,86 @@
+# Trainers/embedding/configs/model_registry.yaml
+#
+# Location: Trainers/embedding/configs/model_registry.yaml
+# Purpose:  Single source of truth (SSOT) for every embedding base model the
+#           pipeline can train/load. Each entry fully describes how to LOAD,
+#           PROMPT, and ADAPT a base model. Adding a model is ONE block here —
+#           no Python change (the config-driven rule).
+# Used by:  Trainers/embedding/src/registry.py (EmbeddingModelSpec loader),
+#           which the trainer (train_embedding.py), the dual loader
+#           (model_loader.py), and eval-time embedding all import.
+#
+# Schema is the binding contract in
+# docs/architecture/embedding-reranker-phase1/01_CONTRACTS.md §1.1. The R7
+# corrections (PREPARE-verified) are folded in: Qwen3 native 32k / default_dim
+# 1024 / Matryoshka; bge query prompt OPTIONAL; decoder LoRA targets include the
+# MLP projections + lora_task_type FEATURE_EXTRACTION.
+
+models:
+  bge-base-en:
+    hf_id: BAAI/bge-base-en-v1.5
+    fast_path_hf_id: null         # optional unsloth/-prefixed mirror for the fast path; null -> use hf_id
+    family: bert                  # bert | xlm-roberta | decoder
+    embedding_type: bi_encoder    # bi_encoder | cross_encoder (cross_encoder reserved for Phase 3)
+    pooling: cls                  # mean | cls | last_token | weighted_mean
+    normalize: true
+    max_seq_length: 512
+    default_dim: 768
+    matryoshka_dims: []           # optional truncation dims (empty = disabled)
+    query_prompt: "Represent this sentence for searching relevant passages: "
+    passage_prompt: ""
+    prompt_required: false        # R7: bge query prompt is OPTIONAL (no prompt -> slight degradation only)
+    lora_target_modules: [query, key, value, dense]   # R7: verified via named_modules() in CODE smoke
+    lora_task_type: null          # null for encoder (PEFT infers); FEATURE_EXTRACTION for decoder
+    trust_remote_code: false
+
+  e5-base:
+    hf_id: intfloat/e5-base-v2
+    fast_path_hf_id: null
+    family: bert
+    embedding_type: bi_encoder
+    pooling: mean
+    normalize: true
+    max_seq_length: 512
+    default_dim: 768
+    matryoshka_dims: []
+    query_prompt: "query: "       # E5 REQUIRES query:/passage: prefixes
+    passage_prompt: "passage: "
+    prompt_required: true
+    lora_target_modules: [query, key, value, dense]
+    lora_task_type: null
+    trust_remote_code: false
+
+  gte-base:
+    hf_id: thenlper/gte-base
+    fast_path_hf_id: null
+    family: bert
+    embedding_type: bi_encoder
+    pooling: mean
+    normalize: true
+    max_seq_length: 512
+    default_dim: 768
+    matryoshka_dims: []
+    query_prompt: ""
+    passage_prompt: ""
+    prompt_required: false
+    lora_target_modules: [query, key, value, dense]
+    lora_task_type: null
+    trust_remote_code: false
+
+  qwen3-embedding-0.6b:
+    hf_id: Qwen/Qwen3-Embedding-0.6B
+    fast_path_hf_id: null
+    family: decoder               # last-token pooling, instruct prompt
+    embedding_type: bi_encoder
+    pooling: last_token
+    normalize: true
+    max_seq_length: 32768         # R7: native 32k, NOT 8192
+    default_dim: 1024             # R7: user-definable 32-1024 (MRL)
+    matryoshka_dims: [1024, 768, 512, 256, 128]   # R7: MRL/Matryoshka is native here
+    query_prompt: "Instruct: Given a query, retrieve relevant passages\nQuery: "
+    passage_prompt: ""
+    prompt_required: false
+    # R7: full decoder target set incl. MLP-proj (materially affects adapter capacity)
+    lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+    lora_task_type: FEATURE_EXTRACTION    # R7: required for decoder-as-embedder
+    trust_remote_code: false      # R7: doc claimed true; HF card shows standard usage. CODE verified; default false.

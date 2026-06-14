@@ -97,6 +97,7 @@ python tuner.py cloud-run --job-config Trainers/recipes/battle_of_models_qwen35_
 | `loss-bench` | Loss-only benchmarking on a finished training run    |
 | `datagen`    | Synthetic data generation (e.g. SynthChat vault)     |
 | `eval`       | Evaluation runs (when migrated)                      |
+| `embedding`  | Embedding/retrieval fine-tuning (SentenceTransformers)|
 
 The discovery module does not enforce this vocabulary; new methods can
 be introduced by setting the field and filtering on the same value.
