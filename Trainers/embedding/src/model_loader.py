@@ -226,11 +226,17 @@ def _apply_frozen_head(model, spec: EmbeddingModelSpec):
 
     Encoder bases (bge/e5/gte) ship Transformer + Pooling (+ Normalize) with no
     trainable projection head, so a Dense head is appended when absent — otherwise
-    there is nothing to train. All pre-existing parameters are frozen
-    (requires_grad=False); only the appended head stays trainable.
+    there is nothing to train. The appended head is an EXPLICITLY LINEAR
+    projection (activation_function=nn.Identity()): ST's Dense defaults its
+    activation to nn.Tanh(), which would inject an unintended nonlinearity, so the
+    identity is passed deliberately. nn.Identity() — not None — because
+    Dense.forward calls self.activation_function() unconditionally, so None would
+    crash at forward. All pre-existing parameters are frozen (requires_grad=False);
+    only the appended head stays trainable.
 
     Returns the model with exactly the head trainable.
     """
+    from torch import nn
     from sentence_transformers import models as st_models
 
     # Freeze everything currently in the model.
@@ -247,6 +253,7 @@ def _apply_frozen_head(model, spec: EmbeddingModelSpec):
             in_features=embedding_dim,
             out_features=embedding_dim,
             bias=True,
+            activation_function=nn.Identity(),  # explicit linear; ST defaults to Tanh()
         )
         # ST containers behave like nn.Sequential keyed by string indices; append
         # under a stable name so the head is discoverable and saved with the model.
