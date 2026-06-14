@@ -225,6 +225,19 @@ def _compute_single(metric: str, k: int, result: QueryResult) -> float:
     raise ValueError(f"Unsupported metric {metric!r}.")
 
 
+def _has_relevance(metric: str, result: QueryResult) -> bool:
+    """Whether ``result`` carries any ground-truth relevance for ``metric``.
+
+    A query with no relevant docs is undefined for these metrics (each pure fn
+    returns ``0.0`` for it), so it is excluded from the mean denominator rather
+    than counted as a zero that drags the aggregate down. nDCG keys off the graded
+    relevance map; the binary metrics key off the relevant set.
+    """
+    if metric == "ndcg":
+        return any(grade > 0 for grade in result.graded_relevance().values())
+    return bool(result.relevant)
+
+
 def aggregate_retrieval_metrics(
     results: Sequence[QueryResult],
     metric_specs: Sequence[str],
@@ -232,15 +245,25 @@ def aggregate_retrieval_metrics(
     """Compute mean metrics across a query set.
 
     Parses each ``"<metric>@<k>"`` spec, evaluates it per query, and returns the
-    mean value across all queries (e.g. ``map@k`` averaged over queries is MAP).
+    mean value across all queries with ground-truth relevance for that metric
+    (e.g. ``map@k`` averaged over queries is MAP).
+
+    Zero-relevant queries (no relevant docs / all-zero grades) are **excluded from
+    the mean denominator** rather than counted as zeros: such a query is undefined
+    for these metrics, and counting it would silently drag the aggregate toward
+    zero in proportion to how many unlabeled queries the eval set carries. The
+    denominator is therefore per-metric (the count of queries that actually have
+    relevance for that metric). A spec whose every query is zero-relevant maps to
+    ``0.0`` (no queries contribute).
 
     Args:
         results: Per-query retrieval outcomes.
         metric_specs: Canonical spec strings, e.g. ``["recall@10", "ndcg@10"]``.
 
     Returns:
-        Mapping each original spec string to its mean value across queries.
-        Returns ``0.0`` for every spec when ``results`` is empty.
+        Mapping each original spec string to its mean value across the queries
+        that have relevance for that metric. Returns ``0.0`` for a spec when no
+        query contributes (including when ``results`` is empty).
 
     Raises:
         ValueError: If any spec is malformed (see :func:`parse_metric_spec`).
@@ -253,8 +276,12 @@ def aggregate_retrieval_metrics(
 
     aggregated: dict[str, float] = {}
     for spec, metric, k in parsed:
-        total = sum(_compute_single(metric, k, result) for result in results)
-        aggregated[spec] = total / len(results)
+        scored = [
+            _compute_single(metric, k, result)
+            for result in results
+            if _has_relevance(metric, result)
+        ]
+        aggregated[spec] = sum(scored) / len(scored) if scored else 0.0
     return aggregated
 
 

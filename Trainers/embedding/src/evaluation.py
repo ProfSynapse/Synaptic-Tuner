@@ -31,6 +31,12 @@ _METRIC_TO_IR_KWARG = {
     "accuracy": "accuracy_at_k",
 }
 
+# Column names emitted by data_loader.load_embedding_dataset — used to derive an
+# in-training IR set (queries/corpus/qrels) from the held-out eval split.
+_IR_FROM_DATASET_QUERY_COLUMN = "anchor"
+_IR_FROM_DATASET_POSITIVE_COLUMN = "positive"
+_IR_FROM_DATASET_NEGATIVE_COLUMN = "negative"
+
 
 def parse_metric_specs(metric_specs: Iterable[str]) -> dict[str, list[int]]:
     """Parse ["recall@10", "mrr@10", ...] into IR-evaluator k-list kwargs.
@@ -99,4 +105,80 @@ def build_ir_evaluator(
         batch_size=batch_size,
         show_progress_bar=False,
         **k_kwargs,
+    )
+
+
+def build_ir_evaluator_from_dataset(
+    eval_dataset: Any,
+    metric_specs: Sequence[str],
+    *,
+    name: str = "embedding-dev",
+    batch_size: int = 32,
+) -> Any | None:
+    """Derive an InformationRetrievalEvaluator from a held-out triplet/pairs split.
+
+    The embedding trainer's eval split is a datasets.Dataset of (anchor, positive
+    [, negative]) rows — not a corpus/queries/qrels triple. To run recall@k / MRR /
+    nDCG during training, this folds the split into an IR set: each row's anchor is
+    a query whose single relevant doc is its positive; the corpus is every distinct
+    positive (and negative, when present) across the split, so non-positive docs act
+    as distractors. Identical texts collapse onto one doc id, so a query is scored
+    against the shared corpus rather than a private positive.
+
+    Returns the configured evaluator, or None when no usable eval set exists (the
+    caller then trains without in-training IR eval rather than crashing).
+
+    Args:
+        eval_dataset:  the held-out datasets.Dataset (or None).
+        metric_specs:  canonical "<metric>@<k>" list (drives the IR k-lists).
+        name:          evaluator name (prefixes the reported metric keys).
+        batch_size:    encode batch size.
+    """
+    if eval_dataset is None or len(eval_dataset) == 0:
+        return None
+
+    columns = set(getattr(eval_dataset, "column_names", []) or [])
+    if _IR_FROM_DATASET_QUERY_COLUMN not in columns or _IR_FROM_DATASET_POSITIVE_COLUMN not in columns:
+        # The split does not carry the expected (anchor, positive) columns — skip
+        # in-training IR eval rather than mis-derive an IR set.
+        return None
+
+    corpus: dict[str, str] = {}
+    doc_id_by_text: dict[str, str] = {}
+
+    def _doc_id(text: str) -> str:
+        """Return a stable doc id for a passage text, collapsing duplicates."""
+        if text not in doc_id_by_text:
+            doc_id = f"d{len(doc_id_by_text)}"
+            doc_id_by_text[text] = doc_id
+            corpus[doc_id] = text
+        return doc_id_by_text[text]
+
+    queries: dict[str, str] = {}
+    relevant_docs: dict[str, set[str]] = {}
+
+    has_negative = _IR_FROM_DATASET_NEGATIVE_COLUMN in columns
+    for index, row in enumerate(eval_dataset):
+        anchor = row.get(_IR_FROM_DATASET_QUERY_COLUMN)
+        positive = row.get(_IR_FROM_DATASET_POSITIVE_COLUMN)
+        if not anchor or not positive:
+            continue
+        qid = f"q{index}"
+        queries[qid] = anchor
+        relevant_docs[qid] = {_doc_id(positive)}
+        if has_negative:
+            negative = row.get(_IR_FROM_DATASET_NEGATIVE_COLUMN)
+            if negative:
+                _doc_id(negative)  # register as a distractor in the corpus
+
+    if not queries:
+        return None
+
+    return build_ir_evaluator(
+        queries,
+        corpus,
+        relevant_docs,
+        metric_specs,
+        name=name,
+        batch_size=batch_size,
     )

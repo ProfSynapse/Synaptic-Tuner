@@ -158,13 +158,23 @@ def test_unknown_adapter_mode_raises(fake_spec):
 @pytest.mark.parametrize("mode", ["full", "lora", "frozen_head"])
 def test_fallback_path_used_when_fast_unavailable(mode, fake_spec, monkeypatch):
     """With fast path disabled, the loader builds via the plain ST fallback and
-    returns loader_path='fallback' — never touching unsloth."""
+    returns loader_path='fallback' — never touching unsloth.
+
+    This pins the loader-PATH SELECTION contract, not adapter application: the
+    loader now (CONTRACTS §2.4) applies the adapter_mode to the loaded model, so
+    the application step is stubbed to identity here and the adapter-application
+    behavior is asserted separately (test-engineer's per-mode param-grad
+    regression). The sentinel proves the fallback model is what flows through."""
     sentinel_model = object()
 
     def fake_load_fallback(spec):
         return sentinel_model
 
     monkeypatch.setattr(model_loader, "_load_fallback", fake_load_fallback)
+    monkeypatch.setattr(
+        model_loader, "_apply_adapter_mode_fallback",
+        lambda model, spec, adapter_mode, lora_config: model,
+    )
 
     loaded = model_loader.load_embedding_model(
         fake_spec, adapter_mode=mode, allow_fast_path=False
@@ -190,6 +200,12 @@ def test_fast_load_failure_degrades_to_fallback(fake_spec, monkeypatch):
     sentinel = object()
     monkeypatch.setattr(model_loader, "_load_fast", boom_fast)
     monkeypatch.setattr(model_loader, "_load_fallback", lambda spec: sentinel)
+    # Stub adapter application to identity — this test pins the degrade-to-fallback
+    # PATH, not adapter application (CONTRACTS §2.4, asserted separately).
+    monkeypatch.setattr(
+        model_loader, "_apply_adapter_mode_fallback",
+        lambda model, spec, adapter_mode, lora_config: model,
+    )
 
     with pytest.warns(UserWarning, match="falling back"):
         loaded = model_loader.load_embedding_model(fake_spec, adapter_mode="lora")

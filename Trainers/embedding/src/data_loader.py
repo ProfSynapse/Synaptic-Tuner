@@ -56,6 +56,40 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _resolve_aliased_field(record: dict[str, Any], field_label: str, aliases: tuple[str, ...]) -> str:
+    """Resolve one of ``aliases`` from ``record`` into a non-empty string.
+
+    Distinguishes the two failure modes the original conflated:
+      - none of the alias keys is present  -> "missing"
+      - a key is present but its value is empty/blank -> "empty"
+
+    Args:
+        record:      the raw JSONL record.
+        field_label: human name for the field (e.g. "query") for error messages.
+        aliases:     accepted key names, in priority order.
+
+    Returns:
+        The resolved value as a stripped-non-empty string.
+
+    Raises:
+        ValueError: the field is missing (no alias key) or present-but-empty.
+    """
+    present_keys = [key for key in aliases if key in record]
+    if not present_keys:
+        raise ValueError(
+            f"Record missing required {field_label!r} field "
+            f"(expected one of {list(aliases)}): {record!r}"
+        )
+    for key in present_keys:
+        value = record[key]
+        if value is not None and str(value).strip():
+            return str(value)
+    raise ValueError(
+        f"Record has an empty {field_label!r} field "
+        f"(key(s) {present_keys} present but blank): {record!r}"
+    )
+
+
 def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     """Normalize one record to {query, positive, negatives: list[str]}.
 
@@ -64,14 +98,12 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
     or list). Pair records (no negatives) yield an empty negatives list.
 
     Raises:
-        ValueError: a record is missing a query or positive.
+        ValueError: a record is missing a query/positive field, or carries one
+            that is present but empty (reported distinctly — see
+            :func:`_resolve_aliased_field`).
     """
-    query = record.get("query") or record.get("anchor") or record.get("question")
-    positive = record.get("positive") or record.get("pos")
-    if not query or not positive:
-        raise ValueError(
-            f"Record missing required 'query'/'positive' fields: {record!r}"
-        )
+    query = _resolve_aliased_field(record, "query", ("query", "anchor", "question"))
+    positive = _resolve_aliased_field(record, "positive", ("positive", "pos"))
 
     raw_negatives = record.get("negatives")
     if raw_negatives is None:

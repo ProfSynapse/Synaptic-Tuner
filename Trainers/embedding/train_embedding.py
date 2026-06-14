@@ -42,6 +42,7 @@ from registry import get_spec  # noqa: E402
 from model_loader import load_embedding_model  # noqa: E402
 from data_loader import load_embedding_dataset  # noqa: E402
 from losses import build_loss, select_batch_sampler  # noqa: E402
+from evaluation import build_ir_evaluator_from_dataset  # noqa: E402
 from callbacks import EmbeddingMetricsCallback  # noqa: E402
 
 
@@ -194,6 +195,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     loss = build_loss(loaded.model, loss_name, spec)
     batch_sampler = select_batch_sampler(loss_name)
 
+    # In-training IR evaluator (recall@k / MRR / nDCG) derived from the held-out
+    # eval split, driven by the config `evaluation.metrics` list. None when there
+    # is no usable eval split, in which case training runs without IR eval.
+    eval_cfg = config.get("evaluation", {}) or {}
+    metric_specs = eval_cfg.get("metrics", []) or []
+    ir_evaluator = build_ir_evaluator_from_dataset(eval_dataset, metric_specs) if metric_specs else None
+    has_eval = eval_dataset is not None or ir_evaluator is not None
+
     training_args = SentenceTransformerTrainingArguments(
         output_dir=str(checkpoints_dir),
         num_train_epochs=int(training_cfg.get("epochs", 1)),
@@ -204,7 +213,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         batch_sampler=batch_sampler,
         seed=args.seed,
         logging_steps=int(training_cfg.get("logging_steps", 5)),
-        eval_strategy="steps" if eval_dataset is not None else "no",
+        eval_strategy="steps" if has_eval else "no",
         report_to="none",
     )
 
@@ -214,6 +223,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         loss=loss,
+        evaluator=ir_evaluator,
         callbacks=[EmbeddingMetricsCallback(
             log_every_n_steps=int(training_cfg.get("logging_steps", 5)),
             output_dir=str(run_dir),

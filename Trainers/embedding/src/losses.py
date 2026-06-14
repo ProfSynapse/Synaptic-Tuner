@@ -37,6 +37,14 @@ IN_BATCH_NEGATIVE_LOSSES = frozenset(
     {"multiple_negatives_ranking", "cached_multiple_negatives_ranking"}
 )
 
+# Loss names that require a graded (sentence1, sentence2, score) dataset shape.
+# The v1 data loader (data_loader.load_embedding_dataset) only emits
+# (anchor, positive[, negative]) columns from triplet/pairs JSONL — there is NO
+# score column — so selecting one of these would crash at train time inside the
+# loss. They are gated at config time (build_loss) with an actionable message
+# rather than allowed to reach a deep train-time failure (§6.1).
+SCORE_REQUIRING_LOSSES = frozenset({"cosent", "cosine_similarity"})
+
 
 def build_loss(model: Any, loss_name: str, spec: EmbeddingModelSpec) -> Any:
     """Build the ST loss for `loss_name`, wrapping in MatryoshkaLoss if declared.
@@ -51,7 +59,9 @@ def build_loss(model: Any, loss_name: str, spec: EmbeddingModelSpec) -> Any:
         An ST loss instance ready to pass to SentenceTransformerTrainer.
 
     Raises:
-        ValueError: unknown loss_name.
+        ValueError: unknown loss_name, OR a score-requiring loss (cosent /
+                    cosine_similarity) that the triplet/pairs data loader cannot
+                    feed — caught here at config time, not deep in train().
     """
     from sentence_transformers import losses
 
@@ -67,6 +77,19 @@ def build_loss(model: Any, loss_name: str, spec: EmbeddingModelSpec) -> Any:
     if key not in base_loss_factories:
         raise ValueError(
             f"Unknown loss {loss_name!r}; supported: {sorted(base_loss_factories)}"
+        )
+
+    # Fail fast at config time: these losses need a (sentence1, sentence2, score)
+    # dataset, but the v1 triplet/pairs loader emits no score column, so they would
+    # otherwise crash mid-training with an opaque error.
+    if key in SCORE_REQUIRING_LOSSES:
+        raise ValueError(
+            f"Loss {loss_name!r} requires a graded (sentence1, sentence2, score) "
+            f"dataset, but the v1 embedding data loader only produces "
+            f"(anchor, positive[, negative]) from triplet/pairs JSONL. "
+            f"Use one of {sorted(set(base_loss_factories) - SCORE_REQUIRING_LOSSES)}, "
+            f"or provide a scored-pairs data loader before selecting "
+            f"{sorted(SCORE_REQUIRING_LOSSES)} (deferred in v1)."
         )
 
     base_loss = base_loss_factories[key]()
