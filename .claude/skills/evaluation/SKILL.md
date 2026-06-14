@@ -40,6 +40,7 @@ Schema/structural validation may still be reported for debugging, but it is not 
 - `Evaluator/config/tool_schema.yaml` - Current CLI wrapper/tool schema metadata
 - `Evaluator/config/rubrics/` - LLM-as-judge rubrics
 - `Evaluator/results/` - Evaluation output JSON and Markdown
+- `Evaluator/config/scenarios/embedding_retrieval_smoke.yaml` - Corpus-level retrieval scenario (the `retrieval` verifier)
 
 ## Progressive Reference
 
@@ -78,6 +79,38 @@ tests:
 ```
 
 Use `correct.any` for multiple valid answers, such as command by id or by name. Use `correct.all` or nested `all`/`any`/`not` assertions for stricter structures.
+
+## Retrieval Scenarios (embedding models)
+
+Embedding models are scored **corpus-level**, not per-completion — there is no
+backend `chat()` turn. A retrieval test declares a `retrieval_config` block
+instead of `correct`; the evaluator embeds a corpus + query set, runs FAISS
+top-k retrieval against qrels, aggregates recall@k / MRR / nDCG@k / MAP, and
+applies a pass/warn/fail threshold ladder. Thresholds live in YAML, never in
+Python.
+
+```yaml
+tests:
+  - id: bge_base_retrieval_smoke
+    tags: [embedding, retrieval, smoke]
+    retrieval_config:
+      corpus: Datasets/embedding/examples/corpus.jsonl     # {id, text}
+      queries: Datasets/embedding/examples/queries.jsonl   # {id, text}
+      qrels: Datasets/embedding/examples/qrels.jsonl        # {query_id, doc_id, relevance}
+      metrics: [recall@10, mrr@10, ndcg@10]                 # "<metric>@<k>" grammar
+      model: { registry_name: bge-base-en }                # or model.path to a trained adapter
+      thresholds:
+        min: { ndcg@10: 0.30, recall@10: 0.40 }            # below min → fail
+        warn_margin: 0.05                                  # within [min, min+margin) → warn
+      primary_metric: ndcg@10
+```
+
+The verifier is registered under the type key `retrieval`
+(`shared/verifiers/builtins/retrieval_verifier.py`); `EvaluationRecord.status`
+evaluates the retrieval ladder ahead of the correctness ladder. The canonical
+scenario is `Evaluator/config/scenarios/embedding_retrieval_smoke.yaml`. For
+authoring the data + the full retrieval surface, use the `embedding-training`
+skill (`reference/retrieval-eval.md`).
 
 ## Response View
 

@@ -224,6 +224,30 @@ def load_embedding_model(
 | `lora` | `peft.LoraConfig(target_modules=spec.lora_target_modules, task_type=spec.lora_task_type)` (Unsloth LoRA on fast, PEFT on fallback). Output = small adapter → reuses merge/upload. | yes | — |
 | `frozen_head` | freeze base, train only appended Dense/MLP head. Smallest, CPU-trainable. | no | **Compare-to-ST-baseline gate (R6):** before training the head, assert frozen-base embeddings match a plain-`SentenceTransformer` baseline within tolerance (Unsloth nonstandard-pooling caveat). Smoke test enforces this. |
 
+**R6 disposition (v1) — cloud-smoke-deferred (lead-accepted A′).** The R6
+compare-to-ST-baseline gate is a *fidelity check on the frozen-base
+representation*; it only has meaning when the real fast-path encoder runs on
+GPU, which is the same Docker/GPU blocker that defers the overlay pins (§7).
+Therefore in v1 R6 is **NOT** a runtime assertion in `Trainers/embedding/`
+source — it rides the deferred cloud-smoke checklist (§7.4) as a **named,
+blocking pre-production gate**. What this does and does NOT defer:
+- The `frozen_head` **MODE** (loadable, produces `dim == default_dim`
+  embeddings) **IS** already covered by the loader/probe unit tests — it is not
+  deferred.
+- Only the compare-to-baseline **GATE** (the fidelity assertion) defers to the
+  cloud smoke.
+
+A runtime assertion was considered and rejected for v1: it could not execute its
+meaningful path in any environment available to this workflow (it would only
+*fire* on the same cloud run the smoke already governs), so it adds unverifiable
+source for zero earlier enforcement.
+
+**Phase-2 future-trigger:** if `frozen_head` graduates from "smallest /
+experimental mode" to a **PRIMARY supported mode**, R6 becomes a runtime
+assertion in `evaluation`/training (compare trained frozen_head metrics vs the
+untrained-ST baseline, warn/fail) and this §2.4 disposition is revisited. Not a
+v1 change.
+
 **No `qlora` mode in v1 (R8).** The enum is exactly `{full, lora, frozen_head}`.
 A `qlora` value in config → `ValueError` with a "deferred to a later phase"
 message.
@@ -673,6 +697,23 @@ mechanism; its exact pins are a CODE smoke-test output.
 ### 7.3 `Evaluator/requirements.txt`
 
 Add `faiss-cpu` (+ optional `mteb`, deferred). Method-local discipline applies.
+
+### 7.4 Deferred Cloud-Smoke Checklist (v1 blocking pre-production gates)
+
+The v1 workflow runs without Docker/GPU, so a small set of guarantees cannot be
+*demonstrated* here. They are not gaps — each is a **named, blocking gate** that
+MUST pass on a real GPU/cloud smoke run before `embedding` training is relied on
+in production. This checklist is the single, loud home for those deferrals.
+
+| Gate | What must pass on the cloud smoke | Until then |
+|------|-----------------------------------|------------|
+| **Overlay pins (§7.1, §7.2)** | The `setup.pip` overlay (`sentence-transformers`, `faiss-cpu`, `transformers` floor) resolves on the modern Unsloth image with no numpy/transformers mismatch; exact pins captured empirically. | Pins stay `TBD-pending-CODE-smoke-test`; do NOT hardcode speculative versions. |
+| **R6 frozen-base fidelity** | The `frozen_head` compare-to-ST-baseline gate (§2.4): frozen-base embeddings match a plain-`SentenceTransformer` baseline within tolerance on the real fast-path encoder. | **`frozen_head` must not be relied on for a production run until the compare-to-ST-baseline smoke passes on GPU.** The MODE is unit-tested (loadable, correct dim); only the fidelity GATE defers. |
+
+The R6 WARN-log honesty backstop (a one-line "fidelity gate cloud-deferred"
+notice in the `frozen_head` training path) is itself **deferred to Phase 2** —
+it too only surfaces on the cloud run this checklist already governs, so the
+checklist entry above is the v1 honesty backstop.
 
 ---
 
