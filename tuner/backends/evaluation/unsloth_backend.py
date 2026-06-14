@@ -60,6 +60,11 @@ class UnslothBackend(IEvaluationBackend):
         """
         models = []
 
+        # NOTE: "embedding" is intentionally EXCLUDED from this tuple (CONTRACTS
+        # §5.3). Embedding models are scored via the retrieval_verifier, never
+        # quantized/served through the Unsloth serving backend, so scanning
+        # embedding_output/ here would surface dirs this backend cannot serve.
+        # Do not "fix" the apparent inconsistency with the train-time method gates.
         for method in ("sft", "kto", "grpo", "dpo"):
             for output_dir in iter_training_output_dirs(method, self._repo_root):
                 if not output_dir.exists():

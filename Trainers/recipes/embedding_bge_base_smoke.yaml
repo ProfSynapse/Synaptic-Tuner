@@ -1,0 +1,83 @@
+# Local Docker embedding smoke-test template (Phase 1).
+#
+# Trains a small bge-base-en embedding adapter for a few steps to exercise the
+# `embedding` method end-to-end (registry -> dual loader -> ST trainer -> output
+# layout) on the local Docker path. Config-driven: change model.registry_name,
+# dataset.local_file, or training/lora values to run a different smoke without
+# touching code.
+#
+# Contract: docs/architecture/embedding-reranker-phase1/01_CONTRACTS.md §5/§7.
+name: embedding-bge-base-smoke
+description: Smoke-test the local Docker embedding path with bge-base-en (few steps).
+target: local
+method: embedding
+provider: local_docker
+
+job:
+  # Rides the modern official Unsloth image (ships transformers 4.57.1). The
+  # embedding stack (sentence-transformers + faiss-cpu) is layered on via the
+  # setup.pip overlay below, exactly like the SFT smoke recipe pins its stack.
+  image: unsloth/unsloth:latest
+  # "always" refreshes latest before a run; "missing" is repeatable after you
+  # have pulled a known-good image.
+  pull_policy: missing
+  # "auto" chooses copy on Windows and bind elsewhere; set explicitly if needed.
+  transfer: auto
+  keep_container: false
+
+setup:
+  # METHOD-LOCAL overlay (CONTRACTS §7.1/§7.2). Adds the embedding deps on top of
+  # the Unsloth image WITHOUT perturbing the legacy SFT transformers 4.45.2
+  # island. The image already ships transformers 4.57.1, so we do NOT re-pin
+  # transformers here — only the embedding-specific packages.
+  #
+  # TBD-PENDING-SMOKE-TEST: exact version pins are intentionally OMITTED. The repo
+  # has a documented history of image/numpy/transformers mismatches (PREPARE §3.2,
+  # cloud-training.md:208-214), so the pins MUST be determined empirically by
+  # running this smoke once and recording the first working set. Do NOT invent
+  # speculative version numbers here. Replace the bare names with `pkg==X.Y.Z`
+  # once the smoke run confirms a compatible set.
+  pip:
+    - sentence-transformers   # TBD pin (==X.Y.Z) after smoke
+    - faiss-cpu               # TBD pin (==X.Y.Z) after smoke
+    - datasets                # TBD pin (==X.Y.Z) after smoke
+
+run:
+  method: embedding
+  # Entry point owned by WU-A (Trainers/embedding/). The training loop is
+  # loader-agnostic; this recipe only selects the base + adapter mode + steps.
+  trainer: Trainers/embedding/train_embedding.py
+  dry_run: false
+  dashboard: false
+  quiet: true
+
+model:
+  # Resolved against Trainers/embedding/configs/model_registry.yaml (WU-A).
+  registry_name: bge-base-en
+
+dataset:
+  # Tiny checked-in triplet fixture (WU-D). {query, positive, negatives} JSONL.
+  local_file: Datasets/embedding/examples/triplets_smoke.jsonl
+
+training:
+  loss: multiple_negatives_ranking
+  batch_size: 16
+  num_epochs: 1
+  # Keep the smoke fast: a handful of optimizer steps is enough to prove the
+  # method wires end-to-end. Bump for a real run.
+  max_steps: 10
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+
+lora:
+  # Small-r LoRA keeps the smoke cheap; adapter_mode may also be set to
+  # frozen_head in config.yaml for an even lighter run (CONTRACTS §2.4/§6.2).
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+artifacts:
+  # Canonical embedding output layout, auto-asserted by adding "embedding" to
+  # TRAINING_METHODS (CONTRACTS §6.2): embedding_output/<timestamp>/...
+  output_root: toolset-training-artifacts/runs/local_docker/embedding/{name}
+  run_timestamp: "{timestamp}"

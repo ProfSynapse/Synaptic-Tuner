@@ -1,0 +1,192 @@
+# CASE-STUDY config for the `transcript-distillation` skill (see
+# .skills/transcript-distillation/). Our own run: scope to coding projects,
+# exclude client/sensitive ones, output to gitignored private/.
+#
+# Run with the skill engine:
+#   python .skills/transcript-distillation/scripts/distill.py \
+#     --config configs/transcript_import/default.yaml --smoke --limit 30 --show 3
+#
+# OUTPUT IS PRIVATE: rows land under private/ which is gitignored. Never commit.
+
+sources:
+  claude_main:
+    format: claude_code
+    enabled: true
+    root: "~/.claude/projects"
+    # session transcripts sit directly in each <project-slug>/ dir
+    glob: "*/*.jsonl"
+  claude_subagent:
+    format: claude_code
+    enabled: true
+    root: "~/.claude/projects"
+    # subagent (Task-tool / PACT teammate) runs nested under <project>/<session>/subagents/
+    glob: "*/*/subagents/*.jsonl"
+  codex:
+    format: codex
+    enabled: true
+    root: "~/.codex/sessions"
+    glob: "**/*.jsonl"
+
+# Scope filter. Claude projects are filtered by their dir-slug; Codex sessions
+# are filtered by the cwd recorded in their session_meta event.
+scope:
+  # a project is in-scope only if its path/cwd matches one of these (case-insensitive)
+  include_substrings:
+    - "documents-code-"   # claude slug form
+    - "/documents/code/"  # codex cwd form
+  # ...and matches NONE of these
+  exclude_substrings:
+    - "client-a"
+    - "project-b"
+
+# Deterministic secret redaction, applied at emit time so raw secrets never
+# hit disk. High-entropy credential formats (keys/tokens) + sensitive env
+# assignments. This is the PRIMARY scrub (your priority: keep live secrets out
+# of training data). For deeper PII (names/emails/paths) run the OPF-backed
+# SynthChat sanitize as an optional second pass once OPF_CHECKPOINT is set up.
+sanitize:
+  enabled: true
+  replacement: "[REDACTED:{name}]"
+  # named regexes; value secrets in env-assignments keep the key, drop the value
+  patterns:
+    openai_key: "sk-(?:proj-)?[A-Za-z0-9_-]{20,}"
+    openrouter_key: "sk-or-v1-[A-Za-z0-9]{32,}"
+    anthropic_key: "sk-ant-[A-Za-z0-9_-]{20,}"
+    hf_token: "hf_[A-Za-z0-9]{30,}"
+    github_token: "gh[pousr]_[A-Za-z0-9]{36,}"
+    aws_access_key: "AKIA[0-9A-Z]{16}"
+    google_api_key: "AIza[0-9A-Za-z_-]{35}"
+    slack_token: "xox[baprs]-[0-9A-Za-z-]{10,}"
+    bearer_token: "[Bb]earer\\s+[A-Za-z0-9._-]{20,}"
+    jwt: "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"
+    private_key_block: "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+  # for KEY=VALUE / KEY: VALUE lines, redact the VALUE but keep the key name
+  env_assignment:
+    sensitive_key_re: "(?i)(?:api[_-]?key|secret|token|password|passwd|private[_-]?key|access[_-]?key|client[_-]?secret)"
+    replacement: "[REDACTED:env_secret]"
+
+# Session-outcome classifier — judges the whole trajectory by where it ended up,
+# then tags every row from that session. This is the strongest quality signal:
+# a turn from a session that ultimately passed tests / built clean / got committed
+# / opened a PR / earned user approval was on a good path. Tag-only by default
+# (see quality_filter.require_outcomes to actually filter on it).
+session_outcome:
+  enabled: true
+  test_command_re: "\\b(pytest|jest|vitest|mocha|go test|cargo test|cargo nextest|npm (?:run )?test|yarn test|pnpm test|tox|rspec|phpunit|gradle test|mvn test|unittest|ctest|python -m pytest)\\b"
+  build_command_re: "\\b(tsc|cargo (?:build|check|clippy)|go build|make\\b|cmake|vite build|next build|webpack|gradle build|mvn (?:package|compile)|eslint|ruff|mypy)\\b"
+  commit_command_re: "git commit"
+  # result text signals (used alongside the tool-result error flag / exit code)
+  pass_re: "\\b(\\d+ passed|all tests passed|tests? passed|build succeeded|0 errors?|passing|PASS)\\b"
+  fail_re: "\\b(\\d+ failed|FAILED|\\berror\\b|exception|panicked|✗)\\b"
+  approve_re: "^(thanks|thank you|perfect|great|awesome|nice|lgtm|looks good|that works|ship it|excellent|amazing|love it|works now|fixed it)\\b"
+  approve_max_chars: 80
+
+# Quality tiers stamped on every row (metadata.quality_tier) from the session
+# outcome. Train staged (gold first) or weight by tier. gold = code verifiably
+# worked; silver = saved/shipped; bronze = no terminal signal.
+quality_tiers:
+  gold: [tests_passed, clean_build]
+  silver: [committed, pr_created, user_approved]
+  # everything else -> bronze
+  # subagents inherit their PARENT session's outcome (their own transcript never
+  # contains the commit/PR/test), so a coder subagent under a gold session is gold.
+  inherit_parent_for_subagents: true
+
+# Quality funnel — runs at emit time, BEFORE the judge. Cuts the ~450k raw
+# per-turn rows down to substantive coding-agent turns. Everything here is tunable:
+# flip drop_tools to keep orchestration behavior, raise/lower the text floor, etc.
+quality_filter:
+  enabled: true
+  # tool calls that are harness/PACT ceremony, not transferable coding skill.
+  # a turn whose ONLY tool calls are these (and no substantive text) is dropped.
+  drop_tools:
+    - TaskCreate
+    - TaskUpdate
+    - TaskList
+    - TaskGet
+    - TaskOutput
+    - TaskStop
+    - TeamCreate
+    - TeamDelete
+    - SendMessage
+    - ToolSearch
+    - Monitor
+    - EnterPlanMode
+    - ExitPlanMode
+    - PushNotification
+    - CronCreate
+    - CronList
+    - CronDelete
+    - RemoteTrigger
+  # Skill() calls invoking these are bootstrap/ritual; non-listed skills are kept
+  drop_skills:
+    - "PACT:bootstrap"
+    - "PACT:teammate-bootstrap"
+    - "PACT:orchestration"
+  # text-only turns shorter than this (est. tokens) are filler -> dropped
+  min_completion_tokens: 12
+  # drop rows whose completion is a near-duplicate of one already kept
+  dedup:
+    enabled: true
+  # OFF by default (can over-drop): drop rows whose prompt is a hook/ritual
+  drop_prompt_markers: []
+  # Outcome filter. Empty list = tag only (keep all, record session_outcome in
+  # metadata). Set e.g. [tests_passed, clean_build, committed, pr_created,
+  # user_approved] to keep ONLY rows from verified-good sessions.
+  require_outcomes: []
+
+output:
+  dir: "private/transcripts"
+  rows_file: "rows.jsonl"
+  # written to <dir>/smoke/ when --smoke is passed
+  smoke_subdir: "smoke"
+
+# Each emitted row = one assistant turn with its preceding context.
+granularity: "assistant_turn"
+# Bound row size by ESTIMATED TOKENS so rows fit the training context window
+# (local training is context-limited). Context is filled most-recent-first up to
+# the budget, after reserving room for the completion. message count is only a
+# secondary safety ceiling. Rows whose completion alone exceeds the budget are
+# still emitted but flagged metadata.oversize=true so they can be filtered.
+context_budget:
+  # NOTE: this caps CONTEXT DEPTH per row, not the number of examples (every
+  # assistant turn is one row regardless). Training cost scales ~O(seq^2), so
+  # keep this at your real local seq length. 8192 fits ~all completions + recent
+  # context cheaply; 4096 is the budget option; 32768 is ~16x the attention cost.
+  max_context_tokens: 8192      # local training seq length; override with --max-context-tokens
+  chars_per_token: 4.0         # rough estimate; code skews ~3.5
+  max_context_messages: 120    # hard ceiling regardless of token budget
+
+# Deterministic labeling. Anything not confidently accept/reject is left
+# label=null (borderline) for the downstream SynthChat judge pass.
+labeling:
+  # High-precision correction signal: the NEXT human turn is treated as a
+  # correction only when it is SHORT (<= max_correction_chars) and STARTS WITH
+  # one of these markers. Corrections are terse and directed; loose substring
+  # matching ("don't worry", "actually, also...") produced massive false rejects.
+  correction_markers:
+    - "no,"
+    - "no."
+    - "no "
+    - "nope"
+    - "stop"
+    - "wrong"
+    - "that's wrong"
+    - "thats wrong"
+    - "that's not"
+    - "thats not"
+    - "incorrect"
+    - "undo"
+    - "revert"
+    - "not what i"
+  # a human turn longer than this is a new instruction, not a correction
+  max_correction_chars: 180
+  interrupt_markers:
+    - "[request interrupted by user]"
+    - "[request interrupted"
+  # an assistant turn is a clean ACCEPT only when: no tool error in the turn,
+  # not interrupted, and the next human turn (if any) is not a correction.
+  # a clean REJECT requires an UNRECOVERED failure: a tool error or interrupt
+  # that is followed by a human correction (not by the model fixing it itself).
+  # everything else -> borderline (null) -> judge.
+  require_human_signal_for_reject: true

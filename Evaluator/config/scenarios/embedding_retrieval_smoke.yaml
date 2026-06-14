@@ -1,0 +1,33 @@
+name: Embedding Retrieval Smoke
+description: >
+  Corpus-level retrieval smoke scenario for the `retrieval` verifier. Each test
+  declares a `retrieval_config` block; the evaluator embeds the corpus + queries,
+  runs FAISS top-k retrieval against qrels, aggregates recall@k / MRR / nDCG, and
+  applies the pass/warn/fail threshold ladder (R4). There is no backend chat()
+  turn — retrieval is scored corpus-level, a sibling to the per-completion path.
+
+  Thresholds live HERE (config-driven), never in Python. `min` entries gate
+  (below min -> fail); a metric within [min, min + warn_margin) -> warn.
+
+  Fixture paths below point at the WU-D-owned committed examples; the canonical
+  smoke fixtures land at Datasets/embedding/examples/. Swap `model.registry_name`
+  for a `model.path` to a trained run/adapter to evaluate a fine-tuned embedder.
+tests:
+  - id: bge_base_retrieval_smoke
+    tags:
+      - embedding
+      - retrieval
+      - smoke
+    retrieval_config:
+      corpus: Datasets/embedding/examples/corpus.jsonl
+      queries: Datasets/embedding/examples/queries.jsonl
+      qrels: Datasets/embedding/examples/qrels.jsonl
+      metrics: [recall@10, mrr@10, ndcg@10]
+      model:
+        registry_name: bge-base-en
+      thresholds:
+        min:
+          ndcg@10: 0.30
+          recall@10: 0.40
+        warn_margin: 0.05
+      primary_metric: ndcg@10

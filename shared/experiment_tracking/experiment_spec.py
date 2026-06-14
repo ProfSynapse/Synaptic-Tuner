@@ -208,7 +208,7 @@ class ExperimentSpec:
             issues.append("experiment.name is required")
         if self.provider not in {"hf_jobs", "modal", "runpod", "local"}:
             issues.append(f"unsupported provider '{self.provider}'")
-        if self.method not in {"sft", "kto", "grpo", "dpo"}:
+        if self.method not in {"sft", "kto", "grpo", "dpo", "embedding"}:
             issues.append(f"unsupported method '{self.method}'")
         if not self.dataset.source:
             issues.append("experiment.dataset.source is required")

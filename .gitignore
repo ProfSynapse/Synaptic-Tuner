@@ -126,6 +126,9 @@ grpo_output_rtx3090/.worktrees/
 # Local scratch workspace
 scratch/
 
+# Private transcript-derived training data (local Claude/Codex logs) — NEVER commit
+private/
+
 # Runtime/test scratch output
 /.runtime_tmp/
 /.tmp/

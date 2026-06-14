@@ -1,0 +1,34 @@
+# Trainers/embedding/configs/config.yaml
+#
+# Location: Trainers/embedding/configs/config.yaml
+# Purpose:  Default embedding training run config. Selects a base model by
+#           registry_name (resolved against model_registry.yaml), the adapter
+#           mode, loss, hyperparameters, dataset, and in-training eval metrics.
+# Used by:  Trainers/embedding/train_embedding.py (loaded as the default config;
+#           CLI flags override individual values).
+#
+# Shape is the binding contract in
+# docs/architecture/embedding-reranker-phase1/01_CONTRACTS.md §6.2.
+
+model:
+  registry_name: bge-base-en       # key into configs/model_registry.yaml
+  adapter_mode: lora               # full | lora | frozen_head   (NO qlora — R8)
+
+training:
+  loss: multiple_negatives_ranking
+  batch_size: 64
+  epochs: 1
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+dataset:
+  local_file: Datasets/embedding/examples/triplets_smoke.jsonl
+  eval_split: 0.05
+
+evaluation:
+  metrics: [recall@10, mrr@10, ndcg@10]
