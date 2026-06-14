@@ -75,6 +75,7 @@ Commands:
   cloud-eval  Cloud evaluation on HF Jobs
   cloud-gym   Run the vault gym against a trained cloud run on HF Jobs
   cloud-inspect Inspect saved HF cloud evaluation results
+  cloud-extract Forward-only hidden-state extraction on HF Jobs (publish-by-id)
   local-run   Config-driven local Docker training/eval job
   bucket      Read, list, pull, push, or analyze local / HF bucket artifacts
   run-experiment  Run train -> eval -> loss from one experiment config
@@ -141,7 +142,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -215,6 +216,50 @@ Examples:
         "--surgery-config",
         dest="surgery_config",
         help="Path to LoRA surgery config YAML (surgery command only)"
+    )
+
+    # Cloud-extract-specific flags (forward-only hidden-state extraction on HF
+    # Jobs, publish-by-id). Reuses the shared --base-model-name, --gpu,
+    # --timeout-hours, and --dry-run flags defined elsewhere in this parser.
+    parser.add_argument(
+        "--extraction-config",
+        help="Extraction config (hub id or repo-relative path) for cloud-extract."
+    )
+    parser.add_argument(
+        "--slice-dataset-name",
+        help="Hub dataset id for the matched extraction slice (cloud-extract)."
+    )
+    parser.add_argument(
+        "--base-model-revision",
+        help="Base model commit SHA to pin for cloud-extract (required for cloud)."
+    )
+    parser.add_argument(
+        "--adapter-repo-id",
+        help="Hub model repo id for the contrast adapter (cloud-extract)."
+    )
+    parser.add_argument(
+        "--adapter-revision",
+        help="Contrast adapter commit SHA to pin (cloud-extract)."
+    )
+    parser.add_argument(
+        "--output-dataset-name",
+        help="Hub dataset id to receive the extraction outputs (cloud-extract)."
+    )
+    parser.add_argument(
+        "--cloud-image",
+        help="Override the Docker image for the cloud-extract HF Job."
+    )
+    parser.add_argument(
+        "--repo-url",
+        help="Override the tuner repo clone URL for cloud-extract (default: git origin)."
+    )
+    parser.add_argument(
+        "--repo-branch",
+        help="Override the tuner repo branch for cloud-extract (default: current branch)."
+    )
+    parser.add_argument(
+        "--repo-commit",
+        help="Override the tuner repo commit SHA for cloud-extract (default: HEAD)."
     )
 
     # Cloud-specific flags
