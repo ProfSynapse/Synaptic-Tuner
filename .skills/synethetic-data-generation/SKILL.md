@@ -432,3 +432,4 @@ expressed in config.
 - For non-default tool names, provide `--env-tool-schema` and `--env-exec-config`
 - Prefer checked-in `SynthChat/config/targets_*.json` manifests over ad hoc inline JSON when running smoke tests or repeatable generation slices
 - For privacy smoke tests, prefer the checked-in fixtures under `tests/fixtures/privacy/`, the target manifest `SynthChat/config/targets_privacy_docs_smoke.json`, and the runbook `docs/plans/synthchat-privacy-smoke-runbook.md`
+- **Embedding (retrieval) triplet generation is a Phase-2 forward ref.** Embedding training consumes `{query, positive, negatives}` triplets; generating those synthetically (mining hard negatives, query paraphrasis) is not yet wired into SynthChat. For now author triplets by hand against the `embedding-training` skill's data shapes (`Datasets/embedding/examples/triplets_smoke.jsonl` is the canonical fixture). A synthetic triplet scenario type lands in a later phase.

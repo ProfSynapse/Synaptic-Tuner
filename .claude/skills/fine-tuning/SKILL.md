@@ -52,8 +52,16 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **SFT** | Teach format and behavior | 2e-4 | 3 | Positive examples only | First stage |
 | **KTO** | Refine with preferences | 1e-6 | 1 | Interleaved True/False | Second stage |
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
+| **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
 
 **Recommended pipeline:** SFT → KTO → GRPO
+
+> **Embedding training** (SentenceTransformer bi-encoders for retrieval) is a
+> separate method with its own registry, dual loader, adapter modes
+> (`full`/`lora`/`frozen_head`), and corpus-level retrieval evaluation. It rides
+> the same `local-run`/recipe path as SFT. For the full surface use the
+> dedicated **`embedding-training`** skill; the triplet/retrieval data shapes are
+> in `reference/dataset-formats.md` below.
 
 ## Complexity Tiers
 
@@ -72,6 +80,7 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 - `Evaluator/recipes/` — unified evaluation recipe configs
 - `Trainers/kto/` — KTO trainer
 - `Trainers/grpo/` — GRPO and env-GRPO trainer
+- `Trainers/embedding/` — embedding (SentenceTransformer bi-encoder) trainer, registry, and dual loader; see the `embedding-training` skill
 - `Trainers/archive/legacy_rtx3090/` — archived legacy RTX3090 trainer snapshots and outputs; do not use for new runs
 - `Datasets/` — JSONL training datasets
 - `SynthChat/scenarios/` — synthetic data and environment-backed scenarios
@@ -197,6 +206,19 @@ python tuner.py local-run \
 ```
 
 For a different local SFT run, copy a recipe under `Trainers/recipes/` (one with `target: local` or `target: both`) and change `model`, `dataset`, `training`, `lora`, `job.image`, and `setup.pip` as needed. Use repo-relative local dataset paths; the runner translates them for the container.
+
+**Config-driven local Docker embedding smoke run:**
+```bash
+python tuner.py local-run \
+  --job-config Trainers/recipes/embedding_bge_base_smoke.yaml \
+  --yes
+```
+
+Trains a small bge-base-en embedding adapter for a few steps. The recipe rides
+the modern Unsloth image and layers `sentence-transformers` + `faiss-cpu` +
+`datasets` via `setup.pip` (pins are TBD-pending the cloud smoke — captured from
+the first working run, never invented). For the full embedding surface (registry,
+adapter modes, retrieval eval) use the `embedding-training` skill.
 
 **Generate a dataset with prompt optimization provenance:**
 ```bash

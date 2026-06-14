@@ -72,6 +72,34 @@ Prompts plus a ground-truth tool wrapper for reward scoring.
 
 ---
 
+## Embedding Dataset Format (triplets / pairs)
+
+The `embedding` method (SentenceTransformer bi-encoders) trains on retrieval
+triplets or pairs, NOT conversations. One JSONL record per line, read by
+`Trainers/embedding/src/data_loader.py`.
+
+```jsonl
+{"query": "How do I reset my password?", "positive": "Open Settings → Security → Reset Password.", "negatives": ["Our refund policy allows returns within 30 days.", "Dark mode is under Appearance."]}
+{"query": "What payment methods are accepted?", "positive": "We accept Visa, Mastercard, PayPal, and Apple Pay."}
+```
+
+Key rules:
+- Anchor aliases: `query` / `anchor` / `question`. Positive: `positive` / `pos`.
+  Negatives: `negatives` (list) / `negative` / `neg` (scalar or list).
+- A `negatives` list explodes into one `(anchor, positive, negative)` row per
+  negative (standard hard-negative shape).
+- Do NOT mix pair and triplet records in one file — if any record has negatives,
+  pair rows are dropped.
+- The registry spec's `query_prompt` / `passage_prompt` are applied
+  automatically; E5-style models require them, so reference models by
+  `registry_name`.
+
+Retrieval **evaluation** data is separate (corpus / queries / qrels JSONL). Full
+details + the canonical `Datasets/embedding/examples/` fixtures are in the
+`embedding-training` skill (`reference/triplet-data.md`).
+
+---
+
 ## Current Tool Wrapper
 
 The canonical tool-call format is:

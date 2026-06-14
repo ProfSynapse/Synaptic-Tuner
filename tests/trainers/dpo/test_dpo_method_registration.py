@@ -38,10 +38,14 @@ def test_base_cloud_supported_methods_includes_dpo():
 
 
 def test_named_gate_sites_source_contains_dpo():
+    # Needles updated to the 5-element literals in the SAME commit as the
+    # embedding method-wiring edits (CONTRACTS §5.1.1). 'embedding' is appended
+    # at each named train-time gate, so the old 4-element substrings no longer
+    # match; pinning the 5-element form keeps this sweep loud against future drops.
     sites = {
-        "tuner/cli/parser.py": '"sft", "kto", "grpo", "dpo"',
-        "tuner/backends/training/cloud/hf_jobs_backend.py": '["sft", "kto", "grpo", "dpo"]',
-        "tuner/backends/training/rtx_backend.py": '["sft", "kto", "grpo", "dpo"]',
+        "tuner/cli/parser.py": '"sft", "kto", "grpo", "dpo", "embedding"',
+        "tuner/backends/training/cloud/hf_jobs_backend.py": '["sft", "kto", "grpo", "dpo", "embedding"]',
+        "tuner/backends/training/rtx_backend.py": '["sft", "kto", "grpo", "dpo", "embedding"]',
     }
     for rel, needle in sites.items():
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")

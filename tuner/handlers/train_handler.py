@@ -139,7 +139,10 @@ class TrainHandler(BaseHandler):
             platforms.append({
                 "id": "rtx",
                 "name": "NVIDIA GPU (CUDA)",
-                "methods": ["sft", "kto", "grpo", "dpo"]
+                # Mirror of RTXBackend.get_available_methods(); keep in sync.
+                # Future-dedup (CONTRACTS §5.4): derive from the backend instead
+                # of hardcoding so this status list can never drift again.
+                "methods": ["sft", "kto", "grpo", "dpo", "embedding"]
             })
         if has_mlx:
             platforms.append({
