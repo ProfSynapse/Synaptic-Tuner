@@ -1,0 +1,101 @@
+# transcript-distillation — portable template config.
+# Copy this, adjust, and run:
+#   python .../scripts/distill.py --config my_config.yaml --smoke --limit 20 --show 3
+#
+# Out of the box this grabs ALL local Claude Code + Codex transcripts (empty
+# scope = match everything) and writes deduped, quality-tiered rows to
+# ./transcript_distill_out/. Tighten `scope` to target specific projects.
+
+sources:
+  claude_main:
+    format: claude_code          # adapter name (see scripts/adapters/)
+    enabled: true
+    root: "~/.claude/projects"
+    glob: "*/*.jsonl"            # main session transcripts
+  claude_subagent:
+    format: claude_code
+    enabled: true
+    root: "~/.claude/projects"
+    glob: "*/*/subagents/*.jsonl"   # Task-tool / subagent runs (inherit parent outcome)
+  codex:
+    format: codex
+    enabled: true
+    root: "~/.codex/sessions"
+    glob: "**/*.jsonl"
+
+# Which projects to include. Claude is matched by project-slug, Codex by the
+# cwd in session_meta. EMPTY include = match everything (good for a first run).
+scope:
+  include_substrings: []         # e.g. ["documents-code-", "/documents/code/"]
+  exclude_substrings: []         # e.g. ["secret-client", "personal"]
+
+output:
+  dir: "transcript_distill_out"  # relative to where you run distill.py
+  rows_file: "rows.jsonl"
+  smoke_subdir: "smoke"
+
+# ---- secret scrub (runs at emit time; raw secrets never hit disk) ----
+sanitize:
+  enabled: true
+  replacement: "[REDACTED:{name}]"
+  patterns:
+    openai_key: "sk-(?:proj-)?[A-Za-z0-9_-]{20,}"
+    openrouter_key: "sk-or-v1-[A-Za-z0-9]{32,}"
+    anthropic_key: "sk-ant-[A-Za-z0-9_-]{20,}"
+    hf_token: "hf_[A-Za-z0-9]{30,}"
+    github_token: "gh[pousr]_[A-Za-z0-9]{36,}"
+    aws_access_key: "AKIA[0-9A-Z]{16}"
+    google_api_key: "AIza[0-9A-Za-z_-]{35}"
+    slack_token: "xox[baprs]-[0-9A-Za-z-]{10,}"
+    bearer_token: "[Bb]earer\\s+[A-Za-z0-9._-]{20,}"
+    jwt: "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"
+    private_key_block: "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+  env_assignment:
+    sensitive_key_re: "(?i)(?:api[_-]?key|secret|token|password|passwd|private[_-]?key|access[_-]?key|client[_-]?secret)"
+    replacement: "[REDACTED:env_secret]"
+
+# ---- one row per assistant turn; context filled most-recent-first to budget ----
+context_budget:
+  max_context_tokens: 8192       # your training seq length (override: --max-context-tokens)
+  chars_per_token: 4.0
+  max_context_messages: 120
+
+# ---- deterministic labels: accept / borderline(->judge) / reject ----
+labeling:
+  correction_markers: ["no,", "no.", "no ", "nope", "stop", "wrong", "that's wrong",
+                       "thats wrong", "that's not", "thats not", "incorrect", "undo",
+                       "revert", "not what i"]
+  max_correction_chars: 180
+  interrupt_markers: ["[request interrupted by user]", "[request interrupted"]
+
+# ---- session-outcome classifier (the strongest quality signal) ----
+session_outcome:
+  enabled: true
+  test_command_re: "\\b(pytest|jest|vitest|mocha|go test|cargo test|cargo nextest|npm (?:run )?test|yarn test|pnpm test|tox|rspec|phpunit|gradle test|mvn test|unittest|ctest|python -m pytest)\\b"
+  build_command_re: "\\b(tsc|cargo (?:build|check|clippy)|go build|make\\b|cmake|vite build|next build|webpack|gradle build|mvn (?:package|compile)|eslint|ruff|mypy)\\b"
+  commit_command_re: "git commit"
+  pass_re: "\\b(\\d+ passed|all tests passed|tests? passed|build succeeded|0 errors?|passing|PASS)\\b"
+  fail_re: "\\b(\\d+ failed|FAILED|\\berror\\b|exception|panicked|✗)\\b"
+  approve_re: "^(thanks|thank you|perfect|great|awesome|nice|lgtm|looks good|that works|ship it|excellent|amazing|love it|works now|fixed it)\\b"
+  approve_max_chars: 80
+
+quality_tiers:
+  gold: [tests_passed, clean_build]
+  silver: [committed, pr_created, user_approved]
+  inherit_parent_for_subagents: true
+
+# ---- quality funnel: drop ceremony tools, filler, and duplicates ----
+quality_filter:
+  enabled: true
+  drop_tools: [TaskCreate, TaskUpdate, TaskList, TaskGet, TaskOutput, TaskStop,
+               TeamCreate, TeamDelete, SendMessage, ToolSearch, Monitor,
+               EnterPlanMode, ExitPlanMode, PushNotification, CronCreate, CronList,
+               CronDelete, RemoteTrigger]
+  drop_skills: ["PACT:bootstrap", "PACT:teammate-bootstrap", "PACT:orchestration"]
+  min_completion_tokens: 12
+  dedup:
+    enabled: true
+  drop_prompt_markers: []
+  # empty = tag-only (keep all rows, stamped with quality_tier). Set to e.g.
+  # [tests_passed, clean_build] to keep ONLY verified-good sessions.
+  require_outcomes: []
