@@ -107,6 +107,53 @@ def dpo_lineage_to_run_record(
     )
 
 
+def retrieval_eval_to_run_record(
+    lineage: dict[str, Any],
+    run_dir: str,
+    *,
+    run_id: str | None = None,
+    cloud: bool = False,
+) -> RunRecord:
+    """Convert a retrieval_eval_lineage.json dict to a RunRecord.
+
+    Mirrors :func:`_training_lineage_to_run_record` but for embedding/retrieval
+    evaluation lineage (R5). The primary metric is the retrieval headline metric
+    (e.g. ``ndcg@10``) carried under ``results.primary_metric``/
+    ``results.primary_metric_name``.
+
+    Args:
+        lineage: Parsed content of retrieval_eval_lineage.json.
+        run_dir: Absolute path to the run output directory.
+        run_id: Optional pre-generated run ID. If None, a new UUID4 is created.
+        cloud: If True, run_type is "cloud_embedding" instead of "embedding".
+
+    Returns:
+        A RunRecord populated from the retrieval eval lineage.
+    """
+    results = lineage.get("results", {})
+    model_info = lineage.get("model", {})
+    dataset_info = lineage.get("dataset", {})
+    hardware_info = lineage.get("hardware", {})
+
+    device = hardware_info.get("device", "")
+    hw_str = device if device else None
+
+    return RunRecord(
+        run_id=run_id or str(uuid.uuid4()),
+        run_type="cloud_embedding" if cloud else "embedding",
+        name=f"EMBEDDING eval {lineage.get('timestamp', '')}".strip(),
+        timestamp=lineage.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        status="completed",
+        output_dir=run_dir,
+        tags={"method": "embedding", "provider": "cloud" if cloud else "local"},
+        model_name=model_info.get("base_model"),
+        dataset_source=dataset_info.get("queries"),
+        primary_metric=results.get("primary_metric"),
+        primary_metric_name=results.get("primary_metric_name"),
+        hardware=hw_str,
+    )
+
+
 def ml_tracking_to_run_record(
     tracking_data: dict[str, Any],
     run_dir: str,

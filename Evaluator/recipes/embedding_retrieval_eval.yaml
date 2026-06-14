@@ -1,0 +1,44 @@
+# Embedding retrieval evaluation recipe.
+#
+# Declares a corpus-level retrieval evaluation: the `retrieval` verifier embeds a
+# corpus + query set, runs FAISS top-k retrieval against qrels, and reports
+# recall@k / MRR / nDCG with a pass/warn/fail ladder. This is the EVALUATION
+# counterpart to the training recipe Trainers/recipes/embedding_bge_base_smoke.yaml
+# (which trains the embedder); run training first, then point `model` here at the
+# trained run/adapter to measure retrieval quality.
+#
+# Config-driven: swap `model` (registry name OR a trained run/adapter path), the
+# scenario, or the thresholds without touching code. The scenario YAML is the
+# source of truth for thresholds; values mirrored here are for direct-recipe runs.
+name: embedding-retrieval-eval
+target: local
+method: embedding
+verifier: retrieval
+
+# The scenario carries the per-test `retrieval_config` (corpus/queries/qrels/
+# metrics/model/thresholds). The recipe references it so a run is one command.
+scenario: Evaluator/config/scenarios/embedding_retrieval_smoke.yaml
+
+# Default model for direct-recipe runs (the scenario may override per-test).
+# Use a registry_name for a base model, or `path:` for a trained run/adapter.
+model:
+  registry_name: bge-base-en
+
+# Headline metric surfaced to experiment tracking (RunRecord.primary_metric_name).
+primary_metric: ndcg@10
+
+# Metric set and thresholds (mirror the scenario; the scenario YAML wins at run
+# time). `min` gates (below -> fail); within [min, min+warn_margin) -> warn.
+metrics: [recall@10, mrr@10, ndcg@10]
+thresholds:
+  min:
+    ndcg@10: 0.30
+    recall@10: 0.40
+  warn_margin: 0.05
+
+# Retrieval eval is CPU-runnable (faiss-cpu); no GPU gate. The retrieval lineage
+# (retrieval_eval_lineage.json) maps to a RunRecord via
+# shared/experiment_tracking/adapters.py:retrieval_eval_to_run_record
+# (run_type="embedding").
+hardware:
+  device: cpu

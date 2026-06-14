@@ -1,0 +1,20 @@
+{"id": "doc_password_reset", "text": "To reset your password, open Settings, choose Security, click Reset Password, and follow the emailed link."}
+{"id": "doc_payment_methods", "text": "At checkout we accept Visa, Mastercard, American Express, PayPal, and Apple Pay."}
+{"id": "doc_shipping_time", "text": "Standard shipping typically arrives within five to seven business days after dispatch."}
+{"id": "doc_order_tracking", "text": "Once your order ships, a tracking number is emailed to you and shown on the Orders page."}
+{"id": "doc_two_factor", "text": "Enable two-factor authentication in Settings under Security by adding an authenticator app or phone number."}
+{"id": "doc_return_policy", "text": "You may return most items within 30 days of delivery for a full refund to the original payment method."}
+{"id": "doc_dark_mode", "text": "Yes, the mobile app includes a dark mode you can turn on under Appearance in Settings."}
+{"id": "doc_billing_address", "text": "Update your billing address in Settings under Billing, then save the new address before your next charge."}
+{"id": "doc_cancel_subscription", "text": "You can cancel your subscription at any time from the Billing page; access continues until the end of the paid period."}
+{"id": "doc_contact_support", "text": "Reach customer support through the in-app Help center or by emailing support@example.com for a reply within one business day."}
+{"id": "doc_download_invoices", "text": "Download past invoices from the Billing page under Invoice History as PDF files for any prior period."}
+{"id": "doc_free_trial", "text": "New users get a 14-day free trial with full access; no charge is made until the trial ends."}
+{"id": "doc_notification_prefs", "text": "Adjust which alerts you receive in Settings under Notifications, toggling email and push options independently."}
+{"id": "doc_payment_failed", "text": "If a payment fails, we retry it after three days and email you a link to update your card before suspending access."}
+{"id": "doc_delete_account", "text": "Permanently delete your account from Settings under Privacy by choosing Delete Account and confirming; this removes your data."}
+{"id": "doc_international_shipping", "text": "Yes, we ship to most countries; international orders may take ten to fifteen business days and incur customs fees."}
+{"id": "doc_discount_code", "text": "Enter your discount code in the Promo Code field on the checkout page and click Apply before paying."}
+{"id": "doc_upgrade_plan", "text": "Upgrade to a higher plan from the Billing page; the new rate is prorated and takes effect immediately."}
+{"id": "doc_payment_security", "text": "Your payment details are encrypted and stored with a PCI-compliant processor; we never see your full card number."}
+{"id": "doc_order_history", "text": "Your full order history, including past and current orders, is listed on the Orders page in your account."}

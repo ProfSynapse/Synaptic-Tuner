@@ -4,6 +4,11 @@
 # HTTP client for backend communication
 requests>=2.31.0
 
+# Retrieval evaluation (embedding scenarios): corpus-level FAISS nearest-neighbour
+# retrieval for the `retrieval` verifier. Exact pin is TBD-pending-CODE-smoke-test
+# per the embedding overlay; the unpinned floor keeps the method-local discipline.
+faiss-cpu
+
 # Optional: environment-backed execution in E2B sandboxes
 # e2b>=1.0.0
 

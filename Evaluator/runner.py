@@ -17,6 +17,12 @@ from shared.verifiers.builtins.assertion_verifier import (
     evaluate_correctness,
     has_correctness_config,
 )
+from shared.verifiers.builtins.retrieval_verifier import (
+    RetrievalConfig,
+    RetrievalThresholds,
+    RetrievalValidationResult,
+    RetrievalVerifier,
+)
 from shared.verifiers.builtins.tool_sequence import evaluate_tool_sequence
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
@@ -67,6 +73,7 @@ class EvaluationRecord:
     judge: Optional["JudgeValidationResult"] = None
     scoring: Optional["PathScoringResult"] = None
     correctness: Optional[CorrectnessResult] = None
+    retrieval: Optional["RetrievalValidationResult"] = None
     conversation_trace: Optional[List[Dict[str, Any]]] = None
 
     @property
@@ -84,6 +91,14 @@ class EvaluationRecord:
         """
         if self.error is not None:
             return "fail"
+
+        # Retrieval scenarios are scored on their own continuous-metric ladder
+        # (R4). Placed BEFORE the correctness branch so a retrieval scenario is
+        # never additionally subjected to per-completion correctness assertions.
+        if self.retrieval is not None:
+            if not self.retrieval.passed:
+                return "fail"
+            return "warn" if self.retrieval.warned else "pass"
 
         if self.correctness is not None:
             if not self.correctness.passed:
@@ -299,6 +314,14 @@ def _evaluate_single_case(
             error=None,
         )
 
+    # Corpus-level retrieval scenario — a SIBLING to the per-completion path
+    # below, NOT a per-completion verifier invocation. When a scenario declares
+    # `retrieval_config`, embed the corpus once and score the query set against
+    # qrels; there is no backend chat() turn. This honors the architect's fence:
+    # retrieval never flows through the per-completion verify(VerifierInput) loop.
+    if case.metadata.get("retrieval_config"):
+        return _evaluate_retrieval_case(case)
+
     # Get expected_context from prompt metadata (if validation enabled)
     # The system prompt is already in case.metadata["system"] and will be
     # included via case.chat_messages()
@@ -448,6 +471,130 @@ def _evaluate_single_case(
         correctness=correctness_result,
         conversation_trace=_build_single_turn_trace(case, response.message),
     )
+
+
+def _evaluate_retrieval_case(case: PromptCase) -> EvaluationRecord:
+    """Evaluate a corpus-level retrieval scenario.
+
+    Builds a :class:`RetrievalConfig` from the scenario's ``retrieval_config``
+    block, resolves the embedding model (registry name -> hf_id + prompts when
+    the embedding registry is importable, else a direct id/path), and invokes the
+    retrieval verifier's corpus-level ``evaluate_retrieval`` entry point exactly
+    once. Any error is captured on ``EvaluationRecord.error`` (status -> fail).
+
+    Args:
+        case: The prompt case whose metadata carries ``retrieval_config``.
+
+    Returns:
+        An :class:`EvaluationRecord` with ``retrieval`` populated, or ``error``
+        set if config resolution / evaluation raised.
+    """
+    try:
+        cfg = _build_retrieval_config(case.metadata["retrieval_config"])
+        result = RetrievalVerifier().evaluate_retrieval(cfg)
+    except Exception as exc:  # noqa: BLE001 - surface any failure as a failed case
+        logger.error("Retrieval evaluation error for %s: %s", case.case_id, exc)
+        return EvaluationRecord(
+            case=case,
+            response_text=None,
+            validator=None,
+            latency_s=None,
+            raw_response=None,
+            error=f"Retrieval evaluation error: {exc}",
+        )
+
+    return EvaluationRecord(
+        case=case,
+        response_text=None,
+        validator=None,
+        latency_s=None,
+        raw_response=None,
+        error=None,
+        retrieval=result,
+    )
+
+
+def _build_retrieval_config(raw: Mapping[str, Any]) -> RetrievalConfig:
+    """Translate a scenario ``retrieval_config`` mapping into a RetrievalConfig.
+
+    The ``model`` block is either ``{registry_name: <name>}`` (resolved to an
+    hf_id + query/passage prompts via the embedding registry when importable) or
+    ``{path: <id-or-path>}`` / a bare string. Resolving the registry name lives
+    in the Evaluator caller (here) — the ``shared/`` verifier stays registry-free.
+
+    Args:
+        raw: The scenario's ``retrieval_config`` mapping.
+
+    Returns:
+        A fully-populated :class:`RetrievalConfig`.
+
+    Raises:
+        ValueError: If required keys are missing or the model cannot be resolved.
+    """
+    for key in ("corpus", "queries", "qrels", "metrics", "model"):
+        if key not in raw:
+            raise ValueError(f"retrieval_config missing required key: {key!r}")
+
+    model_id, query_prompt, passage_prompt = _resolve_retrieval_model(raw["model"])
+
+    thresholds_raw = raw.get("thresholds") or {}
+    thresholds = RetrievalThresholds(
+        min=dict(thresholds_raw.get("min") or {}),
+        warn_margin=float(thresholds_raw.get("warn_margin", 0.0)),
+    )
+
+    return RetrievalConfig(
+        corpus=raw["corpus"],
+        queries=raw["queries"],
+        qrels=raw["qrels"],
+        metrics=list(raw["metrics"]),
+        model=model_id,
+        thresholds=thresholds,
+        primary_metric=raw.get("primary_metric"),
+        query_prompt=query_prompt,
+        passage_prompt=passage_prompt,
+        normalize=bool(raw.get("normalize", True)),
+        batch_size=int(raw.get("batch_size", 32)),
+    )
+
+
+def _resolve_retrieval_model(model: Any) -> tuple[str, str, str]:
+    """Resolve a scenario ``model`` block to ``(model_id, query_prompt, passage_prompt)``.
+
+    Accepts a bare string (id/path), ``{path: ...}``, or ``{registry_name: ...}``.
+    For a registry name, the embedding registry (WU-A) is consulted when present
+    to supply the canonical hf_id plus query/passage prompt prefixes; if the
+    registry is not importable, a registry-name-only block is an error (we refuse
+    to silently treat a registry key as a raw model id).
+
+    Returns:
+        ``(model_id, query_prompt, passage_prompt)``.
+
+    Raises:
+        ValueError: If the block is empty or a registry name cannot be resolved.
+    """
+    if isinstance(model, str):
+        return model, "", ""
+    if not isinstance(model, Mapping):
+        raise ValueError(f"retrieval_config.model must be a string or mapping, got {type(model)}")
+
+    if model.get("path"):
+        return str(model["path"]), str(model.get("query_prompt", "")), str(model.get("passage_prompt", ""))
+
+    registry_name = model.get("registry_name")
+    if not registry_name:
+        raise ValueError("retrieval_config.model needs a 'registry_name' or 'path'.")
+
+    try:
+        from Trainers.embedding.src.registry import get_spec  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise ValueError(
+            f"retrieval_config.model.registry_name={registry_name!r} requires the embedding "
+            f"registry (Trainers/embedding/src/registry.py), which is not importable: {exc}"
+        ) from exc
+
+    spec = get_spec(str(registry_name))
+    return spec.hf_id, spec.query_prompt, spec.passage_prompt
 
 
 def _evaluate_case_with_environment_loop(
