@@ -97,6 +97,7 @@ def route_command(args: Namespace) -> int:
         from tuner.handlers.hardware_plan_handler import HardwarePlanHandler
         from tuner.handlers.cloud_eval_handler import CloudEvalHandler
         from tuner.handlers.cloud_inspect_handler import CloudInspectHandler
+        from tuner.handlers.cloud_extract_handler import CloudExtractHandler
         from tuner.handlers.cloud_jobs_handler import CloudJobsHandler
         from tuner.handlers.cloud_gym_handler import CloudGymHandler
         from tuner.handlers.cloud_run_handler import CloudRunHandler
@@ -236,6 +237,7 @@ def route_command(args: Namespace) -> int:
         'cloud-eval': CloudEvalHandler,
         'cloud-gym': CloudGymHandler,
         'cloud-inspect': CloudInspectHandler,
+        'cloud-extract': CloudExtractHandler,
         'bucket': BucketHandler,
         'run-experiment': ExperimentHandler,
         'analyze-experiment': ExperimentAnalysisHandler,
