@@ -218,6 +218,7 @@ Synthetic Conversations/
 │   ├── rtx3090_sft/           # SFT training (legacy, local GPU)
 │   ├── rtx3090_kto/           # KTO training (refinement)
 │   ├── local/                 # Local Docker SFT/KTO jobs (uid-agnostic, persistent-container mode)
+│   ├── embedding/             # Embedding & reranker trainer (dual loader fast/fallback; full/LoRA/frozen_head modes)
 │   └── shared/                # Shared code (upload, model loading, utilities)
 │
 ├── SynthChat/                 # Synthetic chat generation & dataset improvement
@@ -231,6 +232,7 @@ Synthetic Conversations/
 │   ├── utilities/             # Path, env, YAML loading utilities
 │   ├── experiment_tracking/   # Unified run registry
 │   ├── flywheel/              # Enterprise Data Flywheel (inference logging -> auto-retrain)
+│   ├── ml/                    # Retrieval metrics (numpy-only: recall@k, nDCG, MRR)
 │   └── validation/            # Unified validation (parsing, validators, rubric)
 │
 ├── tuner/                     # Cloud training orchestration (HF Jobs)
