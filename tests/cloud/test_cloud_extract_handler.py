@@ -26,7 +26,11 @@ import pytest
 
 from tuner.cloud import RepoCheckoutSpec
 from tuner.core.exceptions import CloudProviderError
-from tuner.handlers.cloud_extract_handler import CloudExtractHandler, ExtractionLaunchPlan
+from tuner.handlers.cloud_extract_handler import (
+    CloudExtractHandler,
+    ExtractionLaunchPlan,
+    _redact_url_userinfo,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -91,6 +95,22 @@ def test_build_launch_plan_trims_and_populates():
     assert plan.base_model_revision == "a" * 40
     assert plan.adapter_repo_id == "prof/sft-contrast-adapter"
     assert plan.repo.commit == "c" * 40
+
+
+def test_handle_surfaces_config_error_through_handle_path():
+    """LOW-1: handle() wraps a config-validation failure as CONFIG_ERROR (rc=1).
+
+    The validation raises are also covered at build_launch_plan() level, but this
+    drives the full handle() try/except wrapper so the CONFIG_ERROR surface is
+    not green-by-omission.
+    """
+    handler = _make_handler(_full_args(slice_dataset_name="", json=True))
+    with patch("tuner.handlers.cloud_extract_handler.load_env_file"), \
+         patch.object(handler, "output_error") as output_error:
+        rc = handler.handle()
+    assert rc == 1
+    # The uniform error surface tagged the failure with the CONFIG_ERROR code.
+    assert output_error.call_args.kwargs.get("code") == "CLOUD_EXTRACT_CONFIG_ERROR"
 
 
 # --------------------------------------------------------------------------- #
@@ -159,6 +179,19 @@ def test_repo_source_falls_back_to_git_when_overrides_absent():
 def test_repo_source_unresolvable_raises():
     handler = _make_handler(_full_args(repo_url=None, repo_branch=None, repo_commit=None))
     with patch.object(handler, "_git", return_value=""):
+        with pytest.raises(CloudProviderError, match="repo source"):
+            handler._resolve_repo_source()
+
+
+def test_explicit_empty_repo_url_fails_closed_not_silent_git_fallback():
+    """LOW-4: an explicit --repo-url '' is honored (fails closed), not silently
+    routed to the git fallback. `is not None` distinguishes passed-but-empty
+    from absent; the empty value then trips the fail-closed guard.
+    """
+    handler = _make_handler(_full_args(repo_url=""))
+    # If the empty override were ignored, _git would be consulted; assert it is
+    # NOT, and that the empty url fails closed.
+    with patch.object(handler, "_git", side_effect=AssertionError("git fallback must not run for an explicit empty override")):
         with pytest.raises(CloudProviderError, match="repo source"):
             handler._resolve_repo_source()
 
@@ -243,6 +276,53 @@ def test_dry_run_json_mode_emits_plan(capsys, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# SEC-L1: dry-run must not leak credentials embedded in the clone URL
+# --------------------------------------------------------------------------- #
+def test_redact_url_userinfo_strips_credentials():
+    """Unit: _redact_url_userinfo removes user:pass@, leaves clean URLs intact."""
+    assert (
+        _redact_url_userinfo("https://user:ghp_secrettoken@github.com/prof/tuner.git")
+        == "https://github.com/prof/tuner.git"
+    )
+    # No userinfo -> unchanged; empty -> unchanged.
+    assert _redact_url_userinfo("https://github.com/prof/tuner.git") == "https://github.com/prof/tuner.git"
+    assert _redact_url_userinfo("") == ""
+
+
+def test_dry_run_redacts_url_credentials_in_text(capsys, monkeypatch):
+    """SEC-L1: a PAT embedded in --repo-url must NOT reach stdout."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    secret = "ghp_supersecrettoken"
+    handler = _make_handler(_full_args(
+        dry_run=True,
+        repo_url=f"https://user:{secret}@github.com/prof/tuner.git",
+    ))
+    with patch("tuner.handlers.cloud_extract_handler.load_env_file"):
+        rc = handler.handle()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert secret not in out
+    # The redacted host still appears so the operator sees the real target.
+    assert "github.com/prof/tuner.git" in out
+
+
+def test_dry_run_json_redacts_url_credentials_in_command(capsys, monkeypatch):
+    """SEC-L1: the JSON-mode 'command' field must NOT carry the embedded PAT."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    secret = "ghp_supersecrettoken"
+    handler = _make_handler(_full_args(
+        dry_run=True,
+        json=True,
+        repo_url=f"https://user:{secret}@github.com/prof/tuner.git",
+    ))
+    with patch("tuner.handlers.cloud_extract_handler.load_env_file"):
+        rc = handler.handle()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert secret not in out
+
+
+# --------------------------------------------------------------------------- #
 # Submit path
 # --------------------------------------------------------------------------- #
 def _patch_submit_env(token: Optional[str], hub: Any):
@@ -276,6 +356,41 @@ def test_submit_with_yes_calls_executor():
     spec = executor_cls.return_value.submit.call_args.args[0]
     assert spec.secrets.get("HF_TOKEN") == "hf_tok"
     assert spec.flavor  # populated
+
+
+def test_submit_hub_load_failure_is_env_error():
+    """LOW-2: load_huggingface_hub raising surfaces as ENV_ERROR (rc=1)."""
+    handler = _make_handler(_full_args(auto_confirm=True, json=True))
+    with patch("tuner.handlers.cloud_extract_handler.load_env_file"), \
+         patch("tuner.handlers.cloud_extract_handler.get_hf_token", return_value="hf_tok"), \
+         patch(
+             "tuner.handlers.cloud_extract_handler.load_huggingface_hub",
+             side_effect=CloudProviderError("huggingface_hub missing run_job"),
+         ), \
+         patch.object(handler, "output_error") as output_error, \
+         patch("tuner.handlers.cloud_extract_handler.HFJobExecutor") as executor_cls:
+        rc = handler.handle()
+    assert rc == 1
+    executor_cls.return_value.submit.assert_not_called()
+    assert output_error.call_args.kwargs.get("code") == "CLOUD_EXTRACT_ENV_ERROR"
+
+
+def test_submit_executor_failure_is_submit_error():
+    """LOW-3: executor.submit raising (e.g. network/quota) -> SUBMIT_ERROR (rc=1).
+
+    This is the operationally most-likely failure once a real job is launched.
+    """
+    handler = _make_handler(_full_args(auto_confirm=True, json=True))
+    hub = MagicMock()
+    p_env, p_token, p_hub = _patch_submit_env(token="hf_tok", hub=hub)
+    with p_env, p_token, p_hub, \
+         patch.object(handler, "output_error") as output_error, \
+         patch("tuner.handlers.cloud_extract_handler.HFJobExecutor") as executor_cls:
+        executor_cls.return_value.submit.side_effect = CloudProviderError("HF Jobs quota exceeded")
+        rc = handler.handle()
+    assert rc == 1
+    executor_cls.return_value.submit.assert_called_once()
+    assert output_error.call_args.kwargs.get("code") == "CLOUD_EXTRACT_SUBMIT_ERROR"
 
 
 def test_submit_without_yes_prompts_and_cancel_does_not_submit():
