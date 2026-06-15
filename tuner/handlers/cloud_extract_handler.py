@@ -38,6 +38,11 @@ cost-incurring -- gated behind explicit ``--yes`` confirmation and, upstream,
 the runner's capability + submodule-pushed + HF_TOKEN + artifact-resolution
 push-gate (section 6.5). ``--dry-run`` assembles and prints the job spec
 without submitting (and without requiring a token).
+
+RUNBOOK / SECURITY: the tuner repo's git origin (or any ``--repo-url``) MUST NOT
+embed credentials (e.g. a PAT in ``https://user:token@host/...``). The dry-run
+redacts URL userinfo before printing, but credential-free origins are the
+contract; use an HF/GitHub token via the environment, never in the URL.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from shared.utilities.env import get_hf_token, load_env_file
 from tuner.cloud import (
@@ -81,6 +87,29 @@ _CLONE_DIR = "/workspace/repo"
 # analog of the local probe harness); it is invoked by hub id, never by a local
 # path, because HF Jobs has no research-repo mount.
 _EXTRACTION_ENTRYPOINT = "python -m tuner.cloud.extraction_runner"
+
+
+def _redact_url_userinfo(url: str) -> str:
+    """Strip any ``user:pass@`` userinfo from a URL for safe display.
+
+    Operators MUST NOT embed credentials in the tuner repo's git origin (a PAT
+    in ``https://user:token@host/...`` would otherwise be echoed to stdout/JSON
+    by the dry-run). This redacts the userinfo component so the printed clone
+    URL never carries a secret; the value is display-only and does not alter the
+    URL actually used to clone inside the job. Returns the input unchanged when
+    there is no userinfo (or when the URL cannot be parsed).
+    """
+    if not url:
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    if "@" not in parts.netloc:
+        return url
+    # netloc is "userinfo@host[:port]"; keep only the host[:port] tail.
+    host = parts.netloc.rsplit("@", 1)[1]
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 @dataclass(frozen=True)
@@ -207,13 +236,26 @@ class CloudExtractHandler(BaseHandler):
         override_branch = getattr(self.args, "repo_branch", None)
         override_commit = getattr(self.args, "repo_commit", None)
 
-        url = str(override_url).strip() if override_url else self._git("config", "--get", "remote.origin.url")
+        # An EXPLICIT override (including an empty string) is honored as a
+        # deliberate choice: `is not None` distinguishes "flag passed" from "flag
+        # absent". An explicit empty value therefore yields '' and is caught by
+        # the fail-closed guard below, rather than silently falling through to
+        # the git fallback (which would mask an operator mistake).
+        url = (
+            str(override_url).strip()
+            if override_url is not None
+            else self._git("config", "--get", "remote.origin.url")
+        )
         branch = (
             str(override_branch).strip()
-            if override_branch
+            if override_branch is not None
             else self._git("rev-parse", "--abbrev-ref", "HEAD")
         )
-        commit = str(override_commit).strip() if override_commit else self._git("rev-parse", "HEAD")
+        commit = (
+            str(override_commit).strip()
+            if override_commit is not None
+            else self._git("rev-parse", "HEAD")
+        )
 
         if not url or not branch or not commit:
             raise CloudProviderError(
@@ -342,9 +384,22 @@ class CloudExtractHandler(BaseHandler):
         return self._handle_submit(plan)
 
     def _handle_dry_run(self, plan: ExtractionLaunchPlan) -> int:
-        """Assemble + print the job spec WITHOUT submitting (no token needed)."""
+        """Assemble + print the job spec WITHOUT submitting (no token needed).
+
+        SECURITY: the printed command embeds the clone URL. If an operator's git
+        origin embeds credentials (``https://user:token@host/...``) those must
+        not leak to stdout/JSON, so the displayed command has any URL userinfo
+        redacted via :func:`_redact_url_userinfo`. Origins should never embed
+        credentials in the first place; the runbook note above the verb
+        documents this.
+        """
         spec = self.build_job_spec(plan, token=None)
         command_text = spec.command[-1] if spec.command else ""
+        # Redact any embedded credentials in the clone URL before display. Only
+        # the printed text is altered; the submitted command is unaffected.
+        safe_url = _redact_url_userinfo(plan.repo.url)
+        if safe_url != plan.repo.url:
+            command_text = command_text.replace(plan.repo.url, safe_url)
         if self.json_mode:
             self.output(
                 {
