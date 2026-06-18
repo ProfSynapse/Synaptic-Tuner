@@ -31,10 +31,22 @@ Adapters also answer cheap path questions WITHOUT a full parse where possible:
                            file whose outcome should be inherited; else None
 """
 from __future__ import annotations
+import glob as _glob
+import os as _os
 
 
 class Adapter:
     name = "base"
+
+    def discover(self, root: str, glob_pat: str):
+        """Yield transcript file paths under `root`.
+
+        Default: a recursive filesystem glob (what most formats want). Override
+        for index-backed formats — e.g. a sqlite catalog that records the
+        canonical path of each transcript regardless of where it lives on disk
+        (used by codex_sqlite for cross-platform discovery)."""
+        for path in _glob.glob(_os.path.join(root, glob_pat), recursive=True):
+            yield path
 
     def scope_key(self, path: str, root: str) -> str:
         raise NotImplementedError

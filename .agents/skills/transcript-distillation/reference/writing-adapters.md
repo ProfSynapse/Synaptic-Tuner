@@ -26,7 +26,35 @@ class MyFormatAdapter(Adapter):
 
     def parent_path(self, path):          # optional: nested/subagent -> parent file
         return None
+
+    def discover(self, root, glob_pat):   # optional: how files are enumerated
+        ...                               # default = recursive filesystem glob
 ```
+
+## File discovery (`discover`)
+
+By default the engine enumerates transcripts with a recursive filesystem glob
+(`root` + `glob`). Override `discover(root, glob_pat)` to yield paths from an
+**index** instead — e.g. a sqlite catalog that records the canonical absolute
+path of every transcript. This is what makes discovery portable when files are
+scattered or live at a platform-specific location: read the DB at its fixed
+per-platform path and follow the recorded paths. See
+`adapters/codex.py::CodexSqliteAdapter`, which reads `~/.codex/sqlite/state_*.sqlite`
+and follows each thread's `rollout_path`. If `discover` caches per-path metadata
+(like the recorded cwd) while enumerating, `scope_key` can reuse it instead of
+re-opening each file.
+
+**One file, many sessions.** `discover` also lets a single physical file expand
+into many logical sessions. The claude.ai bulk export is one `conversations.json`
+holding thousands of chats; treating it as one session would merge every chat's
+context and outcome. Instead, `ClaudeAiExportAdapter.discover` yields a **virtual
+path per conversation** — `"<realpath>::<index>"` — so each chat flows through
+the engine as its own scope/outcome/context boundary. `parse`/`scope_key` split
+the index back off (`rsplit("::", 1)`, so Windows drive colons are safe) and the
+parsed JSON is cached on the instance so the big file is read once, not once per
+conversation. The engine never `open()`s a virtual path itself — only the
+adapter resolves it — so synthetic identifiers are safe. See
+`adapters/claude_ai_export.py`.
 
 Register it in `scripts/adapters/__init__.py`:
 
@@ -82,4 +110,6 @@ detected from commands).
   blocks paired by id, `pr-link` session signal, subagent → parent inheritance.
 - `adapters/codex.py` — `response_item` payloads, `function_call` /
   `function_call_output` pairs, exit status parsed from plaintext output, cwd
-  scope-key from `session_meta`.
+  scope-key from `session_meta`. Ships two adapters sharing one parser:
+  `codex` (filesystem glob) and `codex_sqlite` (index-backed `discover` via the
+  thread catalog — cross-platform, follows `rollout_path`).

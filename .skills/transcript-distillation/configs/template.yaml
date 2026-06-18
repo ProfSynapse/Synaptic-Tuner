@@ -18,10 +18,29 @@ sources:
     root: "~/.claude/projects"
     glob: "*/*/subagents/*.jsonl"   # Task-tool / subagent runs (inherit parent outcome)
   codex:
-    format: codex
+    format: codex                 # filesystem glob of rollout JSONLs
     enabled: true
-    root: "~/.codex/sessions"
+    root: "~/.codex/sessions"     # mac/linux default. WSL+Windows Codex: point
+                                  # at the Windows home, e.g.
+                                  # "/mnt/c/Users/<you>/.codex" (covers
+                                  # sessions/ AND archived_sessions/)
     glob: "**/*.jsonl"
+  # Portable alternative (mac/linux/windows): read Codex's thread catalog and
+  # follow each thread's rollout_path. Use when rollouts are scattered or you
+  # don't know the on-disk layout. Lower coverage than the glob if the index
+  # omits older threads — prefer the glob above when you can resolve the path.
+  # codex_sqlite:
+  #   format: codex_sqlite
+  #   enabled: true
+  #   root: "~/.codex/sqlite"     # dir holding state_*.sqlite; glob is ignored
+  # claude.ai bulk export (Settings -> Privacy -> Export data -> conversations.json).
+  # One file holds many conversations; the adapter splits it into one session
+  # each. Scope is the conversation TITLE. Unlike the local CLI transcripts, this
+  # export contains PLAINTEXT thinking — set `reasoning.capture: true` to keep it.
+  # claude_ai_export:
+  #   format: claude_ai_export
+  #   enabled: true
+  #   root: "conversations.json"  # the exported file, or a dir of exports; glob ignored
 
 # Which projects to include. Claude is matched by project-slug, Codex by the
 # cwd in session_meta. EMPTY include = match everything (good for a first run).
@@ -50,6 +69,10 @@ sanitize:
     bearer_token: "[Bb]earer\\s+[A-Za-z0-9._-]{20,}"
     jwt: "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"
     private_key_block: "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+    # DB/broker connection URIs with an embedded password (scheme://user:pass@host).
+    # Only fires when credentials are present, so credential-less example URIs
+    # (postgres://localhost/db) are left intact.
+    db_connection_uri: "(?i)(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|redis|rediss|amqps?|mssql|sqlserver|clickhouse|jdbc:[a-z0-9]+)://[^:@/\\s]+:[^@\\s]+@[^\\s\"'`]+"
   env_assignment:
     sensitive_key_re: "(?i)(?:api[_-]?key|secret|token|password|passwd|private[_-]?key|access[_-]?key|client[_-]?secret)"
     replacement: "[REDACTED:env_secret]"
@@ -59,6 +82,80 @@ context_budget:
   max_context_tokens: 8192       # your training seq length (override: --max-context-tokens)
   chars_per_token: 4.0
   max_context_messages: 120
+
+# ---- reasoning / thinking capture (optional, off by default) ----
+# When on, each row gets a separate `reasoning` field (completion stays clean).
+# Reality of what's in the logs:
+#   - Codex: the readable reasoning SUMMARY is captured; the verbatim chain-of-
+#     thought is in `encrypted_content` (opaque) and is NOT recoverable.
+#   - Claude Code: thinking blocks log only a `signature` (no plaintext), so
+#     `reasoning` is empty for Claude rows.
+#   - claude_ai_export: the bulk export DOES carry verbatim plaintext thinking,
+#     so `reasoning` is fully populated for those rows.
+reasoning:
+  capture: false
+
+# ---- user-feedback weight (a per-turn signal, ALL sources) ----
+# Read off the NEXT human turn and stamped as metadata.user_feedback
+# (praised|accepted|neutral|corrected) + metadata.feedback_score (+2/+1/0/-1).
+# Orthogonal to quality_tier: tier grades the SESSION by execution outcome;
+# feedback grades the TURN by what the human said next. A praised/accepted
+# coding turn is extra-good; a corrected one is suspect — so it applies to
+# coding sessions too, not just chats (where it's often the only signal).
+# Use it as an extra selection weight: SFT on (gold OR praised); KTO negatives
+# from (corrected). Precedence: corrected > praised > accepted.
+feedback:
+  enabled: true
+  # explicit approval — matched anywhere in the next human turn (specific phrases)
+  # NOTE: prose-common words (beautiful/amazing/brilliant/love it) are deliberately
+  # omitted — they fire on pasted fiction/quotes. Keep markers task-directed.
+  praise_markers: ["perfect", "exactly", "exactly what", "exactly right",
+                   "that works", "works great", "works now", "works perfectly",
+                   "that did it", "that fixed it", "nailed it", "you nailed", "spot on",
+                   "looks great", "looks good", "looks perfect", "that's perfect",
+                   "thats perfect", "much better", "excellent", "great job", "great work",
+                   "well done", "lgtm", "looks good to me", "this is great", "that's great",
+                   "thats great", "that's exactly", "thank you so much", "that's it",
+                   "thats it", "good enough", "that's correct", "thats correct",
+                   "that's right", "thats right", "you got it", "this is perfect",
+                   "works like a charm"]
+  # short acceptance / proceed — turn must be SHORT and START with one of these
+  accept_markers: ["yes", "yep", "yeah", "yup", "ok", "okay", "sure", "continue",
+                   "proceed", "go ahead", "go for it", "do it", "lets do it", "let's do it",
+                   "apply", "applied", "ok applied", "post it", "ship it", "ship", "next",
+                   "next up", "sounds good", "good", "fine", "agreed", "makes sense",
+                   "please continue", "yes please", "yes continue", "do that", "go",
+                   "fire", "perfect", "looks good"]
+  max_accept_chars: 45
+  window_chars: 100        # reject markers only count within first N chars (corrections
+                           # are front-loaded; avoids matches buried in pasted content)
+  praise_window_chars: 50  # praise is an even more front-loaded reaction
+  # dissatisfaction — matched anywhere (specific phrases; ambiguous bare words avoided)
+  reject_markers: ["that's not what", "thats not what", "not what i", "that's not right",
+                   "thats not right", "that's wrong", "thats wrong", "that's incorrect",
+                   "thats incorrect", "that's not correct", "thats not correct",
+                   "doesn't work", "does not work", "didn't work", "did not work",
+                   "not working", "still broken", "still not working", "still doesn't",
+                   "you misunderstood", "you missed", "not quite right", "that's not it",
+                   "thats not it", "undo that", "that didn't", "that broke", "broke it",
+                   "that failed", "this is wrong", "you're wrong", "youre wrong", "nope"]
+
+# ---- per-turn content domain: coding vs chat (deterministic, NO LLM) ----
+# Stamped as metadata.domain ("coding"|"chat") so downstream training can split
+# coding from conversational data. Decided purely on the row's TEXT content
+# (prompt + completion + reasoning), INDEPENDENT of tool_names and source.
+# CRITICAL: coding means AUTHORING CODE, not merely invoking a tool. A chat turn
+# that calls web_search / analysis / artifacts / any MCP tool is STILL "chat" —
+# tool-call presence is NOT a coding signal. A turn is "coding" only if its text
+# contains real code: a language-tagged (or code-bodied) fence, a unified diff, a
+# traceback, a build/test/git command, or a code-file extension with syntax.
+domain:
+  enabled: true
+  # fenced code blocks tagged with one of these languages count as code
+  lang_tags: ["python", "py", "js", "javascript", "ts", "typescript", "tsx",
+              "jsx", "bash", "sh", "shell", "rust", "rs", "go", "golang",
+              "java", "cpp", "c++", "ruby", "rb", "php", "sql", "yaml", "yml",
+              "json", "toml", "html", "css", "dockerfile", "make"]
 
 # ---- deterministic labels: accept / borderline(->judge) / reject ----
 labeling:
@@ -96,6 +193,9 @@ quality_filter:
   dedup:
     enabled: true
   drop_prompt_markers: []
+  drop_content_substrings: []    # drop rows whose prompt OR completion contains
+                                 # any of these (case-insensitive) — scrub
+                                 # confidential mentions that bleed across projects
   # empty = tag-only (keep all rows, stamped with quality_tier). Set to e.g.
   # [tests_passed, clean_build] to keep ONLY verified-good sessions.
   require_outcomes: []

@@ -160,3 +160,11 @@ Evaluator/config/scenarios/archive/
 docs/archive/
 .claude/worktrees/
 toolset-training-artifacts/
+
+# personal claude.ai export — never commit
+conversations.json
+*.conversations.json
+my_distill.yaml
+
+# personal fine-tuning workspace (plan, distilled rows, rubrics, push scripts) — never commit
+/personal_finetune/
