@@ -74,7 +74,7 @@ def _prepare_loss_example(
             tokenizer=tokenizer,
             record=record,
             max_seq_length=max_seq_length,
-            assistant_only_loss=completion_only,
+            loss_mask_mode="completion_only" if completion_only else "full_sequence",
             source_hash=line_hash,
         )
     except ValueError:

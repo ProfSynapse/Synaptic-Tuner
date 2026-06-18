@@ -64,8 +64,6 @@ class SFTTrainingConfig:
     lr_scheduler_type: str
     max_seq_length: int
     packing: bool
-    completion_only_loss: bool
-    assistant_only_loss: bool
     gradient_checkpointing: bool
     optim: str
     fp16: bool
@@ -80,6 +78,23 @@ class SFTTrainingConfig:
     group_by_length: bool
     eval_strategy: str
     eval_steps: int
+    # SFT loss-mask mode (what gets supervised). One of:
+    #   "completion_only" – ONLY the final assistant turn (DEFAULT; the historical
+    #                       behavior, formerly driven by completion_only_loss=true).
+    #   "assistant_only"  – EVERY assistant turn incl. intermediate tool-call turns
+    #                       (system/user/tool masked) — for multi-turn agentic
+    #                       tool-use SFT.
+    #   "full_sequence"   – every token.
+    loss_mask_mode: str = "completion_only"
+    # How assistant tool_calls are rendered into the tokenized SFT features:
+    #   "render_text" – fold structured tool_calls into prose ("Tool calls: ...")
+    #                   (default; back-compat for non-native datasets).
+    #   "native"      – preserve structured tool_calls and emit the chat template's
+    #                   native <tool_call>/<function=...> markup, with tool-role
+    #                   turns passed through. REQUIRED for native tool-trajectory
+    #                   datasets; pair with loss_mask_mode="assistant_only" so the
+    #                   tool-call markup lands in the trained label span.
+    tool_call_mode: str = "render_text"
     # Generic kwargs forwarded into the tokenizer's chat template at SFT
     # preprocessing time (e.g. {enable_thinking: false} for thinking-capable
     # models). None ⇒ no kwargs ⇒ default rendering for every existing config.

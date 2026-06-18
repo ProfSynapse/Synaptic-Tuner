@@ -6,7 +6,7 @@ from typing import Optional, Tuple, Any
 from datasets import load_dataset, Dataset
 
 from preprocessing import (
-    ASSISTANT_ONLY,
+    COMPLETION_ONLY,
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
 )
@@ -153,7 +153,8 @@ def load_and_prepare_tokenized_dataset(
     filter_desirable: bool = False,
     tokenizer: Any = None,
     max_seq_length: int = 2048,
-    loss_mask_mode: str = ASSISTANT_ONLY,
+    loss_mask_mode: str = COMPLETION_ONLY,
+    tool_call_mode: str = "render_text",
     chat_template_kwargs: Optional[dict] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
@@ -208,6 +209,7 @@ def load_and_prepare_tokenized_dataset(
         tokenizer=tokenizer,
         max_seq_length=max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        tool_call_mode=tool_call_mode,
         num_proc=num_proc,
         include_text=False,
         chat_template_kwargs=chat_template_kwargs,

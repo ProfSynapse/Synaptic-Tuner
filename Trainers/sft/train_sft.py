@@ -305,7 +305,7 @@ def build_training_lineage(
             "max_grad_norm": config.training.max_grad_norm,
             "max_seq_length": config.training.max_seq_length,
             "packing": config.training.packing,
-            "completion_only_loss": config.training.completion_only_loss,
+            "loss_mask_mode": config.training.loss_mask_mode,
             "gradient_checkpointing": config.training.gradient_checkpointing,
             "fp16": not torch.cuda.is_bf16_supported() if config.training.fp16 is False else config.training.fp16,
             "bf16": torch.cuda.is_bf16_supported() if config.training.bf16 is True else config.training.bf16,
@@ -385,6 +385,18 @@ def parse_args(argv=None):
                        help="JSON object of kwargs forwarded into the tokenizer chat "
                             "template at preprocessing time "
                             "(e.g. '{\"enable_thinking\": false}').")
+    parser.add_argument("--loss-mask-mode", type=str, default=None,
+                       choices=["full_sequence", "completion_only", "assistant_only"],
+                       help="Override SFT loss-mask mode: completion_only (final "
+                            "assistant turn only; default), assistant_only (every "
+                            "assistant turn incl. tool-call turns), or full_sequence.")
+    parser.add_argument("--tool-call-mode", type=str, default=None,
+                       choices=["render_text", "native"],
+                       help="Override how assistant tool_calls are tokenized: "
+                            "render_text (fold tool_calls into prose; default) or "
+                            "native (emit the chat template's native <tool_call> "
+                            "markup; REQUIRED for native tool-trajectory datasets, "
+                            "pair with --loss-mask-mode assistant_only).")
     parser.add_argument("--lora-r", type=int,
                        help="Override LoRA rank")
     parser.add_argument("--lora-alpha", type=int,
@@ -612,6 +624,10 @@ def run(args: argparse.Namespace):
                 f"(got {type(parsed_chat_template_kwargs).__name__})."
             )
         config.training.chat_template_kwargs = parsed_chat_template_kwargs
+    if args.loss_mask_mode is not None:
+        config.training.loss_mask_mode = args.loss_mask_mode
+    if args.tool_call_mode is not None:
+        config.training.tool_call_mode = args.tool_call_mode
     if args.lora_r is not None:
         config.lora.r = args.lora_r
     if args.lora_alpha is not None:
@@ -797,12 +813,25 @@ def run(args: argparse.Namespace):
         tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
         print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
-    loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
+    loss_mask_mode = config.training.loss_mask_mode
+    _valid_loss_mask_modes = ("full_sequence", "completion_only", "assistant_only")
+    if loss_mask_mode not in _valid_loss_mask_modes:
+        raise ValueError(
+            f"training.loss_mask_mode must be one of {_valid_loss_mask_modes}, "
+            f"got {loss_mask_mode!r}."
+        )
+    tool_call_mode = config.training.tool_call_mode
+    _valid_tool_call_modes = ("render_text", "native")
+    if tool_call_mode not in _valid_tool_call_modes:
+        raise ValueError(
+            f"training.tool_call_mode must be one of {_valid_tool_call_modes}, "
+            f"got {tool_call_mode!r}."
+        )
     preprocessing_metadata = {
         "contract_version": 1,
         "dataset_representation": "tokenized",
         "loss_mask_mode": loss_mask_mode,
-        "tool_call_mode": "render_text",
+        "tool_call_mode": tool_call_mode,
         "chat_template_source": chat_template_name,
         "packing": False,
     }
@@ -820,6 +849,7 @@ def run(args: argparse.Namespace):
         tokenizer=tokenizer,
         max_seq_length=config.training.max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        tool_call_mode=tool_call_mode,
         chat_template_kwargs=config.training.chat_template_kwargs,
     )
     run_metadata["train_size"] = len(train_dataset)
@@ -914,7 +944,8 @@ def run(args: argparse.Namespace):
     print(f"  Dropout: {config.lora.lora_dropout}")
     print(f"\nSFT-specific:")
     print("  Packing: False (explicit pre-encoded dataset path)")
-    print(f"  Completion-only loss: {config.training.completion_only_loss}")
+    print(f"  Loss-mask mode: {config.training.loss_mask_mode}")
+    print(f"  Tool-call mode: {config.training.tool_call_mode}")
     print(f"\nOptimizations:")
     print(f"  Optimizer: {config.training.optim}")
     print(f"  FP16: {training_args.fp16}")

@@ -66,7 +66,7 @@ def test_materialize_sft_features_emits_explicit_token_fields_for_conversational
             normalized,
             tokenizer=_FakeTokenizer(),
             max_seq_length=128,
-            loss_mask_mode="assistant_only",
+            loss_mask_mode="completion_only",
             tool_call_mode="render_text",
         )
     )
@@ -94,7 +94,7 @@ def test_prepare_sft_dataset_returns_dataset_with_explicit_token_columns():
         raw_dataset,
         tokenizer=_FakeTokenizer(),
         max_seq_length=64,
-        loss_mask_mode="assistant_only",
+        loss_mask_mode="completion_only",
         backend="trl_unsloth",
     )
 
@@ -121,7 +121,7 @@ def test_prepare_sft_dataset_truncates_overlong_examples_deterministically():
         raw_dataset,
         tokenizer=_FakeTokenizer(),
         max_seq_length=32,
-        loss_mask_mode="assistant_only",
+        loss_mask_mode="completion_only",
         backend="trl_unsloth",
     )
 
@@ -169,6 +169,6 @@ def test_materialize_rejects_unsupported_tool_call_mode():
             normalized,
             tokenizer=_FakeTokenizer(),
             max_seq_length=128,
-            loss_mask_mode="assistant_only",
+            loss_mask_mode="completion_only",
             tool_call_mode="unsupported_mode",
         )

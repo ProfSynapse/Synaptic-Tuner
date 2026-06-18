@@ -15,8 +15,9 @@ from shared.sft_preprocessing import (
     sanitize_messages_for_chat_template,
 )
 
-ASSISTANT_ONLY = "assistant_only"
-FULL_SEQUENCE = "full_sequence"
+ASSISTANT_ONLY = "assistant_only"      # train EVERY assistant turn (per-span)
+COMPLETION_ONLY = "completion_only"    # train ONLY the final assistant turn
+FULL_SEQUENCE = "full_sequence"        # train everything
 
 
 def sanitize_conversations(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -36,7 +37,7 @@ def render_chat_text(messages: list[dict[str, Any]], tokenizer: Any) -> str:
         tokenizer=tokenizer,
         record={"messages": messages},
         max_seq_length=10**9,
-        assistant_only_loss=False,
+        loss_mask_mode=FULL_SEQUENCE,
     )
     return tokenizer.decode(prepared.input_ids) if hasattr(tokenizer, "decode") else tokenizer.apply_chat_template(
         messages,
@@ -50,20 +51,20 @@ def materialize_sft_features(
     *,
     tokenizer: Any,
     max_seq_length: int,
-    loss_mask_mode: str = ASSISTANT_ONLY,
+    loss_mask_mode: str = COMPLETION_ONLY,
     tool_call_mode: str = "render_text",
     chat_template_kwargs: dict[str, Any] | None = None,
 ) -> PreparedSFTExample:
-    if tool_call_mode != "render_text":
+    if tool_call_mode not in ("render_text", "native"):
         raise ValueError(f"Unsupported tool_call_mode: {tool_call_mode}")
 
-    assistant_only_loss = loss_mask_mode == ASSISTANT_ONLY
     record = {"messages": example["messages"]} if "messages" in example else example
     return _materialize_sft_example(
         tokenizer=tokenizer,
         record=record,
         max_seq_length=max_seq_length,
-        assistant_only_loss=assistant_only_loss,
+        loss_mask_mode=loss_mask_mode,
+        tool_call_mode=tool_call_mode,
         chat_template_kwargs=chat_template_kwargs,
     )
 
@@ -73,7 +74,8 @@ def prepare_sft_dataset(
     *,
     tokenizer: Any,
     max_seq_length: int,
-    loss_mask_mode: str = ASSISTANT_ONLY,
+    loss_mask_mode: str = COMPLETION_ONLY,
+    tool_call_mode: str = "render_text",
     backend: str = "trl_unsloth",
     chat_template_kwargs: dict[str, Any] | None = None,
 ) -> Dataset:
@@ -86,6 +88,7 @@ def prepare_sft_dataset(
             tokenizer=tokenizer,
             max_seq_length=max_seq_length,
             loss_mask_mode=loss_mask_mode,
+            tool_call_mode=tool_call_mode,
             chat_template_kwargs=chat_template_kwargs,
         )
         return {
@@ -106,7 +109,8 @@ def load_and_prepare_sft_dataset(
     dataset: Dataset,
     tokenizer: Any,
     max_seq_length: int,
-    loss_mask_mode: str = ASSISTANT_ONLY,
+    loss_mask_mode: str = COMPLETION_ONLY,
+    tool_call_mode: str = "render_text",
     num_proc: int = 1,
     include_text: bool = False,
     chat_template_kwargs: dict[str, Any] | None = None,
@@ -118,5 +122,6 @@ def load_and_prepare_sft_dataset(
         tokenizer=tokenizer,
         max_seq_length=max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        tool_call_mode=tool_call_mode,
         chat_template_kwargs=chat_template_kwargs,
     )
