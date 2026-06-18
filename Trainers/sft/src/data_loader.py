@@ -3,7 +3,7 @@ Data loading and preprocessing for SFT training.
 """
 
 from typing import Optional, Tuple, Any
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, VerificationMode
 
 from preprocessing import (
     COMPLETION_ONLY,
@@ -178,10 +178,17 @@ def load_and_prepare_tokenized_dataset(
         print(f"Loading from HuggingFace: {dataset_name}")
         if data_files:
             print(f"Using file: {data_files}")
+            # Loading ONE split's file from a multi-split repo: skip the builder's
+            # expected-splits verification. The repo README's `dataset_info` may
+            # declare both train AND test splits; requesting only the train shard
+            # via data_files otherwise triggers ExpectedMoreSplitsError({'test'})
+            # even though the parquet loads fine. NO_CHECKS disables that
+            # split-count contract for this single-shard load.
             raw_datasets = load_dataset(
                 dataset_name,
                 data_files=data_files,
-                num_proc=num_proc
+                num_proc=num_proc,
+                verification_mode=VerificationMode.NO_CHECKS,
             )
         else:
             raw_datasets = load_dataset(dataset_name, num_proc=num_proc)
