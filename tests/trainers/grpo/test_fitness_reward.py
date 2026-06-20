@@ -16,7 +16,12 @@ sys.path.insert(0, str(ROOT))
 # Also add GRPO src so rewards module is importable directly
 sys.path.insert(0, str(ROOT / "Trainers" / "grpo" / "src"))
 
-from rewards import fitness_reward, build_fitness_reward, _coerce_to_text
+from rewards import (
+    fitness_reward,
+    build_fitness_reward,
+    build_combined_reward_function,
+    _coerce_to_text,
+)
 
 
 # --- Valid Qwen-format tool call output for testing ---
@@ -185,3 +190,39 @@ class TestBuildFitnessReward:
         reward_fn([VALID_TOOL_CALL])
 
         mock_evaluator_cls.assert_called_with(config_path="my/custom/rules.yaml")
+
+
+def test_custom_reward_file_with_dataclass_loads(tmp_path):
+    reward_file = tmp_path / "custom_reward.py"
+    reward_file.write_text(
+        "\n".join(
+            [
+                "from dataclasses import dataclass",
+                "",
+                "@dataclass(frozen=True)",
+                "class RewardSettings:",
+                "    value: float = 0.75",
+                "",
+                "def dataclass_reward(completions, prompts=None, **kwargs):",
+                "    settings = RewardSettings()",
+                "    return [settings.value for _ in completions]",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    reward_fn, plan = build_combined_reward_function(
+        {
+            "items": [],
+            "custom": {
+                "enabled": True,
+                "file": str(reward_file),
+                "functions": [{"name": "dataclass_reward", "weight": 1.0}],
+            },
+        },
+        base_dir=tmp_path,
+    )
+
+    assert plan == [{"type": "custom", "name": "dataclass_reward", "weight": 1.0}]
+    assert reward_fn(["a", "b"]) == [0.75, 0.75]

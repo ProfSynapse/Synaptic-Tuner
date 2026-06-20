@@ -16,6 +16,7 @@ import importlib
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -588,6 +589,7 @@ def build_combined_reward_function(
                 spec = importlib.util.spec_from_file_location("custom_rewards", str(path))
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
+                    sys.modules[spec.name] = module
                     spec.loader.exec_module(module)
 
                     for fn_cfg in custom.get("functions", []) or []:
