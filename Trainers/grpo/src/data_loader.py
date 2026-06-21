@@ -8,7 +8,7 @@ Expected dataset shape for tool-calling:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 
@@ -47,10 +47,12 @@ def format_dataset_for_grpo(
     tokenizer: object,
     prompt_column: str = "prompt",
     num_proc: int = 1,
+    chat_template_kwargs: Optional[dict[str, Any]] = None,
 ) -> Dataset:
     """
     Ensure dataset has a string `prompt` field usable by GRPOTrainer.
     """
+    template_kwargs = dict(chat_template_kwargs or {})
 
     def _format_example(example):
         prompt_value = example.get(prompt_column)
@@ -64,6 +66,7 @@ def format_dataset_for_grpo(
                 prompt_value,
                 tokenize=False,
                 add_generation_prompt=True,
+                **template_kwargs,
             )
 
         # Keep all original fields (for rewards), but replace prompt with string
