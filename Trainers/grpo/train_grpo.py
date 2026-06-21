@@ -237,8 +237,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     # Apply chat template (config override wins; else inferred)
     chat_template_name = model_cfg.get('chat_template') or _detect_chat_template(model_cfg['model_name'])
-    tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
-    print(f"✓ Applied {chat_template_name} chat template via Unsloth")
+    if str(chat_template_name).lower() in {"native", "tokenizer"}:
+        print("Preserving tokenizer-native chat template")
+    else:
+        tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
+        print(f"✓ Applied {chat_template_name} chat template via Unsloth")
 
     # Apply LoRA for GRPO training
     # (If loading from SFT checkpoint, the SFT LoRA was already merged into base weights)
@@ -339,6 +342,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         tokenizer=tokenizer,
         prompt_column=dataset_cfg.get('prompt_column', 'prompt'),
         num_proc=dataset_cfg.get('num_proc', 1),
+        chat_template_kwargs=training_cfg.get('chat_template_kwargs'),
     )
 
     # Training args
