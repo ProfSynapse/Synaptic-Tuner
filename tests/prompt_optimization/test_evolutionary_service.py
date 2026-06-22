@@ -469,3 +469,131 @@ prompt_optimization:
     assert payload["data"]["strategy"] == "evolutionary"
     assert payload["data"]["generation_count"] == 1
     assert payload["data"]["stop_reason"] in {"target_score", "max_generations", "stagnation"}
+
+
+def test_evolutionary_progress_stream_appends_one_row_per_candidate(tmp_path):
+    """The OPTIONAL progress_stream appends each candidate the instant it is scored.
+
+    Drives the GA in fixture_assertions mode (no LLM) for the full run with an
+    unreachable target, so it spans every generation. Asserts the stream file
+    accumulates exactly population_size * generation_count rows (proving the emit
+    is PER-CANDIDATE across the whole run, not a single end-of-run flush), that
+    each row is valid candidate-history-shaped JSON, and that the stream union
+    equals candidate_history.jsonl (the stream is a live mirror of the canonical
+    artifact, not a divergent record).
+    """
+    source = tmp_path / "prompts.yaml"
+    source.write_text("prompt: Baseline.\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    stream = tmp_path / "candidate_stream.jsonl"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f"""
+prompt_optimization:
+  schema_version: 2
+  strategy: evolutionary
+  run_id: evo-stream
+  seed: 5
+  output_dir: {output_dir.as_posix()}
+  progress_stream: {stream.as_posix()}
+  population_size: 3
+  max_generations: 3
+  elite_count: 1
+  mutation_rate: 1.0
+  crossover_rate: 0.0
+  stopping:
+    target_score: 1.1
+    max_stagnation: 99
+    min_delta: 0.0
+  subjects:
+    - id: main
+      path: {source.as_posix()}
+      dotted_path: prompt
+  operators:
+    - type: append
+      values:
+        - Extra guidance.
+  evaluation:
+    assertions:
+      - id: never_passes
+        type: contains
+        text: THIS_TEXT_IS_NEVER_PRESENT
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = PromptOptimizationService.from_config(config).run()
+
+    # Ran the full schedule (target unreachable, no stagnation cap hit).
+    assert result.generation_count == 3
+    assert result.stop_reason == "max_generations"
+
+    assert stream.exists()
+    stream_rows = [
+        json.loads(line)
+        for line in stream.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    # PER-CANDIDATE: one streamed row for every candidate of every generation.
+    assert len(stream_rows) == 3 * 3
+    # Each streamed row is candidate-history-shaped and in-range.
+    for row in stream_rows:
+        assert {"id", "candidate_id", "generation", "score", "selected"} <= set(row)
+        assert 0.0 <= row["score"] <= 1.0
+    assert {row["generation"] for row in stream_rows} == {0, 1, 2}
+
+    # The stream is a live mirror of the canonical run-end candidate_history.
+    history_ids = {
+        json.loads(line)["id"]
+        for line in (output_dir / "candidate_history.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert {row["id"] for row in stream_rows} == history_ids
+
+
+def test_evolutionary_progress_stream_absent_by_default(tmp_path):
+    """Without progress_stream, behavior is unchanged: no stream file is written."""
+    source = tmp_path / "prompts.yaml"
+    source.write_text("prompt: Baseline.\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f"""
+prompt_optimization:
+  schema_version: 2
+  strategy: evolutionary
+  run_id: evo-no-stream
+  seed: 5
+  output_dir: {output_dir.as_posix()}
+  population_size: 3
+  max_generations: 2
+  elite_count: 1
+  mutation_rate: 1.0
+  crossover_rate: 0.0
+  stopping:
+    target_score: 1.1
+    max_stagnation: 99
+    min_delta: 0.0
+  subjects:
+    - id: main
+      path: {source.as_posix()}
+      dotted_path: prompt
+  operators:
+    - type: append
+      values:
+        - Extra guidance.
+  evaluation:
+    assertions:
+      - id: never_passes
+        type: contains
+        text: THIS_TEXT_IS_NEVER_PRESENT
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = PromptOptimizationService.from_config(config).run()
+
+    assert result.generation_count == 2
+    # No stream artifact anywhere in the output dir; canonical artifacts still present.
+    assert not list(output_dir.glob("*stream*"))
+    assert (output_dir / "candidate_history.jsonl").exists()

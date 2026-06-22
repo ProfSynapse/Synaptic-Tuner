@@ -10,7 +10,7 @@ Summary: Executes a single LLM judge call via BaseLLMClient.structured_output(),
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from shared.llm import BaseLLMClient
 
@@ -217,6 +217,8 @@ class JudgeService:
 
         composite = max(0.0, min(1.0, composite))
 
+        quality_gated_score = self._compute_quality_gated_score(rubric, per_dimension)
+
         return JudgeScore(
             rubric_key=rubric.key,
             rubric_name=rubric.name,
@@ -225,7 +227,102 @@ class JudgeService:
             pass_threshold=rubric.pass_threshold,
             feedback=feedback,
             per_dimension=per_dimension,
+            quality_gated_score=quality_gated_score,
         )
+
+    def _compute_quality_gated_score(
+        self,
+        rubric: RubricDef,
+        per_dimension: List[Dict[str, Any]],
+    ) -> Optional[float]:
+        """Compute the floors-as-gates "quality gated" composite, or None.
+
+        This is a SECOND, optional selection composite that pulls the rubric's
+        safety-floor dimensions OUT of the weighted score and treats them as hard
+        gates instead. It is config-driven and fully generic: every domain-specific
+        value (which dims are floors, the floor threshold, the quality weights)
+        comes from ``rubric.quality_gate`` (loaded from the rubric YAML). When no
+        quality_gate is configured this returns None and the default-off path is
+        byte-identical (no gated stat is ever emitted downstream).
+
+        Mechanism (architect-ratified, floors-as-gates / gate-not-weight):
+          * If ANY configured floor dim scores < floor_threshold, the case is
+            hard-eliminated: the gated composite is 0.0.
+          * Otherwise the gated composite is the weighted sum over the configured
+            NON-floor "quality" dimensions, using the renormalized quality_weights.
+
+        FAIL-CLOSED contract: if a configured floor or quality dimension key is
+        absent from the judge's per-dimension output, this raises ValueError rather
+        than silently treating the missing dim as passing/zero. A missing floor dim
+        must never silently pass the gate (it is a privacy/quality safety control),
+        and a missing quality dim means a malformed config that must surface, not
+        produce a quietly-wrong selection score. judge() converts the raise into a
+        failed JudgeResult, so the candidate is not selected on a bad metric.
+
+        Args:
+            rubric: The dimensioned rubric (carries the optional quality_gate).
+            per_dimension: The per-dimension breakdown already computed for this
+                rubric (list of {key, name, weight, reasoning, score}).
+
+        Returns:
+            The gated composite (0.0-1.0), 0.0 on a floor breach, or None when the
+            rubric has no quality_gate configured.
+
+        Raises:
+            ValueError: On a structurally invalid quality_gate config or a
+                configured dimension key missing from per_dimension (fail-closed).
+        """
+        gate = rubric.quality_gate
+        if not gate:
+            return None
+
+        floor_dims = gate.get("floor_dims") or []
+        quality_weights = gate.get("quality_weights") or {}
+        if not isinstance(floor_dims, list) or not isinstance(quality_weights, dict):
+            raise ValueError(
+                f"Rubric '{rubric.key}' quality_gate must define a 'floor_dims' list "
+                f"and a 'quality_weights' mapping."
+            )
+        if not quality_weights:
+            raise ValueError(
+                f"Rubric '{rubric.key}' quality_gate.quality_weights is empty; "
+                f"a gated composite needs at least one quality dimension."
+            )
+        try:
+            floor_threshold = float(gate.get("floor_threshold", 0.0))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Rubric '{rubric.key}' quality_gate.floor_threshold is not numeric: "
+                f"{gate.get('floor_threshold')!r}"
+            )
+
+        # Index the per-dimension scores the judge actually produced.
+        scores_by_key = {dim["key"]: dim["score"] for dim in per_dimension}
+
+        # FAIL-CLOSED: every configured floor dim must be present. A missing floor
+        # dim must NOT silently pass the gate.
+        for dim_key in floor_dims:
+            if dim_key not in scores_by_key:
+                raise ValueError(
+                    f"Rubric '{rubric.key}' quality_gate floor dim '{dim_key}' is not "
+                    f"in the judge's per-dimension output {sorted(scores_by_key)}; "
+                    f"failing closed rather than treating it as passing."
+                )
+            if scores_by_key[dim_key] < floor_threshold:
+                # Hard-eliminate: a floor breach zeroes the gated selection score.
+                return 0.0
+
+        # FAIL-CLOSED: every configured quality dim must be present too.
+        gated = 0.0
+        for dim_key, weight in quality_weights.items():
+            if dim_key not in scores_by_key:
+                raise ValueError(
+                    f"Rubric '{rubric.key}' quality_gate quality dim '{dim_key}' is not "
+                    f"in the judge's per-dimension output {sorted(scores_by_key)}."
+                )
+            gated += float(weight) * scores_by_key[dim_key]
+
+        return max(0.0, min(1.0, gated))
 
     def _validate_dimension_weights(self, rubric: RubricDef) -> Dict[str, float]:
         """Validate dimension weights and return a {key: weight} map.

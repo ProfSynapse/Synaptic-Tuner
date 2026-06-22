@@ -42,6 +42,61 @@ def _judge_normalized_score(records: Sequence[EvaluationRecord]) -> Optional[flo
     return sum(composites) / len(composites)
 
 
+def _judge_case_quality_gated(record: EvaluationRecord) -> Optional[float]:
+    """Per-case "quality gated" composite = mean of each rubric's gated score.
+
+    The gated score is the optional floors-as-gates composite the judge layer
+    computes when a rubric carries a ``quality_gate`` config (0.0 on a floor
+    breach, else the renormalized quality-only composite). Returns None when the
+    case has no judge result or no rubric carried a gated score (so a run without
+    any quality_gate stays byte-identical -- no gated stat is emitted). For the
+    single-rubric case this degenerates to that rubric's gated score.
+    """
+    judge = record.judge
+    if judge is None:
+        return None
+    gated = [
+        s.quality_gated_score
+        for s in judge.judge_result.scores
+        if s.quality_gated_score is not None
+    ]
+    if not gated:
+        return None
+    return sum(gated) / len(gated)
+
+
+def _quality_gated_normalized_score(records: Sequence[EvaluationRecord]) -> Optional[float]:
+    """Run-level quality-gated gradient = mean across cases of each gated composite.
+
+    Parallel to _judge_normalized_score but over the floors-as-gates composite.
+    None when no case carries a gated score (no rubric in the run had a
+    quality_gate configured), so the stat is simply absent on the default-off
+    path and the existing judge_normalized_score is never affected.
+    """
+    gated = [g for record in records if (g := _judge_case_quality_gated(record)) is not None]
+    if not gated:
+        return None
+    return sum(gated) / len(gated)
+
+
+def _quality_gated_min_normalized_score(records: Sequence[EvaluationRecord]) -> Optional[float]:
+    """Run-level WORST-case quality-gated score = min across cases of each gated composite.
+
+    Parallel to _quality_gated_normalized_score but takes the MIN instead of the
+    mean, so a candidate is scored by its weakest case rather than its average.
+    Selecting the optimizer on this applies topic-diversity selection pressure: a
+    prompt that aces one topic but drifts off another is penalized by the drifted
+    case, whereas the mean would let a strong case mask it. None under exactly the
+    same condition as the mean variant (no case carries a gated score -- no rubric
+    had a quality_gate configured), so the stat is absent on the default-off path
+    and never affects the existing judge/mean gradients.
+    """
+    gated = [g for record in records if (g := _judge_case_quality_gated(record)) is not None]
+    if not gated:
+        return None
+    return min(gated)
+
+
 def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     total = len(records)
     errors = sum(1 for record in records if record.error)
@@ -71,6 +126,16 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
     # judge composite so normalized_score can reflect it when path-scoring is
     # absent. None when no case has a judge (non-judge runs are unaffected).
     judge_normalized_score = _judge_normalized_score(records)
+    # Optional floors-as-gates selection gradient: present only when a rubric in
+    # the run carries a quality_gate config (else None -> absent stat, the
+    # judge_normalized_score path is byte-identical). The optimizer selects on this
+    # by pointing objective.metric at stats.quality_gated_normalized_score.
+    quality_gated_normalized_score = _quality_gated_normalized_score(records)
+    # Worst-case sibling of the gated mean: min across cases of the gated composite.
+    # Same None condition (no rubric carried a quality_gate -> absent stat). The
+    # optimizer applies topic-diversity selection pressure by pointing
+    # objective.metric at stats.quality_gated_min_normalized_score.
+    quality_gated_min_normalized_score = _quality_gated_min_normalized_score(records)
     episode_recoveries = sum(
         1
         for record in records
@@ -223,6 +288,16 @@ def aggregate_stats(records: Sequence[EvaluationRecord]) -> Dict[str, Any]:
         # Surfaced separately so the report shows the judge gradient's provenance
         # (None when no judge ran).
         "judge_normalized_score": judge_normalized_score,
+        # Optional floors-as-gates selection gradient (None unless a rubric carried
+        # a quality_gate config). Emitted ALONGSIDE judge_normalized_score; the
+        # weighted composite path above is untouched. The optimizer can select on
+        # this via objective.metric=stats.quality_gated_normalized_score.
+        "quality_gated_normalized_score": quality_gated_normalized_score,
+        # Worst-case sibling of the gated mean (min across cases). Emitted alongside
+        # the mean; None unless a rubric carried a quality_gate. The optimizer can
+        # select on this via objective.metric=stats.quality_gated_min_normalized_score
+        # to apply topic-diversity selection pressure.
+        "quality_gated_min_normalized_score": quality_gated_min_normalized_score,
         "episode_recoveries": episode_recoveries,
         "by_tag": {
             tag: {

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import re
 from dataclasses import asdict, dataclass
@@ -233,6 +234,16 @@ class PromptOptimizationService:
         min_delta = float(stopping.get("min_delta", 0.0))
         score_floor = float(self.config.get("score_floor", 0.0))
 
+        # OPTIONAL per-candidate progress stream. When ``progress_stream`` is set
+        # (absolute path, or relative to output_dir), each candidate is appended
+        # to it the instant it is scored, so a long evolutionary run is observable
+        # in real time instead of silent until the run-end candidate_history flush.
+        # Disabled by default (None) — pure addition, no behavior change otherwise.
+        progress_stream_path = self._resolve_progress_stream_path(output_dir)
+        if progress_stream_path is not None:
+            progress_stream_path.parent.mkdir(parents=True, exist_ok=True)
+            progress_stream_path.write_text("", encoding="utf-8")  # fresh per run
+
         population = self._initial_population(subjects, population_size, rng)
         all_candidates: list[EvolutionCandidate] = []
         generation_rows: list[dict[str, Any]] = []
@@ -242,15 +253,22 @@ class PromptOptimizationService:
         stop_reason = "max_generations"
 
         for generation in range(max_generations):
-            evaluated = [
-                self._evaluate_genome(
+            evaluated = []
+            for candidate in population:
+                scored = self._evaluate_genome(
                     candidate,
                     subjects,
                     score_floor=score_floor,
                     evaluator_adapter=evaluator_adapter,
                 )
-                for candidate in population
-            ]
+                evaluated.append(scored)
+                # Stream this candidate the instant it is scored (if enabled), so
+                # progress is observable live rather than only at the run-end flush.
+                if progress_stream_path is not None:
+                    _append_jsonl_durable(
+                        progress_stream_path,
+                        self._evolution_candidate_to_dict(scored),
+                    )
             ranked = sorted(evaluated, key=lambda item: (item.score, -item.index, item.id), reverse=True)
             elites = ranked[:elite_count]
             selected_ids = {candidate.id for candidate in elites}
@@ -410,6 +428,21 @@ class PromptOptimizationService:
         path = Path(str(raw)).expanduser()
         if not path.is_absolute():
             path = self.repo_root / path
+        return path.resolve()
+
+    def _resolve_progress_stream_path(self, output_dir: Path) -> Path | None:
+        """Resolve the OPTIONAL per-candidate progress-stream path, or None.
+
+        ``progress_stream`` may be absolute, or relative to the run's output_dir
+        (the natural home for a run artifact). Absent/blank -> None (streaming
+        disabled; the run behaves exactly as before).
+        """
+        raw = self.config.get("progress_stream")
+        if not raw or not str(raw).strip():
+            return None
+        path = Path(str(raw)).expanduser()
+        if not path.is_absolute():
+            path = output_dir / path
         return path.resolve()
 
     def _load_subjects(self) -> list[PromptSubject]:
@@ -1191,3 +1224,18 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _append_jsonl_durable(path: Path, row: dict[str, Any]) -> None:
+    """Append one row to a JSONL and flush+fsync so a tailer sees it immediately.
+
+    Used for OPTIONAL per-candidate progress streaming: when ``progress_stream``
+    is configured, each candidate is appended the moment it is scored (rather than
+    only at the run-end ``candidate_history.jsonl`` flush), so an external watcher
+    can observe incremental progress in real time. The flush + fsync defeat OS
+    buffering; without them a long run looks silent until it completes.
+    """
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, sort_keys=True) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())

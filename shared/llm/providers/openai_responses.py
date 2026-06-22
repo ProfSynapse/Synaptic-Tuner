@@ -32,6 +32,12 @@ class OpenAIResponsesClient(BaseLLMClient):
         self.store = bool(store)
         self.structured_output_strict = bool(structured_output_strict)
         self.thinking_effort = _normalize_thinking_effort(thinking_effort)
+        # Token-usage from the most recent request, for cost instrumentation.
+        # The Responses API returns a ``usage`` block on every response; we cache
+        # it here (additively, no return-signature change) so callers that care
+        # about cost can read ``client.last_usage`` after a chat/structured_output
+        # call. None until the first request; None again if a response omits usage.
+        self.last_usage: Dict[str, Any] | None = None
 
     @property
     def provider_name(self) -> str:
@@ -186,7 +192,11 @@ class OpenAIResponsesClient(BaseLLMClient):
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            # Cache token usage for cost instrumentation (additive; never raises).
+            usage = data.get("usage") if isinstance(data, dict) else None
+            self.last_usage = usage if isinstance(usage, dict) else None
+            return data
         except requests.exceptions.ConnectionError as e:
             raise LLMConnectionError(f"Cannot connect to OpenAI Responses API: {e}")
         except requests.exceptions.Timeout as e:
