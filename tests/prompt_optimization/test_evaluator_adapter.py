@@ -456,6 +456,119 @@ class _FakeRecord:
         return None
 
 
+# ---------------------------------------------------------------------------
+# _judge_metric_unresolved: the None-guard for judge-derived gradient metrics.
+# Extended (Task #23) to ALSO cover stats.quality_gated_normalized_score so the
+# all-reject / no-gate edges degrade to score_floor instead of crashing
+# _resolve_metric on a None. Unit-tested directly (no filesystem / LLM).
+# ---------------------------------------------------------------------------
+
+def _make_adapter(*, metric: str, failure_policy: str = "score_floor"):
+    from shared.prompt_optimization.evaluators import EvaluatorScoringAdapter
+
+    evaluation_config = {
+        "evaluator": {
+            "failure_policy": failure_policy,
+            "objective": {"metric": metric},
+            "prompt_placement": {
+                "mode": "system_overlay",
+                "template": "{candidate_prompt}\n\n{system}",
+            },
+        }
+    }
+    return EvaluatorScoringAdapter(
+        evaluation_config=evaluation_config,
+        config_path=Path("unused.yaml"),
+        repo_root=Path("."),
+        score_floor=0.2,
+    )
+
+
+def test_judge_metric_unresolved_fires_for_judge_gradient_when_none():
+    adapter = _make_adapter(metric="stats.judge_normalized_score")
+    assert adapter._judge_metric_unresolved({"judge_normalized_score": None}) is True
+
+
+def test_judge_metric_unresolved_fires_for_quality_gated_when_none():
+    """The new gated metric joins the None-guard: a None gated gradient (no rubric
+    carried a quality_gate / no case judged) degrades to floor, not a crash."""
+    adapter = _make_adapter(metric="stats.quality_gated_normalized_score")
+    assert adapter._judge_metric_unresolved({"quality_gated_normalized_score": None}) is True
+
+
+def test_quality_gated_all_reject_is_numeric_zero_not_none():
+    """ALL-REJECT edge: every case trips a floor -> each per-case gated value is 0.0
+    -> the run-level mean is a numeric 0.0, NOT None. So the guard does NOT fire and
+    _resolve_metric consumes 0.0 cleanly (worst candidate, no crash). This is the
+    distinction the guard's None-path and the helper's numeric-path must both honour.
+    """
+    from Evaluator.reporting import _quality_gated_normalized_score
+
+    class _Judge:
+        def __init__(self, scores):
+            self.judge_result = type("R", (), {"scores": scores})()
+
+    class _Score:
+        def __init__(self, gated):
+            self.quality_gated_score = gated
+
+    class _Record:
+        def __init__(self, judge):
+            self.judge = judge
+
+    # Two cases, BOTH gate-rejected (gated == 0.0 each).
+    records = [_Record(_Judge([_Score(0.0)])), _Record(_Judge([_Score(0.0)]))]
+    result = _quality_gated_normalized_score(records)
+    assert result == 0.0
+    assert result is not None  # numeric zero, not the None default-off path
+
+    # And the guard does NOT fire on a numeric 0.0 stat (only on None).
+    adapter = _make_adapter(metric="stats.quality_gated_normalized_score")
+    assert adapter._judge_metric_unresolved({"quality_gated_normalized_score": 0.0}) is False
+
+
+def test_judge_metric_unresolved_does_not_fire_for_other_metrics():
+    adapter = _make_adapter(metric="stats.pass_rate")
+    # Even with a None gated gradient present, a non-gradient objective keeps the
+    # strict numeric contract (guard returns False -> _resolve_metric handles it).
+    assert adapter._judge_metric_unresolved({"quality_gated_normalized_score": None}) is False
+
+
+def test_judge_metric_unresolved_respects_failure_policy_raise():
+    adapter = _make_adapter(metric="stats.quality_gated_normalized_score", failure_policy="raise")
+    # failure_policy='raise' must NOT short-circuit; caller proceeds to _resolve_metric
+    # which raises on the None as before.
+    assert adapter._judge_metric_unresolved({"quality_gated_normalized_score": None}) is False
+
+
+def test_all_cases_structural_gate_rejected_yields_none_then_guard_fires():
+    """The architect's named landmine path, end to end at the stats+guard layer:
+    every case fails the structural gate (--judge-mode and) -> NO case is judged
+    -> record.judge is None on every record -> _quality_gated_normalized_score
+    returns None (NOT 0.0; nothing was scored). The extended guard must then fire
+    so the candidate floors instead of crashing _resolve_metric on the None.
+
+    This is DISTINCT from the all-floor-breach case (which IS judged -> per-case
+    0.0 -> numeric 0.0 mean): here the rejection happens BEFORE the judge, so the
+    gated gradient is genuinely absent (None), which is exactly the case the
+    judge_normalized_score-only guard would have missed for the new metric key.
+    """
+    from Evaluator.reporting import _quality_gated_normalized_score
+
+    class _Record:
+        def __init__(self):
+            self.judge = None  # structurally gate-rejected -> never judged
+
+    records = [_Record(), _Record()]
+    gradient = _quality_gated_normalized_score(records)
+    assert gradient is None  # nothing judged -> genuinely absent, not 0.0
+
+    adapter = _make_adapter(metric="stats.quality_gated_normalized_score")
+    # The guard fires on the None gradient -> caller floors the candidate instead
+    # of passing None into _resolve_metric (which would crash).
+    assert adapter._judge_metric_unresolved({"quality_gated_normalized_score": gradient}) is True
+
+
 def _write_evaluator_config(tmp_path: Path) -> Path:
     config_dir = tmp_path / "EvaluatorConfig"
     scenarios_dir = config_dir / "scenarios"

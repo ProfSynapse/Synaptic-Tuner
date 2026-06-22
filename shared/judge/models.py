@@ -37,6 +37,22 @@ class RubricDef:
             contract and a sum != 1.0 (beyond tolerance) is a hard error. When
             False/None (placeholder rubrics pending client sign-off), a non-unit
             weight sum is normalized-and-warned instead of failing the run.
+        quality_gate: Optional, generic config for a SECOND selection composite
+            that pulls "safety floor" dimensions OUT of the weighted score and
+            treats them as hard gates instead (floors-as-gates). Absent (None),
+            behavior is byte-identical: only the weighted ``score`` composite is
+            computed. When present it is a dict with three keys, all generic so
+            the engine carries no domain knowledge (the actual dimension names,
+            threshold, and weights live in the rubric YAML):
+              * ``floor_dims`` (list[str]): dimension keys that act as hard gates.
+              * ``floor_threshold`` (float): any floor dim scoring below this
+                eliminates the case (gated composite -> 0.0).
+              * ``quality_weights`` (dict[str, float]): the weights over the
+                NON-floor "quality" dimensions used to compute the gated composite
+                when all floors pass. Keys must be dimensions present in
+                ``dimensions``; the engine FAILS CLOSED if a configured floor or
+                quality key is absent from the judge's per-dimension output (see
+                JudgeService._score_dimensioned_rubric).
     """
 
     key: str
@@ -49,6 +65,7 @@ class RubricDef:
     improver_prompt: Optional[str] = None
     dimensions: Optional[List[Dict[str, Any]]] = None
     weights_ratified: bool = False
+    quality_gate: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -71,6 +88,13 @@ class JudgeScore:
             ``key``, ``name``, ``weight``, ``reasoning`` (the judge's reason-first
             justification), and ``score`` (the bare per-dimension score). None for
             legacy single-composite rubrics.
+        quality_gated_score: Optional SECOND composite, populated only when the
+            rubric carries a ``quality_gate`` config (floors-as-gates). It is the
+            renormalized quality-only composite, or 0.0 when any floor dimension
+            scored below the configured floor_threshold (hard-eliminate). None when
+            no quality_gate is configured, so the default-off path is byte-identical
+            and downstream readers (reporting) emit no gated stat. This is a
+            SELECTION-alternative view; the weighted ``score`` above is untouched.
     """
 
     rubric_key: str
@@ -80,6 +104,7 @@ class JudgeScore:
     pass_threshold: float
     feedback: Optional[str] = None
     per_dimension: Optional[List[Dict[str, Any]]] = None
+    quality_gated_score: Optional[float] = None
 
 
 @dataclass
@@ -117,6 +142,7 @@ class JudgeResult:
                     "pass_threshold": s.pass_threshold,
                     "feedback": s.feedback,
                     "per_dimension": s.per_dimension,
+                    "quality_gated_score": s.quality_gated_score,
                 }
                 for s in self.scores
             ],

@@ -47,6 +47,19 @@ class EvaluatorScoringAdapter:
             raise EvaluatorScoringConfigError("evaluation.evaluator.failure_policy must be 'score_floor' or 'raise'.")
         self.objective = _mapping(self.evaluator_config.get("objective"), "evaluation.evaluator.objective")
         self.objective_metric = str(self.objective.get("metric") or "stats.normalized_score")
+        # Optional, default-OFF per-case-records persistence. When enabled, each
+        # candidate's metrics carry a `case_records` array (one full per-case dict
+        # via reporting.record_to_dict) so downstream analysis reads ready-made
+        # judge/dimension/text fields instead of re-deriving them from a re-run.
+        # Default False keeps the candidate payload byte-identical (only the thin
+        # `records` summary survives), so this never bloats existing runs. The
+        # heavy `raw_response` blob is omitted from each case record by default
+        # (persist_raw_response) to keep the candidate stream small and tailable;
+        # a compact `usage` summary is extracted from it instead.
+        self.persist_case_records = bool(self.evaluator_config.get("persist_case_records", False))
+        self.persist_raw_response = bool(
+            self.evaluator_config.get("persist_raw_response", False)
+        )
         try:
             self.pass_threshold = float(self.objective.get("pass_threshold", 1.0))
         except (TypeError, ValueError) as exc:
@@ -79,7 +92,7 @@ class EvaluatorScoringAdapter:
     def _score(self, genome_values: Mapping[str, str], subjects: Sequence[PromptSubject]) -> PromptEvaluationScore:
         from Evaluator.client_factory import create_client, create_settings
         from Evaluator.config_loader import ConfigLoader
-        from Evaluator.reporting import aggregate_stats
+        from Evaluator.reporting import aggregate_stats, record_to_dict
         from Evaluator.runner import evaluate_cases
 
         config_dir = self._resolve_path(str(self.evaluator_config.get("config_dir", "Evaluator/config")))
@@ -223,33 +236,68 @@ class EvaluatorScoringAdapter:
             )
         raw_score = _resolve_metric(metric_context, self.objective_metric)
         normalized = _normalize_score(raw_score, self.objective)
+        metrics: dict[str, Any] = {
+            "normalized_score": normalized,
+            "objective_metric": self.objective_metric,
+            "objective_value": raw_score,
+            "evaluator_stats": stats,
+            "case_count": len(records),
+        }
+        # Default-OFF: only when persist_case_records is configured do we attach the
+        # full per-case dicts. This rides through _evolution_candidate_to_dict for
+        # free (metrics is serialized wholesale), so analysis tooling reads
+        # response_text / judge dimensions / correctness verdicts directly from the
+        # candidate stream instead of re-running the winner. Each record is reduced
+        # by _case_record_for_persistence (raw_response stripped to a compact usage
+        # summary unless explicitly opted in).
+        if self.persist_case_records:
+            metrics["case_records"] = [
+                _case_record_for_persistence(
+                    record_to_dict(record),
+                    include_raw_response=self.persist_raw_response,
+                )
+                for record in records
+            ]
         return PromptEvaluationScore(
             score=normalized,
-            metrics={
-                "normalized_score": normalized,
-                "objective_metric": self.objective_metric,
-                "objective_value": raw_score,
-                "evaluator_stats": stats,
-                "case_count": len(records),
-            },
+            metrics=metrics,
             passed=normalized >= self.pass_threshold,
             diagnostics=tuple(_record_diagnostics(records)),
         )
 
-    def _judge_metric_unresolved(self, stats: Mapping[str, Any]) -> bool:
-        """True when the objective targets the judge gradient but it is None.
+    # Judge-derived run-level gradient stats that legitimately go None when no
+    # case produced the underlying signal (no case judged, or -- for the gated
+    # variant -- every case was gate-rejected so there is no gradient to mean).
+    # Selecting on any of these must degrade to score_floor, not crash
+    # _resolve_metric on the None. The mapping is objective_metric -> stats key.
+    _NULLABLE_GRADIENT_METRICS = {
+        "stats.judge_normalized_score": "judge_normalized_score",
+        "stats.quality_gated_normalized_score": "quality_gated_normalized_score",
+        "stats.quality_gated_min_normalized_score": "quality_gated_min_normalized_score",
+    }
 
-        Only fires for the stats.judge_normalized_score objective (the judge
-        gradient is None when no case was judged). Any other objective keeps the
-        strict numeric contract enforced by _resolve_metric. Honours
-        failure_policy='raise' by NOT short-circuiting (the caller proceeds to
-        _resolve_metric, which raises on the None as before).
+    def _judge_metric_unresolved(self, stats: Mapping[str, Any]) -> bool:
+        """True when the objective targets a judge gradient stat but it is None.
+
+        Fires for any of the judge-derived gradient objectives in
+        _NULLABLE_GRADIENT_METRICS (the plain judge gradient
+        stats.judge_normalized_score, the floors-as-gates mean
+        stats.quality_gated_normalized_score, and its worst-case sibling
+        stats.quality_gated_min_normalized_score). The gradient is None when no case
+        produced the underlying signal -- for the gated metric, that includes the
+        ALL-REJECT edge where every candidate's cases trip a floor (each
+        per-case gated value is 0.0, which still yields a numeric mean; the None
+        case is when no rubric carried a quality_gate / no case was judged at all).
+        Any other objective keeps the strict numeric contract enforced by
+        _resolve_metric. Honours failure_policy='raise' by NOT short-circuiting
+        (the caller proceeds to _resolve_metric, which raises on the None as before).
         """
-        if self.objective_metric != "stats.judge_normalized_score":
+        stats_key = self._NULLABLE_GRADIENT_METRICS.get(self.objective_metric)
+        if stats_key is None:
             return False
         if self.failure_policy == "raise":
             return False
-        return stats.get("judge_normalized_score") is None
+        return stats.get(stats_key) is None
 
     def _runtime_failure_score(self, exc: Exception) -> PromptEvaluationScore:
         diagnostic = {
@@ -491,6 +539,56 @@ def _record_summary(record: Any) -> dict[str, Any]:
         "score": record.score,
         "scoring": scoring,
     }
+
+
+def _usage_summary(raw_response: Any) -> dict[str, Any] | None:
+    """Compact, analysis-ready token usage pulled from a target raw_response.
+
+    The OpenAI Responses provider stores the full response (including its
+    ``usage`` block) on ``record.raw_response`` (runner.py raw_response=response.raw).
+    This lifts just the token counts into a small dict so per-case cost is parseable
+    without carrying the whole response blob. Returns None when no usage block is
+    present (e.g. dry-run, structural-only, or a provider that omits usage), so the
+    field is simply absent rather than a misleading zero.
+    """
+    if not isinstance(raw_response, Mapping):
+        return None
+    usage = raw_response.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    summary: dict[str, Any] = {}
+    # Responses API uses input_tokens/output_tokens/total_tokens; copy whatever is
+    # present (and the detail sub-dicts when given) without assuming a fixed shape.
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)):
+            summary[key] = value
+    for detail_key in ("input_tokens_details", "output_tokens_details"):
+        detail = usage.get(detail_key)
+        if isinstance(detail, Mapping):
+            summary[detail_key] = dict(detail)
+    return summary or None
+
+
+def _case_record_for_persistence(
+    record_dict: dict[str, Any], *, include_raw_response: bool
+) -> dict[str, Any]:
+    """Reduce a full record_to_dict() payload for candidate-stream persistence.
+
+    By default drops the heavy ``raw_response`` blob (it can be large and is not
+    needed for score analysis) and replaces it with a compact ``usage`` summary so
+    per-case token cost stays parseable. When ``include_raw_response`` is set, the
+    full blob is preserved verbatim instead. All other fields (judge dimensions,
+    correctness verdict, response_text, tags, ...) pass through unchanged.
+    """
+    out = dict(record_dict)
+    raw_response = out.get("raw_response")
+    usage = _usage_summary(raw_response)
+    if not include_raw_response:
+        out.pop("raw_response", None)
+    if usage is not None:
+        out["usage"] = usage
+    return out
 
 
 def _record_diagnostics(records: Iterable[Any]) -> list[dict[str, Any]]:

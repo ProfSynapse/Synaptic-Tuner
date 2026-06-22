@@ -82,6 +82,7 @@ class RubricLoader:
             improver_prompt=data.get("improver_prompt"),
             dimensions=data.get("dimensions"),
             weights_ratified=bool(data.get("weights_ratified", False)),
+            quality_gate=data.get("quality_gate"),
         )
 
     def load_many(self, rubric_keys: List[str]) -> List[RubricDef]:
