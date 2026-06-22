@@ -87,7 +87,7 @@ def test_chat_template_kwargs_forwarded_to_both_call_sites():
         tokenizer=tokenizer,
         record=_EXAMPLE,
         max_seq_length=128,
-        assistant_only_loss=True,
+        loss_mask_mode="completion_only",
         chat_template_kwargs={"enable_thinking": False},
     )
 
@@ -108,7 +108,7 @@ def test_default_none_forwards_no_kwargs_byte_identical():
         tokenizer=tokenizer,
         record=_EXAMPLE,
         max_seq_length=128,
-        assistant_only_loss=True,
+        loss_mask_mode="completion_only",
         # chat_template_kwargs omitted ⇒ default None ⇒ no extra kwargs.
     )
 
@@ -126,7 +126,7 @@ def test_preprocessing_wrappers_thread_chat_template_kwargs():
         normalized,
         tokenizer=tokenizer,
         max_seq_length=128,
-        loss_mask_mode="assistant_only",
+        loss_mask_mode="completion_only",
         chat_template_kwargs={"enable_thinking": False},
     )
 
@@ -165,10 +165,10 @@ def test_enable_thinking_false_masks_marker_out_of_target_keeps_it_in_prompt():
         tokenizer=tokenizer,
         record=_EXAMPLE,
         max_seq_length=512,
-        assistant_only_loss=True,
+        loss_mask_mode="completion_only",
         chat_template_kwargs={"enable_thinking": False},
     )
-    assert prepared.loss_mask_mode == "assistant_only"
+    assert prepared.loss_mask_mode == "completion_only"
 
     target_ids = [
         tok

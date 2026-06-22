@@ -77,6 +77,7 @@ Commands:
   cloud-inspect Inspect saved HF cloud evaluation results
   cloud-extract Forward-only hidden-state extraction on HF Jobs (publish-by-id)
   local-run   Config-driven local Docker training/eval job
+  local-serve Serve a local merged model in a vLLM container (OpenAI-compatible)
   bucket      Read, list, pull, push, or analyze local / HF bucket artifacts
   run-experiment  Run train -> eval -> loss from one experiment config
   analyze-experiment Inspect a finished experiment bundle and recommendations
@@ -120,6 +121,9 @@ Examples:
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/recipes/job.yaml --yes
   python tuner.py local-run --job-config Trainers/recipes/job.yaml --yes
+  python tuner.py local-serve --model path/to/merged-model --port 8011 --yes
+  python tuner.py local-serve --status
+  python tuner.py local-serve --stop
   python tuner.py cloud-jobs list
   python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
@@ -142,7 +146,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "local-serve", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -393,6 +397,38 @@ Examples:
         "--container-status",
         action="store_true",
         help="Print the persistent container's state for the given --job-config (local-run only).",
+    )
+
+    # local-serve flags (vLLM serving container for a local merged model).
+    # Reuses the global --model (host model dir) and --stop (stop container).
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        dest="container_status",
+        help="Print the serving container's state (local-serve), alias of --container-status.",
+    )
+    parser.add_argument(
+        "--serve-port",
+        type=int,
+        help="Host port to publish the vLLM endpoint on (local-serve; default 8011).",
+    )
+    parser.add_argument(
+        "--served-model-name",
+        help="Name the served model is registered under for the OpenAI API (local-serve; default 'finetuned').",
+    )
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        help="vLLM GPU memory fraction 0.0-1.0 (local-serve; default 0.90).",
+    )
+    parser.add_argument(
+        "--max-model-len",
+        type=int,
+        help="vLLM max model (context) length (local-serve; default 16384).",
+    )
+    parser.add_argument(
+        "--serve-image",
+        help="Override the vLLM Docker image tag for local-serve (e.g. vllm/vllm-openai:<your-custom-tag>).",
     )
     parser.add_argument("--eval-run", help="Cloud evaluation run slug or prefix to inspect (cloud-inspect only). Use 'latest' for newest.")
     parser.add_argument("--job", help="HF job reference for cloud-jobs show/logs/cancel. Accepts either <job-id> or <namespace>/<job-id>.")

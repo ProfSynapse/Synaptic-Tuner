@@ -51,6 +51,75 @@ Context is filled most-recent-first after reserving room for the completion.
 A turn whose completion alone exceeds budget is still emitted, flagged
 `metadata.oversize=true`.
 
+## `reasoning` (map)
+Optional reasoning/thinking capture. Off by default.
+- `capture`: when `true`, each row gets a separate `reasoning` field (the
+  `completion` stays answer+tool-calls only). The field is secret-scrubbed like
+  the others.
+
+What's actually recoverable from the logs:
+- **Codex**: the readable reasoning **summary** (the `summary_text` blocks) is
+  captured. The verbatim chain-of-thought is in `encrypted_content` — an opaque
+  provider-held ciphertext — and is **not** recoverable.
+- **Claude Code**: `thinking` blocks store only a `signature` (no plaintext), so
+  `reasoning` is empty for Claude rows. Capture is wired generically so it would
+  populate if a future format logs plaintext thinking.
+
+## `feedback` (map)
+A per-turn **human-reaction** weight, read off the NEXT human turn, stamped as
+`metadata.user_feedback` (`praised`/`accepted`/`neutral`/`corrected`) and
+`metadata.feedback_score` (`+2`/`+1`/`0`/`-1`). Orthogonal to `quality_tier`:
+the tier grades the *session* by execution outcome, this grades the *turn* by
+what the human said next. Applies to **all** sources (a praised/accepted coding
+turn is extra-good; a corrected one is suspect), and is often the only quality
+signal for chat-style sources that never run tests/builds.
+
+- `enabled`: bool.
+- `praise_markers`: explicit-approval phrases. Matched anywhere within the first
+  `praise_window_chars` of the turn. Keep these task-directed — omit prose-common
+  words (beautiful/amazing/love) or they fire on pasted fiction/quotes.
+- `accept_markers`: short acceptance/proceed phrases. Only count when the turn is
+  ≤ `max_accept_chars` AND starts with one (so "yes but you forgot X" isn't a
+  clean accept).
+- `reject_markers`: dissatisfaction phrases. Matched anywhere within the first
+  `window_chars`. Use specific multi-word phrases; avoid ambiguous bare words.
+- `window_chars` (default 100) / `praise_window_chars` (default 50): feedback is
+  front-loaded, so markers only count near the start of the turn — this avoids
+  matching a marker buried in pasted code/JSON/a long prompt.
+
+Precedence is conservative: `corrected` > `praised` > `accepted`. A turn that
+opens with a markdown quote (`>`) is treated as pasted content and scored
+`neutral`.
+
+## `domain` (map)
+A per-turn **content domain** tag, stamped as `metadata.domain`
+(`"coding"` | `"chat"`), so downstream training can split coding from
+conversational data. Deterministic/regex — **no LLM**. Decided purely on the
+row's concatenated text (`prompt + " " + completion + " " + reasoning`),
+**independent of `tool_names` and `source_kind`**.
+
+**`coding` means AUTHORING CODE, not merely invoking a tool.** A chat turn that
+calls `web_search` / `analysis` / `artifacts` / any MCP tool is **still
+`chat`** — tool-call presence is **not** a coding signal. A turn is `coding`
+only when its text contains real code:
+- a fenced block tagged with a known language, OR an untagged fence whose body
+  has ≥4 programming symbols (`{};=()`) or a syntax marker (`def `, `import `,
+  `function `, `class `, `=>`, `fn `, ...);
+- a unified diff (`diff --git`, `@@ ... @@`, `+++`/`---` hunks);
+- a traceback / panic / segfault;
+- a build/test/git command invocation (`pytest`, `npm `, `cargo `, `go test`,
+  `git commit`, `pip install`, `make`, ...);
+- a code-file extension (`.py`, `.ts`, `.rs`, ...) alongside programming syntax.
+
+Everything else is `chat`. Runs uniformly on all sources — codex/claude_code
+turns naturally tag `coding`; pure-planning turns tag `chat` (correct and
+intended; domain is per-turn content, not per-source).
+
+- `enabled`: bool (default **true**). When `false`, every row is stamped
+  `domain="chat"`.
+- `lang_tags`: list of fence language tags that count as code (defaults cover
+  python/js/ts/rust/go/java/sql/yaml/etc.).
+
 ## `labeling` (map)
 Deterministic per-turn label.
 - `correction_markers`: the next human turn is a correction (=> reject) only if
@@ -88,5 +157,9 @@ Claude's `pr-link` events.)
 - `dedup.enabled`: drop near-duplicate completions (normalized hash).
 - `drop_prompt_markers`: drop rows whose prompt starts with a ritual marker
   (off by default — can over-drop).
+- `drop_content_substrings`: drop rows whose prompt OR completion contains any
+  of these substrings (case-insensitive). Use to scrub confidential
+  client/topic mentions that bleed across projects, beyond the project-slug
+  `scope.exclude_substrings`. Off by default (empty list).
 - `require_outcomes`: empty = tag-only (keep all, tiered). Set to e.g.
   `[tests_passed, clean_build]` to keep ONLY verified-good sessions.

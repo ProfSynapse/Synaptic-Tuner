@@ -14,6 +14,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 |------|---------|
 | Interactive menu | `./run.sh` → Train |
 | Local Docker config run | `python tuner.py local-run --job-config Trainers/recipes/<recipe>.yaml --yes` |
+| Serve a merged model locally (vLLM container) | `python tuner.py local-serve --model <merged-dir> --serve-port 8011 --yes` (then eval with `--backend vllm`; `--status` / `--stop` to manage) |
 | SFT training | `cd Trainers/sft && python train_sft.py --model-size 7b` |
 | KTO training | `cd Trainers/kto && python train_kto.py --model-size 7b` |
 | GRPO training | `cd Trainers/grpo && python train_grpo.py` |

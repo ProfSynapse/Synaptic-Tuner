@@ -1,0 +1,40 @@
+# LoRA Without Regret (Schulman et al., Sep 2025)
+# Matches full fine-tuning quality at ~67% compute cost.
+# Three rules: all-linear targets, high rank, 10x higher LR.
+#
+# Use with: --tier regret-free (once wired) or manually merge into config.yaml
+# Best for: SFT when you want full-FT quality from LoRA
+# VRAM: ~14-18GB for 3B, ~20-24GB for 7B (high rank = more adapter params)
+# Paper: https://thinkingmachines.ai/blog/lora/
+#
+# NOTE: use_rslora is practically mandatory at r=256 to stabilize gradients.
+#
+# UNSLOTH COMPAT:
+#   use_rslora: Supported natively (fixed in PR #2539, May 2025).
+#   target_modules "all-linear": Only works on the NEW FastBaseModel path
+#     (env var UNSLOTH_USE_NEW_MODEL=1). On the legacy path, Unsloth iterates
+#     target_modules as a list, so the string "all-linear" would break.
+#     If using the legacy path, expand to an explicit module list below.
+
+r: 256
+lora_alpha: 16
+learning_rate: 2e-3
+use_rslora: true
+
+# "all-linear" requires UNSLOTH_USE_NEW_MODEL=1.
+# For legacy Unsloth, replace with your architecture's explicit module list, e.g.:
+#   target_modules:
+#     - q_proj
+#     - k_proj
+#     - v_proj
+#     - o_proj
+#     - gate_proj
+#     - up_proj
+#     - down_proj
+target_modules: "all-linear"
+
+# Conservative schedule for high-rank stability
+warmup_ratio: 0.1
+num_train_epochs: 2
+batch_size: 2
+gradient_accumulation_steps: 8

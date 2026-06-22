@@ -58,7 +58,7 @@ class ClaudeCodeAdapter(Adapter):
             content = msg.get("content")
 
             if t == "assistant":
-                text, tool_calls = "", []
+                text, reasoning, tool_calls = "", "", []
                 if isinstance(content, list):
                     for b in content:
                         if not isinstance(b, dict):
@@ -66,13 +66,18 @@ class ClaudeCodeAdapter(Adapter):
                         bt = b.get("type")
                         if bt == "text":
                             text += str(b.get("text", ""))
+                        elif bt == "thinking":
+                            # plaintext CoT; in practice Claude Code logs only a
+                            # signature here (encrypted), so this is usually "".
+                            reasoning += str(b.get("thinking", ""))
                         elif bt == "tool_use":
                             tool_calls.append({"name": b.get("name"), "input": b.get("input") or {}})
                             if b.get("id"):
                                 id2cmd[b["id"]] = _command_of(b)
                 elif isinstance(content, str):
                     text = content
-                events.append({"role": "assistant", "text": text, "tool_calls": tool_calls})
+                events.append({"role": "assistant", "text": text,
+                               "tool_calls": tool_calls, "reasoning": reasoning})
 
             elif t == "user":
                 results = []

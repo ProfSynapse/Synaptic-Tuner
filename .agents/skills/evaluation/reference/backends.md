@@ -33,7 +33,30 @@ python -m Evaluator.cli \
   --max-tokens 768
 ```
 
-Use this for dedicated eval containers and fine-tuned model serving. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions.
+Use this for dedicated eval containers and fine-tuned model serving. The evaluator reads backend responses, builds a generic response view, and applies YAML `correct` assertions. `--model` is the **served model name** (what the container registered the model under), not a host path.
+
+### Starting the container: `local-serve`
+
+You do not need to hand-run `docker run` for the vLLM endpoint. The `local-serve` command launches a `vllm/vllm-openai` container that serves a local **merged (16-bit) model directory** on an OpenAI-compatible port, waits for it to become ready, and leaves it running for evaluation. No host pip install of vLLM is needed — serving lives in the container.
+
+```bash
+# Start: serve a merged model dir on port 8011 as "finetuned"
+python tuner.py local-serve \
+  --model path/to/merged-model \
+  --serve-port 8011 \
+  --served-model-name finetuned \
+  --yes
+
+# Inspect / stop
+python tuner.py local-serve --status
+python tuner.py local-serve --stop
+```
+
+Defaults: image `vllm/vllm-openai:latest` (override with `--serve-image vllm/vllm-openai:<your-custom-tag>` for an architecture an older `:latest` image does not yet support), port `8011`, served name `finetuned`, `--gpu-memory-utilization 0.90`, `--max-model-len 16384`. The container is named `tuner-vllm-serve`; a re-run detects an already-running container instead of double-launching. It mounts the model dir read-only at `/model` and publishes the container's port `8000` to the host `--serve-port`.
+
+The command forces the **default** Docker daemon socket (`unix:///var/run/docker.sock`) regardless of the active Docker context, so it never drives a non-default (e.g. colima) context. It fails loud with clear messages for: daemon unreachable, image pull failure, model dir missing, or the server never becoming ready (it dumps the container log tail). First serve pulls the image — layer progress is streamed so a large download is distinguishable from a hang.
+
+Once it reports ready, run the evaluator command above against `--host 127.0.0.1 --port <serve-port> --model <served-model-name>`.
 
 ---
 

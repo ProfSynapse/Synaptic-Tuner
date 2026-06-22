@@ -401,3 +401,173 @@ class TestRegistry:
         out = cv.verify(_sample("only a here"))
         assert out.score == pytest.approx(1.0)
         assert out.passed is True
+
+
+# ---------------------------------------------------------------------------
+# Tool-call-accuracy eval: args_match scorer against the EXACT emitted schema
+# (Tools/materialize_toolcall_eval.py::build_case). The spec, the <tool_call>
+# Qwen markup the model emits, and the ground_truth shape are reproduced verbatim
+# from the materializer so this test pins the real eval contract end-to-end.
+# ---------------------------------------------------------------------------
+
+# Verbatim copy of the verifier spec the materializer writes into every case.
+_TOOLCALL_SPEC = {
+    "type": "args_match",
+    "params": {
+        "scheme": "overlap",
+        "gt_tool_field": "tool_name",
+        "gt_args_field": "arguments",
+        "pass_threshold": 0.5,
+    },
+}
+
+
+def _toolcall_input(completion_text: str, ground_truth: dict) -> VerifierInput:
+    """Build a VerifierInput the way Evaluator/runner.py::_evaluate_single_case does:
+    raw completion text (verifier re-parses the <tool_call> block) + ground_truth.
+    """
+    return VerifierInput(
+        completion_text=completion_text,
+        parsed=None,
+        prompt_text="",
+        ground_truth=ground_truth,
+    )
+
+
+class TestArgsMatchToolCallScorer:
+    """Pins the args_match overlap scheme on the real eval schema."""
+
+    def test_exact_match_scores_one(self):
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                '<tool_call>{"name":"search","arguments":{"q":"x"}}</tool_call>',
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert out.score == 1.0
+        assert out.passed is True
+        # detail.gt_tool is the integration seam the aggregator depends on.
+        assert out.detail["gt_tool"] == "search"
+        assert out.detail["pred_tool"] == "search"
+
+    def test_name_mismatch_scores_zero(self):
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                '<tool_call>{"name":"other_tool","arguments":{"q":"x"}}</tool_call>',
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert out.score == 0.0
+        assert out.passed is False
+
+    def test_partial_args_extra_predicted_between_zero_and_one(self):
+        # Model predicts an EXTRA arg not in ground truth -> key overlap < 1.
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                '<tool_call>{"name":"search","arguments":{"q":"x","extra":"y"}}</tool_call>',
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert 0.0 < out.score < 1.0
+
+    def test_partial_args_missing_predicted_between_zero_and_one(self):
+        # Model OMITS an arg present in ground truth -> key overlap < 1.
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                '<tool_call>{"name":"search","arguments":{"q":"x"}}</tool_call>',
+                {"tool_name": "search", "arguments": {"q": "x", "page": 2}},
+            )
+        )
+        assert 0.0 < out.score < 1.0
+
+    def test_no_tool_call_in_completion_scores_zero(self):
+        # A plain-text response with no <tool_call> block -> not found -> 0.0.
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "I will search for x.",
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert out.score == 0.0
+        assert out.passed is False
+
+    # -- Hermes / Qwen-Agent XML tool-call body --------------------------------
+    # The model under eval emits <function=NAME><parameter=KEY>VALUE</parameter>
+    # rather than JSON inside <tool_call>. These pin that the parser extracts the
+    # name (so pred_tool is populated, not empty) and the args.
+
+    def test_xml_exact_match_scores_one(self):
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "<tool_call>\n<function=search>\n"
+                "<parameter=q>x</parameter>\n</function>\n</tool_call>",
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert out.score == 1.0
+        assert out.passed is True
+        assert out.detail["pred_tool"] == "search"
+        assert out.detail["gt_tool"] == "search"
+
+    def test_xml_name_mismatch_scores_zero_but_pred_populated(self):
+        # The original bug: XML tool name came back EMPTY. Pin that the predicted
+        # tool name is now populated even when it does not match ground truth.
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "<tool_call>\n<function=other_tool>\n"
+                "<parameter=q>x</parameter>\n</function>\n</tool_call>",
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert out.score == 0.0
+        assert out.passed is False
+        assert out.detail["pred_tool"] == "other_tool"
+
+    def test_xml_partial_args_extra_predicted_between_zero_and_one(self):
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "<tool_call>\n<function=search>\n"
+                "<parameter=q>x</parameter>\n<parameter=extra>y</parameter>\n"
+                "</function>\n</tool_call>",
+                {"tool_name": "search", "arguments": {"q": "x"}},
+            )
+        )
+        assert 0.0 < out.score < 1.0
+
+    def test_xml_partial_args_missing_predicted_between_zero_and_one(self):
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "<tool_call>\n<function=search>\n"
+                "<parameter=q>x</parameter>\n</function>\n</tool_call>",
+                {"tool_name": "search", "arguments": {"q": "x", "page": "2"}},
+            )
+        )
+        assert 0.0 < out.score < 1.0
+
+    def test_xml_multi_parameter_both_keys_captured(self):
+        # Both parameters present and matching -> exact match (score 1.0),
+        # which can only happen if BOTH keys were captured.
+        v = build_verifier(_TOOLCALL_SPEC)
+        out = v.verify(
+            _toolcall_input(
+                "<tool_call>\n<function=bash_tool>\n"
+                "<parameter=command>ls -la</parameter>\n"
+                "<parameter=description>list files</parameter>\n"
+                "</function>\n</tool_call>",
+                {
+                    "tool_name": "bash_tool",
+                    "arguments": {"command": "ls -la", "description": "list files"},
+                },
+            )
+        )
+        assert out.score == 1.0
+        assert out.detail["pred_tool"] == "bash_tool"

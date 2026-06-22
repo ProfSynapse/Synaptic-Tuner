@@ -175,17 +175,33 @@ class UnslothClient(BaseLLMClient):
                 max_length=self._max_seq_length,
             ).to(self._model.device)
 
+            # Normalize temperature. The CLI default arrives as None (meaning
+            # "greedy"), and `None > 0` raises TypeError, so collapse None to
+            # 0.0 and use a single resolved value for both the sampling flag
+            # and the temperature argument.
+            temp = 0.0 if temperature is None else float(temperature)
+            do_sample = temp > 0
+
             # Generate
             pad_token_id = getattr(actual_tokenizer, 'pad_token_id', None) or \
                            getattr(actual_tokenizer, 'eos_token_id', None)
+            # Pass the tokenizer's EOS (read dynamically — do NOT hardcode an id;
+            # e.g. this Qwen3.5 tokenizer's <|im_end|> is 248046, not the 151645
+            # of Qwen2.5) so generation stops at the chat terminator.
+            # generation_config can be empty, so without this the model never
+            # halts: it rambles to max_new_tokens, hallucinating extra turns whose
+            # role markers leak into the decoded text once special tokens are
+            # stripped, which mangles the <tool_call> payload and breaks the parser.
+            eos_token_id = getattr(actual_tokenizer, 'eos_token_id', None)
 
             outputs = self._model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
-                temperature=temperature if temperature > 0 else None,
+                temperature=temp if do_sample else None,
                 top_p=self._top_p,
-                do_sample=temperature > 0,
+                do_sample=do_sample,
                 pad_token_id=pad_token_id,
+                eos_token_id=eos_token_id,
                 use_cache=True,
             )
 

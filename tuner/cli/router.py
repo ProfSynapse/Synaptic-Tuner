@@ -89,6 +89,25 @@ def route_command(args: Namespace) -> int:
             return 1
         return LocalRunHandler(args=args).handle()
 
+    if command == "local-serve":
+        try:
+            from tuner.handlers.local_serve_handler import LocalServeHandler
+        except ImportError as e:
+            if json_mode:
+                output = {
+                    "success": False,
+                    "error": {
+                        "message": f"Local serve handler import failed: {e}",
+                        "code": "HANDLER_IMPORT_ERROR",
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Error: Local serve handler import failed: {e}")
+            return 1
+        return LocalServeHandler(args=args).handle()
+
     # Import handlers (deferred to avoid circular imports)
     try:
         from tuner.handlers.train_handler import TrainHandler
@@ -137,7 +156,7 @@ def route_command(args: Namespace) -> int:
         output = {
             "success": False,
             "error": {
-                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, experiment-loop, prompt-optimize, surgery, status, doctor, list)",
+                "message": "JSON mode requires a command (train, cloud, cloud-run, local-run, local-serve, cloud-jobs, plan-hardware, cloud-pipeline, cloud-eval, cloud-gym, cloud-inspect, bucket, run-experiment, analyze-experiment, eval, synthchat, modelops, ml, flywheel, experiment-loop, prompt-optimize, surgery, status, doctor, list)",
                 "code": "COMMAND_REQUIRED",
             },
             "timestamp": datetime.now().isoformat()

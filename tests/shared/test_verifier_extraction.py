@@ -84,6 +84,77 @@ class TestToolCallParity:
 
 
 # ---------------------------------------------------------------------------
+# Hermes / Qwen-Agent XML tool-call body (additive to the JSON-in-tool_call path)
+# ---------------------------------------------------------------------------
+
+class TestQwenXmlToolCall:
+    """The model under eval emits XML inside <tool_call> instead of JSON."""
+
+    def test_xml_function_and_parameters(self):
+        text = (
+            "<tool_call>\n<function=bash_tool>\n"
+            "<parameter=command>ls -la</parameter>\n"
+            "<parameter=description>list files</parameter>\n"
+            "</function>\n</tool_call>"
+        )
+        first = parse_response(text).first_tool_call
+        assert first is not None
+        assert first.name == "bash_tool"
+        assert first.arguments == {"command": "ls -la", "description": "list files"}
+
+    def test_extract_parity_for_xml(self):
+        text = (
+            "<tool_call>\n<function=search>\n"
+            "<parameter=q>cats</parameter>\n</function>\n</tool_call>"
+        )
+        ea = extract(text, mode="tool_call")
+        first = parse_response(text).first_tool_call
+        assert ea.found is True
+        assert ea.tool_name == first.name == "search"
+        assert ea.arguments == first.arguments == {"q": "cats"}
+
+    def test_name_with_spaces_and_colons_preserved(self):
+        text = (
+            "<tool_call>\n<function=Claude in Chrome:tabs_context_mcp>\n"
+            "<parameter=tab>3</parameter>\n</function>\n</tool_call>"
+        )
+        first = parse_response(text).first_tool_call
+        assert first is not None
+        assert first.name == "Claude in Chrome:tabs_context_mcp"
+        assert first.arguments == {"tab": "3"}
+
+    def test_multiple_blocks_first_wins(self):
+        text = (
+            "<tool_call>\n<function=first_tool>\n"
+            "<parameter=a>1</parameter>\n</function>\n</tool_call>\n"
+            "<tool_call>\n<function=second_tool>\n"
+            "<parameter=b>2</parameter>\n</function>\n</tool_call>"
+        )
+        parsed = parse_response(text)
+        assert len(parsed.tool_calls) == 2
+        assert parsed.first_tool_call.name == "first_tool"
+        assert extract(text, mode="tool_call").tool_name == "first_tool"
+
+    def test_multiline_parameter_value_preserved(self):
+        text = (
+            "<tool_call>\n<function=bash_tool>\n"
+            "<parameter=command>echo a\necho b</parameter>\n"
+            "</function>\n</tool_call>"
+        )
+        first = parse_response(text).first_tool_call
+        assert first is not None
+        assert first.arguments["command"] == "echo a\necho b"
+
+    def test_json_path_still_works(self):
+        # Regression guard: the existing JSON-in-tool_call body is unchanged.
+        text = '<tool_call>{"name": "search", "arguments": {"q": "x"}}</tool_call>'
+        first = parse_response(text).first_tool_call
+        assert first is not None
+        assert first.name == "search"
+        assert first.arguments == {"q": "x"}
+
+
+# ---------------------------------------------------------------------------
 # boxed
 # ---------------------------------------------------------------------------
 

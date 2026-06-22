@@ -328,6 +328,12 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                 arguments=args if isinstance(args, dict) else {},
                 raw=json_content,
             ))
+        elif _parse_qwen_xml_block(json_content, result):
+            # Hermes / Qwen-Agent XML body:
+            #   <function=NAME><parameter=KEY>VALUE</parameter>...</function>
+            # Handled (tool call appended) by the helper above. This branch is
+            # tried only after the JSON path fails, so the JSON path is unchanged.
+            continue
         else:
             # Fallback: Try to extract name and arguments separately
             name = _extract_string_field(json_content, "name")
@@ -357,6 +363,67 @@ def _parse_qwen_format(response: str, result: ParsedResponse) -> None:
                     arguments=args if isinstance(args, dict) else {},
                     raw=raw,
                 ))
+
+
+# Hermes / Qwen-Agent XML tool-call body patterns.
+#   <function=NAME> ... </function>  (NAME may contain spaces/colons)
+#   <parameter=KEY>VALUE</parameter>  (VALUE is a raw, possibly multi-line string)
+_XML_FUNCTION_RE = re.compile(r'<function=([^>]+)>', re.IGNORECASE)
+_XML_PARAMETER_RE = re.compile(
+    r'<parameter=([^>]+)>([\s\S]*?)</parameter>', re.IGNORECASE
+)
+
+
+def _parse_qwen_xml_block(body: str, result: ParsedResponse) -> bool:
+    """Parse a single Hermes/Qwen-Agent XML tool-call body.
+
+    The body is the inner text of one ``<tool_call>...</tool_call>`` block, e.g.::
+
+        <function=bash_tool>
+        <parameter=command>...value...</parameter>
+        <parameter=description>...value...</parameter>
+        </function>
+
+    The function name is the ``<function=NAME>`` attribute (kept verbatim except
+    for surrounding whitespace, so names containing spaces/colons such as
+    ``Claude in Chrome:tabs_context_mcp`` survive). Each ``<parameter=KEY>VALUE``
+    becomes ``{KEY: VALUE}`` with VALUE kept as a raw (possibly multi-line)
+    string.
+
+    This is additive: it is only reached after the JSON path fails, and it
+    builds the exact same :class:`ParsedToolCall` structure the JSON path builds
+    (so wrapper sanitisation/matching stays consistent).
+
+    Args:
+        body: Inner text of a single ``<tool_call>`` block.
+        result: The accumulating :class:`ParsedResponse` (mutated on success).
+
+    Returns:
+        ``True`` if an XML tool call was found and appended, else ``False``.
+    """
+    fn_match = _XML_FUNCTION_RE.search(body)
+    if not fn_match:
+        return False
+
+    name = fn_match.group(1).strip()
+    if not name:
+        return False
+
+    args: Dict[str, Any] = {}
+    for key, value in _XML_PARAMETER_RE.findall(body):
+        args[key.strip()] = value.strip()
+
+    args = sanitize_wrapper_string_fields(args, function_name=name)
+    wrapper_spec = match_configured_wrapper(args, function_name=name)
+    if wrapper_spec is not None:
+        name = wrapper_spec["wrapper_name"]
+
+    result.tool_calls.append(ParsedToolCall(
+        name=name,
+        arguments=args,
+        raw=body,
+    ))
+    return True
 
 
 def _parse_mistral_format(response: str, result: ParsedResponse) -> None:

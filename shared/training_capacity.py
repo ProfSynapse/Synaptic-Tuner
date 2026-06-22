@@ -438,7 +438,7 @@ def build_capacity_feature_row(lineage: Dict[str, Any]) -> Dict[str, Any]:
         "training_optimizer": training.get("optimizer"),
         "training_max_grad_norm": training.get("max_grad_norm"),
         "training_packing": _coerce_bool_flag(training.get("packing")),
-        "training_completion_only_loss": _coerce_bool_flag(training.get("completion_only_loss")),
+        "training_loss_mask_mode": training.get("loss_mask_mode"),
         "training_gradient_checkpointing": _coerce_bool_flag(training.get("gradient_checkpointing")),
         "training_fp16": _coerce_bool_flag(training.get("fp16")),
         "training_bf16": _coerce_bool_flag(training.get("bf16")),

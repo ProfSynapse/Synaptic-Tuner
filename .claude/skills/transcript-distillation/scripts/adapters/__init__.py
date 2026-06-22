@@ -3,10 +3,12 @@
 To support a new format: implement the Adapter interface in a new module
 (see base.py and writing-adapters.md), import it, and add an instance below.
 """
+from .claude_ai_export import ClaudeAiExportAdapter
 from .claude_code import ClaudeCodeAdapter
-from .codex import CodexAdapter
+from .codex import CodexAdapter, CodexSqliteAdapter
 
-_ADAPTERS = [ClaudeCodeAdapter(), CodexAdapter()]
+_ADAPTERS = [ClaudeCodeAdapter(), CodexAdapter(), CodexSqliteAdapter(),
+             ClaudeAiExportAdapter()]
 REGISTRY = {a.name: a for a in _ADAPTERS}
 
 

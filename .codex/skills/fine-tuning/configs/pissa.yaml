@@ -1,0 +1,20 @@
+# PiSSA: Principal Singular Values and Singular Vectors Adaptation
+# Initializes adapters from the principal SVD components of pretrained weights
+# instead of random init. Faster convergence; GSM8K +5% over standard LoRA.
+#
+# Use with: set init_lora_weights: "pissa" in your trainer config.yaml
+# Best for: Fast convergence without quantization overhead
+# VRAM: Same as standard LoRA at equivalent rank
+# Paper: https://arxiv.org/abs/2404.02948
+#
+# UNSLOTH COMPAT: BLOCKED
+#   Unsloth validates init_lora_weights against an allowlist:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   "pissa" is NOT in the list and will raise ValueError.
+#   To use PiSSA you must bypass Unsloth and use PEFT's get_peft_model()
+#   directly, losing Unsloth's speed optimizations.
+#   Tracked upstream: https://github.com/unslothai/unsloth/issues/3693
+
+r: 64
+lora_alpha: 128
+# init_lora_weights: "pissa"  # BLOCKED by Unsloth — see note above

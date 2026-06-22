@@ -1,0 +1,66 @@
+# Canonical model+GPU experiment spec template.
+#
+# Naming strategy:
+# - Use the short model+GPU form for the canonical baseline/profile:
+#     file: <model_slug>_<gpu_slug>.yaml
+#     experiment.name: <model-slug>-<gpu-slug>
+# - Put batch size, dependency pins, and other known-good runtime choices in this
+#   canonical spec for that model+GPU pair.
+# - Add descriptive suffixes only for intentional variants, for example:
+#     <model_slug>_<gpu_slug>_dora.yaml
+#     <model_slug>_<gpu_slug>_rslora.yaml
+#     <model_slug>_<gpu_slug>_evolutionary_smoke.yaml
+
+experiment:
+  name: <model-slug>-<gpu-slug>
+  provider: hf_jobs
+  method: sft
+  objective: <objective>
+  dataset:
+    source: <hf-dataset-repo>
+    file: <dataset-file>.jsonl
+  training:
+    model_name: <hf-model-name>
+    gpu: <hf-gpu-flavor>
+    # Use either a pinned cloud image or an image_profile. Prefer explicit pins
+    # when this model+GPU pair depends on a specific runtime.
+    cloud_image: <optional-explicit-image>
+    # image_profile: stable
+    pip_packages:
+      - <optional-stage-local-pin>
+    batch_size: <per-device-batch>
+    gradient_accumulation: <grad-accumulation>
+    learning_rate: 1.0e-4
+    num_epochs: 2
+    max_seq_length: 2048
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    lora_dropout: 0.0
+    lora_target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+  evaluation:
+    enabled: true
+    preset: full
+    runtime: vllm
+    image_profile: fast_vllm
+    # Eval can use a different flavor than training. Prefer a cheaper eval-only
+    # flavor when the runtime supports it. `a10g-small` is the safe baseline;
+    # use `zero-a10g` only when the current HF namespace has access.
+    gpu: <hf-eval-gpu-flavor>
+  loss:
+    enabled: true
+    gpu: <hf-loss-gpu-flavor>
+    max_seq_length: 2048
+    completion_only: true
+  features:
+    enabled: true
+    formats:
+      - jsonl
+      - csv
