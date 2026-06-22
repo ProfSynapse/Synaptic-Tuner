@@ -463,9 +463,13 @@ def test_hubspot_turn_and_matching_tool_result_dropped():
 
 def test_client_excluded_conversation_is_dropped_when_term_in_body_only():
     """CONTENT-LEVEL client exclusion: a conversation whose TITLE/slug is clean
-    but whose BODY mentions a third-party client term (Project-B / client-a /
-    client-c) is dropped ENTIRELY — slug-level scope filtering misses these.
+    but whose BODY mentions a third-party client term (project-zephyr / acme-corp /
+    client-x) is dropped ENTIRELY — slug-level scope filtering misses these.
     COUNTER-TEST: the identical conversation WITHOUT the client term emits."""
+    # Self-contained placeholder client terms (the real canonical patterns live
+    # in the gitignored personal_finetune/client_exclude module; these neutral
+    # stand-ins exercise the identical drop behaviour without baking real names).
+    client_terms = ["acme-corp", "project-zephyr", "client-x"]
     base = [
         {"role": "human", "text": "help me with the project"},
         {"role": "assistant", "text": "", "tool_calls": [
@@ -477,26 +481,29 @@ def test_client_excluded_conversation_is_dropped_when_term_in_body_only():
     clean = [dict(e) for e in base]
     clean[2] = {**base[2], "output": "weekly standup notes for the api team"}
     rows, stats = T.emit_trajectory_rows(
-        clean, source_kind="claude_ai_export", project="weekly sync", rel_id="r.json", cfg=_cfg())
+        clean, source_kind="claude_ai_export", project="weekly sync", rel_id="r.json",
+        cfg=_cfg(client_exclude=client_terms))
     assert stats["emitted"] == 1, "clean conv must emit"
 
     # SAME conv but a client term hidden in the tool OUTPUT (not the title) -> drop
     leaky = [dict(e) for e in base]
-    leaky[2] = {**base[2], "output": "pricing model for the client-c client engagement"}
+    leaky[2] = {**base[2], "output": "pricing model for the client-x client engagement"}
     rows, stats = T.emit_trajectory_rows(
-        leaky, source_kind="claude_ai_export", project="weekly sync", rel_id="r.json", cfg=_cfg())
+        leaky, source_kind="claude_ai_export", project="weekly sync", rel_id="r.json",
+        cfg=_cfg(client_exclude=client_terms))
     assert rows == [] and stats["skipped"] == "client_excluded", \
         "client term in BODY must drop the whole conversation"
 
     # term in a USER turn and in a tool-call INPUT both also trigger
     for inject in (
-        [{"role": "human", "text": "summarize the client-a meeting"}, base[1], base[2], base[3]],
+        [{"role": "human", "text": "summarize the acme-corp meeting"}, base[1], base[2], base[3]],
         [base[0], {"role": "assistant", "text": "", "tool_calls": [
-            {"name": "Write", "input": {"path": "/x", "content": "project-b roadmap"}}]},
+            {"name": "Write", "input": {"path": "/x", "content": "project-zephyr roadmap"}}]},
          base[2], base[3]],
     ):
         rows, stats = T.emit_trajectory_rows(
-            inject, source_kind="claude_ai_export", project="ok", rel_id="r.json", cfg=_cfg())
+            inject, source_kind="claude_ai_export", project="ok", rel_id="r.json",
+            cfg=_cfg(client_exclude=client_terms))
         assert rows == [] and stats["skipped"] == "client_excluded"
 
     # disabling client_exclude ([]), the leaky conv emits again (knob works)
@@ -716,12 +723,46 @@ def test_length_guard_drops_userless_row_failclosed(monkeypatch):
     assert stats["dropped_oversize_singleton"] == 0
 
 
-def test_client_exclude_default_matches_canonical_source():
-    """SINGLE SOURCE OF TRUTH: the trajectory path's client-term patterns must
-    equal the project's canonical client_exclude._CLIENT_TERMS so the two paths
-    can never drift (the documented content-leak failure mode). When the canonical
-    module is importable, trajectory.py imports it directly; this asserts the
-    in-skill FALLBACK list is also kept byte-identical as a backstop."""
+def test_public_fallback_client_exclude_ships_empty():
+    """SECURITY INVARIANT (public contract): no real client/personal terms are
+    baked into the public source tree. The in-tree fallback list MUST ship empty
+    so the shipped repo carries no third-party names; the real terms live only in
+    the gitignored ``personal_finetune`` canonical module (imported when present)
+    or are supplied explicitly via config ``client_exclude``.
+
+    Guard this going forward: if someone reintroduces literal client terms into
+    the fallback, this test fails."""
+    assert T._FALLBACK_CLIENT_EXCLUDE_PATTERNS == []
+    # With no canonical module importable and an empty fallback, the resolved
+    # default is also empty -> no content-level client exclusion is hardcoded.
+    # (When the gitignored canonical module IS present it may be non-empty; we do
+    # not assert on that here so the public suite is deterministic without it.)
+    assert isinstance(T.DEFAULT_CLIENT_EXCLUDE_PATTERNS, list)
+
+
+def test_client_exclude_override_is_honored():
+    """Override mechanism: when an explicit ``client_exclude`` source is provided
+    via config, the resolved patterns reflect it (and actually drive the
+    content-level scan). Uses a synthetic, non-real placeholder term so no real
+    client names appear in the public source/tests."""
+    placeholder = "synthetic-placeholder-client"
+    cfg = _cfg(client_exclude=[placeholder])
+    # config carries the override verbatim
+    assert cfg.client_exclude == [placeholder]
+    # and it compiles into a usable matcher that flags conversations mentioning it
+    client_re = T._compile_client_re(cfg.client_exclude)
+    assert client_re is not None
+    events = [{"role": "user", "text": f"please contact {placeholder} today"}]
+    assert T._events_have_client_term(events, client_re) is True
+    # an unrelated conversation is not flagged
+    clean = [{"role": "user", "text": "no third-party names here"}]
+    assert T._events_have_client_term(clean, client_re) is False
+
+
+def test_canonical_client_exclude_override_when_present():
+    """If the gitignored canonical ``personal_finetune`` module IS present in the
+    checkout, the resolved default prefers it (SINGLE SOURCE OF TRUTH). Skipped
+    when the module is absent so the public suite stays green without it."""
     import sys as _sys
     from pathlib import Path as _Path
     pf = _Path(__file__).resolve().parents[2] / "personal_finetune" / "scripts"
@@ -729,8 +770,6 @@ def test_client_exclude_default_matches_canonical_source():
         import pytest
         pytest.skip("canonical client_exclude.py not present in this checkout")
     _sys.path.insert(0, str(pf))
-    from client_exclude import _CLIENT_TERMS
-    # the resolved default (prefers canonical import) equals canonical
-    assert T.DEFAULT_CLIENT_EXCLUDE_PATTERNS == list(_CLIENT_TERMS)
-    # and the in-skill fallback is itself byte-identical (backstop if import fails)
-    assert T._FALLBACK_CLIENT_EXCLUDE_PATTERNS == list(_CLIENT_TERMS)
+    from client_exclude import _CLIENT_TERMS  # noqa: E402
+    # the canonical patterns resolver prefers the canonical import when available
+    assert T._canonical_client_patterns() == list(_CLIENT_TERMS)

@@ -174,21 +174,21 @@ DEFAULT_TOOL_DROP_PATTERNS = ["hubspot"]
 # We therefore scan the WHOLE conversation text here and DROP the conversation
 # if any client term appears.
 #
-# SINGLE SOURCE OF TRUTH: when the project's canonical client-exclusion module
-# (``client_exclude._CLIENT_TERMS``) is importable, we USE IT directly so the
-# trajectory path can never drift from the chat-assemble step — the documented
-# failure mode is two copies of the pattern diverging. The literal list below is
-# only a FALLBACK for using this skill in isolation (the skill must stay usable
-# without the private personal_finetune package). bare "baby" is intentionally
-# excluded (an unrelated "baby's development" project exists). Override via
-# config `client_exclude`.
+# SINGLE SOURCE OF TRUTH: the canonical client-exclusion patterns live in the
+# (gitignored) private ``personal_finetune`` package / config ``client_exclude``
+# (``client_exclude._CLIENT_TERMS``). When that module is importable we USE IT
+# directly so the trajectory path can never drift from the chat-assemble step —
+# the documented failure mode is two copies of the pattern diverging. Override
+# via config ``client_exclude``.
+#
+# The in-tree FALLBACK below is intentionally EMPTY so that no personal/client
+# names ever ship in the public source tree. With an empty fallback and no
+# canonical module present, no content-level client exclusion is applied — the
+# real patterns must come from the private package or an explicit config
+# `client_exclude`.
 import re as _re_ce  # noqa: E402
 
-_FALLBACK_CLIENT_EXCLUDE_PATTERNS = [
-    r"plan[\s\-]?your[\s\-]?baby",
-    r"client-a",
-    r"ai[\s\-]?nurse",
-]
+_FALLBACK_CLIENT_EXCLUDE_PATTERNS = []
 
 
 def _canonical_client_patterns():

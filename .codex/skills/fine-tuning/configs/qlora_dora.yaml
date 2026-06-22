@@ -1,0 +1,20 @@
+# QLoRA + DoRA: Best-practice combo for VRAM-limited training
+# 4-bit NF4 base model + bf16 DoRA adapters.
+# Current consensus best quality within single-GPU VRAM budgets.
+#
+# Use with: Ensure model config has load_in_4bit: true, then apply these LoRA overrides
+# Best for: Single GPU (RTX 3090/4090), 7B-13B models
+# VRAM: ~8-12GB for 7B (vs ~14GB without quantization)
+# Ref: https://letsdatascience.com/blog/fine-tuning-llms-with-lora-and-qlora-complete-guide
+#
+# UNSLOTH COMPAT:
+#   use_dora passes through via **kwargs to PEFT's LoraConfig. Works but
+#   Unsloth may not apply its fast kernels (see dora.yaml for details).
+
+r: 64
+lora_alpha: 128
+use_dora: true
+
+# Pair with model config:
+#   load_in_4bit: true
+# This template only covers LoRA overrides; quantization is set in the model section.

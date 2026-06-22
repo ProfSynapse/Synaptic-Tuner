@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync canonical .skills content into .agents/skills and .claude/skills."""
+"""Sync canonical .skills content into .agents/skills, .claude/skills, and .codex/skills."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def check_skill_tree(source_root: Path, target_root: Path) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Sync canonical .skills into .agents/skills and .claude/skills.")
+    parser = argparse.ArgumentParser(description="Sync canonical .skills into .agents/skills, .claude/skills, and .codex/skills.")
     parser.add_argument("--check", action="store_true", help="Check for drift instead of copying files.")
     return parser
 
@@ -88,6 +88,7 @@ def main() -> int:
     targets = [
         repo_root / ".agents" / "skills",
         repo_root / ".claude" / "skills",
+        repo_root / ".codex" / "skills",
     ]
 
     if args.check:

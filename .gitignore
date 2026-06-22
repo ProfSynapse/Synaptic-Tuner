@@ -134,8 +134,6 @@ private/
 /.tmp/
 /pytest-cache-files-*/
 /tmp/*
-!/tmp/clipcannon-review/
-!/tmp/clipcannon-review/**
 
 # Local git worktree metadata
 /.worktrees/
@@ -168,3 +166,12 @@ my_distill.yaml
 
 # personal fine-tuning workspace (plan, distilled rows, rubrics, push scripts) — never commit
 /personal_finetune/
+
+# Stray npm / node scaffolding and local tool junk (not part of this Python project)
+node_modules/
+package-lock.json
+studio/
+# Codex: ignore ONLY the local pact/ subfolder; .codex/ and .codex/skills/ stay tracked
+.codex/pact/
+# Repo-root scratch dir — re-ignore fully (the /tmp/* rule above only covers contents).
+tmp/

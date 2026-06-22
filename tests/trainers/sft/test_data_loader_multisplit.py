@@ -2,8 +2,8 @@
 README's expected-splits contract.
 
 REPRODUCTION APPROACH (real, not monkeypatched): we build a tiny on-disk HF
-dataset repo on tmp_path that mirrors the real `professorsynapse/personal-
-transcripts-sft` shape closely enough to trigger the actual failure:
+dataset repo on tmp_path that mirrors the real `<org>/<dataset>` shape
+closely enough to trigger the actual failure:
 
   data/train-00000-of-00001.parquet   (a couple rows)
   data/test-00000-of-00001.parquet     (one row)
