@@ -61,6 +61,7 @@ from .config import (
     parse_tags,
 )
 from .config_loader import ConfigLoader, load_yaml_scenarios
+from .prompt_sets import load_prompt_cases
 from .reporting import (
     build_run_payload,
     console_summary,
@@ -332,6 +333,11 @@ Backend Configuration:
         help="YAML scenario file(s) to run (can specify multiple). Overrides --prompt-set",
     )
     parser.add_argument(
+        "--prompt-set",
+        dest="prompt_set",
+        help="JSONL prompt-set file with per-case ground_truth/verifiers",
+    )
+    parser.add_argument(
         "--preset",
         help="Preset from eval_run.yaml (e.g., 'quick', 'full', 'behavior_only')",
     )
@@ -354,6 +360,22 @@ Backend Configuration:
         "max-tokens budget for output text; only applies to gpt-5 backends.",
     )
     parser.add_argument("--seed", type=int, help="Optional generation seed")
+    parser.add_argument(
+        "--load-in-4bit",
+        dest="load_in_4bit",
+        choices=["true", "false"],
+        default=None,
+        help="Unsloth: load model in 4-bit (true/false). When the backend is "
+        "unsloth and this is unset, defaults to false (16-bit fidelity).",
+    )
+    parser.add_argument(
+        "--max-seq-length",
+        dest="max_seq_length",
+        type=int,
+        default=None,
+        help="Unsloth: max sequence length. When the backend is unsloth and "
+        "this is unset, defaults to 16384.",
+    )
     parser.add_argument("--host", help="Override backend host (OLLAMA_HOST or LMSTUDIO_HOST)")
     parser.add_argument("--port", type=int, help="Override backend port (OLLAMA_PORT or LMSTUDIO_PORT)")
     parser.add_argument("--mlc-port", type=int, default=8000, help="Port for MLC/WebLLM HTTP server (default: 8000)")
@@ -543,23 +565,34 @@ def main(argv: List[str] | None = None) -> int:
     partial_write_every = max(1, int(args.partial_write_every or 5))
     config_dir = expand_path(args.config_dir)
 
-    # Require --scenario or --preset
-    if not args.scenarios and not args.preset:
-        print("Error: --scenario is required. Example: --scenario behavior_prompts.yaml", file=sys.stderr)
+    # Require --scenario, --preset, or --prompt-set
+    if not args.scenarios and not args.preset and not args.prompt_set:
+        print(
+            "Error: one of --scenario, --preset, or --prompt-set is required. "
+            "Example: --scenario behavior_prompts.yaml",
+            file=sys.stderr,
+        )
         return 1
 
     # Load run config so execution defaults can come from eval_run.yaml/preset.
     loader = ConfigLoader(config_dir)
     run_config = loader.load_eval_run(args.preset)
 
-    # Load from YAML config system
     tag_filter = parse_tags(args.tags) if args.tags else None
-    selected_cases = load_yaml_scenarios(
-        config_dir=config_dir,
-        scenario_files=args.scenarios,
-        preset=args.preset,
-        tag_filter=tag_filter,
-    )
+
+    if args.prompt_set:
+        # JSONL prompt-set route: per-case ground_truth/verifiers are preserved
+        # by load_prompt_cases (only id/question/prompt/tags are lifted out of
+        # metadata), unlike the YAML allowlist path. Bypasses the YAML loader.
+        selected_cases = load_prompt_cases(expand_path(args.prompt_set))
+    else:
+        # Load from YAML config system
+        selected_cases = load_yaml_scenarios(
+            config_dir=config_dir,
+            scenario_files=args.scenarios,
+            preset=args.preset,
+            tag_filter=tag_filter,
+        )
 
     if args.limit and len(selected_cases) > args.limit:
         selected_cases = selected_cases[:args.limit]

@@ -13,7 +13,7 @@ extracting good rows from raw logs.
 `configs/transcript_import/default.yaml` (repo root). Differs from the template:
 - `scope.include_substrings: ["documents-code-", "/documents/code/"]` — only
   coding projects.
-- `scope.exclude_substrings: ["client-a", "project-b"]` — client/sensitive.
+- `scope.exclude_substrings: ["<client-name>", "<project-name>"]` — client/sensitive.
 - Output to `private/transcripts/` (gitignored).
 
 Run:

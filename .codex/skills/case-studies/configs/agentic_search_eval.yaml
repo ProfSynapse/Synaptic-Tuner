@@ -1,0 +1,997 @@
+# ============================================================
+# AGENTIC SEARCH EVALUATION — TEMPLATE
+# ============================================================
+#
+# TOOL-AGNOSTIC: Replace YOUR_SEARCH_TOOL / YOUR_READ_TOOL
+# with your actual tools before running.
+#
+# TWO EVALUATION MODES:
+#
+#   STATIC MODE (no --env-backend flag)
+#     Corpus embedded in system prompt. Tests whether the model
+#     knows HOW to search/read/answer. Quick, no extra setup.
+#     Run: python -m Evaluator.cli --preset agentic_search
+#
+#   RUNTIME MODE (--env-backend local)
+#     Real files in an isolated temp filesystem. Tool calls are
+#     ACTUALLY EXECUTED — search returns real matches, read
+#     returns real content. Tests real search-find-answer ability.
+#     Run: python -m Evaluator.cli --preset agentic_search_runtime \
+#       --env-backend local \
+#       --env-tool-schema path/to/your_tool_schema.yaml \
+#       --env-exec-config path/to/your_exec_config.yaml
+#
+# Tags: agentic_search, search_quality, grounding, multi_hop,
+#        distractor_resistance, no_answer, runtime
+# ID conventions: AS_* (static), ASR_* (runtime)
+# ============================================================
+
+name: Agentic Search Evaluation
+description: >-
+  Tests a model's ability to search a document corpus, select relevant
+  documents, synthesize information, and provide grounded answers. Covers
+  single-doc lookup, multi-hop reasoning, distractor resistance,
+  no-answer detection, term specificity, vocabulary mismatch,
+  multi-step refinement, and grounded citation.
+
+tests:
+
+  # ------------------------------------------------------------------
+  # 1. Simple single-doc search
+  # ------------------------------------------------------------------
+  - id: AS_single_doc_lookup
+    question: "What is the maximum batch size supported by the data loader?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+    system: |
+      You are a documentation assistant. Answer the user's question using
+      ONLY the documents available through search. Do not guess.
+
+      <corpus>
+      [doc_id: config-reference]
+      Title: Data Loader Configuration Reference
+      The data loader supports batch sizes from 1 to 512. The default
+      batch size is 32. Set `batch_size` in loader.yaml to override.
+      Larger batch sizes require proportionally more GPU memory.
+
+      [doc_id: quickstart-guide]
+      Title: Quick Start Guide
+      Install dependencies with `pip install -r requirements.txt`.
+      Run `python main.py` to start. See config-reference for tuning.
+
+      [doc_id: changelog-v2]
+      Title: Changelog v2.0
+      Added streaming mode. Fixed memory leak in tokenizer.
+      Bumped minimum Python version to 3.10.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Model should search for "batch size" or "data loader", find
+      config-reference, and answer 512. Single search + read is sufficient.
+
+  # ------------------------------------------------------------------
+  # 2. Multi-hop search
+  # ------------------------------------------------------------------
+  - id: AS_multi_hop_reasoning
+    question: "Which team owns the service that handles payment retries?"
+    tags:
+      - agentic_search
+      - multi_hop
+      - grounding
+    system: |
+      You are an internal knowledge-base assistant. Answer using ONLY
+      information retrieved from the available documents.
+
+      <corpus>
+      [doc_id: service-catalog]
+      Title: Service Catalog
+      billing-service: Handles invoicing, payment processing, and
+      retry logic for failed transactions. Owner: see team-directory.
+      auth-service: SSO and token management. Owner: Platform team.
+      notification-service: Email and push alerts. Owner: Comms team.
+
+      [doc_id: team-directory]
+      Title: Team Directory
+      Platform team: auth-service, infra-gateway.
+      Payments team: billing-service, refund-engine.
+      Comms team: notification-service, template-renderer.
+
+      [doc_id: oncall-schedule]
+      Title: On-Call Schedule — Q1
+      Week 1: Platform team. Week 2: Payments team.
+      Week 3: Comms team. Week 4: rotate.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Requires two hops: (1) find that billing-service handles payment
+      retries, (2) find that Payments team owns billing-service. Model
+      must combine information from service-catalog and team-directory.
+
+  # ------------------------------------------------------------------
+  # 3. Distractor resistance
+  # ------------------------------------------------------------------
+  - id: AS_distractor_resistance
+    question: "What is the default timeout for the API gateway?"
+    tags:
+      - agentic_search
+      - distractor_resistance
+      - grounding
+    system: |
+      You are a documentation assistant. Answer using ONLY the documents
+      available through search. If multiple documents mention timeouts,
+      use the one specifically about the API gateway.
+
+      <corpus>
+      [doc_id: gateway-config]
+      Title: API Gateway Configuration
+      The gateway forwards requests to backend services. Default
+      timeout: 30 seconds. Override with `gateway.timeout_ms` in
+      gateway.yaml. Health-check interval: 10 seconds.
+
+      [doc_id: client-sdk-timeouts]
+      Title: Client SDK — Timeout Settings
+      The Python client SDK has a default request timeout of 60 seconds.
+      Set `client_timeout` to adjust. The retry timeout is 120 seconds.
+      These are CLIENT-SIDE values and do not affect the gateway.
+
+      [doc_id: database-pool]
+      Title: Database Connection Pool
+      Connection timeout: 5 seconds. Query timeout: 15 seconds.
+      Pool size: 20 connections. Idle timeout: 300 seconds.
+
+      [doc_id: monitoring-alerts]
+      Title: Monitoring & Alerts
+      Alert on gateway timeout > 30s. Alert on DB timeout > 15s.
+      Alert on client error rate > 5%. Dashboard: /ops/metrics.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Three documents mention "timeout" but only gateway-config has the
+      gateway default. Model must not confuse the client SDK 60s timeout
+      or the DB 5s timeout with the gateway 30s value.
+
+  # ------------------------------------------------------------------
+  # 4. No-answer detection
+  # ------------------------------------------------------------------
+  - id: AS_no_answer_detection
+    question: "What is the company's policy on remote work for contractors?"
+    tags:
+      - agentic_search
+      - no_answer
+      - search_quality
+    system: |
+      You are an HR knowledge assistant. Answer ONLY from the available
+      documents. If the answer is not in the corpus, clearly state that
+      the information was not found.
+
+      <corpus>
+      [doc_id: remote-work-policy]
+      Title: Remote Work Policy — Full-Time Employees
+      Full-time employees may work remotely up to 3 days per week.
+      Manager approval required for fully remote arrangements.
+      Equipment stipend: $500/year. VPN required for all remote access.
+
+      [doc_id: contractor-onboarding]
+      Title: Contractor Onboarding Guide
+      Contractors receive a company laptop and badge access.
+      NDA must be signed before day one. Billing cycle: net-30.
+      Contact procurement@company.com for equipment issues.
+
+      [doc_id: benefits-summary]
+      Title: Benefits Summary — 2025
+      Health insurance, 401k match, PTO policy, parental leave.
+      Applies to full-time employees only.
+      </corpus>
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+      - TEXT_ONLY
+    expected_response_type: text_only
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      The remote-work policy covers full-time employees only. The
+      contractor-onboarding doc does not address remote work. The model
+      should search, read the relevant docs, and conclude that contractor
+      remote-work policy is not documented in the available corpus.
+
+  # ------------------------------------------------------------------
+  # 5. Broad vs narrow search terms
+  # ------------------------------------------------------------------
+  - id: AS_term_specificity
+    question: "How do I enable debug logging for the payment webhook handler?"
+    tags:
+      - agentic_search
+      - search_quality
+    system: |
+      You are a developer documentation assistant. Answer using the
+      available documents. Choose precise search terms.
+
+      <corpus>
+      [doc_id: logging-overview]
+      Title: Logging Overview
+      The system uses structured JSON logging. Log levels: DEBUG, INFO,
+      WARN, ERROR. Global log level set in logging.yaml. Per-module
+      overrides supported via `modules.<name>.level` keys.
+
+      [doc_id: webhook-handler-config]
+      Title: Payment Webhook Handler — Configuration
+      Enable debug logging: set `modules.payment_webhook.level: DEBUG`
+      in logging.yaml. This produces verbose request/response logs
+      including headers and payload bodies. Caution: may log PII.
+
+      [doc_id: webhook-security]
+      Title: Webhook Security
+      All inbound webhooks are verified via HMAC-SHA256 signature.
+      Invalid signatures return 403. Replay protection: 5-minute window.
+
+      [doc_id: payment-processing]
+      Title: Payment Processing Pipeline
+      Payments flow: webhook receipt -> validation -> ledger entry ->
+      notification. Retry on ledger failure: 3 attempts, exponential
+      backoff.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      A broad search for "logging" would match logging-overview. A
+      narrow search for "payment webhook" or "webhook handler debug"
+      should find webhook-handler-config directly. The model should
+      select terms specific enough to reach the right document
+      efficiently.
+
+  # ------------------------------------------------------------------
+  # 6. Vocabulary mismatch
+  # ------------------------------------------------------------------
+  - id: AS_vocabulary_mismatch
+    question: "How do I throttle the request rate to avoid getting blocked?"
+    tags:
+      - agentic_search
+      - search_quality
+    system: |
+      You are a developer assistant. Answer using ONLY the available
+      documents. The user may use different terminology than the docs.
+
+      <corpus>
+      [doc_id: rate-limiting-guide]
+      Title: Rate Limiting Configuration
+      The API enforces per-client rate limits. Default: 100 requests
+      per minute. Configure via `rate_limit.rpm` in api.yaml. Clients
+      exceeding the limit receive HTTP 429. Implement exponential
+      backoff in your client code. Burst allowance: 20 requests.
+
+      [doc_id: caching-layer]
+      Title: Caching Layer
+      Redis-backed response cache. TTL: 60 seconds for GET endpoints.
+      Cache-Control headers respected. Purge via /admin/cache/clear.
+
+      [doc_id: auth-guide]
+      Title: Authentication Guide
+      API keys issued via /admin/keys. Include in X-API-Key header.
+      Keys rotate quarterly. Revoked keys return 401.
+
+      [doc_id: error-handling]
+      Title: Error Handling Reference
+      400: Bad request. 401: Unauthorized. 403: Forbidden.
+      429: Rate limit exceeded — retry after Retry-After header value.
+      500: Internal server error — contact support.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      User says "throttle" and "getting blocked" — the docs say
+      "rate limiting" and "HTTP 429". The model must translate the
+      user's vocabulary to the corpus terminology to find
+      rate-limiting-guide. May also surface error-handling for the
+      429 reference.
+
+  # ------------------------------------------------------------------
+  # 7. Multi-step refinement
+  # ------------------------------------------------------------------
+  - id: AS_multi_step_refinement
+    question: "What environment variables does the email notification service need?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+    system: |
+      You are a deployment assistant. Answer from the available
+      documents only. If your first search is too broad, refine it.
+
+      <corpus>
+      [doc_id: service-overview]
+      Title: Microservices Overview
+      The platform runs 12 microservices. Each has its own config.
+      Common env vars: DATABASE_URL, LOG_LEVEL, SERVICE_PORT.
+      Service-specific vars documented in each service's config doc.
+
+      [doc_id: email-service-config]
+      Title: Email Notification Service — Configuration
+      Required environment variables:
+        SMTP_HOST: Mail server hostname
+        SMTP_PORT: Mail server port (default: 587)
+        SMTP_USER: Authentication username
+        SMTP_PASS: Authentication password
+        FROM_ADDRESS: Default sender address
+        TEMPLATE_DIR: Path to email templates
+      Optional: RATE_LIMIT_PER_HOUR (default: 1000).
+
+      [doc_id: push-service-config]
+      Title: Push Notification Service — Configuration
+      Required: FIREBASE_KEY, APNS_CERT_PATH, DEVICE_REGISTRY_URL.
+      Optional: BATCH_SIZE (default: 100), RETRY_COUNT (default: 3).
+
+      [doc_id: sms-service-config]
+      Title: SMS Notification Service — Configuration
+      Required: TWILIO_SID, TWILIO_AUTH, TWILIO_FROM_NUMBER.
+      Optional: MAX_SMS_LENGTH (default: 160).
+
+      [doc_id: deploy-runbook]
+      Title: Deployment Runbook
+      Step 1: Pull latest images. Step 2: Run migrations.
+      Step 3: Set env vars per service config docs. Step 4: Deploy.
+      Rollback: revert to previous image tag.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      A search for "environment variables" hits service-overview (generic)
+      and possibly all service configs. The model should narrow to "email
+      notification" or "email service config" to reach email-service-config.
+      If the first search returns too many results, the model should
+      refine rather than dump all matches.
+
+  # ------------------------------------------------------------------
+  # 8. Grounded citation
+  # ------------------------------------------------------------------
+  - id: AS_grounded_citation
+    question: "Summarize the data retention requirements and cite which document each requirement comes from."
+    tags:
+      - agentic_search
+      - grounding
+      - search_quality
+    system: |
+      You are a compliance assistant. Answer ONLY from the available
+      documents. When stating a fact, cite the source document by name.
+
+      <corpus>
+      [doc_id: data-retention-policy]
+      Title: Data Retention Policy
+      User account data: retained for 7 years after account closure.
+      Transaction logs: retained for 5 years. Audit trails: retained
+      for 10 years. Anonymized analytics data: no retention limit.
+      Review cycle: annual.
+
+      [doc_id: gdpr-compliance]
+      Title: GDPR Compliance Addendum
+      EU user data subject to right-to-erasure. Erasure requests must
+      be fulfilled within 30 days. Retention policy overridden by
+      erasure request except where legal hold applies.
+
+      [doc_id: backup-procedures]
+      Title: Backup Procedures
+      Daily incremental backups retained for 30 days. Weekly full
+      backups retained for 90 days. Disaster recovery backups retained
+      for 1 year. All backups encrypted with AES-256.
+
+      [doc_id: security-overview]
+      Title: Security Overview
+      Encryption at rest and in transit. Access control via RBAC.
+      Penetration testing: quarterly. SOC 2 Type II certified.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Model must reference specific documents by name in its answer.
+      Expected citations: data-retention-policy for retention periods,
+      gdpr-compliance for erasure override, backup-procedures for
+      backup retention. Answers without citations fail grounding.
+
+  # ------------------------------------------------------------------
+  # 9. Ambiguous query requiring clarification
+  # ------------------------------------------------------------------
+  - id: AS_ambiguous_query_clarification
+    question: "How do I set up the connection?"
+    tags:
+      - agentic_search
+      - search_quality
+    system: |
+      You are a documentation assistant. Answer from the available
+      documents. If the question is too ambiguous to search effectively,
+      ask the user to clarify.
+
+      <corpus>
+      [doc_id: database-setup]
+      Title: Database Connection Setup
+      Install the database driver. Set DATABASE_URL in .env.
+      Run `python manage.py migrate` to initialize schema.
+      Connection pool size: 10 (configurable).
+
+      [doc_id: vpn-setup]
+      Title: VPN Connection Setup
+      Download the VPN client from /tools/vpn. Import the .ovpn
+      config file. Authenticate with your SSO credentials.
+      Required for remote access to staging and production.
+
+      [doc_id: api-client-setup]
+      Title: API Client Connection Setup
+      Install the SDK: `pip install our-client`. Initialize with
+      `Client(api_key="...")`. Set base_url for non-production
+      environments.
+
+      [doc_id: websocket-guide]
+      Title: WebSocket Connection Guide
+      Connect to ws://host:8080/stream. Send auth frame first.
+      Heartbeat interval: 30 seconds. Reconnect on close code 1006.
+      </corpus>
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+      - TEXT_ONLY
+    expected_response_type: clarification
+    behavior_expectations:
+      asks_for_user_input: true
+      explains_choice: true
+    anti_patterns:
+      immediate_tool_call: false
+      assumes_user_choice: true
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      "The connection" is ambiguous — four different connection types
+      exist. The model should either ask which connection type the user
+      means or briefly list the options. Picking one without asking is
+      an anti-pattern.
+
+  # ------------------------------------------------------------------
+  # 10. Search with negation constraint
+  # ------------------------------------------------------------------
+  - id: AS_negation_constraint
+    question: "List all storage backends we support OTHER THAN S3."
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+    system: |
+      You are a platform documentation assistant. Answer from the
+      available documents only. Pay attention to constraints in the
+      user's question.
+
+      <corpus>
+      [doc_id: storage-backends]
+      Title: Supported Storage Backends
+      The platform supports four storage backends:
+        1. Amazon S3 — default for production deployments
+        2. Google Cloud Storage (GCS) — set STORAGE_BACKEND=gcs
+        3. Azure Blob Storage — set STORAGE_BACKEND=azure
+        4. Local filesystem — for development only, STORAGE_BACKEND=local
+      All backends implement the StorageProvider interface.
+
+      [doc_id: s3-deep-dive]
+      Title: S3 Configuration Deep Dive
+      Bucket naming conventions, IAM policies, cross-region
+      replication, lifecycle rules. Set AWS_REGION and S3_BUCKET.
+
+      [doc_id: migration-guide]
+      Title: Storage Migration Guide
+      To migrate between backends, run `python migrate_storage.py
+      --from s3 --to gcs`. Supports incremental migration.
+      Estimated time: ~1 hour per 100 GB.
+      </corpus>
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+      asks_for_user_input: false
+    anti_patterns:
+      immediate_tool_call: false
+    environment:
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Model must find the storage-backends doc and list GCS, Azure Blob
+      Storage, and local filesystem — excluding S3 as the user requested.
+      Including S3 in the answer is a failure. The s3-deep-dive doc is
+      a distractor.
+
+  # ================================================================
+  # RUNTIME MODE TESTS (ASR_*)
+  #
+  # These tests use fixture-based filesystems and agentic loops.
+  # The model's tool calls are ACTUALLY EXECUTED against real files.
+  # The system prompt does NOT contain the corpus — the model must
+  # discover content by searching and reading.
+  #
+  # Requires: --env-backend local --env-tool-schema --env-exec-config
+  #
+  # ⚠️  DATA CONTAMINATION WARNING
+  #
+  # These fixture documents and questions MUST NOT overlap with your
+  # training data. If the model saw these exact docs or questions
+  # during training, evaluation measures memorization, not capability.
+  #
+  # Best practices:
+  #   - Use a held-out document set that was never in training
+  #   - Or generate fresh questions from the fixture environment
+  #     (e.g., have a teacher model write questions about the fixture
+  #     docs, then use those questions here)
+  #   - Never reuse SynthChat-generated training corpora as eval
+  #     fixtures — write new content or use a different domain
+  #   - The fixture docs below are EXAMPLES — replace them with
+  #     your own held-out content before trusting eval results
+  # ================================================================
+
+  # ------------------------------------------------------------------
+  # R1. Runtime: Single-doc lookup
+  # ------------------------------------------------------------------
+  - id: ASR_single_doc_lookup
+    question: "What is the maximum batch size supported by the data loader?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/config-reference.md
+            body: |
+              # Data Loader Configuration Reference
+              The data loader supports batch sizes from 1 to 512. The default
+              batch size is 32. Set `batch_size` in loader.yaml to override.
+              Larger batch sizes require proportionally more GPU memory.
+          - path: docs/quickstart-guide.md
+            body: |
+              # Quick Start Guide
+              Install dependencies with `pip install -r requirements.txt`.
+              Run `python main.py` to start. See config-reference for tuning.
+          - path: docs/changelog-v2.md
+            body: |
+              # Changelog v2.0
+              Added streaming mode. Fixed memory leak in tokenizer.
+              Bumped minimum Python version to 3.10.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_single_doc_lookup. Model must actually search
+      and read files to find the answer (512). No corpus in system prompt.
+
+  # ------------------------------------------------------------------
+  # R2. Runtime: Multi-hop reasoning
+  # ------------------------------------------------------------------
+  - id: ASR_multi_hop_reasoning
+    question: "Which team owns the service that handles payment retries?"
+    tags:
+      - agentic_search
+      - multi_hop
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/service-catalog.md
+            body: |
+              # Service Catalog
+              billing-service: Handles invoicing, payment processing, and
+              retry logic for failed transactions. Owner: see team-directory.
+              auth-service: SSO and token management. Owner: Platform team.
+              notification-service: Email and push alerts. Owner: Comms team.
+          - path: docs/team-directory.md
+            body: |
+              # Team Directory
+              Platform team: auth-service, infra-gateway.
+              Payments team: billing-service, refund-engine.
+              Comms team: notification-service, template-renderer.
+          - path: docs/oncall-schedule.md
+            body: |
+              # On-Call Schedule — Q1
+              Week 1: Platform team. Week 2: Payments team.
+              Week 3: Comms team. Week 4: rotate.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_multi_hop_reasoning. Model must search for
+      payment retries → find billing-service → search for team owner →
+      find Payments team. Requires reading 2 documents minimum.
+
+  # ------------------------------------------------------------------
+  # R3. Runtime: Distractor resistance
+  # ------------------------------------------------------------------
+  - id: ASR_distractor_resistance
+    question: "What is the default timeout for the API gateway?"
+    tags:
+      - agentic_search
+      - distractor_resistance
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/gateway-config.md
+            body: |
+              # API Gateway Configuration
+              The gateway forwards requests to backend services. Default
+              timeout: 30 seconds. Override with `gateway.timeout_ms` in
+              gateway.yaml. Health-check interval: 10 seconds.
+          - path: docs/client-sdk-timeouts.md
+            body: |
+              # Client SDK — Timeout Settings
+              The Python client SDK has a default request timeout of 60 seconds.
+              Set `client_timeout` to adjust. The retry timeout is 120 seconds.
+              These are CLIENT-SIDE values and do not affect the gateway.
+          - path: docs/database-pool.md
+            body: |
+              # Database Connection Pool
+              Connection timeout: 5 seconds. Query timeout: 15 seconds.
+              Pool size: 20 connections. Idle timeout: 300 seconds.
+          - path: docs/monitoring-alerts.md
+            body: |
+              # Monitoring & Alerts
+              Alert on gateway timeout > 30s. Alert on DB timeout > 15s.
+              Alert on client error rate > 5%. Dashboard: /ops/metrics.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_distractor_resistance. Four files mention
+      "timeout" — model must find gateway-config.md specifically and
+      answer 30 seconds, not confuse with client 60s or DB 5s values.
+
+  # ------------------------------------------------------------------
+  # R4. Runtime: No-answer detection
+  # ------------------------------------------------------------------
+  - id: ASR_no_answer_detection
+    question: "What is the company's policy on remote work for contractors?"
+    tags:
+      - agentic_search
+      - no_answer
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+      - TEXT_ONLY
+    expected_response_type: text_only
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/remote-work-policy.md
+            body: |
+              # Remote Work Policy — Full-Time Employees
+              Full-time employees may work remotely up to 3 days per week.
+              Manager approval required for fully remote arrangements.
+              Equipment stipend: $500/year. VPN required for all remote access.
+          - path: docs/contractor-onboarding.md
+            body: |
+              # Contractor Onboarding Guide
+              Contractors receive a company laptop and badge access.
+              NDA must be signed before day one. Billing cycle: net-30.
+              Contact procurement@company.com for equipment issues.
+          - path: docs/benefits-summary.md
+            body: |
+              # Benefits Summary — 2025
+              Health insurance, 401k match, PTO policy, parental leave.
+              Applies to full-time employees only.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_no_answer_detection. Remote-work policy covers
+      FTEs only. Contractor onboarding doesn't mention remote work. Model
+      should search, read, and conclude the info isn't in the corpus.
+
+  # ------------------------------------------------------------------
+  # R5. Runtime: Multi-step refinement
+  # ------------------------------------------------------------------
+  - id: ASR_multi_step_refinement
+    question: "What environment variables does the email notification service need?"
+    tags:
+      - agentic_search
+      - search_quality
+      - grounding
+      - runtime
+    system: |
+      You are a documentation assistant. Search the available documents
+      to answer the user's question. Use your search and read tools to
+      find relevant content. Answer ONLY based on what you find. If the
+      information is not available, say so.
+    expected_tools:
+      - YOUR_SEARCH_TOOL
+    acceptable_tools:
+      - YOUR_SEARCH_TOOL
+      - YOUR_READ_TOOL
+    expected_response_type: tool_with_explanation
+    behavior_expectations:
+      explains_choice: true
+    environment:
+      fixture:
+        directories: [docs]
+        notes:
+          - path: docs/service-overview.md
+            body: |
+              # Microservices Overview
+              The platform runs 12 microservices. Each has its own config.
+              Common env vars: DATABASE_URL, LOG_LEVEL, SERVICE_PORT.
+              Service-specific vars documented in each service's config doc.
+          - path: docs/email-service-config.md
+            body: |
+              # Email Notification Service — Configuration
+              Required environment variables:
+                SMTP_HOST: Mail server hostname
+                SMTP_PORT: Mail server port (default: 587)
+                SMTP_USER: Authentication username
+                SMTP_PASS: Authentication password
+                FROM_ADDRESS: Default sender address
+                TEMPLATE_DIR: Path to email templates
+              Optional: RATE_LIMIT_PER_HOUR (default: 1000).
+          - path: docs/push-service-config.md
+            body: |
+              # Push Notification Service — Configuration
+              Required: FIREBASE_KEY, APNS_CERT_PATH, DEVICE_REGISTRY_URL.
+              Optional: BATCH_SIZE (default: 100), RETRY_COUNT (default: 3).
+          - path: docs/sms-service-config.md
+            body: |
+              # SMS Notification Service — Configuration
+              Required: TWILIO_SID, TWILIO_AUTH, TWILIO_FROM_NUMBER.
+              Optional: MAX_SMS_LENGTH (default: 160).
+          - path: docs/deploy-runbook.md
+            body: |
+              # Deployment Runbook
+              Step 1: Pull latest images. Step 2: Run migrations.
+              Step 3: Set env vars per service config docs. Step 4: Deploy.
+              Rollback: revert to previous image tag.
+      loop:
+        enabled: true
+        mode: agentic
+        max_turns: 6
+        max_tool_steps: 6
+        stop_on_text_response: true
+      allowed_tools:
+        - YOUR_SEARCH_TOOL
+        - YOUR_READ_TOOL
+      max_steps: 6
+    notes: >-
+      Runtime variant of AS_multi_step_refinement. Broad search for
+      "environment variables" hits many files. Model should narrow to
+      "email service" or "email notification config" to find the right
+      doc. Answer: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+      FROM_ADDRESS, TEMPLATE_DIR (required) + RATE_LIMIT_PER_HOUR.
+
+# ============================================================
+# PRESET CONFIGURATION
+# ============================================================
+#
+# Add these blocks to Evaluator/config/eval_run.yaml under `presets:`:
+#
+#   # Static mode — corpus in system prompt, quick behavioral check
+#   agentic_search:
+#     description: "RAG agent: search -> select -> answer (static corpus)"
+#     scenarios:
+#       - agentic_search_prompts.yaml
+#     tag_filter:
+#       - agentic_search
+#     exclude_tags:
+#       - runtime
+#     scoring:
+#       pass_threshold: 0.8
+#       weights:
+#         tool_correct: 1.0
+#         behavior_pass: 0.5
+#         response_type_match: 0.3
+#
+#   # Runtime mode — real filesystem, actual tool execution
+#   agentic_search_runtime:
+#     description: "RAG agent: live search -> read -> answer (runtime env)"
+#     scenarios:
+#       - agentic_search_prompts.yaml
+#     tag_filter:
+#       - runtime
+#     scoring:
+#       pass_threshold: 0.8
+#
+# Copy this file to: Evaluator/config/scenarios/agentic_search_prompts.yaml
+#
+# Static:  python -m Evaluator.cli --preset agentic_search
+# Runtime: python -m Evaluator.cli --preset agentic_search_runtime \
+#            --env-backend local \
+#            --env-tool-schema <path> --env-exec-config <path>
+# ============================================================

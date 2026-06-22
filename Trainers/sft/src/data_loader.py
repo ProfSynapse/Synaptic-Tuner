@@ -3,10 +3,10 @@ Data loading and preprocessing for SFT training.
 """
 
 from typing import Optional, Tuple, Any
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, VerificationMode
 
 from preprocessing import (
-    ASSISTANT_ONLY,
+    COMPLETION_ONLY,
     load_and_prepare_sft_dataset,
     sanitize_conversations as sanitize_prepared_conversations,
 )
@@ -153,7 +153,8 @@ def load_and_prepare_tokenized_dataset(
     filter_desirable: bool = False,
     tokenizer: Any = None,
     max_seq_length: int = 2048,
-    loss_mask_mode: str = ASSISTANT_ONLY,
+    loss_mask_mode: str = COMPLETION_ONLY,
+    tool_call_mode: str = "render_text",
     chat_template_kwargs: Optional[dict] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
@@ -177,10 +178,17 @@ def load_and_prepare_tokenized_dataset(
         print(f"Loading from HuggingFace: {dataset_name}")
         if data_files:
             print(f"Using file: {data_files}")
+            # Loading ONE split's file from a multi-split repo: skip the builder's
+            # expected-splits verification. The repo README's `dataset_info` may
+            # declare both train AND test splits; requesting only the train shard
+            # via data_files otherwise triggers ExpectedMoreSplitsError({'test'})
+            # even though the parquet loads fine. NO_CHECKS disables that
+            # split-count contract for this single-shard load.
             raw_datasets = load_dataset(
                 dataset_name,
                 data_files=data_files,
-                num_proc=num_proc
+                num_proc=num_proc,
+                verification_mode=VerificationMode.NO_CHECKS,
             )
         else:
             raw_datasets = load_dataset(dataset_name, num_proc=num_proc)
@@ -208,6 +216,7 @@ def load_and_prepare_tokenized_dataset(
         tokenizer=tokenizer,
         max_seq_length=max_seq_length,
         loss_mask_mode=loss_mask_mode,
+        tool_call_mode=tool_call_mode,
         num_proc=num_proc,
         include_text=False,
         chat_template_kwargs=chat_template_kwargs,

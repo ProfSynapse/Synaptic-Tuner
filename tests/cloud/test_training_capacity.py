@@ -142,7 +142,7 @@ def test_build_capacity_feature_row():
             "optimizer": "adamw_8bit",
             "max_grad_norm": 1.0,
             "packing": False,
-            "completion_only_loss": True,
+            "loss_mask_mode": "completion_only",
             "gradient_checkpointing": True,
             "fp16": False,
             "bf16": True,

@@ -1,0 +1,19 @@
+# LoftQ: Quantization-Aware LoRA Initialization
+# Minimizes quantization error when combining LoRA with 4-bit base models.
+# Uses SVD-based init that accounts for the quantization residual.
+#
+# Use with: set init_lora_weights: "loftq" in your trainer config.yaml
+# Best for: QLoRA runs where you want to minimize quality loss from quantization
+# VRAM: Same as standard QLoRA
+# Ref: https://arxiv.org/abs/2310.08659
+#
+# UNSLOTH COMPAT:
+#   init_lora_weights="loftq" is in Unsloth's allowed list:
+#     [True, False, "gaussian", "loftq", "corda"]
+#   This works natively with FastLanguageModel.get_peft_model().
+#   Also supports loftq_config={} kwarg for detailed LoftQ settings.
+# Pair with: load_in_4bit: true in model config
+
+r: 64
+lora_alpha: 128
+init_lora_weights: "loftq"

@@ -145,6 +145,13 @@ def build_settings_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
         opts["host"] = args.host
     if hasattr(args, "port") and args.port is not None:
         opts["port"] = args.port
+    # Unsloth load-fidelity knobs. The CLI passes --load-in-4bit as a tri-state
+    # string ("true"/"false"/None); normalize to a bool here when set. None means
+    # "unset" — create_settings applies the unsloth-specific default downstream.
+    if getattr(args, "load_in_4bit", None) is not None:
+        opts["load_in_4bit"] = (args.load_in_4bit == "true")
+    if getattr(args, "max_seq_length", None) is not None:
+        opts["max_seq_length"] = args.max_seq_length
     return opts
 
 

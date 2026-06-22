@@ -104,6 +104,8 @@ def create_settings(
     thinking_effort: Optional[str] = None,
     seed: Optional[int] = None,
     reasoning_effort: Optional[str] = None,
+    load_in_4bit: Optional[bool] = None,
+    max_seq_length: Optional[int] = None,
 ) -> BackendSettings:
     """Create backend settings for the specified backend type.
 
@@ -126,6 +128,13 @@ def create_settings(
         reasoning_effort: DEPRECATED alias for thinking_effort, retained so
             callers/configs using the old name keep working; folded into
             thinking_effort below (explicit thinking_effort wins if both set).
+        load_in_4bit: Unsloth-only — load the base model in 4-bit. None means
+            unset; for the unsloth backend an unset value defaults to False
+            (16-bit fidelity) rather than the UnslothSettings default of True.
+            Ignored for non-unsloth backends.
+        max_seq_length: Unsloth-only — max sequence length. None means unset;
+            for the unsloth backend an unset value defaults to 16384 rather than
+            the UnslothSettings default of 4096. Ignored for non-unsloth backends.
 
     Returns:
         Configured settings object
@@ -168,6 +177,13 @@ def create_settings(
     effective_effort = thinking_effort if thinking_effort is not None else reasoning_effort
     if backend in {BackendType.OPENROUTER, BackendType.OPENAI_RESPONSES}:
         kwargs["thinking_effort"] = effective_effort
+    # Unsloth load-fidelity knobs, guarded to the unsloth backend so other
+    # settings classes (which lack these fields) aren't broken. When unset for
+    # unsloth, apply 16-bit/16k defaults appropriate for this adapter rather than
+    # the UnslothSettings dataclass defaults (4-bit / 4096).
+    if backend == BackendType.UNSLOTH:
+        kwargs["load_in_4bit"] = load_in_4bit if load_in_4bit is not None else False
+        kwargs["max_seq_length"] = max_seq_length if max_seq_length is not None else 16384
     if host is not None:
         kwargs["host"] = host
     if port is not None:

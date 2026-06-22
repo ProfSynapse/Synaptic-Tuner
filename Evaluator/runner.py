@@ -24,6 +24,7 @@ from shared.verifiers.builtins.retrieval_verifier import (
     RetrievalVerifier,
 )
 from shared.verifiers.builtins.tool_sequence import evaluate_tool_sequence
+from shared.verifiers import build_verifier, VerifierInput
 from .prompt_sets import PromptCase
 from .protocols import BackendClient
 from .response_view import build_response_view
@@ -75,6 +76,7 @@ class EvaluationRecord:
     correctness: Optional[CorrectnessResult] = None
     retrieval: Optional["RetrievalValidationResult"] = None
     conversation_trace: Optional[List[Dict[str, Any]]] = None
+    verifier: Optional[Dict[str, Any]] = None  # {"name","score","passed","detail"}
 
     @property
     def status(self) -> str:
@@ -383,6 +385,31 @@ def _evaluate_single_case(
 
     response_view = build_response_view(response.message, response.raw)
     correctness_result = _run_correctness_validation(case, response_view)
+
+    # Per-case verifier dispatch (R-verifier). When a case carries a `verifiers`
+    # spec list in its metadata (typically from a JSONL prompt-set), build the
+    # first verifier and score the RAW completion text — the verifier re-parses
+    # any `<tool_call>` blocks itself. This is a standalone continuous metric and
+    # is intentionally NOT wired into EvaluationRecord.status, so scenarios
+    # without a `verifiers` spec are completely unaffected.
+    verifier_result = None
+    verifier_specs = case.metadata.get("verifiers")
+    if verifier_specs:
+        spec = verifier_specs[0]
+        vin = VerifierInput(
+            completion_text=response.message,  # RAW text; verifier re-parses <tool_call>
+            parsed=None,
+            prompt_text=case.question,
+            ground_truth=case.metadata.get("ground_truth", {}),
+        )
+        vout = build_verifier(spec).verify(vin)
+        verifier_result = {
+            "name": spec.get("name", spec.get("type")),
+            "score": vout.score,
+            "passed": vout.passed,
+            "detail": dict(vout.detail),
+        }
+
     behavior_result = None
 
     environment_result = None
@@ -470,6 +497,7 @@ def _evaluate_single_case(
         scoring=scoring_result,
         correctness=correctness_result,
         conversation_trace=_build_single_turn_trace(case, response.message),
+        verifier=verifier_result,
     )
 
 

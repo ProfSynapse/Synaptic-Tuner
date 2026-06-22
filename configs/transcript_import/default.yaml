@@ -34,10 +34,13 @@ scope:
   include_substrings:
     - "documents-code-"   # claude slug form
     - "/documents/code/"  # codex cwd form
-  # ...and matches NONE of these
+  # ...and matches NONE of these.
+  # These are placeholder examples only. Put real client/sensitive terms in your
+  # gitignored personal override config (e.g. my_distill.yaml / personal_finetune/),
+  # never in this committed default.
   exclude_substrings:
-    - "client-a"
-    - "project-b"
+    - "<client-name>"
+    - "<project-name>"
 
 # Deterministic secret redaction, applied at emit time so raw secrets never
 # hit disk. High-entropy credential formats (keys/tokens) + sensitive env
