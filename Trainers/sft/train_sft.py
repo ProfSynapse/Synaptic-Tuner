@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -298,7 +299,9 @@ def build_training_lineage(
             "effective_batch_size": config.training.per_device_train_batch_size * config.training.gradient_accumulation_steps,
             "learning_rate": config.training.learning_rate,
             "num_epochs": config.training.num_train_epochs,
-            "max_steps": args.max_steps if args.max_steps else -1,
+            "max_steps": args.max_steps
+            if args.max_steps is not None
+            else getattr(config.training, "max_steps", None) or -1,
             "warmup_ratio": config.training.warmup_ratio,
             "lr_scheduler": config.training.lr_scheduler_type,
             "optimizer": config.training.optim,
@@ -593,6 +596,8 @@ def run(args: argparse.Namespace):
         config.seed = args.seed
     if args.num_epochs is not None:
         config.training.num_train_epochs = args.num_epochs
+    if args.max_steps is not None:
+        config.training.max_steps = args.max_steps
     if args.max_seq_length is not None:
         config.training.max_seq_length = args.max_seq_length
         config.model.max_seq_length = args.max_seq_length
@@ -854,6 +859,7 @@ def run(args: argparse.Namespace):
     print(f"[UI] Dashboard available: {DASHBOARD_AVAILABLE}, using dashboard: {use_dashboard}")
 
     # Configure SFT training arguments
+    effective_max_steps = getattr(config.training, "max_steps", None) or -1
     sft_config_kwargs = {
         "output_dir": config.training.output_dir,
         "per_device_train_batch_size": config.training.per_device_train_batch_size,
@@ -867,8 +873,8 @@ def run(args: argparse.Namespace):
         "optim": config.training.optim,
         "fp16": not is_bfloat16_supported() if config.training.fp16 is False else config.training.fp16,
         "bf16": is_bfloat16_supported() if config.training.bf16 is True else config.training.bf16,
-        "num_train_epochs": 1 if args.max_steps else config.training.num_train_epochs,
-        "max_steps": args.max_steps if args.max_steps else -1,
+        "num_train_epochs": 1 if effective_max_steps > 0 else config.training.num_train_epochs,
+        "max_steps": effective_max_steps,
         "warmup_ratio": config.training.warmup_ratio,
         "logging_steps": config.training.logging_steps,
         "save_steps": config.training.save_steps,
@@ -969,13 +975,11 @@ def run(args: argparse.Namespace):
     # Apply log suppression for trainer initialization if quiet mode
     if use_quiet_mode:
         # Suppress verbose output during trainer creation and training
-        import logging
         for name in ['unsloth', 'transformers', 'transformers.trainer', 'trl', 'peft', 'accelerate']:
             logging.getLogger(name).setLevel(logging.WARNING)
 
     # Extra suppression for dashboard mode - completely quiet the trainer's logging
     if use_dashboard:
-        import logging
         # Set trainer to ERROR level to suppress metrics output (we handle it in callback)
         logging.getLogger('transformers.trainer').setLevel(logging.ERROR)
 

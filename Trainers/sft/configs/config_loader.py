@@ -84,6 +84,7 @@ class SFTTrainingConfig:
     # preprocessing time (e.g. {enable_thinking: false} for thinking-capable
     # models). None ⇒ no kwargs ⇒ default rendering for every existing config.
     chat_template_kwargs: Optional[Dict[str, Any]] = None
+    max_steps: Optional[int] = None
 
 
 @dataclass

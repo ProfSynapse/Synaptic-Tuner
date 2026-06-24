@@ -48,3 +48,19 @@ def test_train_sft_numeric_overrides_are_hardened_is_not_none() -> None:
         "if args.learning_rate:",
     ):
         assert stale not in source, f"SFT trainer still has truthy guard: {stale}"
+
+
+def test_train_sft_honors_config_level_max_steps() -> None:
+    # Python/YAML configs can carry training.max_steps for smoke runs. The CLI
+    # value still takes precedence, but an unset CLI flag must not silently turn
+    # a smoke config into a full epoch.
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(encoding="utf-8")
+    config_source = (
+        REPO_ROOT / "Trainers" / "sft" / "configs" / "config_loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "max_steps: Optional[int] = None" in config_source
+    assert "if args.max_steps is not None:" in source
+    assert "config.training.max_steps = args.max_steps" in source
+    assert 'effective_max_steps = getattr(config.training, "max_steps", None) or -1' in source
+    assert '"max_steps": effective_max_steps' in source
