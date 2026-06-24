@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://syntheticconversations.local/schemas/sft_projection.schema.json",
+  "title": "SFT Projection Record",
+  "type": "object",
+  "required": [
+    "conversations"
+  ],
+  "properties": {
+    "conversations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "content": {
+            "type": ["string", "null"]
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "label": {
+      "type": "boolean"
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "scenario_family": {
+      "type": "string"
+    },
+    "source_example_id": {
+      "type": "string"
+    },
+    "total_turns": {
+      "type": "integer"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

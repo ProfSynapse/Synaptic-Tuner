@@ -102,6 +102,17 @@ class FlywheelConfig:
     # -- Validation rules for FitnessEvaluator --
     validation_rules: list[dict] = field(default_factory=list)
 
+    # -- Staging filters --
+    # Optional declarative filter specs applied by DatasetStager when assembling
+    # SFT/KTO/GRPO datasets. Each entry is a spec dict consumed by the generic
+    # rollout-filter engine (shared/validation/rollout_filters.py):
+    #   {field, op, value, applies_to?, on_missing?}
+    # Filters evaluate against an inference-log filter view (record fields at the
+    # top level + parsed log content under a "content." prefix). Empty/absent =
+    # no-op (default staging behavior is unchanged). Invalid specs raise
+    # ValueError at stager construction.
+    filters: list[dict] = field(default_factory=list)
+
     def to_fitness_config(self) -> dict[str, Any]:
         """Build FitnessEvaluator config dict from flywheel settings.
 

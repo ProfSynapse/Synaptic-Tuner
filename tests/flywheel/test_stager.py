@@ -309,3 +309,257 @@ class TestContentHash:
         h1 = stager._compute_content_hash({"sft": f1})
         h2 = stager._compute_content_hash({"sft": f3})
         assert h1 != h2
+
+
+class TestDatasetStagerFilters:
+    """DatasetStager applies declarative staging filters at each write seam."""
+
+    def _make_catalog(self, *, sft=None, kto=None, grpo=None):
+        catalog = AsyncMock()
+        catalog.find_logs = AsyncMock(side_effect=[
+            sft or [], kto or [], grpo or [],
+        ])
+        catalog.get_latest_dataset_version = AsyncMock(return_value=None)
+        catalog.create_dataset_version = AsyncMock(return_value="v001")
+        catalog.mark_used = AsyncMock()
+        return catalog
+
+    @pytest.mark.asyncio
+    async def test_no_filters_output_unchanged(self, tmp_path):
+        """Regression lock: no filters configured -> identical counts and rows.
+
+        Stage the same logs with an empty filter config and with no filter key
+        at all; both must produce the same counts and the same JSONL bytes.
+        """
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {"messages": [{"role": "user", "content": "a"}], "response_content": "A"},
+            {"messages": [{"role": "user", "content": "b"}], "response_content": "B"},
+            {"messages": [{"role": "user", "content": "c"}], "response_content": "C"},
+        ])
+
+        def records():
+            sft = [
+                _make_record("s1", str(log_file), 0, tag="sft", fitness_score=0.95),
+                _make_record("s2", str(log_file), 1, tag="sft", fitness_score=0.5),
+            ]
+            kto = [_make_record("k1", str(log_file), 2, tag="kto", fitness_score=0.1)]
+            grpo = [_make_record("g1", str(log_file), 0, tag="grpo", fitness_score=0.95)]
+            return sft, kto, grpo
+
+        # Run with no filters key.
+        sft, kto, grpo = records()
+        cat1 = self._make_catalog(sft=sft, kto=kto, grpo=grpo)
+        stager1 = DatasetStager(cat1, FlywheelConfig(), datasets_dir=tmp_path / "ds1")
+        with patch.object(stager1, "_register_flywheel_cycle", return_value=""):
+            r1 = await stager1.stage_dataset()
+
+        # Run with explicit empty filters list.
+        sft, kto, grpo = records()
+        cat2 = self._make_catalog(sft=sft, kto=kto, grpo=grpo)
+        stager2 = DatasetStager(
+            cat2, FlywheelConfig(filters=[]), datasets_dir=tmp_path / "ds2",
+        )
+        with patch.object(stager2, "_register_flywheel_cycle", return_value=""):
+            r2 = await stager2.stage_dataset()
+
+        assert (r1.sft_count, r1.kto_pos_count, r1.kto_neg_count, r1.grpo_count) == (2, 2, 1, 1)
+        assert (r1.sft_count, r1.kto_pos_count, r1.kto_neg_count, r1.grpo_count) == \
+               (r2.sft_count, r2.kto_pos_count, r2.kto_neg_count, r2.grpo_count)
+
+        for key in ("sft", "kto", "grpo"):
+            b1 = Path(r1.file_paths[key]).read_bytes()
+            b2 = Path(r2.file_paths[key]).read_bytes()
+            assert b1 == b2
+
+    @pytest.mark.asyncio
+    async def test_fitness_score_filter_drops_low_from_targets(self, tmp_path):
+        """fitness_score gte 0.9 drops low-score logs from sft/kto_positive/grpo."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"},
+        ] * 4)
+
+        sft = [
+            _make_record("hi", str(log_file), 0, tag="sft", fitness_score=0.95),
+            _make_record("lo", str(log_file), 0, tag="sft", fitness_score=0.5),
+        ]
+        # KTO positive comes from sft_logs; negative from kto_logs.
+        kto = [_make_record("kn", str(log_file), 0, tag="kto", fitness_score=0.1)]
+        grpo = [
+            _make_record("ghi", str(log_file), 0, tag="grpo", fitness_score=0.95),
+            _make_record("glo", str(log_file), 0, tag="grpo", fitness_score=0.2),
+        ]
+
+        cat = self._make_catalog(sft=sft, kto=kto, grpo=grpo)
+        cfg = FlywheelConfig(filters=[
+            {"field": "fitness_score", "op": "gte", "value": 0.9},
+        ])
+        stager = DatasetStager(cat, cfg, datasets_dir=tmp_path / "ds")
+        with patch.object(stager, "_register_flywheel_cycle", return_value=""):
+            r = await stager.stage_dataset()
+
+        # sft: only hi (0.95) kept; lo dropped.
+        assert r.sft_count == 1
+        # kto_positive uses the same sft_logs view -> same 1 kept.
+        assert r.kto_pos_count == 1
+        # grpo: only ghi (0.95) kept.
+        assert r.grpo_count == 1
+        # kto_negative is NOT in default targets -> never filtered.
+        assert r.kto_neg_count == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_field_passes_under_on_missing_keep(self, tmp_path):
+        """A record missing the addressed field passes under on_missing: keep.
+
+        ``content.score`` is genuinely absent from logs that don't carry it, so
+        the dot-path resolves to MISSING and on_missing: keep retains the row.
+        """
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            # First log carries content.score; second does not.
+            {"messages": [{"role": "user", "content": "a"}], "response_content": "A", "score": 0.95},
+            {"messages": [{"role": "user", "content": "b"}], "response_content": "B"},
+            {"messages": [{"role": "user", "content": "c"}], "response_content": "C", "score": 0.1},
+        ])
+
+        sft = [
+            _make_record("has_hi", str(log_file), 0, tag="sft"),
+            _make_record("no_field", str(log_file), 1, tag="sft"),
+            _make_record("has_lo", str(log_file), 2, tag="sft"),
+        ]
+        cat = self._make_catalog(sft=sft, kto=[], grpo=[])
+        cfg = FlywheelConfig(filters=[
+            {"field": "content.score", "op": "gte", "value": 0.9, "on_missing": "keep"},
+        ])
+        stager = DatasetStager(cat, cfg, datasets_dir=tmp_path / "ds")
+        with patch.object(stager, "_register_flywheel_cycle", return_value=""):
+            r = await stager.stage_dataset()
+
+        # has_hi (0.95) kept by predicate; no_field kept by on_missing: keep;
+        # has_lo (0.1) dropped.
+        assert r.sft_count == 2
+
+    @pytest.mark.asyncio
+    async def test_kto_negative_only_filtered_when_scoped(self, tmp_path):
+        """Unscoped filter never touches kto_negative; a scoped one does."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"},
+        ] * 4)
+
+        def neg_records():
+            return [
+                _make_record("n_hi", str(log_file), 0, tag="kto", fitness_score=0.95),
+                _make_record("n_lo", str(log_file), 0, tag="kto", fitness_score=0.1),
+            ]
+
+        # Unscoped filter (defaults exclude kto_negative): both negatives kept.
+        cat1 = self._make_catalog(sft=[], kto=neg_records(), grpo=[])
+        cfg1 = FlywheelConfig(filters=[
+            {"field": "fitness_score", "op": "gte", "value": 0.9},
+        ])
+        stager1 = DatasetStager(cat1, cfg1, datasets_dir=tmp_path / "ds1")
+        with patch.object(stager1, "_register_flywheel_cycle", return_value=""):
+            r1 = await stager1.stage_dataset()
+        assert r1.kto_neg_count == 2  # unscoped -> 0 dropped
+
+        # Scoped to kto_negative: low-score negative dropped.
+        cat2 = self._make_catalog(sft=[], kto=neg_records(), grpo=[])
+        cfg2 = FlywheelConfig(filters=[
+            {
+                "field": "fitness_score", "op": "gte", "value": 0.9,
+                "applies_to": ["kto_negative"],
+            },
+        ])
+        stager2 = DatasetStager(cat2, cfg2, datasets_dir=tmp_path / "ds2")
+        with patch.object(stager2, "_register_flywheel_cycle", return_value=""):
+            r2 = await stager2.stage_dataset()
+        assert r2.kto_neg_count == 1  # n_lo dropped
+
+    @pytest.mark.asyncio
+    async def test_kto_interleaving_preserved_after_filtering(self, tmp_path):
+        """After filtering, positives/negatives still interleave (pos, neg, pos, ...)."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"},
+        ] * 6)
+
+        # Two positives survive (0.95), one dropped (0.1). Two negatives (unscoped
+        # filter never touches kto_negative).
+        sft = [
+            _make_record("p1", str(log_file), 0, tag="sft", fitness_score=0.95),
+            _make_record("pdrop", str(log_file), 0, tag="sft", fitness_score=0.1),
+            _make_record("p2", str(log_file), 0, tag="sft", fitness_score=0.95),
+        ]
+        kto = [
+            _make_record("n1", str(log_file), 0, tag="kto", fitness_score=0.1),
+            _make_record("n2", str(log_file), 0, tag="kto", fitness_score=0.1),
+        ]
+
+        cat = self._make_catalog(sft=sft, kto=kto, grpo=[])
+        cfg = FlywheelConfig(filters=[
+            {"field": "fitness_score", "op": "gte", "value": 0.9},
+        ])
+        stager = DatasetStager(cat, cfg, datasets_dir=tmp_path / "ds")
+        with patch.object(stager, "_register_flywheel_cycle", return_value=""):
+            r = await stager.stage_dataset()
+
+        assert r.kto_pos_count == 2
+        assert r.kto_neg_count == 2
+
+        lines = Path(r.file_paths["kto"]).read_text().strip().splitlines()
+        labels = [json.loads(line)["label"] for line in lines]
+        # zip_longest interleave on filtered lists: pos, neg, pos, neg.
+        assert labels == [True, False, True, False]
+
+    @pytest.mark.asyncio
+    async def test_filter_provenance_recorded_in_version(self, tmp_path):
+        """The DatasetVersion records the staging filter specs + stats."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"},
+        ] * 2)
+
+        sft = [
+            _make_record("hi", str(log_file), 0, tag="sft", fitness_score=0.95),
+            _make_record("lo", str(log_file), 0, tag="sft", fitness_score=0.1),
+        ]
+        cat = self._make_catalog(sft=sft, kto=[], grpo=[])
+        cfg = FlywheelConfig(filters=[
+            {"field": "fitness_score", "op": "gte", "value": 0.9},
+        ])
+        stager = DatasetStager(cat, cfg, datasets_dir=tmp_path / "ds")
+        with patch.object(stager, "_register_flywheel_cycle", return_value=""):
+            await stager.stage_dataset()
+
+        version_arg = cat.create_dataset_version.call_args[0][0]
+        crit = version_arg.filter_criteria
+        # Existing keys preserved.
+        assert "sft_threshold" in crit
+        assert "scoring_method" in crit
+        # New provenance keys.
+        assert crit["staging_filters"] == [
+            {"field": "fitness_score", "op": "gte", "value": 0.9, "on_missing": "keep"},
+        ]
+        assert "sft" in crit["staging_filter_stats"]
+
+    def test_invalid_filter_spec_raises_at_init(self, tmp_path):
+        """An invalid filter spec raises ValueError at stager construction."""
+        catalog = AsyncMock()
+        cfg = FlywheelConfig(filters=[{"field": "fitness_score", "op": "bogus", "value": 1}])
+        with pytest.raises(ValueError):
+            DatasetStager(catalog, cfg, datasets_dir=tmp_path / "ds")
+
+    def test_content_prefix_addressable(self, tmp_path):
+        """The filter view exposes parsed content under a 'content.' prefix."""
+        record = _make_record("c1", fitness_score=0.5)
+        content = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "response_content": "the answer",
+        }
+        view = DatasetStager._filter_view(record, content)
+        # Record field at top level.
+        assert view["fitness_score"] == 0.5
+        # Content nested under 'content'.
+        assert view["content"]["response_content"] == "the answer"

@@ -22,6 +22,7 @@ Generate, improve, validate, sanitize, and evaluate synthetic training datasets 
 | Validate dataset | `python -m SynthChat.run validate -i FILE [options]` |
 | Sanitize docs or JSONL | `python -m SynthChat.run sanitize -i PATH --privacy-profile PROFILE [options]` |
 | Evaluate model | `python -m Evaluator.cli --model NAME [options]` |
+| Project rollouts → SFT/KTO/GRPO | `python SynthChat/scripts/project_rollout_datasets.py --input ROLLOUT.jsonl --canonical-output ... --kto-output ... --grpo-output ... [--sft-output ...] [--filter-config FILTER.yaml]` |
 | Structural check | `python3 scripts/validate_syngen.py FILE` |
 | JSONL → Markdown | `./scripts/jsonl_to_markdown.sh data.jsonl` |
 | Combine datasets | `./scripts/combine_datasets.sh -o out.jsonl FILE1 FILE2` |
@@ -48,6 +49,7 @@ Load the specific reference you need:
 | **Rubric Authoring** | Writing or modifying rubric YAMLs | `reference/rubric-authoring.md` |
 | **Testing Protocol** | After creating/modifying scenarios or rubrics — MUST dry-run before full generation | `reference/testing-protocol.md` |
 | **Manual Editing** | Hand-crafting individual dataset lines | `reference/manual-editing.md` |
+| **Rollout Projection & Curation** | Projecting rollouts into SFT/KTO/GRPO datasets, config-driven filtering (`--filter-config`), full multi-turn SFT (`--sft-output`), data-recipe planning heuristics | `reference/rollout-projection.md` |
 
 For environment-backed multi-turn tool data, also load:
 - `reference/scenario-authoring.md` for config-first scenario structure

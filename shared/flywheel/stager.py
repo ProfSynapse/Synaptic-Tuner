@@ -18,11 +18,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from shared.validation import FilterStats, RolloutFilterSet
+
 from .catalog import DatasetVersion, InferenceLogRecord, LogCatalog, LogFilter
 from .config import FlywheelConfig
 from .utils import read_log_content
 
 logger = logging.getLogger(__name__)
+
+# Default target set for a staging filter that omits ``applies_to``. Quality
+# filters apply to the positive/GRPO targets only; ``kto_negative`` is excluded
+# so hard negatives are never silently dropped unless a researcher explicitly
+# lists ``kto_negative`` in ``applies_to`` (mirrors the projector convention).
+_DEFAULT_FILTER_TARGETS = ("sft", "kto_positive", "grpo")
 
 
 @dataclass
@@ -65,6 +73,13 @@ class DatasetStager:
         self._config = config
         self._datasets_dir = Path(
             datasets_dir or config.datasets_dir,
+        )
+        # Build the declarative staging filter engine. Invalid specs raise
+        # ValueError here (fail-closed at construction). An empty config yields
+        # an empty set whose .apply() is a pass-all no-op.
+        self._filter_set = RolloutFilterSet(
+            filters=config.filters or [],
+            default_targets=_DEFAULT_FILTER_TARGETS,
         )
 
     async def stage_dataset(
@@ -112,10 +127,14 @@ class DatasetStager:
         file_paths: dict[str, Path] = {}
         used_log_ids: list[str] = []
 
+        # Accumulate per-target/per-filter drop stats for this staging run.
+        # Fresh per run so re-staging never carries stale tallies.
+        filter_stats = FilterStats()
+
         # Stage SFT examples
         if sft_logs:
             sft_path = version_dir / "sft_training.jsonl"
-            sft_count = self._write_sft(sft_logs, sft_path)
+            sft_count = self._write_sft(sft_logs, sft_path, filter_stats)
             result.sft_count = sft_count
             file_paths["sft"] = sft_path
             used_log_ids.extend(r.log_id for r in sft_logs)
@@ -123,7 +142,7 @@ class DatasetStager:
         # Stage KTO examples (SFT logs as positive, KTO logs as negative)
         if sft_logs or kto_logs:
             kto_path = version_dir / "kto_training.jsonl"
-            pos, neg = self._write_kto(sft_logs, kto_logs, kto_path)
+            pos, neg = self._write_kto(sft_logs, kto_logs, kto_path, filter_stats)
             result.kto_pos_count = pos
             result.kto_neg_count = neg
             file_paths["kto"] = kto_path
@@ -132,7 +151,7 @@ class DatasetStager:
         # Stage GRPO examples
         if grpo_logs and self._config.grpo_enabled:
             grpo_path = version_dir / "grpo_training.jsonl"
-            grpo_count = self._write_grpo(grpo_logs, grpo_path)
+            grpo_count = self._write_grpo(grpo_logs, grpo_path, filter_stats)
             result.grpo_count = grpo_count
             file_paths["grpo"] = grpo_path
             used_log_ids.extend(r.log_id for r in grpo_logs)
@@ -168,6 +187,13 @@ class DatasetStager:
                 "sft_threshold": self._config.sft_threshold,
                 "kto_min_threshold": self._config.kto_min_threshold,
                 "scoring_method": self._config.scoring_method,
+                # Declarative staging filters applied to this version (empty when
+                # no filters configured). Records what filtering was applied so a
+                # staged version is self-describing.
+                "staging_filters": [f.describe() for f in self._filter_set.filters],
+                "staging_filter_stats": (
+                    {} if filter_stats.is_empty else filter_stats.as_dict()
+                ),
             },
         )
 
@@ -200,7 +226,71 @@ class DatasetStager:
             version_id, result.sft_count, result.kto_pos_count,
             result.kto_neg_count, result.grpo_count,
         )
+        if not self._filter_set.is_empty and not filter_stats.is_empty:
+            logger.info(
+                "Staging filter breakdown (per target): %s",
+                filter_stats.as_dict(),
+            )
         return result
+
+    @staticmethod
+    def _filter_view(record: InferenceLogRecord, content: dict) -> dict[str, Any]:
+        """Build the dot-path namespace a staging filter evaluates against.
+
+        Filters in the flywheel address an inference-log record, not an
+        environment rollout, so the namespace differs from the projector.
+        Exactly two layers are exposed:
+
+        * Record-level fields at the TOP level — the real
+          :class:`~shared.flywheel.catalog.InferenceLogRecord` dataclass fields
+          (via ``dataclasses.asdict``). Notable keys a researcher can address:
+          ``log_id``, ``timestamp``, ``model_id``, ``adapter_name``,
+          ``temperature``, ``max_tokens``, ``tools_requested``,
+          ``finish_reason``, ``prompt_tokens``, ``completion_tokens``,
+          ``latency_ms``, ``fitness_score``, ``is_valid``, ``tag``,
+          ``dataset_version``, ``source_file``, ``line_number``, ``tenant_id``.
+          (``messages``, ``tools``, ``tool_calls``, ``response_content`` and the
+          token-id capture fields also exist on the dataclass but, for records
+          read from the catalog index, only the index-backed fields are
+          populated — prefer the ``content.*`` view below for transcript data.)
+
+        * The parsed log content under a ``content.`` prefix — e.g.
+          ``content.messages``, ``content.response_content``,
+          ``content.tool_calls``, ``content.completion_token_ids``. This is the
+          authoritative source of the request/response transcript.
+
+        So a researcher can write ``field: fitness_score`` or
+        ``field: content.response_content``. Record fields take the top level;
+        the raw content dict is nested under ``content`` (never merged, so a
+        ``content`` key inside the log cannot shadow a record field).
+        """
+        from dataclasses import asdict
+
+        view: dict[str, Any] = asdict(record)
+        view["content"] = content
+        return view
+
+    def _passes_filters(
+        self,
+        record: InferenceLogRecord,
+        content: dict,
+        target: str,
+        stats: FilterStats | None,
+    ) -> bool:
+        """Apply the configured filter set to ``record`` for one staging target.
+
+        Returns True when the record passes (or when no filters are
+        configured). Records the decision into ``stats`` for the per-target /
+        per-filter breakdown. Mirrors ``_passes_filters`` in the SynthChat
+        projector, but with the stager's targets and filter view.
+        """
+        if self._filter_set.is_empty:
+            return True
+        view = self._filter_view(record, content)
+        decision = self._filter_set.apply(view, target)
+        if stats is not None:
+            stats.record(target, self._filter_set, decision)
+        return decision.passed
 
     def _next_version_id(self) -> str:
         """Determine next version ID by scanning datasets directory."""
@@ -222,14 +312,23 @@ class DatasetStager:
             return "v001"
 
     def _write_sft(
-        self, logs: list[InferenceLogRecord], path: Path,
+        self,
+        logs: list[InferenceLogRecord],
+        path: Path,
+        stats: FilterStats | None = None,
     ) -> int:
-        """Write SFT training examples (label: true)."""
+        """Write SFT training examples (label: true).
+
+        Records that fail the configured staging filters for the ``"sft"``
+        target are skipped, so the returned count is the post-filter count.
+        """
         count = 0
         with open(path, "w", encoding="utf-8") as f:
             for record in logs:
                 content = self._read_log_content(record)
                 if not content:
+                    continue
+                if not self._passes_filters(record, content, "sft", stats):
                     continue
                 example = self._format_sft_example(record, content)
                 f.write(json.dumps(example, ensure_ascii=False) + "\n")
@@ -241,6 +340,7 @@ class DatasetStager:
         sft_logs: list[InferenceLogRecord],
         kto_logs: list[InferenceLogRecord],
         path: Path,
+        stats: FilterStats | None = None,
     ) -> tuple[int, int]:
         """Write KTO training examples with interleaved positive/negative pairs.
 
@@ -248,6 +348,14 @@ class DatasetStager:
         true/false examples. We zip positives and negatives, writing
         alternating pairs. When one list is exhausted, remaining items
         from the longer list are appended at the end.
+
+        Staging filters are applied per-target BEFORE the pos/neg example lists
+        are built, so the zip_longest interleaving operates on already-filtered
+        lists and stays intact. Positives (from ``sft_logs``) use the
+        ``"kto_positive"`` target; negatives (from ``kto_logs``) use the
+        ``"kto_negative"`` target — which is excluded from the default target
+        set, so hard negatives are never dropped unless a filter explicitly
+        opts in via ``applies_to: [kto_negative]``.
         """
         pos_examples: list[dict] = []
         neg_examples: list[dict] = []
@@ -256,11 +364,15 @@ class DatasetStager:
             content = self._read_log_content(record)
             if not content:
                 continue
+            if not self._passes_filters(record, content, "kto_positive", stats):
+                continue
             pos_examples.append(self._format_kto_example(record, content, label=True))
 
         for record in kto_logs:
             content = self._read_log_content(record)
             if not content:
+                continue
+            if not self._passes_filters(record, content, "kto_negative", stats):
                 continue
             neg_examples.append(self._format_kto_example(record, content, label=False))
 
@@ -277,14 +389,23 @@ class DatasetStager:
         return len(pos_examples), len(neg_examples)
 
     def _write_grpo(
-        self, logs: list[InferenceLogRecord], path: Path,
+        self,
+        logs: list[InferenceLogRecord],
+        path: Path,
+        stats: FilterStats | None = None,
     ) -> int:
-        """Write GRPO training examples (with reward signal)."""
+        """Write GRPO training examples (with reward signal).
+
+        Records that fail the configured staging filters for the ``"grpo"``
+        target are skipped, so the returned count is the post-filter count.
+        """
         count = 0
         with open(path, "w", encoding="utf-8") as f:
             for record in logs:
                 content = self._read_log_content(record)
                 if not content:
+                    continue
+                if not self._passes_filters(record, content, "grpo", stats):
                     continue
                 example = self._format_grpo_example(record, content)
                 f.write(json.dumps(example, ensure_ascii=False) + "\n")
