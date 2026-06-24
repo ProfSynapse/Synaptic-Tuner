@@ -29,7 +29,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from shared.utilities.paths import get_trainer_root
+from shared.utilities.paths import TRAINING_METHODS, get_trainer_root
 from .base import ITrainingBackend
 from tuner.core.config import TrainingConfig
 from tuner.core.exceptions import ConfigurationError
@@ -100,10 +100,15 @@ class RTXBackend(ITrainingBackend):
         """
         Get available training methods for RTX backend.
 
+        Derived from the TRAINING_METHODS SSOT (shared/utilities/paths.py) so
+        that registering a new method is a single-source edit — no hardcoded
+        duplicate list to keep in sync.
+
         Returns:
-            List of method names: ['sft', 'kto', 'grpo', 'dpo', 'embedding']
+            List of method names (e.g. ['sft', 'kto', 'grpo', 'dpo',
+            'embedding', 'ace_step']).
         """
-        return ["sft", "kto", "grpo", "dpo", "embedding"]
+        return list(TRAINING_METHODS)
 
     def load_config(self, method: str) -> TrainingConfig:
         """

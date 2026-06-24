@@ -37,36 +37,75 @@ def test_base_cloud_supported_methods_includes_dpo():
     assert "dpo" in base_cloud.SUPPORTED_METHODS
 
 
-def test_named_gate_sites_source_contains_dpo():
-    # Needles updated to the 5-element literals in the SAME commit as the
-    # embedding method-wiring edits (CONTRACTS §5.1.1). 'embedding' is appended
-    # at each named train-time gate, so the old 4-element substrings no longer
-    # match; pinning the 5-element form keeps this sweep loud against future drops.
-    sites = {
-        "tuner/cli/parser.py": '"sft", "kto", "grpo", "dpo", "embedding"',
-        "tuner/backends/training/cloud/hf_jobs_backend.py": '["sft", "kto", "grpo", "dpo", "embedding"]',
-        "tuner/backends/training/rtx_backend.py": '["sft", "kto", "grpo", "dpo", "embedding"]',
-    }
-    for rel, needle in sites.items():
-        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
-        assert needle in source, f"{rel} missing dpo registration ({needle!r})"
+def test_named_gate_sites_derive_dpo_from_ssot():
+    """The named train-time gates DERIVE from TRAINING_METHODS (SSOT) after
+    backend-coder's #27 dedup — the hardcoded method-list literals were removed in
+    favour of ``list(TRAINING_METHODS)`` / ``SUPPORTED_METHODS = TRAINING_METHODS``.
+
+    So we assert FUNCTIONALLY that dpo resolves through each gate (its method set
+    equals the SSOT) rather than grepping a now-deleted literal. Regression-loud
+    the SSOT way: drop dpo from TRAINING_METHODS and every gate fails at once; add
+    a new method and NOTHING here needs editing.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT))
+    from shared.utilities.paths import TRAINING_METHODS
+    from tuner.backends.training.cloud import base_cloud
+    from tuner.backends.training.cloud.hf_jobs_backend import HFJobsBackend
+    from tuner.backends.training.rtx_backend import RTXBackend
+    from tuner.cli.parser import create_parser
+
+    ssot = set(TRAINING_METHODS)
+    assert "dpo" in ssot
+    assert set(RTXBackend(REPO_ROOT).get_available_methods()) == ssot
+    assert set(HFJobsBackend(REPO_ROOT).get_available_methods()) == ssot
+    assert set(base_cloud.SUPPORTED_METHODS) == ssot
+    assert create_parser().parse_args(["train", "--method", "dpo"]).method == "dpo"
 
 
 # ---- Lifecycle-parity iteration sites (eval discovery, model discovery, handlers) ----
 
 def test_lifecycle_iteration_sites_include_dpo():
-    sites = [
+    """Lifecycle-iteration sites must still resolve dpo.
+
+    backend-coder's #27 dedup converted train_handler.py to SSOT-derive its
+    method list (``"methods": list(TRAINING_METHODS)``), so the literal ``"dpo"``
+    no longer appears there — asserting the literal would be a false regression.
+    The OTHER six sites still enumerate methods explicitly (the eval-backend
+    serving tuples intentionally, the discovery/handler sites pending their own
+    dedup), so they keep the literal-grep assertion. train_handler.py instead
+    asserts SSOT-derivation, which functionally includes dpo.
+    """
+    literal_sites = [
         "tuner/backends/evaluation/unsloth_backend.py",
         "tuner/backends/evaluation/mlc_backend.py",
         "tuner/backends/evaluation/llamacpp_backend.py",
         "tuner/discovery/base_models.py",
         "tuner/handlers/merge_handler.py",
         "tuner/handlers/doctor_handler.py",
-        "tuner/handlers/train_handler.py",
     ]
-    for rel in sites:
+    for rel in literal_sites:
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert '"dpo"' in source or "'dpo'" in source, f"{rel} missing 'dpo' in its method enumeration"
+
+    # train_handler.py is SSOT-derived: it carries no "dpo" literal but resolves
+    # dpo via list(TRAINING_METHODS). Assert the derivation, not the literal.
+    th_source = (REPO_ROOT / "tuner/handlers/train_handler.py").read_text(encoding="utf-8")
+    assert "list(TRAINING_METHODS)" in th_source, (
+        "train_handler.py should SSOT-derive its method list via list(TRAINING_METHODS)"
+    )
+    assert '"dpo"' not in th_source and "'dpo'" not in th_source, (
+        "train_handler.py is SSOT-derived; a reintroduced 'dpo' literal signals a "
+        "regression away from the dedup (CONTRACTS §5.1.1)"
+    )
+    # And dpo functionally resolves there: TRAINING_METHODS (its source) contains dpo.
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT))
+    from shared.utilities.paths import TRAINING_METHODS
+
+    assert "dpo" in TRAINING_METHODS
 
 
 # ---- No method-tuple enumeration site left without dpo ----
