@@ -15,9 +15,9 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 | Task | Command |
 |------|---------|
 | Interactive menu | `./run.sh` → Upload |
-| Upload merged 16-bit | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit` |
-| Upload with GGUF | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit --create-gguf` |
-| Upload LoRA only | `python3 scripts/upload_model.py MODEL_PATH user/repo --save-method lora` |
+| Upload merged 16-bit | `python3 .skills/upload-deployment/scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit` |
+| Upload with GGUF | `python3 .skills/upload-deployment/scripts/upload_model.py MODEL_PATH user/repo --save-method merged_16bit --create-gguf` |
+| Upload LoRA only | `python3 .skills/upload-deployment/scripts/upload_model.py MODEL_PATH user/repo --save-method lora` |
 | Merge LoRA manually | `./run.sh` → Merge LoRA |
 | Convert to GGUF only | `./run.sh` → Convert |
 | Cloud GGUF conversion | `python tuner.py cloud-run --job-config Trainers/recipes/gguf_conversion.yaml --yes` |
@@ -27,7 +27,7 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 
 | Strategy | Size (7B) | GPU Required | Best For |
 |----------|-----------|--------------|----------|
-| `lora_only` | ~100-500 MB | No | Sharing adapters, fast upload |
+| `lora` | ~100-500 MB | No | Sharing adapters, fast upload |
 | `merged_16bit` | ~14 GB | Yes | Production inference, GGUF source |
 | `merged_4bit` | ~4 GB | Yes | Smaller footprint, slight quality loss |
 
@@ -41,7 +41,7 @@ For cloud training, provider-native storage remains the source of truth. Hugging
 
 ## Key Directories
 
-- `scripts/upload_model.py` — Generic upload entry point
+- `.skills/upload-deployment/scripts/upload_model.py` — Generic upload entry point
 - `scripts/cloud_gguf_convert.py` — Cloud GGUF conversion CLI (download → convert → upload)
 - `Trainers/recipes/gguf_conversion.yaml` — HF Jobs recipe (`target: cloud`) for cloud GGUF conversion
 - `shared/upload/` — Upload orchestrator and strategies
@@ -65,7 +65,7 @@ Load the specific reference you need:
 
 **Standard upload after SFT:**
 ```bash
-python3 scripts/upload_model.py \
+python3 .skills/upload-deployment/scripts/upload_model.py \
   Trainers/sft/sft_output/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit \
@@ -109,7 +109,7 @@ python -m Evaluator.cli --backend unsloth --model path/to/model \
 After upload, HuggingFace repo contains:
 ```
 username/model-name/
-├── lora/                      # LoRA adapters (if lora_only)
+├── lora/                      # LoRA adapters (if --save-method lora)
 ├── merged-16bit/              # Full model (if merged_16bit)
 ├── gguf/                      # GGUF quantizations (if --create-gguf)
 │   ├── model-Q4_K_M.gguf

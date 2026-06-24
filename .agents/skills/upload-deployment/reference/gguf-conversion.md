@@ -28,7 +28,7 @@ GGUF (GPT-Generated Unified Format) is the standard format for running models wi
 ### Via Upload (Recommended)
 
 ```bash
-python3 scripts/upload_model.py MODEL_PATH user/repo \
+python3 .skills/upload-deployment/scripts/upload_model.py MODEL_PATH user/repo \
   --save-method merged_16bit \
   --create-gguf
 ```

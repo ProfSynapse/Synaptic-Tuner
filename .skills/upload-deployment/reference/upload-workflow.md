@@ -10,7 +10,7 @@ For cloud runs, provider-native storage is the default durable location. Treat H
 
 ### From SFT Trainer
 ```bash
-python3 scripts/upload_model.py \
+python3 .skills/upload-deployment/scripts/upload_model.py \
   Trainers/sft/sft_output/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit \
@@ -19,7 +19,7 @@ python3 scripts/upload_model.py \
 
 ### From KTO Trainer
 ```bash
-python3 scripts/upload_model.py \
+python3 .skills/upload-deployment/scripts/upload_model.py \
   Trainers/kto/kto_output/TIMESTAMP/final_model \
   username/model-name \
   --save-method merged_16bit
@@ -43,11 +43,11 @@ Choose a save strategy:
 
 | Strategy | Flag | What Happens | Size (7B) |
 |----------|------|--------------|-----------|
-| `lora_only` | `--save-method lora_only` | Copy LoRA adapters only | ~100-500 MB |
+| `lora` | `--save-method lora` | Copy LoRA adapters only | ~100-500 MB |
 | `merged_16bit` | `--save-method merged_16bit` | Merge LoRA → base, save FP16 | ~14 GB |
 | `merged_4bit` | `--save-method merged_4bit` | Merge LoRA → base, save 4-bit | ~4 GB |
 
-**Recommendation:** `merged_16bit` for production, `lora_only` for sharing adapters.
+**Recommendation:** `merged_16bit` for production, `lora` for sharing adapters.
 
 ### Step 2: Upload to HuggingFace Hub
 
@@ -84,7 +84,7 @@ Uploads all documentation files to HuggingFace.
 |------|-------------|---------|
 | `MODEL_PATH` | Path to trained model (positional) | `./sft_output/TIMESTAMP/final_model` |
 | `REPO_ID` | HuggingFace repo (positional) | `username/model-name` |
-| `--save-method` | Save strategy | `merged_16bit`, `merged_4bit`, `lora_only` |
+| `--save-method` | Save strategy | `merged_16bit`, `merged_4bit`, `lora` |
 | `--create-gguf` | Create GGUF quantizations | (flag) |
 | `--private` | Make repo private | (flag) |
 
@@ -123,7 +123,7 @@ Or manually:
 cd Trainers/sft && python train_sft.py --model-size 7b
 
 # 2. Upload
-python3 scripts/upload_model.py Trainers/sft/sft_output/LATEST/final_model user/model \
+python3 .skills/upload-deployment/scripts/upload_model.py Trainers/sft/sft_output/LATEST/final_model user/model \
   --save-method merged_16bit --create-gguf
 
 # 3. Evaluate
