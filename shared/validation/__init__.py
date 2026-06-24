@@ -38,6 +38,14 @@ from .fitness import (
     FitnessResult,
     create_fitness_evaluator,
 )
+from .rollout_filters import (
+    MISSING,
+    get_path,
+    FilterDecision,
+    RolloutFilter,
+    RolloutFilterSet,
+    FilterStats,
+)
 
 __all__ = [
     # Parsing
@@ -61,4 +69,11 @@ __all__ = [
     "FitnessEvaluator",
     "FitnessResult",
     "create_fitness_evaluator",
+    # Rollout filtering
+    "MISSING",
+    "get_path",
+    "FilterDecision",
+    "RolloutFilter",
+    "RolloutFilterSet",
+    "FilterStats",
 ]

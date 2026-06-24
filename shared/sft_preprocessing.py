@@ -51,11 +51,62 @@ def render_tool_call_content(tool_calls: list[dict[str, Any]]) -> str:
     return "\n\n".join(rendered_parts)
 
 
+def render_tool_result_content(content: Any) -> str:
+    """Render a tool-result message body into the repo's ChatML-style text format.
+
+    Mirrors :func:`render_tool_call_content` (which renders assistant *requests*),
+    producing the symmetric *result* side of a tool exchange. JSON-shaped bodies are
+    pretty-printed; everything else is stringified verbatim. The ``tool_result:``
+    label keeps multi-turn transcripts coherent and visually paired with the
+    ``tool_call:`` label emitted for assistant tool calls.
+    """
+    if isinstance(content, str):
+        body = content
+    elif content is None:
+        body = ""
+    else:
+        body = json.dumps(content, ensure_ascii=False, indent=2)
+    return f"tool_result:\n{body}" if body else "tool_result:"
+
+
 def sanitize_messages_for_chat_template(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize nullable content and render tool calls into assistant text."""
+    """Normalize nullable content and render tool calls/results into plain text.
+
+    Behavior is split by role so multi-turn trajectories template coherently while
+    existing single-turn rows stay byte-identical:
+
+    * ``system`` / ``user`` / ``assistant`` — unchanged from the original contract:
+      ``None`` content becomes ``""``, non-string content is JSON-encoded, and any
+      assistant ``tool_calls`` are rendered into text via
+      :func:`render_tool_call_content` then popped. Existing data uses only these
+      roles, so their output is identical to before this function learned about
+      tool-result messages.
+    * ``tool`` — a tool-RESULT message (the environment's reply to an assistant
+      tool call). The repo's house style renders tool exchanges into *text* rather
+      than passing them structurally to the chat template, and most chat templates
+      only understand system/user/assistant roles. To keep the render-to-text style
+      consistent AND guarantee the transcript templates on any tokenizer, the result
+      body is rendered via :func:`render_tool_result_content` and the message is
+      re-tagged with ``role: "user"``. This matches how the rollout environment
+      itself presents tool output (as a ``user`` turn carrying the execution
+      result), so it is faithful to the source trace, not a lossy approximation.
+
+    No existing single-turn row contains a ``tool`` role, so this branch is purely
+    additive and cannot perturb the byte output of any current SFT example.
+    """
     sanitized: list[dict[str, Any]] = []
     for message in messages:
         normalized = dict(message)
+        role = normalized.get("role")
+
+        if role == "tool":
+            rendered = render_tool_result_content(normalized.get("content"))
+            normalized["role"] = "user"
+            normalized["content"] = rendered
+            normalized.pop("tool_calls", None)
+            sanitized.append(normalized)
+            continue
+
         content = normalized.get("content")
         if content is None:
             content = ""
