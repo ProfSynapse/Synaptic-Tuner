@@ -1,0 +1,99 @@
+# Local Docker ACE-STEP v1.5 music-LoRA/LoKr smoke-test recipe (Phase 1).
+#
+# Exercises the `ace_step` method end-to-end on the local Docker path:
+#   registration (paths.py SSOT) -> separate ACE-STEP image -> train_ace_step.py
+#   wrapper (preprocess -> fixed) -> ace_step_output/ layout.
+#
+# Build contract: docs/architecture/ace-step-pipeline-contract.md §1/§2/§5/§9.
+# Config-driven: change model.*, dataset.*, training.*, adapter.* in
+# Trainers/ace_step/configs/config.yaml (backend-coder-2) to run a different
+# smoke WITHOUT touching this recipe or any code.
+#
+# EXPLICIT-COMMAND PATH (NOT the sft/dpo/kto auto-builder): `ace_step` is outside
+# local_run_handler's auto-built method set, so this recipe supplies an explicit
+# `run.command` (mirrors the embedding precedent's "bring your own command"
+# stance). The wrapper orchestrates the two ACE-STEP stages internally.
+name: ace-step-lokr-smoke
+description: Smoke-test the local Docker ACE-STEP v1.5 music path (LoKr, few epochs).
+target: local
+method: ace_step
+provider: local_docker
+
+job:
+  # SEPARATE purpose-built ACE-STEP image (NOT the Unsloth image). Built from
+  # Trainers/ace_step/Dockerfile (cu128 + apt ffmpeg + transformers<4.58 +
+  # Lightning Fabric + peft/LyCORIS + ACE-STEP cloned at the pinned ref).
+  # ⚠️ TAG TBD-FROM-SMOKE: set to the tag produced by the first working image
+  # build (e.g. `docker build -f Trainers/ace_step/Dockerfile -t ace-step:v0.1.8 .`).
+  image: ace-step:v0.1.8
+  pull_policy: missing
+  # bind is REQUIRED for an out-of-repo audio corpus (copy-mode can't reach
+  # outside the repo tree). Non-Windows defaults to bind; pinned here explicitly.
+  transfer: bind
+  keep_container: false
+  # Mounts the host audio corpus + .pt cache into the container (data-path seam,
+  # contract §5.2). data_dir is the GENERIC, config-driven corpus root — a
+  # researcher overrides dataset.data_dir in config.yaml (or --data-dir). Empty
+  # falls back to the gitignored default Datasets/ace_step_corpus/.
+
+setup:
+  # METHOD-LOCAL overlay. The ACE-STEP image already ships the full audio stack,
+  # so this overlay is normally EMPTY. It exists as the seam to layer any
+  # smoke-discovered extra pin on top WITHOUT rebuilding the base image.
+  #
+  # TBD-PENDING-SMOKE-TEST: do NOT invent version pins. If the first smoke needs
+  # an extra package or a corrective pin, record it here as `pkg==X.Y.Z`.
+  pip: []
+
+run:
+  method: ace_step
+  # Entry point owned by backend-coder-2 (Trainers/ace_step/train_ace_step.py).
+  trainer: Trainers/ace_step/train_ace_step.py
+  # EXPLICIT command (required — ace_step is not auto-built). The wrapper reads
+  # all run params from --config and orchestrates preprocess -> fixed itself.
+  # --dry-run first proves flag translation with zero GPU/audio cost (contract
+  # §1.1); flip to a real run by removing --dry-run once the byte-confirm passes.
+  command:
+    - python
+    - Trainers/ace_step/train_ace_step.py
+    - --config
+    - Trainers/ace_step/configs/config.yaml
+    - --dry-run
+  dry_run: false
+  dashboard: false
+  quiet: true
+
+model:
+  # Resolved against Trainers/ace_step/configs/model_registry.yaml (backend-coder-2).
+  registry_name: ace-step-v15-2b
+
+dataset:
+  # GENERIC config-driven data paths (contract §5 — SACROSANCT, never hardcoded).
+  # Empty data_dir => the gitignored default landing dir Datasets/ace_step_corpus/.
+  # A researcher points data_dir at THEIR own out-of-repo corpus (host path), or
+  # sets dataset_name for the cloud HF-dataset-pull lane.
+  #
+  # IMPORTANT (contract §5.3): dataset_name is OUR cloud seam ONLY — there is NO
+  # ACE-STEP `--dataset-name` flag. On the cloud lane the wrapper pulls the HF
+  # dataset to a LOCAL path and feeds THAT path to ACE-STEP's --audio-dir /
+  # --dataset-dir (the same flags the local lane uses). Locally, data_dir is used
+  # directly. So dataset_name and data_dir are two ways to land the SAME corpus on
+  # a local path that ACE-STEP's preprocess/train then consume.
+  #
+  # PHASE-1 CONVENTION for dataset_json (the labeled-index ALT to data_dir →
+  # --dataset-json, contract §5 schema): the local Docker lane binds ONLY data_dir
+  # (→ /workspace/data:ro) and cache_dir (→ /workspace/cache). It does NOT bind a
+  # separate dataset_json path. So if you set config.yaml's dataset.dataset_json,
+  # KEEP THAT FILE UNDER data_dir — it then rides the /workspace/data mount and the
+  # wrapper's --dataset-json resolves inside the corpus root. An out-of-repo
+  # dataset_json file is NOT mounted in Phase 1 (would file-not-found at a real
+  # run). A dedicated dataset_json bind is a deferred follow-up (lead decision).
+  data_dir: ""
+  cache_dir: ""
+  dataset_name: ""
+
+artifacts:
+  # Canonical ace_step output layout (auto-asserted by adding "ace_step" to
+  # TRAINING_METHODS): ace_step_output/<run> (backend-coder registration).
+  output_root: toolset-training-artifacts/runs/local_docker/ace_step/{name}
+  run_timestamp: "{timestamp}"

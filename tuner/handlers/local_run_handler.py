@@ -35,6 +35,12 @@ from tuner.ui import BOX, confirm, print_menu
 
 DEFAULT_STOP_TIMEOUT = 60
 
+# Generic gitignored landing dir for a music-training audio corpus when a recipe
+# leaves dataset.data_dir empty (build contract §5.1). Repo-relative, NOT
+# user-specific — a researcher normally points dataset.data_dir at their own
+# out-of-repo corpus instead. Kept in sync with the .gitignore entry.
+DEFAULT_ACE_STEP_CORPUS_DIR = "Datasets/ace_step_corpus"
+
 _USER_FIELD_PATTERN = re.compile(r"^\d+:\d+$")
 
 
@@ -334,6 +340,27 @@ def _cache_mount_args(plan: dict[str, Any], home_dir: Path) -> list[str]:
     return args
 
 
+def _data_dir_mount_args(plan: dict[str, Any]) -> list[str]:
+    """Build `-v` args for the generic ACE-STEP audio corpus + tensor-cache mounts.
+
+    Mirrors ``_cache_mount_args``: a method (today only ``ace_step``) that needs a
+    large out-of-repo audio corpus sets ``dataset.data_dir`` / ``dataset.cache_dir``
+    in its config; ``_compile`` resolves those to absolute host paths and stores
+    them on the plan. The corpus is mounted read-only at ``/workspace/data`` and
+    the writable ``.pt`` cache at ``/workspace/cache`` (build contract §5.2). The
+    wrapper inside the container reads the rewritten container paths, NOT the host
+    paths. Absent keys -> no mounts (every existing recipe is unaffected).
+    """
+    args: list[str] = []
+    host_data_dir = plan.get("data_dir")
+    if host_data_dir:
+        args.extend(["-v", f"{host_data_dir}:/workspace/data:ro"])
+    host_cache_dir = plan.get("cache_dir")
+    if host_cache_dir:
+        args.extend(["-v", f"{host_cache_dir}:/workspace/cache"])
+    return args
+
+
 def _ensure_host_cache_dirs(plan: dict[str, Any], home_dir: Path) -> None:
     """Pre-create ``~/.cache/huggingface`` / ``~/.cache/pip`` on the host.
 
@@ -391,6 +418,7 @@ def _build_persistent_docker_run_args(
         f"{repo_root}:/workspace/repo",
     ]
     args.extend(_cache_mount_args(plan, home_dir))
+    args.extend(_data_dir_mount_args(plan))
     args.extend(
         [
             "--entrypoint",
@@ -465,6 +493,64 @@ class LocalRunHandler(BaseHandler):
         if not path.is_absolute():
             path = self.repo_root / path
         return path.resolve()
+
+    def _resolve_data_dir_paths(
+        self, cfg: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """Resolve dataset.data_dir / dataset.cache_dir to absolute host paths.
+
+        Generic + config-driven (build contract §5.1 — SACROSANCT, never a
+        hardcoded personal path). Returns ``(data_dir_host, cache_dir_host)`` as
+        strings, or ``(None, None)`` when the recipe declares neither (so non-audio
+        methods are entirely unaffected). Resolution rules:
+
+        - ``dataset.data_dir`` empty AND ``dataset.cache_dir`` empty AND method is
+          not ``ace_step`` -> ``(None, None)`` (no mounts; the common case).
+        - ``data_dir`` empty but the method needs a corpus -> the gitignored
+          default landing dir ``Datasets/ace_step_corpus`` (NOT user-specific).
+        - ``cache_dir`` empty -> a ``.cache`` subdir under the resolved data_dir,
+          so the ``.pt`` tensor cache survives container restarts alongside the
+          corpus.
+
+        Both are resolved with ``_rel_path`` so a researcher may give an absolute
+        out-of-repo path (the normal case for a large corpus) or a repo-relative
+        one. The directories are pre-created on the host so Docker does not create
+        them root-owned.
+        """
+        dataset_cfg = cfg.get("dataset", {})
+        if not isinstance(dataset_cfg, dict):
+            return None, None
+        method = str(
+            (cfg.get("run", {}) if isinstance(cfg.get("run"), dict) else {}).get(
+                "method", ""
+            )
+        ).lower()
+
+        raw_data_dir = str(dataset_cfg.get("data_dir") or "").strip()
+        raw_cache_dir = str(dataset_cfg.get("cache_dir") or "").strip()
+
+        # Nothing to mount unless this method opts into the corpus seam. ace_step
+        # always gets the default landing dir even when data_dir is left blank.
+        if not raw_data_dir and not raw_cache_dir and method != "ace_step":
+            return None, None
+
+        data_dir_host = self._rel_path(raw_data_dir or DEFAULT_ACE_STEP_CORPUS_DIR)
+        cache_dir_host = (
+            self._rel_path(raw_cache_dir)
+            if raw_cache_dir
+            else (data_dir_host / ".cache")
+        )
+
+        for target in (data_dir_host, cache_dir_host):
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                print(
+                    f"Warning: could not pre-create {target} ({exc}); "
+                    "docker will create it."
+                )
+
+        return str(data_dir_host), str(cache_dir_host)
 
     def _render_value(self, value: Any, variables: dict[str, str]) -> Any:
         if isinstance(value, str):
@@ -659,6 +745,19 @@ class LocalRunHandler(BaseHandler):
             job_cfg.get("mount_pip_cache"), "mount_pip_cache", default=True
         )
 
+        # Generic out-of-repo audio-corpus + tensor-cache mounts (build contract
+        # §5). Config-driven and method-agnostic: any recipe that sets
+        # dataset.data_dir / dataset.cache_dir gets the host paths resolved here
+        # and mounted by _data_dir_mount_args. Today only ace_step uses it; absent
+        # keys -> None -> no mounts, so every existing recipe is unaffected.
+        data_dir_host, cache_dir_host = self._resolve_data_dir_paths(cfg)
+        if data_dir_host and transfer_mode != "bind":
+            raise LocalRunError(
+                "dataset.data_dir requires job.transfer: bind (an out-of-repo "
+                "audio corpus cannot be copied into the build context); "
+                f"got transfer={transfer_mode!r}."
+            )
+
         explicit_container_name = job_cfg.get("container_name")
         if explicit_container_name:
             # User-supplied name wins; we still slug/normalize it.
@@ -699,6 +798,8 @@ class LocalRunHandler(BaseHandler):
             "stop_timeout": stop_timeout,
             "tty_mode": tty_mode,
             "persist": persist,
+            "data_dir": data_dir_host,
+            "cache_dir": cache_dir_host,
             "mount_hf_cache": mount_hf_cache,
             "mount_pip_cache": mount_pip_cache,
         }
@@ -833,6 +934,7 @@ class LocalRunHandler(BaseHandler):
             ]
         )
         docker_cmd.extend(_cache_mount_args(plan, home_dir))
+        docker_cmd.extend(_data_dir_mount_args(plan))
         docker_cmd.extend(
             [
                 "-w",

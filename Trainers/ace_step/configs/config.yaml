@@ -1,0 +1,76 @@
+# Trainers/ace_step/configs/config.yaml
+#
+# Location: Trainers/ace_step/configs/config.yaml
+# Purpose:  Default ACE-STEP v1.5 music fine-tuning run config. Single source of
+#           all run params for the subprocess wrapper. Selects a base checkpoint by
+#           registry_name (resolved against model_registry.yaml), the audio
+#           preprocessing options, training hyperparameters, the LoRA/LoKr adapter,
+#           and the output location. ALL audio + training params are YAML keys
+#           (config-driven SACROSANCT — never hardcode scenario-specific values).
+# Used by:  Trainers/ace_step/train_ace_step.py (loaded as the default config; CLI
+#           flags override individual values). src/data_loader.py reads the dataset/
+#           preprocess sections to build the stage-1 `train.py fixed --preprocess` argv
+#           (preprocess is a store_true FLAG on the `fixed` subcommand, not a subcommand).
+#
+# Shape is the binding contract in
+# docs/architecture/ace-step-pipeline-contract.md §2. Section/key NAMES are LOCKED.
+#
+# ⚠️ The defaults below are the ACE-STEP v1.5 upstream defaults (read from
+# acestep/training_v2/cli/args.py by preparer-acestep) used as sensible config
+# defaults — they are NOT ground truth to bake into code. Every value maps to a
+# CONFIRMED `train.py` flag (§1.3), EXCEPT:
+#   - preprocess.target_sr / preprocess.channels  -> assertion/doc only; 48 kHz
+#     stereo resample is AUTOMATIC inside preprocess (there is no --sr/--channels flag)
+#   - preprocess.force                            -> wrapper-level cache skip (no upstream flag)
+# Flag spellings are PROVISIONAL until the §1.3 BUILD STEP-0 `train.py {preprocess,fixed}
+# --help` byte-confirm passes against the provisioned ACE-STEP repo.
+
+method: ace_step
+
+model:
+  registry_name: ace-step-v15-2b   # key into configs/model_registry.yaml -> --checkpoint-dir
+  variant: "turbo"                  # -> --model-variant. choices incl: turbo | sft | base (upstream default "turbo")
+
+dataset:
+  data_dir: ""                      # GENERIC out-of-repo audio corpus root (§5) -> --audio-dir.
+                                    # Empty -> documented gitignored default landing dir (Datasets/ace_step_corpus/).
+  dataset_json: ""                  # ALT to data_dir: labeled dataset JSON (single index file) -> --dataset-json.
+                                    # One of {data_dir, dataset_json} required.
+  cache_dir: ""                     # .pt tensor cache dir (§5). -> --tensor-output (preprocess) / --dataset-dir (train).
+                                    # Empty -> default under data_dir.
+  dataset_name: ""                  # CLOUD: HF dataset id pulled at runtime (§5); cloud equivalent of data_dir.
+
+preprocess:
+  target_sr: 48000                  # 48 kHz — ASSERTION/doc only; preprocess auto-resamples (NO --sr flag, §4.1)
+  channels: 2                       # STEREO — ASSERTION/doc only (auto-resample; NO --channels flag)
+  max_duration: 240                 # -> --max-duration (upstream default 240.0s); OOM-guard for long songs
+  device: "cuda"                    # -> --device. PIN cuda for training (mps broken, §9). upstream default "auto"
+  precision: "auto"                 # -> --precision. choices: auto | bf16 | fp16 | fp32
+  force: false                      # wrapper-level: re-run preprocess even if .pt cache present (no upstream flag)
+
+training:
+  learning_rate: 1.0e-4             # -> --lr / --learning-rate (upstream default 1e-4)
+  epochs: 500                       # -> --epochs (upstream default 100). EPOCHS, not steps — there is NO --max-steps.
+                                    # Tutorial guidance: ~100 songs -> 500ep; 10-20 songs -> 800ep.
+  train_batch_size: 1               # -> --batch-size (upstream default 1)
+  gradient_accumulation: 4          # -> --gradient-accumulation (upstream default 4)
+  save_every: 10                    # -> --save-every (checkpoint every N epochs, upstream default 10)
+  precision: "auto"                 # -> --precision. choices: auto | bf16 | fp16 | fp32
+  device: "cuda"                    # -> --device. PIN cuda for training.
+  seed: 42                          # -> --seed (upstream default 42)
+
+# adapter-AGNOSTIC block (architect §2 rename: was `lora:` — renamed so rank/alpha are
+# NOT misread as LoRA-universal). `type` selects which upstream knobs `rank`/`alpha`
+# translate to (see config_translation.build_fixed_argv):
+#   type=lokr -> --lokr-linear-dim (rank) / --lokr-linear-alpha (alpha)   [LyCORIS, ~5min — smoke path]
+#   type=lora -> --rank/-r (rank)         / --alpha (alpha)               [PEFT, ~1hr]
+# Shipped default `lokr` is USER-CONFIRMED (DELTA-2 resolved: lead relayed the user's
+# decision = LoKr/LyCORIS). The `lora` branch stays as the documented alternative.
+adapter:
+  type: "lokr"                      # -> --adapter-type. lokr (LyCORIS, ~5min, USER-CONFIRMED shipped default) | lora (PEFT, ~1hr)
+  rank: 64                          # lokr -> --lokr-linear-dim ; lora -> --rank/-r  (v1.5 default 64)
+  alpha: 128                        # lokr -> --lokr-linear-alpha ; lora -> --alpha  (v1.5 default 128)
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]  # -> --target-modules (v1.5 PEFT-style names; v1 used linear_q/to_q...)
+
+output:
+  adapter_dir: ""                   # -> --output-dir. Empty -> ace_step_output/<run> (CANONICAL_OUTPUT_DIRS convention; remapped by wrapper)

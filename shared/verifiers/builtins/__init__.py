@@ -3,7 +3,7 @@
 Importing this package runs each module's ``@register(...)`` decorator as a
 side-effect, populating :data:`shared.verifiers.registry.VERIFIER_FACTORIES`
 with the built-in verifier types (``substring``, ``structure``, ``llm_judge``,
-``args_match``, ``assertions``, ``tool_sequence``, ``retrieval``).
+``args_match``, ``assertions``, ``tool_sequence``, ``retrieval``, ``audio``).
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from . import (  # noqa: F401  (registration side-effect)
     args_match,
     assertion_verifier,
+    audio_verifier,
     llm_judge,
     retrieval_verifier,
     structure,
@@ -26,4 +27,5 @@ __all__ = [
     "assertion_verifier",
     "tool_sequence",
     "retrieval_verifier",
+    "audio_verifier",
 ]
