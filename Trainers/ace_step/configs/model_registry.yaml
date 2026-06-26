@@ -1,0 +1,67 @@
+# Trainers/ace_step/configs/model_registry.yaml
+#
+# Location: Trainers/ace_step/configs/model_registry.yaml
+# Purpose:  Single source of truth (SSOT) for every ACE-STEP v1.5 base checkpoint
+#           the pipeline can fine-tune. An ACE-STEP "model" is a multi-file HF folder
+#           (VAE + text-encoder + DiT + LM planner) that snapshot_downloads into a
+#           checkpoints ROOT, with the variant selecting the DiT subfolder. This
+#           mirrors the embedding precedent's method-local model registry
+#           (Trainers/embedding/configs/model_registry.yaml). Adding a checkpoint is
+#           ONE block here — no Python change (the config-driven rule).
+# Used by:  Trainers/ace_step/train_ace_step.py (resolves model.registry_name ->
+#           the checkpoints-root folder passed as `--checkpoint-dir` to train.py;
+#           model.variant selects the DiT subfolder via ACE-STEP's VARIANT_DIR_MAP).
+#
+# Schema is the binding contract in docs/architecture/ace-step-pipeline-contract.md §3.
+#
+# VALUES CONFIRMED (2026-06-24) from the provisioned vendor/ACE-Step-1.5 @ tag v0.1.8
+# (GitHub ace-step/ACE-Step-1.5 SHA dce621408bee8c31b4fcf4811682eb9359e1bc94) — read
+# from acestep/model_downloader.py (MAIN_MODEL_REPO, MAIN_MODEL_COMPONENTS,
+# SUBMODEL_REGISTRY) + acestep/training_v2/cli/args.py (VARIANT_DIR_MAP).
+#
+# Component layout: the AGGREGATE repo ACE-Step/Ace-Step1.5 snapshot_downloads into
+# the checkpoints root and unpacks these subfolders (MAIN_MODEL_COMPONENTS):
+#   acestep-v15-turbo/      (default 2B DiT — selected by variant "turbo")
+#   vae/                    (VAE audio autoencoder)
+#   Qwen3-Embedding-0.6B/   (text encoder)
+#   acestep-5Hz-lm-1.7B/    (default LM planner, 1.7B — bundled-only, no standalone repo)
+# `--checkpoint-dir` points at this ROOT; `--model-variant` selects the DiT subfolder.
+#
+# ⚠️ REPRODUCIBILITY: upstream model_downloader.py pins NO HF revision (pulls `main`).
+# We pin `revision` here and config_translation.fetch_checkpoint() THREADS it into
+# huggingface_hub.snapshot_download(repo_id=hf_id, revision=<this>) on a real run, so the
+# pin is load-bearing (not decorative) — the aggregate-repo revision below is honored
+# verbatim. (`fetch_checkpoint` is invoked on the real-run weights-resolution path; the
+# --dry-run / argv-build path uses the network-free resolve_checkpoint_dir() namer.)
+
+models:
+  # DEFAULT: the aggregate repo bundles VAE + text-encoder + default turbo DiT + 1.7B LM
+  # = the entire default download/train/cli path. Pin THIS for a standard 2B run.
+  ace-step-v15-2b:
+    hf_id: "ACE-Step/Ace-Step1.5"          # AGGREGATE repo (note irregular casing "Ace-Step1.5"). license: mit
+    variant: "turbo"                        # default DiT subfolder; -> --model-variant (choices: turbo|base|sft)
+    revision: "19671f406d603126926c1b7e2adc169acbcade22"  # pinned aggregate-repo revision (upstream defaults to `main`)
+    components:                             # subfolders unpacked under the checkpoints root (MAIN_MODEL_COMPONENTS)
+      dit: "acestep-v15-turbo"              # default 2B DiT (turbo)
+      vae: "vae"                            # VAE audio autoencoder
+      text_encoder: "Qwen3-Embedding-0.6B"  # text encoder
+      lm_planner: "acestep-5Hz-lm-1.7B"     # default LM planner (1.7B, bundled-only)
+
+  # XL (4B): the XL DiT ships as opt-in standalone repos (SUBMODEL_REGISTRY). It is laid
+  # down ALONGSIDE the aggregate's VAE/text-encoder/LM under the same checkpoints root;
+  # variant selects the xl_turbo DiT subfolder. (Pull the aggregate first for the shared
+  # VAE/text-encoder/LM, then the XL DiT repo into the same root.)
+  # ⚠️ XL DIR-MAP CAUTION (architect, contract §3): VARIANT_DIR_MAP (args.py:18-22) only
+  # holds the THREE 2B keys (turbo/base/sft -> acestep-v15-turbo/base/sft) — the XL dir
+  # entries are NOT in that visible map. The `dit:` subfolder below is BEST-EFFORT until
+  # the XL checkpoint-subdir resolution is confirmed from the provisioned repo (2B/turbo
+  # is the smoke path, so XL can stay best-effort until then).
+  ace-step-v15-xl:
+    hf_id: "ACE-Step/acestep-v15-xl-turbo"  # standalone XL (4B) DiT repo (SUBMODEL_REGISTRY). license: mit
+    variant: "xl_turbo"                      # -> --model-variant (XL choices: xl_turbo|xl_base|xl_sft)
+    revision: "main"                         # ⚠️ XL repo revision not pinned by upstream; confirm a known-good SHA before a reproducible XL run (preparer-acestep can enumerate)
+    components:
+      dit: "acestep-v15-xl-turbo"           # 4B XL DiT (BEST-EFFORT subdir — see XL DIR-MAP CAUTION above)
+      vae: "vae"                             # shared from the aggregate repo
+      text_encoder: "Qwen3-Embedding-0.6B"   # shared from the aggregate repo
+      lm_planner: "acestep-5Hz-lm-1.7B"      # shared from the aggregate repo (or opt-in acestep-5Hz-lm-0.6B/4B)

@@ -35,6 +35,12 @@ from tuner.ui import BOX, confirm, print_menu
 
 DEFAULT_STOP_TIMEOUT = 60
 
+# Generic gitignored landing dir for a music-training audio corpus when a recipe
+# leaves dataset.data_dir empty (build contract §5.1). Repo-relative, NOT
+# user-specific — a researcher normally points dataset.data_dir at their own
+# out-of-repo corpus instead. Kept in sync with the .gitignore entry.
+DEFAULT_ACE_STEP_CORPUS_DIR = "Datasets/ace_step_corpus"
+
 _USER_FIELD_PATTERN = re.compile(r"^\d+:\d+$")
 
 
@@ -334,6 +340,50 @@ def _cache_mount_args(plan: dict[str, Any], home_dir: Path) -> list[str]:
     return args
 
 
+def _path_within(path: Path, root: Path) -> bool:
+    """True if ``path`` is ``root`` itself or a descendant of it.
+
+    Thin wrapper over ``Path.is_relative_to`` (py3.9+), which is COMPONENT-aware —
+    so it does NOT false-positive on sibling prefixes (``/data-evil`` is correctly
+    NOT within ``/data``, unlike a brittle string ``startswith`` check). Both inputs
+    are expected to be already-``resolve()``-d absolute paths, so the comparison
+    runs on the symlink-followed REAL paths: a data_dir/cache_dir that symlinks out
+    of the tree (e.g. -> /etc) collapses to its real target and this check catches
+    the escape FOR FREE — no separate symlink logic needed (M-b).
+    """
+    return path.is_relative_to(root)
+
+
+def _data_dir_mount_args(plan: dict[str, Any]) -> list[str]:
+    """Build `-v` args for the generic ACE-STEP audio corpus + tensor-cache mounts.
+
+    Mirrors ``_cache_mount_args``: a method (today only ``ace_step``) that needs a
+    large out-of-repo audio corpus sets ``dataset.data_dir`` / ``dataset.cache_dir``
+    in its config; ``_compile`` resolves those to absolute host paths and stores
+    them on the plan. The corpus is mounted read-only at ``/workspace/data`` and
+    the writable ``.pt`` cache at ``/workspace/cache`` (build contract §5.2). The
+    wrapper inside the container reads the rewritten container paths, NOT the host
+    paths. Absent keys -> no mounts (every existing recipe is unaffected).
+
+    SECURITY NOTE (M-b): ``/workspace/cache`` is mounted READ-WRITE, and under the
+    default bind-mode user model (``job.user: auto`` -> run as root + chown-back),
+    files the container writes there land ROOT-OWNED on the host. The host path is
+    operator-supplied (``dataset.cache_dir``) and resolved with ``.resolve()``,
+    which follows symlinks — so do NOT point ``cache_dir`` at a sensitive host
+    directory. ``_resolve_data_dir_paths`` emits a containment WARNING when the
+    resolved cache_dir escapes both the repo tree and the corpus root (warn-only;
+    operator-trust model, never a hard block).
+    """
+    args: list[str] = []
+    host_data_dir = plan.get("data_dir")
+    if host_data_dir:
+        args.extend(["-v", f"{host_data_dir}:/workspace/data:ro"])
+    host_cache_dir = plan.get("cache_dir")
+    if host_cache_dir:
+        args.extend(["-v", f"{host_cache_dir}:/workspace/cache"])
+    return args
+
+
 def _ensure_host_cache_dirs(plan: dict[str, Any], home_dir: Path) -> None:
     """Pre-create ``~/.cache/huggingface`` / ``~/.cache/pip`` on the host.
 
@@ -391,6 +441,7 @@ def _build_persistent_docker_run_args(
         f"{repo_root}:/workspace/repo",
     ]
     args.extend(_cache_mount_args(plan, home_dir))
+    args.extend(_data_dir_mount_args(plan))
     args.extend(
         [
             "--entrypoint",
@@ -465,6 +516,130 @@ class LocalRunHandler(BaseHandler):
         if not path.is_absolute():
             path = self.repo_root / path
         return path.resolve()
+
+    def _resolve_data_dir_paths(
+        self, cfg: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """Resolve dataset.data_dir / dataset.cache_dir to absolute host paths.
+
+        Generic + config-driven (build contract §5.1 — SACROSANCT, never a
+        hardcoded personal path). Returns ``(data_dir_host, cache_dir_host)`` as
+        strings, or ``(None, None)`` when the recipe declares neither (so non-audio
+        methods are entirely unaffected). Resolution rules:
+
+        - ``dataset.data_dir`` empty AND ``dataset.cache_dir`` empty AND method is
+          not ``ace_step`` -> ``(None, None)`` (no mounts; the common case).
+        - ``data_dir`` empty but the method needs a corpus -> the gitignored
+          default landing dir ``Datasets/ace_step_corpus`` (NOT user-specific).
+        - ``cache_dir`` empty -> a ``.cache`` subdir under the resolved data_dir,
+          so the ``.pt`` tensor cache survives container restarts alongside the
+          corpus.
+
+        Both are resolved with ``_rel_path`` so a researcher may give an absolute
+        out-of-repo path (the normal case for a large corpus) or a repo-relative
+        one. The directories are pre-created on the host so Docker does not create
+        them root-owned.
+
+        SECURITY (M-b): ``cache_dir`` is bind-mounted READ-WRITE and, in the default
+        bind-mode user model, container writes land root-owned on the host; the
+        resolved paths come from ``.resolve()`` which follows symlinks. This method
+        therefore emits a containment WARNING (via ``_warn_mount_containment``) when
+        a resolved path escapes its expected roots. It is warn-only — the project's
+        local-run trust model is operator-trust, so we never hard-fail here.
+        """
+        dataset_cfg = cfg.get("dataset", {})
+        if not isinstance(dataset_cfg, dict):
+            return None, None
+        method = str(
+            (cfg.get("run", {}) if isinstance(cfg.get("run"), dict) else {}).get(
+                "method", ""
+            )
+        ).lower()
+
+        raw_data_dir = str(dataset_cfg.get("data_dir") or "").strip()
+        raw_cache_dir = str(dataset_cfg.get("cache_dir") or "").strip()
+
+        # Nothing to mount unless this method opts into the corpus seam. ace_step
+        # always gets the default landing dir even when data_dir is left blank.
+        if not raw_data_dir and not raw_cache_dir and method != "ace_step":
+            return None, None
+
+        data_dir_host = self._rel_path(raw_data_dir or DEFAULT_ACE_STEP_CORPUS_DIR)
+        cache_dir_host = (
+            self._rel_path(raw_cache_dir)
+            if raw_cache_dir
+            else (data_dir_host / ".cache")
+        )
+
+        # Containment heads-up BEFORE we create dirs / mount (M-b). Warn-only.
+        self._warn_mount_containment(data_dir_host, cache_dir_host)
+
+        for target in (data_dir_host, cache_dir_host):
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                print(
+                    f"Warning: could not pre-create {target} ({exc}); "
+                    "docker will create it."
+                )
+
+        return str(data_dir_host), str(cache_dir_host)
+
+    def _warn_mount_containment(
+        self, data_dir_host: Path, cache_dir_host: Path
+    ) -> None:
+        """Emit a containment WARNING when a resolved corpus/cache mount escapes
+        its expected roots (security finding M-b). Warn-only — operator-trust
+        model, never a hard block.
+
+        The bind-mount host paths are operator-supplied (``dataset.data_dir`` /
+        ``dataset.cache_dir``) and resolved with ``.resolve()``, which FOLLOWS
+        SYMLINKS — so a careless or crafted value can land a mount outside the repo
+        tree. The two mounts carry different risk:
+
+        - ``cache_dir`` is mounted READ-WRITE at ``/workspace/cache`` and, under the
+          default bind-mode user model (root + chown-back), container writes land
+          root-owned on the host. This is the real foot-gun, so the warning is
+          prominent and fires when cache_dir escapes BOTH the repo tree AND the
+          corpus root (``data_dir``, which the operator chose, self-authorizes a
+          cache nested under it).
+        - ``data_dir`` is mounted READ-ONLY, so an out-of-repo corpus is the
+          documented normal case and low-risk; we surface only a quieter
+          informational note (not the prominent ``security`` warning) when it
+          leaves the repo tree, to flag a possible symlink escape.
+
+        Expected (safe) roots = repo_root and, for cache_dir, the resolved corpus
+        root. ``self.repo_root`` is already absolute; we re-resolve defensively so
+        the comparison is symlink-consistent with the resolved mount paths.
+        """
+        repo_root = self.repo_root.resolve()
+        default_corpus = (repo_root / DEFAULT_ACE_STEP_CORPUS_DIR).resolve()
+
+        # cache_dir: RW + potentially root-owned -> prominent security warning.
+        # The escape test runs on the RESOLVED paths (post-_rel_path/.resolve()),
+        # so a symlinked cache_dir collapses to its real target and is caught here.
+        if not _path_within(cache_dir_host, repo_root) and not _path_within(
+            cache_dir_host, data_dir_host
+        ):
+            print(
+                f"Warning (security): resolved dataset.cache_dir {cache_dir_host} "
+                "resolves outside both the repo tree and the corpus root. It is "
+                "bind-mounted READ-WRITE at /workspace/cache and, under the default "
+                "bind/auto user model, files written there are created as "
+                "container-root then chown'd to your host uid. Do NOT point "
+                "cache_dir at a sensitive directory (e.g. ~/.ssh, /etc, $HOME) "
+                "(path resolution follows symlinks)."
+            )
+
+        # data_dir: :ro and out-of-repo is the normal large-corpus case -> quieter
+        # informational note only, to flag a possible symlink escape.
+        if not _path_within(data_dir_host, repo_root) and data_dir_host != default_corpus:
+            print(
+                f"Note: resolved dataset.data_dir {data_dir_host} is outside the "
+                "repo tree. It is bind-mounted READ-ONLY at /workspace/data; this is "
+                "expected for an out-of-repo corpus — confirm it is the path you "
+                "intend (note: path resolution follows symlinks)."
+            )
 
     def _render_value(self, value: Any, variables: dict[str, str]) -> Any:
         if isinstance(value, str):
@@ -659,6 +834,19 @@ class LocalRunHandler(BaseHandler):
             job_cfg.get("mount_pip_cache"), "mount_pip_cache", default=True
         )
 
+        # Generic out-of-repo audio-corpus + tensor-cache mounts (build contract
+        # §5). Config-driven and method-agnostic: any recipe that sets
+        # dataset.data_dir / dataset.cache_dir gets the host paths resolved here
+        # and mounted by _data_dir_mount_args. Today only ace_step uses it; absent
+        # keys -> None -> no mounts, so every existing recipe is unaffected.
+        data_dir_host, cache_dir_host = self._resolve_data_dir_paths(cfg)
+        if data_dir_host and transfer_mode != "bind":
+            raise LocalRunError(
+                "dataset.data_dir requires job.transfer: bind (an out-of-repo "
+                "audio corpus cannot be copied into the build context); "
+                f"got transfer={transfer_mode!r}."
+            )
+
         explicit_container_name = job_cfg.get("container_name")
         if explicit_container_name:
             # User-supplied name wins; we still slug/normalize it.
@@ -699,6 +887,8 @@ class LocalRunHandler(BaseHandler):
             "stop_timeout": stop_timeout,
             "tty_mode": tty_mode,
             "persist": persist,
+            "data_dir": data_dir_host,
+            "cache_dir": cache_dir_host,
             "mount_hf_cache": mount_hf_cache,
             "mount_pip_cache": mount_pip_cache,
         }
@@ -833,6 +1023,7 @@ class LocalRunHandler(BaseHandler):
             ]
         )
         docker_cmd.extend(_cache_mount_args(plan, home_dir))
+        docker_cmd.extend(_data_dir_mount_args(plan))
         docker_cmd.extend(
             [
                 "-w",

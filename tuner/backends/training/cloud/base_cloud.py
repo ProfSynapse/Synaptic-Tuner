@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from shared.utilities.paths import TRAINING_METHODS
 from tuner.core.exceptions import CloudProviderError
 
 logger = logging.getLogger(__name__)
@@ -106,8 +107,10 @@ def load_gpu_pricing(cloud_config_path: Optional[Path] = None) -> dict:
     return _GPU_PRICING_CACHE
 
 
-# Supported training methods across all cloud backends
-SUPPORTED_METHODS = ("sft", "kto", "grpo", "dpo", "embedding")
+# Supported training methods across all cloud backends. Derived from the
+# TRAINING_METHODS SSOT (shared/utilities/paths.py) so registering a new method
+# is a single-source edit — no hardcoded duplicate to keep in sync.
+SUPPORTED_METHODS = TRAINING_METHODS
 
 
 def validate_training_method(method: str, backend_name: str) -> None:
@@ -155,6 +158,39 @@ def load_gpu_tiers(cloud_config_path: Path) -> dict:
         return config.get("gpu_tiers", {})
     except Exception as e:
         logger.warning("Failed to load GPU tiers from %s: %s", cloud_config_path, e)
+        return {}
+
+
+def load_method_labels(methods_config_path: Path) -> dict:
+    """
+    Load training-method display labels from Trainers/methods.yaml.
+
+    Method labels map a method code (the TRAINING_METHODS SSOT keys) to a
+    human-readable label for the training menu. They live in a dedicated,
+    backend-agnostic file (method identity is repo-level, owned by the paths.py
+    SSOT — not cloud-specific). Loading from YAML keeps label additions a config
+    edit, not a code change (mirrors load_gpu_tiers).
+
+    Args:
+        methods_config_path: Path to the Trainers/methods.yaml file
+
+    Returns:
+        Dictionary mapping method code -> display label. Returns empty dict if
+        the file doesn't exist or has no method_labels section (callers fall
+        back to the uppercased method code).
+
+    Example:
+        labels = load_method_labels(repo_root / "Trainers" / "methods.yaml")
+        sft_label = labels["sft"]  # "SFT - Supervised Fine-Tuning"
+    """
+    if not methods_config_path.exists():
+        return {}
+    try:
+        with open(methods_config_path) as f:
+            config = yaml.safe_load(f)
+        return config.get("method_labels", {})
+    except Exception as e:
+        logger.warning("Failed to load method labels from %s: %s", methods_config_path, e)
         return {}
 
 

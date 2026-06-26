@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 
 import yaml
 
-from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
+from shared.utilities.paths import TRAINING_METHODS, get_trainer_root, iter_training_output_dirs
 
 
 @dataclass
@@ -145,8 +145,12 @@ class BaseModelDiscovery:
         """
         results: List[ModelInfo] = []
 
-        # Trainer output directories
-        for trainer_type in ("sft", "kto", "grpo", "dpo"):
+        # Trainer output directories. Derived from the TRAINING_METHODS SSOT
+        # (shared/utilities/paths.py) so a trained run of ANY registered method —
+        # including embedding and ace_step — is discoverable here and never silently
+        # invisible. iter_training_output_dirs() resolves every method's dir (verified),
+        # and the inner final_model/ check naturally skips methods without one.
+        for trainer_type in TRAINING_METHODS:
             for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
                 if not output_dir.exists():
                     continue

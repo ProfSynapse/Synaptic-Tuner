@@ -473,15 +473,21 @@ class CloudTrainHandler(BaseHandler):
 
     def _load_method_labels(self) -> Dict[str, str]:
         """
-        Load training method display labels.
+        Load training method display labels from Trainers/methods.yaml.
+
+        Reads the method_labels section of the dedicated, backend-agnostic
+        methods.yaml so that adding or changing a label only requires a YAML
+        edit, not a code change (mirrors _load_gpu_tiers). A method with no
+        entry falls back to its uppercased code at the call site (see the menu
+        builder's `method_labels.get(m, m.upper())`).
 
         Returns:
             Dict mapping method codes to human-readable labels.
         """
-        return {
-            "sft": "SFT - Supervised Fine-Tuning",
-            "kto": "KTO - Preference Learning",
-        }
+        from tuner.backends.training.cloud.base_cloud import load_method_labels
+
+        config_path = self.repo_root / "Trainers" / "methods.yaml"
+        return load_method_labels(config_path)
 
     def _load_gpu_tiers(self) -> Dict[str, Dict]:
         """

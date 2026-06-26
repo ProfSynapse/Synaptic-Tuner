@@ -64,10 +64,16 @@ class TestHFJobsBackendProperties:
 
     def test_available_methods(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        # 5-element list: "embedding" appended in the same commit as the
-        # method-wiring edit (CONTRACTS §5.1.1). HF Jobs runs the embedding
-        # cloud path (recipe + setup.pip overlay), so it must advertise it.
-        assert backend.get_available_methods() == ["sft", "kto", "grpo", "dpo", "embedding"]
+        # SSOT-DERIVED (CONTRACTS §5.1.1, backend-coder's #27 dedup): the method
+        # list now derives from TRAINING_METHODS via `list(TRAINING_METHODS)`, so
+        # we assert equality WITH the SSOT (preserving order) rather than a frozen
+        # literal. This auto-tracks new methods (embedding, ace_step, …) without a
+        # test edit, while still failing loudly if the derivation breaks.
+        from shared.utilities.paths import TRAINING_METHODS
+
+        assert backend.get_available_methods() == list(TRAINING_METHODS)
+        # Spot-check the methods this cloud backend must advertise.
+        assert {"embedding", "ace_step"} <= set(backend.get_available_methods())
 
 
 class TestHFJobsValidateEnvironment:

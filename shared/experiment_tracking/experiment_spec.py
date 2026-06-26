@@ -6,6 +6,8 @@ from typing import Any, List, Optional
 
 import yaml
 
+from shared.utilities.paths import TRAINING_METHODS
+
 
 EXPERIMENT_STAGES = ("training", "evaluation", "loss", "analysis", "recommendation")
 
@@ -208,7 +210,7 @@ class ExperimentSpec:
             issues.append("experiment.name is required")
         if self.provider not in {"hf_jobs", "modal", "runpod", "local"}:
             issues.append(f"unsupported provider '{self.provider}'")
-        if self.method not in {"sft", "kto", "grpo", "dpo", "embedding"}:
+        if self.method not in set(TRAINING_METHODS):
             issues.append(f"unsupported method '{self.method}'")
         if not self.dataset.source:
             issues.append("experiment.dataset.source is required")

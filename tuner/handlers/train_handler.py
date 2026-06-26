@@ -15,6 +15,7 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Optional
 
+from shared.utilities.paths import TRAINING_METHODS
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -139,10 +140,11 @@ class TrainHandler(BaseHandler):
             platforms.append({
                 "id": "rtx",
                 "name": "NVIDIA GPU (CUDA)",
-                # Mirror of RTXBackend.get_available_methods(); keep in sync.
-                # Future-dedup (CONTRACTS §5.4): derive from the backend instead
-                # of hardcoding so this status list can never drift again.
-                "methods": ["sft", "kto", "grpo", "dpo", "embedding"]
+                # Derived from the TRAINING_METHODS SSOT (shared/utilities/paths.py)
+                # so this status surface can never drift from the registered
+                # methods (CONTRACTS §5.4 dedup). The RTX/CUDA platform supports
+                # every train-time method, which is exactly TRAINING_METHODS.
+                "methods": list(TRAINING_METHODS)
             })
         if has_mlx:
             platforms.append({

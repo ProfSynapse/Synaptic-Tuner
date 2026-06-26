@@ -1,0 +1,23 @@
+# ============================================================================
+# Training-method display labels
+#
+# Location: Trainers/methods.yaml
+# Used by:  tuner/handlers/cloud_train_handler.py (_load_method_labels) via the
+#           load_method_labels() helper in
+#           tuner/backends/training/cloud/base_cloud.py.
+#
+# Maps a method code (the TRAINING_METHODS SSOT keys in
+# shared/utilities/paths.py) to a human-readable label for the training menu.
+# Method IDENTITY is owned by the paths.py SSOT; this file is the presentation
+# layer over it (backend-agnostic — rtx/local/cloud all read the same labels).
+# Adding or changing a label is a YAML edit here, not a code change. A method
+# with no entry falls back to its uppercased code at the call site.
+# ============================================================================
+
+method_labels:
+  sft: "SFT - Supervised Fine-Tuning"
+  kto: "KTO - Preference Learning"
+  grpo: "GRPO - Reward Optimization"
+  dpo: "DPO - Direct Preference Optimization"
+  embedding: "Embedding - Bi-Encoder Training"
+  ace_step: "ACE-STEP - Music Generation (LoRA/LoKr)"

@@ -118,6 +118,16 @@ SynthChat/interactions/
 Evaluator/interactions/
 SynthChat/output/
 
+# ACE-STEP v1.5 external dependency (provisioned by devops, NOT checked in).
+# Cloned at a pinned ref for the train.py/cli.py --help byte-confirm + the
+# Docker image clone. See Trainers/ace_step/Dockerfile + the build contract §9.
+vendor/
+
+# ACE-STEP default audio-corpus landing dir (generic data_dir fallback, §5).
+# Large binary audio is never committed; a researcher points dataset.data_dir
+# at their own corpus, or drops audio here when data_dir is left empty.
+Datasets/ace_step_corpus/
+
 # Local training outputs
 webllm_output/
 sft_output_mac/

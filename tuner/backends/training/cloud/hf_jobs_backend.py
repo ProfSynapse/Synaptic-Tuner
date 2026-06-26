@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from shared.cloud_artifacts import normalize_hf_bucket_id
-from shared.utilities.paths import get_trainer_root
+from shared.utilities.paths import TRAINING_METHODS, get_trainer_root
 from tuner.cloud import (
     CloudJobSpec,
     HFJobExecutor,
@@ -117,12 +117,15 @@ class HFJobsBackend(
         Get available training methods.
 
         HF Jobs supports the same methods as local RTX training since
-        the scripts run unchanged in the cloud environment.
+        the scripts run unchanged in the cloud environment. Derived from the
+        TRAINING_METHODS SSOT (shared/utilities/paths.py) so a new method is a
+        single-source edit — no hardcoded duplicate list to keep in sync.
 
         Returns:
-            List of method names: ['sft', 'kto', 'grpo', 'dpo', 'embedding']
+            List of method names (e.g. ['sft', 'kto', 'grpo', 'dpo',
+            'embedding', 'ace_step']).
         """
-        return ["sft", "kto", "grpo", "dpo", "embedding"]
+        return list(TRAINING_METHODS)
 
     def validate_environment(self) -> Tuple[bool, str]:
         """

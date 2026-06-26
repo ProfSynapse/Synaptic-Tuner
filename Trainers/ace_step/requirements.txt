@@ -1,0 +1,71 @@
+# Trainers/ace_step/requirements.txt
+#
+# METHOD-LOCAL dependency island for the ACE-STEP v1.5 music trainer.
+# (Build contract docs/architecture/ace-step-pipeline-contract.md §9; mirrors the
+#  Trainers/embedding/requirements.txt island convention.)
+#
+# This is the ace_step method's OWN pinned island. It is a SEPARATE dependency
+# world from the repo's text trainers and is installed into a SEPARATE Docker
+# image (Trainers/ace_step/Dockerfile) — it is NEVER overlaid on the Unsloth
+# image. Reason (VERIFIED): the repo runs transformers 5.x while ACE-STEP v1.5
+# requires transformers<4.58 — an empty-intersection conflict, so the audio /
+# diffusion stack must live in its own image and must NOT perturb any other
+# method's transformers pin.
+#
+# EXACT PINS ARE TBD-PENDING-SMOKE-TEST (repo convention, embedding precedent):
+# the version numbers below are the dependency SET (with the hard upper/lower
+# bounds the contract + ACE-STEP's own pyproject require), NOT final pins. The
+# repo has a documented history of CUDA-wheel / numpy / transformers mismatches,
+# so the exact working pins MUST be captured EMPIRICALLY from the first working
+# image-build + preprocess smoke and recorded here as `pkg==X.Y.Z`. Do NOT invent
+# speculative cu128 wheel versions. Until the smoke confirms a set, the bounded
+# specifiers below declare intent only.
+#
+# NOTE: torch / torchaudio cu128 wheels are installed in the Dockerfile from the
+# PyTorch cu128 index (--extra-index-url https://download.pytorch.org/whl/cu128),
+# NOT from PyPI — see Trainers/ace_step/Dockerfile. ffmpeg is an APT system
+# package in the image (torchaudio needs it to decode audio), NOT a pip dep.
+# ACE-STEP v1.5 itself is provisioned from its own repo at a pinned ref in the
+# Dockerfile (contract §9), not installed from this file.
+
+# PRIMARY SOURCE OF TRUTH for the version SET below = ACE-STEP v1.5's own
+# pyproject.toml at the pinned ref (vendor/ACE-Step-1.5, contract §9). The
+# numbers here mirror that pyproject's Linux-x86_64 declarations so this island
+# stays in sync with the provisioned repo. The Dockerfile installs ACE-STEP from
+# its own pyproject (which pins the cu128 wheels via its uv index); this file is
+# the human-readable record + the floor for any direct pip use. Python: >=3.11,<3.13.
+
+# --- Core audio / CUDA tensor stack (cu128 wheels via Dockerfile index) ---
+# Linux x86_64 target (cloud HF Jobs + local CUDA). ACE-STEP pins these exactly:
+torch==2.10.0             # +cu128 via --extra-index-url in Dockerfile (ACE-STEP pyproject pin)
+torchaudio==2.10.0        # +cu128; needs apt ffmpeg at runtime to decode audio
+torchvision==0.25.0       # +cu128 (ACE-STEP pulls it transitively)
+
+# --- Training framework (Lightning Fabric, NOT full PL Trainer / NOT HF Trainer) ---
+lightning>=2.0.0          # provides lightning.fabric
+
+# --- Adapters: PEFT (LoRA) + LyCORIS (LoKr) ---
+peft>=0.18.0              # LoRA inject (contract §1.3 --adapter-type lora)
+lycoris-lora              # LoKr inject (contract §1.3 --adapter-type lokr); pin TBD
+
+# --- Diffusion model stack (ACE-STEP DiT/DCAE) ---
+diffusers>=0.37.0         # DiT / scheduler components
+transformers>=4.51.0,<4.58.0  # HARD UPPER BOUND — conflicts with repo's 5.x (why this is a separate image)
+vector-quantize-pytorch>=1.27.15  # DCAE codec quantizer (ACE-STEP dep)
+torchcodec>=0.9.1         # audio codec ops (ACE-STEP dep)
+torchao>=0.16.0,<0.17.0   # quantization/optim (ACE-STEP dep)
+pytorch-wavelets>=1.3.0   # ACE-STEP dep
+
+# --- Audio I/O + HF data pulls ---
+# On the cloud lane the wrapper pulls the HF model weights + (via dataset_name)
+# the audio corpus DOWN TO A LOCAL PATH, then hands that path to ACE-STEP's
+# --audio-dir/--dataset-dir. There is NO ACE-STEP --dataset-name flag (contract
+# §5.3) — these libs do the pull-to-local-path, not a remote-dataset handoff.
+soundfile>=0.13.1         # audio read/write
+huggingface-hub           # model + HF-dataset snapshot_download (pass revision=<sha>)
+hf-transfer               # fast Hub pulls (HF_HUB_ENABLE_HF_TRANSFER=1)
+datasets                  # HF-dataset pull -> local path (cloud input lane)
+
+# --- Config / utilities (repo-standard) ---
+pyyaml                    # config.yaml parsing
+python-dotenv             # env loading (repo convention)

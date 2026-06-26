@@ -17,6 +17,12 @@ from shared.verifiers.builtins.assertion_verifier import (
     evaluate_correctness,
     has_correctness_config,
 )
+from shared.verifiers.builtins.audio_verifier import (
+    AudioConfig,
+    AudioThresholds,
+    AudioValidationResult,
+    AudioVerifier,
+)
 from shared.verifiers.builtins.retrieval_verifier import (
     RetrievalConfig,
     RetrievalThresholds,
@@ -74,6 +80,7 @@ class EvaluationRecord:
     scoring: Optional["PathScoringResult"] = None
     correctness: Optional[CorrectnessResult] = None
     retrieval: Optional["RetrievalValidationResult"] = None
+    audio: Optional["AudioValidationResult"] = None
     conversation_trace: Optional[List[Dict[str, Any]]] = None
 
     @property
@@ -99,6 +106,15 @@ class EvaluationRecord:
             if not self.retrieval.passed:
                 return "fail"
             return "warn" if self.retrieval.warned else "pass"
+
+        # Audio scenarios are scored on their own structural ladder (valid-audio
+        # smoke), a sibling to retrieval. Placed BEFORE the correctness branch so
+        # an audio scenario is never additionally subjected to per-completion
+        # correctness assertions.
+        if self.audio is not None:
+            if not self.audio.passed:
+                return "fail"
+            return "warn" if self.audio.warned else "pass"
 
         if self.correctness is not None:
             if not self.correctness.passed:
@@ -321,6 +337,14 @@ def _evaluate_single_case(
     # retrieval never flows through the per-completion verify(VerifierInput) loop.
     if case.metadata.get("retrieval_config"):
         return _evaluate_retrieval_case(case)
+
+    # Corpus-level audio scenario — a SIBLING to the per-completion path, exactly
+    # like retrieval above. When a scenario declares `audio_config`, score the
+    # rendered audio files structurally (loadable/SR/channels/duration/RMS); there
+    # is no backend chat() turn. Mirrors the retrieval fence: audio never flows
+    # through the per-completion verify(VerifierInput) loop.
+    if case.metadata.get("audio_config"):
+        return _evaluate_audio_case(case)
 
     # Get expected_context from prompt metadata (if validation enabled)
     # The system prompt is already in case.metadata["system"] and will be
@@ -555,6 +579,92 @@ def _build_retrieval_config(raw: Mapping[str, Any]) -> RetrievalConfig:
         passage_prompt=passage_prompt,
         normalize=bool(raw.get("normalize", True)),
         batch_size=int(raw.get("batch_size", 32)),
+    )
+
+
+def _evaluate_audio_case(case: PromptCase) -> EvaluationRecord:
+    """Evaluate a corpus-level audio (valid-audio smoke) scenario.
+
+    Builds an :class:`AudioConfig` from the scenario's ``audio_config`` block and
+    invokes the audio verifier's corpus-level ``evaluate_audio`` entry point
+    exactly once. Any error (missing required key, unreadable path handling, etc.)
+    is captured on ``EvaluationRecord.error`` (status -> fail). Mirrors
+    :func:`_evaluate_retrieval_case`.
+
+    Args:
+        case: The prompt case whose metadata carries ``audio_config``.
+
+    Returns:
+        An :class:`EvaluationRecord` with ``audio`` populated, or ``error`` set if
+        config resolution / evaluation raised.
+    """
+    try:
+        cfg = _build_audio_config(case.metadata["audio_config"])
+        result = AudioVerifier().evaluate_audio(cfg)
+    except Exception as exc:  # noqa: BLE001 - surface any failure as a failed case
+        logger.error("Audio evaluation error for %s: %s", case.case_id, exc)
+        return EvaluationRecord(
+            case=case,
+            response_text=None,
+            validator=None,
+            latency_s=None,
+            raw_response=None,
+            error=f"Audio evaluation error: {exc}",
+        )
+
+    return EvaluationRecord(
+        case=case,
+        response_text=None,
+        validator=None,
+        latency_s=None,
+        raw_response=None,
+        error=None,
+        audio=result,
+    )
+
+
+def _build_audio_config(raw: Mapping[str, Any]) -> AudioConfig:
+    """Translate a scenario ``audio_config`` mapping into an :class:`AudioConfig`.
+
+    Required key: ``audio_paths`` (a non-empty sequence of rendered audio file
+    paths). ``thresholds`` is optional; absent keys fall back to the
+    :class:`AudioThresholds` defaults (48 kHz / stereo / no duration cap /
+    no silence floor). The Phase-2 ``reference_set`` / ``captions`` / ``metrics``
+    keys are accepted and passed through (empty/None in Phase-1). Mirrors
+    :func:`_build_retrieval_config`'s required-key validation.
+
+    Args:
+        raw: The scenario's ``audio_config`` mapping.
+
+    Returns:
+        A fully-populated :class:`AudioConfig`.
+
+    Raises:
+        ValueError: If ``audio_paths`` is missing or empty.
+    """
+    if "audio_paths" not in raw:
+        raise ValueError("audio_config missing required key: 'audio_paths'")
+    audio_paths = list(raw["audio_paths"])
+    if not audio_paths:
+        raise ValueError("audio_config 'audio_paths' must be a non-empty list")
+
+    thr_raw = raw.get("thresholds") or {}
+    defaults = AudioThresholds()
+    thresholds = AudioThresholds(
+        min_duration_s=float(thr_raw.get("min_duration_s", defaults.min_duration_s)),
+        max_duration_s=float(thr_raw.get("max_duration_s", defaults.max_duration_s)),
+        require_sr=int(thr_raw.get("require_sr", defaults.require_sr)),
+        require_channels=int(thr_raw.get("require_channels", defaults.require_channels)),
+        min_rms=float(thr_raw.get("min_rms", defaults.min_rms)),
+    )
+
+    captions = raw.get("captions")
+    return AudioConfig(
+        audio_paths=audio_paths,
+        thresholds=thresholds,
+        reference_set=raw.get("reference_set"),
+        captions=list(captions) if captions is not None else None,
+        metrics=tuple(raw.get("metrics") or ()),
     )
 
 

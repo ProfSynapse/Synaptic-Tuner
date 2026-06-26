@@ -26,7 +26,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
-from shared.utilities.paths import get_trainer_root, iter_training_output_dirs
+from shared.utilities.paths import TRAINING_METHODS, get_trainer_root, iter_training_output_dirs
 from tuner.handlers.base import BaseHandler
 from tuner.utils.validation import load_env_file
 
@@ -648,8 +648,11 @@ class DoctorHandler(BaseHandler):
                     details=f"Expected at {folder}"
                 ))
 
-        # Training output folders
-        for trainer in ["sft", "kto", "grpo", "dpo"]:
+        # Training output folders. Derived from the TRAINING_METHODS SSOT
+        # (shared/utilities/paths.py) so the doctor health-check reports output
+        # folders for EVERY registered method — including embedding and ace_step —
+        # instead of silently omitting them from the diagnostics.
+        for trainer in TRAINING_METHODS:
             for output_folder in iter_training_output_dirs(trainer, self.repo_root):
                 if output_folder.exists():
                     run_count = len([d for d in output_folder.iterdir() if d.is_dir()])

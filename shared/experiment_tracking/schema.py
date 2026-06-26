@@ -46,7 +46,7 @@ class RunRecord:
     """
 
     run_id: str
-    run_type: str  # "sft" | "kto" | "grpo" | "ml" | "evaluation" | "embedding" | "cloud_sft" | "cloud_kto" | "cloud_grpo" | "cloud_embedding"
+    run_type: str  # "sft" | "kto" | "grpo" | "dpo" | "ace_step" | "ml" | "evaluation" | "embedding" | "cloud_sft" | "cloud_kto" | "cloud_grpo" | "cloud_embedding"
     name: str
     timestamp: str  # ISO 8601 UTC
     status: str  # "completed" | "failed" | "running"
