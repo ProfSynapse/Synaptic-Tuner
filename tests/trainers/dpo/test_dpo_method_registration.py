@@ -69,37 +69,48 @@ def test_named_gate_sites_derive_dpo_from_ssot():
 def test_lifecycle_iteration_sites_include_dpo():
     """Lifecycle-iteration sites must still resolve dpo.
 
-    backend-coder's #27 dedup converted train_handler.py to SSOT-derive its
-    method list (``"methods": list(TRAINING_METHODS)``), so the literal ``"dpo"``
-    no longer appears there — asserting the literal would be a false regression.
-    The OTHER six sites still enumerate methods explicitly (the eval-backend
-    serving tuples intentionally, the discovery/handler sites pending their own
-    dedup), so they keep the literal-grep assertion. train_handler.py instead
-    asserts SSOT-derivation, which functionally includes dpo.
+    These sites split into two classes as the SSOT-derive dedup rolls out:
+
+    - LITERAL sites still enumerate methods explicitly (the eval-backend serving
+      tuples intentionally lock the 4-method causal-LM set per CONTRACTS §5.3;
+      merge_handler.py is pending its own dedup), so they keep the literal-grep.
+    - SSOT-DERIVED sites iterate ``TRAINING_METHODS`` and carry NO "dpo" literal —
+      asserting the literal would be a false regression. train_handler.py (#27)
+      led; base_models.py + doctor_handler.py joined it under F-1 (backend-coder
+      #47, which made ace_step/embedding discoverable). For these we assert the
+      SSOT-derivation marker IS present AND the "dpo" literal is ABSENT (a
+      reintroduced literal signals a regression away from the dedup), while dpo
+      still resolves because TRAINING_METHODS contains it.
     """
     literal_sites = [
         "tuner/backends/evaluation/unsloth_backend.py",
         "tuner/backends/evaluation/mlc_backend.py",
         "tuner/backends/evaluation/llamacpp_backend.py",
-        "tuner/discovery/base_models.py",
         "tuner/handlers/merge_handler.py",
-        "tuner/handlers/doctor_handler.py",
     ]
     for rel in literal_sites:
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert '"dpo"' in source or "'dpo'" in source, f"{rel} missing 'dpo' in its method enumeration"
 
-    # train_handler.py is SSOT-derived: it carries no "dpo" literal but resolves
-    # dpo via list(TRAINING_METHODS). Assert the derivation, not the literal.
-    th_source = (REPO_ROOT / "tuner/handlers/train_handler.py").read_text(encoding="utf-8")
-    assert "list(TRAINING_METHODS)" in th_source, (
-        "train_handler.py should SSOT-derive its method list via list(TRAINING_METHODS)"
-    )
-    assert '"dpo"' not in th_source and "'dpo'" not in th_source, (
-        "train_handler.py is SSOT-derived; a reintroduced 'dpo' literal signals a "
-        "regression away from the dedup (CONTRACTS §5.1.1)"
-    )
-    # And dpo functionally resolves there: TRAINING_METHODS (its source) contains dpo.
+    # Sites converted to SSOT-derive their enumeration from TRAINING_METHODS: they
+    # carry no "dpo" literal but resolve dpo by iterating the SSOT. Assert the
+    # derivation, not the literal.
+    ssot_derived_sites = [
+        "tuner/handlers/train_handler.py",      # #27
+        "tuner/discovery/base_models.py",       # F-1 (#47)
+        "tuner/handlers/doctor_handler.py",     # F-1 (#47)
+    ]
+    for rel in ssot_derived_sites:
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "TRAINING_METHODS" in source, (
+            f"{rel} should SSOT-derive its method enumeration from TRAINING_METHODS"
+        )
+        assert '"dpo"' not in source and "'dpo'" not in source, (
+            f"{rel} is SSOT-derived; a reintroduced 'dpo' literal signals a regression "
+            f"away from the dedup (CONTRACTS §5.1.1)"
+        )
+
+    # dpo functionally resolves through every SSOT-derived site: it is in the SSOT.
     import sys
 
     sys.path.insert(0, str(REPO_ROOT))
