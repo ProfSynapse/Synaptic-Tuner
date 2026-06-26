@@ -27,6 +27,13 @@ job:
   # build (e.g. `docker build -f Trainers/ace_step/Dockerfile -t ace-step:v0.1.8 .`).
   image: ace-step:v0.1.8
   pull_policy: missing
+  # ACE_STEP_HOME env seam (review M-i): the image bakes ENV ACE_STEP_HOME=/opt/ace-step
+  # (the in-image ACE-STEP clone). This var SELECTS which train.py/cli.py the wrapper
+  # executes — config_translation resolves the ACE-STEP CLI under ACE_STEP_HOME, so in
+  # the container it runs /opt/ace-step/train.py. When ACE_STEP_HOME is UNSET (the
+  # build-host `--help` byte-confirm lane) it falls back to repo_root/vendor/ACE-Step-1.5.
+  # The handler does NOT pass it at run time — it is image-baked — so no recipe knob is
+  # needed; this note is documentation only (full mechanism: Trainers/ace_step/Dockerfile).
   # bind is REQUIRED for an out-of-repo audio corpus (copy-mode can't reach
   # outside the repo tree). Non-Windows defaults to bind; pinned here explicitly.
   transfer: bind

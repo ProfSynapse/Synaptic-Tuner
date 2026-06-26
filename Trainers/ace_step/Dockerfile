@@ -36,9 +36,22 @@
 #   reproducible pull — that pin lives in backend-coder-2's model_registry.yaml.
 
 # CUDA 12.8 devel base (provides the cu128 toolkit ACE-STEP's wheels target).
-# Pin TBD-FROM-SMOKE: confirm this exact base tag resolves cu128 wheels cleanly on
-# the first build; the repo has a documented history of CUDA/numpy/wheel mismatches.
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+#
+# IMMUTABLE BASE PIN (review F-3): the base is pinned by @sha256 MANIFEST-LIST
+# digest, not just the floating tag — nvidia re-publishes the 12.8.0 tag, so a
+# bare tag is not reproducible. The digest is the multi-arch manifest list, so
+# Docker still selects the correct per-arch image at pull. The tag is kept
+# alongside the digest purely for human readability; when both are present Docker
+# resolves by digest and the tag is ignored. Digest resolved 2026-06-26 from the
+# Docker Hub registry (docker-content-digest of the manifest list). To re-pin on a
+# deliberate base bump: `docker manifest inspect nvidia/cuda:<tag>` or read the
+# registry docker-content-digest header, then update BOTH the tag and the digest.
+#
+# SCOPE NOTE: only the BASE image is pinned here. The cu128 PIP wheel set
+# (transformers / torch / torchaudio / diffusers …) remains TBD-FROM-SMOKE — those
+# exact pins genuinely require a CUDA image build to capture and stay deferred to
+# the TEST/CI pin-from-smoke step (review F-3 is intentionally base-digest only).
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04@sha256:c900a2ac7f3d860c854f7364eadfe32b8cd33933a838f96b71e9bb6525f77a8c
 
 # ACE-STEP v1.5 pinned ref. ACE_STEP_SHA is the immutable canonical commit;
 # ACE_STEP_REF is the tag used to fetch the branch before resetting to the SHA.

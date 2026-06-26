@@ -6,8 +6,8 @@ Location: Trainers/ace_step/train_ace_step.py
 Purpose:  Fine-tune an ACE-STEP v1.5 music model (DCAE + DiT) with a LoRA/LoKr
           adapter by driving ACE-STEP's OWN headless CLI as a subprocess (Option A
           — we do NOT reimplement training). Two stages, orchestrated in order:
-            stage 1  `python train.py preprocess ...`  (audio -> .pt tensor cache)
-            stage 2  `python train.py fixed ...`       (LoRA/LoKr train -> adapter)
+            stage 1  `python train.py fixed --preprocess ...`  (audio -> .pt cache)
+            stage 2  `python train.py fixed ...`              (LoRA/LoKr -> adapter)
           Translates our single config.yaml (§2) into the ACE-STEP `train.py` argv
           (§1.3 translation table), captures each subprocess's returncode, tees its
           stderr to the run log, and RAISES on a nonzero exit so a failed train.py
@@ -54,6 +54,7 @@ import yaml  # noqa: E402
 
 from config_translation import (  # noqa: E402
     build_fixed_argv,
+    fetch_checkpoint,
     resolve_cache_dir,
     resolve_checkpoint_dir,
     resolve_output_dir,
@@ -113,10 +114,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     Sequence:
         1. Load config + apply CLI overrides.
         2. Resolve checkpoint dir (model_registry.yaml), cache dir, output dir.
-        3. Stage 1 — preprocess (delegated to data_loader.run_preprocess; builds +
-           invokes `train.py preprocess`, returns the resolved .pt cache dir).
-        4. Stage 2 — fixed train (build argv here, invoke, raise-on-nonzero).
-        5. Remap output dir -> ace_step_output/ + register the run.
+        3. Materialize base weights at the registry-pinned revision (fetch_checkpoint,
+           M-a) — real-run only; unreached on --dry-run (after the early-return below).
+        4. Stage 1 — preprocess (delegated to data_loader.run_preprocess; builds +
+           invokes `train.py fixed --preprocess`, returns the resolved .pt cache dir).
+        5. Stage 2 — fixed train (build argv here, invoke, raise-on-nonzero).
+        6. Remap output dir -> ace_step_output/ + register the run.
 
     A `--dry-run` short-circuits before any subprocess execution: it prints the
     fully translated argv for BOTH stages and returns. This is the single place the
@@ -163,6 +166,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "cache_dir": str(cache_dir),
             "output_dir": str(output_dir),
         }
+
+    # Materialize base checkpoint at the registry-pinned revision (M-a).
+    # Unreached on --dry-run (named above, not downloaded); weights must be
+    # present before stage-1 preprocess loads the VAE/text-encoder.
+    fetch_checkpoint(config, repo_root, dry_run=False)
 
     # ----- Stage 1: preprocess (audio -> .pt cache). Skipped inside run_preprocess
     # when the cache is present and preprocess.force is false. -----
@@ -225,8 +233,9 @@ def _print_dry_run(preprocess_argv: list[str], fixed_argv: list[str]) -> None:
     """Print both translated argv lists for --dry-run inspection.
 
     This is the de-risk surface: it shows EXACTLY what would be shelled out, so the
-    §1.3 flag translation can be byte-confirmed against `train.py {preprocess,fixed}
-    --help` without spending any GPU/audio.
+    §1.3 flag translation can be byte-confirmed against `train.py fixed --help`
+    (preprocess is the `--preprocess` flag on `fixed`, not a separate subcommand)
+    without spending any GPU/audio.
     """
     print("[DRY RUN] Stage 1 — preprocess argv:")
     print("    " + " ".join(preprocess_argv))

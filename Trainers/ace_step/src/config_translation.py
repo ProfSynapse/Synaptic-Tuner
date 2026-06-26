@@ -16,10 +16,12 @@ Contract: docs/architecture/ace-step-pipeline-contract.md §1.3 (flag table), §
 
 ⚠️ PROVISIONAL: the flag spellings/defaults below were read by preparer-acestep via
 raw-GitHub fetch of acestep/training_v2/cli/args.py, NOT by executing `--help`. The
-§1.3 BUILD STEP-0 (`python train.py {preprocess,fixed} --help` against the
-provisioned ACE-STEP repo) must byte-confirm every flag before the translation is
-"locked". If any flag differs, correct it HERE and ping the architect (design
-authority) before locking. The wrapper `--dry-run` prints what this module produces.
+§1.3 BUILD STEP-0 byte-confirm runs `python train.py fixed --help` (the `fixed`
+subcommand) + `python train.py --help` (the root parser — `--preprocess` is a
+root-level store_true FLAG, NOT a `preprocess` subcommand) against the provisioned
+ACE-STEP repo to byte-confirm every flag before the translation is "locked". If any
+flag differs, correct it HERE and ping the architect (design authority) before
+locking. The wrapper `--dry-run` prints what this module produces.
 
 Config-driven SACROSANCT: every value is read from config — nothing scenario-specific
 is baked in. A value absent from config falls back to the ACE-STEP upstream default
@@ -89,14 +91,13 @@ def _load_model_registry(repo_root: Path) -> dict[str, Any]:
     return data.get("models", {}) or {}
 
 
-def resolve_checkpoint_dir(config: dict[str, Any], repo_root: Path) -> Path:
-    """Resolve model.registry_name -> the base-checkpoint folder (--checkpoint-dir).
+def _resolve_registry_entry(
+    config: dict[str, Any], repo_root: Path
+) -> tuple[str, dict[str, Any]]:
+    """Resolve model.registry_name -> (registry_name, registry-entry dict).
 
-    The registry entry is the SSOT for the multi-file HF folder (§3). Today the
-    checkpoint root is the HF cache folder for `hf_id@revision`; until the §3 ids are
-    byte-confirmed (Task #32), this returns the registry-name-keyed cache path so the
-    translation is exercised end-to-end (the concrete HF download is a runtime
-    concern handled by ACE-STEP / the image).
+    Shared by resolve_checkpoint_dir (the path namer) and fetch_checkpoint (the
+    weights materializer) so the SSOT lookup + validation live in exactly one place.
 
     Raises:
         ValueError: model.registry_name is missing or not in the registry.
@@ -112,12 +113,116 @@ def resolve_checkpoint_dir(config: dict[str, Any], repo_root: Path) -> Path:
             f"Unknown model.registry_name {registry_name!r}; "
             f"known: {sorted(models.keys())}"
         )
+    return registry_name, (models[registry_name] or {})
 
-    # The checkpoint folder is the HF-cached download root for this registry entry.
-    # Concrete folder = <repo>/Datasets/ace_step_models/<registry_name> (a documented,
-    # gitignored landing dir, mirroring the corpus default). ACE-STEP/the image
-    # populates it from hf_id@revision; we only NAME it deterministically here.
+
+def resolve_checkpoint_dir(config: dict[str, Any], repo_root: Path) -> Path:
+    """Resolve model.registry_name -> the local base-checkpoint folder (--checkpoint-dir).
+
+    PURE path namer — does NO network/IO beyond reading the registry YAML, so it is
+    safe on the --dry-run / argv-build path (it runs BEFORE the dry-run early-return in
+    train_ace_step.run, and build_fixed_argv needs the path to render the dry-run argv).
+    The actual weight materialization (snapshot_download at the pinned revision) is the
+    separate fetch_checkpoint() below, invoked only on a real run.
+
+    Concrete folder = <repo>/Datasets/ace_step_models/<registry_name> — a documented,
+    gitignored landing dir (mirrors the corpus default). fetch_checkpoint() populates it
+    from the registry entry's hf_id @ revision; here we only NAME it deterministically.
+
+    Raises:
+        ValueError: model.registry_name is missing or not in the registry.
+    """
+    registry_name, _entry = _resolve_registry_entry(config, repo_root)
     return repo_root / "Datasets" / "ace_step_models" / registry_name
+
+
+def resolve_dit_subfolder(config: dict[str, Any], repo_root: Path) -> str | None:
+    """Return the DiT component subfolder for the selected registry entry (or None).
+
+    Reads `components.dit` from the registry entry (§3). ACE-STEP's own train.py maps
+    --model-variant -> the DiT subdir via its internal VARIANT_DIR_MAP, so this is
+    informational/best-effort (used by fetch_checkpoint's idempotency check + surfaced
+    for diagnostics). For the XL entry the subfolder is best-effort per the §3 XL
+    DIR-MAP caution (VARIANT_DIR_MAP only carries the three 2B keys); a None/absent
+    value simply disables the idempotency short-circuit (always (re)fetches).
+    """
+    _registry_name, entry = _resolve_registry_entry(config, repo_root)
+    components = entry.get("components") or {}
+    dit = components.get("dit")
+    return str(dit) if dit else None
+
+
+def fetch_checkpoint(
+    config: dict[str, Any],
+    repo_root: Path,
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+) -> Path:
+    """Materialize the base checkpoint locally at the registry-PINNED revision.
+
+    This is the M-a wiring that makes the `revision` pin in model_registry.yaml load-
+    bearing instead of decorative: it threads the entry's `hf_id` + `revision` into a
+    `huggingface_hub.snapshot_download(repo_id=..., revision=...)` so a real run pulls
+    the EXACT pinned commit (upstream model_downloader.py otherwise defaults to `main`).
+
+    Returns the same local dir as resolve_checkpoint_dir() (the --checkpoint-dir target).
+
+    Behavior:
+      - dry_run=True: resolve + RETURN the dir WITHOUT any download (keeps --dry-run
+        zero-network; the wrapper's dry-run path uses this).
+      - already-populated (the DiT subfolder exists under the dir) and not force:
+        SKIP the download (idempotent — re-pulling multi-GB weights is expensive),
+        return the dir.
+      - otherwise: lazy-import snapshot_download and pull hf_id @ revision into the dir.
+
+    The live network call only happens on a real (non-dry-run) run with weights absent —
+    deferred with the GPU/image smoke — but the revision THREADING + call wiring land now
+    and are unit-tested (the download is mocked; no live network in CI).
+
+    Raises:
+        ValueError: model.registry_name missing/unknown, or the entry lacks hf_id.
+    """
+    registry_name, entry = _resolve_registry_entry(config, repo_root)
+    checkpoint_dir = repo_root / "Datasets" / "ace_step_models" / registry_name
+
+    if dry_run:
+        return checkpoint_dir
+
+    hf_id = entry.get("hf_id")
+    if not hf_id:
+        raise ValueError(
+            f"registry entry {registry_name!r} is missing 'hf_id'; cannot fetch weights"
+        )
+    # revision may be absent -> None lets snapshot_download fall back to the repo default
+    # (`main`); we pass whatever the registry pins so a pinned SHA is honored verbatim.
+    revision = entry.get("revision")
+
+    dit_subfolder = resolve_dit_subfolder(config, repo_root)
+    already_present = bool(
+        dit_subfolder and (checkpoint_dir / dit_subfolder).exists()
+    )
+    if already_present and not force:
+        print(
+            f"[ace_step:weights] {checkpoint_dir} already has '{dit_subfolder}' "
+            f"-> SKIPPING snapshot_download (use force=True to re-pull)."
+        )
+        return checkpoint_dir
+
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    # Lazy import (repo convention: heavy HF dep imported at the call, not module load).
+    from huggingface_hub import snapshot_download
+
+    print(
+        f"[ace_step:weights] snapshot_download(repo_id={hf_id!r}, "
+        f"revision={revision!r}) -> {checkpoint_dir}"
+    )
+    snapshot_download(
+        repo_id=str(hf_id),
+        revision=revision,
+        local_dir=str(checkpoint_dir),
+    )
+    return checkpoint_dir
 
 
 def resolve_cache_dir(config: dict[str, Any], repo_root: Path) -> Path:

@@ -28,8 +28,11 @@
 # `--checkpoint-dir` points at this ROOT; `--model-variant` selects the DiT subfolder.
 #
 # ⚠️ REPRODUCIBILITY: upstream model_downloader.py pins NO HF revision (pulls `main`).
-# We pin `revision` here so a researcher can pass it through to snapshot_download for a
-# reproducible checkpoint. The aggregate-repo revision below is the known-good pin.
+# We pin `revision` here and config_translation.fetch_checkpoint() THREADS it into
+# huggingface_hub.snapshot_download(repo_id=hf_id, revision=<this>) on a real run, so the
+# pin is load-bearing (not decorative) — the aggregate-repo revision below is honored
+# verbatim. (`fetch_checkpoint` is invoked on the real-run weights-resolution path; the
+# --dry-run / argv-build path uses the network-free resolve_checkpoint_dir() namer.)
 
 models:
   # DEFAULT: the aggregate repo bundles VAE + text-encoder + default turbo DiT + 1.7B LM

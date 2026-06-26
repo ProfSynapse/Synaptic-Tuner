@@ -147,6 +147,32 @@ def test_too_long_fails(wav_factory):
     assert any("too_long" in r for r in result.detail["per_file"][f]["reasons"])
 
 
+def test_duration_exactly_at_boundaries_passes(wav_factory):
+    """Duration == min AND == max must PASS: the interval is INCLUSIVE [min, max].
+
+    The verifier uses strict inequalities (duration < min → too_short; duration >
+    max → too_long), so a clip whose length is EXACTLY the boundary passes. A 1.0 s
+    clip at 48 kHz is exactly 48000/48000 = 1.0 s (no float drift at this ratio), so
+    setting min == max == 1.0 exercises BOTH boundaries at once. This guards against
+    a future ``<`` → ``<=`` (or ``>`` → ``>=``) flip that would wrongly reject a
+    boundary-length render — the most plausible silent regression in this ladder.
+    """
+    f = wav_factory("boundary.wav", sample_rate=48000, channels=2, duration_s=1.0)
+    result = AudioVerifier().evaluate_audio(
+        AudioConfig(
+            audio_paths=[f],
+            thresholds=AudioThresholds(
+                min_duration_s=1.0, max_duration_s=1.0,
+                require_sr=48000, require_channels=2, min_rms=1e-4,
+            ),
+        )
+    )
+    assert result.detail["per_file"][f]["duration_s"] == pytest.approx(1.0, abs=1e-9)
+    assert result.passed is True
+    # No too_short / too_long reason at the inclusive boundary.
+    assert result.detail["per_file"][f]["reasons"] == []
+
+
 def test_unloadable_path_fails_gracefully(tmp_path):
     """A missing / non-audio file is a structural fail, not a crash."""
     missing = str(tmp_path / "does_not_exist.wav")

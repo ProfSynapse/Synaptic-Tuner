@@ -5,8 +5,9 @@ Location: Trainers/ace_step/src/data_loader.py
 Purpose:  Orchestrate ACE-STEP stage 1: turn an audio corpus (--audio-dir) or a
           labeled dataset JSON (--dataset-json) into the flat per-sample `.pt`
           tensor cache that stage-2 `train.py fixed` consumes via --dataset-dir.
-          This shim BUILDS the `train.py preprocess` argv (via config_translation)
-          and INVOKES it (via subprocess_runner), then points the trainer at the
+          This shim BUILDS the `train.py fixed --preprocess` argv (via
+          config_translation) and INVOKES it (via subprocess_runner), then points
+          the trainer at the
           resolved cache dir. It does NOT re-encode audio itself — ACE-STEP's own
           preprocess does the two-pass VAE -> DiT-encoder work and writes the cache.
 Used by:  Trainers/ace_step/train_ace_step.py (stage-1 of the run sequence).
@@ -79,7 +80,7 @@ def run_preprocess(
     repo_root: Path,
     dry_run: bool,
 ) -> list[str]:
-    """Build (and unless dry_run, invoke) the stage-1 `train.py preprocess` argv.
+    """Build (and unless dry_run, invoke) the stage-1 `train.py fixed --preprocess` argv.
 
     Returns the translated preprocess argv in ALL modes (so the caller can show it in
     --dry-run and so the invocation path is the same argv that was displayed).
