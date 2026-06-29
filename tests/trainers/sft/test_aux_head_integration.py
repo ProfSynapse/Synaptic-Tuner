@@ -99,9 +99,18 @@ def _collate(features):
     }
 
 
-def _make_trainer(tmp_path, *, freeze_base=True, loss="bce", token_position="last", remove_unused_columns=False):
+def _make_trainer(
+    tmp_path,
+    *,
+    freeze_base=True,
+    loss="bce",
+    token_position="last",
+    remove_unused_columns=False,
+    lm_loss_weight=0.0,
+    input_norm="none",
+):
     model = _tiny_causal_lm()
-    head = AuxHead(input_dim=HIDDEN, head_type="linear")
+    head = AuxHead(input_dim=HIDDEN, head_type="linear", input_norm=input_norm)
     cfg = AuxHeadConfig(
         enabled=True,
         layer=READ_LAYER,
@@ -110,7 +119,8 @@ def _make_trainer(tmp_path, *, freeze_base=True, loss="bce", token_position="las
         loss=loss,
         head_type="linear",
         freeze_base=freeze_base,
-        lm_loss_weight=0.0,
+        lm_loss_weight=lm_loss_weight,
+        input_norm=input_norm,
     )
     args = TrainingArguments(
         output_dir=str(tmp_path / "out"),
@@ -220,3 +230,114 @@ def test_train_refuses_resume_from_checkpoint(tmp_path):
         trainer.train(resume_from_checkpoint=str(tmp_path / "out" / "checkpoint-1"))
     with pytest.raises(RuntimeError, match="resume_from_checkpoint"):
         trainer.train(resume_from_checkpoint=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase B: joint loss, unfrozen base, gradient flow
+# ---------------------------------------------------------------------------
+
+def test_joint_loss_equals_lm_plus_weighted_head(tmp_path):
+    # With lm_loss_weight>0 the total loss must be exactly
+    # outputs.loss + lm_loss_weight * head_loss (acceptance #2).
+    lm_loss_weight = 0.5
+    trainer, model, head = _make_trainer(
+        tmp_path, freeze_base=False, lm_loss_weight=lm_loss_weight
+    )
+    batch = _collate([_RowDataset()[i] for i in range(4)])
+    target = batch["aux_target"].clone()  # compute_loss pops aux_target
+
+    loss, outputs = trainer.compute_loss(model, batch, return_outputs=True)
+
+    # Recompute the head term from the SAME outputs the trainer used.
+    from aux_head import compute_aux_head_loss, reduce_hidden_states  # noqa: E402
+
+    reduced = reduce_hidden_states(
+        outputs.hidden_states[READ_LAYER], batch["attention_mask"], "last"
+    )
+    head_loss = compute_aux_head_loss(head(reduced), target, "bce")
+    expected = outputs.loss + lm_loss_weight * head_loss
+    assert torch.allclose(loss, expected, atol=1e-6)
+
+
+def test_phase_a_compute_loss_is_head_loss_only(tmp_path):
+    # lm_loss_weight==0 ⇒ the loss is the head loss alone (Phase-A byte-identical),
+    # even though outputs.loss (the LM CE) is finite and available.
+    trainer, model, head = _make_trainer(tmp_path, freeze_base=True, lm_loss_weight=0.0)
+    batch = _collate([_RowDataset()[i] for i in range(4)])
+    target = batch["aux_target"].clone()
+
+    loss, outputs = trainer.compute_loss(model, batch, return_outputs=True)
+
+    from aux_head import compute_aux_head_loss, reduce_hidden_states  # noqa: E402
+
+    reduced = reduce_hidden_states(
+        outputs.hidden_states[READ_LAYER], batch["attention_mask"], "last"
+    )
+    head_loss = compute_aux_head_loss(head(reduced), target, "bce")
+    assert torch.allclose(loss, head_loss, atol=1e-6)
+    assert outputs.loss is not None  # the LM loss was computed but NOT added
+
+
+def test_unfrozen_base_optimizer_includes_base_and_step_updates_both(tmp_path):
+    # freeze_base=false ⇒ a second optimizer param group covers the base's
+    # trainable params, and one joint step moves BOTH a base weight and the head
+    # (acceptance #3). The tiny Llama has no LoRA, so its trainable params stand
+    # in for the LoRA params PEFT would leave trainable on a real run.
+    trainer, model, head = _make_trainer(
+        tmp_path, freeze_base=False, lm_loss_weight=1.0
+    )
+    optimizer = trainer.create_optimizer()
+    assert len(optimizer.param_groups) == 2  # head group + base group
+
+    base_before = [p.detach().clone() for p in model.parameters()]
+    head_before = [p.detach().clone() for p in head.parameters()]
+    trainer.train()
+    base_moved = any(not torch.equal(b, a) for b, a in zip(base_before, model.parameters()))
+    head_moved = any(not torch.equal(b, a) for b, a in zip(head_before, head.parameters()))
+    assert base_moved
+    assert head_moved
+
+
+def test_gradient_flows_into_base_from_head_alone_under_checkpointing(tmp_path):
+    # §2.5 ISOLATED head path (acceptance #6): freeze_base=false AND
+    # lm_loss_weight=0, so the ONLY loss is the head loss. Under gradient
+    # checkpointing (forced ON) the head's gradient must still reach a base param
+    # at/before the read layer — proving the recomputed hidden state the head
+    # reads is NOT detached from the base. This is deliberately NOT the
+    # false-green "lm_loss_weight>0 + some base grad" form (an LM-loss gradient
+    # would reach the base regardless of the head).
+    trainer, model, head = _make_trainer(
+        tmp_path, freeze_base=False, lm_loss_weight=0.0
+    )
+    model.gradient_checkpointing_enable()  # FORCE checkpointing on for this assertion
+    model.config.use_cache = False
+    model.train()
+
+    batch = _collate([_RowDataset()[i] for i in range(4)])
+    loss, outputs = trainer.compute_loss(model, batch, return_outputs=True)
+
+    # The read hidden state must remain attached to the autograd graph.
+    assert outputs.hidden_states[READ_LAYER].grad_fn is not None
+
+    model.zero_grad(set_to_none=True)
+    loss.backward()
+
+    # A base param strictly before the read layer (hidden_states[2] = output of
+    # block index 1) must receive gradient purely from the head loss.
+    pre_read_param = model.model.layers[0].self_attn.q_proj.weight
+    assert pre_read_param.grad is not None
+    assert torch.count_nonzero(pre_read_param.grad) > 0
+
+    head_param = next(head.parameters())
+    assert head_param.grad is not None
+    assert torch.count_nonzero(head_param.grad) > 0
+
+
+def test_input_norm_layernorm_trains_through_the_trainer(tmp_path):
+    # The optional input normalization must survive a real training step: the
+    # head (LayerNorm + linear) moves under a normal LR.
+    trainer, model, head = _make_trainer(tmp_path, input_norm="layernorm")
+    assert hasattr(head, "norm")
+    head_before = [p.detach().clone() for p in head.parameters()]
+    trainer.train()
+    assert any(not torch.equal(b, a) for b, a in zip(head_before, head.parameters()))

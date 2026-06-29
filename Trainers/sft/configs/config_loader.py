@@ -166,6 +166,7 @@ class AuxHeadConfig:
     freeze_base: bool = True             # Phase A = true (Phase B flips this)
     lm_loss_weight: float = 0.0          # Phase A = 0.0 (no LM term; Phase B > 0)
     head_lr: Optional[float] = None      # optional; defaults to trainer LR if None
+    input_norm: str = "none"             # "none" (default; off) | "layernorm"
 
 
 @dataclass
@@ -315,6 +316,7 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
         freeze_base=aux_data.get('freeze_base', True),
         lm_loss_weight=aux_data.get('lm_loss_weight', 0.0),
         head_lr=aux_data.get('head_lr', None),
+        input_norm=aux_data.get('input_norm', 'none'),
     )
 
 

@@ -20,11 +20,13 @@ the stock trainer. After ``train()`` the caller saves the head via
 
 Phase A vs Phase B
 ------------------
-Phase A loss IS the head loss alone (no LM term). The base + LoRA are frozen and
-the optimizer is built over the head's parameters only. The single Phase-B seam
-(``loss = outputs.loss + lm_loss_weight * head_loss``) is marked with a one-line
-comment in ``compute_loss``; flipping ``freeze_base``/``lm_loss_weight`` is the
-only change Phase B needs here.
+Phase A (``freeze_base=true``, ``lm_loss_weight=0``): the base + LoRA are frozen,
+the optimizer is built over the head's parameters only, and the loss IS the head
+loss alone. Phase B (``freeze_base=false``, ``lm_loss_weight>0``): the base stays
+unfrozen (PEFT's LoRA params remain trainable), the optimizer adds those params
+as a second group, and the loss is ``outputs.loss + lm_loss_weight * head_loss``,
+co-training the base with the head. The Phase-A path is byte-identical regardless
+of the Phase-B code being present (both branches gate on the config values).
 """
 
 from __future__ import annotations
@@ -34,7 +36,12 @@ from typing import Any, Optional
 import torch
 from transformers import Trainer
 
-from aux_head import AuxHead, compute_aux_head_loss, reduce_hidden_states
+from aux_head import (
+    AuxHead,
+    compute_aux_head_loss,
+    prompt_end_indices,
+    reduce_hidden_states,
+)
 
 
 class AuxHeadTrainer(Trainer):
@@ -75,6 +82,8 @@ class AuxHeadTrainer(Trainer):
 
         if getattr(aux_head_config, "freeze_base", True):
             self._freeze_base_keep_head()
+        else:
+            self._prepare_unfrozen_base_keep_head()
 
         self._log_trainable_param_accounting()
 
@@ -115,6 +124,28 @@ class AuxHeadTrainer(Trainer):
         for param in self.aux_head.parameters():
             param.requires_grad = True
 
+    def _prepare_unfrozen_base_keep_head(self) -> None:
+        """Phase B: co-train the unfrozen base alongside the head.
+
+        Leave the base/adapter ``requires_grad`` exactly as PEFT set them (the
+        LoRA params stay trainable) — do NOT freeze. Only ensure the head's params
+        are trainable. ``create_optimizer`` then registers both the head group and
+        the base's trainable (LoRA) params.
+
+        Defensive belt for the gradient-checkpointing path: ``output_hidden_states``
+        + checkpointing + LoRA can detach the recomputed hidden state the head
+        reads. ``enable_input_require_grads`` registers a forward hook that keeps
+        the input-embedding output requiring grad, so the autograd graph reaches
+        the adapter through the recompute boundary. It is a no-op under vanilla
+        ``torch`` checkpointing and harmless otherwise; ``use_cache`` is left to
+        the framework.
+        """
+        for param in self.aux_head.parameters():
+            param.requires_grad = True
+        enable_input_require_grads = getattr(self.model, "enable_input_require_grads", None)
+        if callable(enable_input_require_grads):
+            enable_input_require_grads()
+
     def _log_trainable_param_accounting(self) -> None:
         """Log trainable-param counts (mirror model_loader accounting) for audit."""
         base_trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -136,8 +167,9 @@ class AuxHeadTrainer(Trainer):
         The head is not a submodule of ``self.model``, so stock
         ``create_optimizer`` (which walks ``model.parameters()``) would never see
         it. We override to register the head's params explicitly, optionally on a
-        dedicated ``head_lr`` learning rate. Phase B (``freeze_base=false``) would
-        additionally add the unfrozen LoRA params here.
+        dedicated ``head_lr`` learning rate. Phase B (``freeze_base=false``)
+        additionally adds the base's trainable (LoRA) params as a second group at
+        the trainer learning rate.
         """
         if self.optimizer is not None:
             return self.optimizer
@@ -145,10 +177,21 @@ class AuxHeadTrainer(Trainer):
         optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
         head_lr = getattr(self.aux_head_config, "head_lr", None)
         head_params = [p for p in self.aux_head.parameters() if p.requires_grad]
-        param_group = {"params": head_params}
+        head_group = {"params": head_params}
         if head_lr is not None:
-            param_group["lr"] = head_lr
-        self.optimizer = optimizer_cls([param_group], **optimizer_kwargs)
+            head_group["lr"] = head_lr
+        param_groups = [head_group]
+
+        # Phase B: also optimize the unfrozen base (the LoRA params PEFT left
+        # trainable). No explicit lr ⇒ this group inherits the optimizer default
+        # (the trainer learning_rate carried in optimizer_kwargs). The head group
+        # keeps its optional head_lr override.
+        if not getattr(self.aux_head_config, "freeze_base", True):
+            base_params = [p for p in self.model.parameters() if p.requires_grad]
+            if base_params:
+                param_groups.append({"params": base_params})
+
+        self.optimizer = optimizer_cls(param_groups, **optimizer_kwargs)
         return self.optimizer
 
     def compute_loss(
@@ -158,7 +201,12 @@ class AuxHeadTrainer(Trainer):
         return_outputs: bool = False,
         num_items_in_batch: Optional[int] = None,
     ):
-        """Phase A: loss = proper_score(head(reduced hidden state), aux_target)."""
+        """Head loss, optionally combined with the LM loss (Phase B).
+
+        Phase A (``lm_loss_weight == 0``): ``loss = proper_score(head, aux_target)``
+        alone. Phase B (``lm_loss_weight > 0``): ``loss = outputs.loss +
+        lm_loss_weight * head_loss``, co-training the unfrozen base with the head.
+        """
         cfg = self.aux_head_config
 
         # The collator stacks the per-row target under "aux_target"; pop it so it
@@ -171,19 +219,40 @@ class AuxHeadTrainer(Trainer):
                 "plumbing carried the per-row target through."
             )
 
-        # Enable hidden states HERE (no global flag); base is frozen so this
-        # forward accrues gradient only through the head below.
+        # For "end_of_prompt", recover the per-row prompt/completion boundary from
+        # the labels (prompt tokens are masked to -100). Computed HERE because the
+        # batch still carries "labels"; passed into the reduction below.
+        prompt_end_idx = None
+        if cfg.token_position == "end_of_prompt":
+            labels = inputs.get("labels")
+            if labels is None:
+                raise ValueError(
+                    "token_position='end_of_prompt' requires 'labels' in the batch to "
+                    "locate the prompt/completion boundary; none were present."
+                )
+            prompt_end_idx = prompt_end_indices(labels, inputs["attention_mask"])
+
+        # Enable hidden states HERE (no global flag). In Phase A the base is frozen
+        # so this forward accrues gradient only through the head; in Phase B the
+        # unfrozen base co-trains through both the head loss and the LM loss.
         outputs = model(**inputs, output_hidden_states=True)
 
         hidden = outputs.hidden_states[cfg.layer]
-        reduced = reduce_hidden_states(hidden, inputs["attention_mask"], cfg.token_position)
+        reduced = reduce_hidden_states(
+            hidden, inputs["attention_mask"], cfg.token_position, prompt_end_idx=prompt_end_idx
+        )
         pred = self.aux_head(reduced)
 
         target = aux_target.to(pred.device)
         head_loss = compute_aux_head_loss(pred, target, cfg.loss)
 
-        # Phase A: the head loss is the ENTIRE loss (no LM term).
-        # Phase B seam (do NOT enable here): loss = outputs.loss + cfg.lm_loss_weight * head_loss
-        loss = head_loss
+        # Phase A (lm_loss_weight == 0): the head loss is the ENTIRE loss, leaving
+        # the off-path byte-identical. Phase B (> 0): add the weighted LM loss
+        # (already computed because "labels" stayed in the forward).
+        lm_loss_weight = getattr(cfg, "lm_loss_weight", 0.0)
+        if lm_loss_weight > 0:
+            loss = outputs.loss + lm_loss_weight * head_loss
+        else:
+            loss = head_loss
 
         return (loss, outputs) if return_outputs else loss

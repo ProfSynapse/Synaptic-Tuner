@@ -31,6 +31,7 @@ def test_absent_block_yields_disabled_default():
     assert cfg.head_type == "linear"
     assert cfg.freeze_base is True
     assert cfg.lm_loss_weight == 0.0
+    assert cfg.input_norm == "none"
 
 
 def test_enabled_block_is_parsed_fieldwise():
@@ -58,6 +59,23 @@ def test_enabled_block_is_parsed_fieldwise():
     assert cfg.hidden_dims == [64, 16]
     assert cfg.out_activation == "identity"
     assert cfg.head_lr == 1e-3
+
+
+def test_phase_b_block_is_parsed_fieldwise():
+    cfg = load_aux_head_config(
+        {
+            "enabled": True,
+            "layer": 35,
+            "token_position": "end_of_prompt",
+            "input_norm": "layernorm",
+            "freeze_base": False,
+            "lm_loss_weight": 1.0,
+        }
+    )
+    assert cfg.token_position == "end_of_prompt"
+    assert cfg.input_norm == "layernorm"
+    assert cfg.freeze_base is False
+    assert cfg.lm_loss_weight == 1.0
 
 
 def test_enabled_without_layer_fails_loud():

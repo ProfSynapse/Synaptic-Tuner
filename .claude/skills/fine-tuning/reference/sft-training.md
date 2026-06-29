@@ -90,37 +90,62 @@ When `completion_only_loss: true` (default):
 
 ### Auxiliary Readout Head (`aux_head`, optional)
 An optional auxiliary scalar readout head that learns to predict a per-row
-target from a frozen base model's hidden state (Phase A: the base/LoRA is
-frozen and only the small head trains; the LM loss is not used). The feature is
-**off by default** — when the `aux_head` block is absent or `enabled: false`,
-the SFT path is byte-identical to a standard run.
+target from a base model's hidden state. It runs in two modes:
+
+- **Phase A** (`freeze_base: true`, `lm_loss_weight: 0`): the base/LoRA is frozen
+  and only the small head trains; the LM loss is not used.
+- **Phase B** (`freeze_base: false`, `lm_loss_weight > 0`): the base stays
+  unfrozen (the LoRA params PEFT left trainable are added to the optimizer as a
+  second group at the trainer LR) and the head co-trains jointly with the LM
+  loss — total loss is `lm_loss + lm_loss_weight * head_loss`.
+
+The feature is **off by default** — when the `aux_head` block is absent or
+`enabled: false`, the SFT path is byte-identical to a standard run. The Phase-A
+path (frozen base, no LM term, `input_norm: none`) is itself byte-identical
+whether or not the Phase-B code is present, because both branches gate on the
+config values.
 
 When enabled, every training row must carry a finite numeric target under the
 column named by `target_field`; a missing, null, non-numeric, or non-finite
 value fails loudly (there is no silent default). After training, the head is
 written next to the model as a sidecar (`aux_head.safetensors` +
 `aux_head_config.json`) so it can be reloaded for inference independently of the
-base weights.
+base weights. The sidecar persists `input_norm`, so a head trained with
+normalization reloads and infers identically.
 
 ```yaml
 aux_head:
   enabled: true            # absent / false => feature fully off
   layer: 35                # required when enabled: which hidden_states index to read (0 = embeddings)
-  token_position: last     # "last" (last non-pad) | "mean" | integer index
+  token_position: last     # "last" (last non-pad) | "mean" | int | "end_of_prompt"
   target_field: target     # per-row dataset column carrying the scalar target
   loss: bce                # "bce" | "brier" (MSE on probability)
   head_type: linear        # "linear" | "mlp"
   hidden_dims: []          # hidden widths when head_type: mlp
   out_activation: sigmoid  # "sigmoid" (prob in [0,1]) | "identity"
-  freeze_base: true        # Phase A = true
-  lm_loss_weight: 0.0      # Phase A = 0.0 (no LM term)
+  input_norm: none         # "none" (off; default) | "layernorm" (so the head trains at a normal LR)
+  freeze_base: true        # Phase A = true; Phase B = false (co-train the unfrozen base)
+  lm_loss_weight: 0.0      # Phase A = 0.0; Phase B > 0 (weight on the head loss in the joint sum)
   head_lr: null            # optional dedicated head LR; defaults to trainer LR
 ```
 
-A complete runnable example lives at
-`Trainers/sft/configs/aux_head_example.yaml`. `layer` has no default — choosing
-the hidden-state index is a deliberate per-run decision, so an enabled block
-without it fails fast.
+Two Phase-B knobs:
+
+- **`token_position: end_of_prompt`** reads the last *prompt* token (the position
+  right before generation) instead of the last completion token. At train time
+  the prompt/completion boundary is recovered from the label mask (prompt tokens
+  are masked to `-100`); a row with no prompt span (completion-first or empty
+  completion) falls back to the last real token. At inference the input is
+  prompt-only, so `end_of_prompt` and `last` coincide.
+- **`input_norm: layernorm`** applies a `LayerNorm` to the pulled hidden state
+  before the head, so a linear head trains at a normal LR on unnormalized
+  activations instead of saturating.
+
+Complete runnable examples live at
+`Trainers/sft/configs/aux_head_example.yaml` (Phase A) and
+`Trainers/sft/configs/aux_head_phase_b_example.yaml` (Phase B). `layer` has no
+default — choosing the hidden-state index is a deliberate per-run decision, so an
+enabled block without it fails fast.
 
 ---
 
@@ -193,7 +218,7 @@ Key sections:
 - `training` — batch size, LR, epochs, packing, etc.
 - `dataset` — source, filtering, split
 - `evolutionary` — experimental gradient evolution (disabled by default)
-- `aux_head` — optional auxiliary scalar readout head over a frozen base (disabled by default)
+- `aux_head` — optional auxiliary scalar readout head, head-only over a frozen base (Phase A) or co-trained with the LM loss over an unfrozen base (Phase B); disabled by default
 
 For cloud runs, evolutionary SFT is now expressible through `run-experiment` specs or `cloud-pipeline --train-evolutionary-*` overrides. Keep the first run short and capped by `max_steps`; the wrapper adds real per-step overhead.
 
