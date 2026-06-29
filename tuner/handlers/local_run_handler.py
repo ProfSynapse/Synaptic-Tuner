@@ -88,6 +88,19 @@ def _append_flag(args: list[str], key: str, value: Any) -> None:
     args.extend([flag, str(value)])
 
 
+def _append_bool_flag(args: list[str], key: str, value: Any) -> None:
+    """Emit a tri-state boolean as ``--flag`` / ``--no-flag`` (None ⇒ omit).
+
+    Mirrors train_sft.py's paired store_true/store_false dest pattern (e.g.
+    --load-in-4bit / --no-load-in-4bit) so a recipe can express False explicitly
+    without absence collapsing to False. Distinct from :func:`_append_flag`, whose
+    bool path can only emit the positive ``--flag`` and silently drops False.
+    """
+    if value is None:
+        return
+    args.append(_flag_name(key) if bool(value) else _flag_name("no_" + key))
+
+
 def _validate_user_field(raw: Any) -> str:
     """Normalize the ``job.user`` YAML value.
 
@@ -716,6 +729,35 @@ class LocalRunHandler(BaseHandler):
                 command.extend(
                     ["--chat-template-kwargs", json.dumps(chat_template_kwargs)]
                 )
+
+            # aux_head block forwarding (sft-only; the dpo/kto trainers expose no
+            # --aux-head-* flags). Forwarded field-by-field ONLY when the recipe
+            # carries an aux_head block, so recipes without one emit ZERO new flags
+            # and stay byte-identical. enabled/freeze_base are tri-state booleans
+            # (--flag/--no-flag) so a recipe can set them False explicitly; the
+            # scalar/str/numeric knobs ride the _append_flag None⇒omit path (a
+            # falsy-but-set value like lm_loss_weight: 0.0 is still forwarded).
+            aux_head_cfg = cfg.get("aux_head")
+            if isinstance(aux_head_cfg, dict):
+                _append_bool_flag(command, "aux_head_enabled", aux_head_cfg.get("enabled"))
+                _append_bool_flag(command, "aux_head_freeze_base", aux_head_cfg.get("freeze_base"))
+                for field_name in (
+                    "layer",
+                    "token_position",
+                    "target_field",
+                    "loss",
+                    "head_type",
+                    "out_activation",
+                    "input_norm",
+                    "lm_loss_weight",
+                    "head_lr",
+                ):
+                    _append_flag(command, "aux_head_" + field_name, aux_head_cfg.get(field_name))
+            # prompt_render is a training-config preprocessing knob (it replaces the
+            # masking region, so it lives on training, not aux_head), forwarded via
+            # the aux-head-grouped flag independently of the aux_head block. Unset
+            # ⇒ omitted ⇒ byte-identical for every existing recipe.
+            _append_flag(command, "aux_head_prompt_render", training_cfg.get("prompt_render"))
 
         # beta forwards only for dpo/kto (sft has no --beta argparse). is not None
         # so an explicit beta: 0.0 is honored, not silently swapped for the trainer

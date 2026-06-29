@@ -39,7 +39,7 @@ def test_local_run_sft_config_compiles_repo_relative_dataset(tmp_path):
     assert plan["host_artifact_path"].name == "unit"
 
 
-def _compile_local_command(tmp_path, *, method, trainer, training, lora=None):
+def _compile_local_command(tmp_path, *, method, trainer, training, lora=None, aux_head=None):
     """Compile a local-docker recipe and return the built trainer command list."""
     dataset = tmp_path / "data.jsonl"
     dataset.write_text('{"conversations":[]}\n', encoding="utf-8")
@@ -59,6 +59,8 @@ def _compile_local_command(tmp_path, *, method, trainer, training, lora=None):
     }
     if lora is not None:
         recipe["lora"] = lora
+    if aux_head is not None:
+        recipe["aux_head"] = aux_head
     config.write_text(yaml.safe_dump(recipe), encoding="utf-8")
     handler = LocalRunHandler(args=Namespace(json=True, job_config=str(config)))
     plan = handler._compile(config, handler._load_yaml(config))
@@ -261,3 +263,81 @@ def test_local_run_dpo_omits_chat_template_kwargs(tmp_path):
         training={"max_steps": 1, "beta": 0.05, "chat_template_kwargs": {"enable_thinking": False}},
     )
     assert "--chat-template-kwargs" not in command
+
+
+def test_local_run_sft_omits_aux_head_flags_when_absent(tmp_path):
+    # Byte-identical for recipes with no aux_head block and no training.prompt_render:
+    # zero --aux-head-* flags emitted (the whole point of the gated forwarding).
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+    )
+    assert not any(arg.startswith("--aux-head-") for arg in command)
+    assert "--no-aux-head-enabled" not in command
+
+
+def test_local_run_sft_forwards_aux_head_block(tmp_path):
+    # An aux_head block forwards field-by-field; enabled/freeze_base use the
+    # tri-state --flag/--no-flag form; prompt_render rides training, not aux_head.
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1, "prompt_render": "prompt_completion"},
+        aux_head={
+            "enabled": True,
+            "layer": 35,
+            "token_position": "end_of_prompt",
+            "target_field": "score",
+            "loss": "bce",
+            "head_type": "linear",
+            "out_activation": "sigmoid",
+            "input_norm": "layernorm",
+            "freeze_base": False,
+            "lm_loss_weight": 1.0,
+            "head_lr": 0.005,
+        },
+    )
+    assert "--aux-head-enabled" in command
+    assert "--no-aux-head-freeze-base" in command
+    assert command[command.index("--aux-head-layer") + 1] == "35"
+    assert command[command.index("--aux-head-token-position") + 1] == "end_of_prompt"
+    assert command[command.index("--aux-head-target-field") + 1] == "score"
+    assert command[command.index("--aux-head-loss") + 1] == "bce"
+    assert command[command.index("--aux-head-head-type") + 1] == "linear"
+    assert command[command.index("--aux-head-out-activation") + 1] == "sigmoid"
+    assert command[command.index("--aux-head-input-norm") + 1] == "layernorm"
+    assert command[command.index("--aux-head-lm-loss-weight") + 1] == "1.0"
+    assert command[command.index("--aux-head-head-lr") + 1] == "0.005"
+    assert command[command.index("--aux-head-prompt-render") + 1] == "prompt_completion"
+
+
+def test_local_run_sft_forwards_falsy_aux_head_values(tmp_path):
+    # A set-but-falsy lm_loss_weight (0.0) and an explicit enabled: false must
+    # still forward (provenance: the trainer must run the recipe's exact values).
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+        aux_head={"enabled": False, "lm_loss_weight": 0.0},
+    )
+    assert "--no-aux-head-enabled" in command
+    assert command[command.index("--aux-head-lm-loss-weight") + 1] == "0.0"
+
+
+def test_local_run_sft_forwards_prompt_render_without_aux_head_block(tmp_path):
+    # prompt_render is a training-config knob, forwarded independently of the
+    # aux_head block (a plain SFT recipe may want the faithful render).
+    command = _compile_local_command(
+        tmp_path, method="sft", trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1, "prompt_render": "prompt_completion"},
+    )
+    assert command[command.index("--aux-head-prompt-render") + 1] == "prompt_completion"
+
+
+def test_local_run_dpo_omits_aux_head_flags(tmp_path):
+    # aux_head forwarding is sft-only: a stray aux_head block in a dpo recipe must
+    # not be forwarded (the dpo trainer exposes no --aux-head-* flags).
+    command = _compile_local_command(
+        tmp_path, method="dpo", trainer="Trainers/dpo/train_dpo.py",
+        training={"max_steps": 1, "beta": 0.05, "prompt_render": "prompt_completion"},
+        aux_head={"enabled": True, "layer": 35},
+    )
+    assert not any(arg.startswith("--aux-head-") for arg in command)

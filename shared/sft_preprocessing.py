@@ -166,6 +166,7 @@ def materialize_sft_example(
     assistant_only_loss: bool,
     source_hash: str | None = None,
     chat_template_kwargs: dict[str, Any] | None = None,
+    prompt_render: str = "full_conversation",
 ) -> PreparedSFTExample:
     # chat_template_kwargs is forwarded verbatim into apply_chat_template (e.g.
     # {"enable_thinking": False} for thinking-capable models). Default None ⇒ empty
@@ -183,6 +184,70 @@ def materialize_sft_example(
     # Unwrap Processor → Tokenizer for multimodal models (Gemma 4, Qwen-VL, etc.)
     # Processors have apply_chat_template but lack encode(); the inner .tokenizer does.
     _encoder = getattr(tokenizer, "tokenizer", tokenizer)
+
+    # prompt_render selects the render/masking strategy. The default
+    # "full_conversation" path (below) renders the whole conversation with
+    # add_generation_prompt=False and derives the assistant-only mask by a prefix
+    # match. That prefix match breaks whenever a template renders the assistant
+    # scaffold differently with vs. without add_generation_prompt (e.g. one fewer
+    # newline around the header), so the masked boundary is not the generation
+    # anchor. The "prompt_completion" branch instead builds input_ids from the
+    # add_generation_prompt=True prompt render — so the prompt ends EXACTLY at the
+    # generation anchor — followed by the raw completion plus a derived terminal,
+    # masking the prompt segment to -100. It is gated strictly behind the
+    # non-default flag AND an assistant final turn, so every existing caller is
+    # byte-identical. template_kwargs are forwarded into the prompt-half render
+    # identically to the full-conversation render, so no new divergence axis is
+    # introduced; the completion half is encoded raw (no chat template).
+    if prompt_render == "prompt_completion" and messages[-1].get("role") == "assistant":
+        prompt_str = tokenizer.apply_chat_template(
+            messages[:-1],
+            tokenize=False,
+            add_generation_prompt=True,
+            **template_kwargs,
+        )
+        prompt_ids = _encoder.encode(prompt_str, add_special_tokens=False)
+
+        completion_text = messages[-1].get("content")
+        if not isinstance(completion_text, str):
+            raise ValueError(
+                "prompt_render='prompt_completion' requires the final assistant "
+                "message content to be a string after sanitization, got "
+                f"{type(completion_text).__name__}."
+            )
+        # Terminal is DERIVED from the tokenizer (never a hardcoded literal) so the
+        # completion closes with the model's own end-of-turn id. Read from the
+        # encoder whose vocabulary produced the ids, falling back to the outer
+        # tokenizer (Processor wrappers proxy this); loud if neither defines it.
+        terminal_id = getattr(_encoder, "eos_token_id", None)
+        if terminal_id is None:
+            terminal_id = getattr(tokenizer, "eos_token_id", None)
+        if terminal_id is None:
+            raise ValueError(
+                "prompt_render='prompt_completion' requires the tokenizer to define "
+                "eos_token_id (the completion terminal is derived from it, never "
+                "hardcoded)."
+            )
+        completion_ids = (
+            _encoder.encode(completion_text, add_special_tokens=False) + [terminal_id]
+        )
+
+        full_ids = prompt_ids + completion_ids
+        truncation_applied = len(full_ids) > max_seq_length
+        input_ids = list(full_ids[:max_seq_length])
+        attention_mask = [1] * len(input_ids)
+        # Mask the prompt segment; every completion token (incl. the terminal)
+        # carries a real label. Right-trim mirrors the full-conversation contract.
+        labels = ([-100] * len(prompt_ids) + completion_ids)[:max_seq_length]
+        return PreparedSFTExample(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+            example_format=example_format,
+            loss_mask_mode="assistant_only",
+            truncation_applied=truncation_applied,
+            source_hash=source_hash,
+        )
 
     full_str = tokenizer.apply_chat_template(
         messages,

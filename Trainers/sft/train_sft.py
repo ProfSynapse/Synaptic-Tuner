@@ -43,6 +43,7 @@ from configs.config_loader import (
     get_13b_config,
     get_20b_config,
     load_config,
+    validate_aux_head_coherence,
 )
 from src.data_loader import load_and_prepare_tokenized_dataset, print_dataset_samples
 from src.model_loader import (
@@ -473,6 +474,47 @@ def parse_args(argv=None):
         help="Disable 4-bit model loading",
     )
 
+    # aux_head CLI knobs (local-run lane). Every flag defaults to None so an unset
+    # flag never overrides the loaded config — a CLI-provided value takes
+    # precedence over the YAML/preset config, and absence is byte-identical to
+    # config-only. Scalar/str/numeric knobs set AuxHeadConfig fields; the two
+    # booleans (enabled, freeze_base) use the tri-state --flag/--no-flag pattern
+    # (mirroring --load-in-4bit) so False is expressible without making absence
+    # mean False. --aux-head-prompt-render is grouped here for user intent but
+    # sets config.training.prompt_render — the render mode lives on
+    # SFTTrainingConfig, not AuxHeadConfig (it replaces the masking region).
+    parser.set_defaults(aux_head_enabled=None, aux_head_freeze_base=None)
+    parser.add_argument("--aux-head-enabled", action="store_true", dest="aux_head_enabled",
+                        help="Enable the auxiliary scalar readout head (AuxHeadConfig.enabled=true).")
+    parser.add_argument("--no-aux-head-enabled", action="store_false", dest="aux_head_enabled",
+                        help="Disable the auxiliary scalar readout head (AuxHeadConfig.enabled=false).")
+    parser.add_argument("--aux-head-layer", type=int, default=None,
+                        help="Hidden-states index the head reads (AuxHeadConfig.layer).")
+    parser.add_argument("--aux-head-token-position", type=str, default=None,
+                        help="Token position the head reduces over "
+                             "(AuxHeadConfig.token_position; e.g. last | mean | end_of_prompt).")
+    parser.add_argument("--aux-head-target-field", type=str, default=None,
+                        help="Per-row dataset column carrying the head target (AuxHeadConfig.target_field).")
+    parser.add_argument("--aux-head-loss", type=str, default=None,
+                        help="Head loss (AuxHeadConfig.loss; e.g. bce | brier).")
+    parser.add_argument("--aux-head-head-type", type=str, default=None,
+                        help="Head architecture (AuxHeadConfig.head_type; e.g. linear | mlp).")
+    parser.add_argument("--aux-head-out-activation", type=str, default=None,
+                        help="Head output activation (AuxHeadConfig.out_activation; e.g. sigmoid | identity).")
+    parser.add_argument("--aux-head-input-norm", type=str, default=None,
+                        help="Head input normalization (AuxHeadConfig.input_norm; e.g. none | layernorm).")
+    parser.add_argument("--aux-head-freeze-base", action="store_true", dest="aux_head_freeze_base",
+                        help="Freeze the base model (AuxHeadConfig.freeze_base=true).")
+    parser.add_argument("--no-aux-head-freeze-base", action="store_false", dest="aux_head_freeze_base",
+                        help="Unfreeze the base model for joint co-training (AuxHeadConfig.freeze_base=false).")
+    parser.add_argument("--aux-head-lm-loss-weight", type=float, default=None,
+                        help="Weight on the LM loss term in joint training (AuxHeadConfig.lm_loss_weight).")
+    parser.add_argument("--aux-head-head-lr", type=float, default=None,
+                        help="Optional explicit head learning rate (AuxHeadConfig.head_lr).")
+    parser.add_argument("--aux-head-prompt-render", type=str, default=None,
+                        help="SFT render/masking strategy "
+                             "(config.training.prompt_render; full_conversation | prompt_completion).")
+
     # Dataset parameters
     parser.add_argument("--dataset-name", type=str,
                        help="HuggingFace dataset name")
@@ -626,6 +668,52 @@ def run(args: argparse.Namespace):
                 f"(got {type(parsed_chat_template_kwargs).__name__})."
             )
         config.training.chat_template_kwargs = parsed_chat_template_kwargs
+    # aux_head CLI overrides (local-run lane). config.aux_head always exists
+    # (Config carries a default AuxHeadConfig), so each is a direct field set
+    # guarded by is not None — an unset flag preserves the loaded config exactly.
+    # NOTE: these overrides run AFTER load_aux_head_config, so the YAML-load
+    # coherence guards have already passed; the shared validate_aux_head_coherence
+    # call below re-runs them on the final (post-override) config to keep the CLI
+    # lane at parity with the YAML lane.
+    # prompt_render is grouped with the aux knobs for user intent but targets
+    # config.training (the render mode is a preprocessing strategy, not a head field).
+    if args.aux_head_enabled is not None:
+        config.aux_head.enabled = args.aux_head_enabled
+    if args.aux_head_layer is not None:
+        config.aux_head.layer = args.aux_head_layer
+    if args.aux_head_token_position is not None:
+        config.aux_head.token_position = args.aux_head_token_position
+    if args.aux_head_target_field is not None:
+        config.aux_head.target_field = args.aux_head_target_field
+    if args.aux_head_loss is not None:
+        config.aux_head.loss = args.aux_head_loss
+    if args.aux_head_head_type is not None:
+        config.aux_head.head_type = args.aux_head_head_type
+    if args.aux_head_out_activation is not None:
+        config.aux_head.out_activation = args.aux_head_out_activation
+    if args.aux_head_input_norm is not None:
+        config.aux_head.input_norm = args.aux_head_input_norm
+    if args.aux_head_freeze_base is not None:
+        config.aux_head.freeze_base = args.aux_head_freeze_base
+    if args.aux_head_lm_loss_weight is not None:
+        config.aux_head.lm_loss_weight = args.aux_head_lm_loss_weight
+    if args.aux_head_head_lr is not None:
+        config.aux_head.head_lr = args.aux_head_head_lr
+    if args.aux_head_prompt_render is not None:
+        config.training.prompt_render = args.aux_head_prompt_render
+    # Coherence parity with the YAML lane: the --aux-head-* overrides above mutate
+    # config.aux_head after load_aux_head_config ran, so a config assembled purely
+    # from CLI flags (e.g. --aux-head-enabled --no-aux-head-freeze-base, which
+    # reaches the freeze_base=false + lm_loss_weight=0 corner via the dataclass
+    # defaults) would otherwise reach training unvalidated. Same shared guard,
+    # same raise. Distinct from the prompt_render WARN below — both must hold.
+    validate_aux_head_coherence(
+        enabled=config.aux_head.enabled,
+        freeze_base=config.aux_head.freeze_base,
+        lm_loss_weight=config.aux_head.lm_loss_weight,
+        out_activation=config.aux_head.out_activation,
+        loss=config.aux_head.loss,
+    )
     if args.lora_r is not None:
         config.lora.r = args.lora_r
     if args.lora_alpha is not None:
@@ -827,6 +915,25 @@ def run(args: argparse.Namespace):
     aux_head_enabled = bool(aux_head_cfg is not None and aux_head_cfg.enabled)
     aux_target_field = aux_head_cfg.target_field if aux_head_enabled else None
 
+    # Faithfulness guard: token_position="end_of_prompt" reads the generation-anchor
+    # token only when the row was rendered prompt/completion-style. On a
+    # full_conversation row the boundary token is NOT the generation anchor (the
+    # assistant scaffold renders differently with vs. without add_generation_prompt),
+    # so the head reads an off-anchor representation. WARN (not error): the combo is
+    # legitimate for single-turn / inference-shaped rows whose two renders coincide.
+    if (
+        aux_head_enabled
+        and aux_head_cfg.token_position == "end_of_prompt"
+        and config.training.prompt_render == "full_conversation"
+    ):
+        print(
+            "\nWARNING: aux_head token_position='end_of_prompt' with "
+            "prompt_render='full_conversation' — the head may read an off-anchor "
+            "token because the assistant scaffold renders differently with vs. "
+            "without add_generation_prompt. Set training.prompt_render="
+            "'prompt_completion' for a faithful boundary.\n"
+        )
+
     # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
     # depend on implicit TRL/Unsloth dataset preparation behavior.
     train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
@@ -842,6 +949,7 @@ def run(args: argparse.Namespace):
         loss_mask_mode=loss_mask_mode,
         chat_template_kwargs=config.training.chat_template_kwargs,
         aux_target_field=aux_target_field,
+        prompt_render=config.training.prompt_render,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
