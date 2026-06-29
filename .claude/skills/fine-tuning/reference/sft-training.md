@@ -88,6 +88,40 @@ When `completion_only_loss: true` (default):
 - User prompt tokens ignored during training
 - Prevents model from learning to generate user messages
 
+### Auxiliary Readout Head (`aux_head`, optional)
+An optional auxiliary scalar readout head that learns to predict a per-row
+target from a frozen base model's hidden state (Phase A: the base/LoRA is
+frozen and only the small head trains; the LM loss is not used). The feature is
+**off by default** — when the `aux_head` block is absent or `enabled: false`,
+the SFT path is byte-identical to a standard run.
+
+When enabled, every training row must carry a finite numeric target under the
+column named by `target_field`; a missing, null, non-numeric, or non-finite
+value fails loudly (there is no silent default). After training, the head is
+written next to the model as a sidecar (`aux_head.safetensors` +
+`aux_head_config.json`) so it can be reloaded for inference independently of the
+base weights.
+
+```yaml
+aux_head:
+  enabled: true            # absent / false => feature fully off
+  layer: 35                # required when enabled: which hidden_states index to read (0 = embeddings)
+  token_position: last     # "last" (last non-pad) | "mean" | integer index
+  target_field: target     # per-row dataset column carrying the scalar target
+  loss: bce                # "bce" | "brier" (MSE on probability)
+  head_type: linear        # "linear" | "mlp"
+  hidden_dims: []          # hidden widths when head_type: mlp
+  out_activation: sigmoid  # "sigmoid" (prob in [0,1]) | "identity"
+  freeze_base: true        # Phase A = true
+  lm_loss_weight: 0.0      # Phase A = 0.0 (no LM term)
+  head_lr: null            # optional dedicated head LR; defaults to trainer LR
+```
+
+A complete runnable example lives at
+`Trainers/sft/configs/aux_head_example.yaml`. `layer` has no default — choosing
+the hidden-state index is a deliberate per-run decision, so an enabled block
+without it fails fast.
+
 ---
 
 ## Training Workflow
@@ -159,6 +193,7 @@ Key sections:
 - `training` — batch size, LR, epochs, packing, etc.
 - `dataset` — source, filtering, split
 - `evolutionary` — experimental gradient evolution (disabled by default)
+- `aux_head` — optional auxiliary scalar readout head over a frozen base (disabled by default)
 
 For cloud runs, evolutionary SFT is now expressible through `run-experiment` specs or `cloud-pipeline --train-evolutionary-*` overrides. Keep the first run short and capped by `max_steps`; the wrapper adds real per-step overhead.
 

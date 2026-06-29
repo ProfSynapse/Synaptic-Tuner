@@ -227,6 +227,25 @@ def validate_model_compatibility(config) -> None:
 
 
 
+def _resolve_hidden_size(model) -> int:
+    """Resolve the base model's hidden size for the aux_head input dim.
+
+    The model returned by the PEFT/Unsloth wrap usually proxies ``.config`` to the
+    base, but not always — fall back to the base model's config, then to the input
+    embedding width.
+    """
+    config_obj = getattr(model, "config", None)
+    hidden_size = getattr(config_obj, "hidden_size", None)
+    if hidden_size is None:
+        base = getattr(model, "base_model", None)
+        base_config = getattr(base, "config", None)
+        hidden_size = getattr(base_config, "hidden_size", None)
+    if hidden_size is None:
+        embeddings = model.get_input_embeddings()
+        hidden_size = getattr(embeddings, "embedding_dim", None) or embeddings.weight.shape[1]
+    return int(hidden_size)
+
+
 def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dict[str, torch.Tensor]:
     """Pad explicit tokenized SFT rows into a trainer-ready batch."""
     if not features:
@@ -254,11 +273,21 @@ def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dic
         attention_mask.append(feature_attention_mask)
         labels.append(feature_labels)
 
-    return {
+    batch = {
         "input_ids": torch.tensor(input_ids, dtype=torch.long),
         "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
         "labels": torch.tensor(labels, dtype=torch.long),
     }
+
+    # aux_head: when preprocessing carried a per-row target through (feature
+    # enabled), stack it into a float `aux_target` tensor. Absent ⇒ the batch is
+    # byte-identical to the feature-off path.
+    if "aux_target" in features[0]:
+        batch["aux_target"] = torch.tensor(
+            [float(feature["aux_target"]) for feature in features], dtype=torch.float32
+        )
+
+    return batch
 
 
 def build_training_lineage(
@@ -812,6 +841,12 @@ def run(args: argparse.Namespace):
         "packing": False,
     }
 
+    # aux_head: carry the configured per-row target column through preprocessing
+    # only when the feature is enabled; None ⇒ dataset prep is byte-identical.
+    aux_head_cfg = getattr(config, "aux_head", None)
+    aux_head_enabled = bool(aux_head_cfg is not None and aux_head_cfg.enabled)
+    aux_target_field = aux_head_cfg.target_field if aux_head_enabled else None
+
     # Materialize trainer-ready tokenized rows in-repo so cloud runs do not
     # depend on implicit TRL/Unsloth dataset preparation behavior.
     train_dataset, eval_dataset = load_and_prepare_tokenized_dataset(
@@ -826,6 +861,7 @@ def run(args: argparse.Namespace):
         max_seq_length=config.training.max_seq_length,
         loss_mask_mode=loss_mask_mode,
         chat_template_kwargs=config.training.chat_template_kwargs,
+        aux_target_field=aux_target_field,
     )
     run_metadata["train_size"] = len(train_dataset)
     run_metadata["eval_size"] = len(eval_dataset) if eval_dataset else None
@@ -992,7 +1028,32 @@ def run(args: argparse.Namespace):
         "callbacks": callbacks,
         "data_collator": lambda features: collate_prepared_sft_batch(features, tokenizer),
     }
-    trainer = Trainer(**trainer_kwargs)
+    # aux_head: swap in the readout-head trainer only when enabled; otherwise the
+    # stock Trainer construction is byte-identical to current behavior.
+    aux_head_module = None
+    if aux_head_enabled:
+        from src.aux_head import AuxHead
+        from src.aux_head_trainer import AuxHeadTrainer
+
+        input_dim = _resolve_hidden_size(model)
+        aux_head_module = AuxHead(
+            input_dim=input_dim,
+            head_type=aux_head_cfg.head_type,
+            hidden_dims=aux_head_cfg.hidden_dims,
+            out_activation=aux_head_cfg.out_activation,
+        )
+        print(
+            f"[aux_head] enabled: layer={aux_head_cfg.layer}, token_position={aux_head_cfg.token_position}, "
+            f"target_field={aux_head_cfg.target_field!r}, loss={aux_head_cfg.loss}, head_type={aux_head_cfg.head_type}, "
+            f"input_dim={input_dim}"
+        )
+        trainer = AuxHeadTrainer(
+            aux_head=aux_head_module,
+            aux_head_config=aux_head_cfg,
+            **trainer_kwargs,
+        )
+    else:
+        trainer = Trainer(**trainer_kwargs)
 
     # Remove PrinterCallback to stop the {'loss': ...} dict spam
     # Our LiveDashboardCallback or MetricsTableCallback handles display instead
@@ -1087,6 +1148,21 @@ def run(args: argparse.Namespace):
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
     trainer.save_model(str(final_model_path))
+
+    # aux_head: trainer.save_model does NOT serialize the separately-held head, so
+    # persist it as a portable sidecar (weights + resolved config) alongside the
+    # final model. Only runs when the feature is enabled.
+    if aux_head_module is not None:
+        from src.aux_head import save_aux_head
+
+        save_aux_head(
+            aux_head_module,
+            final_model_path,
+            layer=aux_head_cfg.layer,
+            token_position=aux_head_cfg.token_position,
+            loss=aux_head_cfg.loss,
+        )
+        print(f"[aux_head] saved sidecar (aux_head.safetensors + aux_head_config.json) to: {final_model_path}")
 
     print(f"\n[OK] Training complete!")
     print(f"  Model saved to: {final_model_path}")

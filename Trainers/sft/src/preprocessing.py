@@ -4,6 +4,7 @@ SFT-facing wrapper over the canonical repo-owned preprocessing contract.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from datasets import Dataset
@@ -76,9 +77,16 @@ def prepare_sft_dataset(
     loss_mask_mode: str = ASSISTANT_ONLY,
     backend: str = "trl_unsloth",
     chat_template_kwargs: dict[str, Any] | None = None,
+    aux_target_field: str | None = None,
 ) -> Dataset:
     del backend  # The contract is backend-agnostic; callers choose the trainer separately.
 
+    # ``remove_columns=dataset.column_names`` (below) drops every original column
+    # AFTER ``_materialize`` runs, so any per-row directive (e.g. the aux_head
+    # target) must be READ HERE and threaded into the returned dict to survive —
+    # extending only the collator is too late. When ``aux_target_field`` is None
+    # the returned dict is exactly {input_ids, attention_mask, labels}, identical
+    # to the feature-off behavior.
     def _materialize(example: dict[str, Any]) -> dict[str, Any]:
         normalized = normalize_sft_example(example)
         prepared = materialize_sft_features(
@@ -88,17 +96,45 @@ def prepare_sft_dataset(
             loss_mask_mode=loss_mask_mode,
             chat_template_kwargs=chat_template_kwargs,
         )
-        return {
+        materialized = {
             "input_ids": prepared.input_ids,
             "attention_mask": prepared.attention_mask,
             "labels": prepared.labels,
         }
+        if aux_target_field is not None:
+            materialized["aux_target"] = _read_aux_target(example, aux_target_field)
+        return materialized
 
     return dataset.map(
         _materialize,
         remove_columns=dataset.column_names,
         desc="Preparing tokenized SFT examples",
     )
+
+
+def _read_aux_target(example: dict[str, Any], aux_target_field: str) -> float:
+    """Read + validate a per-row aux_head target. Loud on missing/NaN (never default).
+
+    Mirrors the subspan precedent's loud-fail discipline: every row must carry a
+    finite target when the feature is enabled — there is no silent substitution.
+    """
+    raw_value = example.get(aux_target_field, None)
+    if raw_value is None:
+        raise ValueError(
+            f"aux_head is enabled with target_field={aux_target_field!r} but a row is "
+            f"missing it (or it is null). Every training row must carry a finite target."
+        )
+    try:
+        target_value = float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"aux_head target_field={aux_target_field!r} value {raw_value!r} is not numeric."
+        ) from exc
+    if not math.isfinite(target_value):
+        raise ValueError(
+            f"aux_head target_field={aux_target_field!r} value {raw_value!r} is not finite (NaN/inf)."
+        )
+    return target_value
 
 
 def load_and_prepare_sft_dataset(
@@ -110,6 +146,7 @@ def load_and_prepare_sft_dataset(
     num_proc: int = 1,
     include_text: bool = False,
     chat_template_kwargs: dict[str, Any] | None = None,
+    aux_target_field: str | None = None,
 ) -> Dataset:
     del num_proc
     del include_text
@@ -119,4 +156,5 @@ def load_and_prepare_sft_dataset(
         max_seq_length=max_seq_length,
         loss_mask_mode=loss_mask_mode,
         chat_template_kwargs=chat_template_kwargs,
+        aux_target_field=aux_target_field,
     )
