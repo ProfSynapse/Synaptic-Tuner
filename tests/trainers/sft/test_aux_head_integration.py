@@ -341,3 +341,75 @@ def test_input_norm_layernorm_trains_through_the_trainer(tmp_path):
     head_before = [p.detach().clone() for p in head.parameters()]
     trainer.train()
     assert any(not torch.equal(b, a) for b, a in zip(head_before, head.parameters()))
+
+
+def test_unfrozen_base_optimizer_group_is_exactly_the_trainable_subset(tmp_path):
+    # Acceptance #3, strengthened: a FULLY-unfrozen tiny base makes "the second
+    # group contains the trainable params" trivially true. On a real run PEFT
+    # leaves only the LoRA params trainable, so here we mimic that sparsity —
+    # freeze MOST base params and leave a single one trainable — then assert the
+    # optimizer's second param group is EXACTLY that trainable subset (not the
+    # whole base), that the trainable base param MOVES after one joint step, and
+    # that a frozen base param does NOT move.
+    trainer, model, head = _make_trainer(
+        tmp_path, freeze_base=False, lm_loss_weight=1.0
+    )
+
+    # Stand-in for LoRA sparsity: only layer-0 q_proj stays trainable.
+    trainable_subset = {}
+    for name, param in model.named_parameters():
+        if "layers.0.self_attn.q_proj" in name:
+            param.requires_grad = True
+            trainable_subset[name] = param
+        else:
+            param.requires_grad = False
+    assert len(trainable_subset) >= 1  # the subset is non-empty (non-vacuous)
+
+    optimizer = trainer.create_optimizer()
+    assert len(optimizer.param_groups) == 2  # head group + base group
+
+    # Group 0 is the head; group 1 is the base's trainable params (see
+    # create_optimizer's append order). The base group must be EXACTLY the
+    # trainable subset — by object identity, so a regression that widened it to
+    # the whole base would turn this red.
+    head_group_ids = {id(p) for p in optimizer.param_groups[0]["params"]}
+    base_group_ids = {id(p) for p in optimizer.param_groups[1]["params"]}
+    assert head_group_ids == {id(p) for p in head.parameters()}
+    assert base_group_ids == {id(p) for p in trainable_subset.values()}
+
+    named = dict(model.named_parameters())
+    trainable_name = next(iter(trainable_subset))
+    # A param guaranteed to be outside the trainable subset (different layer).
+    frozen_name = "model.layers.2.mlp.down_proj.weight"
+    assert not named[frozen_name].requires_grad
+
+    trainable_before = named[trainable_name].detach().clone()
+    frozen_before = named[frozen_name].detach().clone()
+    trainer.train()
+    assert not torch.equal(trainable_before, named[trainable_name])  # subset moved
+    assert torch.equal(frozen_before, named[frozen_name])  # frozen did NOT move
+
+
+def test_unfrozen_base_belt_is_harmless_without_checkpointing(tmp_path):
+    # YELLOW disposition (accept-as-is): _prepare_unfrozen_base_keep_head calls
+    # enable_input_require_grads() on EVERY freeze_base=false construction, not
+    # only when gradient checkpointing is enabled. That belt exists for the
+    # checkpointing path (asserted load-bearing in
+    # test_gradient_flows_into_base_from_head_alone_under_checkpointing). This
+    # test brackets it from the other side: with checkpointing OFF the belt must
+    # be HARMLESS — a normal unfrozen-base joint step still trains cleanly
+    # (finite loss; base and head both move), nothing regresses.
+    trainer, model, head = _make_trainer(
+        tmp_path, freeze_base=False, lm_loss_weight=1.0
+    )
+    assert getattr(model, "is_gradient_checkpointing", False) is False  # GC off here
+
+    base_before = [p.detach().clone() for p in model.parameters()]
+    head_before = [p.detach().clone() for p in head.parameters()]
+    result = trainer.train()
+
+    assert result.training_loss == pytest.approx(result.training_loss)  # finite, not NaN
+    base_moved = any(not torch.equal(b, a) for b, a in zip(base_before, model.parameters()))
+    head_moved = any(not torch.equal(b, a) for b, a in zip(head_before, head.parameters()))
+    assert base_moved
+    assert head_moved
