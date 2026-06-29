@@ -35,6 +35,11 @@ def test_absent_block_yields_disabled_default():
 
 
 def test_enabled_block_is_parsed_fieldwise():
+    # NOTE: out_activation is "sigmoid" here (not "identity") because the loader
+    # now rejects the identity + probability-loss (brier/bce) combination as
+    # incoherent — see test_rejects_identity_out_activation_with_probability_loss.
+    # Identity is still a valid dataclass value for callers that consume raw
+    # logits; only the loader refuses to pair it with a probability-scoring loss.
     cfg = load_aux_head_config(
         {
             "enabled": True,
@@ -44,7 +49,7 @@ def test_enabled_block_is_parsed_fieldwise():
             "loss": "brier",
             "head_type": "mlp",
             "hidden_dims": [64, 16],
-            "out_activation": "identity",
+            "out_activation": "sigmoid",
             "freeze_base": True,
             "lm_loss_weight": 0.0,
             "head_lr": 1e-3,
@@ -57,7 +62,7 @@ def test_enabled_block_is_parsed_fieldwise():
     assert cfg.loss == "brier"
     assert cfg.head_type == "mlp"
     assert cfg.hidden_dims == [64, 16]
-    assert cfg.out_activation == "identity"
+    assert cfg.out_activation == "sigmoid"
     assert cfg.head_lr == 1e-3
 
 
@@ -81,6 +86,51 @@ def test_phase_b_block_is_parsed_fieldwise():
 def test_enabled_without_layer_fails_loud():
     with pytest.raises(ValueError, match="requires aux_head.layer"):
         load_aux_head_config({"enabled": True})
+
+
+@pytest.mark.parametrize(
+    "freeze_base, lm_loss_weight",
+    [
+        (False, 0.0),  # co-train base on head loss alone, no LM anchor
+        (True, 1.0),   # weighted LM term with no gradient (base frozen)
+    ],
+)
+def test_rejects_incoherent_freeze_base_lm_loss_weight(freeze_base, lm_loss_weight):
+    with pytest.raises(ValueError, match="must agree on the phase"):
+        load_aux_head_config(
+            {
+                "enabled": True,
+                "layer": 35,
+                "freeze_base": freeze_base,
+                "lm_loss_weight": lm_loss_weight,
+            }
+        )
+
+
+@pytest.mark.parametrize("loss", ["bce", "brier"])
+def test_rejects_identity_out_activation_with_probability_loss(loss):
+    with pytest.raises(ValueError, match="out_activation='identity' is incompatible"):
+        load_aux_head_config(
+            {
+                "enabled": True,
+                "layer": 35,
+                "loss": loss,
+                "out_activation": "identity",
+            }
+        )
+
+
+def test_coherent_phase_configs_still_load():
+    # Both valid phase combinations must continue to load (byte-identical valid
+    # path): frozen-base head-only and unfrozen-base joint co-training.
+    phase_a = load_aux_head_config(
+        {"enabled": True, "layer": 35, "freeze_base": True, "lm_loss_weight": 0.0}
+    )
+    assert phase_a.freeze_base is True and phase_a.lm_loss_weight == 0.0
+    phase_b = load_aux_head_config(
+        {"enabled": True, "layer": 35, "freeze_base": False, "lm_loss_weight": 1.0}
+    )
+    assert phase_b.freeze_base is False and phase_b.lm_loss_weight == 1.0
 
 
 def test_config_has_real_aux_head_field_so_block_is_not_silently_dropped():

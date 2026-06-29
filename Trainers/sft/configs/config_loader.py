@@ -304,17 +304,54 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
             "(no silent default — choose the hidden_states index to read)."
         )
 
+    freeze_base = aux_data.get('freeze_base', True)
+    lm_loss_weight = aux_data.get('lm_loss_weight', 0.0)
+    loss = aux_data.get('loss', 'bce')
+    out_activation = aux_data.get('out_activation', 'sigmoid')
+
+    # Coherence guard: freeze_base and lm_loss_weight must describe the SAME phase.
+    # Valid: (freeze_base=true, lm_loss_weight=0) trains the head alone over a
+    # frozen base, or (freeze_base=false, lm_loss_weight>0) co-trains the base
+    # jointly with a weighted LM term. The (false, 0) corner co-trains the base on
+    # the head loss alone with no LM term anchoring it — the base drifts freely.
+    # The (true, >0) corner adds an LM term that receives no gradient (the base is
+    # frozen) — wasted compute and a misleading loss curve. Reject both loudly
+    # rather than launch a silently incoherent run.
+    phase_coherent = (freeze_base and lm_loss_weight == 0) or (
+        not freeze_base and lm_loss_weight > 0
+    )
+    if enabled and not phase_coherent:
+        raise ValueError(
+            "aux_head.freeze_base and aux_head.lm_loss_weight must agree on the "
+            "phase: use (freeze_base=true, lm_loss_weight=0) or "
+            "(freeze_base=false, lm_loss_weight>0). Got "
+            f"freeze_base={freeze_base}, lm_loss_weight={lm_loss_weight} — an "
+            "incoherent combination that would train a misconfigured run."
+        )
+
+    # Coherence guard: an "identity" out_activation returns the raw value, not a
+    # probability in [0, 1], so pairing it with a probability-scoring loss
+    # (bce/brier, which expect a probability) silently mis-scores — bce on
+    # out-of-range inputs, or brier as MSE-on-logits (a non-proper score). Require
+    # a sigmoid output for these losses.
+    if enabled and out_activation == 'identity' and loss in ('bce', 'brier'):
+        raise ValueError(
+            "aux_head.out_activation='identity' is incompatible with "
+            f"aux_head.loss={loss!r}: bce and brier expect a probability in "
+            "[0, 1]. Use out_activation='sigmoid' for these losses."
+        )
+
     return AuxHeadConfig(
         enabled=enabled,
         layer=layer,
         token_position=aux_data.get('token_position', 'last'),
         target_field=aux_data.get('target_field', 'target'),
-        loss=aux_data.get('loss', 'bce'),
+        loss=loss,
         head_type=aux_data.get('head_type', 'linear'),
         hidden_dims=list(aux_data.get('hidden_dims', []) or []),
-        out_activation=aux_data.get('out_activation', 'sigmoid'),
-        freeze_base=aux_data.get('freeze_base', True),
-        lm_loss_weight=aux_data.get('lm_loss_weight', 0.0),
+        out_activation=out_activation,
+        freeze_base=freeze_base,
+        lm_loss_weight=lm_loss_weight,
         head_lr=aux_data.get('head_lr', None),
         input_norm=aux_data.get('input_norm', 'none'),
     )
