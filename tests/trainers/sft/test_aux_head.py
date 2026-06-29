@@ -27,6 +27,7 @@ from aux_head import (  # noqa: E402
     compute_aux_head_loss,
     infer_aux_scalar,
     load_aux_head,
+    prompt_end_indices,
     reduce_hidden_states,
     resolve_hidden_size,
     save_aux_head,
@@ -76,6 +77,32 @@ def test_invalid_head_type_and_activation_raise():
         AuxHead(input_dim=0)
 
 
+def test_input_norm_defaults_to_none_and_adds_no_submodule():
+    # Default "none" must add NO norm submodule, so the state_dict (and thus the
+    # save/reload round-trip) stays byte-identical to a head without the knob.
+    head = AuxHead(input_dim=8, head_type="linear")
+    assert head.input_norm == "none"
+    assert not hasattr(head, "norm")
+    assert not any(k.startswith("norm.") for k in head.state_dict())
+
+
+def test_input_norm_layernorm_adds_norm_and_tames_large_inputs():
+    head = AuxHead(input_dim=8, head_type="linear", input_norm="layernorm")
+    assert isinstance(head.norm, torch.nn.LayerNorm)
+    assert any(k.startswith("norm.") for k in head.state_dict())
+    # On large-magnitude inputs the LayerNorm keeps the pre-sigmoid logit finite
+    # and the output a real probability (the raw-input head would saturate).
+    out = head(torch.randn(6, 8) * 1000.0)
+    assert out.shape == (6,)
+    assert torch.all(out >= 0.0) and torch.all(out <= 1.0)
+    assert torch.all(torch.isfinite(out))
+
+
+def test_input_norm_rejects_unknown_value():
+    with pytest.raises(ValueError):
+        AuxHead(input_dim=8, input_norm="batchnorm")
+
+
 # ---------------------------------------------------------------------------
 # reduce_hidden_states: last / mean / int, right-pad aware
 # ---------------------------------------------------------------------------
@@ -114,6 +141,58 @@ def test_reduce_rejects_bad_inputs():
         reduce_hidden_states(torch.randn(1, 4, 2), torch.ones(1, 4), "median")
     with pytest.raises(ValueError):
         reduce_hidden_states(torch.randn(1, 4, 2), torch.ones(1, 4), 99)
+
+
+# ---------------------------------------------------------------------------
+# end_of_prompt: boundary derivation + reduction (training + inference)
+# ---------------------------------------------------------------------------
+
+def test_prompt_end_indices_finds_boundary_and_handles_edges():
+    # Row 0: prompt = tokens 0..1, completion starts at 2 -> boundary = 1.
+    # Row 1: completion-first (no prompt) -> last real token (index 2).
+    # Row 2: empty completion (all masked) -> last real token (index 1).
+    labels = torch.tensor([
+        [-100, -100, 5, 6],   # boundary at 1
+        [7, 8, 9, -100],      # completion-first -> last real (idx 2)
+        [-100, -100, -100, -100],  # empty completion -> last real (idx 1)
+    ])
+    attention_mask = torch.tensor([
+        [1, 1, 1, 1],
+        [1, 1, 1, 0],
+        [1, 1, 0, 0],
+    ])
+    idx = prompt_end_indices(labels, attention_mask)
+    assert idx.tolist() == [1, 2, 1]
+
+
+def test_reduce_end_of_prompt_selects_boundary_token():
+    hidden = torch.arange(2 * 4 * 3, dtype=torch.float32).reshape(2, 4, 3)
+    attention_mask = torch.tensor([[1, 1, 1, 1], [1, 1, 1, 0]])
+    # Row 0 boundary index 1, row 1 boundary index 0.
+    prompt_end_idx = torch.tensor([1, 0])
+    reduced = reduce_hidden_states(hidden, attention_mask, "end_of_prompt", prompt_end_idx=prompt_end_idx)
+    assert torch.equal(reduced[0], hidden[0, 1])
+    assert torch.equal(reduced[1], hidden[1, 0])
+
+
+def test_reduce_end_of_prompt_empty_completion_equals_last():
+    # Acceptance #4: an empty-completion row reduces to the SAME vector as "last".
+    hidden = torch.arange(1 * 5 * 2, dtype=torch.float32).reshape(1, 5, 2)
+    attention_mask = torch.tensor([[1, 1, 1, 0, 0]])  # 3 real tokens
+    labels = torch.tensor([[-100, -100, -100, -100, -100]])  # all prompt, no completion
+    idx = prompt_end_indices(labels, attention_mask)
+    eop = reduce_hidden_states(hidden, attention_mask, "end_of_prompt", prompt_end_idx=idx)
+    last = reduce_hidden_states(hidden, attention_mask, "last")
+    assert torch.equal(eop, last)
+
+
+def test_reduce_end_of_prompt_without_idx_falls_back_to_last():
+    # Inference path: prompt-only input, no labels/prompt_end_idx -> behaves as "last".
+    hidden = torch.arange(2 * 4 * 3, dtype=torch.float32).reshape(2, 4, 3)
+    attention_mask = torch.tensor([[1, 1, 0, 0], [1, 1, 1, 1]])
+    eop = reduce_hidden_states(hidden, attention_mask, "end_of_prompt")
+    last = reduce_hidden_states(hidden, attention_mask, "last")
+    assert torch.equal(eop, last)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +236,40 @@ def test_save_load_roundtrip_preserves_weights_and_config(tmp_path):
     assert resolved["layer"] == 35
     assert resolved["token_position"] == "last"
     assert resolved["loss"] == "bce"
+
+
+def test_save_load_roundtrip_preserves_input_norm(tmp_path):
+    # A head saved with a LayerNorm must reload with the same input_norm and infer
+    # bit-for-bit (acceptance #5: portability of the input_norm knob).
+    head = AuxHead(input_dim=12, head_type="linear", input_norm="layernorm")
+    save_aux_head(head, tmp_path, layer=10, token_position="end_of_prompt", loss="bce")
+
+    resolved = aux_head_mod.read_aux_head_resolved_config(tmp_path)
+    assert resolved["input_norm"] == "layernorm"
+    assert resolved["token_position"] == "end_of_prompt"
+
+    reloaded = load_aux_head(tmp_path)
+    assert reloaded.input_norm == "layernorm"
+    assert isinstance(reloaded.norm, torch.nn.LayerNorm)
+
+    x = torch.randn(4, 12) * 50.0
+    assert torch.allclose(head(x), reloaded(x), atol=1e-6)
+
+
+def test_load_legacy_sidecar_without_input_norm_defaults_to_none(tmp_path):
+    # Old Phase-A sidecars predate input_norm; a reload must default it to "none".
+    head = AuxHead(input_dim=8, head_type="linear")
+    save_aux_head(head, tmp_path, layer=5, token_position="last", loss="bce")
+    # Simulate a legacy sidecar: strip the input_norm key.
+    import json
+    cfg_path = tmp_path / "aux_head_config.json"
+    data = json.loads(cfg_path.read_text())
+    data.pop("input_norm", None)
+    cfg_path.write_text(json.dumps(data))
+
+    reloaded = load_aux_head(tmp_path)
+    assert reloaded.input_norm == "none"
+    assert not hasattr(reloaded, "norm")
 
 
 def test_load_missing_sidecar_raises(tmp_path):

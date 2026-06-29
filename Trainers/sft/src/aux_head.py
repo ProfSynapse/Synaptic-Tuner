@@ -41,6 +41,7 @@ from torch import nn
 VALID_HEAD_TYPES = ("linear", "mlp")
 VALID_LOSSES = ("bce", "brier")
 VALID_OUT_ACTIVATIONS = ("sigmoid", "identity")
+VALID_INPUT_NORMS = ("none", "layernorm")
 
 
 class AuxHead(nn.Module):
@@ -54,11 +55,16 @@ class AuxHead(nn.Module):
         hidden_dims: Hidden widths for the ``mlp`` head. Ignored for ``linear``.
         out_activation: ``"sigmoid"`` (default) squashes the logit into ``[0, 1]``;
             ``"identity"`` returns the raw logit (callers that want logits).
+        input_norm: ``"none"`` (default; off — Phase-A byte-identical, adds no
+            submodule/params) or ``"layernorm"`` (a ``nn.LayerNorm(input_dim)``
+            applied to the pulled hidden state before the net, so the head trains
+            at a normal LR on unnormalized activations instead of saturating).
 
     forward(hidden) -> Tensor:
         ``hidden`` has shape ``[batch, input_dim]`` (already reduced over the
         sequence). The pulled hidden state is cast to the head's parameter dtype
-        first, so a bf16/fp16 base can feed an fp32 head safely. Returns a
+        first (so a bf16/fp16 base can feed an fp32 head safely), then optionally
+        normalized (``input_norm="layernorm"``), then projected. Returns a
         ``[batch]`` tensor; with ``out_activation="sigmoid"`` every element lies
         in ``[0, 1]``.
     """
@@ -69,6 +75,7 @@ class AuxHead(nn.Module):
         head_type: str = "linear",
         hidden_dims: Sequence[int] = (),
         out_activation: str = "sigmoid",
+        input_norm: str = "none",
     ) -> None:
         super().__init__()
         if input_dim <= 0:
@@ -79,11 +86,21 @@ class AuxHead(nn.Module):
             raise ValueError(
                 f"Unknown out_activation {out_activation!r}; expected one of {VALID_OUT_ACTIVATIONS}."
             )
+        if input_norm not in VALID_INPUT_NORMS:
+            raise ValueError(
+                f"Unknown input_norm {input_norm!r}; expected one of {VALID_INPUT_NORMS}."
+            )
 
         self.input_dim = int(input_dim)
         self.head_type = head_type
         self.hidden_dims = tuple(int(d) for d in hidden_dims)
         self.out_activation = out_activation
+        self.input_norm = input_norm
+
+        # ``"none"`` adds NO submodule, so the state_dict (and thus the Phase-A
+        # save/reload round-trip) is byte-identical to before this knob existed.
+        if input_norm == "layernorm":
+            self.norm: nn.Module = nn.LayerNorm(self.input_dim)
 
         if head_type == "linear":
             self.net: nn.Module = nn.Linear(self.input_dim, 1)
@@ -105,6 +122,9 @@ class AuxHead(nn.Module):
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         # Cast the pulled hidden state to the head's dtype (bf16 base -> fp32 head).
         hidden = hidden.to(self.dtype)
+        # Optional input normalization (off by default; Phase-A byte-identical).
+        if self.input_norm == "layernorm":
+            hidden = self.norm(hidden)
         logits = self.net(hidden).squeeze(-1)  # [batch, 1] -> [batch]
         if self.out_activation == "sigmoid":
             return torch.sigmoid(logits)
@@ -134,10 +154,45 @@ def resolve_hidden_size(model: Any) -> int:
     return int(hidden_size)
 
 
+def prompt_end_indices(labels: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    """Per-row index of the last prompt token (the position right before generation).
+
+    The SFT preprocessing masks prompt tokens to ``-100`` and leaves completion
+    tokens with real ids, so the first un-masked label marks where generation
+    starts; the token just before it is the end of the prompt.
+
+    Two rows have no preceding prompt span and resolve to the last *real* token
+    (``attention_mask.sum(1) - 1``) — i.e. ``"last"``-equivalent — rather than a
+    spurious index 0:
+
+    - **Empty completion** (every label ``-100``): the whole row is prompt, so the
+      last real token IS the end of the prompt.
+    - **Completion-first** (the first real token is a completion token): there is
+      no prompt to end, so the boundary is taken as the last real token.
+
+    Both are detected by ``first_completion == 0`` (``argmax`` returns 0 for an
+    all-masked row too), so a single guard covers them.
+
+    Args:
+        labels: ``[batch, seq]`` token labels (-100 = masked/prompt).
+        attention_mask: ``[batch, seq]`` 1/0 mask (1 = real token, right-padded).
+
+    Returns:
+        ``[batch]`` long tensor of end-of-prompt indices.
+    """
+    real = labels != -100
+    first_completion = real.int().argmax(dim=1)  # 0 for all-masked rows
+    last_real = (attention_mask.to(labels.device).long().sum(dim=1) - 1).clamp_min(0)
+    boundary = first_completion - 1
+    no_prompt = first_completion == 0  # completion-first OR empty-completion
+    return torch.where(no_prompt, last_real, boundary)
+
+
 def reduce_hidden_states(
     hidden: torch.Tensor,
     attention_mask: torch.Tensor,
     token_position: Union[str, int] = "last",
+    prompt_end_idx: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Reduce a ``[batch, seq, hidden]`` tensor to ``[batch, hidden]``.
 
@@ -148,7 +203,13 @@ def reduce_hidden_states(
         hidden: ``[batch, seq, hidden]`` hidden states for one layer.
         attention_mask: ``[batch, seq]`` 1/0 mask (1 = real token, right-padded).
         token_position: ``"last"`` (last non-pad token), ``"mean"`` (mask-weighted
-            mean over real tokens), or an int index into the sequence.
+            mean over real tokens), ``"end_of_prompt"`` (the last prompt token,
+            via ``prompt_end_idx``), or an int index into the sequence.
+        prompt_end_idx: ``[batch]`` per-row end-of-prompt indices (from
+            :func:`prompt_end_indices`). Required only for ``"end_of_prompt"`` at
+            train time; when ``None`` (e.g. prompt-only inference) ``"end_of_prompt"``
+            falls back to ``"last"`` — for a prompt-only input the last real token
+            IS the end of the prompt, so the two reductions coincide.
 
     Returns:
         ``[batch, hidden]``.
@@ -159,7 +220,12 @@ def reduce_hidden_states(
     batch_size = hidden.size(0)
     arange = torch.arange(batch_size, device=hidden.device)
 
-    if token_position == "last":
+    if token_position == "end_of_prompt" and prompt_end_idx is not None:
+        idx = prompt_end_idx.to(hidden.device).long().clamp_min(0)
+        return hidden[arange, idx]
+
+    if token_position == "last" or token_position == "end_of_prompt":
+        # "end_of_prompt" with no prompt_end_idx (inference) reduces as "last".
         lengths = attention_mask.to(hidden.device).long().sum(dim=1)
         last_idx = (lengths - 1).clamp_min(0)  # all-zero mask is impossible, but cheap insurance
         return hidden[arange, last_idx]
@@ -234,6 +300,7 @@ def save_aux_head(
         "head_type": aux_head.head_type,
         "hidden_dims": list(aux_head.hidden_dims),
         "out_activation": aux_head.out_activation,
+        "input_norm": aux_head.input_norm,
         "layer": layer,
         "token_position": token_position,
         "loss": loss,
@@ -267,6 +334,7 @@ def load_aux_head(run_dir: Union[str, Path], base_model: Optional[Any] = None) -
         head_type=resolved.get("head_type", "linear"),
         hidden_dims=tuple(resolved.get("hidden_dims", []) or []),
         out_activation=resolved.get("out_activation", "sigmoid"),
+        input_norm=resolved.get("input_norm", "none"),  # old sidecars default to off
     )
     head.load_state_dict(load_file(str(weights_path)))
 

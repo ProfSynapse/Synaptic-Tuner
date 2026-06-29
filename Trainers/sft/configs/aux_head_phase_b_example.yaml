@@ -1,0 +1,105 @@
+# ============================================================================
+# Example SFT config with an auxiliary scalar readout head (aux_head), Phase B.
+#
+# Phase B co-trains the head JOINTLY with the language-model loss over an
+# UNFROZEN base: the total loss is `outputs.loss + lm_loss_weight * head_loss`,
+# the base's trainable (LoRA) params stay trainable and are added to the
+# optimizer alongside the head, and the head reads the end-of-prompt token with
+# optional input normalization so it trains at a normal LR.
+#
+# The difference from the Phase-A example is the aux_head block (freeze_base,
+# lm_loss_weight, token_position, input_norm) plus a lower base learning rate.
+# With `aux_head` absent or enabled=false, training is byte-identical to a
+# normal SFT run; with freeze_base=true + lm_loss_weight=0 + input_norm=none it
+# is byte-identical to the Phase-A path.
+#
+# The base model, dataset, and target column below are placeholders — point them
+# at your own. The dataset must carry a per-row float in [0,1] (or a 0/1 label)
+# under `aux_head.target_field`; producing that column is the dataset's job.
+# ============================================================================
+
+model:
+  model_name: "unsloth/Qwen3-4B"
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: false
+
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0
+  bias: "none"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+  use_gradient_checkpointing: "unsloth"   # the single GC knob for this unsloth base
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+
+training:
+  output_dir: "./aux_head_phase_b_output"
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-4            # base co-training LR (lower than Phase-A head-only)
+  max_grad_norm: 1.0
+  lr_scheduler_type: "linear"
+  max_seq_length: 2048
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  # The base co-trains in Phase B, so gradient checkpointing now pays off. Use
+  # exactly ONE GC mechanism: the unsloth base is already wrapped by
+  # lora.use_gradient_checkpointing="unsloth" above, so leave HF's own
+  # gradient_checkpointing off to avoid double-wrapping the same modules.
+  gradient_checkpointing: false
+  optim: "adamw_8bit"
+  fp16: false
+  bf16: true
+  num_train_epochs: 1
+  warmup_ratio: 0.02
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  group_by_length: false
+  eval_strategy: "no"
+  eval_steps: 50
+
+dataset:
+  dataset_name: null
+  dataset_file: null
+  # Point this at a local JSONL whose rows carry the target column below.
+  local_file: "../../Datasets/your_dataset_with_target.jsonl"
+  num_proc: 1
+  test_size: 0.1
+  split_dataset: false
+  filter_desirable: false
+
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+
+seed: 42
+
+# ============================================================================
+# Auxiliary scalar readout head (Phase B: unfrozen base, joint LM + head loss).
+# ============================================================================
+aux_head:
+  enabled: true            # absent/false ⇒ feature fully off (backward compatible)
+  layer: 35                # which hidden_states index to read (0 = embeddings); required when enabled
+  token_position: end_of_prompt  # "last" | "mean" | int | "end_of_prompt" (last prompt token)
+  target_field: target     # per-row dataset column carrying the target float/label
+  loss: bce                # "bce" (binary/soft in [0,1]) | "brier" (MSE on prob)
+  head_type: linear        # "linear" | "mlp"
+  hidden_dims: []          # widths for the "mlp" head; ignored for "linear"
+  out_activation: sigmoid  # "sigmoid" (prob in [0,1]) | "identity" (raw logit)
+  input_norm: layernorm    # "none" (off) | "layernorm" (so the head trains at a normal LR)
+  freeze_base: false       # Phase B = false (co-train the unfrozen base)
+  lm_loss_weight: 1.0      # Phase B > 0: total loss = lm_loss + lm_loss_weight * head_loss
+  head_lr: null            # optional dedicated head LR; defaults to trainer LR if null

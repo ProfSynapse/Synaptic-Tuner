@@ -84,10 +84,16 @@ def test_aux_head_trainer_overrides_present():
     assert "train" in cls.__dict__
 
 
-def test_aux_head_trainer_source_marks_phase_b_seam_and_no_lm_term():
+def test_aux_head_trainer_source_wires_live_joint_loss_seam():
     source = (SFT_DIR / "src" / "aux_head_trainer.py").read_text(encoding="utf-8")
-    # Phase A: head loss is the entire loss.
+    # Phase B: the joint-loss seam is now LIVE (it is no longer a disabled
+    # comment). The discriminator is the exact weighted-sum line, which exists
+    # ONLY when the seam is wired — guarding against the green-by-omission trap
+    # where a bare ``lm_loss_weight`` token would pass even as a comment.
+    assert "loss = outputs.loss + lm_loss_weight * head_loss" in source
+    # Gated on the weight so the lm_loss_weight==0 path stays byte-identical.
+    assert "if lm_loss_weight > 0:" in source
+    # Phase A (lm_loss_weight == 0): the head loss is still the entire loss.
     assert "loss = head_loss" in source
-    # Phase B seam left as a one-line comment, NOT enabled.
-    assert "lm_loss_weight" in source
+    # Hidden states are enabled inside compute_loss (no global flag).
     assert "output_hidden_states=True" in source

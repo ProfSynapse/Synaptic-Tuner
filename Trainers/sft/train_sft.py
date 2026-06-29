@@ -1021,6 +1021,7 @@ def run(args: argparse.Namespace):
             head_type=aux_head_cfg.head_type,
             hidden_dims=aux_head_cfg.hidden_dims,
             out_activation=aux_head_cfg.out_activation,
+            input_norm=getattr(aux_head_cfg, "input_norm", "none"),
         )
         print(
             f"[aux_head] enabled: layer={aux_head_cfg.layer}, token_position={aux_head_cfg.token_position}, "
