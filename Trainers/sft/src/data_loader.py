@@ -155,6 +155,7 @@ def load_and_prepare_tokenized_dataset(
     max_seq_length: int = 2048,
     loss_mask_mode: str = ASSISTANT_ONLY,
     chat_template_kwargs: Optional[dict] = None,
+    aux_target_field: Optional[str] = None,
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -162,6 +163,9 @@ def load_and_prepare_tokenized_dataset(
     This is the repo-owned prepared-dataset path for trainers that want to
     consume ``input_ids`` / ``attention_mask`` / ``labels`` directly instead of
     relying on implicit TRL preprocessing behavior.
+
+    ``aux_target_field`` (optional) names a per-row column to carry through as an
+    ``aux_target`` feature for the auxiliary readout head. None ⇒ unchanged.
     """
     print("=" * 60)
     print("LOADING TOKENIZED DATASET FOR SFT")
@@ -211,6 +215,7 @@ def load_and_prepare_tokenized_dataset(
         num_proc=num_proc,
         include_text=False,
         chat_template_kwargs=chat_template_kwargs,
+        aux_target_field=aux_target_field,
     )
 
     eval_dataset = None

@@ -147,6 +147,28 @@ class EvolutionaryConfig:
 
 
 @dataclass
+class AuxHeadConfig:
+    """Auxiliary scalar readout head configuration (Phase A: frozen base).
+
+    Absent block / ``enabled=false`` ⇒ feature fully off (backward compatible).
+    Everything tunable lives here (config-first); nothing is hardcoded in the
+    trainer. ``layer`` is required when enabled (no silent default — other users
+    read a different layer than ours).
+    """
+    enabled: bool = False
+    layer: Optional[int] = None          # which hidden_states index to read (0 = embeddings)
+    token_position: Any = "last"         # "last" (last non-pad) | "mean" | int index
+    target_field: str = "target"         # per-row dataset column carrying the target
+    loss: str = "bce"                    # "bce" | "brier" (MSE on prob)
+    head_type: str = "linear"            # "linear" | "mlp"
+    hidden_dims: List[int] = field(default_factory=list)  # for "mlp"
+    out_activation: str = "sigmoid"      # "sigmoid" (prob in [0,1]) | "identity"
+    freeze_base: bool = True             # Phase A = true (Phase B flips this)
+    lm_loss_weight: float = 0.0          # Phase A = 0.0 (no LM term; Phase B > 0)
+    head_lr: Optional[float] = None      # optional; defaults to trainer LR if None
+
+
+@dataclass
 class Config:
     """Master configuration combining all sub-configs."""
     model: ModelConfig
@@ -155,6 +177,7 @@ class Config:
     dataset: DatasetConfig
     wandb: WandbConfig
     evolutionary: EvolutionaryConfig = field(default_factory=EvolutionaryConfig)
+    aux_head: AuxHeadConfig = field(default_factory=AuxHeadConfig)
     seed: int = 42
 
     @property
@@ -262,6 +285,39 @@ def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
     )
 
 
+def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
+    """Load aux_head config from a YAML dict (mirrors load_evolutionary_config).
+
+    Returns a default (disabled) config on absent/empty input. When enabled, the
+    ``layer`` must be present — there is no silent default, so a misconfigured
+    block fails loudly rather than reading an arbitrary layer.
+    """
+    if not aux_data:
+        return AuxHeadConfig()
+
+    enabled = aux_data.get('enabled', False)
+    layer = aux_data.get('layer', None)
+    if enabled and layer is None:
+        raise ValueError(
+            "aux_head.enabled=true requires aux_head.layer to be set explicitly "
+            "(no silent default — choose the hidden_states index to read)."
+        )
+
+    return AuxHeadConfig(
+        enabled=enabled,
+        layer=layer,
+        token_position=aux_data.get('token_position', 'last'),
+        target_field=aux_data.get('target_field', 'target'),
+        loss=aux_data.get('loss', 'bce'),
+        head_type=aux_data.get('head_type', 'linear'),
+        hidden_dims=list(aux_data.get('hidden_dims', []) or []),
+        out_activation=aux_data.get('out_activation', 'sigmoid'),
+        freeze_base=aux_data.get('freeze_base', True),
+        lm_loss_weight=aux_data.get('lm_loss_weight', 0.0),
+        head_lr=aux_data.get('head_lr', None),
+    )
+
+
 def load_config(config_path: str = None) -> Config:
     """
     Load YAML config and convert to Config dataclass.
@@ -281,6 +337,7 @@ def load_config(config_path: str = None) -> Config:
     dataset_config = dict_to_dataclass(DatasetConfig, yaml_config['dataset'])
     wandb_config = dict_to_dataclass(WandbConfig, yaml_config.get('wandb', {}))
     evolutionary_config = load_evolutionary_config(yaml_config.get('evolutionary', {}))
+    aux_head_config = load_aux_head_config(yaml_config.get('aux_head', {}))
 
     return Config(
         model=model_config,
@@ -289,6 +346,7 @@ def load_config(config_path: str = None) -> Config:
         dataset=dataset_config,
         wandb=wandb_config,
         evolutionary=evolutionary_config,
+        aux_head=aux_head_config,
         seed=yaml_config.get('seed', 42)
     )
 
