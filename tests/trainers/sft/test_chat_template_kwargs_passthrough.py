@@ -117,6 +117,31 @@ def test_default_none_forwards_no_kwargs_byte_identical():
         assert call["kwargs"] == {}
 
 
+def test_prompt_completion_forwards_kwargs_to_single_prompt_render():
+    # In prompt_completion mode the prompt is rendered ONCE
+    # (add_generation_prompt=True) and the completion is encoded raw (no template),
+    # so there is exactly one apply_chat_template call and it must carry the
+    # forwarded kwargs — the new branch must not introduce a kwargs-divergent
+    # render relative to the full_conversation path.
+    class _RecordingTokenizerWithEos(_RecordingTokenizer):
+        eos_token_id = 7
+
+    tokenizer = _RecordingTokenizerWithEos()
+
+    materialize_sft_example(
+        tokenizer=tokenizer,
+        record=_EXAMPLE,
+        max_seq_length=128,
+        assistant_only_loss=True,
+        chat_template_kwargs={"enable_thinking": False},
+        prompt_render="prompt_completion",
+    )
+
+    assert len(tokenizer.calls) == 1
+    assert tokenizer.calls[0]["add_generation_prompt"] is True
+    assert tokenizer.calls[0]["kwargs"] == {"enable_thinking": False}
+
+
 def test_preprocessing_wrappers_thread_chat_template_kwargs():
     """The SFT-facing wrappers forward the kwarg down to materialize."""
     tokenizer = _RecordingTokenizer()

@@ -18,7 +18,12 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "configs"))
 
 import config_loader  # noqa: E402
-from config_loader import AuxHeadConfig, Config, load_aux_head_config  # noqa: E402
+from config_loader import (  # noqa: E402
+    AuxHeadConfig,
+    Config,
+    load_aux_head_config,
+    validate_aux_head_coherence,
+)
 
 
 def test_absent_block_yields_disabled_default():
@@ -131,6 +136,108 @@ def test_coherent_phase_configs_still_load():
         {"enabled": True, "layer": 35, "freeze_base": False, "lm_loss_weight": 1.0}
     )
     assert phase_b.freeze_base is False and phase_b.lm_loss_weight == 1.0
+
+
+# --- validate_aux_head_coherence: direct unit tests -------------------------
+# The same guard is reused by both the YAML-load path (load_aux_head_config,
+# exercised above) and the CLI-override path (train_sft.run). These tests pin
+# the shared function directly so the CLI lane is covered without importing
+# train_sft (which imports unsloth and cannot load in-process).
+
+
+@pytest.mark.parametrize(
+    "freeze_base, lm_loss_weight",
+    [
+        (False, 0.0),  # co-train base on head loss alone, no LM anchor
+        (True, 1.0),   # weighted LM term with no gradient (base frozen)
+    ],
+)
+def test_validate_coherence_rejects_incoherent_phase(freeze_base, lm_loss_weight):
+    with pytest.raises(ValueError, match="must agree on the phase"):
+        validate_aux_head_coherence(
+            enabled=True,
+            freeze_base=freeze_base,
+            lm_loss_weight=lm_loss_weight,
+            out_activation="sigmoid",
+            loss="bce",
+            layer=35,
+        )
+
+
+@pytest.mark.parametrize(
+    "freeze_base, lm_loss_weight",
+    [
+        (True, 0.0),   # frozen base, head-only — Phase A
+        (False, 1.0),  # unfrozen base, weighted LM term — Phase B
+    ],
+)
+def test_validate_coherence_accepts_coherent_phase(freeze_base, lm_loss_weight):
+    # No raise on either valid phase combination.
+    validate_aux_head_coherence(
+        enabled=True,
+        freeze_base=freeze_base,
+        lm_loss_weight=lm_loss_weight,
+        out_activation="sigmoid",
+        loss="bce",
+        layer=35,
+    )
+
+
+@pytest.mark.parametrize("loss", ["bce", "brier"])
+def test_validate_coherence_rejects_identity_with_probability_loss(loss):
+    with pytest.raises(ValueError, match="out_activation='identity' is incompatible"):
+        validate_aux_head_coherence(
+            enabled=True,
+            freeze_base=True,
+            lm_loss_weight=0.0,
+            out_activation="identity",
+            loss=loss,
+            layer=35,
+        )
+
+
+def test_validate_coherence_is_noop_when_disabled():
+    # A disabled head has inert fields — even an otherwise-incoherent combination
+    # (incl. a missing layer) must not raise (mirrors the enabled-gated
+    # YAML-load behavior).
+    validate_aux_head_coherence(
+        enabled=False,
+        freeze_base=False,
+        lm_loss_weight=0.0,
+        out_activation="identity",
+        loss="bce",
+        layer=None,
+    )
+
+
+@pytest.mark.parametrize("loss", ["bce", "brier"])
+def test_validate_coherence_rejects_missing_layer_when_enabled(loss):
+    # A-M1 parity: an enabled head with no layer must raise EARLY + DESCRIPTIVE
+    # on BOTH lanes. The flag-only runner lane never calls load_aux_head_config,
+    # so this presence guard must live in the shared validator (not inline in the
+    # loader) or that lane would crash late at hidden_states[None].
+    with pytest.raises(ValueError, match="requires aux_head.layer to be set"):
+        validate_aux_head_coherence(
+            enabled=True,
+            freeze_base=True,
+            lm_loss_weight=0.0,
+            out_activation="sigmoid",
+            loss=loss,
+            layer=None,
+        )
+
+
+def test_validate_coherence_accepts_layer_when_enabled():
+    # The presence guard passes once a layer is named (no raise on an otherwise
+    # coherent enabled head).
+    validate_aux_head_coherence(
+        enabled=True,
+        freeze_base=True,
+        lm_loss_weight=0.0,
+        out_activation="sigmoid",
+        loss="bce",
+        layer=0,
+    )
 
 
 def test_config_has_real_aux_head_field_so_block_is_not_silently_dropped():

@@ -141,11 +141,60 @@ Two Phase-B knobs:
   before the head, so a linear head trains at a normal LR on unnormalized
   activations instead of saturating.
 
+### `prompt_render` (a `training` knob, paired with `end_of_prompt`)
+
+`token_position: end_of_prompt` is only faithful when the row was tokenized so the
+prompt ends exactly at the generation anchor. The default render
+(`training.prompt_render: full_conversation`) renders the whole conversation and
+derives the assistant-only mask by a prefix match — but many chat templates render
+the assistant scaffold differently with vs. without `add_generation_prompt` (e.g.
+one fewer newline), so the masked boundary token is NOT the generation anchor and
+the head reads an off-anchor representation.
+
+Set `training.prompt_render: prompt_completion` for a faithful boundary: the row's
+`input_ids` are built from the `add_generation_prompt=True` prompt render followed
+by the raw completion plus the tokenizer's derived terminal (`eos_token_id`), with
+the prompt segment masked to `-100`. The prompt then ends exactly at the
+generation anchor, so the existing `end_of_prompt` read is faithful.
+
+```yaml
+training:
+  prompt_render: prompt_completion   # full_conversation (default) | prompt_completion
+```
+
+`prompt_render` lives on the `training` config (it replaces the SFT masking
+region, so it is not an `aux_head` field), but it is grouped with the aux_head
+knobs for launching (see below). It defaults to `full_conversation`, so every
+existing recipe is byte-identical. When `aux_head.enabled` and
+`token_position: end_of_prompt` are set while `prompt_render` is still
+`full_conversation`, the trainer prints a one-line WARNING (not an error — the
+combo is legitimate for single-turn / inference-shaped rows whose two renders
+coincide).
+
 Complete runnable examples live at
 `Trainers/sft/configs/aux_head_example.yaml` (Phase A) and
 `Trainers/sft/configs/aux_head_phase_b_example.yaml` (Phase B). `layer` has no
 default — choosing the hidden-state index is a deliberate per-run decision, so an
 enabled block without it fails fast.
+
+### Launching aux_head (local-run recipe + direct CLI)
+
+The `aux_head` block flows through **both** launch paths:
+
+- **Direct trainer** (`cd Trainers/sft && python train_sft.py ...`): every field
+  has a CLI flag — `--aux-head-enabled` / `--no-aux-head-enabled`,
+  `--aux-head-layer`, `--aux-head-token-position`, `--aux-head-target-field`,
+  `--aux-head-loss`, `--aux-head-head-type`, `--aux-head-out-activation`,
+  `--aux-head-input-norm`, `--aux-head-freeze-base` / `--no-aux-head-freeze-base`,
+  `--aux-head-lm-loss-weight`, `--aux-head-head-lr`, and `--aux-head-prompt-render`
+  (which sets `training.prompt_render`). An unset flag never overrides the loaded
+  config; a CLI value takes precedence over the YAML/preset config.
+- **local-run recipe** (`python tuner.py local-run --job-config <recipe>.yaml`):
+  put an `aux_head:` block (and, when using `end_of_prompt`, a
+  `training.prompt_render: prompt_completion`) in the recipe; the runner forwards
+  every field to the trainer's `--aux-head-*` flags automatically. Recipes with no
+  `aux_head` block and no `training.prompt_render` emit zero new flags, so they
+  stay byte-identical. aux_head forwarding is SFT-only.
 
 ---
 

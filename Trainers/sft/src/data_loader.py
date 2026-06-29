@@ -156,6 +156,7 @@ def load_and_prepare_tokenized_dataset(
     loss_mask_mode: str = ASSISTANT_ONLY,
     chat_template_kwargs: Optional[dict] = None,
     aux_target_field: Optional[str] = None,
+    prompt_render: str = "full_conversation",
 ) -> Tuple[Dataset, Optional[Dataset]]:
     """
     Load and prepare dataset into explicit tokenized SFT features.
@@ -168,7 +169,7 @@ def load_and_prepare_tokenized_dataset(
     ``aux_target`` feature for the auxiliary readout head. None ⇒ unchanged.
     """
     print("=" * 60)
-    print("LOADING TOKENIZED DATASET FOR SFT")
+    print("LOADING ENCODED DATASET FOR SFT")
     print("=" * 60)
 
     if tokenizer is None:
@@ -206,7 +207,7 @@ def load_and_prepare_tokenized_dataset(
         print(f"Filtered: {original_size} → {filtered_count} examples")
         print(f"Removed: {original_size - filtered_count} undesirable examples")
 
-    print("\nPreparing explicit tokenized SFT features...")
+    print("\nPreparing explicit encoded SFT features...")
     train_dataset = load_and_prepare_sft_dataset(
         dataset=raw_datasets,
         tokenizer=tokenizer,
@@ -216,6 +217,7 @@ def load_and_prepare_tokenized_dataset(
         include_text=False,
         chat_template_kwargs=chat_template_kwargs,
         aux_target_field=aux_target_field,
+        prompt_render=prompt_render,
     )
 
     eval_dataset = None
@@ -277,10 +279,10 @@ def print_dataset_samples(dataset: Dataset, num_samples: int = 3):
             print(f"Format: Text")
             print(f"Content: {example['text'][:200]}...")
         elif "input_ids" in example and "labels" in example:
-            print("Format: Tokenized SFT")
-            print(f"Input IDs: {len(example['input_ids'])} tokens")
+            print("Format: Encoded SFT")
+            print(f"Input IDs: {len(example['input_ids'])} ids")
             supervised = sum(1 for label in example["labels"] if label != -100)
-            print(f"Supervised tokens: {supervised}")
+            print(f"Supervised positions: {supervised}")
             if "loss_mask_mode" in example:
                 print(f"Loss mask mode: {example['loss_mask_mode']}")
         else:

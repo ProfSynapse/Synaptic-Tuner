@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "src"))
 sys.path.insert(0, str(ROOT / "Trainers" / "sft" / "configs"))
 
@@ -328,6 +329,118 @@ def test_gradient_flows_into_base_from_head_alone_under_checkpointing(tmp_path):
     assert pre_read_param.grad is not None
     assert torch.count_nonzero(pre_read_param.grad) > 0
 
+    head_param = next(head.parameters())
+    assert head_param.grad is not None
+    assert torch.count_nonzero(head_param.grad) > 0
+
+
+class _MinimalRenderTokenizer:
+    """Tiny tokenizer that renders rows short enough for the tiny model's position
+    budget while still exercising the prompt_completion render path end to end.
+
+    The generation-prompt render appends a single ``G`` anchor; encode maps chars
+    into ``[3, VOCAB)`` so ids never collide with pad (0) or the eos terminal (2).
+    """
+
+    eos_token_id = 2
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        body = "".join(str(m["content"]) for m in messages)
+        if add_generation_prompt:
+            body += "G"
+        return body
+
+    def encode(self, text, add_special_tokens=False):
+        return [3 + (ord(char) % (VOCAB - 3)) for char in text]
+
+
+def test_joint_step_trains_through_prompt_completion_rendered_rows(tmp_path):
+    # §3.4: a joint step (freeze_base=false, lm_loss_weight>0) over rows produced
+    # by the prompt_completion render mode runs end to end and produces BOTH head
+    # and base gradients, with token_position="end_of_prompt" reading the faithful
+    # boundary the new render guarantees (prompt_end_indices recovers it from the
+    # leading -100 run, undisturbed by trailing pad). Extends the §2.5 path to the
+    # new render mode (acceptance #4).
+    from shared.sft_preprocessing import materialize_sft_example
+
+    tokenizer = _MinimalRenderTokenizer()
+    raw = []
+    for i in range(8):
+        prepared = materialize_sft_example(
+            tokenizer=tokenizer,
+            record={
+                "messages": [
+                    {"role": "user", "content": "q"},
+                    {"role": "assistant", "content": "a" if i % 2 == 0 else "b"},
+                ]
+            },
+            max_seq_length=SEQ,
+            assistant_only_loss=True,
+            prompt_render="prompt_completion",
+        )
+        raw.append((prepared, 1.0 if i % 2 == 0 else 0.0))
+
+    # Every render must carry a masked prompt prefix AND at least one real label,
+    # otherwise end_of_prompt degenerates to "last" and the test is vacuous.
+    for prepared, _ in raw:
+        assert -100 in prepared.labels
+        assert any(label != -100 for label in prepared.labels)
+
+    max_len = max(len(prepared.input_ids) for prepared, _ in raw)
+    rows = []
+    for prepared, target in raw:
+        pad = max_len - len(prepared.input_ids)
+        rows.append(
+            {
+                "input_ids": prepared.input_ids + [0] * pad,
+                "attention_mask": prepared.attention_mask + [0] * pad,
+                "labels": prepared.labels + [-100] * pad,
+                "aux_target": target,
+            }
+        )
+
+    model = _tiny_causal_lm()
+    head = AuxHead(input_dim=HIDDEN, head_type="linear")
+    cfg = AuxHeadConfig(
+        enabled=True,
+        layer=READ_LAYER,
+        token_position="end_of_prompt",
+        target_field="aux_target",
+        loss="bce",
+        head_type="linear",
+        freeze_base=False,
+        lm_loss_weight=1.0,
+    )
+    args = TrainingArguments(
+        output_dir=str(tmp_path / "out"),
+        use_cpu=True,
+        remove_unused_columns=False,
+        per_device_train_batch_size=4,
+        max_steps=1,
+        learning_rate=0.1,
+        logging_steps=1,
+        save_strategy="no",
+        report_to="none",
+        seed=0,
+    )
+    trainer = AuxHeadTrainer(
+        model=model,
+        args=args,
+        data_collator=_collate,
+        train_dataset=_RowDataset(),
+        aux_head=head,
+        aux_head_config=cfg,
+    )
+
+    batch = _collate(rows[:4])
+    loss, outputs = trainer.compute_loss(model, batch, return_outputs=True)
+    model.zero_grad(set_to_none=True)
+    loss.backward()
+
+    # Joint loss (LM + head) must reach BOTH a pre-read base param and the head.
+    pre_read_param = model.model.layers[0].self_attn.q_proj.weight
+    assert pre_read_param.grad is not None
+    assert torch.count_nonzero(pre_read_param.grad) > 0
     head_param = next(head.parameters())
     assert head_param.grad is not None
     assert torch.count_nonzero(head_param.grad) > 0

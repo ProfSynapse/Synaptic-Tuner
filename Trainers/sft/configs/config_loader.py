@@ -85,6 +85,16 @@ class SFTTrainingConfig:
     # models). None ⇒ no kwargs ⇒ default rendering for every existing config.
     chat_template_kwargs: Optional[Dict[str, Any]] = None
     max_steps: Optional[int] = None
+    # Render/masking strategy for SFT preprocessing.
+    #   "full_conversation" (default) — render the whole conversation with
+    #       add_generation_prompt=False and derive the assistant-only mask by a
+    #       prefix match. Byte-identical to historical behavior.
+    #   "prompt_completion" — build input_ids from the add_generation_prompt=True
+    #       prompt render followed by the raw completion + derived terminal, with
+    #       the prompt segment masked to -100. Lives here (not on AuxHeadConfig)
+    #       because it REPLACES the assistant_only masking region rather than
+    #       configuring the head; see shared.sft_preprocessing.materialize_sft_example.
+    prompt_render: str = "full_conversation"
 
 
 @dataclass
@@ -286,28 +296,45 @@ def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
     )
 
 
-def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
-    """Load aux_head config from a YAML dict (mirrors load_evolutionary_config).
+def validate_aux_head_coherence(
+    enabled: bool,
+    freeze_base: bool,
+    lm_loss_weight: float,
+    out_activation: str,
+    loss: str,
+    layer: Optional[int],
+) -> None:
+    """Raise if an enabled aux_head config is internally incoherent.
 
-    Returns a default (disabled) config on absent/empty input. When enabled, the
-    ``layer`` must be present — there is no silent default, so a misconfigured
-    block fails loudly rather than reading an arbitrary layer.
+    Shared by both config paths so a config assembled from CLI flags is
+    validated identically to one loaded from YAML:
+
+    - ``load_aux_head_config`` (the YAML-load path), and
+    - ``train_sft.run`` after the ``--aux-head-*`` CLI overrides mutate
+      ``config.aux_head`` (those overrides run AFTER ``load_aux_head_config``,
+      so without this shared call a CLI-assembled config would reach training
+      unvalidated).
+
+    Guards (all gated on ``enabled``): ``layer`` must be set; ``freeze_base`` and
+    ``lm_loss_weight`` must describe the same phase; and a probability-scoring
+    ``loss`` requires a probability ``out_activation``. A disabled head
+    (``enabled=False``) is always coherent — the fields are inert — so this is a
+    no-op in that case.
     """
-    if not aux_data:
-        return AuxHeadConfig()
+    if not enabled:
+        return
 
-    enabled = aux_data.get('enabled', False)
-    layer = aux_data.get('layer', None)
-    if enabled and layer is None:
+    # Presence guard: an enabled head must name the hidden_states index it reads.
+    # There is no silent default (other users read a different layer than ours),
+    # so a config whose layer never reached the YAML/flags fails loudly HERE
+    # rather than crashing late and cryptically at hidden_states[None]. Shared by
+    # both lanes — the flag-only runner lane never calls load_aux_head_config, so
+    # without this check that lane would skip the presence guard entirely.
+    if layer is None:
         raise ValueError(
             "aux_head.enabled=true requires aux_head.layer to be set explicitly "
             "(no silent default — choose the hidden_states index to read)."
         )
-
-    freeze_base = aux_data.get('freeze_base', True)
-    lm_loss_weight = aux_data.get('lm_loss_weight', 0.0)
-    loss = aux_data.get('loss', 'bce')
-    out_activation = aux_data.get('out_activation', 'sigmoid')
 
     # Coherence guard: freeze_base and lm_loss_weight must describe the SAME phase.
     # Valid: (freeze_base=true, lm_loss_weight=0) trains the head alone over a
@@ -320,7 +347,7 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
     phase_coherent = (freeze_base and lm_loss_weight == 0) or (
         not freeze_base and lm_loss_weight > 0
     )
-    if enabled and not phase_coherent:
+    if not phase_coherent:
         raise ValueError(
             "aux_head.freeze_base and aux_head.lm_loss_weight must agree on the "
             "phase: use (freeze_base=true, lm_loss_weight=0) or "
@@ -334,12 +361,45 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
     # (bce/brier, which expect a probability) silently mis-scores — bce on
     # out-of-range inputs, or brier as MSE-on-logits (a non-proper score). Require
     # a sigmoid output for these losses.
-    if enabled and out_activation == 'identity' and loss in ('bce', 'brier'):
+    if out_activation == 'identity' and loss in ('bce', 'brier'):
         raise ValueError(
             "aux_head.out_activation='identity' is incompatible with "
             f"aux_head.loss={loss!r}: bce and brier expect a probability in "
             "[0, 1]. Use out_activation='sigmoid' for these losses."
         )
+
+
+def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
+    """Load aux_head config from a YAML dict (mirrors load_evolutionary_config).
+
+    Returns a default (disabled) config on absent/empty input. When enabled, the
+    ``layer`` must be present — there is no silent default, so a misconfigured
+    block fails loudly rather than reading an arbitrary layer.
+    """
+    if not aux_data:
+        return AuxHeadConfig()
+
+    enabled = aux_data.get('enabled', False)
+    layer = aux_data.get('layer', None)
+    freeze_base = aux_data.get('freeze_base', True)
+    lm_loss_weight = aux_data.get('lm_loss_weight', 0.0)
+    loss = aux_data.get('loss', 'bce')
+    out_activation = aux_data.get('out_activation', 'sigmoid')
+
+    # Coherence guards (layer presence + phase agreement + probability-loss/
+    # out_activation match) are shared with the CLI-override path in
+    # train_sft.run; a single implementation keeps the YAML lane and the CLI lane
+    # raising identically. The layer-presence check lives in the shared validator
+    # too (not inline here) so the flag-only runner lane — which never calls this
+    # function — gets the same early, descriptive raise.
+    validate_aux_head_coherence(
+        enabled=enabled,
+        freeze_base=freeze_base,
+        lm_loss_weight=lm_loss_weight,
+        out_activation=out_activation,
+        loss=loss,
+        layer=layer,
+    )
 
     return AuxHeadConfig(
         enabled=enabled,

@@ -54,6 +54,7 @@ def materialize_sft_features(
     loss_mask_mode: str = ASSISTANT_ONLY,
     tool_call_mode: str = "render_text",
     chat_template_kwargs: dict[str, Any] | None = None,
+    prompt_render: str = "full_conversation",
 ) -> PreparedSFTExample:
     if tool_call_mode != "render_text":
         raise ValueError(f"Unsupported tool_call_mode: {tool_call_mode}")
@@ -66,6 +67,7 @@ def materialize_sft_features(
         max_seq_length=max_seq_length,
         assistant_only_loss=assistant_only_loss,
         chat_template_kwargs=chat_template_kwargs,
+        prompt_render=prompt_render,
     )
 
 
@@ -78,6 +80,7 @@ def prepare_sft_dataset(
     backend: str = "trl_unsloth",
     chat_template_kwargs: dict[str, Any] | None = None,
     aux_target_field: str | None = None,
+    prompt_render: str = "full_conversation",
 ) -> Dataset:
     del backend  # The contract is backend-agnostic; callers choose the trainer separately.
 
@@ -95,6 +98,7 @@ def prepare_sft_dataset(
             max_seq_length=max_seq_length,
             loss_mask_mode=loss_mask_mode,
             chat_template_kwargs=chat_template_kwargs,
+            prompt_render=prompt_render,
         )
         materialized = {
             "input_ids": prepared.input_ids,
@@ -147,6 +151,7 @@ def load_and_prepare_sft_dataset(
     include_text: bool = False,
     chat_template_kwargs: dict[str, Any] | None = None,
     aux_target_field: str | None = None,
+    prompt_render: str = "full_conversation",
 ) -> Dataset:
     del num_proc
     del include_text
@@ -157,4 +162,5 @@ def load_and_prepare_sft_dataset(
         loss_mask_mode=loss_mask_mode,
         chat_template_kwargs=chat_template_kwargs,
         aux_target_field=aux_target_field,
+        prompt_render=prompt_render,
     )
