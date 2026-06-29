@@ -302,6 +302,7 @@ def validate_aux_head_coherence(
     lm_loss_weight: float,
     out_activation: str,
     loss: str,
+    layer: Optional[int],
 ) -> None:
     """Raise if an enabled aux_head config is internally incoherent.
 
@@ -314,11 +315,26 @@ def validate_aux_head_coherence(
       so without this shared call a CLI-assembled config would reach training
       unvalidated).
 
-    A disabled head (``enabled=False``) is always coherent — the fields are
-    inert — so this is a no-op in that case.
+    Guards (all gated on ``enabled``): ``layer`` must be set; ``freeze_base`` and
+    ``lm_loss_weight`` must describe the same phase; and a probability-scoring
+    ``loss`` requires a probability ``out_activation``. A disabled head
+    (``enabled=False``) is always coherent — the fields are inert — so this is a
+    no-op in that case.
     """
     if not enabled:
         return
+
+    # Presence guard: an enabled head must name the hidden_states index it reads.
+    # There is no silent default (other users read a different layer than ours),
+    # so a config whose layer never reached the YAML/flags fails loudly HERE
+    # rather than crashing late and cryptically at hidden_states[None]. Shared by
+    # both lanes — the flag-only runner lane never calls load_aux_head_config, so
+    # without this check that lane would skip the presence guard entirely.
+    if layer is None:
+        raise ValueError(
+            "aux_head.enabled=true requires aux_head.layer to be set explicitly "
+            "(no silent default — choose the hidden_states index to read)."
+        )
 
     # Coherence guard: freeze_base and lm_loss_weight must describe the SAME phase.
     # Valid: (freeze_base=true, lm_loss_weight=0) trains the head alone over a
@@ -365,26 +381,24 @@ def load_aux_head_config(aux_data: Dict[str, Any]) -> AuxHeadConfig:
 
     enabled = aux_data.get('enabled', False)
     layer = aux_data.get('layer', None)
-    if enabled and layer is None:
-        raise ValueError(
-            "aux_head.enabled=true requires aux_head.layer to be set explicitly "
-            "(no silent default — choose the hidden_states index to read)."
-        )
-
     freeze_base = aux_data.get('freeze_base', True)
     lm_loss_weight = aux_data.get('lm_loss_weight', 0.0)
     loss = aux_data.get('loss', 'bce')
     out_activation = aux_data.get('out_activation', 'sigmoid')
 
-    # Coherence guards (phase agreement + probability-loss/out_activation match)
-    # are shared with the CLI-override path in train_sft.run; a single
-    # implementation keeps the YAML lane and the CLI lane raising identically.
+    # Coherence guards (layer presence + phase agreement + probability-loss/
+    # out_activation match) are shared with the CLI-override path in
+    # train_sft.run; a single implementation keeps the YAML lane and the CLI lane
+    # raising identically. The layer-presence check lives in the shared validator
+    # too (not inline here) so the flag-only runner lane — which never calls this
+    # function — gets the same early, descriptive raise.
     validate_aux_head_coherence(
         enabled=enabled,
         freeze_base=freeze_base,
         lm_loss_weight=lm_loss_weight,
         out_activation=out_activation,
         loss=loss,
+        layer=layer,
     )
 
     return AuxHeadConfig(

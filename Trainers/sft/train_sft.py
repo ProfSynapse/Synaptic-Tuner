@@ -703,16 +703,20 @@ def run(args: argparse.Namespace):
         config.training.prompt_render = args.aux_head_prompt_render
     # Coherence parity with the YAML lane: the --aux-head-* overrides above mutate
     # config.aux_head after load_aux_head_config ran, so a config assembled purely
-    # from CLI flags (e.g. --aux-head-enabled --no-aux-head-freeze-base, which
-    # reaches the freeze_base=false + lm_loss_weight=0 corner via the dataclass
-    # defaults) would otherwise reach training unvalidated. Same shared guard,
-    # same raise. Distinct from the prompt_render WARN below — both must hold.
+    # from CLI flags would otherwise reach training unvalidated — e.g.
+    # --aux-head-enabled --no-aux-head-freeze-base (the freeze_base=false +
+    # lm_loss_weight=0 corner via dataclass defaults), or --aux-head-enabled with
+    # no --aux-head-layer (layer=None, which would crash late at hidden_states[None]
+    # on the flag-only runner lane that never calls load_aux_head_config). Same
+    # shared guard, same raise. Distinct from the prompt_render WARN below — both
+    # must hold.
     validate_aux_head_coherence(
         enabled=config.aux_head.enabled,
         freeze_base=config.aux_head.freeze_base,
         lm_loss_weight=config.aux_head.lm_loss_weight,
         out_activation=config.aux_head.out_activation,
         loss=config.aux_head.loss,
+        layer=config.aux_head.layer,
     )
     if args.lora_r is not None:
         config.lora.r = args.lora_r

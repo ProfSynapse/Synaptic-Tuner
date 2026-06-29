@@ -152,6 +152,10 @@ def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:
     assert "lm_loss_weight=config.aux_head.lm_loss_weight" in source
     assert "out_activation=config.aux_head.out_activation" in source
     assert "loss=config.aux_head.loss" in source
+    # A-M1 lane parity: the shared validator now also enforces layer-presence, so
+    # the CLI lane must thread config.aux_head.layer (set from --aux-head-layer)
+    # into the same call — otherwise the flag-only runner lane skips the check.
+    assert "layer=config.aux_head.layer" in source
 
     # Ordering: the guard must run AFTER the last aux_head CLI override so it sees
     # the final config. The prompt_render override is the last line of the block.

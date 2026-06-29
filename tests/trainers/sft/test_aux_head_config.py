@@ -160,6 +160,7 @@ def test_validate_coherence_rejects_incoherent_phase(freeze_base, lm_loss_weight
             lm_loss_weight=lm_loss_weight,
             out_activation="sigmoid",
             loss="bce",
+            layer=35,
         )
 
 
@@ -178,6 +179,7 @@ def test_validate_coherence_accepts_coherent_phase(freeze_base, lm_loss_weight):
         lm_loss_weight=lm_loss_weight,
         out_activation="sigmoid",
         loss="bce",
+        layer=35,
     )
 
 
@@ -190,18 +192,51 @@ def test_validate_coherence_rejects_identity_with_probability_loss(loss):
             lm_loss_weight=0.0,
             out_activation="identity",
             loss=loss,
+            layer=35,
         )
 
 
 def test_validate_coherence_is_noop_when_disabled():
     # A disabled head has inert fields — even an otherwise-incoherent combination
-    # must not raise (mirrors the enabled-gated YAML-load behavior).
+    # (incl. a missing layer) must not raise (mirrors the enabled-gated
+    # YAML-load behavior).
     validate_aux_head_coherence(
         enabled=False,
         freeze_base=False,
         lm_loss_weight=0.0,
         out_activation="identity",
         loss="bce",
+        layer=None,
+    )
+
+
+@pytest.mark.parametrize("loss", ["bce", "brier"])
+def test_validate_coherence_rejects_missing_layer_when_enabled(loss):
+    # A-M1 parity: an enabled head with no layer must raise EARLY + DESCRIPTIVE
+    # on BOTH lanes. The flag-only runner lane never calls load_aux_head_config,
+    # so this presence guard must live in the shared validator (not inline in the
+    # loader) or that lane would crash late at hidden_states[None].
+    with pytest.raises(ValueError, match="requires aux_head.layer to be set"):
+        validate_aux_head_coherence(
+            enabled=True,
+            freeze_base=True,
+            lm_loss_weight=0.0,
+            out_activation="sigmoid",
+            loss=loss,
+            layer=None,
+        )
+
+
+def test_validate_coherence_accepts_layer_when_enabled():
+    # The presence guard passes once a layer is named (no raise on an otherwise
+    # coherent enabled head).
+    validate_aux_head_coherence(
+        enabled=True,
+        freeze_base=True,
+        lm_loss_weight=0.0,
+        out_activation="sigmoid",
+        loss="bce",
+        layer=0,
     )
 
 
