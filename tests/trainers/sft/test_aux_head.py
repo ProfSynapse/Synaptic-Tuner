@@ -28,8 +28,10 @@ from aux_head import (  # noqa: E402
     infer_aux_scalar,
     load_aux_head,
     reduce_hidden_states,
+    resolve_hidden_size,
     save_aux_head,
 )
+from types import SimpleNamespace  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -233,3 +235,54 @@ def test_only_head_trains_and_loss_decreases():
     # The frozen base never accumulated gradient.
     assert all(p.grad is None for p in frozen_base.parameters())
     assert all(not p.requires_grad for p in frozen_base.parameters())
+
+
+# ---------------------------------------------------------------------------
+# resolve_hidden_size: all three fallback branches (sizes the head input_dim)
+# ---------------------------------------------------------------------------
+
+def test_resolve_hidden_size_reads_top_level_config():
+    # Branch 1: the (PEFT/Unsloth-proxied) model exposes .config.hidden_size.
+    model = SimpleNamespace(config=SimpleNamespace(hidden_size=128))
+    assert resolve_hidden_size(model) == 128
+
+
+def test_resolve_hidden_size_falls_back_to_base_model_config():
+    # Branch 2: top-level .config has no hidden_size; the base model's does.
+    model = SimpleNamespace(
+        config=SimpleNamespace(),  # no hidden_size attribute
+        base_model=SimpleNamespace(config=SimpleNamespace(hidden_size=256)),
+    )
+    assert resolve_hidden_size(model) == 256
+
+
+def test_resolve_hidden_size_falls_back_to_input_embedding_width():
+    # Branch 3: neither config exposes hidden_size; read the embedding width.
+    embedding = torch.nn.Embedding(10, 64)
+
+    model = SimpleNamespace(
+        config=SimpleNamespace(),
+        base_model=SimpleNamespace(config=SimpleNamespace()),
+        get_input_embeddings=lambda: embedding,
+    )
+    assert resolve_hidden_size(model) == 64
+
+
+def test_resolve_hidden_size_embedding_width_from_weight_shape():
+    # Branch 3 variant: embedding lacks .embedding_dim → fall through to weight.shape[1].
+    weight = torch.zeros(10, 48)
+    embedding = SimpleNamespace(embedding_dim=None, weight=weight)
+
+    model = SimpleNamespace(
+        config=SimpleNamespace(),
+        base_model=SimpleNamespace(config=SimpleNamespace()),
+        get_input_embeddings=lambda: embedding,
+    )
+    assert resolve_hidden_size(model) == 48
+
+
+def test_resolve_hidden_size_returns_int():
+    # The head's nn.Linear needs a real int, not a tensor/0-d value.
+    model = SimpleNamespace(config=SimpleNamespace(hidden_size=32))
+    result = resolve_hidden_size(model)
+    assert isinstance(result, int) and result == 32

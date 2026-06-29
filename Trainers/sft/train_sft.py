@@ -226,26 +226,6 @@ def validate_model_compatibility(config) -> None:
     print(border + "\n")
 
 
-
-def _resolve_hidden_size(model) -> int:
-    """Resolve the base model's hidden size for the aux_head input dim.
-
-    The model returned by the PEFT/Unsloth wrap usually proxies ``.config`` to the
-    base, but not always — fall back to the base model's config, then to the input
-    embedding width.
-    """
-    config_obj = getattr(model, "config", None)
-    hidden_size = getattr(config_obj, "hidden_size", None)
-    if hidden_size is None:
-        base = getattr(model, "base_model", None)
-        base_config = getattr(base, "config", None)
-        hidden_size = getattr(base_config, "hidden_size", None)
-    if hidden_size is None:
-        embeddings = model.get_input_embeddings()
-        hidden_size = getattr(embeddings, "embedding_dim", None) or embeddings.weight.shape[1]
-    return int(hidden_size)
-
-
 def collate_prepared_sft_batch(features: list[dict[str, Any]], tokenizer) -> dict[str, torch.Tensor]:
     """Pad explicit tokenized SFT rows into a trainer-ready batch."""
     if not features:
@@ -1032,10 +1012,10 @@ def run(args: argparse.Namespace):
     # stock Trainer construction is byte-identical to current behavior.
     aux_head_module = None
     if aux_head_enabled:
-        from src.aux_head import AuxHead
+        from src.aux_head import AuxHead, resolve_hidden_size
         from src.aux_head_trainer import AuxHeadTrainer
 
-        input_dim = _resolve_hidden_size(model)
+        input_dim = resolve_hidden_size(model)
         aux_head_module = AuxHead(
             input_dim=input_dim,
             head_type=aux_head_cfg.head_type,

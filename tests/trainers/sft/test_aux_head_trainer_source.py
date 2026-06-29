@@ -54,10 +54,14 @@ def test_sidecar_save_runs_only_when_head_present():
     assert "save_aux_head(" in source
 
 
-def test_hidden_size_resolver_has_peft_fallback():
+def test_hidden_size_resolver_imported_from_aux_head():
+    # The resolver moved into the unsloth-free aux_head module so its fallback
+    # branches are unit-testable; train_sft.py now imports + calls it.
     source = _train_sft_source()
-    assert "def _resolve_hidden_size(model)" in source
-    assert "base_model" in source
+    assert "from src.aux_head import AuxHead, resolve_hidden_size" in source
+    assert "input_dim = resolve_hidden_size(model)" in source
+    # The inline definition is gone (logic lives in aux_head.py now).
+    assert "def _resolve_hidden_size(model)" not in source
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +80,8 @@ def test_aux_head_trainer_overrides_present():
     assert "compute_loss" in cls.__dict__
     assert "create_optimizer" in cls.__dict__
     assert "_freeze_base_keep_head" in cls.__dict__
+    # Resume guard (Phase A does not support resume_from_checkpoint).
+    assert "train" in cls.__dict__
 
 
 def test_aux_head_trainer_source_marks_phase_b_seam_and_no_lm_term():

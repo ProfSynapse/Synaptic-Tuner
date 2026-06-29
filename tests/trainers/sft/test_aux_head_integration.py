@@ -99,7 +99,7 @@ def _collate(features):
     }
 
 
-def _make_trainer(tmp_path, *, freeze_base=True, loss="bce", token_position="last"):
+def _make_trainer(tmp_path, *, freeze_base=True, loss="bce", token_position="last", remove_unused_columns=False):
     model = _tiny_causal_lm()
     head = AuxHead(input_dim=HIDDEN, head_type="linear")
     cfg = AuxHeadConfig(
@@ -115,7 +115,7 @@ def _make_trainer(tmp_path, *, freeze_base=True, loss="bce", token_position="las
     args = TrainingArguments(
         output_dir=str(tmp_path / "out"),
         use_cpu=True,  # transformers-5.5: replaces the removed no_cuda kwarg
-        remove_unused_columns=False,  # keep aux_target on the rows (mirrors train_sft)
+        remove_unused_columns=remove_unused_columns,  # keep aux_target on the rows (mirrors train_sft)
         per_device_train_batch_size=4,
         max_steps=5,
         learning_rate=0.1,
@@ -201,3 +201,22 @@ def test_missing_aux_target_in_batch_fails_loud(tmp_path):
     batch.pop("aux_target")
     with pytest.raises(ValueError, match="aux_target"):
         trainer.compute_loss(model, batch)
+
+
+def test_construction_rejects_remove_unused_columns_true(tmp_path):
+    # The per-row aux_target column survives ONLY because remove_unused_columns is
+    # False. Flipping it must fail loud at construction (naming the coupling), not
+    # surface as an opaque "missing aux_target" error mid-training.
+    with pytest.raises(ValueError, match="remove_unused_columns"):
+        _make_trainer(tmp_path, remove_unused_columns=True)
+
+
+def test_train_refuses_resume_from_checkpoint(tmp_path):
+    # The head is sidecar-saved post-train and is NOT in HF per-step checkpoints,
+    # so resume would reinitialize it while reloading stale optimizer state.
+    # The guard must refuse loudly rather than train a corrupted head.
+    trainer, model, head = _make_trainer(tmp_path)
+    with pytest.raises(RuntimeError, match="resume_from_checkpoint"):
+        trainer.train(resume_from_checkpoint=str(tmp_path / "out" / "checkpoint-1"))
+    with pytest.raises(RuntimeError, match="resume_from_checkpoint"):
+        trainer.train(resume_from_checkpoint=True)

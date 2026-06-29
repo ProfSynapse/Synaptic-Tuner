@@ -111,6 +111,29 @@ class AuxHead(nn.Module):
         return logits  # "identity"
 
 
+def resolve_hidden_size(model: Any) -> int:
+    """Resolve the base model's hidden size for the aux_head input dim.
+
+    The model returned by the PEFT/Unsloth wrap usually proxies ``.config`` to the
+    base, but not always — fall back to the base model's config, then to the input
+    embedding width.
+
+    This lives in the unsloth-free head module (not the ``train_sft`` entry point,
+    which imports unsloth at module load) so all three fallback branches are
+    importable and unit-testable. ``train_sft.run`` imports and calls it.
+    """
+    config_obj = getattr(model, "config", None)
+    hidden_size = getattr(config_obj, "hidden_size", None)
+    if hidden_size is None:
+        base = getattr(model, "base_model", None)
+        base_config = getattr(base, "config", None)
+        hidden_size = getattr(base_config, "hidden_size", None)
+    if hidden_size is None:
+        embeddings = model.get_input_embeddings()
+        hidden_size = getattr(embeddings, "embedding_dim", None) or embeddings.weight.shape[1]
+    return int(hidden_size)
+
+
 def reduce_hidden_states(
     hidden: torch.Tensor,
     attention_mask: torch.Tensor,

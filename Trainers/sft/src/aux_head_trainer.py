@@ -51,6 +51,20 @@ class AuxHeadTrainer(Trainer):
         self.aux_head = aux_head
         self.aux_head_config = aux_head_config
 
+        # Fail loud on the load-bearing dependency, not deep inside compute_loss.
+        # The per-row ``aux_target`` column survives into the collator ONLY because
+        # the SFT path sets remove_unused_columns=False; HF would otherwise strip
+        # any column not in the model's forward signature. Flipping that flag would
+        # surface as an opaque "batch without 'aux_target'" error far from the
+        # toggle, so assert it here where the cause is obvious.
+        if self.args.remove_unused_columns is not False:
+            raise ValueError(
+                "AuxHeadTrainer requires TrainingArguments.remove_unused_columns=False "
+                "so the per-row 'aux_target' column survives into the data collator and "
+                f"compute_loss; got remove_unused_columns={self.args.remove_unused_columns!r}. "
+                "Do not flip this when aux_head is enabled."
+            )
+
         # Place the head on the base model's device (dtype stays the head's own,
         # so a bf16 base can feed an fp32 head; AuxHead.forward casts the input).
         try:
@@ -63,6 +77,31 @@ class AuxHeadTrainer(Trainer):
             self._freeze_base_keep_head()
 
         self._log_trainable_param_accounting()
+
+    def train(self, resume_from_checkpoint=None, *args: Any, **kwargs: Any):  # type: ignore[override]
+        """Fail loud on resume — Phase A does not support ``resume_from_checkpoint``.
+
+        The head is held OUTSIDE ``self.model`` and persisted ONLY as a post-train
+        sidecar (``save_aux_head``). HF's per-step checkpoints serialize
+        ``self.model`` + ``optimizer.pt`` + ``scheduler.pt`` but NOT the head module,
+        so resuming would reconstruct the head fresh (random) in ``run()`` while
+        reloading STALE head-optimizer momentum onto it — silently corrupting the
+        head. Until the head is hooked into checkpoint save/load (out of Phase-A
+        scope), refuse to resume rather than train a corrupted head.
+
+        The guard lives on the trainer (not only at the call site) so it protects
+        every caller, and it is observed HERE because ``resume_from_checkpoint``
+        arrives as a ``train()`` argument, not a ``TrainingArguments`` field.
+        """
+        if resume_from_checkpoint:
+            raise RuntimeError(
+                "AuxHeadTrainer does not support resume_from_checkpoint: the aux_head is "
+                "not captured by HF per-step checkpoints (it is sidecar-saved after "
+                "train() only), so resuming would reinitialize the head while reapplying "
+                "stale head-optimizer state. Phase A does not support resume — restart "
+                "training from scratch or clear resume_from_checkpoint."
+            )
+        return super().train(resume_from_checkpoint, *args, **kwargs)
 
     def _freeze_base_keep_head(self) -> None:
         """Freeze every base/LoRA parameter so ONLY the head accumulates gradient.
