@@ -20,6 +20,13 @@ from typing import Any, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 
+def _load_json_field(value: Any) -> Any:
+    """Decode JSON values from SQL drivers while tolerating NULLs."""
+    if value is None or isinstance(value, (dict, list)):
+        return value
+    return json.loads(value)
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -58,6 +65,8 @@ class InferenceLogRecord:
     latency_ms: float = 0.0
     fitness_score: float | None = None
     is_valid: bool | None = None
+    verdict_rationale: str | None = None
+    rubric_scores: list[dict[str, Any]] | None = None
     tag: str | None = None
     dataset_version: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -76,11 +85,15 @@ class InferenceLogRecord:
         "completion_token_ids",
         "completion_logprobs",
     )
+    _OPTIONAL_VERDICT_FIELDS = (
+        "verdict_rationale",
+        "rubric_scores",
+    )
 
     def to_json(self) -> str:
         """Serialize to JSON string (omitting unset token-capture fields)."""
         data = asdict(self)
-        for key in self._OPTIONAL_TOKEN_FIELDS:
+        for key in self._OPTIONAL_TOKEN_FIELDS + self._OPTIONAL_VERDICT_FIELDS:
             if data.get(key) is None:
                 data.pop(key, None)
         return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
@@ -159,7 +172,13 @@ class LogCatalog(Protocol):
     async def count_logs(self, filters: LogFilter) -> int: ...
     async def avg_score(self, filters: LogFilter) -> float: ...
     async def update_score(
-        self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],
+        self,
+        log_id: str,
+        fitness_score: float,
+        is_valid: bool,
+        errors: list[str],
+        verdict_rationale: str | None = None,
+        rubric_scores: list[dict[str, Any]] | None = None,
     ) -> None: ...
     async def update_tag(self, log_id: str, tag: str, tag_source: str) -> None: ...
     async def mark_used(self, log_ids: list[str], dataset_version: str) -> None: ...
@@ -182,6 +201,8 @@ CREATE TABLE IF NOT EXISTS inference_logs (
     tools_requested INTEGER NOT NULL DEFAULT 0,
     fitness_score   REAL,
     is_valid        INTEGER,
+    verdict_rationale TEXT,
+    rubric_scores   TEXT,
     tag             TEXT,
     tag_source      TEXT,
     dataset_version TEXT,
@@ -233,6 +254,7 @@ class SQLiteLogCatalog:
         self._conn = await aiosqlite.connect(str(self._db_path))
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.executescript(_SQLITE_SCHEMA)
+        await self._ensure_schema()
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -326,14 +348,29 @@ class SQLiteLogCatalog:
         return float(row[0]) if row and row[0] is not None else 0.0
 
     async def update_score(
-        self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],
+        self,
+        log_id: str,
+        fitness_score: float,
+        is_valid: bool,
+        errors: list[str],
+        verdict_rationale: str | None = None,
+        rubric_scores: list[dict[str, Any]] | None = None,
     ) -> None:
         """Update fitness score and validation status."""
         await self._conn.execute(
             """UPDATE inference_logs
-               SET fitness_score = ?, is_valid = ?
+               SET fitness_score = ?,
+                   is_valid = ?,
+                   verdict_rationale = ?,
+                   rubric_scores = ?
                WHERE log_id = ?""",
-            (fitness_score, 1 if is_valid else 0, log_id),
+            (
+                fitness_score,
+                1 if is_valid else 0,
+                verdict_rationale,
+                json.dumps(rubric_scores) if rubric_scores is not None else None,
+                log_id,
+            ),
         )
         await self._conn.commit()
 
@@ -414,6 +451,20 @@ class SQLiteLogCatalog:
 
     # -- Internal helpers ---------------------------------------------------
 
+    async def _ensure_schema(self) -> None:
+        """Add nullable columns introduced after the initial SQLite schema."""
+        cursor = await self._conn.execute("PRAGMA table_info(inference_logs)")
+        rows = await cursor.fetchall()
+        existing = {row[1] for row in rows}
+        if "verdict_rationale" not in existing:
+            await self._conn.execute(
+                "ALTER TABLE inference_logs ADD COLUMN verdict_rationale TEXT"
+            )
+        if "rubric_scores" not in existing:
+            await self._conn.execute(
+                "ALTER TABLE inference_logs ADD COLUMN rubric_scores TEXT"
+            )
+
     def _build_query(
         self, select: str, filters: LogFilter,
     ) -> tuple[str, list]:
@@ -475,6 +526,8 @@ class SQLiteLogCatalog:
             tool_calls=[{}] if row.get("has_tool_calls") else [],
             fitness_score=row.get("fitness_score"),
             is_valid=bool(row["is_valid"]) if row.get("is_valid") is not None else None,
+            verdict_rationale=row.get("verdict_rationale"),
+            rubric_scores=_load_json_field(row.get("rubric_scores")),
             tag=row.get("tag"),
             dataset_version=row.get("dataset_version"),
             source_file=row.get("source_file", ""),
@@ -550,6 +603,8 @@ class PostgresLogCatalog:
                     tools_requested BOOLEAN NOT NULL DEFAULT FALSE,
                     fitness_score   DOUBLE PRECISION,
                     is_valid        BOOLEAN,
+                    verdict_rationale TEXT,
+                    rubric_scores   JSONB,
                     tag             TEXT,
                     tag_source      TEXT,
                     dataset_version TEXT,
@@ -559,6 +614,14 @@ class PostgresLogCatalog:
                     created_at      TEXT NOT NULL DEFAULT NOW()::TEXT
                 )
             """)
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.inference_logs "
+                "ADD COLUMN IF NOT EXISTS verdict_rationale TEXT"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.inference_logs "
+                "ADD COLUMN IF NOT EXISTS rubric_scores JSONB"
+            )
             await conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self._schema}.dataset_versions (
                     version_id      TEXT PRIMARY KEY,
@@ -668,15 +731,28 @@ class PostgresLogCatalog:
         return float(row) if row is not None else 0.0
 
     async def update_score(
-        self, log_id: str, fitness_score: float, is_valid: bool, errors: list[str],
+        self,
+        log_id: str,
+        fitness_score: float,
+        is_valid: bool,
+        errors: list[str],
+        verdict_rationale: str | None = None,
+        rubric_scores: list[dict[str, Any]] | None = None,
     ) -> None:
         """Update fitness score and validation status."""
         async with self._pool.acquire() as conn:
             await conn.execute(
                 f"""UPDATE {self._schema}.inference_logs
-                    SET fitness_score = $1, is_valid = $2
-                    WHERE log_id = $3""",
-                fitness_score, is_valid, log_id,
+                    SET fitness_score = $1,
+                        is_valid = $2,
+                        verdict_rationale = $3,
+                        rubric_scores = $4::jsonb
+                    WHERE log_id = $5""",
+                fitness_score,
+                is_valid,
+                verdict_rationale,
+                json.dumps(rubric_scores) if rubric_scores is not None else None,
+                log_id,
             )
 
     async def update_tag(
@@ -821,6 +897,8 @@ class PostgresLogCatalog:
             tool_calls=[{}] if row.get("has_tool_calls") else [],
             fitness_score=row.get("fitness_score"),
             is_valid=row["is_valid"] if row.get("is_valid") is not None else None,
+            verdict_rationale=row.get("verdict_rationale"),
+            rubric_scores=_load_json_field(row.get("rubric_scores")),
             tag=row.get("tag"),
             dataset_version=row.get("dataset_version"),
             source_file=row.get("source_file", ""),

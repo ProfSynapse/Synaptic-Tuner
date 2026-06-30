@@ -52,6 +52,54 @@ def render_completion(ev: dict) -> str:
     return "\n".join(parts)
 
 
+def render_native_completion(ev: dict) -> str:
+    return ev.get("text", "").strip()
+
+
+def _serialize_tool_arguments(value) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return "{}"
+    return json.dumps(value, ensure_ascii=False)
+
+
+def native_message(e: dict) -> dict:
+    if e["role"] == "human":
+        return {"role": "user", "content": e.get("text", "")}
+    if e["role"] == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": str(e.get("tool_call_id") or ""),
+            "content": e.get("output", ""),
+        }
+
+    msg = {"role": "assistant", "content": e.get("text", "").strip() or None}
+    tool_calls = []
+    for idx, call in enumerate(e.get("tool_calls") or []):
+        tool_calls.append({
+            "id": str(call.get("id") or f"call_{idx:04d}"),
+            "type": "function",
+            "function": {
+                "name": str(call.get("name") or ""),
+                "arguments": _serialize_tool_arguments(call.get("input")),
+            },
+        })
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return msg
+
+
+def redact_nested(value, redactor, counts):
+    if isinstance(value, str):
+        return redactor.redact(value, counts)
+    if isinstance(value, list):
+        return [redact_nested(v, redactor, counts) for v in value]
+    if isinstance(value, dict):
+        return {k: redact_nested(v, redactor, counts) for k, v in value.items()}
+    return value
+
+
 def _is_correction(text: str, markers: list[str], max_len: int) -> bool:
     low = text.strip().lower()
     if not low or len(low) > max_len:
@@ -59,8 +107,9 @@ def _is_correction(text: str, markers: list[str], max_len: int) -> bool:
     return any(low.startswith(m) for m in markers)
 
 
-def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget):
+def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget, render_mode="flat"):
     rows = []
+    native = render_mode == "native"
     corr_markers = lab["correction_markers"]
     intr_markers = lab["interrupt_markers"]
     max_tokens = ctx_budget.get("max_context_tokens", 8192)
@@ -70,8 +119,14 @@ def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget):
 
     def _content(e):
         if e["role"] == "tool":
-            return "[tool result]"
+            return e.get("output", "") if native else "[tool result]"
         return render_completion(e) if e["role"] == "assistant" else e.get("text", "")
+
+    def _message(e):
+        if native:
+            return native_message(e)
+        role = {"human": "user", "assistant": "assistant", "tool": "tool"}[e["role"]]
+        return {"role": role, "content": _content(e)}
 
     for i, ev in enumerate(events):
         if ev["role"] != "assistant":
@@ -113,10 +168,10 @@ def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget):
         else:
             label, tier = True, "good"
 
-        completion_str = render_completion(ev)
+        completion_str = render_native_completion(ev) if native else render_completion(ev)
         budget = max_tokens - est(completion_str)
         oversize = budget < 0
-        conv_rev = [{"role": "assistant", "content": completion_str}]
+        conv_rev = [native_message(ev) if native else {"role": "assistant", "content": completion_str}]
         used = 0
         for e in reversed(events[:i]):
             if len(conv_rev) >= max_msgs:
@@ -126,8 +181,7 @@ def emit_rows(events, *, source_kind, project, rel_id, lab, ctx_budget):
             if used + t > budget and len(conv_rev) > 1:
                 break
             used += t
-            role = {"human": "user", "assistant": "assistant", "tool": "tool"}[e["role"]]
-            conv_rev.append({"role": role, "content": c})
+            conv_rev.append(_message(e))
         conv = list(reversed(conv_rev))
 
         prompt = ""
@@ -233,7 +287,10 @@ def should_keep(row, q, seen, cpt):
 
     if tools:
         kept = [t for t in tools if t not in drop_tools]
-        ceremony_skill = "Skill" in tools and any(sk in comp for sk in drop_skills)
+        current_msg = (row.get("conversations") or [{}])[-1]
+        tool_payload = comp + " " + json.dumps(current_msg.get("tool_calls") or [],
+                                               ensure_ascii=False)
+        ceremony_skill = "Skill" in tools and any(sk in tool_payload for sk in drop_skills)
         if not kept or (len(kept) == 1 and kept[0] == "Skill" and ceremony_skill):
             return False, "ceremony_tool"
     else:
@@ -289,6 +346,9 @@ def main():
         cfg.setdefault("context_budget", {})["max_context_tokens"] = args.max_context_tokens
     redactor = Redactor(cfg.get("sanitize") or {"enabled": False})
     redaction_counts: Counter = Counter()
+    render_mode = ((cfg.get("distill") or {}).get("render") or {}).get("render_mode", "flat")
+    if render_mode not in ("flat", "native"):
+        raise SystemExit("distill.render.render_mode must be 'flat' or 'native'")
     qcfg = cfg.get("quality_filter") or {"enabled": False}
     q_enabled = qcfg.get("enabled", False)
     oc_cfg = cfg.get("session_outcome") or {"enabled": False}
@@ -348,7 +408,8 @@ def main():
             tier = derive_tier(outcomes, tiers_cfg)
 
             rows = emit_rows(events, source_kind=kind, project=project, rel_id=rel_id,
-                             lab=lab, ctx_budget=cfg.get("context_budget", {}))
+                             lab=lab, ctx_budget=cfg.get("context_budget", {}),
+                             render_mode=render_mode)
             bs = by_source.setdefault(kind, {"accept": 0, "reject": 0, "borderline": 0})
             for r in rows:
                 r["metadata"]["session_outcome"] = outcomes
@@ -368,7 +429,11 @@ def main():
                     outcome_counts[o2] += 1
                 tier_counts[tier] += 1
                 for m in r["conversations"]:
-                    m["content"] = redactor.redact(m["content"], redaction_counts)
+                    if "content" in m and m["content"] is not None:
+                        m["content"] = redactor.redact(m["content"], redaction_counts)
+                    if m.get("tool_calls"):
+                        m["tool_calls"] = redact_nested(m["tool_calls"], redactor,
+                                                        redaction_counts)
                 fout.write(json.dumps(r, ensure_ascii=False) + "\n")
                 stats["rows"] += 1
                 bucket = ("accept" if r["label"] is True else

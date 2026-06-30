@@ -6,8 +6,13 @@ function_call_output pairs; exit status is plaintext "Process exited with code N
 """
 from __future__ import annotations
 import json
+from pathlib import Path
 
 from .base import Adapter, blocks_text
+
+
+def _fallback_tool_call_id(path: str, seq: int) -> str:
+    return f"codex_{Path(path).stem}_{seq:04d}"
 
 
 def _command_of(arguments) -> str:
@@ -48,7 +53,9 @@ class CodexAdapter(Adapter):
     def parse(self, path: str):
         events: list[dict] = []
         signals = {"pr_created": False}
-        pending_cmd = ""
+        pending_calls: list[tuple[str, str]] = []
+        call_seq = 0
+        orphan_result_seq = 0
 
         for line in open(path, errors="ignore"):
             try:
@@ -71,11 +78,13 @@ class CodexAdapter(Adapter):
             elif pt in ("function_call", "custom_tool_call"):
                 args = p.get("arguments") or p.get("input") or ""
                 cmd = _command_of(args)
+                call_seq += 1
+                tool_call_id = str(p.get("call_id") or p.get("id") or _fallback_tool_call_id(path, call_seq))
                 if "gh pr create" in cmd:
                     signals["pr_created"] = True
                 events.append({"role": "assistant", "text": "",
-                               "tool_calls": [{"name": p.get("name"), "input": args}]})
-                pending_cmd = cmd
+                               "tool_calls": [{"id": tool_call_id, "name": p.get("name"), "input": args}]})
+                pending_calls.append((tool_call_id, cmd))
 
             elif pt in ("function_call_output", "custom_tool_call_output"):
                 out = p.get("output")
@@ -83,7 +92,21 @@ class CodexAdapter(Adapter):
                 low = s.lower()
                 err = ("exited with code" in low and "exited with code 0" not in low) \
                     or "traceback (most recent call last)" in low
+                source_id = p.get("call_id")
+                if source_id:
+                    tool_call_id = str(source_id)
+                    cmd = ""
+                    for idx, (pending_id, pending_cmd) in enumerate(pending_calls):
+                        if pending_id == tool_call_id:
+                            cmd = pending_cmd
+                            pending_calls.pop(idx)
+                            break
+                elif pending_calls:
+                    tool_call_id, cmd = pending_calls.pop(0)
+                else:
+                    orphan_result_seq += 1
+                    tool_call_id, cmd = _fallback_tool_call_id(path, call_seq + orphan_result_seq), ""
                 events.append({"role": "tool", "tool_error": err,
-                               "command": pending_cmd, "output": s})
-                pending_cmd = ""
+                               "tool_call_id": tool_call_id,
+                               "command": cmd, "output": s})
         return events, signals

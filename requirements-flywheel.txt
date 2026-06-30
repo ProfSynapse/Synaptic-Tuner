@@ -8,6 +8,9 @@
 # Async SQLite for local log catalog
 aiosqlite>=0.20.0,<1.0
 
+# Async test support for flywheel catalog checks
+pytest-asyncio>=0.23.0,<1.0
+
 # Async PostgreSQL for cloud/multi-tenant log catalog
 asyncpg>=0.29.0,<1.0
 

@@ -32,6 +32,19 @@ The scope-key is adapter-defined: `claude_code` uses the project-slug;
 - `rows_file`: filename (default `rows.jsonl`).
 - `smoke_subdir`: subdir used when `--smoke` is passed (default `smoke`).
 
+## `distill.render` (map)
+- `render_mode`: `flat` or `native` (default `flat`).
+
+`flat` preserves the legacy row shape: assistant completions include serialized
+tool calls as text and tool context messages use `[tool result]`.
+
+`native` emits OpenAI-style tool messages for source/native emit workflows:
+assistant messages may include
+`tool_calls: [{id, type: "function", function: {name, arguments}}]`, and tool
+result messages use `role: tool`, `tool_call_id`, and output `content`.
+Legacy row fields such as `prompt`, `completion`, `label`, and `metadata` are
+still present. In native mode, `completion` is assistant text only.
+
 ## `sanitize` (map)
 Deterministic secret scrub, applied to every text field at emit time.
 - `enabled`: bool.

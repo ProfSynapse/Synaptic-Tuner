@@ -34,6 +34,13 @@ output:
   rows_file: "rows.jsonl"
   smoke_subdir: "smoke"
 
+# ---- row rendering ----
+distill:
+  render:
+    # flat preserves the legacy completion shape. Set to native to emit
+    # OpenAI-style assistant tool_calls plus role=tool result messages.
+    render_mode: "flat"          # flat | native
+
 # ---- secret scrub (runs at emit time; raw secrets never hit disk) ----
 sanitize:
   enabled: true
