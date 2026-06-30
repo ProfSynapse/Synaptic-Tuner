@@ -11,8 +11,9 @@ parse(path) returns (events, signals).
 events: ordered list of dicts, one per logical turn:
   human turn     -> {"role": "human",     "text": str}
   assistant turn -> {"role": "assistant", "text": str,
-                     "tool_calls": [{"name": str, "input": any}]}
+                     "tool_calls": [{"id": str, "name": str, "input": any}]}
   tool result    -> {"role": "tool", "tool_error": bool,
+                     "tool_call_id": str, # matches assistant tool_calls[].id
                      "command": str,   # the command this result is answering
                      "output": str}    # the result text (for outcome detection)
 

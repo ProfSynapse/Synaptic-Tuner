@@ -28,6 +28,8 @@ class TestInferenceLogRecord:
         assert r.tools_requested is False
         assert r.tool_calls == []
         assert r.fitness_score is None
+        assert r.verdict_rationale is None
+        assert r.rubric_scores is None
         assert r.tag is None
         assert r.errors == []
 
@@ -46,6 +48,28 @@ class TestInferenceLogRecord:
         assert data["tools_requested"] is True
         assert len(data["tool_calls"]) == 1
         assert data["fitness_score"] == 0.85
+        assert "verdict_rationale" not in data
+        assert "rubric_scores" not in data
+
+    def test_to_json_includes_verdict_fields_when_set(self):
+        r = InferenceLogRecord(
+            log_id="test-1",
+            timestamp="2026-01-01T00:00:00Z",
+            model_id="gpt-test",
+            verdict_rationale="Clear tool use and concise answer.",
+            rubric_scores=[
+                {
+                    "rubric_key": "tool_quality",
+                    "score": 0.91,
+                    "per_dimension": [
+                        {"key": "correctness", "score": 0.9, "reasoning": "ok"}
+                    ],
+                }
+            ],
+        )
+        data = json.loads(r.to_json())
+        assert data["verdict_rationale"] == "Clear tool use and concise answer."
+        assert data["rubric_scores"][0]["rubric_key"] == "tool_quality"
 
     def test_from_dict_ignores_unknown_fields(self):
         data = {
@@ -178,6 +202,48 @@ class TestSQLiteLogCatalog:
         low = await catalog.find_logs(LogFilter(max_score=0.5))
         assert len(low) == 0
 
+    async def test_update_score_persists_verdict_rationale_and_rubric_scores(
+        self, catalog,
+    ):
+        r = _make_record("score-meta")
+        rubric_scores = [
+            {
+                "rubric_key": "tool_quality",
+                "rubric_name": "Tool Quality",
+                "score": 0.88,
+                "passed": True,
+                "pass_threshold": 0.8,
+                "feedback": "Good structure.",
+                "per_dimension": [
+                    {
+                        "key": "correctness",
+                        "name": "Correctness",
+                        "weight": 0.7,
+                        "reasoning": "The tool call matches the request.",
+                        "score": 0.9,
+                    }
+                ],
+                "quality_gated_score": 0.86,
+            }
+        ]
+        await catalog.insert_log(r)
+        await catalog.update_score(
+            "score-meta",
+            0.88,
+            True,
+            [],
+            verdict_rationale="Good structure.",
+            rubric_scores=rubric_scores,
+        )
+
+        results = await catalog.find_logs(LogFilter())
+
+        assert len(results) == 1
+        assert results[0].fitness_score == 0.88
+        assert results[0].is_valid is True
+        assert results[0].verdict_rationale == "Good structure."
+        assert results[0].rubric_scores == rubric_scores
+
     async def test_unscored_only_filter(self, catalog):
         r1 = _make_record("us1")
         r2 = _make_record("us2")
@@ -281,6 +347,55 @@ class TestSQLiteLogCatalog:
         with_tools = await catalog.find_logs(LogFilter(has_tool_calls=True))
         assert len(with_tools) == 1
         assert with_tools[0].log_id == "tc1"
+
+    async def test_initialize_migrates_existing_sqlite_catalog(self, tmp_path):
+        import aiosqlite
+
+        db_path = tmp_path / "old.db"
+        conn = await aiosqlite.connect(str(db_path))
+        await conn.execute(
+            """CREATE TABLE inference_logs (
+                log_id          TEXT PRIMARY KEY,
+                timestamp       TEXT NOT NULL,
+                model_id        TEXT NOT NULL,
+                adapter_name    TEXT,
+                has_tool_calls  INTEGER NOT NULL DEFAULT 0,
+                tools_requested INTEGER NOT NULL DEFAULT 0,
+                fitness_score   REAL,
+                is_valid        INTEGER,
+                tag             TEXT,
+                tag_source      TEXT,
+                dataset_version TEXT,
+                source_file     TEXT NOT NULL,
+                line_number     INTEGER NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT ''
+            )"""
+        )
+        await conn.commit()
+        await conn.close()
+
+        migrated = SQLiteLogCatalog(db_path)
+        await migrated.initialize()
+        await migrated.insert_log(_make_record("migrated"))
+        await migrated.update_score(
+            "migrated",
+            0.92,
+            True,
+            [],
+            verdict_rationale="Migrated schema stores rationale.",
+            rubric_scores=[{"rubric_key": "migration", "score": 0.92}],
+        )
+
+        results = await migrated.find_logs(LogFilter())
+
+        assert (
+            results[0].verdict_rationale
+            == "Migrated schema stores rationale."
+        )
+        assert results[0].rubric_scores == [
+            {"rubric_key": "migration", "score": 0.92}
+        ]
+        await migrated.close()
 
 
 # ---------------------------------------------------------------------------

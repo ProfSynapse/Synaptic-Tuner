@@ -1,6 +1,6 @@
 ---
 name: transcript-distillation
-description: Turn local agent transcripts (Claude Code, Codex CLI, or any format with an adapter) into high-quality fine-tuning rows. Use when someone wants to mine their own coding-agent conversation logs into an SFT/KTO dataset — parse the logs, extract substantive turns, scrub secrets, score each session by outcome (tests passed / built clean / committed / PR'd), dedup, and tier by quality. Config-driven and format-pluggable; point it at a transcript directory and it produces deduped, quality-tiered JSONL. This skill is about USING the checked-in distill engine via CLI + YAML.
+description: Turn local agent transcripts (Claude Code, Codex CLI, or any format with an adapter) into high-quality fine-tuning rows. Use when someone wants to mine their own coding-agent conversation logs into an SFT/KTO/DPO/GRPO dataset — parse the logs, extract substantive turns, scrub secrets, score each session by outcome (tests passed / built clean / committed / PR'd), dedup, and tier by quality. Config-driven and format-pluggable; point it at a transcript directory and it produces deduped, quality-tiered JSONL. This skill is about USING the checked-in distill engine via CLI + YAML.
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
 ---
 
@@ -75,10 +75,14 @@ Each knob is documented in `reference/config-schema.md`. Highlights:
 - **`quality_filter`** — drop ceremony tools (orchestration), trivial text
   turns, and duplicate completions. Set `require_outcomes` to keep ONLY
   verified-good sessions.
+- **`distill.render.render_mode`** — `flat` keeps today's text row shape and
+  remains the default; `native` emits source rows with structured assistant
+  `tool_calls` and `role:"tool"` results linked by stable `tool_call_id`.
 
 ## Output row schema
 
-One JSON object per line, shaped for SFT/KTO:
+One JSON object per line. In default `render_mode: flat`, rows keep the current
+text-first shape used by SFT/KTO/DPO/GRPO projections:
 
 ```json
 {
@@ -99,7 +103,15 @@ One JSON object per line, shaped for SFT/KTO:
 
 Build a dataset from it by filtering on `metadata.quality_tier` and/or `label`:
 SFT on `label==true` gold rows; route `label==null` (borderline) rows to an
-LLM-as-judge to mint KTO negatives.
+LLM-as-judge to mint KTO negatives; build DPO pairs and GRPO reward/rollout
+inputs with explicit method-specific projections.
+
+With `render_mode: native`, rows are a high-fidelity source/emit format for
+tool-use data, not a universal trainer input replacement. Assistant messages
+carry structured `tool_calls`; tool-result messages carry `role:"tool"`,
+the matching stable `tool_call_id`, and the captured output content. Prepare or
+trainer-specific dataset builders must project those native rows into the final
+SFT, KTO, DPO, static-GRPO, or env-GRPO schema they accept.
 
 ## Privacy
 
