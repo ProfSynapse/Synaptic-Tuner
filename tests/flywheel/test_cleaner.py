@@ -98,7 +98,16 @@ class TestDataCleanerScoring:
 
         assert result.total_processed == 1
         assert result.scored == 1
-        mock_catalog.update_score.assert_called_once_with("tc-1", 0.9, True, [])
+        mock_catalog.update_score.assert_called_once_with(
+            "tc-1",
+            0.9,
+            True,
+            [],
+            verdict_rationale=(
+                "score=0.900; verdict=valid; method=error_count; errors=none"
+            ),
+            rubric_scores=None,
+        )
 
     @pytest.mark.asyncio
     async def test_scores_text_response(self, tmp_path):
@@ -141,7 +150,16 @@ class TestDataCleanerScoring:
 
         assert result.scored == 1
         # Cleaner stores the score regardless of text_response_policy
-        mock_catalog.update_score.assert_called_once_with("text-1", 0.0, True, [])
+        mock_catalog.update_score.assert_called_once_with(
+            "text-1",
+            0.0,
+            True,
+            [],
+            verdict_rationale=(
+                "score=0.000; verdict=valid; method=error_count; errors=none"
+            ),
+            rubric_scores=None,
+        )
 
     @pytest.mark.asyncio
     async def test_missing_source_file_scores_zero(self):
@@ -172,6 +190,11 @@ class TestDataCleanerScoring:
         call_args = mock_catalog.update_score.call_args
         assert call_args[0][1] == 0.0  # score
         assert call_args[0][2] is False  # is_valid
+        assert call_args.kwargs["verdict_rationale"] == (
+            "score=0.000; verdict=invalid; method=error; "
+            "errors=Source file not readable"
+        )
+        assert call_args.kwargs["rubric_scores"] is None
 
     @pytest.mark.asyncio
     async def test_error_during_scoring_counted(self, tmp_path):

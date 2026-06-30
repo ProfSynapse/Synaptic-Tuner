@@ -112,8 +112,14 @@ class DatasetStager:
             LogFilter(tag="kto", unused_only=True),
         )
         grpo_logs = await self._catalog.find_logs(
-            LogFilter(tag="grpo", unused_only=True),
+            LogFilter(
+                tag=["sft", "grpo"],
+                unused_only=True,
+                is_valid=True,
+                has_tool_calls=True,
+            ),
         )
+        grpo_logs = [r for r in grpo_logs if r.tools_requested]
 
         if not sft_logs and not kto_logs and not grpo_logs:
             logger.info("No tagged logs to stage")
@@ -155,6 +161,14 @@ class DatasetStager:
             result.grpo_count = grpo_count
             file_paths["grpo"] = grpo_path
             used_log_ids.extend(r.log_id for r in grpo_logs)
+
+        total_staged = (
+            result.sft_count + result.kto_pos_count
+            + result.kto_neg_count + result.grpo_count
+        )
+        if total_staged == 0:
+            logger.info("No records staged after target filtering/config")
+            return result
 
         # Compute content hash
         content_hash = self._compute_content_hash(file_paths)
@@ -213,10 +227,7 @@ class DatasetStager:
         run_id = self._register_flywheel_cycle(version)
 
         result.version_id = version_id
-        result.total_records = (
-            result.sft_count + result.kto_pos_count
-            + result.kto_neg_count + result.grpo_count
-        )
+        result.total_records = total_staged
         result.file_paths = {k: str(v) for k, v in file_paths.items()}
         result.content_hash = content_hash
         result.run_id = run_id
@@ -408,6 +419,8 @@ class DatasetStager:
                 if not self._passes_filters(record, content, "grpo", stats):
                     continue
                 example = self._format_grpo_example(record, content)
+                if example is None:
+                    continue
                 f.write(json.dumps(example, ensure_ascii=False) + "\n")
                 count += 1
         return count
@@ -428,24 +441,25 @@ class DatasetStager:
 
     def _format_grpo_example(
         self, record: InferenceLogRecord, content: dict,
-    ) -> dict:
-        """Format a log as a GRPO training example.
+    ) -> dict | None:
+        """Format a log as a static-GRPO trainer example."""
+        tool_calls = content.get("tool_calls") or []
+        if not tool_calls:
+            return None
 
-        When the log carries token-faithful rollout capture (completion token
-        ids + per-token logprobs, from a logprobs-enabled proxy), those fields
-        are passed through alongside the conversational form so a downstream
-        token-faithful / replay GRPO consumer can use the exact sampled tokens.
-        Records without capture are unchanged.
-        """
-        conversations = self._build_conversations(content)
-        reward = (record.fitness_score or 0.0) * self._config.grpo_reward_scale
-        example: dict[str, Any] = {"conversations": conversations, "reward": reward}
+        function = (tool_calls[0] or {}).get("function") or {}
+        tool_name = function.get("name")
+        args_json = function.get("arguments")
+        if not tool_name or args_json is None:
+            return None
+        if not isinstance(args_json, str):
+            args_json = json.dumps(args_json, ensure_ascii=False)
 
-        for key in ("prompt_token_ids", "completion_token_ids", "completion_logprobs"):
-            value = content.get(key)
-            if value is not None:
-                example[key] = value
-        return example
+        return {
+            "prompt": content.get("messages", []),
+            "ground_truth_tool": tool_name,
+            "ground_truth_args_json": args_json,
+        }
 
     @staticmethod
     def _build_conversations(content: dict) -> list[dict[str, str]]:
