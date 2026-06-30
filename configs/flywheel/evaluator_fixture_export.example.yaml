@@ -1,0 +1,39 @@
+# Example config for:
+#   python tuner.py flywheel export-fixtures --export-config configs/flywheel/evaluator_fixture_export.example.yaml --output Evaluator/config/scenarios/flywheel_frozen.yaml
+#
+# Correctness is intentionally provided only by templates below. The exporter
+# does not infer semantic correctness from responses or environment execution.
+
+catalog_filter:
+  tag:
+    - sft
+    - grpo
+  is_valid: true
+  limit: 50
+
+# Optional post-hydration filters. These use the generic RolloutFilterSet grammar
+# and evaluate record fields at top level plus full log JSON under content.*.
+filters:
+  - field: content.messages
+    op: exists
+  - field: fitness_score
+    op: gte
+    value: 0.8
+    on_missing: drop
+
+output:
+  name: Flywheel Frozen Fixtures
+  description: Frozen Evaluator fixtures exported from curated flywheel logs.
+  metadata:
+    source: flywheel
+    correctness_source: export_config
+  test:
+    id: flywheel_{{ log_id }}
+    messages: "{{ content.messages }}"
+    tags:
+      - flywheel
+      - frozen
+      - "{{ tag }}"
+    correct:
+      response_content: "{{ content.response_content }}"
+      tool_calls: "{{ content.tool_calls }}"

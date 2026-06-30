@@ -224,6 +224,63 @@ class TestFlywheelHandler:
         output = capsys.readouterr().out
         assert "v001" in output
 
+    def test_export_fixtures_requires_export_config(self, capsys):
+        args = Namespace(
+            json=True,
+            subcommand="export-fixtures",
+            export_config=None,
+            output="out.yaml",
+            dry_run=False,
+            auto_confirm=False,
+            flywheel_config=None,
+        )
+        handler = self._make_handler(args)
+
+        code = handler.handle()
+
+        assert code == 1
+        assert "MISSING_EXPORT_CONFIG" in capsys.readouterr().out
+
+    def test_export_fixtures_json_mode_dispatches(self, capsys):
+        args = Namespace(
+            json=True,
+            subcommand="export-fixtures",
+            export_config="export.yaml",
+            output="out.yaml",
+            dry_run=True,
+            auto_confirm=True,
+            flywheel_config=None,
+        )
+        handler = self._make_handler(args)
+        config = MagicMock()
+
+        from shared.flywheel.evaluator_exporter import EvaluatorFixtureExportResult
+
+        async def fake_export(**kwargs):
+            assert kwargs["config"] is config
+            assert kwargs["export_config"] == "export.yaml"
+            assert kwargs["output"] == "out.yaml"
+            assert kwargs["overwrite"] is True
+            assert kwargs["dry_run"] is True
+            return EvaluatorFixtureExportResult(
+                output_path="out.yaml",
+                selected_count=2,
+                hydrated_count=2,
+                exported_count=1,
+                skipped_by_filter_count=1,
+                missing_content_count=0,
+                dry_run=True,
+            )
+
+        with patch.object(handler, "_load_config", return_value=config):
+            with patch.object(handler, "_export_fixtures_async", side_effect=fake_export):
+                code = handler.handle()
+
+        assert code == 0
+        output = capsys.readouterr().out
+        assert "exported_count" in output
+        assert "out.yaml" in output
+
 
 # ---------------------------------------------------------------------------
 # CloudTrainHandler
