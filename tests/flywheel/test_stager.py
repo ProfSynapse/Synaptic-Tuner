@@ -135,16 +135,23 @@ class TestDatasetStagerWrite:
 
     @pytest.mark.asyncio
     async def test_grpo_jsonl_format(self, tmp_path):
-        """GRPO output has conversations + reward field."""
+        """GRPO output has the static trainer schema."""
         log_file = tmp_path / "logs.jsonl"
         _write_log_file(log_file, [{
             "messages": [{"role": "user", "content": "Search for X"}],
             "response_content": "Found X",
+            "tool_calls": [{
+                "function": {
+                    "name": "search",
+                    "arguments": "{\"query\":\"X\"}",
+                },
+            }],
         }])
 
         grpo_record = _make_record(
             "grpo-1", source_file=str(log_file), line_number=0,
-            tag="grpo", fitness_score=0.7,
+            tag="grpo", fitness_score=0.7, is_valid=True,
+            tools_requested=True, tool_calls=[{}],
         )
 
         stager = self._make_stager(tmp_path)
@@ -160,9 +167,81 @@ class TestDatasetStagerWrite:
         assert result.grpo_count == 1
         grpo_path = Path(result.file_paths["grpo"])
         example = json.loads(grpo_path.read_text().strip())
-        assert "reward" in example
-        assert example["reward"] == pytest.approx(0.7)
-        assert "conversations" in example
+        assert example == {
+            "prompt": [{"role": "user", "content": "Search for X"}],
+            "ground_truth_tool": "search",
+            "ground_truth_args_json": "{\"query\":\"X\"}",
+        }
+        assert "reward" not in example
+        assert "conversations" not in example
+
+        grpo_filter = stager._catalog.find_logs.call_args_list[2].args[0]
+        assert grpo_filter.tag == ["sft", "grpo"]
+        assert grpo_filter.unused_only is True
+        assert grpo_filter.is_valid is True
+        assert grpo_filter.has_tool_calls is True
+
+    @pytest.mark.asyncio
+    async def test_grpo_eligible_sft_tool_call_log_staged(self, tmp_path):
+        """SFT-tagged valid tool-call logs are eligible for GRPO staging."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [{
+            "messages": [{"role": "user", "content": "Lookup A"}],
+            "response_content": "",
+            "tool_calls": [{
+                "function": {"name": "lookup", "arguments": {"id": "A"}},
+            }],
+        }])
+
+        record = _make_record(
+            "sft-tool-1", source_file=str(log_file), line_number=0,
+            tag="sft", fitness_score=1.0, is_valid=True,
+            tools_requested=True, tool_calls=[{}],
+        )
+
+        stager = self._make_stager(tmp_path)
+        stager._catalog.find_logs = AsyncMock(side_effect=[
+            [],        # sft query
+            [],        # kto query
+            [record],  # grpo eligibility query can return sft-tagged logs
+        ])
+
+        with patch.object(stager, "_register_flywheel_cycle", return_value="run-1"):
+            result = await stager.stage_dataset()
+
+        assert result.grpo_count == 1
+        grpo_path = Path(result.file_paths["grpo"])
+        example = json.loads(grpo_path.read_text().strip())
+        assert example["ground_truth_tool"] == "lookup"
+        assert example["ground_truth_args_json"] == "{\"id\": \"A\"}"
+
+    @pytest.mark.asyncio
+    async def test_grpo_requires_tools_requested(self, tmp_path):
+        """GRPO staging locally rejects rows without tools requested."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [{
+            "messages": [{"role": "user", "content": "Lookup A"}],
+            "response_content": "",
+            "tool_calls": [{
+                "function": {"name": "lookup", "arguments": "{}"},
+            }],
+        }])
+
+        record = _make_record(
+            "no-tools-requested", source_file=str(log_file), line_number=0,
+            tag="grpo", fitness_score=1.0, is_valid=True,
+            tools_requested=False, tool_calls=[{}],
+        )
+
+        stager = self._make_stager(tmp_path)
+        stager._catalog.find_logs = AsyncMock(side_effect=[
+            [], [], [record],
+        ])
+
+        result = await stager.stage_dataset()
+
+        assert result.version_id == ""
+        assert result.grpo_count == 0
 
     @pytest.mark.asyncio
     async def test_grpo_disabled_skips(self, tmp_path):
@@ -171,11 +250,15 @@ class TestDatasetStagerWrite:
         _write_log_file(log_file, [{
             "messages": [{"role": "user", "content": "X"}],
             "response_content": "Y",
+            "tool_calls": [{
+                "function": {"name": "lookup", "arguments": "{}"},
+            }],
         }])
 
         grpo_record = _make_record(
             "grpo-skip", source_file=str(log_file), line_number=0,
-            tag="grpo", fitness_score=0.6,
+            tag="grpo", fitness_score=0.6, is_valid=True,
+            tools_requested=True, tool_calls=[{}],
         )
 
         stager = self._make_stager(tmp_path, grpo_enabled=False)
@@ -185,11 +268,18 @@ class TestDatasetStagerWrite:
             [grpo_record],   # grpo
         ])
 
-        with patch.object(stager, "_register_flywheel_cycle", return_value=""):
+        with patch.object(
+            stager, "_register_flywheel_cycle", return_value="",
+        ) as register:
             result = await stager.stage_dataset()
 
+        assert result.version_id == ""
         assert result.grpo_count == 0
+        assert result.total_records == 0
         assert "grpo" not in result.file_paths
+        stager._catalog.create_dataset_version.assert_not_called()
+        stager._catalog.mark_used.assert_not_called()
+        register.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_logs_returns_empty_result(self, tmp_path):
@@ -333,7 +423,13 @@ class TestDatasetStagerFilters:
         """
         log_file = tmp_path / "logs.jsonl"
         _write_log_file(log_file, [
-            {"messages": [{"role": "user", "content": "a"}], "response_content": "A"},
+            {
+                "messages": [{"role": "user", "content": "a"}],
+                "response_content": "A",
+                "tool_calls": [{
+                    "function": {"name": "answer", "arguments": "{}"},
+                }],
+            },
             {"messages": [{"role": "user", "content": "b"}], "response_content": "B"},
             {"messages": [{"role": "user", "content": "c"}], "response_content": "C"},
         ])
@@ -344,7 +440,12 @@ class TestDatasetStagerFilters:
                 _make_record("s2", str(log_file), 1, tag="sft", fitness_score=0.5),
             ]
             kto = [_make_record("k1", str(log_file), 2, tag="kto", fitness_score=0.1)]
-            grpo = [_make_record("g1", str(log_file), 0, tag="grpo", fitness_score=0.95)]
+            grpo = [
+                _make_record(
+                    "g1", str(log_file), 0, tag="grpo", fitness_score=0.95,
+                    is_valid=True, tools_requested=True, tool_calls=[{}],
+                )
+            ]
             return sft, kto, grpo
 
         # Run with no filters key.
@@ -377,7 +478,13 @@ class TestDatasetStagerFilters:
         """fitness_score gte 0.9 drops low-score logs from sft/kto_positive/grpo."""
         log_file = tmp_path / "logs.jsonl"
         _write_log_file(log_file, [
-            {"messages": [{"role": "user", "content": "hi"}], "response_content": "ok"},
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "response_content": "ok",
+                "tool_calls": [{
+                    "function": {"name": "answer", "arguments": "{}"},
+                }],
+            },
         ] * 4)
 
         sft = [
@@ -387,8 +494,14 @@ class TestDatasetStagerFilters:
         # KTO positive comes from sft_logs; negative from kto_logs.
         kto = [_make_record("kn", str(log_file), 0, tag="kto", fitness_score=0.1)]
         grpo = [
-            _make_record("ghi", str(log_file), 0, tag="grpo", fitness_score=0.95),
-            _make_record("glo", str(log_file), 0, tag="grpo", fitness_score=0.2),
+            _make_record(
+                "ghi", str(log_file), 0, tag="grpo", fitness_score=0.95,
+                is_valid=True, tools_requested=True, tool_calls=[{}],
+            ),
+            _make_record(
+                "glo", str(log_file), 0, tag="grpo", fitness_score=0.2,
+                is_valid=True, tools_requested=True, tool_calls=[{}],
+            ),
         ]
 
         cat = self._make_catalog(sft=sft, kto=kto, grpo=grpo)

@@ -151,6 +151,8 @@ class DataCleaner:
                         fitness.score,
                         fitness.is_valid,
                         fitness.errors,
+                        verdict_rationale=self._verdict_rationale(fitness),
+                        rubric_scores=None,
                     )
                     result.scored += 1
 
@@ -226,3 +228,15 @@ class DataCleaner:
         if score < 0.8:
             return "0.3-0.8"
         return "0.8-1.0"
+
+    @staticmethod
+    def _verdict_rationale(fitness: FitnessResult) -> str:
+        """Build a deterministic rationale from the fitness result."""
+        validity = "valid" if fitness.is_valid else "invalid"
+        errors = "; ".join(fitness.errors) if fitness.errors else "none"
+        return (
+            f"score={fitness.score:.3f}; "
+            f"verdict={validity}; "
+            f"method={fitness.scoring_method}; "
+            f"errors={errors}"
+        )
