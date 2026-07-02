@@ -146,7 +146,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -563,5 +563,44 @@ Examples:
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
     parser.add_argument("--base-model-name", help="Base model name for experiment")
     parser.add_argument("--dataset-hash", help="Dataset hash for experiment")
+
+    # Batch inference flags (batch-generate / batch-capture).
+    # These verbs are generic: prompts/sequences in, completions/hidden-states
+    # out, with crash-safe incremental persistence and resume. --model is reused
+    # from above for the model id/path.
+    parser.add_argument("--prompts", help="Input JSONL of {id, prompt} rows (batch-generate).")
+    parser.add_argument("--rows", help="Input JSONL of {id, text|token_ids, positions} rows (batch-capture).")
+    parser.add_argument("--out-dir", help="Output directory for batch artifacts (batch-generate / batch-capture).")
+    parser.add_argument(
+        "--engine",
+        choices=["hf-batched", "vllm"],
+        default="hf-batched",
+        help="Inference engine for batch-generate / batch-capture (default: hf-batched).",
+    )
+    parser.add_argument("--batch-size", type=int, default=16, dest="batch_size", help="Micro-batch size for batch verbs; auto-halves on CUDA OOM (default: 16).")
+    parser.add_argument("--max-new-tokens", type=int, default=48, dest="max_new_tokens", help="Max new tokens for batch-generate (default: 48).")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for batch verbs.")
+    parser.add_argument("--do-sample", action="store_true", dest="do_sample", help="Sample instead of greedy decode (batch-generate).")
+    parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature for batch-generate --do-sample.")
+    parser.add_argument("--top-p", type=float, default=1.0, dest="top_p", help="Nucleus top-p for batch-generate --do-sample.")
+    parser.add_argument("--stop-string", action="append", dest="stop_strings", help="Stop string for batch-generate; may be repeated.")
+    parser.add_argument("--layers", default="all", help="Layers to capture: 'all' or a comma list of hidden_states indices (batch-capture).")
+    parser.add_argument(
+        "--persist-dtype",
+        choices=["float32", "bfloat16"],
+        default="float32",
+        dest="persist_dtype",
+        help="On-disk dtype for captured tensors (batch-capture; default: float32).",
+    )
+    parser.add_argument(
+        "--compute-dtype",
+        choices=["float32", "bfloat16", "float16"],
+        default=None,
+        dest="compute_dtype",
+        help="Override model compute dtype for batch verbs (default: bf16 on supported GPU, else fp32).",
+    )
+    parser.add_argument("--resume", action="store_true", help="Resume a batch run in --out-dir, skipping already-done ids (config hash must match).")
+    parser.add_argument("--sync-every", type=int, default=0, dest="sync_every", help="Run --sync-cmd after every N newly persisted rows for batch verbs (0 = never; a final sync still fires).")
+    parser.add_argument("--sync-cmd", dest="sync_cmd", help="Shell command run after every --sync-every rows (and once at the end) with TUNER_SYNC_DIR / TUNER_SYNC_REASON env vars; failures warn and continue.")
 
     return parser
