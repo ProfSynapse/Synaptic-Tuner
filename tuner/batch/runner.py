@@ -28,6 +28,7 @@ from tuner.batch.persistence import (
     read_jsonl_ids,
     sanitize_id,
 )
+from tuner.batch.gpu_telemetry import peak_suffix, reset_peak
 from tuner.batch.sync_hook import SyncHook
 
 
@@ -140,6 +141,10 @@ def run_batch_generate(
     def _on_oom(old: int, new: int) -> None:
         log(f"[batch-generate] CUDA OOM at batch_size={old}; halving to {new}.")
 
+    # Reset CUDA peak-memory stats so the reported peak reflects THIS stage only.
+    # No-op on CPU.
+    reset_peak()
+
     processed = 0
     try:
         for chunk in _chunks(todo, max(1, batch_size)):
@@ -163,12 +168,14 @@ def run_batch_generate(
             checkpoint.mark_done(res.id for res in results)
             processed += len(results)
             sync.note_rows(len(results))
-            log(f"[batch-generate] persisted {processed}/{len(todo)} new rows.")
+            log(f"[batch-generate] persisted {processed}/{len(todo)} new rows.{peak_suffix()}")
     finally:
         gen_engine.close()
 
     sync.final()
-    return _summary(out_dir, completions_path, len(rows), processed, engine)
+    return _summary(
+        out_dir, completions_path, len(rows), processed, engine, peak_suffix()
+    )
 
 
 def run_batch_capture(
@@ -244,6 +251,10 @@ def run_batch_capture(
     def _on_oom(old: int, new: int) -> None:
         log(f"[batch-capture] CUDA OOM at batch_size={old}; halving to {new}.")
 
+    # Reset CUDA peak-memory stats so the reported peak reflects THIS stage only.
+    # No-op on CPU.
+    reset_peak()
+
     processed = 0
     try:
         for chunk in _chunks(todo, max(1, batch_size)):
@@ -278,12 +289,12 @@ def run_batch_capture(
             checkpoint.mark_done(res.id for res in results)
             processed += len(results)
             sync.note_rows(len(results))
-            log(f"[batch-capture] persisted {processed}/{len(todo)} new rows.")
+            log(f"[batch-capture] persisted {processed}/{len(todo)} new rows.{peak_suffix()}")
     finally:
         cap_engine.close()
 
     sync.final()
-    return _summary(out_dir, index_path, len(rows), processed, engine)
+    return _summary(out_dir, index_path, len(rows), processed, engine, peak_suffix())
 
 
 def _write_safetensors(path: Path, tensors: Dict[str, Any], persist_dtype: str) -> None:
@@ -300,7 +311,12 @@ def _write_safetensors(path: Path, tensors: Dict[str, Any], persist_dtype: str) 
 
 
 def _summary(
-    out_dir: Path, artifact: Path, total: int, processed: int, engine: str
+    out_dir: Path,
+    artifact: Path,
+    total: int,
+    processed: int,
+    engine: str,
+    gpu_peak_suffix: str = "",
 ) -> Dict[str, Any]:
     return {
         "out_dir": str(out_dir),
@@ -308,4 +324,7 @@ def _summary(
         "total_rows": total,
         "newly_processed": processed,
         "engine": engine,
+        # A `` (gpu peak X.X/Y.Y GiB)`` string for the completion log line, or ""
+        # on CPU / when no stage ran. Handlers append it verbatim.
+        "gpu_peak_suffix": gpu_peak_suffix,
     }

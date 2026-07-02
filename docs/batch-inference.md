@@ -102,6 +102,22 @@ vectors per position.
 - Without `--resume`, pointing at an out-dir that already holds a run is refused
   (no silent overwrite / mixing).
 
+## GPU peak-memory telemetry
+
+When CUDA is available, both verbs reset peak-memory stats at stage start and
+report peak allocated VRAM against device total on each persist-milestone log
+line and in the completion line, so you can tune `--batch-size` against measured
+peaks instead of estimates:
+
+```
+[batch-generate] persisted 320/3000 new rows. (gpu peak 12.4/23.0 GiB)
+batch-generate complete: 3000 new rows -> .../completions.jsonl (gpu peak 12.4/23.0 GiB)
+```
+
+Peak is `torch.cuda.max_memory_allocated` and total is the device's
+`total_memory`. On CPU this is a strict no-op: no CUDA calls are attempted and
+the log lines are unchanged (no parenthetical).
+
 ## Sync hook (partial-artifact push)
 
 `--sync-every N` + `--sync-cmd '<shell>'`: after every `N` newly persisted rows

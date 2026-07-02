@@ -68,6 +68,6 @@ class BatchGenerateHandler(BaseHandler):
 
         self.output(summary, human_readable=(
             f"batch-generate complete: {summary['newly_processed']} new rows "
-            f"-> {summary['artifact']}"
+            f"-> {summary['artifact']}{summary.get('gpu_peak_suffix', '')}"
         ))
         return 0
