@@ -21,6 +21,65 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CONFIG_PATH = Path("configs/flywheel/default.yaml")
 
 
+def _default_judge_rubric() -> dict[str, Any]:
+    return {
+        "key": "flywheel_quality",
+        "name": "Flywheel Quality",
+        "description": "Evaluates whether a logged response is suitable training data.",
+        "scope": "response",
+        "pass_threshold": 0.8,
+        "judge_prompt": (
+            "Score whether this logged assistant response is suitable for training. "
+            "Consider instruction following, response correctness, tool-call "
+            "appropriateness when tools are present, and whether the response "
+            "should be selected as a positive example."
+        ),
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "flywheel_quality_score": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
+                "overall_feedback": {"type": "string"},
+            },
+            "required": ["flywheel_quality_score", "overall_feedback"],
+            "additionalProperties": False,
+        },
+    }
+
+
+@dataclass
+class FlywheelJudgeConfig:
+    """Config for optional structured flywheel judge generation.
+
+    Disabled by default so existing cleaner/tagger behavior and staged row shapes
+    remain stable unless a deployment explicitly opts in.
+    """
+
+    enabled: bool = False
+    env_prefix: str = "FLYWHEEL_JUDGE"
+    llm: dict[str, Any] = field(default_factory=dict)
+    judge_config: dict[str, Any] = field(default_factory=dict)
+    system_prompt: str | None = None
+    max_response_chars: int = 4000
+    prompt_template: str = (
+        "{rubric_prompt}\n\n"
+        "## Fitness Summary\n"
+        "score={fitness_score}\n"
+        "is_valid={is_valid}\n"
+        "errors={errors}\n\n"
+        "## Request Messages\n"
+        "{messages_json}\n\n"
+        "## Assistant Response\n"
+        "{response_content}\n\n"
+        "## Tool Calls\n"
+        "{tool_calls_json}\n"
+    )
+    rubric: dict[str, Any] = field(default_factory=_default_judge_rubric)
+
+
 @dataclass
 class FlywheelConfig:
     """Configuration for the flywheel pipeline.
@@ -102,6 +161,9 @@ class FlywheelConfig:
     # -- Validation rules for FitnessEvaluator --
     validation_rules: list[dict] = field(default_factory=list)
 
+    # -- Optional structured judge --
+    judge: FlywheelJudgeConfig = field(default_factory=FlywheelJudgeConfig)
+
     # -- Staging filters --
     # Optional declarative filter specs applied by DatasetStager when assembling
     # SFT/KTO/GRPO datasets. Each entry is a spec dict consumed by the generic
@@ -178,5 +240,7 @@ def load_flywheel_config(
     # Filter to known fields only (forward-compatible)
     known_fields = {f.name for f in FlywheelConfig.__dataclass_fields__.values()}
     filtered = {k: v for k, v in raw.items() if k in known_fields}
+    if isinstance(filtered.get("judge"), dict):
+        filtered["judge"] = FlywheelJudgeConfig(**filtered["judge"])
 
     return FlywheelConfig(**filtered)

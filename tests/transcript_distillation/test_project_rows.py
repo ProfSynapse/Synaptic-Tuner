@@ -101,6 +101,34 @@ def test_dpo_uses_configured_prompt_key_and_serializes_native_tool_calls_to_text
     assert result.rows[0]["provenance"]["prompt_key"] == "same"
 
 
+def test_dpo_propagates_judge_metadata_in_provenance():
+    prompt = [{"role": "user", "content": "Pick"}]
+    judge = {
+        "verdict_rationale": "Useful answer.",
+        "rubric_scores": [{"rubric_key": "quality", "score": 0.9}],
+    }
+    rows = [
+        {
+            "conversations": prompt + [{"role": "assistant", "content": "Good"}],
+            "label": True,
+            "source_example_id": "chosen",
+            "metadata": {"flywheel": {"judge": judge}},
+        },
+        {
+            "conversations": prompt + [{"role": "assistant", "content": "Bad"}],
+            "label": False,
+            "source_example_id": "rejected",
+            "metadata": {"judge": judge},
+        },
+    ]
+
+    result = project_rows(rows, ProjectConfig(target="dpo"))
+
+    provenance = result.rows[0]["provenance"]
+    assert provenance["chosen_judge"] == judge
+    assert provenance["rejected_judge"] == judge
+
+
 def test_static_grpo_extracts_native_first_target_tool_call_and_excludes_tool_messages_by_default():
     row = {
         "conversations": [
@@ -148,6 +176,55 @@ def test_static_grpo_extracts_native_first_target_tool_call_and_excludes_tool_me
         ProjectConfig(target="static-grpo", include_tool_messages=True),
     )
     assert with_tools.rows[0]["prompt"][2] == {"role": "tool", "content": "prior result"}
+
+
+def test_static_grpo_propagates_judge_metadata_in_provenance():
+    row = {
+        "conversations": [
+            {"role": "user", "content": "Run"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "function": {"name": "shell", "arguments": '{"cmd":"pytest"}'},
+                }],
+            },
+        ],
+        "source_example_id": "tool",
+        "verdict_rationale": "Good command.",
+        "rubric_scores": [{"rubric_key": "quality", "score": 1.0}],
+    }
+
+    result = project_rows([row], ProjectConfig(target="static-grpo"))
+
+    assert result.rows[0]["provenance"]["judge"] == {
+        "verdict_rationale": "Good command.",
+        "rubric_scores": [{"rubric_key": "quality", "score": 1.0}],
+    }
+
+
+def test_static_grpo_ignores_rationale_without_structured_scores():
+    row = {
+        "conversations": [
+            {"role": "user", "content": "Run"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "function": {"name": "shell", "arguments": '{"cmd":"pytest"}'},
+                }],
+            },
+        ],
+        "source_example_id": "tool",
+        "verdict_rationale": (
+            "score=0.900; verdict=valid; method=error_count; errors=none"
+        ),
+        "rubric_scores": None,
+    }
+
+    result = project_rows([row], ProjectConfig(target="static-grpo"))
+
+    assert "judge" not in result.rows[0]["provenance"]
 
 
 def test_static_grpo_parses_flat_completion_tool_calls_and_supports_last_user_only_prompt():

@@ -7,6 +7,7 @@ import pytest
 
 from shared.flywheel.catalog import InferenceLogRecord, LogFilter
 from shared.flywheel.config import FlywheelConfig
+from shared.flywheel.judge import FlywheelJudgeOutcome
 from shared.flywheel.tagger import AutoTagger, TaggedExample, TaggingResult
 
 
@@ -33,6 +34,29 @@ def _make_record(
         is_valid=is_valid,
         **defaults,
     )
+
+
+class FakeFlywheelJudge:
+    def __init__(self, outcomes: dict[str, FlywheelJudgeOutcome]) -> None:
+        self.outcomes = outcomes
+        self.calls = []
+
+    def judge_record(self, record, content=None):
+        self.calls.append((record, content))
+        return self.outcomes[record.log_id]
+
+
+class FakeRawLLMClient:
+    def __init__(self, score: float) -> None:
+        self.score = score
+        self.calls = []
+
+    def structured_output(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "flywheel_quality_score": self.score,
+            "overall_feedback": "Structured raw client feedback.",
+        }
 
 
 class TestTaggedExample:
@@ -234,6 +258,62 @@ class TestAutoTaggerTagLogs:
         result = await tagger.tag_logs()
 
         assert result.kto_count == 1
+
+    async def test_ambiguous_uses_structured_judge_pass_fail(self):
+        good = _make_record(
+            "good", fitness_score=0.5, tools_requested=True,
+            tool_calls=[], is_valid=False,
+        )
+        bad = _make_record(
+            "bad", fitness_score=0.55, tools_requested=True,
+            tool_calls=[], is_valid=False,
+        )
+
+        mock_catalog = AsyncMock()
+        mock_catalog.find_logs = AsyncMock(side_effect=[[good, bad], []])
+        mock_catalog.update_tag = AsyncMock()
+
+        judge = FakeFlywheelJudge({
+            "good": FlywheelJudgeOutcome(
+                passed=True,
+                verdict_rationale="Selected.",
+                rubric_scores=[{"rubric_key": "quality", "score": 0.9}],
+            ),
+            "bad": FlywheelJudgeOutcome(
+                passed=False,
+                verdict_rationale="Rejected.",
+                rubric_scores=[{"rubric_key": "quality", "score": 0.2}],
+            ),
+        })
+        tagger = AutoTagger(mock_catalog, FlywheelConfig(), judge=judge)
+        result = await tagger.tag_logs()
+
+        assert result.sft_count == 1
+        assert result.kto_count == 1
+        assert result.judge_invocations == 2
+        assert [call.args for call in mock_catalog.update_tag.call_args_list] == [
+            ("good", "sft", "judge"),
+            ("bad", "kto", "judge"),
+        ]
+
+    async def test_raw_llm_client_injection_is_wrapped_through_judge_service(self):
+        ambig = _make_record(
+            "raw", fitness_score=0.5, tools_requested=True,
+            tool_calls=[], is_valid=False,
+        )
+
+        mock_catalog = AsyncMock()
+        mock_catalog.find_logs = AsyncMock(side_effect=[[ambig], []])
+        mock_catalog.update_tag = AsyncMock()
+
+        raw_client = FakeRawLLMClient(score=0.95)
+        tagger = AutoTagger(mock_catalog, FlywheelConfig(), judge=raw_client)
+        result = await tagger.tag_logs()
+
+        assert result.sft_count == 1
+        assert result.judge_invocations == 1
+        assert raw_client.calls
+        mock_catalog.update_tag.assert_called_once_with("raw", "sft", "judge")
 
     async def test_grpo_count_tracked_orthogonally(self):
         """GRPO eligibility is tracked separately from SFT/KTO tags."""
