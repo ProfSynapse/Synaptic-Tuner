@@ -70,3 +70,9 @@ validation_rules:
   - type: json
     path: "tool_calls[0].function.arguments"
     required: true
+
+# Optional structured judge generation.
+# Disabled by default so cleaning/tagging/staging behavior remains stable unless
+# a deployment explicitly opts in and configures FLYWHEEL_JUDGE_* LLM settings.
+judge:
+  enabled: false

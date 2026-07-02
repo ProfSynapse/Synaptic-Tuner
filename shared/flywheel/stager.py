@@ -22,6 +22,7 @@ from shared.validation import FilterStats, RolloutFilterSet
 
 from .catalog import DatasetVersion, InferenceLogRecord, LogCatalog, LogFilter
 from .config import FlywheelConfig
+from .judge import attach_flywheel_judge_metadata
 from .utils import read_log_content
 
 logger = logging.getLogger(__name__)
@@ -430,14 +431,20 @@ class DatasetStager:
     ) -> dict:
         """Format a log as an SFT training example."""
         conversations = self._build_conversations(content)
-        return {"conversations": conversations, "label": True}
+        return attach_flywheel_judge_metadata(
+            {"conversations": conversations, "label": True},
+            record,
+        )
 
     def _format_kto_example(
         self, record: InferenceLogRecord, content: dict, *, label: bool,
     ) -> dict:
         """Format a log as a KTO training example."""
         conversations = self._build_conversations(content)
-        return {"conversations": conversations, "label": label}
+        return attach_flywheel_judge_metadata(
+            {"conversations": conversations, "label": label},
+            record,
+        )
 
     def _format_grpo_example(
         self, record: InferenceLogRecord, content: dict,
@@ -455,11 +462,11 @@ class DatasetStager:
         if not isinstance(args_json, str):
             args_json = json.dumps(args_json, ensure_ascii=False)
 
-        return {
+        return attach_flywheel_judge_metadata({
             "prompt": content.get("messages", []),
             "ground_truth_tool": tool_name,
             "ground_truth_args_json": args_json,
-        }
+        }, record)
 
     @staticmethod
     def _build_conversations(content: dict) -> list[dict[str, str]]:

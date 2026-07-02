@@ -138,6 +138,19 @@ class TestSftReconstruction:
         assert row["metadata"]["seed_id"] == "seed-123"
         assert row["metadata"]["stop_reason"] == "completed"
 
+    def test_sft_row_propagates_judge_metadata(self, tmp_path):
+        rec = _multi_turn_record()
+        judge = {
+            "verdict_rationale": "Strong rollout.",
+            "rubric_scores": [{"rubric_key": "quality", "score": 0.93}],
+        }
+        rec["metadata"]["judge"] = judge
+
+        row = proj._build_sft_row(tmp_path / "agg.jsonl", 0, rec)
+
+        assert row is not None
+        assert row["metadata"]["judge"] == judge
+
     def test_non_positive_returns_none(self):
         rec = _non_positive_record()
         assert proj._build_sft_row(Path("a.jsonl"), 0, rec) is None

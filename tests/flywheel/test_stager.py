@@ -182,6 +182,99 @@ class TestDatasetStagerWrite:
         assert grpo_filter.has_tool_calls is True
 
     @pytest.mark.asyncio
+    async def test_judge_metadata_attached_when_present(self, tmp_path):
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [
+            {
+                "messages": [{"role": "user", "content": "Good"}],
+                "response_content": "Great!",
+            },
+            {
+                "messages": [{"role": "user", "content": "Bad"}],
+                "response_content": "Wrong",
+            },
+            {
+                "messages": [{"role": "user", "content": "Lookup"}],
+                "response_content": "",
+                "tool_calls": [{
+                    "function": {"name": "lookup", "arguments": "{}"},
+                }],
+            },
+        ])
+        scores = [{"rubric_key": "flywheel_quality", "score": 0.91}]
+        sft_record = _make_record(
+            "sft-judge", source_file=str(log_file), line_number=0, tag="sft",
+            verdict_rationale="Strong response.", rubric_scores=scores,
+        )
+        kto_record = _make_record(
+            "kto-judge", source_file=str(log_file), line_number=1, tag="kto",
+            verdict_rationale="Weak response.", rubric_scores=scores,
+        )
+        grpo_record = _make_record(
+            "grpo-judge", source_file=str(log_file), line_number=2, tag="grpo",
+            fitness_score=1.0, is_valid=True, tools_requested=True,
+            tool_calls=[{}], verdict_rationale="Good tool call.",
+            rubric_scores=scores,
+        )
+
+        stager = self._make_stager(tmp_path)
+        stager._catalog.find_logs = AsyncMock(side_effect=[
+            [sft_record], [kto_record], [grpo_record],
+        ])
+
+        with patch.object(stager, "_register_flywheel_cycle", return_value="run-1"):
+            result = await stager.stage_dataset()
+
+        sft = json.loads(Path(result.file_paths["sft"]).read_text().splitlines()[0])
+        kto_lines = Path(result.file_paths["kto"]).read_text().splitlines()
+        grpo = json.loads(Path(result.file_paths["grpo"]).read_text().strip())
+
+        assert sft["metadata"]["flywheel"]["log_id"] == "sft-judge"
+        assert sft["metadata"]["flywheel"]["judge"]["rubric_scores"] == scores
+        neg = json.loads(kto_lines[1])
+        assert neg["metadata"]["flywheel"]["log_id"] == "kto-judge"
+        assert grpo["metadata"]["flywheel"]["judge"]["verdict_rationale"] == (
+            "Good tool call."
+        )
+
+    @pytest.mark.asyncio
+    async def test_deterministic_rationale_without_scores_does_not_change_shape(
+        self, tmp_path,
+    ):
+        """Default-disabled cleaner rationale is not structured judge metadata."""
+        log_file = tmp_path / "logs.jsonl"
+        _write_log_file(log_file, [{
+            "messages": [{"role": "user", "content": "Hi"}],
+            "response_content": "Hello!",
+        }])
+
+        record = _make_record(
+            "sft-rationale-only",
+            source_file=str(log_file),
+            line_number=0,
+            tag="sft",
+            verdict_rationale=(
+                "score=0.900; verdict=valid; method=error_count; errors=none"
+            ),
+            rubric_scores=None,
+        )
+
+        stager = self._make_stager(tmp_path)
+        stager._catalog.find_logs = AsyncMock(side_effect=[[record], [], []])
+
+        with patch.object(stager, "_register_flywheel_cycle", return_value="run-1"):
+            result = await stager.stage_dataset()
+
+        sft = json.loads(Path(result.file_paths["sft"]).read_text().strip())
+        assert sft == {
+            "conversations": [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello!"},
+            ],
+            "label": True,
+        }
+
+    @pytest.mark.asyncio
     async def test_grpo_eligible_sft_tool_call_log_staged(self, tmp_path):
         """SFT-tagged valid tool-call logs are eligible for GRPO staging."""
         log_file = tmp_path / "logs.jsonl"

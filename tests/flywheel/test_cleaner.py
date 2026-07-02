@@ -10,6 +10,7 @@ import pytest
 from shared.flywheel.catalog import InferenceLogRecord, LogFilter
 from shared.flywheel.cleaner import CleaningResult, DataCleaner, NoOpPIIDetector
 from shared.flywheel.config import FlywheelConfig
+from shared.flywheel.judge import FlywheelJudgeOutcome
 
 
 def _make_record(log_id: str, **kwargs) -> InferenceLogRecord:
@@ -27,6 +28,16 @@ def _write_log_content(path: Path, content: dict) -> None:
     """Write a single log content dict as line 0 of a JSONL file."""
     with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(content) + "\n")
+
+
+class FakeFlywheelJudge:
+    def __init__(self, outcome: FlywheelJudgeOutcome) -> None:
+        self.outcome = outcome
+        self.calls = []
+
+    def judge_record(self, record, content, fitness):
+        self.calls.append((record, content, fitness))
+        return self.outcome
 
 
 class TestNoOpPIIDetector:
@@ -56,6 +67,11 @@ class TestCleaningResult:
 
 class TestDataCleanerScoring:
     """DataCleaner evaluates logs via FitnessEvaluator."""
+
+    def test_invalid_judge_injection_raises_type_error(self):
+        mock_catalog = AsyncMock()
+        with pytest.raises(TypeError, match="judge must expose"):
+            DataCleaner(mock_catalog, FlywheelConfig(), judge=object())
 
     @pytest.mark.asyncio
     async def test_scores_tool_call_response(self, tmp_path):
@@ -108,6 +124,60 @@ class TestDataCleanerScoring:
             ),
             rubric_scores=None,
         )
+
+    @pytest.mark.asyncio
+    async def test_structured_judge_persists_rationale_and_scores(self, tmp_path):
+        log_file = tmp_path / "test.jsonl"
+        log_content = {
+            "response_content": "Here is the result",
+            "tool_calls": [{"function": {"name": "search", "arguments": "{}"}}],
+        }
+        _write_log_content(log_file, log_content)
+
+        record = _make_record(
+            "judge-1",
+            source_file=str(log_file),
+            line_number=0,
+            tools_requested=True,
+            tool_calls=[{"function": {"name": "search"}}],
+        )
+
+        mock_catalog = AsyncMock()
+        mock_catalog.find_logs = AsyncMock(side_effect=[[record], []])
+        mock_catalog.update_score = AsyncMock()
+
+        rubric_scores = [{
+            "rubric_key": "flywheel_quality",
+            "score": 0.87,
+            "passed": True,
+            "feedback": "Good tool use.",
+        }]
+        judge = FakeFlywheelJudge(
+            FlywheelJudgeOutcome(
+                passed=True,
+                verdict_rationale="Good tool use.",
+                rubric_scores=rubric_scores,
+            )
+        )
+
+        with patch("shared.flywheel.cleaner.FitnessEvaluator") as MockEval:
+            from shared.validation.fitness import FitnessResult
+
+            mock_evaluator = MagicMock()
+            mock_evaluator.evaluate.return_value = FitnessResult(
+                score=0.9, is_valid=True, errors=[], scoring_method="error_count",
+            )
+            MockEval.return_value = mock_evaluator
+
+            cleaner = DataCleaner(mock_catalog, FlywheelConfig(), judge=judge)
+            result = await cleaner.clean_logs()
+
+        assert result.scored == 1
+        assert judge.calls
+        mock_catalog.update_score.assert_called_once()
+        call_args = mock_catalog.update_score.call_args
+        assert call_args.kwargs["verdict_rationale"] == "Good tool use."
+        assert call_args.kwargs["rubric_scores"] == rubric_scores
 
     @pytest.mark.asyncio
     async def test_scores_text_response(self, tmp_path):

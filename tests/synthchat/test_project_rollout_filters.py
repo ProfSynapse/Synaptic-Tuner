@@ -109,6 +109,33 @@ class TestGrpoFiltering:
         assert row is not None
         assert row["total_turns"] == 1
 
+    def test_grpo_row_propagates_judge_metadata(self):
+        rec = _positive_record(total_turns=1)
+        judge = {
+            "verdict_rationale": "Good rollout.",
+            "rubric_scores": [{"rubric_key": "quality", "score": 0.95}],
+        }
+        rec["metadata"]["judge"] = judge
+
+        row = proj._build_grpo_row(Path("a.jsonl"), 0, rec, None, None)
+
+        assert row is not None
+        assert row["metadata"]["judge"] == judge
+
+    def test_grpo_row_ignores_rationale_only_metadata(self):
+        rec = _positive_record(total_turns=1)
+        rec["metadata"]["judge"] = {
+            "verdict_rationale": (
+                "score=0.900; verdict=valid; method=error_count; errors=none"
+            ),
+            "rubric_scores": None,
+        }
+
+        row = proj._build_grpo_row(Path("a.jsonl"), 0, rec, None, None)
+
+        assert row is not None
+        assert "judge" not in row["metadata"]
+
 
 class TestKtoPositiveFiltering:
     def test_short_kto_positive_dropped(self):

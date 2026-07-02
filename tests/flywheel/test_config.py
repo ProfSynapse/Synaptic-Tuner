@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from shared.flywheel.config import FlywheelConfig, load_flywheel_config
+from shared.flywheel.config import FlywheelConfig, FlywheelJudgeConfig, load_flywheel_config
 
 
 class TestFlywheelConfigDefaults:
@@ -48,6 +48,12 @@ class TestFlywheelConfigDefaults:
         assert cfg.proxy_port == 8080
         assert cfg.vllm_host == "localhost"
         assert cfg.vllm_port == 8000
+
+    def test_judge_default_disabled(self):
+        cfg = FlywheelConfig()
+        assert isinstance(cfg.judge, FlywheelJudgeConfig)
+        assert cfg.judge.enabled is False
+        assert cfg.judge.env_prefix == "FLYWHEEL_JUDGE"
 
 
 class TestFlywheelConfigOverrides:
@@ -156,3 +162,20 @@ class TestLoadFlywheelConfig:
         cfg = load_flywheel_config(config_file)
         assert cfg.proxy_port == 7777
         assert cfg.sft_threshold == 0.8  # default preserved
+
+    def test_loads_nested_judge_config(self, tmp_path):
+        config_data = {
+            "judge": {
+                "enabled": True,
+                "env_prefix": "CUSTOM_JUDGE",
+                "llm": {"provider": "lmstudio", "model": "judge-model"},
+            }
+        }
+        config_file = tmp_path / "flywheel.yaml"
+        with open(config_file, "w") as f:
+            yaml.dump(config_data, f)
+
+        cfg = load_flywheel_config(config_file)
+        assert cfg.judge.enabled is True
+        assert cfg.judge.env_prefix == "CUSTOM_JUDGE"
+        assert cfg.judge.llm["model"] == "judge-model"

@@ -17,6 +17,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from shared.utilities import load_yaml
 from shared.validation import FilterStats, RolloutFilterSet
+from shared.flywheel.judge import judge_metadata_from_row
 
 # Canonical projection-target names usable in a filter spec's ``applies_to``.
 PROJECTION_TARGETS = ("sft", "grpo", "kto_positive", "kto_negative")
@@ -136,6 +137,16 @@ def _build_canonical_row(path: Path, row: Dict[str, Any]) -> Dict[str, Any]:
     metadata["aggregate_source_artifact"] = path.name
     canonical["metadata"] = metadata
     return canonical
+
+
+def _attach_judge_metadata(projected: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    judge = judge_metadata_from_row(source)
+    if not judge:
+        return projected
+    metadata = dict(projected.get("metadata") or {})
+    metadata["judge"] = judge
+    projected["metadata"] = metadata
+    return projected
 
 
 def _is_quality_positive(metadata: Dict[str, Any]) -> bool:
@@ -289,7 +300,7 @@ def _build_sft_row(
     environment = metadata.get("environment") or {}
     episode_trace = environment.get("episode_trace") or {}
 
-    return {
+    return _attach_judge_metadata({
         "conversations": conversations,
         "label": True,
         "scenario_id": str(metadata.get("scenario") or "unknown"),
@@ -302,7 +313,7 @@ def _build_sft_row(
             "scenario": metadata.get("scenario"),
             "stop_reason": episode_trace.get("stop_reason"),
         },
-    }
+    }, row)
 
 
 def _build_kto_row(
@@ -338,7 +349,7 @@ def _build_kto_row(
     if not _passes_filters(row, kto_target, filter_set, stats):
         return None
 
-    return {
+    return _attach_judge_metadata({
         "conversations": [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": completion},
@@ -357,7 +368,7 @@ def _build_kto_row(
             "stop_reason": (((metadata.get("environment") or {}).get("episode_trace") or {}).get("stop_reason")),
             "stage_failures": _stage_failures(metadata),
         },
-    }
+    }, row)
 
 
 def _build_grpo_row(
@@ -390,7 +401,7 @@ def _build_grpo_row(
     if not tool_name or tool_args is None:
         return None
 
-    return {
+    return _attach_judge_metadata({
         "prompt": [{"role": "user", "content": prompt}],
         "scenario_id": str(metadata.get("scenario") or "unknown"),
         "scenario_family": _scenario_family(metadata),
@@ -411,7 +422,7 @@ def _build_grpo_row(
             "seed_id": ((metadata.get("environment_seed") or {}).get("seed_id")),
             "scenario": metadata.get("scenario"),
         },
-    }
+    }, row)
 
 
 def _build_grpo_tool_turn_rows(
@@ -446,7 +457,7 @@ def _build_grpo_tool_turn_rows(
         prompt = _trace_prompt_messages(trace, turn_index, prompt_context)
         if not prompt:
             continue
-        rows.append({
+        rows.append(_attach_judge_metadata({
             "prompt": prompt,
             "scenario_id": str(metadata.get("scenario") or "unknown"),
             "scenario_family": _scenario_family(metadata),
@@ -470,7 +481,7 @@ def _build_grpo_tool_turn_rows(
                 "source_turn_index": turn_index,
                 "prompt_context": prompt_context,
             },
-        })
+        }, row))
     return rows
 
 

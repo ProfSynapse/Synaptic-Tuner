@@ -18,6 +18,7 @@ from shared.validation.fitness import FitnessEvaluator, FitnessResult
 
 from .catalog import InferenceLogRecord, LogCatalog, LogFilter
 from .config import FlywheelConfig
+from .judge import FlywheelJudge, coerce_flywheel_judge
 from .utils import read_log_content
 
 logger = logging.getLogger(__name__)
@@ -92,10 +93,12 @@ class DataCleaner:
         catalog: LogCatalog,
         config: FlywheelConfig,
         pii_detector: PIIDetector | None = None,
+        judge: FlywheelJudge | None = None,
     ) -> None:
         self._catalog = catalog
         self._config = config
         self._pii = pii_detector or NoOpPIIDetector()
+        self._judge = coerce_flywheel_judge(config, judge)
 
         # Build FitnessEvaluator from config
         fitness_cfg = config.to_fitness_config()
@@ -145,14 +148,26 @@ class DataCleaner:
                         if scrubbed != content.get("response_content", ""):
                             result.pii_scrubbed += 1
 
+                    outcome = None
+                    if self._judge is not None:
+                        outcome = self._judge.judge_record(record, content, fitness)
+
                     # Update catalog with score
                     await self._catalog.update_score(
                         record.log_id,
                         fitness.score,
                         fitness.is_valid,
                         fitness.errors,
-                        verdict_rationale=self._verdict_rationale(fitness),
-                        rubric_scores=None,
+                        verdict_rationale=(
+                            outcome.verdict_rationale
+                            if outcome is not None
+                            else self._verdict_rationale(fitness)
+                        ),
+                        rubric_scores=(
+                            outcome.rubric_scores
+                            if outcome is not None
+                            else None
+                        ),
                     )
                     result.scored += 1
 

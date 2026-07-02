@@ -145,11 +145,15 @@ def project_dpo(rows: Iterable[dict[str, Any]], cfg: ProjectConfig) -> Projectio
             counters["dropped_missing_prompt_key"] += 1
             continue
 
-        buckets[str(key)][label].append({
+        bucket_row = {
             "prompt": prompt,
             "target": serialize_assistant_for_dpo(target[1]),
             "source_example_id": row.get("source_example_id"),
-        })
+        }
+        judge = judge_metadata_from_row(row)
+        if judge:
+            bucket_row["judge"] = judge
+        buckets[str(key)][label].append(bucket_row)
         counters["eligible_rows"] += 1
 
     out: list[dict[str, Any]] = []
@@ -164,15 +168,20 @@ def project_dpo(rows: Iterable[dict[str, Any]], cfg: ProjectConfig) -> Projectio
             continue
         for chosen in chosen_rows:
             for rejected in rejected_rows:
+                provenance = {
+                    "prompt_key": key,
+                    "chosen_source_example_id": chosen["source_example_id"],
+                    "rejected_source_example_id": rejected["source_example_id"],
+                }
+                if chosen.get("judge"):
+                    provenance["chosen_judge"] = chosen["judge"]
+                if rejected.get("judge"):
+                    provenance["rejected_judge"] = rejected["judge"]
                 out.append({
                     "prompt": chosen["prompt"],
                     "chosen": [chosen["target"]],
                     "rejected": [rejected["target"]],
-                    "provenance": {
-                        "prompt_key": key,
-                        "chosen_source_example_id": chosen["source_example_id"],
-                        "rejected_source_example_id": rejected["source_example_id"],
-                    },
+                    "provenance": provenance,
                 })
                 counters["output_rows"] += 1
 
@@ -204,18 +213,55 @@ def project_static_grpo(rows: Iterable[dict[str, Any]], cfg: ProjectConfig) -> P
             counters["dropped_missing_tool_name"] += 1
             continue
 
+        provenance = {
+            "source_example_id": row.get("source_example_id"),
+            "prompt_hash": prompt_hash(prompt),
+        }
+        judge = judge_metadata_from_row(row)
+        if judge:
+            provenance["judge"] = judge
         out.append({
             "prompt": prompt,
             "ground_truth_tool": name,
             "ground_truth_args_json": args_json,
-            "provenance": {
-                "source_example_id": row.get("source_example_id"),
-                "prompt_hash": prompt_hash(prompt),
-            },
+            "provenance": provenance,
         })
         counters["output_rows"] += 1
 
     return ProjectionResult(out, counters)
+
+
+def judge_metadata_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, dict):
+        flywheel = metadata.get("flywheel") or {}
+        if isinstance(flywheel, dict) and isinstance(flywheel.get("judge"), dict):
+            return _structured_judge_or_none(flywheel["judge"])
+        if isinstance(metadata.get("judge"), dict):
+            return _structured_judge_or_none(metadata["judge"])
+
+    verdict_rationale = row.get("verdict_rationale")
+    rubric_scores = row.get("rubric_scores")
+    if not _has_structured_rubric_scores(rubric_scores):
+        return None
+    judge: dict[str, Any] = {}
+    if verdict_rationale is not None:
+        judge["verdict_rationale"] = verdict_rationale
+    if rubric_scores is not None:
+        judge["rubric_scores"] = rubric_scores
+    return judge
+
+
+def _structured_judge_or_none(value: dict[str, Any]) -> dict[str, Any] | None:
+    if value.get("structured") is True:
+        return dict(value)
+    if _has_structured_rubric_scores(value.get("rubric_scores")):
+        return dict(value)
+    return None
+
+
+def _has_structured_rubric_scores(value: Any) -> bool:
+    return isinstance(value, list) and len(value) > 0
 
 
 def prompt_messages(row: dict[str, Any], cfg: ProjectConfig, *, target_index: int) -> list[dict[str, str]]:
