@@ -103,6 +103,7 @@ Flywheel Subcommands:
   flywheel stage        Stage dataset version (no retrain)
   flywheel logs         Show inference log statistics
   flywheel versions     List staged dataset versions
+  flywheel export-fixtures --export-config <yaml> --output <yaml>
 
 List Subcommands:
   list datasets   List available JSONL datasets
@@ -205,12 +206,22 @@ Examples:
         "--dry-run",
         action="store_true",
         dest="dry_run",
-        help="Show what would happen without executing (flywheel run-cycle only)"
+        help="Show what would happen without executing (flywheel run-cycle/export-fixtures only)"
     )
     parser.add_argument(
         "--flywheel-config",
         dest="flywheel_config",
         help="Path to flywheel config YAML (flywheel commands only)"
+    )
+    parser.add_argument(
+        "--export-config",
+        dest="export_config",
+        help="Path to flywheel Evaluator fixture export config YAML (flywheel export-fixtures only)"
+    )
+    parser.add_argument(
+        "--output",
+        dest="output",
+        help="Output file path (flywheel export-fixtures only)"
     )
 
     # Surgery-specific flags

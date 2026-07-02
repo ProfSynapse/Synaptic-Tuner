@@ -31,6 +31,7 @@ class FlywheelHandler(BaseHandler):
         "stage": "_handle_stage",
         "logs": "_handle_logs",
         "versions": "_handle_versions",
+        "export-fixtures": "_handle_export_fixtures",
     }
 
     def __init__(self, args: Optional[Namespace] = None):
@@ -110,13 +111,15 @@ class FlywheelHandler(BaseHandler):
             ("5", "Logs       - Show inference log statistics"),
             ("6", "Versions   - List staged dataset versions"),
             ("7", "Configure  - View flywheel settings"),
+            ("8", "Export Fixtures - Export frozen Evaluator fixtures"),
             ("0", "Back"),
         ]
         choice = print_menu(menu_items, "Select action:")
         dispatch = {"1": self._handle_status, "2": self._handle_run_cycle,
                      "3": self._handle_readiness, "4": self._handle_stage,
                      "5": self._handle_logs, "6": self._handle_versions,
-                     "7": self._handle_configure}
+                     "7": self._handle_configure,
+                     "8": self._handle_export_fixtures}
         return dispatch[choice]() if choice in dispatch else 0
 
     def _handle_status(self) -> int:
@@ -339,3 +342,84 @@ class FlywheelHandler(BaseHandler):
             print(f"  {v['name']:<20} {v['files']:<8} {v['total_examples']:<10}")
         print()
         return 0
+
+    def _handle_export_fixtures(self) -> int:
+        """Export selected flywheel logs as frozen Evaluator YAML fixtures."""
+        export_config = getattr(self.args, "export_config", None) if self.args else None
+        output = getattr(self.args, "output", None) if self.args else None
+        dry_run = getattr(self.args, "dry_run", False) if self.args else False
+        overwrite = getattr(self.args, "auto_confirm", False) if self.args else False
+
+        if not export_config:
+            self.output_error(
+                "flywheel export-fixtures requires --export-config",
+                code="MISSING_EXPORT_CONFIG",
+            )
+            return 1
+        if not output:
+            self.output_error(
+                "flywheel export-fixtures requires --output",
+                code="MISSING_OUTPUT",
+            )
+            return 1
+
+        try:
+            config = self._load_config()
+            result = asyncio.run(
+                self._export_fixtures_async(
+                    config=config,
+                    export_config=export_config,
+                    output=output,
+                    overwrite=overwrite,
+                    dry_run=dry_run,
+                )
+            )
+        except Exception as exc:
+            logger.error("Fixture export failed: %s", exc, exc_info=True)
+            self.output_error(f"Fixture export failed: {exc}", code="FIXTURE_EXPORT_ERROR")
+            return 1
+
+        data = result.to_dict()
+        if self.json_mode:
+            self.output(data)
+            return 0
+
+        if dry_run:
+            self.output_info(
+                "Fixture export dry run: "
+                f"{result.exported_count}/{result.selected_count} records would be exported."
+            )
+        else:
+            self.output_info(
+                f"Exported {result.exported_count} Evaluator fixtures to {result.output_path}"
+            )
+        return 0
+
+    async def _export_fixtures_async(
+        self,
+        *,
+        config: Any,
+        export_config: str,
+        output: str,
+        overwrite: bool,
+        dry_run: bool,
+    ) -> Any:
+        from shared.flywheel.catalog import create_catalog
+        from shared.flywheel.evaluator_exporter import EvaluatorFixtureExporter
+
+        catalog = await create_catalog(
+            backend=config.catalog_backend,
+            path=config.catalog_path,
+            url=config.catalog_url,
+            tenant_id=config.tenant_id,
+        )
+        try:
+            exporter = EvaluatorFixtureExporter(catalog)
+            return await exporter.export(
+                export_config_path=export_config,
+                output_path=output,
+                overwrite=overwrite,
+                dry_run=dry_run,
+            )
+        finally:
+            await catalog.close()

@@ -253,3 +253,27 @@ def test_bucket_push_command_parses():
     assert args.subcommand == "push"
     assert args.path == "local/results.json"
     assert args.dest == "runs/manual_uploads/"
+
+
+def test_flywheel_export_fixtures_command_parses():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "flywheel",
+            "export-fixtures",
+            "--export-config",
+            "configs/flywheel/evaluator_fixture_export.example.yaml",
+            "--output",
+            "Evaluator/config/scenarios/flywheel_frozen.yaml",
+            "--dry-run",
+            "--yes",
+        ]
+    )
+
+    assert args.command == "flywheel"
+    assert args.subcommand == "export-fixtures"
+    assert args.export_config == "configs/flywheel/evaluator_fixture_export.example.yaml"
+    assert args.output == "Evaluator/config/scenarios/flywheel_frozen.yaml"
+    assert args.dry_run is True
+    assert args.auto_confirm is True
