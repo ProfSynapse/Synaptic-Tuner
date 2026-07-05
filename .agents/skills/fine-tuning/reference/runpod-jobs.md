@@ -141,6 +141,26 @@ to ~300s then EXITED) apart from a boot crash-loop (uptime stuck at 1-2s).
 Because there is no log API, a wrapper that wants diagnostics from a failed run
 must upload them itself before it exits -- see "Failure telemetry" below.
 
+### 5. hf_xet download hang (cross-provider, not RunPod-specific)
+
+Symptom: the job freezes right after unsloth's "Fast downloading is enabled"
+banner. Uptime keeps climbing (the container is alive), but network RX is zero
+and the model download never completes; the job eventually hits the wall-clock
+timeout. Killed RunPod r6/r7/r8 and two Modal A0 attempts (2026-07-05).
+
+Diagnosis: attach `py-spy dump --pid <worker>` to a live hung process; the stack
+sits in `xet_get` (`huggingface_hub/file_download.py:626`). The hf_xet CAS
+backend hangs without a timeout on multi-GB pulls of some model repos. It
+SUPERSEDES hf_transfer, so `HF_HUB_ENABLE_HF_TRANSFER=0` alone does nothing
+(verified in the hung process env).
+
+Fix: `HF_HUB_DISABLE_XET=1` forces the classic resolve-endpoint HTTP path, which
+speed-tested healthy. The launcher sets `HF_HUB_DISABLE_XET=1` and
+`HF_HUB_ENABLE_HF_TRANSFER=0` as default pod env (override via `--env`). This
+applies to ANY provider running `huggingface_hub` with `hf_xet` installed,
+INCLUDING Modal -- a Modal run pulling the same repo needs the same two env vars
+(set them in the `@app.function` secrets or the container env).
+
 ---
 
 ## Outputs and the Artifact Contract
@@ -170,6 +190,10 @@ runs/modal/<tag>/      # Modal training runs
   `--publish-target-repo`) so the final model lands on the Hub, not just the
   Modal output Volume. The code default is off (a bare `modal run` should not
   silently publish); a real run always opts in.
+- **Modal runs need the hf_xet mitigation too.** The download hang in gotcha #5
+  is a `huggingface_hub` issue, not a RunPod one; a Modal run pulling a large
+  model repo must set `HF_HUB_DISABLE_XET=1` (and `HF_HUB_ENABLE_HF_TRANSFER=0`)
+  in the container env or it will freeze the same way.
 
 ### Failure telemetry
 

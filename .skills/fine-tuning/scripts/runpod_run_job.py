@@ -82,7 +82,10 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--disk-gb", type=int, default=60)
     ap.add_argument("--timeout-min", type=int, default=180)
     ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
-                    help="extra pod env var (repeatable)")
+                    help="extra pod env var (repeatable). HF_HUB_DISABLE_XET=1 "
+                         "and HF_HUB_ENABLE_HF_TRANSFER=0 are set by default "
+                         "(the hf_xet backend hangs on large model pulls); pass "
+                         "them here to override.")
     ap.add_argument("--probe-only", action="store_true",
                     help="skip clone+wrapper; just print GPU info and exit "
                          "(boot-reliability isolation test)")
@@ -158,6 +161,15 @@ def build_pod_env(args: argparse.Namespace) -> dict:
     hf_token = os.environ.get("HF_TOKEN")
     if hf_token:
         env["HF_TOKEN"] = hf_token
+    # Force the classic resolve-endpoint HTTP download path. The hf_xet CAS
+    # backend hangs without timeout on multi-GB pulls of some model repos
+    # (py-spy showed workers frozen in xet_get at file_download.py:626; killed
+    # RunPod r6/r7/r8 and two Modal A0 attempts, 2026-07-05). It supersedes
+    # hf_transfer, so DISABLE_XET is the load-bearing one; hf_transfer is turned
+    # off too so the fallback is the plain, speed-tested path. Set as defaults
+    # BEFORE the --env loop so an explicit --env can still override either.
+    env["HF_HUB_DISABLE_XET"] = "1"
+    env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
     for pair in args.env:
         if "=" not in pair:
             raise SystemExit(f"--env expects KEY=VALUE, got: {pair}")
