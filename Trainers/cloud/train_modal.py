@@ -100,7 +100,9 @@ training_image = (
         "peft==0.15.2",
         "accelerate==1.6.0",
         "bitsandbytes==0.45.5",
-        "huggingface_hub==0.30.2",
+        # transformers 4.54.0 requires huggingface_hub>=0.34.0,<1.0; the old
+        # ==0.30.2 pin made the image unresolvable (ResolutionImpossible at build).
+        "huggingface_hub>=0.34.0,<1.0",
         # Project utilities — lighter deps, less sensitive to version drift
         "pyyaml",
         "wandb",
