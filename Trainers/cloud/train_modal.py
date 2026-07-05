@@ -37,7 +37,18 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from shared.utilities.paths import get_canonical_output_dir_name, get_canonical_trainer_dir_name
+# shared/ ships with the repo, not the container image: inside the Modal
+# container this module is imported BEFORE the repo is cloned, so the import
+# must not be fatal at module scope. run_training() re-imports it from the
+# cloned workspace after checkout.
+try:
+    from shared.utilities.paths import (
+        get_canonical_output_dir_name,
+        get_canonical_trainer_dir_name,
+    )
+except ImportError:
+    get_canonical_output_dir_name = None
+    get_canonical_trainer_dir_name = None
 
 try:
     import modal
@@ -214,6 +225,15 @@ def run_training(
         raise ValueError(
             "repo_url is required. Provide the git URL of your Toolset-Training repo."
         )
+
+    # The cloned repo provides shared/; resolve the path helpers here because
+    # the container image does not carry the repo source at module-import time.
+    if workspace not in sys.path:
+        sys.path.insert(0, workspace)
+    from shared.utilities.paths import (  # noqa: F811 (module-scope import is best-effort)
+        get_canonical_output_dir_name,
+        get_canonical_trainer_dir_name,
+    )
 
     # Determine trainer directory and script
     trainer_dir = os.path.join(workspace, "Trainers", get_canonical_trainer_dir_name(trainer_type))
