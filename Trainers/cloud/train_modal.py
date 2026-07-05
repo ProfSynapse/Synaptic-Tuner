@@ -165,6 +165,8 @@ def run_training(
     repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
+    dataset_name: str = "",
+    dataset_file: str = "",
     publish_final_model: bool = False,
     publish_target_repo: str = "",
     config_overrides: dict = None,
@@ -265,6 +267,12 @@ def run_training(
         # Convert relative dataset path to absolute within the workspace
         abs_dataset = os.path.join(workspace, dataset_path)
         cmd.extend(["--local-file", abs_dataset])
+    if dataset_name:
+        # Pull the dataset from the Hugging Face Hub instead of the config
+        # default. dataset_file selects a specific file inside that repo.
+        cmd.extend(["--dataset-name", dataset_name])
+    if dataset_file:
+        cmd.extend(["--dataset-file", dataset_file])
     if publish_final_model:
         cmd.append("--publish-final-model")
     if publish_target_repo:
@@ -369,6 +377,8 @@ def main(
     repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
+    dataset_name: str = "",
+    dataset_file: str = "",
     publish_final_model: bool = False,
     publish_target_repo: str = "",
     learning_rate: float = 0.0,
@@ -479,6 +489,8 @@ def main(
         repo_commit=repo_commit,
         model_name=model_name,
         dataset_path=dataset_path,
+        dataset_name=dataset_name,
+        dataset_file=dataset_file,
         publish_final_model=publish_final_model,
         publish_target_repo=publish_target_repo,
         config_overrides=config_overrides,
