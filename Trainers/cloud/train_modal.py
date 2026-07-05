@@ -206,6 +206,20 @@ def run_training(
     os.environ["HF_HOME"] = "/cache/huggingface"
     os.environ["TRANSFORMERS_CACHE"] = "/cache/huggingface"
 
+    # Bridge the repo provenance into the env contract the training scripts read
+    # (train_sft/train_kto/train_dpo consume CLOUD_REPO_BRANCH / CLOUD_REPO_COMMIT
+    # from os.environ to stamp manifest.json and name the run dir). The
+    # ModalBackend sets these in the LOCAL `modal run` process env, but Modal
+    # only forwards explicitly-declared secrets into the remote container, so
+    # the local env never reaches this function -- without this bridge the
+    # manifest records repo_commit=null and the run dir is stamped "-local".
+    # These args are the exact commit this container checked out above, so they
+    # are the authoritative provenance regardless of provider.
+    if repo_branch:
+        os.environ["CLOUD_REPO_BRANCH"] = repo_branch
+    if repo_commit:
+        os.environ["CLOUD_REPO_COMMIT"] = repo_commit
+
     # Clone the repo
     workspace = "/workspace/toolset-training"
     if repo_url:

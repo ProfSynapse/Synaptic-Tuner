@@ -69,6 +69,59 @@ def normalize_hf_bucket_id(bucket_id: str) -> str:
     return normalized.strip("/")
 
 
+def resolve_repo_provenance(
+    repo_dir: Optional[Path] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve (repo_branch, repo_commit) for a cloud run, robustly.
+
+    Every cloud provider clones the repo at a pinned commit inside its
+    container, so the checked-out working tree is itself the authoritative
+    provenance. The launch-time contract is the CLOUD_REPO_BRANCH /
+    CLOUD_REPO_COMMIT env vars, but a provider whose wrapper forgets to
+    forward them into the remote training env would otherwise stamp
+    repo_commit=null and a "-local" run dir. Falling back to `git rev-parse`
+    against the actual checkout closes that gap provider-generically: the
+    manifest records the exact commit that ran regardless of which provider
+    launched it.
+
+    Order: explicit env var (the pinned request) wins; git of the checkout is
+    the fallback; None only when neither is available (a genuine non-cloud or
+    non-git run).
+    """
+    branch = os.environ.get("CLOUD_REPO_BRANCH") or None
+    commit = os.environ.get("CLOUD_REPO_COMMIT") or None
+    if branch and commit:
+        return branch, commit
+
+    cwd = str(repo_dir) if repo_dir is not None else None
+    if commit is None:
+        commit = _git_output(["rev-parse", "HEAD"], cwd)
+    if branch is None:
+        derived = _git_output(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
+        # A detached HEAD (the usual state after `git checkout <sha>`) reports
+        # "HEAD"; that is not a useful branch label, so leave it unset.
+        branch = derived if derived and derived != "HEAD" else branch
+    return branch, commit
+
+
+def _git_output(args: list, cwd: Optional[str]) -> Optional[str]:
+    """Run a read-only git command; return stripped stdout or None on failure."""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    return out or None
+
+
 def build_run_paths(base_output_dir: Path, provider: str, method: str, timestamp: str, commit: str) -> RunPaths:
     """Build the canonical run layout used by cloud providers."""
     short_sha = (commit or "local")[:8]

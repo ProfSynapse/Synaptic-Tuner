@@ -63,6 +63,7 @@ from shared.cloud_artifacts import (
     build_manifest,
     build_run_paths,
     publish_final_model_to_hub,
+    resolve_repo_provenance,
     sync_directory_to_hf_bucket,
     write_manifest,
 )
@@ -806,8 +807,10 @@ def run(args: argparse.Namespace):
     # Validate model compatibility BEFORE loading model
     validate_model_compatibility(config)
 
-    repo_branch = os.environ.get("CLOUD_REPO_BRANCH")
-    repo_commit = os.environ.get("CLOUD_REPO_COMMIT")
+    # Prefer the launch-time env contract; fall back to the git checkout so a
+    # provider whose wrapper does not forward the env vars still records the
+    # exact commit that ran (see resolve_repo_provenance).
+    repo_branch, repo_commit = resolve_repo_provenance()
     artifact_identifier = args.artifact_bucket or os.environ.get("CLOUD_ARTIFACT_IDENTIFIER")
 
     # Create timestamped run directory (following KTO pattern)
