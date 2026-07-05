@@ -37,7 +37,18 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-from shared.utilities.paths import get_canonical_output_dir_name, get_canonical_trainer_dir_name
+# shared/ ships with the repo, not the container image: inside the Modal
+# container this module is imported BEFORE the repo is cloned, so the import
+# must not be fatal at module scope. run_training() re-imports it from the
+# cloned workspace after checkout.
+try:
+    from shared.utilities.paths import (
+        get_canonical_output_dir_name,
+        get_canonical_trainer_dir_name,
+    )
+except ImportError:
+    get_canonical_output_dir_name = None
+    get_canonical_trainer_dir_name = None
 
 try:
     import modal
@@ -89,7 +100,9 @@ training_image = (
         "peft==0.15.2",
         "accelerate==1.6.0",
         "bitsandbytes==0.45.5",
-        "huggingface_hub==0.30.2",
+        # transformers 4.54.0 requires huggingface_hub>=0.34.0,<1.0; the old
+        # ==0.30.2 pin made the image unresolvable (ResolutionImpossible at build).
+        "huggingface_hub>=0.34.0,<1.0",
         # Project utilities — lighter deps, less sensitive to version drift
         "pyyaml",
         "wandb",
@@ -140,9 +153,15 @@ DEFAULT_GPU = "L40S"
     },
     # Scope secrets to only the env vars needed for training, rather than
     # exposing the entire .env file via Secret.from_dotenv().
+    #
+    # UNSLOTH_COMPILE_DISABLE lets older GPU archs (e.g. T4 / sm_75) fall back
+    # off the fused cut_cross_entropy Triton kernel, which fails to compile
+    # there ("PassManager::run failed"). Forwarded only when set locally; empty
+    # by default so it is inert on modern cards.
     secrets=[modal.Secret.from_dict({
         "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
         "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
+        "UNSLOTH_COMPILE_DISABLE": os.environ.get("UNSLOTH_COMPILE_DISABLE", ""),
     })],
 )
 def run_training(
@@ -152,6 +171,8 @@ def run_training(
     repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
+    dataset_name: str = "",
+    dataset_file: str = "",
     publish_final_model: bool = False,
     publish_target_repo: str = "",
     config_overrides: dict = None,
@@ -215,6 +236,15 @@ def run_training(
             "repo_url is required. Provide the git URL of your Toolset-Training repo."
         )
 
+    # The cloned repo provides shared/; resolve the path helpers here because
+    # the container image does not carry the repo source at module-import time.
+    if workspace not in sys.path:
+        sys.path.insert(0, workspace)
+    from shared.utilities.paths import (  # noqa: F811 (module-scope import is best-effort)
+        get_canonical_output_dir_name,
+        get_canonical_trainer_dir_name,
+    )
+
     # Determine trainer directory and script
     trainer_dir = os.path.join(workspace, "Trainers", get_canonical_trainer_dir_name(trainer_type))
     train_script = f"train_{trainer_type}.py"
@@ -243,6 +273,12 @@ def run_training(
         # Convert relative dataset path to absolute within the workspace
         abs_dataset = os.path.join(workspace, dataset_path)
         cmd.extend(["--local-file", abs_dataset])
+    if dataset_name:
+        # Pull the dataset from the Hugging Face Hub instead of the config
+        # default. dataset_file selects a specific file inside that repo.
+        cmd.extend(["--dataset-name", dataset_name])
+    if dataset_file:
+        cmd.extend(["--dataset-file", dataset_file])
     if publish_final_model:
         cmd.append("--publish-final-model")
     if publish_target_repo:
@@ -347,6 +383,8 @@ def main(
     repo_commit: str = "",
     model_name: str = "",
     dataset_path: str = "",
+    dataset_name: str = "",
+    dataset_file: str = "",
     publish_final_model: bool = False,
     publish_target_repo: str = "",
     learning_rate: float = 0.0,
@@ -457,6 +495,8 @@ def main(
         repo_commit=repo_commit,
         model_name=model_name,
         dataset_path=dataset_path,
+        dataset_name=dataset_name,
+        dataset_file=dataset_file,
         publish_final_model=publish_final_model,
         publish_target_repo=publish_target_repo,
         config_overrides=config_overrides,
