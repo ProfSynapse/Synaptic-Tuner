@@ -166,14 +166,25 @@ INCLUDING Modal -- a Modal run pulling the same repo needs the same two env vars
 When the job command exits -- success OR failure -- RunPod RESTARTS the
 container and re-runs the whole job from the top. The launcher's
 `DELETE /pods/{id}` in the `finally` block is the only thing that breaks this
-loop: it removes the pod the moment the poller sees EXITED. So if the launcher
-PROCESS dies before that `finally` runs (session end, `TaskStop`, killed
-babysitter), the pod keeps re-running the job indefinitely and billing the whole
-time. Sweep it manually: `DELETE /v1/pods/<id>`, confirm HTTP 204, then re-query
-until the pod reads null. Hardening option worth considering for long
-unattended jobs: have the wrapper self-terminate at job end by calling the REST
-delete with its own `RUNPOD_POD_ID` (injected into every pod) and the API key,
-so pod teardown does not depend on the launcher surviving.
+loop. So if the launcher PROCESS dies before that `finally` runs (session end,
+`TaskStop`, killed babysitter), the pod keeps re-running the job indefinitely
+and billing the whole time. Sweep it manually: `DELETE /v1/pods/<id>`, confirm
+HTTP 204, then re-query until the pod reads null. Hardening option worth
+considering for long unattended jobs: have the wrapper self-terminate at job
+end by calling the REST delete with its own `RUNPOD_POD_ID` (injected into
+every pod) and the API key, so pod teardown does not depend on the launcher
+surviving.
+
+**Corollary: the pod never reports EXITED, so completion = uptime reset.** A
+poller waiting for status EXITED waits forever; because of the restart loop the
+pod stays RUNNING and `runtime.uptimeInSeconds` snaps back to ~0 each cycle
+(observed 2026-07-05: five completed jobs re-ran every 3-8 minutes until swept,
+with every artifact already uploaded). The reliable completion signal is an
+uptime RESET after boot: the job command ran to the end at least once, and the
+wrapper uploads outputs (or FAILED.txt) before exiting. Distinguish completion
+from a crash-loop by the length of the first run -- a reset after a substantial
+run (>= ~3 min) is completion, a reset after seconds is a crash-loop. On either
+verdict, terminate the pod immediately.
 
 ### 7. A quiet HF log pusher is not a stall
 
