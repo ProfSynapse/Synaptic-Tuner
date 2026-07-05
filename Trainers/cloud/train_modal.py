@@ -153,9 +153,15 @@ DEFAULT_GPU = "L40S"
     },
     # Scope secrets to only the env vars needed for training, rather than
     # exposing the entire .env file via Secret.from_dotenv().
+    #
+    # UNSLOTH_COMPILE_DISABLE lets older GPU archs (e.g. T4 / sm_75) fall back
+    # off the fused cut_cross_entropy Triton kernel, which fails to compile
+    # there ("PassManager::run failed"). Forwarded only when set locally; empty
+    # by default so it is inert on modern cards.
     secrets=[modal.Secret.from_dict({
         "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
         "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
+        "UNSLOTH_COMPILE_DISABLE": os.environ.get("UNSLOTH_COMPILE_DISABLE", ""),
     })],
 )
 def run_training(
