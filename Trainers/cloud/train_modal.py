@@ -140,6 +140,28 @@ VALID_GPU_TYPES = ["T4", "L4", "A10G", "L40S", "A100", "A100-80GB", "H100"]
 DEFAULT_GPU = "L40S"
 
 
+# The hf_xet CAS backend hangs without timeout on multi-GB model pulls (py-spy:
+# workers frozen in xet_get at file_download.py:626), which froze two Modal A0
+# attempts on 2026-07-05. It supersedes hf_transfer, so DISABLE_XET is the
+# load-bearing one; hf_transfer is turned off too so the fallback is the plain
+# resolve-endpoint HTTP path.
+HF_XET_MITIGATION = {"HF_HUB_DISABLE_XET": "1", "HF_HUB_ENABLE_HF_TRANSFER": "0"}
+
+
+def apply_hf_xet_mitigation(env) -> None:
+    """Set the hf_xet-hang mitigation defaults on a mutable env mapping.
+
+    Treats empty as unset: the @app.function secrets dict forwards these as ""
+    when they are absent from the local launch env, and an empty value would
+    neither disable xet nor trip a plain setdefault. So an explicit local value
+    (e.g. "0") is preserved, while an unset-or-empty var falls through to the
+    mitigation default -- the fix applies even on a bare `modal run`.
+    """
+    for key, default in HF_XET_MITIGATION.items():
+        if not env.get(key):
+            env[key] = default
+
+
 # ---------------------------------------------------------------------------
 # Training Function (runs remotely on Modal)
 # ---------------------------------------------------------------------------
@@ -158,10 +180,18 @@ DEFAULT_GPU = "L40S"
     # off the fused cut_cross_entropy Triton kernel, which fails to compile
     # there ("PassManager::run failed"). Forwarded only when set locally; empty
     # by default so it is inert on modern cards.
+    #
+    # HF_HUB_DISABLE_XET / HF_HUB_ENABLE_HF_TRANSFER: forwarded so a local
+    # override reaches the container; run_training also sets them via setdefault
+    # so the xet-hang mitigation applies even on a bare `modal run` (see there).
+    # An empty string here does NOT override the setdefault (only a real value
+    # forwarded from the local env does).
     secrets=[modal.Secret.from_dict({
         "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
         "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
         "UNSLOTH_COMPILE_DISABLE": os.environ.get("UNSLOTH_COMPILE_DISABLE", ""),
+        "HF_HUB_DISABLE_XET": os.environ.get("HF_HUB_DISABLE_XET", ""),
+        "HF_HUB_ENABLE_HF_TRANSFER": os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", ""),
     })],
 )
 def run_training(
@@ -205,6 +235,9 @@ def run_training(
     # Point HuggingFace cache at the persistent volume to avoid re-downloading models
     os.environ["HF_HOME"] = "/cache/huggingface"
     os.environ["TRANSFORMERS_CACHE"] = "/cache/huggingface"
+
+    # Dodge the hf_xet download hang (see apply_hf_xet_mitigation).
+    apply_hf_xet_mitigation(os.environ)
 
     # Bridge the repo provenance into the env contract the training scripts read
     # (train_sft/train_kto/train_dpo consume CLOUD_REPO_BRANCH / CLOUD_REPO_COMMIT
