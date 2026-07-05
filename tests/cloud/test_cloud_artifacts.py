@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -10,10 +11,56 @@ from shared.cloud_artifacts import (
     build_run_paths,
     ensure_hf_bucket,
     normalize_hf_bucket_id,
+    resolve_repo_provenance,
     sync_file_to_hf_bucket,
     sync_directory_to_hf_bucket,
     write_manifest,
 )
+
+
+@pytest.fixture
+def _no_repo_env(monkeypatch):
+    monkeypatch.delenv("CLOUD_REPO_BRANCH", raising=False)
+    monkeypatch.delenv("CLOUD_REPO_COMMIT", raising=False)
+
+
+def _init_repo(path):
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
+    subprocess.run(["git", "-C", str(path), "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def test_resolve_repo_provenance_env_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLOUD_REPO_BRANCH", "feature/x")
+    monkeypatch.setenv("CLOUD_REPO_COMMIT", "deadbeef")
+    # Even with a real repo dir, the pinned env request is authoritative.
+    assert resolve_repo_provenance(tmp_path) == ("feature/x", "deadbeef")
+
+
+def test_resolve_repo_provenance_git_fallback(_no_repo_env, tmp_path):
+    expected = _init_repo(tmp_path)
+    branch, commit = resolve_repo_provenance(tmp_path)
+    assert commit == expected
+    assert branch not in (None, "HEAD")  # a real branch name, not detached-HEAD
+
+
+def test_resolve_repo_provenance_detached_head_leaves_branch_unset(_no_repo_env, tmp_path):
+    sha = _init_repo(tmp_path)
+    # Detaching HEAD is the usual state after `git checkout <sha>` in a cloud clone.
+    subprocess.run(["git", "-C", str(tmp_path), "checkout", "-q", sha], check=True)
+    branch, commit = resolve_repo_provenance(tmp_path)
+    assert commit == sha
+    assert branch is None  # "HEAD" is not a useful branch label
+
+
+def test_resolve_repo_provenance_non_git_returns_none(_no_repo_env, tmp_path):
+    # A directory that is not a git repo and no env contract -> nothing to record.
+    assert resolve_repo_provenance(tmp_path) == (None, None)
 
 
 def test_build_run_paths_uses_canonical_layout(tmp_path):

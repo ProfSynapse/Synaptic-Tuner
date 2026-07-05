@@ -397,10 +397,17 @@ def main():
 
     # Cloud-artifact run layout
     from datetime import datetime
-    from shared.cloud_artifacts import build_manifest, build_run_paths, write_manifest
+    from shared.cloud_artifacts import (
+        build_manifest,
+        build_run_paths,
+        resolve_repo_provenance,
+        write_manifest,
+    )
 
-    repo_branch = os.environ.get("CLOUD_REPO_BRANCH")
-    repo_commit = os.environ.get("CLOUD_REPO_COMMIT")
+    # Prefer the launch-time env contract; fall back to the git checkout so a
+    # provider whose wrapper does not forward the env vars still records the
+    # exact commit that ran (see resolve_repo_provenance).
+    repo_branch, repo_commit = resolve_repo_provenance()
     artifact_identifier = args.artifact_bucket or os.environ.get("CLOUD_ARTIFACT_IDENTIFIER")
 
     timestamp = args.run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
