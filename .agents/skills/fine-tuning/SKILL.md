@@ -28,6 +28,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Evolutionary SFT smoke test | `python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/<evolutionary-spec>.yaml --yes` |
 | Staggered experiment batch | `python3 scripts/launch_experiment_batch.py Trainers/cloud/experiments/<spec1>.yaml Trainers/cloud/experiments/<spec2>.yaml --yes` |
 | One-shot RunPod wrapper job | `python3 scripts/runpod_run_job.py --run-tag <tag> --repo-url <git-url> --commit <full-sha> --wrapper <repo-relative.sh> --dry-run` |
+| Detached Modal job (survives client exit) | `modal run --detach <app_module>::<function>` |
 | Blind hardware plan | `python tuner.py plan-hardware --experiment-spec Trainers/cloud/experiments/<spec>.yaml` |
 | Analyze finished experiment | `python tuner.py analyze-experiment --experiment-id latest` |
 | Analyze/prune dataset from loss | `python3 scripts/prune_dataset_from_loss.py --dataset-path ... --experiment-id ... --analyze-only` |
@@ -167,6 +168,7 @@ Load the specific reference you need:
 | **Cloud Training** | Provider-native persistence, exact-commit rules, cloud smoke tests | `reference/cloud-training.md` |
 | **Cloud Experiments** | Canonical train→eval launches with `--train-*` overrides | `reference/cloud-experiment-launching.md` |
 | **RunPod Jobs** | One-shot wrapper jobs on RunPod pods (non-training lane) | `reference/runpod-jobs.md` |
+| **Modal Jobs** | Serverless GPU jobs on Modal; detached runs, crash-proof resume pattern | `reference/modal-jobs.md` |
 | **Checkpoint Evaluation** | Best-checkpoint selection via eval | `reference/checkpoint-evaluation.md` |
 | **Experiment Loop** | Autonomous hyperparameter search (LLM + LightGBM) | `reference/experiment-loop.md` |
 | **LoRA Techniques** | LoRA variants, init methods, config recipes | `reference/lora-techniques.md` |

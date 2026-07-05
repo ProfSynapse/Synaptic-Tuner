@@ -161,6 +161,55 @@ applies to ANY provider running `huggingface_hub` with `hf_xet` installed,
 INCLUDING Modal -- a Modal run pulling the same repo needs the same two env vars
 (set them in the `@app.function` secrets or the container env).
 
+### 6. Pod restarts and re-runs the whole job when the command exits
+
+When the job command exits -- success OR failure -- RunPod RESTARTS the
+container and re-runs the whole job from the top. The launcher's
+`DELETE /pods/{id}` in the `finally` block is the only thing that breaks this
+loop: it removes the pod the moment the poller sees EXITED. So if the launcher
+PROCESS dies before that `finally` runs (session end, `TaskStop`, killed
+babysitter), the pod keeps re-running the job indefinitely and billing the whole
+time. Sweep it manually: `DELETE /v1/pods/<id>`, confirm HTTP 204, then re-query
+until the pod reads null. Hardening option worth considering for long
+unattended jobs: have the wrapper self-terminate at job end by calling the REST
+delete with its own `RUNPOD_POD_ID` (injected into every pod) and the API key,
+so pod teardown does not depend on the launcher surviving.
+
+### 7. A quiet HF log pusher is not a stall
+
+`huggingface_hub` silently SKIPS an upload whose content is byte-identical to
+what is already there, and a periodic log pusher's cadence can look irregular
+for that reason. A log file that stops growing on the Hub is therefore NOT by
+itself a stall signal. Corroborate before intervening: check real container
+runtime via GraphQL `pod.runtime.uptimeInSeconds` (uptime still climbing means
+the container is alive) and compare progress counters over time. Only kill a job
+once uptime arithmetic plus counter movement actually confirm it is wedged.
+
+---
+
+## Adapter and dataset staging prerequisite
+
+Every base model, adapter, and dataset repo a cloud job references must ALREADY
+exist on the Hub at PREP time, pinned to an explicit revision (a commit sha),
+never `main`. Check existence at prep time, not launch time:
+
+```python
+from huggingface_hub import repo_info
+repo_info("<org>/<repo>", repo_type="model", revision="<full-sha>")
+```
+
+A missing repo or a moving `main` pin is a launch-time failure that wastes a
+paid boot; the prep-time check turns it into a free, early error.
+
+When uploading a local LoRA `final_model/` directory as an adapter repo, exclude
+two files:
+
+- the auto-generated `README.md` -- its YAML front matter carries a
+  `base_model:` pointing at a LOCAL path, which fails Hub model-card validation.
+- `training_args.bin`.
+
+Consumers pass the base model explicitly, so neither file is needed downstream.
+
 ---
 
 ## Outputs and the Artifact Contract
