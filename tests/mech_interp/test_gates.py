@@ -48,6 +48,14 @@ def test_kill_diff_ci_excludes_zero_when_strongly_separated():
     assert res["ci_lo"] > 0
 
 
+def test_kill_diff_identical_arms_diff_zero_ci_straddles():
+    # paired bootstrap: identical arms give exactly diff 0 and a CI that includes 0
+    arm = [1, 0, 1, 1, 0, 1, 0, 0]
+    res = kill_diff_vs_control(arm, list(arm), seed=3, n_boot=500)
+    assert res["diff"] == pytest.approx(0.0)
+    assert res["ci_lo"] <= 0.0 <= res["ci_hi"]
+
+
 def test_kill_diff_reproducible_by_seed():
     primary = [1, 0, 1, 0, 1, 0]
     control = [0, 1, 0, 1, 0, 1]
