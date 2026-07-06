@@ -40,8 +40,15 @@ are scored separately so a run and its adjudication stay independent.
      post-write projection equals `strength * sigma` exactly while the orthogonal
      complement is untouched.
    - `position` selects which token columns are edited: `anchor` (the last prompt
-     token), `anchor_onward`, `final` (each row's true last non-pad token), or
-     `answer_window`.
+     token), `anchor_onward` (from a column to the end), `final` (each row's true
+     last non-pad token, correct under left and right padding), or `answer_window`
+     (only the generated tokens, from `window_start` onward). `answer_window` is a
+     genuinely narrowed window rather than an alias of `anchor_onward`: the caller
+     sets `window_start` to the first generated-token index so the prompt is
+     excluded, and the engine refuses an `answer_window` with no `window_start`
+     instead of silently steering the whole sequence. To also exclude a leading
+     thinking span, advance `window_start` past it; the engine cannot find a
+     thinking boundary itself because that marker is tokenizer-specific.
    - `generation_mode` selects how the edit propagates during `generate()`:
      `anchor` (edit only the prefill anchor; the KV cache carries it forward) or
      `gen_stream` (edit every decode step).

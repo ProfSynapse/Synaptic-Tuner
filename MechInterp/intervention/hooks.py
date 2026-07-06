@@ -137,7 +137,17 @@ def _column_mask_for_policy(
 ) -> torch.Tensor:
     """Return a length-seq_len bool column mask for shared-position policies.
 
-    Used by anchor and anchor_onward; final is per-row and handled separately.
+    Used by anchor, anchor_onward, and answer_window; final is per-row and handled
+    separately.
+
+    answer_window is a genuinely narrowed window, not an alias of anchor_onward:
+    it steers only the columns at and after window_start, which the caller sets to
+    the first generated (visible) token index so the prompt is excluded. It
+    requires an explicit window_start and refuses to silently fall back to column
+    zero, so a misconfigured answer_window fails loudly rather than steering the
+    whole prompt. To also exclude a leading thinking or reasoning span, advance
+    window_start past that span; the engine cannot locate a thinking boundary on
+    its own because that marker is tokenizer-specific.
     """
     mask = torch.zeros(seq_len, dtype=torch.bool, device=device)
     if policy == "anchor":
@@ -148,8 +158,12 @@ def _column_mask_for_policy(
         start = (window_start or 0) % seq_len if window_start else 0
         mask[start:] = True
     elif policy == "answer_window":
-        start = (window_start or 0)
-        start = max(0, min(start, seq_len))
+        if window_start is None:
+            raise ValueError(
+                "answer_window requires an explicit window_start (the first "
+                "generated-token index); it does not default to the full sequence"
+            )
+        start = max(0, min(window_start, seq_len))
         mask[start:] = True
     else:
         raise ValueError(f"policy {policy!r} is not a shared-column policy")

@@ -168,6 +168,28 @@ def test_hook_anchor_onward_additive_over_full_sequence():
     assert all(out[0, c, 0].item() == pytest.approx(1.5) for c in range(3))
 
 
+def test_answer_window_excludes_prompt():
+    # window_start = first generated token, so prompt columns are not steered.
+    d = _unit([1.0, 0.0])
+    hook = InterventionHook("additive", d, strength=2.0, position="answer_window")
+    hook.window_start = 3  # prompt is columns 0..2, generated tokens start at 3
+    hidden = torch.zeros(1, 5, 2)
+    out = hook(None, None, hidden.clone())
+    # prompt columns untouched
+    assert all(out[0, c, 0].item() == 0.0 for c in (0, 1, 2))
+    # answer columns steered
+    assert all(out[0, c, 0].item() == pytest.approx(2.0) for c in (3, 4))
+
+
+def test_answer_window_requires_window_start():
+    d = _unit([1.0, 0.0])
+    hook = InterventionHook("additive", d, strength=1.0, position="answer_window")
+    hidden = torch.zeros(1, 4, 2)
+    # window_start defaults to None -> must raise, never silently steer the prompt
+    with pytest.raises(ValueError):
+        hook(None, None, hidden)
+
+
 def test_strength_length_mismatch_raises():
     d = _unit([1.0, 0.0])
     hook = InterventionHook("additive", d, strength=[1.0, 2.0, 3.0], position="final")
