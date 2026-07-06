@@ -28,6 +28,23 @@ gates.yaml shape:
         pass_if_diff: ">= 5"
         pass_if_ci_excludes_zero: true
 
+      - name: bidirectional_selectivity
+        primitive: bidirectional_gap_diff
+        baseline_arm: baseline
+        arm_a: coupled
+        arm_b: permuted
+        cell_field: cell            # per-row field distinguishing the two populations
+        pos_cell: should_flip       # value of cell_field for the "should rise" population
+        neg_cell: should_not_flip   # value of cell_field for the "should fall" population
+        indicator: flipped          # per-row boolean field, read in every arm/cell combo
+        row_key_field: row_key      # pairs rows across arms; defaults to "row_key"
+        pass_if_diff: ">= 0.05"     # gap(arm_a) - gap(arm_b), as a fraction (0.05 = 5pt)
+        pass_if_ci_excludes_zero: true
+
+count_flips also accepts pass_if_rate (result / n_arm_rows) alongside or instead
+of pass_if (an absolute count), for gates stated as a rate threshold (e.g. "rise
+<= 5pt") rather than a fixed row count.
+
 Rows are grouped by an "arm" field so a single per-row JSONL holds every arm.
 """
 
@@ -42,6 +59,7 @@ import yaml
 from MechInterp.stats.gates import (
     count_flips,
     kill_diff_vs_control,
+    bidirectional_gap_diff,
     permutation_p,
     auroc_floor,
 )
@@ -86,8 +104,73 @@ def _eval_count_flips(gate: dict, rows: list[dict], arm_field: str) -> dict:
         from_state=bool(gate.get("from_state", True)),
         to_state=bool(gate.get("to_state", False)),
     )
-    op_fn, thr = _parse_comparison(gate["pass_if"])
-    return {"value": result, "passed": bool(op_fn(result, thr)), "threshold": thr}
+    passed = True
+    threshold = None
+    if "pass_if" in gate:
+        op_fn, threshold = _parse_comparison(gate["pass_if"])
+        passed = passed and bool(op_fn(result, threshold))
+    rate = (result / len(arm_rows)) if arm_rows else float("nan")
+    if "pass_if_rate" in gate:
+        op_fn, rate_thr = _parse_comparison(gate["pass_if_rate"])
+        passed = passed and bool(op_fn(rate, rate_thr))
+    return {
+        "value": result,
+        "rate": rate,
+        "passed": passed,
+        "threshold": threshold,
+    }
+
+
+def _eval_bidirectional_gap_diff(
+    gate: dict, rows: list[dict], arm_field: str, seed: int, n_boot: int
+) -> dict:
+    cell_field = gate["cell_field"]
+    pos_cell = gate["pos_cell"]
+    neg_cell = gate["neg_cell"]
+    indicator = gate["indicator"]
+    row_key_field = gate.get("row_key_field", "row_key")
+    baseline_arm = gate.get("baseline_arm", "baseline")
+    arm_a = gate["arm_a"]
+    arm_b = gate["arm_b"]
+
+    def _by_key(arm: str, cell: str) -> dict[str, bool]:
+        sub = [
+            r for r in rows if r.get(arm_field) == arm and r.get(cell_field) == cell
+        ]
+        return {str(_field(r, row_key_field)): bool(_field(r, indicator)) for r in sub}
+
+    baseline_pos = _by_key(baseline_arm, pos_cell)
+    baseline_neg = _by_key(baseline_arm, neg_cell)
+    a_pos = _by_key(arm_a, pos_cell)
+    a_neg = _by_key(arm_a, neg_cell)
+    b_pos = _by_key(arm_b, pos_cell)
+    b_neg = _by_key(arm_b, neg_cell)
+
+    pos_keys = sorted(set(baseline_pos) & set(a_pos) & set(b_pos))
+    neg_keys = sorted(set(baseline_neg) & set(a_neg) & set(b_neg))
+    if not pos_keys or not neg_keys:
+        raise ValueError(
+            "bidirectional_gap_diff: need rows present in baseline_arm, arm_a, "
+            "and arm_b on BOTH the pos_cell and neg_cell populations"
+        )
+
+    stats = bidirectional_gap_diff(
+        [baseline_pos[k] for k in pos_keys],
+        [a_pos[k] for k in pos_keys],
+        [b_pos[k] for k in pos_keys],
+        [baseline_neg[k] for k in neg_keys],
+        [a_neg[k] for k in neg_keys],
+        [b_neg[k] for k in neg_keys],
+        seed=gate.get("seed", seed),
+        n_boot=gate.get("n_boot", n_boot),
+    )
+    passed = True
+    if "pass_if_diff" in gate:
+        op_fn, thr = _parse_comparison(gate["pass_if_diff"])
+        passed = passed and bool(op_fn(stats["diff"], thr))
+    if gate.get("pass_if_ci_excludes_zero", False):
+        passed = passed and (stats["ci_lo"] > 0)
+    return {"value": stats, "passed": passed}
 
 
 def _eval_kill_diff(
@@ -153,6 +236,7 @@ def _eval_auroc_floor(
 _DISPATCH = {
     "count_flips": _eval_count_flips,
     "kill_diff_vs_control": _eval_kill_diff,
+    "bidirectional_gap_diff": _eval_bidirectional_gap_diff,
     "permutation_p": _eval_permutation_p,
     "auroc_floor": _eval_auroc_floor,
 }

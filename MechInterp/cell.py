@@ -13,6 +13,20 @@ A row absent from the map is an untouched no-op. The baseline arm maps every row
 to zero. A permuted control draws a count-matched set of rows uniformly at random
 from a seeded generator, matching the count of the arm it controls, so it probes
 the same dose on a different, randomly selected population.
+
+A gain_field arm (continuous per-row coupling) maps every row carrying that field
+to strength * row[gain_field], optionally clipped to +/- gain_clip. A permuted
+control of a gain arm keeps the same row population but SHUFFLES the computed
+gains across it (seeded), so the gain distribution is identical and only the
+row-to-gain pairing is scrambled -- the placebo for a continuous coupling, as
+opposed to the count-matched-random-subset placebo used for selection arms.
+
+Whether a resolved value of exactly 0.0 counts as "active" (the law is applied,
+writing a zero setpoint) or as a no-op depends on the caller: pending_rows takes
+an explicit write_at_zero flag so a fixed-strength "ablate" arm (force_active on
+its ArmConfig) can be distinguished from the "baseline" no-op, and a gain arm's
+own rows are always active regardless of their computed value (a gain of exactly
+0.0 for one row is a real coupling output, not an absence of coupling).
 """
 
 from __future__ import annotations
@@ -67,6 +81,29 @@ def _active_keys_for_arm(arm: ArmConfig, rows: list[dict]) -> list[str]:
     return keys
 
 
+def _gain_values_for_arm(arm: ArmConfig, rows: list[dict]) -> dict[str, float]:
+    """Per-row continuous gain for a gain_field arm: strength * row[gain_field],
+    optionally clipped to +/- gain_clip.
+
+    A row missing the gain_field is not selected (absent from the returned
+    map), mirroring score_field's "no value, no selection" convention. A row
+    present but whose computed gain lands at exactly 0.0 IS selected -- the
+    coupling law is applied at that row with a zero setpoint, per the couple
+    mechanism (erase the projection, write gain*sigma even when gain is 0).
+    """
+    out: dict[str, float] = {}
+    clip = abs(float(arm.gain_clip)) if arm.gain_clip is not None else None
+    for r in rows:
+        val = r.get(arm.gain_field)
+        if val is None:
+            continue
+        g = float(arm.strength) * float(val)
+        if clip is not None:
+            g = max(-clip, min(clip, g))
+        out[row_key_of(r)] = g
+    return out
+
+
 def resolve_arm_strengths(
     arm: ArmConfig,
     rows: list[dict],
@@ -76,13 +113,28 @@ def resolve_arm_strengths(
 
     Fixed-strength arms map every row to arm.strength (baseline uses 0).
     Selection arms map only their active rows to arm.strength.
-    A permuted control draws a seeded, count-matched random subset of all rows,
-    matching the count of the arm it controls, all at arm.strength.
+    A gain_field arm maps every row carrying the field to its own continuous
+    value (see _gain_values_for_arm).
+    A permuted control of a SELECTION arm draws a seeded, count-matched random
+    subset of all rows, matching the count of the arm it controls, all at
+    arm.strength. A permuted control of a GAIN arm instead shuffles the
+    controlled arm's per-row gains across the same row population (seeded),
+    preserving the gain distribution while scrambling the row pairing.
     """
     keys_in_order = [row_key_of(r) for r in rows]
 
     if arm.permuted_control_of is not None:
         controlled = arm_by_name[arm.permuted_control_of]
+
+        if controlled.gain_field is not None:
+            gains = _gain_values_for_arm(controlled, rows)
+            ordered_keys = [k for k in keys_in_order if k in gains]
+            values = [gains[k] for k in ordered_keys]
+            rng = np.random.default_rng(arm.control_seed)
+            perm = rng.permutation(len(values))
+            shuffled = [values[i] for i in perm]
+            return {k: float(v) for k, v in zip(ordered_keys, shuffled)}
+
         controlled_keys = _active_keys_for_arm(controlled, rows)
         n = len(controlled_keys)
         rng = np.random.default_rng(arm.control_seed)
@@ -94,6 +146,9 @@ def resolve_arm_strengths(
         chosen = sorted(keys_in_order[i] for i in chosen_idx)
         strength = arm.strength if arm.strength != 0.0 else controlled.strength
         return {k: float(strength) for k in chosen}
+
+    if arm.gain_field is not None:
+        return _gain_values_for_arm(arm, rows)
 
     active = _active_keys_for_arm(arm, rows)
     return {k: float(arm.strength) for k in active}
@@ -125,6 +180,7 @@ def pending_rows(
     arm: str,
     output_path: str | Path,
     resume: bool,
+    write_at_zero: bool = False,
 ) -> list[dict]:
     """Rows to run for an arm: those with a strength assignment, minus completed.
 
@@ -133,6 +189,13 @@ def pending_rows(
     include their active rows plus all rows at strength 0 for the record. We keep
     every row in the pass so downstream gate arrays are aligned, tagging each with
     its resolved strength.
+
+    _active marks whether the law should actually be applied to a row: a row
+    outside the strengths map is never active. A row inside the map is active
+    if its resolved value is nonzero, OR if write_at_zero is set -- the caller's
+    way of saying "this arm applies at zero too" (the ablate / apply-zero case,
+    as opposed to a baseline arm that happens to resolve every row to 0.0 and
+    should stay a true no-op).
     """
     done = completed_keys(output_path, arm) if resume else set()
     pending = []
@@ -141,8 +204,10 @@ def pending_rows(
         if k in done:
             continue
         rr = dict(r)
-        rr["_strength"] = float(strengths.get(k, 0.0))
-        rr["_active"] = k in strengths
+        selected = k in strengths
+        val = float(strengths.get(k, 0.0))
+        rr["_strength"] = val
+        rr["_active"] = selected and (val != 0.0 or write_at_zero)
         pending.append(rr)
     return pending
 

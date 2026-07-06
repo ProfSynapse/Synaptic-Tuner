@@ -6,6 +6,7 @@ import pytest
 from MechInterp.stats.gates import (
     count_flips,
     kill_diff_vs_control,
+    bidirectional_gap_diff,
     permutation_p,
     auroc_floor,
     hanley_mcneil_se,
@@ -62,6 +63,55 @@ def test_kill_diff_reproducible_by_seed():
     a = kill_diff_vs_control(primary, control, seed=42, n_boot=300)
     b = kill_diff_vs_control(primary, control, seed=42, n_boot=300)
     assert a["ci_lo"] == b["ci_lo"] and a["ci_hi"] == b["ci_hi"]
+
+
+def test_bidirectional_gap_diff_rewards_moving_both_populations_the_right_way():
+    # arm_a: pos population rises 0 -> 1 (good), neg population falls 1 -> 0 (good)
+    # -> gap(arm_a) = (1-0) - (0-1) = 2.0
+    # arm_b: identical to baseline on both populations -> gap(arm_b) = 0.0
+    baseline_pos = [0] * 10
+    arm_a_pos = [1] * 10
+    arm_b_pos = [0] * 10
+    baseline_neg = [1] * 10
+    arm_a_neg = [0] * 10
+    arm_b_neg = [1] * 10
+    res = bidirectional_gap_diff(
+        baseline_pos, arm_a_pos, arm_b_pos, baseline_neg, arm_a_neg, arm_b_neg,
+        seed=0, n_boot=500,
+    )
+    assert res["diff"] == pytest.approx(2.0)
+    assert res["ci_lo"] > 0
+
+
+def test_bidirectional_gap_diff_identical_arms_gives_zero_and_straddling_ci():
+    pos = [0, 1, 0, 1, 0, 1, 0, 1]
+    neg = [1, 0, 1, 0, 1, 0, 1, 0]
+    res = bidirectional_gap_diff(pos, pos, list(pos), neg, neg, list(neg), seed=1, n_boot=500)
+    assert res["diff"] == pytest.approx(0.0)
+    assert res["ci_lo"] <= 0.0 <= res["ci_hi"]
+
+
+def test_bidirectional_gap_diff_reproducible_by_seed():
+    baseline_pos = [0, 0, 1, 0, 1, 1]
+    arm_a_pos = [1, 1, 1, 0, 1, 1]
+    arm_b_pos = [0, 0, 1, 1, 1, 0]
+    baseline_neg = [1, 1, 0, 1, 0, 0]
+    arm_a_neg = [0, 0, 0, 1, 0, 0]
+    arm_b_neg = [1, 0, 0, 1, 1, 0]
+    a = bidirectional_gap_diff(
+        baseline_pos, arm_a_pos, arm_b_pos, baseline_neg, arm_a_neg, arm_b_neg,
+        seed=42, n_boot=300,
+    )
+    b = bidirectional_gap_diff(
+        baseline_pos, arm_a_pos, arm_b_pos, baseline_neg, arm_a_neg, arm_b_neg,
+        seed=42, n_boot=300,
+    )
+    assert a["ci_lo"] == b["ci_lo"] and a["ci_hi"] == b["ci_hi"]
+
+
+def test_bidirectional_gap_diff_length_mismatch_raises():
+    with pytest.raises(ValueError):
+        bidirectional_gap_diff([1, 0], [1], [0, 0], [1], [1], [1], seed=0)
 
 
 def test_roc_auc_perfect_separation():

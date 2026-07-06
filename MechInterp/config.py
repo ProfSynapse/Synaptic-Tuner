@@ -86,7 +86,26 @@ class ArmConfig(BaseModel):
       score_field + threshold + strength   activate rows whose selection score
                     passes the threshold.
       flag_field    activate rows whose named boolean field is true.
-      permuted_control  seeded count-matched control of another arm.
+      gain_field    a CONTINUOUS per-row coupling: effective_strength_i =
+                    strength * row[gain_field], optionally clipped to
+                    +/- gain_clip. Every row carrying the field is active, at
+                    its own computed value (including a row whose computed
+                    value lands at exactly 0.0 -- that row still gets the law
+                    applied at a zero setpoint, it is not skipped). Mutually
+                    exclusive with score_field/flag_field.
+      permuted_control_of  seeded control of another arm. For a selection arm
+                    (score_field/flag_field) this draws a count-matched random
+                    subset of all rows at the same fixed strength. For a
+                    gain_field arm this instead SHUFFLES the controlled arm's
+                    per-row gain values across the same row population (same
+                    seed -> same shuffle), giving an identical gain
+                    distribution with the row-to-gain pairing scrambled.
+
+    force_active: when true, the law is applied to this arm's selected rows
+      even when the resolved strength/gain is exactly 0.0, i.e. an explicit
+      "apply erase_write with a zero setpoint" (ablate) rather than a no-op
+      (baseline). Without this flag a resolved value of exactly 0.0 is treated
+      as no intervention, matching the historical baseline convention.
     """
 
     name: str = Field(..., min_length=1)
@@ -94,8 +113,11 @@ class ArmConfig(BaseModel):
     score_field: Optional[str] = None
     threshold: Optional[float] = None
     flag_field: Optional[str] = None
+    gain_field: Optional[str] = None
+    gain_clip: Optional[float] = None
     permuted_control_of: Optional[str] = None
     control_seed: Optional[int] = None
+    force_active: bool = False
 
     @model_validator(mode="after")
     def _one_selection(self) -> "ArmConfig":
@@ -105,6 +127,22 @@ class ArmConfig(BaseModel):
             raise ValueError(
                 f"arm {self.name}: permuted_control_of requires control_seed"
             )
+        if self.gain_field is not None and (
+            self.score_field is not None or self.flag_field is not None
+        ):
+            raise ValueError(
+                f"arm {self.name}: gain_field is mutually exclusive with "
+                "score_field/threshold and flag_field selection modes"
+            )
+        if self.gain_field is not None and self.permuted_control_of is not None:
+            raise ValueError(
+                f"arm {self.name}: gain_field is mutually exclusive with "
+                "permuted_control_of on the same arm (a gain arm defines its "
+                "own per-row gains; point a separate arm's permuted_control_of "
+                "at this one to get a shuffled-gain placebo)"
+            )
+        if self.gain_clip is not None and self.gain_field is None:
+            raise ValueError(f"arm {self.name}: gain_clip requires gain_field")
         return self
 
 

@@ -14,7 +14,14 @@ regardless of the pre-write value, while the orthogonal complement is untouched.
 
 Both laws support:
   - per-row selection: only rows the caller marks active are edited; inactive
-    rows pass through unchanged (a strength of zero, or no gain, is a no-op).
+    rows pass through unchanged (a strength of zero, or no gain, is a no-op by
+    default).
+  - an explicit active_override bool tensor that replaces the default
+    value-based active detection, so a caller can force a row to be edited even
+    when its strength/gain is exactly zero -- the "apply erase_write with a
+    zero setpoint" (ablate) case, distinct from a true no-op. A NaN component
+    is always excluded from the active set regardless of the override, since
+    writing a NaN setpoint would corrupt the hidden state.
   - per-batch-element strength: alpha / gain may be a scalar or a length-batch
     vector.
   - position policies: which token columns are edited (anchor / anchor_onward /
@@ -170,6 +177,21 @@ def _column_mask_for_policy(
     return mask
 
 
+def _resolve_active(
+    value_row: torch.Tensor, active_override: Optional[torch.Tensor]
+) -> torch.Tensor:
+    """Active-row mask: the override if given, else "value is nonzero".
+
+    A NaN component is always excluded, whether or not an override was given,
+    so a caller can never accidentally command a NaN write.
+    """
+    if active_override is not None:
+        active = active_override.to(dtype=torch.bool, device=value_row.device)
+    else:
+        active = value_row != 0.0
+    return active & (~torch.isnan(value_row))
+
+
 def additive_push(
     hidden: torch.Tensor,
     direction: torch.Tensor,
@@ -177,18 +199,20 @@ def additive_push(
     columns: torch.Tensor,
     per_row: bool,
     final_positions: Optional[torch.Tensor] = None,
+    active_override: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Apply h += alpha * d in place on a cloned hidden tensor.
 
     direction is unit-norm, cast to hidden dtype/device by the caller.
     columns is a bool column mask (shared policies) unless per_row is True, in
     which case final_positions gives each row's single target column.
-    Rows with alpha == 0 are skipped.
+    Rows with alpha == 0 are skipped, unless active_override marks them active
+    (see _resolve_active).
     """
     batch, seq_len, hidden_dim = hidden.shape
     d = direction
     if per_row:
-        active = alpha_row != 0.0
+        active = _resolve_active(alpha_row, active_override)
         if active.any():
             rows = torch.nonzero(active, as_tuple=False).squeeze(1)
             cols = final_positions[rows]
@@ -211,16 +235,23 @@ def erase_and_write(
     columns: torch.Tensor,
     per_row: bool,
     final_positions: Optional[torch.Tensor] = None,
+    active_override: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Apply h' = h - (h.c)c + setpoint*c in place on a cloned hidden tensor.
 
     direction (c) is unit-norm, cast to hidden dtype/device by the caller.
     setpoint_row[b] is the commanded projection for row b (typically gain*sigma).
-    gain_row selects which rows are active (gain == 0 or NaN is a no-op row).
+    By default gain_row selects which rows are active (gain == 0 or NaN is a
+    no-op row). Pass active_override to force specific rows active regardless
+    of their gain value -- this is the only way to express "erase the
+    projection and write a zero setpoint" (ablate) as distinct from "leave
+    this row untouched" (a true no-op), since a plain gain of 0.0 would
+    otherwise be skipped identically to an unselected row. A NaN gain is
+    always excluded even under an override.
     """
     batch, seq_len, hidden_dim = hidden.shape
     c = direction
-    active = (gain_row != 0.0) & (~torch.isnan(gain_row))
+    active = _resolve_active(gain_row, active_override)
     if per_row:
         if active.any():
             rows = torch.nonzero(active, as_tuple=False).squeeze(1)
@@ -251,6 +282,11 @@ class InterventionHook:
     sigma:     scale for erase_write (setpoint = gain * sigma); ignored otherwise.
     position:  "anchor" | "anchor_onward" | "final" | "answer_window".
     attention_mask / final_positions / anchor_index / window_start: position inputs.
+    force_active: when True, every row in the batch is treated as active for
+      this call regardless of its resolved strength/gain value (a NaN
+      component is still excluded). This is how a caller expresses "apply
+      erase_write with a zero setpoint" (ablate) as opposed to a strength of
+      zero meaning no-op (baseline); see MechInterp/cell.py's write_at_zero.
 
     When measure_readback is True the realized projection of each edited row onto
     the direction is stored in last_readback after each call.
@@ -268,6 +304,7 @@ class InterventionHook:
         anchor_index: Optional[int] = None,
         window_start: Optional[int] = None,
         measure_readback: bool = False,
+        force_active: bool = False,
     ):
         if law not in ("additive", "erase_write"):
             raise ValueError(f"unknown law {law!r}")
@@ -283,6 +320,7 @@ class InterventionHook:
         self.anchor_index = anchor_index
         self.window_start = window_start
         self.measure_readback = measure_readback
+        self.force_active = force_active
         self.active = True
         self.last_readback: Optional[dict] = None
 
@@ -315,28 +353,38 @@ class InterventionHook:
                 self.position, seq_len, self.anchor_index, self.window_start, device
             )
 
+        active_override = (
+            torch.ones(batch, dtype=torch.bool, device=device)
+            if self.force_active
+            else None
+        )
+
         if self.law == "additive":
             alpha = _strength_per_row(self.strength, batch, device, dtype)
-            hidden = additive_push(hidden, c, alpha, columns, per_row, final_pos)
+            hidden = additive_push(
+                hidden, c, alpha, columns, per_row, final_pos,
+                active_override=active_override,
+            )
             gain_for_readback = alpha
         else:
             gain = _strength_per_row(self.strength, batch, device, dtype)
             setpoint = gain * self.sigma
             hidden = erase_and_write(
-                hidden, c, setpoint, gain, columns, per_row, final_pos
+                hidden, c, setpoint, gain, columns, per_row, final_pos,
+                active_override=active_override,
             )
             gain_for_readback = gain
 
         if self.measure_readback:
             self.last_readback = self._readback(
-                hidden, c, per_row, final_pos, columns, gain_for_readback
+                hidden, c, per_row, final_pos, columns, gain_for_readback, active_override
             )
 
         if is_tuple:
             return (hidden,) + rest
         return hidden
 
-    def _readback(self, hidden, c, per_row, final_pos, columns, gain_row) -> dict:
+    def _readback(self, hidden, c, per_row, final_pos, columns, gain_row, active_override=None) -> dict:
         """Measure realized projection onto the direction (float64) after the edit.
 
         Returns per-row commanded vs measured projection for active rows and the
@@ -345,7 +393,7 @@ class InterventionHook:
         c64 = c.detach().to(torch.float64)
         batch = hidden.shape[0]
         if per_row:
-            active = gain_row != 0.0
+            active = _resolve_active(gain_row, active_override)
             rows = torch.nonzero(active, as_tuple=False).squeeze(1)
             inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)
             measured = []
@@ -361,7 +409,7 @@ class InterventionHook:
         else:
             col_idx = torch.nonzero(columns, as_tuple=False).squeeze(1)
             first_col = int(col_idx[0].item()) if col_idx.numel() else hidden.shape[1] - 1
-            active = gain_row != 0.0
+            active = _resolve_active(gain_row, active_override)
             rows = torch.nonzero(active, as_tuple=False).squeeze(1)
             inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)
             measured = [
@@ -411,17 +459,27 @@ class GenerationInterventionController:
         mode: str,
         strength: Union[float, Sequence[float], torch.Tensor],
         attention_mask: Optional[torch.Tensor] = None,
+        force_active: bool = False,
     ) -> None:
+        """Arm the hook for one generate() call.
+
+        force_active passes through to the hook: set it when the caller's arm
+        resolution decided this row should be edited even at a zero strength/
+        gain (the ablate case). It is a per-pass flag, not a per-row mask,
+        because this controller drives one row through generate() at a time.
+        """
         if mode not in ("anchor", "gen_stream", "off"):
             raise ValueError(f"unknown mode {mode!r}")
         self.mode = mode
         self.hook.strength = strength
         self.hook.attention_mask = attention_mask
+        self.hook.force_active = force_active
         self._nth_call = 0
 
     def reset(self) -> None:
         self.mode = "off"
         self._nth_call = 0
+        self.hook.force_active = False
         self.hook.active = False
 
     def __call__(self, module, inputs, output):

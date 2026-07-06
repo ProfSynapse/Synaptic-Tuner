@@ -190,6 +190,89 @@ def test_answer_window_requires_window_start():
         hook(None, None, hidden)
 
 
+def test_erase_and_write_active_override_forces_zero_gain_row():
+    # row 1 has gain 0.0 (would be skipped by default) but active_override
+    # forces it active: the ablate case, erase the projection and write zero.
+    d = _unit([1.0, 0.0, 0.0])
+    hidden = torch.tensor(
+        [[10.0, 1.0, 1.0], [10.0, 1.0, 1.0], [10.0, 1.0, 1.0]]
+    ).unsqueeze(1)  # (3, 1, 3)
+    final_pos = torch.tensor([0, 0, 0])
+    gain = torch.tensor([0.0, 0.0, 0.0])
+    override = torch.tensor([False, True, False])
+    out = erase_and_write(
+        hidden.clone(), d, gain, gain, torch.zeros(1, dtype=torch.bool), True,
+        final_pos, active_override=override,
+    )
+    # row 0 (not overridden, gain 0): untouched
+    assert out[0, 0, 0].item() == pytest.approx(10.0)
+    # row 1 (overridden, gain 0): projection erased to exactly 0, not skipped
+    assert out[1, 0, 0].item() == pytest.approx(0.0, abs=1e-6)
+    # row 2 (not overridden): untouched
+    assert out[2, 0, 0].item() == pytest.approx(10.0)
+
+
+def test_erase_and_write_active_override_can_deactivate_nonzero_gain():
+    # active_override is a full replacement, not just an "also active" union:
+    # a nonzero-gain row can be explicitly excluded too.
+    d = _unit([1.0, 0.0])
+    hidden = torch.tensor([[5.0, 1.0]]).unsqueeze(1)
+    final_pos = torch.tensor([0])
+    gain = torch.tensor([3.0])
+    override = torch.tensor([False])
+    out = erase_and_write(
+        hidden.clone(), d, gain * 2.0, gain, torch.zeros(1, dtype=torch.bool), True,
+        final_pos, active_override=override,
+    )
+    assert out[0, 0, 0].item() == pytest.approx(5.0)
+
+
+def test_erase_and_write_active_override_never_writes_nan_gain():
+    d = _unit([1.0, 0.0])
+    hidden = torch.tensor([[5.0, 1.0]]).unsqueeze(1)
+    final_pos = torch.tensor([0])
+    gain = torch.tensor([float("nan")])
+    override = torch.tensor([True])  # force active, but gain is NaN
+    out = erase_and_write(
+        hidden.clone(), d, gain, gain, torch.zeros(1, dtype=torch.bool), True,
+        final_pos, active_override=override,
+    )
+    # NaN is excluded even under an override: row stays untouched, not NaN-corrupted
+    assert out[0, 0, 0].item() == pytest.approx(5.0)
+
+
+def test_hook_force_active_writes_zero_setpoint_for_erase_write():
+    # the ablate case at the hook level: strength 0, force_active True.
+    d = _unit([1.0, 0.0, 0.0])
+    hook = InterventionHook(
+        "erase_write", d, strength=0.0, sigma=3.0, position="final",
+        measure_readback=True, force_active=True,
+    )
+    hidden = torch.tensor([[8.0, 2.0, 2.0], [8.0, 2.0, 2.0]]).unsqueeze(1)
+    mask = torch.tensor([[1], [1]])
+    hook.attention_mask = mask
+    out = hook(None, None, hidden.clone())
+    # projection along d is erased to 0 (the setpoint), not left at 8.0
+    assert out[0, 0, 0].item() == pytest.approx(0.0, abs=1e-4)
+    rb = hook.last_readback
+    assert rb["commanded"] == pytest.approx([0.0, 0.0])
+    assert rb["measured"] == pytest.approx([0.0, 0.0], abs=1e-3)
+
+
+def test_hook_without_force_active_strength_zero_is_true_noop():
+    # regression: default behavior (baseline) is unaffected by the new knob.
+    d = _unit([1.0, 0.0, 0.0])
+    hook = InterventionHook(
+        "erase_write", d, strength=0.0, sigma=3.0, position="final",
+        measure_readback=True,
+    )
+    hidden = torch.tensor([[8.0, 2.0, 2.0]]).unsqueeze(1)
+    hook.attention_mask = torch.tensor([[1]])
+    out = hook(None, None, hidden.clone())
+    assert out[0, 0, 0].item() == pytest.approx(8.0)
+    assert hook.last_readback["active_rows"] == []
+
+
 def test_strength_length_mismatch_raises():
     d = _unit([1.0, 0.0])
     hook = InterventionHook("additive", d, strength=[1.0, 2.0, 3.0], position="final")

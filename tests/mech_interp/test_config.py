@@ -61,6 +61,64 @@ def test_permuted_control_references_known_arm():
         SteerCellConfig(**d)
 
 
+def test_gain_field_mutually_exclusive_with_score_field():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {
+        "name": "primary", "strength": 1.0, "score_field": "s", "threshold": 1.0,
+        "gain_field": "prop_z",
+    }
+    with pytest.raises(ValueError):
+        SteerCellConfig(**d)
+
+
+def test_gain_field_mutually_exclusive_with_flag_field():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {"name": "primary", "strength": 1.0, "flag_field": "f", "gain_field": "prop_z"}
+    with pytest.raises(ValueError):
+        SteerCellConfig(**d)
+
+
+def test_gain_field_mutually_exclusive_with_permuted_control_of():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {
+        "name": "primary", "strength": 1.0, "gain_field": "prop_z",
+        "permuted_control_of": "baseline", "control_seed": 1,
+    }
+    with pytest.raises(ValueError):
+        SteerCellConfig(**d)
+
+
+def test_gain_clip_requires_gain_field():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {"name": "primary", "strength": 1.0, "gain_clip": 2.0}
+    with pytest.raises(ValueError):
+        SteerCellConfig(**d)
+
+
+def test_gain_field_arm_parses_with_clip_and_force_active():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {
+        "name": "coupled", "strength": 1.0, "gain_field": "prop_z", "gain_clip": 2.0,
+    }
+    d["arms"].append({"name": "ablate", "strength": 0.0, "force_active": True})
+    cfg = SteerCellConfig(**d)
+    assert cfg.arms[1].gain_field == "prop_z"
+    assert cfg.arms[1].gain_clip == 2.0
+    assert cfg.arms[2].force_active is True
+    # defaults: force_active is False unless set
+    assert cfg.arms[0].force_active is False
+
+
+def test_permuted_control_of_gain_arm_parses():
+    d = _minimal_steer_dict()
+    d["arms"][1] = {"name": "coupled", "strength": 1.0, "gain_field": "prop_z"}
+    d["arms"].append(
+        {"name": "permuted", "strength": 1.0, "permuted_control_of": "coupled", "control_seed": 7}
+    )
+    cfg = SteerCellConfig(**d)
+    assert cfg.arms[2].permuted_control_of == "coupled"
+
+
 def test_bundled_templates_parse(tmp_path):
     """The shipped example recipes must parse against the schema."""
     from pathlib import Path

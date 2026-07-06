@@ -213,10 +213,16 @@ def _run_one_pass(
     prompt = render_fn(row)
     enc = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
     strength = float(row.get("_strength", 0.0))
+    is_active = bool(row.get("_active", False))
+    # Engagement is decided by _active (set centrally in cell.pending_rows), not
+    # by strength != 0: a force_active arm (ablate) must still engage the
+    # controller at strength 0.0, and force_active also tells the hook to write
+    # that zero setpoint rather than skip the row as a no-op.
     controller.begin_pass(
-        generation_mode if strength != 0.0 else "off",
+        generation_mode if is_active else "off",
         strength,
         attention_mask=enc["attention_mask"],
+        force_active=is_active,
     )
     gen = model.generate(
         **enc,
@@ -308,8 +314,14 @@ def run_steer(
     with open(out_path, "a") as out:
         for arm in config.arms:
             strengths = strengths_by_arm[arm.name]
+            # A gain_field arm always writes at its computed value even when
+            # that value is exactly 0.0 (the couple law with g==0 IS the
+            # ablate arm, per the amendment); force_active on the ArmConfig is
+            # the same "apply-at-zero" intent for a plain fixed-strength arm.
+            write_at_zero = bool(arm.force_active) or arm.gain_field is not None
             pending = cell_mod.pending_rows(
-                rows, strengths, arm.name, out_path, config.execution.resume
+                rows, strengths, arm.name, out_path, config.execution.resume,
+                write_at_zero=write_at_zero,
             )
             arm_summaries[arm.name] = {"n_active": len(strengths), "n_pending": len(pending)}
             for row in pending:
