@@ -244,6 +244,101 @@ def _run_one_pass(
     }
 
 
+def _run_batch(
+    model,
+    tokenizer,
+    controller,
+    rows: list[dict],
+    generation,
+    generation_mode: str,
+    render_fn: Callable,
+) -> list[dict]:
+    """Batched counterpart of _run_one_pass: run a whole chunk of rows through
+    one model.generate() call instead of one row at a time.
+
+    The batch is encoded with LEFT padding, restoring the tokenizer's original
+    padding_side afterward. Left padding right-aligns every row's real prompt
+    tokens, which matters for two things: the prefill step's shared "anchor"
+    column (hard-coded to seq_len - 1 by the controller, see hooks.py) lands on
+    every row's true last prompt token instead of a pad token, and every row's
+    generated continuation starts at the same column -- the batch's padded
+    prompt length -- so no per-row slice offset is needed to cut it out of the
+    generated sequence (the padding tokens all sit before that column).
+
+    Per-row strength and force_active are passed to the controller as
+    length-batch tensors (see _strength_per_row and _resolve_force_active in
+    hooks.py), so a single batch may mix active and inactive rows: an inactive
+    row's strength is 0 and its force_active entry is False, which is a true
+    no-op under both intervention laws (additive: 0 * direction changes
+    nothing; erase_write: the per-row active mask built from strength/override
+    excludes it from the edit entirely). The whole pass runs under mode="off"
+    only when every row in the chunk is inactive, matching _run_one_pass's
+    per-row "off" mode exactly for a batch of size 1.
+
+    Sampling caveat: generation.do_sample=True is not covered by the batching
+    equivalence guarantee -- torch's global RNG stream is consumed in a
+    different order depending on batch shape, so a sampled batch is not
+    expected to reproduce a sampled single-row run token-for-token. Every
+    steer cell's default (and the correctness tests) use greedy decoding
+    (do_sample=False), where this does not apply.
+    """
+    import torch
+
+    device = next(model.parameters()).device
+    prompts = [render_fn(row) for row in rows]
+
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    try:
+        enc = tokenizer(prompts, return_tensors="pt", padding=True)
+    finally:
+        tokenizer.padding_side = original_padding_side
+    enc = {k: v.to(device) for k, v in enc.items()}
+
+    strengths = torch.tensor(
+        [float(row.get("_strength", 0.0)) for row in rows],
+        dtype=torch.float32,
+        device=device,
+    )
+    active = torch.tensor(
+        [bool(row.get("_active", False)) for row in rows],
+        dtype=torch.bool,
+        device=device,
+    )
+    mode = generation_mode if bool(active.any()) else "off"
+    controller.begin_pass(
+        mode,
+        strengths,
+        attention_mask=enc["attention_mask"],
+        force_active=active,
+    )
+    gen = model.generate(
+        **enc,
+        max_new_tokens=generation.max_new_tokens,
+        do_sample=generation.do_sample,
+        num_beams=1,
+        return_dict_in_generate=True,
+    )
+    controller.reset()
+
+    padded_prompt_len = enc["input_ids"].shape[1]
+    row_prompt_lens = enc["attention_mask"].sum(dim=1).tolist()
+    records = []
+    for i, row in enumerate(rows):
+        continuation = gen.sequences[i, padded_prompt_len:]
+        text = tokenizer.decode(continuation, skip_special_tokens=True)
+        records.append(
+            {
+                "row_key": cell_mod.row_key_of(row),
+                "strength": float(row.get("_strength", 0.0)),
+                "active": bool(row.get("_active", False)),
+                "answer_text": text,
+                "prompt_len": int(row_prompt_lens[i]),
+            }
+        )
+    return records
+
+
 def run_steer(
     config: SteerCellConfig,
     model_name: str,
@@ -350,15 +445,29 @@ def run_steer(
                 write_at_zero=write_at_zero,
             )
             arm_summaries[arm.name] = {"n_active": len(strengths), "n_pending": len(pending)}
-            for row in pending:
-                rec = _run_one_pass(
-                    model, tokenizer, controller, row, config.surface.generation,
-                    config.law.generation_mode, render_fn,
-                )
-                rec["arm"] = arm.name
-                if grader is not None:
-                    rec.update(grader(rec))
-                out.write(json.dumps(rec) + "\n")
+            batch_size = config.execution.batch_size
+            if batch_size <= 1:
+                for row in pending:
+                    rec = _run_one_pass(
+                        model, tokenizer, controller, row, config.surface.generation,
+                        config.law.generation_mode, render_fn,
+                    )
+                    rec["arm"] = arm.name
+                    if grader is not None:
+                        rec.update(grader(rec))
+                    out.write(json.dumps(rec) + "\n")
+            else:
+                for i in range(0, len(pending), batch_size):
+                    chunk = pending[i : i + batch_size]
+                    recs = _run_batch(
+                        model, tokenizer, controller, chunk, config.surface.generation,
+                        config.law.generation_mode, render_fn,
+                    )
+                    for rec in recs:
+                        rec["arm"] = arm.name
+                        if grader is not None:
+                            rec.update(grader(rec))
+                        out.write(json.dumps(rec) + "\n")
 
     handle.remove()
     cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)

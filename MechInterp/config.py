@@ -170,6 +170,17 @@ class ExecutionConfig(BaseModel):
     grader: Optional[str] = Field(
         default=None, description="Grader spec 'module.path:callable'"
     )
+    batch_size: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Rows per model.generate() call in the arm loop. 1 (the default) "
+            "reproduces the historical one-row-at-a-time path exactly. A value "
+            "> 1 encodes that many pending rows together with left padding and "
+            "runs them through one batched generate() call; see cli.py's "
+            "_run_batch and its equivalence tests for the correctness contract."
+        ),
+    )
 
 
 class SteerCellConfig(BaseModel):
