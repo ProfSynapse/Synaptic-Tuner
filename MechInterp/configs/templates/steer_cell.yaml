@@ -30,9 +30,16 @@ law:
   generation_mode: anchor    # anchor | gen_stream
 
 # 4. arms: named strength overrides.
+# Dose ladders and negative gains belong HERE, in the recipe, not on the command
+# line. A bare negative like -2 passed as its own argv entry is read as a flag and
+# the run dies with "expected one argument"; keeping strengths in the recipe (a
+# negative strength is fine here) sidesteps that entirely.
 arms:
   - name: baseline           # a no-op population for comparison
     strength: 0.0
+  - name: bidirectional      # a negative strength is a normal recipe value
+    strength: -2.0
+    flag_field: flagged
   - name: primary            # activate rows whose selection score passes threshold
     strength: 2.0
     score_field: selection_score

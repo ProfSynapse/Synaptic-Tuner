@@ -153,3 +153,30 @@ reader can consume.
   fits PCA and classifier on train folds only, so the reported AUROC never sees
   test-fold information. The full-data direction folds the classifier weight back
   through the PCA basis into raw activation space.
+
+## Launch checklist
+
+Two operational gotchas have each killed a paid remote run more than once. Check
+both before launching a cell, especially on a fresh or retried remote container.
+
+1. **Negative-leading values need the equals form.** A grid value that can start
+   with a minus sign (a dose ladder like `-2,-1,0,1,2`, or a single negative gain)
+   passed as its own argv entry is read by argparse as a flag, and the run dies
+   with `expected one argument`. Two defenses, in order of preference:
+   - Put dose ladders and negative gains in the recipe, not on the command line.
+     Arm strengths (including negatives) live in the `arms` block of the steer
+     recipe, so a normal launch never puts a bare negative on argv. This is the
+     structural fix and the reason the verbs take a recipe rather than a grid flag.
+   - If you must pass a negative on the command line to any tool, use the equals
+     form: `--flag=-2,-1,0,1,2`, never `--flag -2,-1,0,1,2`.
+2. **Clone and download steps must be idempotent.** A retried remote function
+   lands on a warm container where the workspace already exists, so an
+   unconditional `git clone` fails. Guard every clone or download with an
+   existence check first, then `fetch` and `checkout` the pinned commit. The same
+   applies to model and dataset pulls: check for the artifact before fetching.
+   Resume-from-output in the steer cell already follows this pattern for its own
+   per-row output; extend it to any wrapper that clones the repo or pulls weights.
+
+The steer cell's own smoke-first gate and `expected_config_sha` guard cover a
+third failure mode (running an edited or unverified cell), so a full launch is
+gated on a recorded smoke pass for the exact config.
