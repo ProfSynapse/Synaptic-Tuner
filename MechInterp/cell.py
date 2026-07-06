@@ -59,8 +59,17 @@ def row_key_of(row: dict) -> str:
 
 
 def compute_config_sha(config: SteerCellConfig) -> str:
-    """Deterministic sha256 over the canonicalized config (readouts by path)."""
+    """Deterministic sha256 over the canonicalized config (readouts by path).
+
+    surface.expected_config_sha is excluded from the payload before hashing:
+    that field holds the expected value of THIS hash, so including it would
+    make the hash a function of itself -- filling it in would shift the
+    computed sha out from under it, and the "expected == computed" guard in
+    run_steer could never be satisfied. Every other field is content, and
+    stays in.
+    """
     payload = config.model_dump(mode="json")
+    payload.get("surface", {}).pop("expected_config_sha", None)
     canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
