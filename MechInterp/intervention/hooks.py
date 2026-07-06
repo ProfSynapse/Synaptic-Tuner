@@ -177,6 +177,37 @@ def _column_mask_for_policy(
     return mask
 
 
+def _resolve_force_active(
+    force_active: Union[bool, Sequence[bool], torch.Tensor, None],
+    batch: int,
+    device: torch.device,
+) -> Optional[torch.Tensor]:
+    """Broadcast a scalar / length-1 / length-batch force_active to an override tensor.
+
+    A plain False (or None) keeps the default value-based active detection (see
+    _resolve_active): returns None. A plain True is the historical single-pass
+    semantics -- every row in the call is force-active -- and returns an
+    all-True tensor. A per-row bool sequence/tensor (a batched pass mixing
+    active and inactive rows within one generate() call) is broadcast/validated
+    like _strength_per_row and returned as the override directly: the caller
+    (e.g. a batched steer pass) is expected to have already folded each row's
+    own force-active decision into that tensor, so this is a full replacement
+    of the default check, not a union with it.
+    """
+    if force_active is None or force_active is False:
+        return None
+    if force_active is True:
+        return torch.ones(batch, dtype=torch.bool, device=device)
+    t = torch.as_tensor(force_active, dtype=torch.bool, device=device)
+    if t.numel() == 1:
+        return t.reshape(1).expand(batch).clone()
+    if t.numel() != batch:
+        raise ValueError(
+            f"force_active length {t.numel()} does not match batch {batch}"
+        )
+    return t
+
+
 def _resolve_active(
     value_row: torch.Tensor, active_override: Optional[torch.Tensor]
 ) -> torch.Tensor:
@@ -287,6 +318,9 @@ class InterventionHook:
       component is still excluded). This is how a caller expresses "apply
       erase_write with a zero setpoint" (ablate) as opposed to a strength of
       zero meaning no-op (baseline); see MechInterp/cell.py's write_at_zero.
+      May also be a per-row bool sequence/tensor so a single batched call can
+      mix active and inactive rows (see _resolve_force_active); a length-1
+      value broadcasts to every row like strength does.
 
     When measure_readback is True the realized projection of each edited row onto
     the direction is stored in last_readback after each call.
@@ -304,7 +338,7 @@ class InterventionHook:
         anchor_index: Optional[int] = None,
         window_start: Optional[int] = None,
         measure_readback: bool = False,
-        force_active: bool = False,
+        force_active: Union[bool, Sequence[bool], torch.Tensor] = False,
     ):
         if law not in ("additive", "erase_write"):
             raise ValueError(f"unknown law {law!r}")
@@ -353,11 +387,7 @@ class InterventionHook:
                 self.position, seq_len, self.anchor_index, self.window_start, device
             )
 
-        active_override = (
-            torch.ones(batch, dtype=torch.bool, device=device)
-            if self.force_active
-            else None
-        )
+        active_override = _resolve_force_active(self.force_active, batch, device)
 
         if self.law == "additive":
             alpha = _strength_per_row(self.strength, batch, device, dtype)
@@ -459,14 +489,18 @@ class GenerationInterventionController:
         mode: str,
         strength: Union[float, Sequence[float], torch.Tensor],
         attention_mask: Optional[torch.Tensor] = None,
-        force_active: bool = False,
+        force_active: Union[bool, Sequence[bool], torch.Tensor] = False,
     ) -> None:
         """Arm the hook for one generate() call.
 
         force_active passes through to the hook: set it when the caller's arm
-        resolution decided this row should be edited even at a zero strength/
-        gain (the ablate case). It is a per-pass flag, not a per-row mask,
-        because this controller drives one row through generate() at a time.
+        resolution decided a row should be edited even at a zero strength/gain
+        (the ablate case). For a single-row pass this is a plain bool. For a
+        batched pass driving several rows through one generate() call, pass a
+        per-row bool tensor instead: strength is already per-row-capable (see
+        _strength_per_row), and force_active follows the same broadcasting
+        rule (see _resolve_force_active) so one pass can mix active and
+        inactive rows correctly.
         """
         if mode not in ("anchor", "gen_stream", "off"):
             raise ValueError(f"unknown mode {mode!r}")
