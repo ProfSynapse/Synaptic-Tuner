@@ -115,6 +115,100 @@ def test_evaluate_gates_kill_diff_ci():
     assert report["gates"]["spec"]["value"]["ci_lo"] > 0
 
 
+def test_evaluate_gates_count_flips_pass_if_rate():
+    rows = [
+        {"arm": "primary", "baseline_positive": True, "positive": False},
+        {"arm": "primary", "baseline_positive": True, "positive": False},
+        {"arm": "primary", "baseline_positive": True, "positive": True},
+        {"arm": "primary", "baseline_positive": True, "positive": True},
+    ]
+    config = {
+        "gates": [
+            {
+                "name": "reach_rate",
+                "primitive": "count_flips",
+                "arm": "primary",
+                "before": "baseline_positive",
+                "after": "positive",
+                "pass_if_rate": "<= 0.6",
+            }
+        ]
+    }
+    report = evaluate_gates(config, rows)
+    assert report["gates"]["reach_rate"]["value"] == 2
+    assert report["gates"]["reach_rate"]["rate"] == pytest.approx(0.5)
+    assert report["overall_pass"]
+
+
+def test_evaluate_gates_count_flips_cell_field_restricts_population():
+    rows = [
+        {"arm": "coupled", "cell": "known_correct_answered", "baseline_refused": False, "refused": True},
+        {"arm": "coupled", "cell": "known_correct_answered", "baseline_refused": False, "refused": False},
+        # a different population in the same arm's output must NOT count
+        # toward the specificity-guard rate.
+        {"arm": "coupled", "cell": "confab", "baseline_refused": False, "refused": True},
+        {"arm": "coupled", "cell": "confab", "baseline_refused": False, "refused": True},
+    ]
+    config = {
+        "gates": [
+            {
+                "name": "specificity_rise",
+                "primitive": "count_flips",
+                "arm": "coupled",
+                "cell_field": "cell",
+                "cell": "known_correct_answered",
+                "before": "baseline_refused",
+                "after": "refused",
+                "from_state": False,
+                "to_state": True,
+                "pass_if_rate": "<= 0.5",
+            }
+        ]
+    }
+    report = evaluate_gates(config, rows)
+    # only the 2 known_correct_answered rows count: 1 flipped -> rate 0.5
+    assert report["gates"]["specificity_rise"]["value"] == 1
+    assert report["gates"]["specificity_rise"]["rate"] == pytest.approx(0.5)
+    assert report["overall_pass"]
+
+
+def test_evaluate_gates_bidirectional_gap_diff():
+    rows = []
+    for i in range(8):
+        key = f"pos{i}"
+        rows.append({"arm": "baseline", "cell": "pos", "row_key": key, "flipped": False})
+        rows.append({"arm": "coupled", "cell": "pos", "row_key": key, "flipped": True})
+        rows.append({"arm": "permuted", "cell": "pos", "row_key": key, "flipped": False})
+    for i in range(8):
+        key = f"neg{i}"
+        rows.append({"arm": "baseline", "cell": "neg", "row_key": key, "flipped": True})
+        rows.append({"arm": "coupled", "cell": "neg", "row_key": key, "flipped": False})
+        rows.append({"arm": "permuted", "cell": "neg", "row_key": key, "flipped": True})
+    config = {
+        "seed": 0,
+        "n_boot": 300,
+        "gates": [
+            {
+                "name": "g1_selectivity",
+                "primitive": "bidirectional_gap_diff",
+                "baseline_arm": "baseline",
+                "arm_a": "coupled",
+                "arm_b": "permuted",
+                "cell_field": "cell",
+                "pos_cell": "pos",
+                "neg_cell": "neg",
+                "indicator": "flipped",
+                "pass_if_diff": ">= 0.05",
+                "pass_if_ci_excludes_zero": True,
+            }
+        ],
+    }
+    report = evaluate_gates(config, rows)
+    assert report["overall_pass"]
+    assert report["gates"]["g1_selectivity"]["value"]["diff"] == pytest.approx(2.0)
+    assert report["gates"]["g1_selectivity"]["value"]["ci_lo"] > 0
+
+
 def test_evaluate_gates_overall_fail_when_one_fails():
     rows = [
         {"arm": "primary", "baseline_positive": True, "positive": True},

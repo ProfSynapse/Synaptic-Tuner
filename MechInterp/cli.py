@@ -213,10 +213,16 @@ def _run_one_pass(
     prompt = render_fn(row)
     enc = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
     strength = float(row.get("_strength", 0.0))
+    is_active = bool(row.get("_active", False))
+    # Engagement is decided by _active (set centrally in cell.pending_rows), not
+    # by strength != 0: a force_active arm (ablate) must still engage the
+    # controller at strength 0.0, and force_active also tells the hook to write
+    # that zero setpoint rather than skip the row as a no-op.
     controller.begin_pass(
-        generation_mode if strength != 0.0 else "off",
+        generation_mode if is_active else "off",
         strength,
         attention_mask=enc["attention_mask"],
+        force_active=is_active,
     )
     gen = model.generate(
         **enc,
@@ -292,10 +298,36 @@ def run_steer(
             model, tokenizer, config, rows, render_fn, direction, sigma, layer
         )
         verdict = cell_mod.evaluate_smoke_readback(readback, config.smoke)
+
+        # A gen_stream cell additionally needs proof that the decode hook fires
+        # during a real generate() call: the forward-only readback above never
+        # exercises the decode loop, so it cannot catch a decode hook that is
+        # wired up but never actually invoked (see gen_stream_fires below).
+        # Skip this on anchor/off cells, whose behavior is unchanged by this
+        # guard.
+        gen_stream_fired = None
+        if verdict["passed"] and config.law.generation_mode == "gen_stream":
+            smoke_enc = tokenizer(render_fn(rows[0]), return_tensors="pt").to(
+                next(model.parameters()).device
+            )
+            gen_stream_fired = gen_stream_fires(model, controller, smoke_enc)
+            if not gen_stream_fired:
+                verdict["passed"] = False
+        verdict["gen_stream_fired"] = gen_stream_fired
+
         readback["passed"] = verdict["passed"]
         cell_mod.record_smoke(config.execution.output_path, config_sha, {**readback, **verdict})
         if not verdict["passed"]:
             handle.remove()
+            if gen_stream_fired is False:
+                print(
+                    "gen_stream decode hook did not fire -- check that the model "
+                    "routes generate() through the hooked module's forward() on "
+                    "every decode step. An optimized cached-generation path that "
+                    "bypasses the hooked module's forward() (as with Unsloth's "
+                    "FastLanguageModel.for_inference) will silently produce this "
+                    "failure mode."
+                )
             print(f"Smoke failed: {verdict}. Full arms not run. Fix or pass --force.")
             return 4
         print(f"Smoke passed: {verdict}")
@@ -308,8 +340,14 @@ def run_steer(
     with open(out_path, "a") as out:
         for arm in config.arms:
             strengths = strengths_by_arm[arm.name]
+            # A gain_field arm always writes at its computed value even when
+            # that value is exactly 0.0 (the couple law with g==0 IS the
+            # ablate arm, per the amendment); force_active on the ArmConfig is
+            # the same "apply-at-zero" intent for a plain fixed-strength arm.
+            write_at_zero = bool(arm.force_active) or arm.gain_field is not None
             pending = cell_mod.pending_rows(
-                rows, strengths, arm.name, out_path, config.execution.resume
+                rows, strengths, arm.name, out_path, config.execution.resume,
+                write_at_zero=write_at_zero,
             )
             arm_summaries[arm.name] = {"n_active": len(strengths), "n_pending": len(pending)}
             for row in pending:
@@ -326,6 +364,65 @@ def run_steer(
     cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)
     print(f"Steer cell complete. Output {out_path}, config_sha {config_sha}")
     return 0
+
+
+# A strength this large relative to any real dose ladder in a recipe makes a
+# missing decode-hook firing unambiguous: if it produces byte-identical output
+# to "off" mode, the hook did not fire, not merely "fired too weakly to move
+# the argmax token."
+_GEN_STREAM_SMOKE_STRENGTH = 100.0
+_GEN_STREAM_SMOKE_MAX_NEW_TOKENS = 8
+
+
+def _generate_under_mode(model, controller, enc, mode: str, strength: float, max_new_tokens: int):
+    """Run one short greedy generate() pass with controller armed for mode.
+
+    Shared by the gen_stream firing guard below and mirrors the begin_pass /
+    generate / reset sequence _run_one_pass uses for the real arm passes.
+    """
+    import torch
+
+    controller.begin_pass(mode, strength, attention_mask=enc["attention_mask"])
+    with torch.no_grad():
+        gen = model.generate(
+            **enc,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1,
+            return_dict_in_generate=True,
+        )
+    controller.reset()
+    return gen.sequences[0]
+
+
+def gen_stream_fires(
+    model,
+    controller,
+    enc,
+    strength: float = _GEN_STREAM_SMOKE_STRENGTH,
+    max_new_tokens: int = _GEN_STREAM_SMOKE_MAX_NEW_TOKENS,
+) -> bool:
+    """Return whether the gen_stream decode hook measurably changes generate() output.
+
+    Runs one short greedy generate() under "gen_stream" mode at a strength
+    large relative to any real dose ladder, and one under "off" mode, on the
+    same encoded prompt, then compares the resulting token ids. Identical ids
+    at that strength means the decode hook never fired during generate(): an
+    optimized cached-generation decode path that never routes through the
+    hooked module's Python forward() will silently produce this failure mode
+    (documented for Unsloth's FastLanguageModel.for_inference). On a plain HF
+    model the decode hook is expected to fire every decode step, so this
+    should return True; a False here is the fail-closed signal the run_steer
+    smoke gate acts on.
+
+    enc must carry "input_ids" and "attention_mask" tensors already on the
+    model's device, e.g. the output of tokenizer(prompt, return_tensors="pt").
+    """
+    import torch
+
+    dosed = _generate_under_mode(model, controller, enc, "gen_stream", strength, max_new_tokens)
+    off = _generate_under_mode(model, controller, enc, "off", strength, max_new_tokens)
+    return not torch.equal(dosed, off)
 
 
 def _run_smoke(model, tokenizer, config, rows, render_fn, direction, sigma, layer):
