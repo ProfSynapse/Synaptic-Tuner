@@ -78,6 +78,22 @@ def test_config_sha_is_deterministic_and_content_sensitive():
     assert cell_mod.compute_config_sha(cfg2) != sha1
 
 
+def test_config_sha_ignores_its_own_expected_value():
+    """The drift guard (run_steer: expected_config_sha == compute_config_sha)
+    must be satisfiable. Filling in surface.expected_config_sha with the sha
+    computed from the unset config must not change the sha -- otherwise the
+    field meant to hold "the expected hash of this config" would itself be an
+    input to that hash, and no value written into it could ever match."""
+    cfg = _config()
+    unset_sha = cell_mod.compute_config_sha(cfg)
+
+    cfg.surface.expected_config_sha = unset_sha
+    assert cell_mod.compute_config_sha(cfg) == unset_sha
+
+    cfg.surface.expected_config_sha = "not-the-right-sha"
+    assert cell_mod.compute_config_sha(cfg) != cfg.surface.expected_config_sha
+
+
 def test_pending_rows_skips_completed_on_resume(tmp_path):
     out = tmp_path / "rows.jsonl"
     out.write_text(json.dumps({"arm": "primary", "row_key": "a"}) + "\n")
