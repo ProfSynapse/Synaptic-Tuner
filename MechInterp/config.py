@@ -160,6 +160,20 @@ class SmokeConfig(BaseModel):
     offtarget_tol: float = Field(
         default=1e-3, description="Max allowed movement of inactive rows."
     )
+    gen_stream_probe_strength: float | None = Field(
+        default=None,
+        description=(
+            "Strength used only by the gen_stream decode-hook firing probe "
+            "(not a real arm dose). The probe must be large RELATIVE TO this "
+            "cell's dose ladder so a byte-identical output unambiguously means "
+            "'hook did not fire' rather than 'fired too weakly to move the "
+            "argmax'. The built-in default (100.0) assumes real doses are well "
+            "below 100, which is false on high-activation-scale substrates "
+            "(e.g. bnb-4bit bases, where coherent doses run into the hundreds); "
+            "set this to a value at or above this cell's top dose there. None "
+            "keeps the built-in default."
+        ),
+    )
 
 
 class ExecutionConfig(BaseModel):

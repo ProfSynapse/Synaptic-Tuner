@@ -438,7 +438,13 @@ def run_steer(
             smoke_enc = tokenizer(render_fn(rows[0]), return_tensors="pt").to(
                 next(model.parameters()).device
             )
-            gen_stream_fired = gen_stream_fires(model, controller, smoke_enc)
+            gen_stream_fired = gen_stream_fires(
+                model,
+                controller,
+                smoke_enc,
+                strength=config.smoke.gen_stream_probe_strength
+                or _GEN_STREAM_SMOKE_STRENGTH,
+            )
             if not gen_stream_fired:
                 verdict["passed"] = False
         verdict["gen_stream_fired"] = gen_stream_fired
@@ -508,10 +514,13 @@ def run_steer(
     return 0
 
 
-# A strength this large relative to any real dose ladder in a recipe makes a
-# missing decode-hook firing unambiguous: if it produces byte-identical output
-# to "off" mode, the hook did not fire, not merely "fired too weakly to move
-# the argmax token."
+# Default firing-probe strength. The premise is that it is large relative to any
+# real dose ladder, so byte-identical output to "off" mode unambiguously means
+# the hook did not fire (not merely "fired too weakly to move the argmax token").
+# That premise breaks on high-activation-scale substrates (e.g. bnb-4bit bases)
+# whose coherent doses run into the hundreds, where 100.0 sits in the inert
+# regime and false-negatives. Override per cell via
+# SmokeConfig.gen_stream_probe_strength when the dose ladder exceeds this.
 _GEN_STREAM_SMOKE_STRENGTH = 100.0
 _GEN_STREAM_SMOKE_MAX_NEW_TOKENS = 8
 
