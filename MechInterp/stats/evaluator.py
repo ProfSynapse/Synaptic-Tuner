@@ -43,7 +43,10 @@ gates.yaml shape:
 
 count_flips also accepts pass_if_rate (result / n_arm_rows) alongside or instead
 of pass_if (an absolute count), for gates stated as a rate threshold (e.g. "rise
-<= 5pt") rather than a fixed row count.
+<= 5pt") rather than a fixed row count. It also accepts an optional
+cell_field/cell pair to restrict to a named sub-population within the arm's
+rows (e.g. only the specificity-guard population), the same filter shape
+bidirectional_gap_diff uses for its two populations.
 
 Rows are grouped by an "arm" field so a single per-row JSONL holds every arm.
 """
@@ -82,10 +85,20 @@ def _parse_comparison(expr: str):
     return _OPS[parts[0]], float(parts[1])
 
 
-def _rows_for_arm(rows: list[dict], arm: Optional[str], arm_field: str) -> list[dict]:
-    if arm is None:
-        return rows
-    return [r for r in rows if r.get(arm_field) == arm]
+def _rows_for_arm(
+    rows: list[dict],
+    arm: Optional[str],
+    arm_field: str,
+    extra_field: Optional[str] = None,
+    extra_value: Optional[Any] = None,
+) -> list[dict]:
+    """Rows for one arm, with an optional second filter (e.g. a cell/population
+    field) so a gate can restrict to a named sub-population within that arm's
+    output without a dedicated primitive per population field name."""
+    out = rows if arm is None else [r for r in rows if r.get(arm_field) == arm]
+    if extra_field is not None:
+        out = [r for r in out if r.get(extra_field) == extra_value]
+    return out
 
 
 def _field(row: dict, name: str):
@@ -95,7 +108,9 @@ def _field(row: dict, name: str):
 
 
 def _eval_count_flips(gate: dict, rows: list[dict], arm_field: str) -> dict:
-    arm_rows = _rows_for_arm(rows, gate.get("arm"), arm_field)
+    arm_rows = _rows_for_arm(
+        rows, gate.get("arm"), arm_field, gate.get("cell_field"), gate.get("cell")
+    )
     before = [bool(_field(r, gate["before"])) for r in arm_rows]
     after = [bool(_field(r, gate["after"])) for r in arm_rows]
     result = count_flips(

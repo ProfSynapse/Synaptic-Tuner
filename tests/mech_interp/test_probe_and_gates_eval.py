@@ -140,6 +140,38 @@ def test_evaluate_gates_count_flips_pass_if_rate():
     assert report["overall_pass"]
 
 
+def test_evaluate_gates_count_flips_cell_field_restricts_population():
+    rows = [
+        {"arm": "coupled", "cell": "known_correct_answered", "baseline_refused": False, "refused": True},
+        {"arm": "coupled", "cell": "known_correct_answered", "baseline_refused": False, "refused": False},
+        # a different population in the same arm's output must NOT count
+        # toward the specificity-guard rate.
+        {"arm": "coupled", "cell": "confab", "baseline_refused": False, "refused": True},
+        {"arm": "coupled", "cell": "confab", "baseline_refused": False, "refused": True},
+    ]
+    config = {
+        "gates": [
+            {
+                "name": "specificity_rise",
+                "primitive": "count_flips",
+                "arm": "coupled",
+                "cell_field": "cell",
+                "cell": "known_correct_answered",
+                "before": "baseline_refused",
+                "after": "refused",
+                "from_state": False,
+                "to_state": True,
+                "pass_if_rate": "<= 0.5",
+            }
+        ]
+    }
+    report = evaluate_gates(config, rows)
+    # only the 2 known_correct_answered rows count: 1 flipped -> rate 0.5
+    assert report["gates"]["specificity_rise"]["value"] == 1
+    assert report["gates"]["specificity_rise"]["rate"] == pytest.approx(0.5)
+    assert report["overall_pass"]
+
+
 def test_evaluate_gates_bidirectional_gap_diff():
     rows = []
     for i in range(8):
