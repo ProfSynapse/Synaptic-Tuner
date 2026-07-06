@@ -33,6 +33,32 @@ modal app logs <app-id>
 modal app list          # find the app id
 ```
 
+### `--detach` alone does not survive a graceful client death
+
+`--detach` protects the APP from client disconnect, but not the in-flight call.
+If the client process receives a graceful signal (SIGINT/SIGTERM) while blocked
+on `.remote()`, the unwinding call sends an explicit input-cancel RPC -- the log
+shows "Received a cancellation signal while processing input" -- and the running
+function dies even though the app was detached. Only SIGKILL or a network drop
+leaves the input running.
+
+The robust fix is to remove the blocking client entirely: have the local
+entrypoint use `.spawn()` instead of `.remote()`.
+
+```python
+@app.local_entrypoint()
+def main():
+    call = my_fn.spawn(...)   # returns immediately after scheduling
+    print(f"spawned {call.object_id}")
+```
+
+With `modal run --detach` + `.spawn()`, the client exits on its own within
+seconds and there is never an in-flight input for a dying client to cancel.
+Completion is then observed out-of-band: `modal app logs` plus a DONE marker on
+the checkpoint Volume (see the crash-proof pattern below). Note Modal's caveat
+that detach keeps only the LAST triggered function alive -- one spawn per
+`modal run` invocation.
+
 ---
 
 ## Image setup gotchas
