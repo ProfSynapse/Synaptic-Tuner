@@ -199,6 +199,37 @@ def _direction_tensor(readout_record: dict):
     return torch.tensor(readout_record["vector_np"], dtype=torch.float32)
 
 
+# Keys _run_one_pass / _run_batch compute themselves; a same-named pool-row
+# field is never allowed to shadow them (see _passthrough_fields).
+_COMPUTED_RECORD_KEYS = frozenset(
+    {"row_key", "strength", "active", "answer_text", "prompt_len"}
+)
+
+
+def _passthrough_fields(row: dict) -> dict:
+    """Pool-row metadata to carry into the output record, verbatim.
+
+    Without this, the record _run_one_pass/_run_batch return is limited to the
+    fields those passes compute, so a grader (and mechinterp score-gates,
+    grouping by a project-chosen field like a class label) can only ever see
+    row_key/strength/active/answer_text/prompt_len -- never the pool row's own
+    metadata (e.g. gold-answer aliases or a class/cell label), no matter what
+    the recipe's rows_path actually puts on each row. Carrying every non-
+    internal field through keeps the grader interface generic: a project's
+    rows dictate what a project's grader can read, with no tuner-side
+    allowlist of "known" field names.
+
+    Excludes underscore-prefixed keys (internal bookkeeping set by
+    cell.pending_rows, e.g. _strength/_active) and the keys the pass itself
+    computes, so a pool row can never shadow those via a same-named field.
+    """
+    return {
+        k: v
+        for k, v in row.items()
+        if not k.startswith("_") and k not in _COMPUTED_RECORD_KEYS
+    }
+
+
 def _run_one_pass(
     model,
     tokenizer,
@@ -236,6 +267,7 @@ def _run_one_pass(
     prompt_len = enc["input_ids"].shape[1]
     text = tokenizer.decode(full[prompt_len:], skip_special_tokens=True)
     return {
+        **_passthrough_fields(row),
         "row_key": cell_mod.row_key_of(row),
         "strength": strength,
         "active": bool(row.get("_active", False)),
@@ -329,6 +361,7 @@ def _run_batch(
         text = tokenizer.decode(continuation, skip_special_tokens=True)
         records.append(
             {
+                **_passthrough_fields(row),
                 "row_key": cell_mod.row_key_of(row),
                 "strength": float(row.get("_strength", 0.0)),
                 "active": bool(row.get("_active", False)),
