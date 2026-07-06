@@ -1,0 +1,31 @@
+{
+  "schema_version": "mechinterp-direction/v1",
+  "layer": 20,
+  "hidden_dim": 8,
+  "normalized": true,
+  "vector": [0.612372, 0.408248, 0.306186, 0.306186, 0.306186, 0.306186, 0.204124, 0.204124],
+  "raw_norm": 1.0,
+  "intercept": 0.0,
+  "mu": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  "sigma": 2.0,
+  "calibration": {
+    "positive_mean": 3.0,
+    "positive_std": 1.0,
+    "negative_mean": -1.0,
+    "negative_std": 1.0,
+    "sigma": 2.0,
+    "separation": 4.0,
+    "n_positive": 2,
+    "n_negative": 2
+  },
+  "recipe": {
+    "n_components": 8,
+    "seed": 20240101,
+    "solver": "saga",
+    "tol": 0.001,
+    "C": 1.0
+  },
+  "provenance": {
+    "note": "Illustrative example direction for the steer_cell template. NOT fitted on real data; hand-written so the template runs end to end. Replace with a probe-fit output."
+  }
+}

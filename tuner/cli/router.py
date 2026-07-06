@@ -175,6 +175,12 @@ def route_command(args: Namespace) -> int:
         handler = MLHandler(args=args)
         return handler.handle()
 
+    # Special handling for mechinterp command (has subcommand)
+    if command == 'mechinterp':
+        from tuner.handlers.mechinterp_handler import MechInterpHandler
+        handler = MechInterpHandler(args=args)
+        return handler.handle()
+
     # Special handling for flywheel command (has subcommand)
     if command == 'flywheel':
         handler = FlywheelHandler(args=args)

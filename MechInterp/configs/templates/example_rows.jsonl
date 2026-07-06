@@ -1,0 +1,4 @@
+{"row_key": "r001", "prompt": "What is the capital of France?", "selection_score": 1.4, "flagged": true}
+{"row_key": "r002", "prompt": "Who wrote the play Hamlet?", "selection_score": 0.3, "flagged": false}
+{"row_key": "r003", "prompt": "What is the boiling point of water at sea level?", "selection_score": 1.1, "flagged": true}
+{"row_key": "r004", "prompt": "Name a prime number between 10 and 20.", "selection_score": 0.8, "flagged": false}

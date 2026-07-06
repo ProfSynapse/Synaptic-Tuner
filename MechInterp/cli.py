@@ -1,0 +1,402 @@
+"""
+CLI layer for the MechInterp verbs.
+
+This is the model-facing glue that turns a validated recipe into a run: it loads
+the model, resolves arms and readouts, registers the intervention hook, generates
+per row, grades, and writes per-row provenance plus a manifest. The lane-agnostic
+logic (arm resolution, resume, smoke gating, config sha) lives in cell.py and is
+imported here so this layer stays thin.
+
+Verbs:
+  extract     generate + capture hidden states to safetensors + manifest.
+  probe_fit   fit a linear readout from extracted activations and freeze it.
+  steer       run the six-block steer cell (smoke-gated).
+  score_gates evaluate a gates.yaml against a per-row output JSONL.
+
+The steer and extract verbs touch a GPU; they refuse to run without an explicit
+acknowledgement flag so a recipe never surprises a shared machine.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Callable, Optional
+
+import numpy as np
+
+from MechInterp import cell as cell_mod
+from MechInterp.config import (
+    SteerCellConfig,
+    ExtractConfig,
+    ProbeFitConfig,
+    load_steer_config,
+    load_extract_config,
+    load_probe_fit_config,
+)
+
+
+# --------------------------------------------------------------------------
+# Model loading (self-contained; handles the transformers 5.x dtype rename)
+# --------------------------------------------------------------------------
+
+
+def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None):
+    import torch
+    import transformers
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    major = int(transformers.__version__.split(".")[0])
+    dtype_kwarg = {"dtype": torch.bfloat16} if major >= 5 else {"torch_dtype": torch.bfloat16}
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, device_map="auto", **dtype_kwarg
+    )
+    if adapter:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter)
+    model.eval()
+    return model, tokenizer
+
+
+def _require_gpu_ack(ack: bool) -> Optional[int]:
+    if not ack:
+        print(
+            "Refusing to run a GPU verb without --i-know-this-runs-on-gpu. "
+            "This verb loads a model and runs generation."
+        )
+        return 2
+    return None
+
+
+def _load_callable(spec: str) -> Callable:
+    import importlib
+
+    module_path, _, attr = spec.partition(":")
+    return getattr(importlib.import_module(module_path), attr)
+
+
+# --------------------------------------------------------------------------
+# extract
+# --------------------------------------------------------------------------
+
+
+def run_extract(config: ExtractConfig, model_name: str, adapter: Optional[str], gpu_ack: bool) -> int:
+    guard = _require_gpu_ack(gpu_ack)
+    if guard is not None:
+        return guard
+    from MechInterp.extraction import PositionSpec, extract_rows
+
+    rows = cell_mod.load_jsonl(config.rows_path)
+    render_fn = _load_callable(config.render_fn)
+    content_end_fn = _load_callable(config.content_end_fn)
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    spec = PositionSpec(
+        families=config.families, every_k=config.every_k, layers=config.layers
+    )
+    manifest = extract_rows(
+        model,
+        tokenizer,
+        rows,
+        render_fn=render_fn,
+        content_end_fn=content_end_fn,
+        spec=spec,
+        out_dir=config.output_dir,
+        max_new_tokens=config.max_new_tokens,
+    )
+    print(
+        f"Extracted {manifest['n_answered']}/{manifest['n_rows']} answered rows "
+        f"to {config.output_dir}"
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
+# probe_fit
+# --------------------------------------------------------------------------
+
+
+def _load_activation_matrix(activations_dir: str, family: str, labels: list[dict]):
+    """Assemble (X, y, layer_keys) from extracted safetensors for one layer sweep.
+
+    Returns a dict {layer_index: X} plus aligned y, using each label row's
+    row_key to find its safetensors file. Only rows with a captured file for the
+    family are included.
+    """
+    from safetensors.torch import load_file
+
+    act_dir = Path(activations_dir)
+    per_layer: dict[int, list] = {}
+    y = []
+    for rec in labels:
+        rk = str(rec.get("row_key", rec.get("id")))
+        safe_key = rk.replace("::", "__").replace("|", "_").replace("/", "_")
+        f = act_dir / f"{safe_key}__{family}.safetensors"
+        if not f.exists():
+            continue
+        tensors = load_file(str(f))
+        for key, t in tensors.items():
+            li = int(key[1:])  # "L23" -> 23
+            per_layer.setdefault(li, []).append(t[0].numpy())  # first captured pos
+        y.append(int(rec["label"]))
+    matrices = {li: np.stack(vals, axis=0) for li, vals in per_layer.items()}
+    return matrices, np.asarray(y, dtype=int)
+
+
+def run_probe_fit(config: ProbeFitConfig) -> int:
+    from MechInterp.probe import sweep_layers, freeze_direction
+
+    labels = cell_mod.load_jsonl(config.labels_path)
+    matrices, y = _load_activation_matrix(
+        config.activations_path, config.position_family, labels
+    )
+    if not matrices:
+        print("No activation matrices found for the requested family.")
+        return 1
+    clf_kwargs = {"solver": config.solver, "tol": config.tol, "C": config.C}
+    sweep = sweep_layers(
+        matrices,
+        y,
+        n_components=config.n_components,
+        n_splits=config.n_splits,
+        seed=config.seed,
+        **clf_kwargs,
+    )
+    best_layer = sweep["best_layer"]
+    record = freeze_direction(
+        matrices[best_layer],
+        y,
+        layer=best_layer,
+        out_path=config.output_direction,
+        n_components=config.n_components,
+        seed=config.seed,
+        normalize=config.normalize,
+        provenance={
+            "activations_path": config.activations_path,
+            "position_family": config.position_family,
+            "auroc_by_layer": sweep["auroc_by_layer"],
+        },
+        **clf_kwargs,
+    )
+    print(
+        f"Froze direction at layer {best_layer} "
+        f"(AUROC {sweep['auroc_by_layer'][best_layer]:.4f}) -> {config.output_direction}"
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
+# steer (six-block cell)
+# --------------------------------------------------------------------------
+
+
+def _direction_tensor(readout_record: dict):
+    import torch
+
+    return torch.tensor(readout_record["vector_np"], dtype=torch.float32)
+
+
+def _run_one_pass(
+    model,
+    tokenizer,
+    controller,
+    row: dict,
+    generation,
+    generation_mode: str,
+    render_fn: Callable,
+) -> dict:
+    import torch
+
+    prompt = render_fn(row)
+    enc = tokenizer(prompt, return_tensors="pt").to(next(model.parameters()).device)
+    strength = float(row.get("_strength", 0.0))
+    controller.begin_pass(
+        generation_mode if strength != 0.0 else "off",
+        strength,
+        attention_mask=enc["attention_mask"],
+    )
+    gen = model.generate(
+        **enc,
+        max_new_tokens=generation.max_new_tokens,
+        do_sample=generation.do_sample,
+        num_beams=1,
+        return_dict_in_generate=True,
+    )
+    controller.reset()
+    full = gen.sequences[0]
+    prompt_len = enc["input_ids"].shape[1]
+    text = tokenizer.decode(full[prompt_len:], skip_special_tokens=True)
+    return {
+        "row_key": cell_mod.row_key_of(row),
+        "strength": strength,
+        "active": bool(row.get("_active", False)),
+        "answer_text": text,
+        "prompt_len": int(prompt_len),
+    }
+
+
+def run_steer(
+    config: SteerCellConfig,
+    model_name: str,
+    adapter: Optional[str],
+    render_fn_spec: str,
+    gpu_ack: bool,
+    force: bool = False,
+) -> int:
+    guard = _require_gpu_ack(gpu_ack)
+    if guard is not None:
+        return guard
+    import torch
+
+    from MechInterp.intervention import InterventionHook, GenerationInterventionController, get_decoder_layer
+    from MechInterp.probe import load_frozen_direction
+    from MechInterp.grading import load_grader
+
+    config_sha = cell_mod.compute_config_sha(config)
+    if config.surface.expected_config_sha and config.surface.expected_config_sha != config_sha:
+        print(
+            f"Config sha mismatch: expected {config.surface.expected_config_sha}, "
+            f"got {config_sha}. Aborting."
+        )
+        return 3
+
+    rows = cell_mod.load_jsonl(config.surface.rows_path)
+    render_fn = _load_callable(render_fn_spec)
+    readout_by_name = {
+        r.name: load_frozen_direction(r.path) for r in config.readouts
+    }
+    active_readout = readout_by_name[config.law.readout]
+    layer = config.law.layer if config.law.layer is not None else active_readout["layer"]
+
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    direction = _direction_tensor(active_readout)
+    sigma = float(active_readout.get("sigma", 1.0))
+    hook = InterventionHook(
+        law=config.law.kind,
+        direction=direction,
+        sigma=sigma,
+        position=config.law.position,
+    )
+    controller = GenerationInterventionController(hook)
+    layer_module = get_decoder_layer(model, layer)
+    handle = layer_module.register_forward_hook(controller)
+
+    grader = load_grader(config.execution.grader) if config.execution.grader else None
+
+    # Smoke gate: run n_rows through the intervention with readback and record.
+    if not force and not cell_mod.smoke_passed(config.execution.output_path, config_sha):
+        readback = _run_smoke(
+            model, tokenizer, config, rows, render_fn, direction, sigma, layer
+        )
+        verdict = cell_mod.evaluate_smoke_readback(readback, config.smoke)
+        readback["passed"] = verdict["passed"]
+        cell_mod.record_smoke(config.execution.output_path, config_sha, {**readback, **verdict})
+        if not verdict["passed"]:
+            handle.remove()
+            print(f"Smoke failed: {verdict}. Full arms not run. Fix or pass --force.")
+            return 4
+        print(f"Smoke passed: {verdict}")
+
+    strengths_by_arm = cell_mod.resolve_all_arms(config, rows)
+    arm_summaries = {}
+    out_path = Path(config.execution.output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(out_path, "a") as out:
+        for arm in config.arms:
+            strengths = strengths_by_arm[arm.name]
+            pending = cell_mod.pending_rows(
+                rows, strengths, arm.name, out_path, config.execution.resume
+            )
+            arm_summaries[arm.name] = {"n_active": len(strengths), "n_pending": len(pending)}
+            for row in pending:
+                rec = _run_one_pass(
+                    model, tokenizer, controller, row, config.surface.generation,
+                    config.law.generation_mode, render_fn,
+                )
+                rec["arm"] = arm.name
+                if grader is not None:
+                    rec.update(grader(rec))
+                out.write(json.dumps(rec) + "\n")
+
+    handle.remove()
+    cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)
+    print(f"Steer cell complete. Output {out_path}, config_sha {config_sha}")
+    return 0
+
+
+def _run_smoke(model, tokenizer, config, rows, render_fn, direction, sigma, layer):
+    """Run a small forward-only readback over the first smoke rows.
+
+    For each smoke row, a fresh forward hook (in final-position mode with
+    readback on) applies the dose arm's strength at the anchor token, and the
+    realized projection is compared to the commanded value. Inactive rows probe
+    off-target movement. A dedicated hook is registered and removed here so it
+    does not interfere with the generation controller registered by the caller.
+    """
+    import torch
+
+    from MechInterp.intervention import InterventionHook, get_decoder_layer
+
+    smoke_rows = rows[: config.smoke.n_rows]
+    dose_arm = next((a for a in config.arms if a.strength != 0.0), config.arms[0])
+    strengths = cell_mod.resolve_arm_strengths(
+        dose_arm, rows, {a.name: a for a in config.arms}
+    )
+
+    smoke_hook = InterventionHook(
+        law=config.law.kind,
+        direction=direction,
+        sigma=sigma,
+        position="final",
+        measure_readback=True,
+    )
+    layer_module = get_decoder_layer(model, layer)
+    handle = layer_module.register_forward_hook(smoke_hook)
+
+    commanded, measured, offtarget = [], [], []
+    dev = next(model.parameters()).device
+    try:
+        for row in smoke_rows:
+            prompt = render_fn(row)
+            enc = tokenizer(prompt, return_tensors="pt").to(dev)
+            rk = cell_mod.row_key_of(row)
+            g = float(strengths.get(rk, 0.0))
+            smoke_hook.strength = g
+            smoke_hook.attention_mask = enc["attention_mask"]
+            smoke_hook.active = True
+            with torch.no_grad():
+                model(**enc, output_hidden_states=False, use_cache=False)
+            rb = smoke_hook.last_readback or {}
+            if g != 0.0:
+                commanded.extend(rb.get("commanded", []))
+                measured.extend(rb.get("measured", []))
+            offtarget.append(float(rb.get("offtarget_abs_max", 0.0)))
+    finally:
+        handle.remove()
+        smoke_hook.active = False
+
+    return {
+        "commanded": commanded,
+        "measured": measured,
+        "offtarget_abs_max": max(offtarget) if offtarget else 0.0,
+    }
+
+
+# --------------------------------------------------------------------------
+# score_gates
+# --------------------------------------------------------------------------
+
+
+def run_score_gates(gates_config_path: str, rows_path: str, arm_field: str = "arm") -> int:
+    from MechInterp.stats import evaluate_gates
+    from MechInterp.stats.evaluator import load_gates_config
+
+    gates_config = load_gates_config(gates_config_path)
+    rows = cell_mod.load_jsonl(rows_path)
+    report = evaluate_gates(gates_config, rows, arm_field=arm_field)
+    print(json.dumps(report, indent=2, default=str))
+    return 0 if report["overall_pass"] else 5

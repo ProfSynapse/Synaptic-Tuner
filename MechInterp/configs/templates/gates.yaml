@@ -1,0 +1,42 @@
+# MechInterp gates: declarative pass/fail policy over a per-row output JSONL.
+# Usage:
+#   python tuner.py mechinterp score-gates \
+#     --gates-config MechInterp/configs/templates/gates.yaml \
+#     --rows-path MechInterp/runs/example/rows.jsonl
+#
+# Rows are grouped by their "arm" field. Each gate names a primitive and the
+# per-row fields it reads. overall_pass is True only if every gate passes.
+
+seed: 20240101
+n_boot: 1000
+n_perm: 1000
+
+gates:
+  # Reach: how many primary rows moved from positive to negative on a predicate.
+  - name: reach
+    primitive: count_flips
+    arm: primary
+    before: baseline_positive
+    after: positive
+    from_state: true
+    to_state: false
+    pass_if: ">= 5"
+
+  # Specificity: primary vs seeded control kill difference, CI must exclude zero.
+  - name: specificity
+    primitive: kill_diff_vs_control
+    primary_arm: primary
+    control_arm: control
+    primary_indicator: killed
+    control_indicator: killed
+    pass_if_diff: ">= 5"
+    pass_if_ci_excludes_zero: true
+
+  # Readout floor: does a score separate the two classes above a lower bound?
+  - name: readout_floor
+    primitive: auroc_floor
+    arm: primary
+    label: label
+    score: readout_score
+    pass_if_auroc: ">= 0.75"
+    pass_if_floor: ">= 0.6"
