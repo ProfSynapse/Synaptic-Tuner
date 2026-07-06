@@ -1,0 +1,20 @@
+# MechInterp probe-fit cell: fit a linear readout and freeze a direction.
+# Usage:
+#   python tuner.py mechinterp probe-fit \
+#     --mi-config MechInterp/configs/templates/probe_fit.yaml
+#
+# activations_path is the output_dir of an extract run; labels_path is a JSONL
+# with row_key + label (0/1). The verb sweeps layers by out-of-fold AUROC and
+# freezes the best layer's direction.
+
+activations_path: MechInterp/runs/example/activations
+labels_path: MechInterp/configs/templates/example_labels.jsonl
+position_family: anchor
+n_components: 128
+n_splits: 5
+seed: 20240101
+solver: saga
+tol: 0.001
+C: 1.0
+normalize: true
+output_direction: MechInterp/runs/example/direction.json

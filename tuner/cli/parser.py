@@ -145,7 +145,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -418,6 +418,51 @@ Examples:
     parser.add_argument("--files-only", action="store_true", help="For bucket list, show files only.")
     parser.add_argument("--dirs-only", action="store_true", help="For bucket list, show directories only.")
     parser.add_argument("--follow", action="store_true", help="Stream live logs for cloud-jobs logs.")
+
+    # MechInterp flags (extract / probe-fit / steer / score-gates sub-commands)
+    parser.add_argument(
+        "--mi-config",
+        dest="mechinterp_config",
+        help="Path to a MechInterp recipe YAML (mechinterp extract/probe-fit/steer)",
+    )
+    parser.add_argument(
+        "--render-fn",
+        dest="render_fn",
+        help="Prompt render callable 'module.path:callable' (mechinterp steer/extract)",
+    )
+    parser.add_argument(
+        "--adapter",
+        dest="adapter",
+        help="Optional PEFT adapter path/id to load on the base model (mechinterp).",
+    )
+    parser.add_argument(
+        "--gates-config",
+        dest="gates_config",
+        help="Path to a gates.yaml (mechinterp score-gates only).",
+    )
+    parser.add_argument(
+        "--rows-path",
+        dest="rows_path",
+        help="Path to a per-row output JSONL to score (mechinterp score-gates only).",
+    )
+    parser.add_argument(
+        "--arm-field",
+        dest="arm_field",
+        default="arm",
+        help="Row field naming the arm for gate grouping (mechinterp score-gates).",
+    )
+    parser.add_argument(
+        "--i-know-this-runs-on-gpu",
+        dest="i_know_this_runs_on_gpu",
+        action="store_true",
+        help="Acknowledge that mechinterp extract/steer load a model and use a GPU.",
+    )
+    parser.add_argument(
+        "--force-full-run",
+        dest="force_full_run",
+        action="store_true",
+        help="Skip the smoke gate and run the full mechinterp steer arms directly.",
+    )
 
     # Experiment loop flags
     parser.add_argument(

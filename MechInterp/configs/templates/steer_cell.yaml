@@ -1,0 +1,62 @@
+# MechInterp steer cell: the six-block declarative intervention run.
+# Usage:
+#   python tuner.py mechinterp steer \
+#     --mi-config MechInterp/configs/templates/steer_cell.yaml \
+#     --model <base-model> --render-fn my_project.prompts:render \
+#     --i-know-this-runs-on-gpu
+#
+# The verb runs a smoke pass first and refuses the full arms until the smoke
+# records a pass for this exact config; pass --force-full-run to override.
+
+# 1. surface: where rows come from and the reproducibility contract.
+surface:
+  rows_path: MechInterp/configs/templates/example_rows.jsonl
+  seed: 20240101
+  generation:
+    max_new_tokens: 96
+    do_sample: false
+  # expected_config_sha: <fill after a first run to pin reproducibility>
+
+# 2. readouts: frozen direction files the cell may read/write along.
+readouts:
+  - name: primary_axis
+    path: MechInterp/configs/templates/example_direction.json
+
+# 3. law: the intervention law and its shared parameters.
+law:
+  kind: erase_write          # additive | erase_write
+  readout: primary_axis
+  position: anchor           # anchor | anchor_onward | final | answer_window
+  generation_mode: anchor    # anchor | gen_stream
+
+# 4. arms: named strength overrides.
+arms:
+  - name: baseline           # a no-op population for comparison
+    strength: 0.0
+  - name: primary            # activate rows whose selection score passes threshold
+    strength: 2.0
+    score_field: selection_score
+    threshold: 1.0
+  - name: control            # seeded count-matched permuted control of primary
+    strength: 2.0
+    permuted_control_of: primary
+    control_seed: 20240101
+  - name: dose_low           # dose-ladder arm on flagged rows
+    strength: 1.0
+    flag_field: flagged
+  - name: dose_high
+    strength: 3.0
+    flag_field: flagged
+
+# 5. execution: lane-agnostic run controls.
+execution:
+  output_path: MechInterp/runs/example/rows.jsonl
+  resume: true
+  grader: MechInterp.grading.interface:example_grader
+
+# 6. smoke: readback tolerances that gate the full arms.
+smoke:
+  n_rows: 8
+  write_rel_tol: 0.05
+  write_abs_floor: 0.5
+  offtarget_tol: 0.001

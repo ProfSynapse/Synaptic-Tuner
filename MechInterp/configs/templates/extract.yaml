@@ -1,0 +1,18 @@
+# MechInterp extraction cell: generate + capture hidden states.
+# Usage:
+#   python tuner.py mechinterp extract \
+#     --mi-config MechInterp/configs/templates/extract.yaml \
+#     --model <base-model> --i-know-this-runs-on-gpu
+#
+# render_fn and content_end_fn are project-supplied callables:
+#   render_fn(row) -> prompt string
+#   content_end_fn(full_ids, prompt_len, tokenizer) -> index of last content token
+
+rows_path: MechInterp/configs/templates/example_rows.jsonl
+output_dir: MechInterp/runs/example/activations
+families: [anchor, answer_end]   # anchor | first_visible | answer_end | every_k
+every_k: 4
+layers: null                     # null = all hidden_states indices, or a list like [20, 22, 24]
+max_new_tokens: 48
+render_fn: my_project.prompts:render
+content_end_fn: my_project.prompts:content_end

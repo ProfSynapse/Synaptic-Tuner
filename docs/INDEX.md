@@ -56,6 +56,10 @@ Then read based on your hardware:
 - `WORKSPACE_KEY_FILES_REFERENCE.md` - Important files reference
 - `WORKSPACE_DOCUMENTATION_INDEX.md` - All documentation
 
+### For Mechanistic-Interpretation Cells
+
+- `MECH_INTERP_CELLS.md` - Project-agnostic intervention/extraction/probe/gates toolkit driven by recipe YAML (`mechinterp` CLI verbs)
+
 ## ☁️ Cloud Training Documentation (Nebius AI) 🆕
 
 ### Why Use Nebius?
