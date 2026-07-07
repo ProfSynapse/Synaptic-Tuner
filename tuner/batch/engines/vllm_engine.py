@@ -54,10 +54,12 @@ class VLLMGenerateEngine(GenerateEngine):
         model_name: str,
         *,
         max_new_tokens: int = 48,
+        min_new_tokens: int = 0,
         do_sample: bool = False,
         temperature: float = 1.0,
         top_p: float = 1.0,
         seed: Optional[int] = None,
+        extra_eos_tokens: Optional[List[str]] = None,
         stop: Optional[List[str]] = None,
         trust_remote_code: bool = True,
         dtype: Optional[str] = None,
@@ -74,18 +76,25 @@ class VLLMGenerateEngine(GenerateEngine):
             llm_kwargs["seed"] = seed
         self.llm = LLM(**llm_kwargs)
         self.max_new_tokens = int(max_new_tokens)
+        self.min_new_tokens = int(min_new_tokens)
         self.do_sample = bool(do_sample)
         self.temperature = float(temperature) if do_sample else 0.0
         self.top_p = float(top_p) if do_sample else 1.0
-        self.stop = list(stop) if stop else None
+        all_stops = list(stop) if stop else []
+        all_stops.extend(list(extra_eos_tokens) if extra_eos_tokens else [])
+        self.stop = all_stops or None
 
     def _sampling_params(self):
-        return self._SamplingParams(
+        kwargs = dict(
             max_tokens=self.max_new_tokens,
             temperature=self.temperature,
             top_p=self.top_p,
             stop=self.stop,
         )
+        try:
+            return self._SamplingParams(**kwargs, min_tokens=self.min_new_tokens)
+        except TypeError:
+            return self._SamplingParams(**kwargs)
 
     def generate(
         self,

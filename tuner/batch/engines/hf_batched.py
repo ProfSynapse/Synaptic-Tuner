@@ -165,10 +165,12 @@ class HFBatchedGenerateEngine(GenerateEngine):
         device: Optional[str] = None,
         dtype: Optional[str] = None,
         max_new_tokens: int = 48,
+        min_new_tokens: int = 0,
         do_sample: bool = False,
         temperature: float = 1.0,
         top_p: float = 1.0,
         seed: Optional[int] = None,
+        extra_eos_tokens: Optional[List[str]] = None,
         stop: Optional[List[str]] = None,
         trust_remote_code: bool = True,
         model: Any = None,
@@ -183,10 +185,12 @@ class HFBatchedGenerateEngine(GenerateEngine):
             tokenizer=tokenizer,
         )
         self.max_new_tokens = int(max_new_tokens)
+        self.min_new_tokens = int(min_new_tokens)
         self.do_sample = bool(do_sample)
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.seed = seed
+        self.extra_eos_tokens = list(extra_eos_tokens) if extra_eos_tokens else []
         self.stop = list(stop) if stop else []
 
     def generate(
@@ -235,10 +239,14 @@ class HFBatchedGenerateEngine(GenerateEngine):
 
         gen_kwargs: Dict[str, Any] = dict(
             max_new_tokens=self.max_new_tokens,
+            min_new_tokens=self.min_new_tokens,
             do_sample=self.do_sample,
             pad_token_id=pad_id,
             use_cache=True,
         )
+        eos_ids = self._eos_token_ids()
+        if eos_ids:
+            gen_kwargs["eos_token_id"] = eos_ids[0] if len(eos_ids) == 1 else eos_ids
         if self.do_sample:
             gen_kwargs["temperature"] = self.temperature
             gen_kwargs["top_p"] = self.top_p
@@ -253,10 +261,10 @@ class HFBatchedGenerateEngine(GenerateEngine):
         # New tokens are everything past the (left-padded) prompt columns.
         new_tokens = out[:, prompt_len:]
         results: List[GenerateResult] = []
-        eos_id = tok.eos_token_id
+        eos_ids = set(self._eos_token_ids())
         for i, it in enumerate(chunk):
             row_ids = new_tokens[i].tolist()
-            trimmed, finish_reason = self._trim(row_ids, pad_id, eos_id)
+            trimmed, finish_reason = self._trim(row_ids, pad_id, eos_ids)
             text = tok.decode(trimmed, skip_special_tokens=True)
             text, stop_hit = self._apply_stop(text)
             if stop_hit:
@@ -275,18 +283,33 @@ class HFBatchedGenerateEngine(GenerateEngine):
             )
         return results
 
-    def _trim(self, ids: List[int], pad_id: int, eos_id: Optional[int]):
+    def _eos_token_ids(self) -> List[int]:
+        tok = self.bundle.tokenizer
+        ids = set()
+        if tok.eos_token_id is not None:
+            ids.add(int(tok.eos_token_id))
+        for token in self.extra_eos_tokens:
+            try:
+                tok_id = tok.convert_tokens_to_ids(token)
+            except Exception:
+                continue
+            unk_id = getattr(tok, "unk_token_id", None)
+            if isinstance(tok_id, int) and tok_id >= 0 and tok_id != unk_id:
+                ids.add(int(tok_id))
+        return sorted(ids)
+
+    def _trim(self, ids: List[int], pad_id: int, eos_ids: set[int]):
         """Trim trailing pad and cut at the first EOS; report a finish reason."""
         finish_reason = "length"
         out: List[int] = []
         for tid in ids:
-            if eos_id is not None and tid == eos_id:
+            if tid in eos_ids:
                 finish_reason = "eos"
                 break
             out.append(tid)
         # Strip trailing pad ids that can appear when a shorter row in the batch
         # already stopped (pad fills the rest of its row).
-        while out and out[-1] == pad_id and (eos_id is None or pad_id != eos_id):
+        while out and out[-1] == pad_id and pad_id not in eos_ids:
             out.pop()
         return out, finish_reason
 
