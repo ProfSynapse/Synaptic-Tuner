@@ -181,6 +181,14 @@ class ExecutionConfig(BaseModel):
 
     output_path: str = Field(..., min_length=1, description="Per-row output JSONL")
     resume: bool = True
+    render_fn: Optional[str] = Field(
+        default=None,
+        description=(
+            "Prompt render callable 'module.path:callable'. Kept here so a "
+            "steer cell can be fully config-driven; the CLI --render-fn flag "
+            "remains a development override."
+        ),
+    )
     grader: Optional[str] = Field(
         default=None, description="Grader spec 'module.path:callable'"
     )

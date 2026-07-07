@@ -1,0 +1,24 @@
+# Minimal local pipeline smoke.
+#
+# This does not download a model or touch a GPU. It validates config -> CLI ->
+# local pipeline execution -> artifact creation.
+
+schema_version: mechinterp-pipeline/v1
+name: local-cli-smoke
+
+runtime:
+  provider: local
+  python: python
+  workdir: .
+
+artifacts:
+  checkpoint_paths:
+    - outputs/local_smoke.txt
+
+stages:
+  - name: hello
+    kind: command
+    command:
+      - python
+      - -c
+      - "import pathlib, platform; p=pathlib.Path('outputs/local_smoke.txt'); p.parent.mkdir(exist_ok=True); p.write_text('local smoke ok\\n' + platform.python_version() + '\\n'); print(p.read_text())"

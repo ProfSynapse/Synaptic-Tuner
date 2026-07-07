@@ -123,6 +123,7 @@ Examples:
   python tuner.py status --json    # JSON output for AI parsing
   python tuner.py cloud-run --job-config Trainers/recipes/job.yaml --yes
   python tuner.py local-run --job-config Trainers/recipes/job.yaml --yes
+  python tuner.py mechinterp run --config MechInterp/configs/my_pipeline.yaml --provider local --yes
   python tuner.py cloud-jobs list
   python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
@@ -186,7 +187,7 @@ Examples:
     parser.add_argument(
         "--config",
         dest="ml_config",
-        help="Path to ML training config YAML (only used with 'ml train')"
+        help="Path to config YAML (ml train or mechinterp run)."
     )
 
     # Flywheel-specific flags
@@ -393,6 +394,11 @@ Examples:
     parser.add_argument("--env-exec-config", help="Custom environment execution YAML for cloud-eval/cloud-gym.")
     parser.add_argument("--job-config", help="Config-driven job YAML (cloud-run or local-run workflow).")
     parser.add_argument(
+        "--provider",
+        choices=["local", "modal"],
+        help="Execution provider for config-driven mechinterp run.",
+    )
+    parser.add_argument(
         "--stop",
         action="store_true",
         help="Stop (but keep) the persistent container for the given --job-config (local-run only).",
@@ -424,6 +430,11 @@ Examples:
         "--mi-config",
         dest="mechinterp_config",
         help="Path to a MechInterp recipe YAML (mechinterp extract/probe-fit/steer)",
+    )
+    parser.add_argument(
+        "--pipeline-config",
+        dest="pipeline_config",
+        help="Path to a multi-stage MechInterp pipeline YAML (mechinterp run).",
     )
     parser.add_argument(
         "--render-fn",
@@ -462,6 +473,22 @@ Examples:
         dest="force_full_run",
         action="store_true",
         help="Skip the smoke gate and run the full mechinterp steer arms directly.",
+    )
+    parser.add_argument(
+        "--only-step",
+        dest="only_step",
+        help="Run only one named stage from a mechinterp pipeline.",
+    )
+    parser.add_argument(
+        "--from-step",
+        dest="from_step",
+        help="Start a mechinterp pipeline at this named stage.",
+    )
+    parser.add_argument(
+        "--skip-step",
+        dest="skip_step",
+        action="append",
+        help="Skip a named stage from a mechinterp pipeline. May be repeated.",
     )
 
     # Experiment loop flags

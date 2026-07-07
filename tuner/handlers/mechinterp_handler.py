@@ -10,6 +10,7 @@ MechInterp CLI layer. GPU-touching verbs (extract, steer) require an explicit
 acknowledgement flag.
 
 Sub-commands:
+  run          run a multi-stage mechinterp pipeline from one config
   extract      generate + capture hidden states to safetensors + manifest
   probe-fit    fit a linear readout and freeze a direction JSON
   steer        run the six-block steer cell (smoke-gated)
@@ -18,6 +19,8 @@ Sub-commands:
 """
 
 import logging
+import os
+import subprocess
 from argparse import Namespace
 from pathlib import Path
 from typing import Optional
@@ -52,6 +55,8 @@ class MechInterpHandler(BaseHandler):
         sub = self._arg("subcommand")
         if sub == "list-configs":
             return self._handle_list_configs()
+        if sub == "run":
+            return self._handle_run()
         if sub == "extract":
             return self._handle_extract()
         if sub == "probe-fit":
@@ -62,7 +67,7 @@ class MechInterpHandler(BaseHandler):
             return self._handle_score_gates()
 
         msg = (
-            "mechinterp requires a sub-command: extract, probe-fit, steer, "
+            "mechinterp requires a sub-command: run, extract, probe-fit, steer, "
             "score-gates, list-configs"
         )
         if self.json_mode:
@@ -100,6 +105,150 @@ class MechInterpHandler(BaseHandler):
             return None
         return val
 
+    def _pipeline_config_arg(self) -> Optional[str]:
+        return (
+            self._arg("pipeline_config")
+            or self._arg("ml_config")
+            or self._arg("mechinterp_config")
+        )
+
+    def _handle_run(self) -> int:
+        from MechInterp.pipeline import (
+            build_pipeline_plan,
+            load_pipeline_config,
+            run_local_pipeline,
+        )
+
+        config_path = self._pipeline_config_arg()
+        if not config_path:
+            self.output_error(
+                "mechinterp run requires --config <pipeline.yaml>",
+                code="ARG_REQUIRED",
+            )
+            return 1
+
+        try:
+            cfg = load_pipeline_config(config_path)
+            provider = self._arg("provider") or cfg.runtime.provider
+            plan = build_pipeline_plan(
+                cfg,
+                repo_root=self.repo_root,
+                provider=provider,
+                only_step=self._arg("only_step"),
+                from_step=self._arg("from_step"),
+                skip_steps=self._arg("skip_step") or [],
+                gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
+                force=bool(self._arg("force_full_run", False)),
+            )
+        except Exception as exc:
+            self.output_error(str(exc), code="MECHINTERP_PIPELINE_CONFIG")
+            return 1
+
+        if self._arg("dry_run", False):
+            self.output(plan, "MechInterp pipeline dry-run plan:")
+            return 0
+
+        if provider == "local":
+            if not self._arg("auto_confirm", False):
+                self.output_error(
+                    "Refusing to run without --yes. Use --dry-run to inspect the plan first.",
+                    code="CONFIRMATION_REQUIRED",
+                )
+                return 2
+            try:
+                return run_local_pipeline(
+                    cfg,
+                    repo_root=self.repo_root,
+                    only_step=self._arg("only_step"),
+                    from_step=self._arg("from_step"),
+                    skip_steps=self._arg("skip_step") or [],
+                    gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
+                    force=bool(self._arg("force_full_run", False)),
+                )
+            except Exception as exc:
+                self.output_error(str(exc), code="MECHINTERP_PIPELINE_RUN_FAILED")
+                return 1
+
+        if provider == "modal":
+            if not self._arg("auto_confirm", False):
+                self.output_error(
+                    "Refusing to submit Modal work without --yes. Use --dry-run first.",
+                    code="CONFIRMATION_REQUIRED",
+                )
+                return 2
+            return self._submit_modal_pipeline(config_path, cfg)
+
+        self.output_error(f"Unsupported mechinterp provider: {provider}", code="BAD_PROVIDER")
+        return 1
+
+    def _git_value(self, args: list[str], default: str = "") -> str:
+        try:
+            return subprocess.check_output(
+                ["git", *args],
+                cwd=self.repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return default
+
+    def _submit_modal_pipeline(self, config_path: str, cfg) -> int:
+        repo_url = self._arg("repo_url") or cfg.repo.url or self._git_value(["config", "--get", "remote.origin.url"])
+        repo_branch = self._arg("repo_branch") or cfg.repo.branch or self._git_value(["branch", "--show-current"], "main")
+        repo_commit = self._arg("repo_commit") or cfg.repo.commit or self._git_value(["rev-parse", "HEAD"])
+        if not repo_url or not repo_commit:
+            self.output_error(
+                "Modal mechinterp runs require a repo URL and exact commit. Pass --repo-url/--repo-commit or set repo.* in config.",
+                code="REPO_SOURCE_REQUIRED",
+            )
+            return 1
+
+        modal_cfg = cfg.modal
+        env = {
+            **os.environ,
+            "MI_MODAL_APP_NAME": modal_cfg.app_name or f"mechinterp-{cfg.name}",
+            "MI_MODAL_IMAGE": modal_cfg.image,
+            "MI_MODAL_GPU": self._arg("gpu") or modal_cfg.gpu,
+            "MI_MODAL_TIMEOUT_HOURS": str(self._arg("timeout_hours") or modal_cfg.timeout_hours),
+            "MI_MODAL_CHECKPOINT_INTERVAL_SEC": str(modal_cfg.checkpoint_interval_sec),
+            "MI_MODAL_VOLUME": modal_cfg.volume_name,
+            "MI_MODAL_MOUNT": modal_cfg.mount_path,
+            "MI_MODAL_PIP": "\n".join(modal_cfg.pip),
+            "MI_MODAL_APT": "\n".join(modal_cfg.apt),
+        }
+
+        runner = self.repo_root / "MechInterp" / "cloud" / "modal_runner.py"
+        cmd = [
+            "modal",
+            "run",
+            "--detach",
+            str(runner),
+            "--config",
+            config_path,
+            "--repo-url",
+            repo_url,
+            "--repo-branch",
+            repo_branch,
+            "--repo-commit",
+            repo_commit,
+        ]
+        if self._arg("only_step"):
+            cmd.extend(["--only-step", self._arg("only_step")])
+        if self._arg("from_step"):
+            cmd.extend(["--from-step", self._arg("from_step")])
+        for step in self._arg("skip_step") or []:
+            cmd.extend(["--skip-step", step])
+        if self._arg("i_know_this_runs_on_gpu", False):
+            cmd.append("--i-know-this-runs-on-gpu")
+        if self._arg("force_full_run", False):
+            cmd.append("--force-full-run")
+
+        try:
+            return subprocess.run(cmd, cwd=self.repo_root, env=env).returncode
+        except FileNotFoundError:
+            self.output_error("Modal CLI not found. Install with: pip install modal", code="MODAL_NOT_FOUND")
+            return 1
+
     def _handle_extract(self) -> int:
         from MechInterp.cli import run_extract
         from MechInterp.config import load_extract_config
@@ -132,10 +281,16 @@ class MechInterpHandler(BaseHandler):
 
         config_path = self._require("mechinterp_config", "--mi-config")
         model = self._require("model", "--model")
-        render_fn = self._require("render_fn", "--render-fn")
-        if not config_path or not model or not render_fn:
+        if not config_path or not model:
             return 1
         config = load_steer_config(config_path)
+        render_fn = self._arg("render_fn") or config.execution.render_fn
+        if not render_fn:
+            self.output_error(
+                "steer requires execution.render_fn in the cell config or --render-fn",
+                code="ARG_REQUIRED",
+            )
+            return 1
         return run_steer(
             config,
             model_name=model,

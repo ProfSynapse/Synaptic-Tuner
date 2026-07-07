@@ -1,0 +1,65 @@
+# Example config-first MechInterp pipeline.
+#
+# Run locally:
+#   python tuner.py mechinterp run --config MechInterp/configs/templates/pipeline.yaml --provider local --dry-run
+#
+# Submit on Modal after replacing model/config paths with real repo files and
+# passing an exact pushed commit:
+#   python tuner.py mechinterp run --config path/to/pipeline.yaml --provider modal --repo-commit <sha> --dry-run
+
+schema_version: mechinterp-pipeline/v1
+name: example-mechinterp-pipeline
+model: Qwen/Qwen3-4B
+
+runtime:
+  provider: local
+  python: python
+  workdir: .
+  # Add project plug-in directories here when render/grader callables live
+  # outside the tuner package, for example ["plugins/renders", "plugins/graders"].
+  pythonpath: []
+
+repo:
+  # Optional for local. Modal can also receive these via CLI flags.
+  url:
+  branch:
+  commit:
+
+modal:
+  app_name: example-mechinterp-pipeline
+  image: vllm/vllm-openai:latest
+  gpu: A10G
+  timeout_hours: 3
+  checkpoint_interval_sec: 120
+  volume_name: mechinterp-pipeline
+  mount_path: /vol/mechinterp
+  pip:
+    - pyyaml
+    - pydantic
+    - safetensors
+    - scikit-learn
+    - scipy
+  apt:
+    - git
+
+artifacts:
+  checkpoint_paths: []
+
+stages:
+  - name: extract
+    kind: mechinterp.extract
+    config: MechInterp/configs/templates/extract.yaml
+
+  - name: fit
+    kind: mechinterp.probe-fit
+    config: MechInterp/configs/templates/probe_fit.yaml
+
+  - name: steer
+    kind: mechinterp.steer
+    config: MechInterp/configs/templates/steer_cell.yaml
+    render_fn: example_render:render
+
+  - name: gates
+    kind: mechinterp.score-gates
+    gates_config: MechInterp/configs/templates/gates.yaml
+    rows_path: outputs/rows_out.jsonl
