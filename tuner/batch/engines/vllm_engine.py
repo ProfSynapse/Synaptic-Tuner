@@ -61,6 +61,7 @@ class VLLMGenerateEngine(GenerateEngine):
         seed: Optional[int] = None,
         extra_eos_tokens: Optional[List[str]] = None,
         stop: Optional[List[str]] = None,
+        revision: Optional[str] = None,
         trust_remote_code: bool = True,
         dtype: Optional[str] = None,
         **_ignored: Any,
@@ -70,6 +71,8 @@ class VLLMGenerateEngine(GenerateEngine):
 
         self._SamplingParams = SamplingParams
         llm_kwargs: dict = {"model": model_name, "trust_remote_code": trust_remote_code}
+        if revision:
+            llm_kwargs["revision"] = revision
         if dtype:
             llm_kwargs["dtype"] = dtype
         if seed is not None:
@@ -147,6 +150,7 @@ class VLLMCaptureEngine(CaptureEngine):
         model_name: str,
         *,
         layers: str = "all",
+        revision: Optional[str] = None,
         trust_remote_code: bool = True,
         dtype: Optional[str] = None,
         **_ignored: Any,

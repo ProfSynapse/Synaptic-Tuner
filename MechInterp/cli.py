@@ -41,18 +41,18 @@ from MechInterp.config import (
 # --------------------------------------------------------------------------
 
 
-def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None):
+def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None, revision: Optional[str] = None):
     import torch
     import transformers
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     major = int(transformers.__version__.split(".")[0])
     dtype_kwarg = {"dtype": torch.bfloat16} if major >= 5 else {"torch_dtype": torch.bfloat16}
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", **dtype_kwarg
+        model_name, revision=revision, device_map="auto", **dtype_kwarg
     )
     if adapter:
         from peft import PeftModel
@@ -84,7 +84,7 @@ def _load_callable(spec: str) -> Callable:
 # --------------------------------------------------------------------------
 
 
-def run_extract(config: ExtractConfig, model_name: str, adapter: Optional[str], gpu_ack: bool) -> int:
+def run_extract(config: ExtractConfig, model_name: str, revision: Optional[str], adapter: Optional[str], gpu_ack: bool) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
         return guard
@@ -93,7 +93,7 @@ def run_extract(config: ExtractConfig, model_name: str, adapter: Optional[str], 
     rows = cell_mod.load_jsonl(config.rows_path)
     render_fn = _load_callable(config.render_fn)
     content_end_fn = _load_callable(config.content_end_fn)
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
     spec = PositionSpec(
         families=config.families, every_k=config.every_k, layers=config.layers
     )
@@ -434,6 +434,7 @@ def _run_batch(
 def run_steer(
     config: SteerCellConfig,
     model_name: str,
+    revision: Optional[str],
     adapter: Optional[str],
     render_fn_spec: str,
     gpu_ack: bool,
@@ -464,7 +465,7 @@ def run_steer(
     active_readout = readout_by_name[config.law.readout]
     layer = config.law.layer if config.law.layer is not None else active_readout["layer"]
 
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
     direction = _direction_tensor(active_readout)
     sigma = float(active_readout.get("sigma", 1.0))
     hook = InterventionHook(

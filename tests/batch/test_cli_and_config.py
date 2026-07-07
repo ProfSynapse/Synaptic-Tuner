@@ -29,6 +29,7 @@ def test_parser_registers_batch_generate():
             "batch-generate",
             "--prompts", "p.jsonl",
             "--model", "some/model",
+            "--model-revision", "abc123",
             "--out-dir", "out",
             "--engine", "hf-batched",
             "--batch-size", "32",
@@ -47,6 +48,7 @@ def test_parser_registers_batch_generate():
     assert args.command == "batch-generate"
     assert args.prompts == "p.jsonl"
     assert args.model == "some/model"
+    assert args.model_revision == "abc123"
     assert args.out_dir == "out"
     assert args.engine == "hf-batched"
     assert args.batch_size == 32
@@ -68,6 +70,7 @@ def test_parser_registers_batch_capture():
             "batch-capture",
             "--rows", "r.jsonl",
             "--model", "some/model",
+            "--model-revision", "def456",
             "--out-dir", "out",
             "--engine", "vllm",
             "--layers", "20,22",
@@ -77,6 +80,7 @@ def test_parser_registers_batch_capture():
     )
     assert args.command == "batch-capture"
     assert args.rows == "r.jsonl"
+    assert args.model_revision == "def456"
     assert args.layers == "20,22"
     assert args.persist_dtype == "bfloat16"
     assert args.engine == "vllm"
@@ -101,12 +105,15 @@ def test_runner_refuses_resume_on_changed_config(tmp_path):
         {
             "verb": "batch-generate",
             "model": "m",
+            "model_revision": None,
             "engine": "hf-batched",
             "max_new_tokens": 48,
+            "min_new_tokens": 0,
             "do_sample": False,
             "temperature": None,
             "top_p": None,
             "seed": 1,
+            "extra_eos_tokens": None,
             "stop": None,
             "dtype": None,
         },

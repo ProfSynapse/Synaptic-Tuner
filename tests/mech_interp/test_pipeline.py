@@ -31,6 +31,7 @@ def _pipeline(tmp_path):
     return PipelineConfig(
         name="smoke",
         model="Tiny/Model",
+        model_revision="rev123",
         runtime={"python": "python", "pythonpath": ["plugins"]},
         stages=[
             {"name": "extract", "kind": "mechinterp.extract", "config": "extract.yaml"},
@@ -97,6 +98,8 @@ def test_plan_compiles_mechinterp_commands_and_config_render_fn(tmp_path):
     )
     commands = {stage["name"]: stage["command"] for stage in plan["stages"]}
     assert commands["extract"][-1] == "--i-know-this-runs-on-gpu"
+    assert "--model-revision" in commands["extract"]
+    assert "rev123" in commands["steer"]
     assert "--render-fn" in commands["steer"]
     assert "render:prompt" in commands["steer"]
     assert "--force-full-run" in commands["steer"]

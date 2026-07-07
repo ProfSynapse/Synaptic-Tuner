@@ -59,6 +59,7 @@ class _ModelBundle:
         *,
         device: Optional[str] = None,
         dtype: Optional[str] = None,
+        revision: Optional[str] = None,
         trust_remote_code: bool = True,
         model: Any = None,
         tokenizer: Any = None,
@@ -73,7 +74,7 @@ class _ModelBundle:
 
         if tokenizer is None:
             tokenizer = AutoTokenizer.from_pretrained(
-                model_name, trust_remote_code=trust_remote_code
+                model_name, revision=revision, trust_remote_code=trust_remote_code
             )
         self.tokenizer = tokenizer
 
@@ -83,6 +84,7 @@ class _ModelBundle:
             )
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
+                revision=revision,
                 trust_remote_code=trust_remote_code,
                 torch_dtype=torch_dtype,
             )
@@ -172,6 +174,7 @@ class HFBatchedGenerateEngine(GenerateEngine):
         seed: Optional[int] = None,
         extra_eos_tokens: Optional[List[str]] = None,
         stop: Optional[List[str]] = None,
+        revision: Optional[str] = None,
         trust_remote_code: bool = True,
         model: Any = None,
         tokenizer: Any = None,
@@ -180,6 +183,7 @@ class HFBatchedGenerateEngine(GenerateEngine):
             model_name,
             device=device,
             dtype=dtype,
+            revision=revision,
             trust_remote_code=trust_remote_code,
             model=model,
             tokenizer=tokenizer,
@@ -337,6 +341,7 @@ class HFBatchedCaptureEngine(CaptureEngine):
         device: Optional[str] = None,
         dtype: Optional[str] = None,
         layers: str = "all",
+        revision: Optional[str] = None,
         trust_remote_code: bool = True,
         model: Any = None,
         tokenizer: Any = None,
@@ -345,6 +350,7 @@ class HFBatchedCaptureEngine(CaptureEngine):
             model_name,
             device=device,
             dtype=dtype,
+            revision=revision,
             trust_remote_code=trust_remote_code,
             model=model,
             tokenizer=tokenizer,

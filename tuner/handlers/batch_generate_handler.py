@@ -48,6 +48,7 @@ class BatchGenerateHandler(BaseHandler):
                 prompts_path=prompts,
                 out_dir=out_dir,
                 model=model,
+                model_revision=getattr(args, "model_revision", None),
                 engine=getattr(args, "engine", "hf-batched"),
                 max_new_tokens=getattr(args, "max_new_tokens", 48),
                 min_new_tokens=getattr(args, "min_new_tokens", 0),

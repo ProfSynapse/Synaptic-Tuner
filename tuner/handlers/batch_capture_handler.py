@@ -47,6 +47,7 @@ class BatchCaptureHandler(BaseHandler):
                 rows_path=rows,
                 out_dir=out_dir,
                 model=model,
+                model_revision=getattr(args, "model_revision", None),
                 engine=getattr(args, "engine", "hf-batched"),
                 layers=getattr(args, "layers", "all"),
                 batch_size=getattr(args, "batch_size", 16),

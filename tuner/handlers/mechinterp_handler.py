@@ -261,6 +261,7 @@ class MechInterpHandler(BaseHandler):
         return run_extract(
             config,
             model_name=model,
+            revision=self._arg("model_revision"),
             adapter=self._arg("adapter"),
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
         )
@@ -294,6 +295,7 @@ class MechInterpHandler(BaseHandler):
         return run_steer(
             config,
             model_name=model,
+            revision=self._arg("model_revision"),
             adapter=self._arg("adapter"),
             render_fn_spec=render_fn,
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),

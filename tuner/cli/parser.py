@@ -558,6 +558,7 @@ Examples:
     )
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
     parser.add_argument("--model", help="Model path for inference")
+    parser.add_argument("--model-revision", dest="model_revision", help="Model commit SHA/revision for reproducible inference loads")
     parser.add_argument("--dataset-path", help="Path to jsonl dataset")
     parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")

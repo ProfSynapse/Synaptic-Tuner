@@ -63,6 +63,7 @@ def run_batch_generate(
     prompts_path: Path,
     out_dir: Path,
     model: str,
+    model_revision: Optional[str] = None,
     engine: str = "hf-batched",
     max_new_tokens: int = 48,
     min_new_tokens: int = 0,
@@ -99,6 +100,7 @@ def run_batch_generate(
     config = {
         "verb": "batch-generate",
         "model": model,
+        "model_revision": model_revision,
         "engine": engine,
         "max_new_tokens": max_new_tokens,
         "min_new_tokens": min_new_tokens,
@@ -131,6 +133,7 @@ def run_batch_generate(
     gen_engine = get_generate_engine(
         engine,
         model_name=model,
+        revision=model_revision,
         max_new_tokens=max_new_tokens,
         min_new_tokens=min_new_tokens,
         do_sample=do_sample,
@@ -189,6 +192,7 @@ def run_batch_capture(
     rows_path: Path,
     out_dir: Path,
     model: str,
+    model_revision: Optional[str] = None,
     engine: str = "hf-batched",
     layers: str = "all",
     batch_size: int = 16,
@@ -222,6 +226,7 @@ def run_batch_capture(
     config = {
         "verb": "batch-capture",
         "model": model,
+        "model_revision": model_revision,
         "engine": engine,
         "layers": layers,
         "persist_dtype": persist_dtype,
@@ -248,6 +253,7 @@ def run_batch_capture(
     cap_engine = get_capture_engine(
         engine,
         model_name=model,
+        revision=model_revision,
         layers=layers,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
