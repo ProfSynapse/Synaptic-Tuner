@@ -20,6 +20,7 @@ acknowledgement flag so a recipe never surprises a shared machine.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -48,11 +49,12 @@ def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None, re
 
     major = int(transformers.__version__.split(".")[0])
     dtype_kwarg = {"dtype": torch.bfloat16} if major >= 5 else {"torch_dtype": torch.bfloat16}
-    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
+    token = os.environ.get("HF_TOKEN") or None
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision, token=token)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, revision=revision, device_map="auto", **dtype_kwarg
+        model_name, revision=revision, token=token, device_map="auto", **dtype_kwarg
     )
     if adapter:
         from peft import PeftModel

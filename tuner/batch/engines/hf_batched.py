@@ -22,6 +22,7 @@ Padding discipline
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from tuner.batch.engines.base import (
@@ -74,7 +75,10 @@ class _ModelBundle:
 
         if tokenizer is None:
             tokenizer = AutoTokenizer.from_pretrained(
-                model_name, revision=revision, trust_remote_code=trust_remote_code
+                model_name,
+                revision=revision,
+                token=os.environ.get("HF_TOKEN") or None,
+                trust_remote_code=trust_remote_code,
             )
         self.tokenizer = tokenizer
 
@@ -85,6 +89,7 @@ class _ModelBundle:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 revision=revision,
+                token=os.environ.get("HF_TOKEN") or None,
                 trust_remote_code=trust_remote_code,
                 torch_dtype=torch_dtype,
             )
