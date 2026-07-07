@@ -255,6 +255,36 @@ def test_bucket_push_command_parses():
     assert args.dest == "runs/manual_uploads/"
 
 
+def test_mechinterp_run_config_flags_parse():
+    parser = create_parser()
+
+    args = parser.parse_args(
+        [
+            "mechinterp",
+            "run",
+            "--config",
+            "MechInterp/configs/pipeline.yaml",
+            "--provider",
+            "modal",
+            "--from-step",
+            "extract",
+            "--skip-step",
+            "fit",
+            "--i-know-this-runs-on-gpu",
+            "--yes",
+        ]
+    )
+
+    assert args.command == "mechinterp"
+    assert args.subcommand == "run"
+    assert args.ml_config == "MechInterp/configs/pipeline.yaml"
+    assert args.provider == "modal"
+    assert args.from_step == "extract"
+    assert args.skip_step == ["fit"]
+    assert args.i_know_this_runs_on_gpu is True
+    assert args.auto_confirm is True
+
+
 def test_flywheel_export_fixtures_command_parses():
     parser = create_parser()
 
