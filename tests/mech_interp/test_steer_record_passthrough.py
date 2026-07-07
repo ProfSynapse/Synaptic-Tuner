@@ -121,6 +121,8 @@ def test_computed_keys_are_never_shadowed_by_a_same_named_pool_field():
     # clobber the generated text the pass itself computes.
     row = _fresh_row()
     row["answer_text"] = "SHOULD NOT SURVIVE"
+    row["n_new_tokens"] = -1
+    row["terminated_naturally"] = "spoofed"
 
     model = _build_tiny_model()
     tokenizer = _build_tiny_tokenizer()
@@ -130,6 +132,10 @@ def test_computed_keys_are_never_shadowed_by_a_same_named_pool_field():
     rec = _run_one_pass(model, tokenizer, controller, row, generation, "anchor", _render)
 
     assert rec["answer_text"] != "SHOULD NOT SURVIVE"
+    assert rec["n_new_tokens"] != -1
+    assert rec["terminated_naturally"] != "spoofed"
+    assert isinstance(rec["n_new_tokens"], int)
+    assert isinstance(rec["terminated_naturally"], bool)
 
 
 def test_grader_can_now_read_aliases_carried_through_the_record():

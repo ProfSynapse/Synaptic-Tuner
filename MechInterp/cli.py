@@ -202,7 +202,15 @@ def _direction_tensor(readout_record: dict):
 # Keys _run_one_pass / _run_batch compute themselves; a same-named pool-row
 # field is never allowed to shadow them (see _passthrough_fields).
 _COMPUTED_RECORD_KEYS = frozenset(
-    {"row_key", "strength", "active", "answer_text", "prompt_len"}
+    {
+        "row_key",
+        "strength",
+        "active",
+        "answer_text",
+        "prompt_len",
+        "n_new_tokens",
+        "terminated_naturally",
+    }
 )
 
 
@@ -227,6 +235,62 @@ def _passthrough_fields(row: dict) -> dict:
         k: v
         for k, v in row.items()
         if not k.startswith("_") and k not in _COMPUTED_RECORD_KEYS
+    }
+
+
+def _eos_token_ids(tokenizer, generation) -> set[int]:
+    ids: set[int] = set()
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is not None:
+        ids.add(int(eos_id))
+    for token in getattr(generation, "extra_eos_tokens", []) or []:
+        try:
+            tok_id = tokenizer.convert_tokens_to_ids(token)
+        except Exception:
+            continue
+        unk_id = getattr(tokenizer, "unk_token_id", None)
+        if isinstance(tok_id, int) and tok_id >= 0 and tok_id != unk_id:
+            ids.add(int(tok_id))
+    return ids
+
+
+def _generation_kwargs(tokenizer, generation) -> dict:
+    kwargs = {
+        "max_new_tokens": generation.max_new_tokens,
+        "min_new_tokens": generation.min_new_tokens,
+        "do_sample": generation.do_sample,
+        "num_beams": 1,
+        "return_dict_in_generate": True,
+    }
+    if generation.do_sample:
+        kwargs["temperature"] = generation.temperature
+        kwargs["top_p"] = generation.top_p
+    eos_ids = sorted(_eos_token_ids(tokenizer, generation))
+    if eos_ids:
+        kwargs["eos_token_id"] = eos_ids[0] if len(eos_ids) == 1 else eos_ids
+    pad_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_id is None:
+        pad_id = getattr(tokenizer, "eos_token_id", None)
+    if pad_id is not None:
+        kwargs["pad_token_id"] = int(pad_id)
+    return kwargs
+
+
+def _continuation_record(tokenizer, continuation, generation) -> dict:
+    token_ids = [int(t) for t in continuation.detach().cpu().tolist()]
+    eos_ids = _eos_token_ids(tokenizer, generation)
+    stop_len = len(token_ids)
+    if eos_ids:
+        for idx, tok_id in enumerate(token_ids):
+            if tok_id in eos_ids:
+                stop_len = idx + 1
+                break
+    effective_ids = token_ids[:stop_len]
+    text = tokenizer.decode(effective_ids, skip_special_tokens=True)
+    return {
+        "answer_text": text,
+        "n_new_tokens": int(stop_len),
+        "terminated_naturally": bool(stop_len < generation.max_new_tokens),
     }
 
 
@@ -257,21 +321,18 @@ def _run_one_pass(
     )
     gen = model.generate(
         **enc,
-        max_new_tokens=generation.max_new_tokens,
-        do_sample=generation.do_sample,
-        num_beams=1,
-        return_dict_in_generate=True,
+        **_generation_kwargs(tokenizer, generation),
     )
     controller.reset()
     full = gen.sequences[0]
     prompt_len = enc["input_ids"].shape[1]
-    text = tokenizer.decode(full[prompt_len:], skip_special_tokens=True)
+    generated = _continuation_record(tokenizer, full[prompt_len:], generation)
     return {
         **_passthrough_fields(row),
         "row_key": cell_mod.row_key_of(row),
         "strength": strength,
         "active": bool(row.get("_active", False)),
-        "answer_text": text,
+        **generated,
         "prompt_len": int(prompt_len),
     }
 
@@ -346,10 +407,7 @@ def _run_batch(
     )
     gen = model.generate(
         **enc,
-        max_new_tokens=generation.max_new_tokens,
-        do_sample=generation.do_sample,
-        num_beams=1,
-        return_dict_in_generate=True,
+        **_generation_kwargs(tokenizer, generation),
     )
     controller.reset()
 
@@ -357,15 +415,16 @@ def _run_batch(
     row_prompt_lens = enc["attention_mask"].sum(dim=1).tolist()
     records = []
     for i, row in enumerate(rows):
-        continuation = gen.sequences[i, padded_prompt_len:]
-        text = tokenizer.decode(continuation, skip_special_tokens=True)
+        generated = _continuation_record(
+            tokenizer, gen.sequences[i, padded_prompt_len:], generation
+        )
         records.append(
             {
                 **_passthrough_fields(row),
                 "row_key": cell_mod.row_key_of(row),
                 "strength": float(row.get("_strength", 0.0)),
                 "active": bool(row.get("_active", False)),
-                "answer_text": text,
+                **generated,
                 "prompt_len": int(row_prompt_lens[i]),
             }
         )
