@@ -22,6 +22,7 @@ StageKind = Literal[
     "mechinterp.extract",
     "mechinterp.probe-fit",
     "mechinterp.steer",
+    "mechinterp.dose-calibrate",
     "mechinterp.score-gates",
 ]
 
@@ -84,7 +85,12 @@ class StageConfig(BaseModel):
                 f"stage {self.name}: string commands require shell: true; "
                 "use a list argv for shell-free execution"
             )
-        if self.kind in {"mechinterp.extract", "mechinterp.probe-fit", "mechinterp.steer"} and not self.config:
+        if self.kind in {
+            "mechinterp.extract",
+            "mechinterp.probe-fit",
+            "mechinterp.steer",
+            "mechinterp.dose-calibrate",
+        } and not self.config:
             raise ValueError(f"stage {self.name}: config is required")
         if self.kind == "mechinterp.score-gates" and (
             not self.gates_config or not self.rows_path
@@ -161,14 +167,21 @@ def _repo_path(repo_root: Path, path: str) -> Path:
     return p if p.is_absolute() else repo_root / p
 
 
-def _steer_render_fn(stage: StageConfig, repo_root: Path) -> str | None:
+def _execution_render_fn(stage: StageConfig, repo_root: Path) -> str | None:
     if stage.render_fn:
         return stage.render_fn
     if not stage.config:
         return None
     try:
-        from MechInterp.config import load_steer_config
+        from MechInterp.config import (
+            load_dose_calibration_config,
+            load_steer_config,
+        )
 
+        if stage.kind == "mechinterp.dose-calibrate":
+            return load_dose_calibration_config(
+                _repo_path(repo_root, stage.config)
+            ).execution.render_fn
         return load_steer_config(_repo_path(repo_root, stage.config)).execution.render_fn
     except Exception:
         return None
@@ -229,7 +242,7 @@ def compile_stage_command(
             _stage_model(cfg, stage),
         ]
         adapter = _stage_adapter(cfg, stage)
-        render_fn = _steer_render_fn(stage, repo_root)
+        render_fn = _execution_render_fn(stage, repo_root)
         if adapter:
             cmd.extend(["--adapter", adapter])
         if render_fn:
@@ -238,6 +251,27 @@ def compile_stage_command(
             cmd.append("--i-know-this-runs-on-gpu")
         if force:
             cmd.append("--force-full-run")
+        return cmd
+
+    if stage.kind == "mechinterp.dose-calibrate":
+        cmd = [
+            python,
+            tuner,
+            "mechinterp",
+            "dose-calibrate",
+            "--mi-config",
+            str(stage.config),
+            "--model",
+            _stage_model(cfg, stage),
+        ]
+        adapter = _stage_adapter(cfg, stage)
+        render_fn = _execution_render_fn(stage, repo_root)
+        if adapter:
+            cmd.extend(["--adapter", adapter])
+        if render_fn:
+            cmd.extend(["--render-fn", render_fn])
+        if gpu_ack:
+            cmd.append("--i-know-this-runs-on-gpu")
         return cmd
 
     if stage.kind == "mechinterp.score-gates":

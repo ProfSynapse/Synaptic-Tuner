@@ -5,6 +5,7 @@ import yaml
 
 from MechInterp.config import (
     SteerCellConfig,
+    load_dose_calibration_config,
     load_steer_config,
     load_extract_config,
     load_probe_fit_config,
@@ -130,6 +131,8 @@ def test_bundled_templates_parse(tmp_path):
     assert extract.families
     probe = load_probe_fit_config(tdir / "probe_fit.yaml")
     assert probe.n_components > 0
+    dose = load_dose_calibration_config(tdir / "dose_calibration.yaml")
+    assert dose.calibration.doses
 
 
 def test_load_steer_config_roundtrip(tmp_path):

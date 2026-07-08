@@ -11,6 +11,7 @@ Verbs:
   extract     generate + capture hidden states to safetensors + manifest.
   probe_fit   fit a linear readout from extracted activations and freeze it.
   steer       run the six-block steer cell (smoke-gated).
+  dose_calibrate run a resumable dose ladder over frozen readouts.
   score_gates evaluate a gates.yaml against a per-row output JSONL.
 
 The steer and extract verbs touch a GPU; they refuse to run without an explicit
@@ -20,6 +21,7 @@ acknowledgement flag so a recipe never surprises a shared machine.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -27,9 +29,11 @@ import numpy as np
 
 from MechInterp import cell as cell_mod
 from MechInterp.config import (
+    DoseCalibrationConfig,
     SteerCellConfig,
     ExtractConfig,
     ProbeFitConfig,
+    load_dose_calibration_config,
     load_steer_config,
     load_extract_config,
     load_probe_fit_config,
@@ -511,6 +515,191 @@ def run_steer(
     handle.remove()
     cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)
     print(f"Steer cell complete. Output {out_path}, config_sha {config_sha}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# dose_calibrate
+# --------------------------------------------------------------------------
+
+
+def _target_readout_names(config: DoseCalibrationConfig) -> list[str]:
+    if config.law.readout == "*":
+        return [readout.name for readout in config.readouts]
+    return [config.law.readout]
+
+
+def _strength_for_dose(config: DoseCalibrationConfig, dose: float, sigma: float) -> float:
+    if config.calibration.dose_kind == "strength":
+        return float(dose)
+    if config.law.kind == "erase_write":
+        return float(dose) / float(sigma or 1.0)
+    return float(dose)
+
+
+def _readback_for_record(readback: dict | None, row_index: int) -> dict:
+    if not readback:
+        return {}
+    active_rows = [int(i) for i in readback.get("active_rows", [])]
+    if row_index not in active_rows:
+        return {
+            "readback_offtarget_abs_max": readback.get("offtarget_abs_max"),
+            "readback_offtarget_abs_mean": readback.get("offtarget_abs_mean"),
+        }
+    idx = active_rows.index(row_index)
+    commanded = readback.get("commanded", [])
+    measured = readback.get("measured", [])
+    return {
+        "readback_commanded": commanded[idx] if idx < len(commanded) else None,
+        "readback_measured": measured[idx] if idx < len(measured) else None,
+        "readback_offtarget_abs_max": readback.get("offtarget_abs_max"),
+        "readback_offtarget_abs_mean": readback.get("offtarget_abs_mean"),
+    }
+
+
+def _write_checkpoint_record(handle, rec: dict) -> None:
+    handle.write(json.dumps(rec) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
+def run_dose_calibration(
+    config: DoseCalibrationConfig,
+    model_name: str,
+    adapter: Optional[str],
+    render_fn_spec: str,
+    gpu_ack: bool,
+) -> int:
+    guard = _require_gpu_ack(gpu_ack)
+    if guard is not None:
+        return guard
+    import torch
+
+    from MechInterp.intervention import (
+        GenerationInterventionController,
+        InterventionHook,
+        get_decoder_layer,
+    )
+    from MechInterp.grading import load_grader
+    from MechInterp.probe import load_frozen_direction
+
+    config_sha = cell_mod.compute_config_sha(config)
+    if (
+        config.surface.expected_config_sha
+        and config.surface.expected_config_sha != config_sha
+    ):
+        print(
+            f"Config sha mismatch: expected {config.surface.expected_config_sha}, "
+            f"got {config_sha}. Aborting."
+        )
+        return 3
+
+    rows = cell_mod.load_jsonl(config.surface.rows_path)
+    render_fn = _load_callable(render_fn_spec)
+    grader = load_grader(config.execution.grader) if config.execution.grader else None
+    readout_by_name = {
+        readout.name: load_frozen_direction(readout.path)
+        for readout in config.readouts
+    }
+
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    out_path = Path(config.execution.output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path = Path(config.execution.summary_path)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+    run_summaries = {}
+    with open(out_path, "a") as out:
+        for readout_name in _target_readout_names(config):
+            readout = readout_by_name[readout_name]
+            layer = config.law.layer if config.law.layer is not None else readout["layer"]
+            sigma = float(readout.get("sigma", 1.0))
+            direction = _direction_tensor(readout)
+            hook = InterventionHook(
+                law=config.law.kind,
+                direction=direction,
+                sigma=sigma,
+                position=config.law.position,
+                measure_readback=True,
+            )
+            controller = GenerationInterventionController(hook)
+            layer_module = get_decoder_layer(model, layer)
+            handle = layer_module.register_forward_hook(controller)
+            try:
+                for dose in config.calibration.doses:
+                    strength = _strength_for_dose(config, float(dose), sigma)
+                    pending = cell_mod.dose_pending_rows(
+                        rows,
+                        out_path,
+                        resume=config.execution.resume,
+                        readout=readout_name,
+                        dose=float(dose),
+                        strength=strength,
+                        selection=config.calibration.selection,
+                        write_at_zero=False,
+                    )
+                    run_summaries[f"{readout_name}:{float(dose):.17g}"] = {
+                        "layer": layer,
+                        "sigma": sigma,
+                        "strength": strength,
+                        "n_pending": len(pending),
+                    }
+                    for start in range(0, len(pending), config.execution.batch_size):
+                        chunk = pending[start : start + config.execution.batch_size]
+                        hook.last_readback = None
+                        if len(chunk) == 1:
+                            recs = [
+                                _run_one_pass(
+                                    model,
+                                    tokenizer,
+                                    controller,
+                                    chunk[0],
+                                    config.surface.generation,
+                                    config.law.generation_mode,
+                                    render_fn,
+                                )
+                            ]
+                        else:
+                            recs = _run_batch(
+                                model,
+                                tokenizer,
+                                controller,
+                                chunk,
+                                config.surface.generation,
+                                config.law.generation_mode,
+                                render_fn,
+                            )
+                        readback = hook.last_readback
+                        for idx, rec in enumerate(recs):
+                            rec.update(
+                                {
+                                    "readout": readout_name,
+                                    "readout_path": next(
+                                        r.path for r in config.readouts if r.name == readout_name
+                                    ),
+                                    "layer": layer,
+                                    "dose": float(dose),
+                                    "dose_kind": config.calibration.dose_kind,
+                                    "sigma": sigma,
+                                    "config_sha": config_sha,
+                                }
+                            )
+                            rec.update(_readback_for_record(readback, idx))
+                            if grader is not None:
+                                rec.update(grader(rec))
+                            _write_checkpoint_record(out, rec)
+            finally:
+                handle.remove()
+
+    summary = cell_mod.summarize_dose_calibration(out_path)
+    summary["config_sha"] = config_sha
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    cell_mod.write_dose_manifest(out_path, config, config_sha, run_summaries)
+    print(
+        f"Dose calibration complete. Output {out_path}, summary {summary_path}, "
+        f"config_sha {config_sha}"
+    )
     return 0
 
 
