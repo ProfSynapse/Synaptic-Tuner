@@ -425,11 +425,11 @@ Examples:
     parser.add_argument("--dirs-only", action="store_true", help="For bucket list, show directories only.")
     parser.add_argument("--follow", action="store_true", help="Stream live logs for cloud-jobs logs.")
 
-    # MechInterp flags (extract / probe-fit / steer / score-gates sub-commands)
+    # MechInterp flags (extract / probe-fit / steer / dose-calibrate / score-gates sub-commands)
     parser.add_argument(
         "--mi-config",
         dest="mechinterp_config",
-        help="Path to a MechInterp recipe YAML (mechinterp extract/probe-fit/steer)",
+        help="Path to a MechInterp recipe YAML (mechinterp extract/probe-fit/steer/dose-calibrate)",
     )
     parser.add_argument(
         "--pipeline-config",
@@ -439,7 +439,7 @@ Examples:
     parser.add_argument(
         "--render-fn",
         dest="render_fn",
-        help="Prompt render callable 'module.path:callable' (mechinterp steer/extract)",
+        help="Prompt render callable 'module.path:callable' (mechinterp steer/extract/dose-calibrate)",
     )
     parser.add_argument(
         "--adapter",
@@ -466,7 +466,7 @@ Examples:
         "--i-know-this-runs-on-gpu",
         dest="i_know_this_runs_on_gpu",
         action="store_true",
-        help="Acknowledge that mechinterp extract/steer load a model and use a GPU.",
+        help="Acknowledge that mechinterp extract/steer/dose-calibrate load a model and use a GPU.",
     )
     parser.add_argument(
         "--force-full-run",

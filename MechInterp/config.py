@@ -234,6 +234,89 @@ class SteerCellConfig(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# Dose calibration
+# --------------------------------------------------------------------------
+
+
+class DoseCalibrationSelection(BaseModel):
+    """Optional row-selection rule for applying a calibration dose.
+
+    Every row is still emitted to the checkpoint JSONL. The selection rule only
+    decides whether the intervention law is active for that row at the current
+    dose. With no selector, every row is active.
+    """
+
+    score_field: Optional[str] = None
+    threshold: Optional[float] = None
+    flag_field: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _valid_selection(self) -> "DoseCalibrationSelection":
+        if self.score_field is not None and self.threshold is None:
+            raise ValueError("dose calibration selection: score_field requires threshold")
+        if self.score_field is not None and self.flag_field is not None:
+            raise ValueError(
+                "dose calibration selection: score_field and flag_field are mutually exclusive"
+            )
+        return self
+
+
+class DoseCalibrationBlock(BaseModel):
+    """Dose ladder and optional selection rule for a calibration run."""
+
+    doses: list[float] = Field(..., min_length=1)
+    dose_kind: Literal["setpoint", "strength"] = Field(
+        default="setpoint",
+        description=(
+            "For erase_write, setpoint means each dose is an absolute projection "
+            "target and is converted to strength=dose/sigma. strength passes "
+            "the dose directly to the intervention hook."
+        ),
+    )
+    selection: DoseCalibrationSelection = Field(
+        default_factory=DoseCalibrationSelection
+    )
+
+
+class DoseCalibrationExecution(BaseModel):
+    """Run controls for generic dose calibration."""
+
+    output_path: str = Field(
+        ..., min_length=1, description="Per-row checkpoint JSONL"
+    )
+    summary_path: str = Field(
+        ..., min_length=1, description="Aggregated summary JSON"
+    )
+    resume: bool = True
+    render_fn: Optional[str] = Field(
+        default=None, description="Prompt render callable 'module.path:callable'"
+    )
+    grader: Optional[str] = Field(
+        default=None, description="Optional grader spec 'module.path:callable'"
+    )
+    batch_size: int = Field(default=1, ge=1)
+
+
+class DoseCalibrationConfig(BaseModel):
+    """Generic resumable dose calibration over readouts and dose rungs."""
+
+    surface: SurfaceConfig
+    readouts: list[ReadoutRef] = Field(..., min_length=1)
+    law: LawConfig
+    calibration: DoseCalibrationBlock
+    execution: DoseCalibrationExecution
+
+    @model_validator(mode="after")
+    def _readout_exists(self) -> "DoseCalibrationConfig":
+        names = {r.name for r in self.readouts}
+        if self.law.readout != "*" and self.law.readout not in names:
+            raise ValueError(
+                f"law.readout {self.law.readout!r} is not a declared readout"
+            )
+        return self
+
+
+# --------------------------------------------------------------------------
 # Extraction and probe-fit
 # --------------------------------------------------------------------------
 
@@ -289,3 +372,7 @@ def load_extract_config(path: str | Path) -> ExtractConfig:
 
 def load_probe_fit_config(path: str | Path) -> ProbeFitConfig:
     return ProbeFitConfig(**_load_yaml(path))
+
+
+def load_dose_calibration_config(path: str | Path) -> DoseCalibrationConfig:
+    return DoseCalibrationConfig(**_load_yaml(path))

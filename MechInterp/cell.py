@@ -38,7 +38,12 @@ from typing import Optional
 
 import numpy as np
 
-from MechInterp.config import ArmConfig, SteerCellConfig
+from MechInterp.config import (
+    ArmConfig,
+    DoseCalibrationConfig,
+    DoseCalibrationSelection,
+    SteerCellConfig,
+)
 
 
 def load_jsonl(path: str | Path) -> list[dict]:
@@ -58,7 +63,7 @@ def row_key_of(row: dict) -> str:
     raise KeyError("row has no row_key / id / key field")
 
 
-def compute_config_sha(config: SteerCellConfig) -> str:
+def compute_config_sha(config: SteerCellConfig | DoseCalibrationConfig) -> str:
     """Deterministic sha256 over the canonicalized config (readouts by path).
 
     surface.expected_config_sha is excluded from the payload before hashing:
@@ -219,6 +224,172 @@ def pending_rows(
         rr["_active"] = selected and (val != 0.0 or write_at_zero)
         pending.append(rr)
     return pending
+
+
+# --------------------------------------------------------------------------
+# Dose calibration state and summaries
+# --------------------------------------------------------------------------
+
+
+def _dose_key(dose: float | str) -> str:
+    return f"{float(dose):.17g}"
+
+
+def _dose_record_key(rec: dict) -> tuple[str, str, str]:
+    return (
+        str(rec.get("readout")),
+        _dose_key(rec.get("dose", 0.0)),
+        str(rec.get("row_key")),
+    )
+
+
+def dose_completed_keys(output_path: str | Path) -> set[tuple[str, str, str]]:
+    """Return completed (readout, dose, row_key) cells from a checkpoint JSONL."""
+    path = Path(output_path)
+    if not path.exists():
+        return set()
+    done = set()
+    for rec in load_jsonl(path):
+        if "readout" in rec and "dose" in rec and "row_key" in rec:
+            done.add(_dose_record_key(rec))
+    return done
+
+
+def dose_selection_active(selection: DoseCalibrationSelection, row: dict) -> bool:
+    """Whether a row should receive the current calibration dose."""
+    if selection.flag_field is not None:
+        return bool(row.get(selection.flag_field))
+    if selection.score_field is not None:
+        value = row.get(selection.score_field)
+        return value is not None and float(value) >= float(selection.threshold)
+    return True
+
+
+def dose_pending_rows(
+    rows: list[dict],
+    output_path: str | Path,
+    *,
+    resume: bool,
+    readout: str,
+    dose: float,
+    strength: float,
+    selection: DoseCalibrationSelection,
+    write_at_zero: bool = False,
+) -> list[dict]:
+    """Rows still needing a specific readout+dose calibration checkpoint."""
+    done = dose_completed_keys(output_path) if resume else set()
+    pending = []
+    dose_id = _dose_key(dose)
+    for row in rows:
+        rk = row_key_of(row)
+        if (str(readout), dose_id, rk) in done:
+            continue
+        active = dose_selection_active(selection, row)
+        rr = dict(row)
+        rr["_strength"] = float(strength)
+        rr["_active"] = bool(active and (float(strength) != 0.0 or write_at_zero))
+        pending.append(rr)
+    return pending
+
+
+_SUMMARY_EXCLUDED_BOOL_FIELDS = frozenset(
+    {"active", "readback_within_tolerance"}
+)
+
+
+def _mean(values: list[float]) -> float | None:
+    return (sum(values) / len(values)) if values else None
+
+
+def summarize_dose_calibration(records_or_path) -> dict:
+    """Aggregate a dose-calibration checkpoint JSONL.
+
+    The summary is deliberately schema-light: project graders can add arbitrary
+    boolean outcome fields, and each boolean is reported as a true-rate by
+    readout+dose group. Numeric readback fields get means when present.
+    """
+    if isinstance(records_or_path, (str, Path)):
+        records = load_jsonl(records_or_path)
+    else:
+        records = list(records_or_path)
+
+    groups: dict[tuple[str, str], dict] = {}
+    for rec in records:
+        if "readout" not in rec or "dose" not in rec:
+            continue
+        key = (str(rec["readout"]), _dose_key(rec["dose"]))
+        group = groups.setdefault(
+            key,
+            {
+                "readout": str(rec["readout"]),
+                "dose": float(rec["dose"]),
+                "n": 0,
+                "n_active": 0,
+                "_strengths": [],
+                "_readback_measured": [],
+                "_readback_commanded": [],
+                "_bool_counts": {},
+            },
+        )
+        group["n"] += 1
+        if bool(rec.get("active", False)):
+            group["n_active"] += 1
+        if rec.get("strength") is not None:
+            group["_strengths"].append(float(rec["strength"]))
+        if rec.get("readback_measured") is not None:
+            group["_readback_measured"].append(float(rec["readback_measured"]))
+        if rec.get("readback_commanded") is not None:
+            group["_readback_commanded"].append(float(rec["readback_commanded"]))
+        for field, value in rec.items():
+            if isinstance(value, bool) and field not in _SUMMARY_EXCLUDED_BOOL_FIELDS:
+                counts = group["_bool_counts"].setdefault(field, {"true": 0, "false": 0})
+                counts["true" if value else "false"] += 1
+
+    out_groups = []
+    for _, group in sorted(groups.items(), key=lambda item: (item[0][0], float(item[0][1]))):
+        bool_metrics = {}
+        for field, counts in sorted(group["_bool_counts"].items()):
+            total = counts["true"] + counts["false"]
+            bool_metrics[field] = {
+                "true": counts["true"],
+                "false": counts["false"],
+                "rate": (counts["true"] / total) if total else None,
+            }
+        out_groups.append(
+            {
+                "readout": group["readout"],
+                "dose": group["dose"],
+                "n": group["n"],
+                "n_active": group["n_active"],
+                "strength_mean": _mean(group["_strengths"]),
+                "readback_measured_mean": _mean(group["_readback_measured"]),
+                "readback_commanded_mean": _mean(group["_readback_commanded"]),
+                "bool_metrics": bool_metrics,
+            }
+        )
+    return {"n_records": len(records), "groups": out_groups}
+
+
+def write_dose_manifest(
+    output_path: str | Path,
+    config: DoseCalibrationConfig,
+    config_sha: str,
+    run_summaries: dict,
+) -> Path:
+    """Write a dose-calibration manifest next to the checkpoint JSONL."""
+    p = Path(output_path)
+    manifest_path = p.with_suffix(p.suffix + ".manifest.json")
+    manifest = {
+        "config_sha": config_sha,
+        "law": config.law.model_dump(mode="json"),
+        "readouts": [r.model_dump(mode="json") for r in config.readouts],
+        "calibration": config.calibration.model_dump(mode="json"),
+        "surface": config.surface.model_dump(mode="json"),
+        "runs": run_summaries,
+    }
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+    return manifest_path
 
 
 # --------------------------------------------------------------------------

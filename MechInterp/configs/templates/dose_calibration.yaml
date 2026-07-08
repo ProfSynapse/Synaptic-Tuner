@@ -1,0 +1,25 @@
+surface:
+  rows_path: data/calibration_rows.jsonl
+  seed: 0
+  generation:
+    max_new_tokens: 96
+    do_sample: false
+readouts:
+  - name: axis
+    path: artifacts/direction.json
+law:
+  kind: erase_write
+  readout: "*"
+  position: anchor_onward
+  generation_mode: gen_stream
+calibration:
+  doses: [25, 50, 75, 100]
+  dose_kind: setpoint
+  selection: {}
+execution:
+  output_path: runs/dose_calibration/checkpoints.jsonl
+  summary_path: runs/dose_calibration/summary.json
+  resume: true
+  render_fn: project.render:prompt
+  grader: null
+  batch_size: 1

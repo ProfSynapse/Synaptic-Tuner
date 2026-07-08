@@ -1,7 +1,8 @@
 """
 Mech-interp handler for the Synaptic Tuner CLI.
 
-Purpose: orchestrate the MechInterp verbs (extract, probe-fit, steer, score-gates)
+Purpose: orchestrate the MechInterp verbs (extract, probe-fit, steer,
+dose-calibrate, score-gates)
 Used by: router when the 'mechinterp' command is invoked.
 
 Each sub-command is recipe-YAML driven, mirroring the other config-first verbs.
@@ -14,6 +15,7 @@ Sub-commands:
   extract      generate + capture hidden states to safetensors + manifest
   probe-fit    fit a linear readout and freeze a direction JSON
   steer        run the six-block steer cell (smoke-gated)
+  dose-calibrate resumable dose ladder over one or more frozen readouts
   score-gates  evaluate a gates.yaml against a per-row output JSONL
   list-configs show bundled example recipes
 """
@@ -63,12 +65,14 @@ class MechInterpHandler(BaseHandler):
             return self._handle_probe_fit()
         if sub == "steer":
             return self._handle_steer()
+        if sub == "dose-calibrate":
+            return self._handle_dose_calibrate()
         if sub == "score-gates":
             return self._handle_score_gates()
 
         msg = (
             "mechinterp requires a sub-command: run, extract, probe-fit, steer, "
-            "score-gates, list-configs"
+            "dose-calibrate, score-gates, list-configs"
         )
         if self.json_mode:
             self.output_error(msg, code="SUBCOMMAND_REQUIRED")
@@ -298,6 +302,30 @@ class MechInterpHandler(BaseHandler):
             render_fn_spec=render_fn,
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
             force=bool(self._arg("force_full_run", False)),
+        )
+
+    def _handle_dose_calibrate(self) -> int:
+        from MechInterp.cli import run_dose_calibration
+        from MechInterp.config import load_dose_calibration_config
+
+        config_path = self._require("mechinterp_config", "--mi-config")
+        model = self._require("model", "--model")
+        if not config_path or not model:
+            return 1
+        config = load_dose_calibration_config(config_path)
+        render_fn = self._arg("render_fn") or config.execution.render_fn
+        if not render_fn:
+            self.output_error(
+                "dose-calibrate requires execution.render_fn in the config or --render-fn",
+                code="ARG_REQUIRED",
+            )
+            return 1
+        return run_dose_calibration(
+            config,
+            model_name=model,
+            adapter=self._arg("adapter"),
+            render_fn_spec=render_fn,
+            gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
         )
 
     def _handle_score_gates(self) -> int:
