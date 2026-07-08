@@ -203,6 +203,15 @@ class ExecutionConfig(BaseModel):
             "_run_batch and its equivalence tests for the correctness contract."
         ),
     )
+    redact_fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional recursive field names to drop before writing per-row "
+            "checkpoint/output JSONL records. Use this for restricted row "
+            "metadata or generated text fields that are needed during grading "
+            "but must not persist in resumable artifacts."
+        ),
+    )
 
 
 class SteerCellConfig(BaseModel):
@@ -295,6 +304,13 @@ class DoseCalibrationExecution(BaseModel):
         default=None, description="Optional grader spec 'module.path:callable'"
     )
     batch_size: int = Field(default=1, ge=1)
+    redact_fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional recursive field names to drop before writing per-row "
+            "checkpoint/output JSONL records."
+        ),
+    )
 
 
 class DoseCalibrationConfig(BaseModel):

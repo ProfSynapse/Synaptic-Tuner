@@ -60,6 +60,9 @@ execution:
   output_path: MechInterp/runs/example/rows.jsonl
   resume: true
   grader: MechInterp.grading.interface:example_grader
+  # Optional recursive drop list for restricted per-row artifacts.
+  # Example: [answer_text, aliases, answer_value, raw_output]
+  redact_fields: []
 
 # 6. smoke: readback tolerances that gate the full arms.
 smoke:

@@ -92,6 +92,7 @@ def test_dose_config_parses_defaults_and_loader(tmp_path):
     assert cfg.calibration.dose_kind == "strength"
     assert cfg.execution.resume is True
     assert cfg.execution.batch_size == 1
+    assert cfg.execution.redact_fields == []
 
     path = tmp_path / "dose.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -105,6 +106,14 @@ def test_dose_config_accepts_setpoint_dose_kind(tmp_path):
     data["calibration"]["dose_kind"] = "setpoint"
     cfg = DoseCalibrationConfig(**data)
     assert cfg.calibration.dose_kind == "setpoint"
+
+
+def test_dose_config_accepts_checkpoint_redaction_fields(tmp_path):
+    DoseCalibrationConfig, _ = _required_config_api()
+    data = _minimal_dose_dict(tmp_path)
+    data["execution"]["redact_fields"] = ["answer_text", "aliases"]
+    cfg = DoseCalibrationConfig(**data)
+    assert cfg.execution.redact_fields == ["answer_text", "aliases"]
 
 
 def test_dose_law_readout_must_be_declared(tmp_path):

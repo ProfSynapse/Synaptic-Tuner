@@ -234,6 +234,27 @@ def _passthrough_fields(row: dict) -> dict:
     }
 
 
+def _redact_record_fields(value, redact_fields: set[str]):
+    if not redact_fields:
+        return value
+    if isinstance(value, dict):
+        return {
+            k: _redact_record_fields(v, redact_fields)
+            for k, v in value.items()
+            if k not in redact_fields
+        }
+    if isinstance(value, list):
+        return [_redact_record_fields(v, redact_fields) for v in value]
+    return value
+
+
+def _write_checkpoint_record(handle, rec: dict, redact_fields: set[str] | None = None) -> None:
+    rec = _redact_record_fields(rec, redact_fields or set())
+    handle.write(json.dumps(rec) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
 def _run_one_pass(
     model,
     tokenizer,
@@ -476,6 +497,7 @@ def run_steer(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out_path, "a") as out:
+        redact_fields = set(config.execution.redact_fields)
         for arm in config.arms:
             strengths = strengths_by_arm[arm.name]
             # A gain_field arm always writes at its computed value even when
@@ -498,7 +520,7 @@ def run_steer(
                     rec["arm"] = arm.name
                     if grader is not None:
                         rec.update(grader(rec))
-                    out.write(json.dumps(rec) + "\n")
+                    _write_checkpoint_record(out, rec, redact_fields)
             else:
                 for i in range(0, len(pending), batch_size):
                     chunk = pending[i : i + batch_size]
@@ -510,7 +532,7 @@ def run_steer(
                         rec["arm"] = arm.name
                         if grader is not None:
                             rec.update(grader(rec))
-                        out.write(json.dumps(rec) + "\n")
+                        _write_checkpoint_record(out, rec, redact_fields)
 
     handle.remove()
     cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)
@@ -555,12 +577,6 @@ def _readback_for_record(readback: dict | None, row_index: int) -> dict:
         "readback_offtarget_abs_max": readback.get("offtarget_abs_max"),
         "readback_offtarget_abs_mean": readback.get("offtarget_abs_mean"),
     }
-
-
-def _write_checkpoint_record(handle, rec: dict) -> None:
-    handle.write(json.dumps(rec) + "\n")
-    handle.flush()
-    os.fsync(handle.fileno())
 
 
 def run_dose_calibration(
@@ -610,6 +626,7 @@ def run_dose_calibration(
 
     run_summaries = {}
     with open(out_path, "a") as out:
+        redact_fields = set(config.execution.redact_fields)
         for readout_name in _target_readout_names(config):
             readout = readout_by_name[readout_name]
             layer = config.law.layer if config.law.layer is not None else readout["layer"]
@@ -687,7 +704,7 @@ def run_dose_calibration(
                             rec.update(_readback_for_record(readback, idx))
                             if grader is not None:
                                 rec.update(grader(rec))
-                            _write_checkpoint_record(out, rec)
+                            _write_checkpoint_record(out, rec, redact_fields)
             finally:
                 handle.remove()
 
