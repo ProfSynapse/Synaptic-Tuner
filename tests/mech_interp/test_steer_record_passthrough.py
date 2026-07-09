@@ -20,6 +20,8 @@ exercises the real generation path rather than a stub, then checks the
 returned record dict rather than the generated text.
 """
 
+import json
+
 from tests.mech_interp.test_batched_generation import (
     _build_controller,
     _build_tiny_model,
@@ -27,9 +29,13 @@ from tests.mech_interp.test_batched_generation import (
     _render,
 )
 
-from MechInterp.cli import _run_batch, _run_one_pass
+from MechInterp.cli import (
+    _redact_record_fields,
+    _run_batch,
+    _run_one_pass,
+    _write_checkpoint_record,
+)
 from MechInterp.config import GenerationContract
-from MechInterp.intervention import get_decoder_layer
 
 _LAYER_IDX = 0
 _MAX_NEW_TOKENS = 4
@@ -156,3 +162,41 @@ def test_grader_returns_none_when_aliases_absent_documenting_the_old_failure():
     # the pool row actually carried.
     grade = _grader({"answer_text": "w4 lives here"})
     assert grade["correct"] is None
+
+
+def test_record_redaction_is_recursive_and_opt_in():
+    rec = {
+        "row_key": "r0",
+        "answer_text": "generated",
+        "aliases": ["gold"],
+        "grade": {"answer_value": "decoded", "correct": True},
+        "nested": [{"answer_text": "inner", "keep": 1}],
+    }
+
+    redacted = _redact_record_fields(rec, {"answer_text", "aliases", "answer_value"})
+
+    assert redacted == {
+        "row_key": "r0",
+        "grade": {"correct": True},
+        "nested": [{"keep": 1}],
+    }
+    assert _redact_record_fields(rec, set()) is rec
+
+
+def test_checkpoint_writer_redacts_before_persisting(tmp_path):
+    path = tmp_path / "rows.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        _write_checkpoint_record(
+            handle,
+            {
+                "row_key": "r0",
+                "answer_text": "generated",
+                "grade": {"answer_value": "decoded", "correct": True},
+            },
+            {"answer_text", "answer_value"},
+        )
+
+    [record] = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert record == {"row_key": "r0", "grade": {"correct": True}}

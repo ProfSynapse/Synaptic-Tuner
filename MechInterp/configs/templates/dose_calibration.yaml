@@ -23,3 +23,6 @@ execution:
   render_fn: project.render:prompt
   grader: null
   batch_size: 1
+  # Optional recursive drop list for restricted per-row artifacts.
+  # Example: [answer_text, aliases, answer_value, raw_output]
+  redact_fields: []
