@@ -45,18 +45,19 @@ from MechInterp.config import (
 # --------------------------------------------------------------------------
 
 
-def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None):
+def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None, revision: Optional[str] = None):
     import torch
     import transformers
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     major = int(transformers.__version__.split(".")[0])
     dtype_kwarg = {"dtype": torch.bfloat16} if major >= 5 else {"torch_dtype": torch.bfloat16}
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    token = os.environ.get("HF_TOKEN") or None
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision, token=token)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", **dtype_kwarg
+        model_name, revision=revision, token=token, device_map="auto", **dtype_kwarg
     )
     if adapter:
         from peft import PeftModel
@@ -88,7 +89,7 @@ def _load_callable(spec: str) -> Callable:
 # --------------------------------------------------------------------------
 
 
-def run_extract(config: ExtractConfig, model_name: str, adapter: Optional[str], gpu_ack: bool) -> int:
+def run_extract(config: ExtractConfig, model_name: str, revision: Optional[str], adapter: Optional[str], gpu_ack: bool) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
         return guard
@@ -97,7 +98,7 @@ def run_extract(config: ExtractConfig, model_name: str, adapter: Optional[str], 
     rows = cell_mod.load_jsonl(config.rows_path)
     render_fn = _load_callable(config.render_fn)
     content_end_fn = _load_callable(config.content_end_fn)
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
     spec = PositionSpec(
         families=config.families, every_k=config.every_k, layers=config.layers
     )
@@ -206,7 +207,15 @@ def _direction_tensor(readout_record: dict):
 # Keys _run_one_pass / _run_batch compute themselves; a same-named pool-row
 # field is never allowed to shadow them (see _passthrough_fields).
 _COMPUTED_RECORD_KEYS = frozenset(
-    {"row_key", "strength", "active", "answer_text", "prompt_len"}
+    {
+        "row_key",
+        "strength",
+        "active",
+        "answer_text",
+        "prompt_len",
+        "n_new_tokens",
+        "terminated_naturally",
+    }
 )
 
 
@@ -253,6 +262,60 @@ def _write_checkpoint_record(handle, rec: dict, redact_fields: set[str] | None =
     handle.write(json.dumps(rec) + "\n")
     handle.flush()
     os.fsync(handle.fileno())
+def _eos_token_ids(tokenizer, generation) -> set[int]:
+    ids: set[int] = set()
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    if eos_id is not None:
+        ids.add(int(eos_id))
+    for token in getattr(generation, "extra_eos_tokens", []) or []:
+        try:
+            tok_id = tokenizer.convert_tokens_to_ids(token)
+        except Exception:
+            continue
+        unk_id = getattr(tokenizer, "unk_token_id", None)
+        if isinstance(tok_id, int) and tok_id >= 0 and tok_id != unk_id:
+            ids.add(int(tok_id))
+    return ids
+
+
+def _generation_kwargs(tokenizer, generation) -> dict:
+    kwargs = {
+        "max_new_tokens": generation.max_new_tokens,
+        "min_new_tokens": generation.min_new_tokens,
+        "do_sample": generation.do_sample,
+        "num_beams": 1,
+        "return_dict_in_generate": True,
+    }
+    if generation.do_sample:
+        kwargs["temperature"] = generation.temperature
+        kwargs["top_p"] = generation.top_p
+    eos_ids = sorted(_eos_token_ids(tokenizer, generation))
+    if eos_ids:
+        kwargs["eos_token_id"] = eos_ids[0] if len(eos_ids) == 1 else eos_ids
+    pad_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_id is None:
+        pad_id = getattr(tokenizer, "eos_token_id", None)
+    if pad_id is not None:
+        kwargs["pad_token_id"] = int(pad_id)
+    return kwargs
+
+
+def _continuation_record(tokenizer, continuation, generation) -> dict:
+    token_ids = [int(t) for t in continuation.detach().cpu().tolist()]
+    eos_ids = _eos_token_ids(tokenizer, generation)
+    stop_len = len(token_ids)
+    if eos_ids:
+        for idx, tok_id in enumerate(token_ids):
+            if tok_id in eos_ids:
+                stop_len = idx + 1
+                break
+    effective_ids = token_ids[:stop_len]
+    text = tokenizer.decode(effective_ids, skip_special_tokens=True)
+    return {
+        "answer_text": text,
+        "n_new_tokens": int(stop_len),
+        "terminated_naturally": bool(stop_len < generation.max_new_tokens),
+    }
 
 
 def _run_one_pass(
@@ -282,21 +345,18 @@ def _run_one_pass(
     )
     gen = model.generate(
         **enc,
-        max_new_tokens=generation.max_new_tokens,
-        do_sample=generation.do_sample,
-        num_beams=1,
-        return_dict_in_generate=True,
+        **_generation_kwargs(tokenizer, generation),
     )
     controller.reset()
     full = gen.sequences[0]
     prompt_len = enc["input_ids"].shape[1]
-    text = tokenizer.decode(full[prompt_len:], skip_special_tokens=True)
+    generated = _continuation_record(tokenizer, full[prompt_len:], generation)
     return {
         **_passthrough_fields(row),
         "row_key": cell_mod.row_key_of(row),
         "strength": strength,
         "active": bool(row.get("_active", False)),
-        "answer_text": text,
+        **generated,
         "prompt_len": int(prompt_len),
     }
 
@@ -371,10 +431,7 @@ def _run_batch(
     )
     gen = model.generate(
         **enc,
-        max_new_tokens=generation.max_new_tokens,
-        do_sample=generation.do_sample,
-        num_beams=1,
-        return_dict_in_generate=True,
+        **_generation_kwargs(tokenizer, generation),
     )
     controller.reset()
 
@@ -382,15 +439,16 @@ def _run_batch(
     row_prompt_lens = enc["attention_mask"].sum(dim=1).tolist()
     records = []
     for i, row in enumerate(rows):
-        continuation = gen.sequences[i, padded_prompt_len:]
-        text = tokenizer.decode(continuation, skip_special_tokens=True)
+        generated = _continuation_record(
+            tokenizer, gen.sequences[i, padded_prompt_len:], generation
+        )
         records.append(
             {
                 **_passthrough_fields(row),
                 "row_key": cell_mod.row_key_of(row),
                 "strength": float(row.get("_strength", 0.0)),
                 "active": bool(row.get("_active", False)),
-                "answer_text": text,
+                **generated,
                 "prompt_len": int(row_prompt_lens[i]),
             }
         )
@@ -400,6 +458,7 @@ def _run_batch(
 def run_steer(
     config: SteerCellConfig,
     model_name: str,
+    revision: Optional[str],
     adapter: Optional[str],
     render_fn_spec: str,
     gpu_ack: bool,
@@ -430,7 +489,7 @@ def run_steer(
     active_readout = readout_by_name[config.law.readout]
     layer = config.law.layer if config.law.layer is not None else active_readout["layer"]
 
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
     direction = _direction_tensor(active_readout)
     sigma = float(active_readout.get("sigma", 1.0))
     hook = InterventionHook(
