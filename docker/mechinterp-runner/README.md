@@ -28,7 +28,7 @@ at start time, and record that alongside the file pins.
 | transformers | `5.12.1` |
 | flash-linear-attention | `0.5.1` |
 | safetensors | `0.8.0` |
-| scikit-learn | `1.9.0` |
+| scikit-learn | `1.7.2` (newest release supporting Python 3.10; 1.8+ needs >=3.11) |
 | numpy | `2.5.1` |
 | pyyaml | `6.0.3` |
 | huggingface_hub | `1.23.0` |

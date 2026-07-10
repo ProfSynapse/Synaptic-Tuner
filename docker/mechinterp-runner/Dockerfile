@@ -33,6 +33,9 @@ RUN python3.10 -m venv /opt/venv
 # everything else resolves from PyPI. Versions were chosen to match the
 # already-validated Qwen3.5/Gemma-4 local stack (transformers 5.12.1, see
 # docs/sessions/0030 in the research repo) rather than picking latest-on-date.
+# scikit-learn is capped at 1.7.2, the newest release that still supports
+# Python 3.10 (1.8+ requires >=3.11); the base image ships Ubuntu 22.04's
+# stock Python 3.10.
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
     && /opt/venv/bin/pip install --no-cache-dir \
         torch==2.9.1 \
@@ -41,7 +44,7 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         transformers==5.12.1 \
         flash-linear-attention==0.5.1 \
         safetensors==0.8.0 \
-        scikit-learn==1.9.0 \
+        scikit-learn==1.7.2 \
         numpy==2.5.1 \
         pyyaml==6.0.3 \
         huggingface_hub==1.23.0
