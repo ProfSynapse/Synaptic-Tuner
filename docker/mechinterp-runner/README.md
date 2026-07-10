@@ -29,7 +29,7 @@ at start time, and record that alongside the file pins.
 | flash-linear-attention | `0.5.1` |
 | safetensors | `0.8.0` |
 | scikit-learn | `1.7.2` (newest release supporting Python 3.10; 1.8+ needs >=3.11) |
-| numpy | `2.5.1` |
+| numpy | `2.2.6` (newest release supporting Python 3.10; 2.3+ needs >=3.11, 2.5+ needs >=3.12) |
 | pyyaml | `6.0.3` |
 | huggingface_hub | `1.23.0` |
 
