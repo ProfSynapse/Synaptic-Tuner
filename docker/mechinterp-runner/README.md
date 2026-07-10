@@ -64,6 +64,15 @@ docker image inspect <registry>/mechinterp-runner:<tag> --format '{{index .RepoD
 
 ## Run pattern (WSL2 + NVIDIA)
 
+On a WSL2 host with Docker Desktop installed, the active Docker CLI context
+may be `desktop-linux`, a Windows named pipe that a Linux shell cannot reach
+(`docker ps` fails with `Failed to initialize: protocol not available`).
+Check `docker context ls` first; if the native WSL2 daemon is running as its
+own systemd service (`unix:///var/run/docker.sock`, usually named `default`),
+switch to it with `docker context use default` before building or running
+this image from a WSL2 shell. Confirm with `docker info | grep -i runtime`
+that an `nvidia` runtime is listed before assuming `--gpus all` will work.
+
 ```bash
 docker run --rm -it \
   --gpus all \
