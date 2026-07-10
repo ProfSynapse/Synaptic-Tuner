@@ -62,6 +62,7 @@ class StageConfig(BaseModel):
     kind: StageKind
     config: Optional[str] = None
     model: Optional[str] = None
+    model_revision: Optional[str] = None
     adapter: Optional[str] = None
     render_fn: Optional[str] = None
     gates_config: Optional[str] = None
@@ -105,6 +106,7 @@ class PipelineConfig(BaseModel):
     schema_version: str = "mechinterp-pipeline/v1"
     name: str = Field(..., min_length=1)
     model: Optional[str] = None
+    model_revision: Optional[str] = None
     adapter: Optional[str] = None
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     repo: RepoConfig = Field(default_factory=RepoConfig)
@@ -156,6 +158,10 @@ def _stage_model(cfg: PipelineConfig, stage: StageConfig) -> str:
     if not model:
         raise ValueError(f"stage {stage.name}: model is required")
     return model
+
+
+def _stage_model_revision(cfg: PipelineConfig, stage: StageConfig) -> str | None:
+    return stage.model_revision if stage.model_revision is not None else cfg.model_revision
 
 
 def _stage_adapter(cfg: PipelineConfig, stage: StageConfig) -> str | None:
@@ -213,6 +219,9 @@ def compile_stage_command(
             "--model",
             _stage_model(cfg, stage),
         ]
+        revision = _stage_model_revision(cfg, stage)
+        if revision:
+            cmd.extend(["--model-revision", revision])
         adapter = _stage_adapter(cfg, stage)
         if adapter:
             cmd.extend(["--adapter", adapter])
@@ -241,6 +250,9 @@ def compile_stage_command(
             "--model",
             _stage_model(cfg, stage),
         ]
+        revision = _stage_model_revision(cfg, stage)
+        if revision:
+            cmd.extend(["--model-revision", revision])
         adapter = _stage_adapter(cfg, stage)
         render_fn = _execution_render_fn(stage, repo_root)
         if adapter:
@@ -310,6 +322,7 @@ def build_pipeline_plan(
         "schema_version": cfg.schema_version,
         "provider": provider,
         "model": cfg.model,
+        "model_revision": cfg.model_revision,
         "adapter": cfg.adapter,
         "runtime": cfg.runtime.model_dump(),
         "modal": cfg.modal.model_dump() if provider == "modal" else None,

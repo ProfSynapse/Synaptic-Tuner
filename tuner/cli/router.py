@@ -70,6 +70,14 @@ def route_command(args: Namespace) -> int:
     json_mode = getattr(args, 'json', False)
     command = getattr(args, 'command', None)
 
+    if command == "batch-generate":
+        from tuner.handlers.batch_generate_handler import BatchGenerateHandler
+        return BatchGenerateHandler(args=args).handle()
+
+    if command == "batch-capture":
+        from tuner.handlers.batch_capture_handler import BatchCaptureHandler
+        return BatchCaptureHandler(args=args).handle()
+
     if command == "local-run":
         try:
             from tuner.handlers.local_run_handler import LocalRunHandler

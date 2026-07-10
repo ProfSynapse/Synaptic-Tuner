@@ -35,10 +35,12 @@ class GenerationContract(BaseModel):
     """How completions are produced. Greedy by default for reproducibility."""
 
     max_new_tokens: int = 96
+    min_new_tokens: int = 0
     do_sample: bool = False
     temperature: float = 1.0
     top_p: float = 1.0
     seed: int = 0
+    extra_eos_tokens: list[str] = Field(default_factory=list)
 
 
 class ReadoutRef(BaseModel):
