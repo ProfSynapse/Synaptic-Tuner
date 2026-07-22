@@ -133,6 +133,28 @@ def _positive_int_env(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be greater than zero.")
     return value
 
+
+def _config_overrides_mapping(value) -> dict:
+    """Normalize programmatic mappings and Modal CLI JSON strings.
+
+    Modal's generated CLI only supports scalar parameter annotations.  Keep the
+    remote function callable with the historical mapping payload while exposing
+    a string annotation that Modal 1.5 can turn into ``--config-overrides``.
+    """
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("config_overrides must be a JSON object string.") from exc
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("config_overrides must be a mapping or a JSON object string.")
+
+
 # Persistent volume for caching HuggingFace model weights between runs.
 # This avoids re-downloading multi-GB models on every training run, saving
 # both time and bandwidth costs.
@@ -477,7 +499,7 @@ def run_training(
     dataset_file: str = "",
     publish_final_model: bool = False,
     publish_target_repo: str = "",
-    config_overrides: dict = None,
+    config_overrides: str = "",
     config_path: str = "",
     config_sha256: str = "",
     dataset_sha256: str = "",
@@ -498,10 +520,10 @@ def run_training(
         dataset_path: Override dataset path relative to repo root
         publish_final_model: Whether to publish final_model to HuggingFace Hub
         publish_target_repo: HuggingFace Hub repo ID to push trained model to
-        config_overrides: Dict of CLI argument overrides (learning_rate, epochs, etc.)
+        config_overrides: JSON object of CLI argument overrides. Programmatic
+            callers may continue to pass a mapping for backward compatibility.
     """
-    if config_overrides is None:
-        config_overrides = {}
+    config_overrides = _config_overrides_mapping(config_overrides)
 
     # Validate trainer type and exact source metadata.
     if trainer_type not in ("sft", "kto"):

@@ -5,7 +5,11 @@ on the remote training container while still honoring an explicit override
 forwarded from the local launch env.
 """
 
+import inspect
+
+import click
 import pytest
+from click.testing import CliRunner
 
 # train_modal defines a Modal @app.function, so importing it needs the modal
 # package; skip cleanly where modal is unavailable rather than erroring.
@@ -13,12 +17,14 @@ modal = pytest.importorskip("modal")
 
 from Trainers.cloud.train_modal import (  # noqa: E402
     HF_XET_MITIGATION,
+    _config_overrides_mapping,
     _sha256,
     _validate_staged_sft_config,
     _write_wrapper_state,
     apply_hf_xet_mitigation,
     build_training_command,
     commit_success_volumes,
+    run_training,
 )
 
 
@@ -47,6 +53,47 @@ def test_explicit_local_value_overrides_default():
 
 def test_mitigation_keys_are_the_two_expected():
     assert set(HF_XET_MITIGATION) == {"HF_HUB_DISABLE_XET", "HF_HUB_ENABLE_HF_TRANSFER"}
+
+
+def test_modal_cli_can_build_help_for_remote_function_annotations():
+    """Exercise Modal's real CLI annotation parser without creating an app run."""
+    from modal.cli.run import (
+        _add_click_options,
+        _get_cli_runnable_signature,
+        safe_get_type_hints,
+    )
+
+    raw_function = run_training.get_raw_f()
+    signature = _get_cli_runnable_signature(
+        inspect.signature(raw_function), safe_get_type_hints(raw_function)
+    )
+
+    def command(**_kwargs):
+        pass
+
+    command = click.command()(_add_click_options(command, signature.parameters))
+    result = CliRunner().invoke(command, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "--config-overrides TEXT" in result.output
+
+
+@pytest.mark.parametrize(
+    "payload, expected",
+    [
+        (None, {}),
+        ("", {}),
+        ({"max_steps": 1}, {"max_steps": 1}),
+        ('{"max_steps": 1}', {"max_steps": 1}),
+    ],
+)
+def test_config_overrides_accepts_cli_json_and_legacy_mappings(payload, expected):
+    assert _config_overrides_mapping(payload) == expected
+
+
+@pytest.mark.parametrize("payload", ["[]", "not-json", False, 1])
+def test_config_overrides_rejects_non_object_payloads(payload):
+    with pytest.raises(ValueError, match="config_overrides"):
+        _config_overrides_mapping(payload)
 
 
 def test_staged_config_and_dataset_are_hash_verified_inside_input_mount(
