@@ -24,6 +24,7 @@ _HASHED_URL_PIP = re.compile(
     r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?https://\S+#sha256=[0-9a-fA-F]{64}$"
 )
 _PINNED_GIT_PIP = re.compile(r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?git\+https://\S+@[0-9a-fA-F]{40}(?:#\S+)?$")
+_STABLE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class ConfigurationError(ValueError):
@@ -153,6 +154,7 @@ def build_modal_sft_plan(
     output_mount_path: str = "/vol/artifacts",
     input_mount_path: str = "/vol/inputs",
     cache_volume_name: str = "toolset-model-cache",
+    run_id: str = "",
     source: Optional[RepoSource] = None,
 ) -> dict:
     """Validate inputs and return an exact, non-executing Modal job plan."""
@@ -170,6 +172,12 @@ def build_modal_sft_plan(
         raise ConfigurationError("gpu must be non-empty.")
     if timeout_hours <= 0:
         raise ConfigurationError("timeout_hours must be greater than zero.")
+    run_id = run_id.strip()
+    if run_id and not _STABLE_RUN_ID.fullmatch(run_id):
+        raise ConfigurationError(
+            "run_id must be 1-128 characters using only letters, digits, '.', '_', or '-', "
+            "and must start with a letter or digit."
+        )
 
     packages = [validate_exact_pip_requirement(item) for item in pip_packages]
     if any(not isinstance(item, str) or not item.strip() for item in packages):
@@ -213,8 +221,9 @@ def build_modal_sft_plan(
 
     config_sha = _sha256(config_path)
     dataset_sha = _sha256(dataset_path)
+    remote_function = "run_stable_training" if run_id else "run_training"
     launch_argv = [
-        "modal", "run", "--detach", f"{wrapper}::run_training",
+        "modal", "run", "--detach", f"{wrapper}::{remote_function}",
         "--trainer-type", "sft",
         "--repo-url", source.url,
         "--repo-branch", source.branch,
@@ -223,6 +232,8 @@ def build_modal_sft_plan(
         "--config-sha256", config_sha,
         "--dataset-sha256", dataset_sha,
     ]
+    if run_id:
+        launch_argv.extend(["--run-id", run_id])
     environment = {
         "MODAL_TRAINING_IMAGE": runtime_image,
         "MODAL_TRAINING_PIP_PACKAGES_JSON": json.dumps(packages, separators=(",", ":")),
@@ -272,6 +283,12 @@ def build_modal_sft_plan(
             "volume_name": output_volume_name,
             "mount_path": output_mount_path,
             "canonical_root": f"{output_mount_path}/outputs/runs/modal/sft",
+            "stable_run_id": run_id or None,
+            "canonical_run": (
+                f"{output_mount_path}/outputs/runs/modal/sft/{run_id}-{source.commit[:8].lower()}"
+                if run_id
+                else None
+            ),
             "publish_final_model": False,
         },
         "staging": {
@@ -288,7 +305,7 @@ def build_modal_sft_plan(
             "argv": launch_argv,
             "verification": {
                 "require_nonempty_app_id_from_submission": True,
-                "require_remote_function": "run_training",
+                "require_remote_function": remote_function,
                 "require_running_or_completed_task": True,
                 "commands": [
                     ["modal", "app", "list", "--json"],

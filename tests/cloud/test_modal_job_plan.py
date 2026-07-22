@@ -54,7 +54,7 @@ def _plan(tmp_path: Path, **overrides):
 
 
 def test_plan_hash_binds_inputs_and_emits_detached_exact_command(tmp_path):
-    plan = _plan(tmp_path)
+    plan = _plan(tmp_path, run_id="generic-smoke-01")
 
     assert plan["inspection_only"] is True
     assert len(plan["inputs"]["config"]["sha256"]) == 64
@@ -63,19 +63,40 @@ def test_plan_hash_binds_inputs_and_emits_detached_exact_command(tmp_path):
     assert plan["runtime"]["gpu"] == "A10G"
     assert plan["runtime"]["timeout_hours"] == 2
     assert plan["artifacts"]["canonical_root"] == "/vol/artifacts/outputs/runs/modal/sft"
+    assert plan["artifacts"]["canonical_run"] == (
+        "/vol/artifacts/outputs/runs/modal/sft/generic-smoke-01-aaaaaaaa"
+    )
     assert plan["artifacts"]["publish_final_model"] is False
 
     launch = plan["launch"]
     assert launch["argv"][:3] == ["modal", "run", "--detach"]
     assert launch["argv"][launch["argv"].index("--repo-commit") + 1] == COMMIT
-    assert launch["argv"][3].endswith("train_modal.py::run_training")
+    assert launch["argv"][3].endswith("train_modal.py::run_stable_training")
+    assert launch["argv"][launch["argv"].index("--run-id") + 1] == "generic-smoke-01"
     assert launch["environment"]["MODAL_GPU"] == "A10G"
     assert launch["environment"]["MODAL_TIMEOUT_SECONDS"] == "7200"
     assert launch["verification"]["require_running_or_completed_task"] is True
+    assert launch["verification"]["require_remote_function"] == "run_stable_training"
     assert json.loads(launch["environment"]["MODAL_TRAINING_PIP_PACKAGES_JSON"]) == [
         "peft==0.18.1",
         "transformers==5.5.0",
     ]
+
+
+def test_plan_preserves_legacy_launch_argv_when_run_id_is_omitted(tmp_path):
+    plan = _plan(tmp_path)
+
+    assert "--run-id" not in plan["launch"]["argv"]
+    assert plan["launch"]["argv"][3].endswith("train_modal.py::run_training")
+    assert plan["launch"]["verification"]["require_remote_function"] == "run_training"
+    assert plan["artifacts"]["stable_run_id"] is None
+    assert plan["artifacts"]["canonical_run"] is None
+
+
+@pytest.mark.parametrize("run_id", ["../escape", "/absolute", "has space", "_leading"])
+def test_plan_rejects_unsafe_stable_run_id(tmp_path, run_id):
+    with pytest.raises(ConfigurationError, match="run_id"):
+        _plan(tmp_path, run_id=run_id)
 
 
 def test_plan_rejects_config_that_points_anywhere_except_staged_dataset(tmp_path):

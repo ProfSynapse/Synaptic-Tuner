@@ -39,6 +39,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -80,6 +81,13 @@ _HASHED_URL_PIP = re.compile(
     r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?https://\S+#sha256=[0-9a-fA-F]{64}$"
 )
 _PINNED_GIT_PIP = re.compile(r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?git\+https://\S+@[0-9a-fA-F]{40}(?:#\S+)?$")
+_STABLE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_CHECKPOINT_NAME = re.compile(r"^checkpoint-([1-9][0-9]*)$")
+DONE_MARKER_NAME = "DONE"
+COMPLETION_READY_MARKER_NAME = "COMPLETION_READY.json"
+OUTPUT_COMMIT_INTERVAL_SECONDS = 60
+PROCESS_STOP_TIMEOUT_SECONDS = 10
+COMMIT_THREAD_JOIN_TIMEOUT_SECONDS = 10
 
 
 def _redact_text(value: str) -> str:
@@ -153,6 +161,17 @@ def _config_overrides_mapping(value) -> dict:
         if isinstance(parsed, dict):
             return parsed
     raise ValueError("config_overrides must be a mapping or a JSON object string.")
+
+
+def _stable_run_id(value: str) -> str:
+    """Validate a path-safe identifier supplied by a generic job planner."""
+    run_id = (value or "").strip()
+    if run_id and not _STABLE_RUN_ID.fullmatch(run_id):
+        raise ValueError(
+            "run_id must be 1-128 characters using only letters, digits, '.', '_', or '-', "
+            "and must start with a letter or digit."
+        )
+    return run_id
 
 
 # Persistent volume for caching HuggingFace model weights between runs.
@@ -409,7 +428,11 @@ def _validate_staged_sft_config(
 
 
 def build_training_command(
-    *, train_script: str, run_timestamp: str, config_path: str = ""
+    *,
+    train_script: str,
+    run_timestamp: str,
+    config_path: str = "",
+    resume_from_checkpoint: str = "",
 ) -> list[str]:
     """Construct the shell-free trainer argv shared by remote execution/tests."""
     command = [
@@ -426,6 +449,8 @@ def build_training_command(
     ]
     if config_path:
         command.extend(["--config", config_path])
+    if resume_from_checkpoint:
+        command.extend(["--resume-from-checkpoint", resume_from_checkpoint])
     return command
 
 
@@ -433,6 +458,460 @@ def commit_success_volumes() -> None:
     """Persist canonical outputs before the replaceable model cache."""
     output_volume.commit()
     model_cache.commit()
+
+
+def _run_git(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["git", *args], cwd=str(cwd) if cwd else None, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        error = _redact_text(result.stderr or result.stdout or "git command failed")
+        raise RuntimeError(f"git {' '.join(args[:2])} failed: {error}")
+    return result
+
+
+def _checkout_workspace(
+    *, repo_url: str, repo_branch: str, repo_commit: str, workspace: Path
+) -> None:
+    """Idempotently materialize an exact source commit in a warm Modal container."""
+    if workspace.exists():
+        if not workspace.is_dir() or not (workspace / ".git").is_dir():
+            raise RuntimeError(f"Existing workspace is not a git checkout: {workspace}")
+        existing_url = _credential_free_repo_url(
+            _run_git(["remote", "get-url", "origin"], cwd=workspace).stdout.strip()
+        )
+        if existing_url != repo_url:
+            raise RuntimeError(
+                "Existing workspace origin does not match the requested credential-free repo URL."
+            )
+        # Trainers and optional trackers may leave untracked runtime byproducts
+        # (for example wandb/). They cannot alter the pinned tracked source and
+        # must not make a warm retry unrecoverable. Any tracked modification is
+        # source drift and remains a hard failure.
+        dirty = _run_git(["status", "--porcelain", "--untracked-files=no"], cwd=workspace)
+        if dirty.stdout.strip():
+            raise RuntimeError(
+                "Existing workspace is dirty; refusing to overwrite warm-container state."
+            )
+        _run_git(["fetch", "--depth", "1", "origin", repo_commit], cwd=workspace)
+    else:
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        _run_git(
+            [
+                "clone",
+                "--branch",
+                repo_branch,
+                "--depth",
+                "1",
+                "--no-checkout",
+                repo_url,
+                str(workspace),
+            ]
+        )
+        # A shallow branch clone can race with a branch-tip advance between
+        # planning and execution. Fetch the immutable requested object before
+        # checkout even on a cold container.
+        _run_git(["fetch", "--depth", "1", "origin", repo_commit], cwd=workspace)
+
+    _run_git(["checkout", "--detach", repo_commit], cwd=workspace)
+    resolved_head = _run_git(["rev-parse", "HEAD"], cwd=workspace).stdout.strip().lower()
+    if resolved_head != repo_commit.lower():
+        raise RuntimeError(
+            f"Exact source verification failed: requested {repo_commit}, "
+            f"got {resolved_head or 'unknown'}."
+        )
+
+
+def _provenance_identity(provenance: dict) -> dict:
+    """Select immutable fields that must agree across retries."""
+    inputs = provenance.get("inputs") or {}
+    return {
+        "run": provenance.get("run"),
+        "source": provenance.get("source"),
+        "inputs": inputs,
+        "runtime": provenance.get("runtime"),
+        "artifacts": provenance.get("artifacts"),
+        "cache": provenance.get("cache"),
+        "publish_final_model": provenance.get("publish_final_model"),
+    }
+
+
+def _read_json_object(path: Path, label: str) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Cannot read valid {label} at {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{label} at {path} must contain a JSON object.")
+    return payload
+
+
+def _validate_stable_namespace(
+    *, namespace: Path, run_dir: Path, run_id: str, expected_provenance: dict
+) -> None:
+    """Reject source drift, collisions, or unowned state in a stable namespace."""
+    _validate_stable_namespace_location(
+        namespace=namespace, run_dir=run_dir, run_id=run_id
+    )
+    if not run_dir.exists():
+        return
+    provenance_path = run_dir / "modal_job_provenance.json"
+    if not provenance_path.is_file():
+        if any(run_dir.iterdir()):
+            raise RuntimeError(
+                f"Stable run directory contains state without Modal provenance: {run_dir}"
+            )
+        return
+    existing = _read_json_object(provenance_path, "Modal job provenance")
+    if _provenance_identity(existing) != _provenance_identity(expected_provenance):
+        raise RuntimeError(
+            f"Stable run namespace {run_id!r} does not match requested source, inputs, or runtime."
+        )
+
+
+def _validate_stable_namespace_location(
+    *, namespace: Path, run_dir: Path, run_id: str
+) -> None:
+    """Validate only the path ownership needed before staged input verification."""
+    if namespace.exists():
+        pattern = re.compile(rf"^{re.escape(run_id)}-[0-9a-fA-F]{{8}}$")
+        collisions = [path for path in namespace.iterdir() if pattern.fullmatch(path.name)]
+        unexpected = [path for path in collisions if path != run_dir]
+        if unexpected:
+            names = ", ".join(sorted(path.name for path in unexpected))
+            raise RuntimeError(
+                f"Stable run namespace {run_id!r} is ambiguous or source-drifted: {names}."
+            )
+    if not run_dir.exists():
+        return
+    if run_dir.is_symlink() or not run_dir.is_dir():
+        raise RuntimeError(f"Stable run path is not a directory: {run_dir}")
+
+
+def _latest_valid_checkpoint(run_dir: Path) -> Path | None:
+    """Return the highest complete Hugging Face checkpoint, failing on ambiguity."""
+    checkpoints_dir = run_dir / "checkpoints"
+    if not checkpoints_dir.is_dir():
+        return None
+    if checkpoints_dir.is_symlink():
+        raise RuntimeError(f"Checkpoint root must not be a symlink: {checkpoints_dir}")
+    candidates: dict[int, Path] = {}
+    for path in checkpoints_dir.iterdir():
+        match = _CHECKPOINT_NAME.fullmatch(path.name)
+        if not match or not path.is_dir():
+            continue
+        if path.is_symlink():
+            raise RuntimeError(f"Checkpoint directory must not be a symlink: {path}")
+        step = int(match.group(1))
+        if step in candidates:
+            raise RuntimeError(f"Ambiguous checkpoints for step {step} in {checkpoints_dir}.")
+        state_path = path / "trainer_state.json"
+        if not state_path.is_file():
+            continue
+        try:
+            state = _read_json_object(state_path, "trainer checkpoint state")
+        except RuntimeError:
+            continue
+        if state.get("global_step") != step:
+            continue
+        optimizer = path / "optimizer.pt"
+        scheduler = path / "scheduler.pt"
+        rng_files = sorted(path.glob("rng_state*.pth"))
+        model_files = [
+            path / name
+            for name in ("adapter_model.safetensors", "model.safetensors", "pytorch_model.bin")
+            if (path / name).is_file()
+        ]
+        if not optimizer.is_file() or not scheduler.is_file() or not rng_files or not model_files:
+            continue
+        try:
+            _validate_torch_state(optimizer)
+            _validate_torch_state(scheduler)
+            for rng_file in rng_files:
+                _validate_torch_state(rng_file)
+            for model_file in model_files:
+                _validate_model_state(model_file)
+        except Exception:
+            # Public restricted readers use several library-specific exception
+            # types for truncation/corruption; all mean this candidate is not a
+            # valid resume point, so continue to the next-lower complete step.
+            continue
+        candidates[step] = path
+    return candidates[max(candidates)] if candidates else None
+
+
+def _validate_torch_state(path: Path) -> None:
+    """CRC-check a modern torch.save archive without unsafe pickle execution."""
+    import zipfile
+
+    if not zipfile.is_zipfile(path):
+        raise ValueError(f"Expected a torch zip archive: {path}")
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        if not any(name.endswith("/data.pkl") for name in names):
+            raise ValueError(f"Torch archive has no data.pkl payload: {path}")
+        corrupt_member = archive.testzip()
+        if corrupt_member is not None:
+            raise ValueError(f"Torch archive failed CRC validation at {corrupt_member}: {path}")
+
+
+def _validate_model_state(path: Path) -> None:
+    """Fully read a model/adapter artifact so truncated tensor data is rejected."""
+    if path.suffix == ".safetensors":
+        from safetensors import safe_open
+
+        with safe_open(str(path), framework="pt", device="cpu") as handle:
+            keys = list(handle.keys())
+            if not keys:
+                raise ValueError(f"Safetensors artifact contains no tensors: {path}")
+            for key in keys:
+                handle.get_tensor(key)
+        return
+    import torch
+
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(f"Expected non-empty tensor mapping in model state: {path}")
+    if not all(isinstance(value, torch.Tensor) for value in payload.values()):
+        raise ValueError(f"Model state contains non-tensor values: {path}")
+
+
+def _config_requires_special_token_lineage(provenance: dict) -> bool:
+    """Read the hash-bound staged YAML to determine the required artifact set."""
+    import yaml
+
+    config_record = ((provenance.get("inputs") or {}).get("config") or {})
+    config_path = Path(str(config_record.get("mounted_path") or ""))
+    expected_sha = str(config_record.get("sha256") or "")
+    if not config_path.is_file() or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha):
+        raise RuntimeError("Stable provenance has no valid authoritative staged SFT config.")
+    if not hmac.compare_digest(_sha256(config_path), expected_sha.lower()):
+        raise RuntimeError("Authoritative staged SFT config no longer matches its bound hash.")
+    try:
+        document = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise RuntimeError(f"Cannot parse authoritative staged SFT config: {exc}") from exc
+    if not isinstance(document, dict):
+        raise RuntimeError("Authoritative staged SFT config must contain a mapping.")
+    tokenizer = ((document.get("model") or {}).get("tokenizer") or {})
+    if not isinstance(tokenizer, dict):
+        raise RuntimeError("model.tokenizer must be a mapping when present.")
+    tokens = tokenizer.get("additional_special_tokens")
+    if tokens is None:
+        return False
+    if not isinstance(tokens, list):
+        raise RuntimeError("model.tokenizer.additional_special_tokens must be a list.")
+    return bool(tokens)
+
+
+def _validate_completed_artifacts(run_dir: Path, provenance: dict) -> None:
+    """Require the complete canonical SFT result before accepting completion."""
+    manifest = _read_json_object(run_dir / "manifest.json", "completed run manifest")
+    if manifest.get("status") != "completed":
+        raise RuntimeError(f"Canonical manifest is not completed: {run_dir / 'manifest.json'}")
+    if manifest.get("repo_commit") != provenance["source"]["commit"]:
+        raise RuntimeError("Completed manifest repo commit does not match Modal provenance.")
+    manifest_provenance = manifest.get("cloud_job_provenance") or {}
+    if _provenance_identity(manifest_provenance) != _provenance_identity(provenance):
+        raise RuntimeError("Completed manifest provenance identity does not match the stable run.")
+
+    lineage = _read_json_object(run_dir / "training_lineage.json", "training lineage")
+    if not lineage:
+        raise RuntimeError("training_lineage.json must contain a non-empty object.")
+    lineage_provenance = lineage.get("cloud_job_provenance")
+    if not isinstance(lineage_provenance, dict):
+        raise RuntimeError("training_lineage.json is missing cloud_job_provenance.")
+    if _provenance_identity(lineage_provenance) != _provenance_identity(provenance):
+        raise RuntimeError("Training lineage provenance identity does not match the stable run.")
+
+    final_model = run_dir / "final_model"
+    if final_model.is_symlink() or not final_model.is_dir():
+        raise RuntimeError(f"Completed run is missing a real final_model directory: {final_model}")
+    adapter_config = _read_json_object(final_model / "adapter_config.json", "adapter config")
+    if not adapter_config:
+        raise RuntimeError("adapter_config.json must contain a non-empty object.")
+    adapter_weights = [
+        path
+        for path in (
+            final_model / "adapter_model.safetensors",
+            final_model / "adapter_model.bin",
+        )
+        if path.is_file() and not path.is_symlink()
+    ]
+    if len(adapter_weights) != 1:
+        raise RuntimeError("final_model must contain exactly one supported adapter weight artifact.")
+    _validate_model_state(adapter_weights[0])
+
+    tokenizer_config = _read_json_object(
+        final_model / "tokenizer_config.json", "tokenizer config"
+    )
+    if not tokenizer_config:
+        raise RuntimeError("tokenizer_config.json must contain a non-empty object.")
+    tokenizer_payloads = (
+        "tokenizer.json",
+        "tokenizer.model",
+        "spiece.model",
+        "vocab.json",
+    )
+    if not any(
+        (final_model / name).is_file() and not (final_model / name).is_symlink()
+        for name in tokenizer_payloads
+    ):
+        raise RuntimeError("final_model is missing a serialized tokenizer vocabulary artifact.")
+    for name in tokenizer_payloads:
+        payload_path = final_model / name
+        if not payload_path.is_file():
+            continue
+        if payload_path.stat().st_size <= 0:
+            raise RuntimeError(f"Tokenizer payload is empty: {payload_path}")
+        if payload_path.suffix == ".json":
+            _read_json_object(payload_path, "tokenizer payload")
+
+    special_lineage_path = final_model / "special_tokens_lineage.json"
+    if _config_requires_special_token_lineage(provenance):
+        special_lineage = _read_json_object(special_lineage_path, "special-token lineage")
+        if not isinstance(special_lineage.get("resolved_config"), dict):
+            raise RuntimeError("special-token lineage is missing resolved_config.")
+        for field in ("config_sha256", "vocab_sha256_after"):
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", str(special_lineage.get(field, ""))):
+                raise RuntimeError(f"special-token lineage has no valid {field}.")
+
+
+def _write_done_marker(run_dir: Path, provenance: dict) -> None:
+    payload = {
+        "schema_version": 1,
+        "status": "completed",
+        "identity": _provenance_identity(provenance),
+    }
+    (run_dir / DONE_MARKER_NAME).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def _write_completion_ready_marker(run_dir: Path, provenance: dict) -> None:
+    (run_dir / COMPLETION_READY_MARKER_NAME).write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "identity": _provenance_identity(provenance),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _validate_completion_ready(run_dir: Path, provenance: dict) -> bool:
+    marker = run_dir / COMPLETION_READY_MARKER_NAME
+    if not marker.exists():
+        return False
+    payload = _read_json_object(marker, "completion-ready marker")
+    if payload.get("status") != "ready" or payload.get("identity") != _provenance_identity(
+        provenance
+    ):
+        raise RuntimeError(f"Completion-ready marker identity does not match: {marker}")
+    _validate_completed_artifacts(run_dir, provenance)
+    return True
+
+
+def _is_completed_retry(run_dir: Path, provenance: dict) -> bool:
+    marker = run_dir / DONE_MARKER_NAME
+    if not marker.exists():
+        return False
+    payload = _read_json_object(marker, "DONE marker")
+    if payload.get("status") != "completed" or payload.get("identity") != _provenance_identity(
+        provenance
+    ):
+        raise RuntimeError(f"DONE marker identity does not match stable run: {marker}")
+    if not _validate_completion_ready(run_dir, provenance):
+        raise RuntimeError(f"DONE marker has no committed completion-ready phase: {marker}")
+    return True
+
+
+def _reload_output_volume() -> None:
+    """Discard local uncommitted mount state before trusting retry markers."""
+    output_volume.reload()
+
+
+def _commit_stable_completion(run_dir: Path, provenance: dict) -> None:
+    """Two-phase commit canonical outputs, then a commit-confirmed DONE marker."""
+    _write_wrapper_state(run_dir, provenance, "completed")
+    _validate_completed_artifacts(run_dir, provenance)
+    _write_completion_ready_marker(run_dir, provenance)
+    output_volume.commit()
+    _promote_ready_completion(run_dir, provenance)
+
+
+def _promote_ready_completion(run_dir: Path, provenance: dict) -> bool:
+    """Finish a committed artifact phase without rerunning expensive training."""
+    if not _validate_completion_ready(run_dir, provenance):
+        return False
+    _write_done_marker(run_dir, provenance)
+    try:
+        output_volume.commit()
+    except Exception:
+        # A same-container retry reloads the committed Volume before reading
+        # DONE. Removing the local copy also prevents accidental in-process use.
+        (run_dir / DONE_MARKER_NAME).unlink(missing_ok=True)
+        raise
+    model_cache.commit()
+    return True
+
+
+def _run_with_periodic_output_commits(
+    cmd: list[str], *, cwd: str, env: dict, interval_seconds: float = OUTPUT_COMMIT_INTERVAL_SECONDS
+) -> int:
+    """Run a trainer while best-effort commits bound crash exposure on the output Volume."""
+    if interval_seconds <= 0 or interval_seconds > 120:
+        raise ValueError("Periodic output commit interval must be >0 and <=120 seconds.")
+    process = subprocess.Popen(cmd, cwd=cwd, env=env)
+    stopped = threading.Event()
+
+    def commit_loop() -> None:
+        while not stopped.wait(interval_seconds):
+            try:
+                output_volume.commit()
+            except Exception as exc:  # A transient commit error must not kill or mask training.
+                print(
+                    "[Modal] Periodic output Volume commit failed (will retry): "
+                    f"{_redact_text(exc)}"
+                )
+
+    thread = threading.Thread(target=commit_loop, name="modal-output-commit", daemon=True)
+    thread.start()
+    wait_error = None
+    try:
+        return process.wait()
+    except BaseException as exc:
+        wait_error = exc
+        try:
+            process.terminate()
+        except Exception:
+            pass
+        try:
+            process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            finally:
+                process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        except Exception:
+            try:
+                process.kill()
+            finally:
+                process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        raise
+    finally:
+        stopped.set()
+        thread.join(timeout=COMMIT_THREAD_JOIN_TIMEOUT_SECONDS)
+        if thread.is_alive():
+            message = "Periodic output Volume commit thread did not stop within its bound."
+            if wait_error is not None:
+                raise RuntimeError(message) from wait_error
+            raise RuntimeError(message)
 
 
 def _modal_provenance(
@@ -444,10 +923,12 @@ def _modal_provenance(
     dataset_path: str,
     dataset_sha256: str,
     inputs_verified: bool,
+    run_id: str = "",
 ) -> dict:
     return {
         "schema_version": 1,
         "provider": "modal",
+        "run": {"id": run_id or None, "stable": bool(run_id)},
         "source": {"branch": repo_branch, "commit": repo_commit.lower()},
         "inputs": {
             "config": {"mounted_path": config_path or None, "sha256": config_sha256 or None},
@@ -506,30 +987,26 @@ def _write_wrapper_state(run_dir: Path, provenance: dict, status: str, error: st
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-@app.function(
-    gpu=FUNCTION_GPU,
-    timeout=FUNCTION_TIMEOUT_SECONDS,
-    volumes=function_volumes,
-    # Scope secrets to only the env vars needed for training, rather than
-    # exposing the entire .env file via Secret.from_dotenv().
-    #
-    # UNSLOTH_COMPILE_DISABLE lets older GPU archs (e.g. T4 / sm_75) fall back
-    # off the fused cut_cross_entropy Triton kernel, which fails to compile
-    # there ("PassManager::run failed"). Forwarded only when set locally; empty
-    # by default so it is inert on modern cards.
-    #
-    # HF_HUB_DISABLE_XET / HF_HUB_ENABLE_HF_TRANSFER: forwarded so a local
-    # override reaches the container; run_training also sets them via setdefault
-    # so the xet-hang mitigation applies even on a bare `modal run` (see there).
-    # An empty string here does NOT override the setdefault (only a real value
-    # forwarded from the local env does).
-    #
-    # The same Secret also carries the non-sensitive MODAL_* import contract.
-    # Modal injects it before re-importing this module in the container, which
-    # keeps the image/Volume dependency graph identical to local submission.
-    secrets=[modal.Secret.from_dict(FUNCTION_SECRET_ENV)],
-)
-def run_training(
+def _commit_failed_state(run_dir: Path, provenance: dict | None, error: str) -> None:
+    """Persist failure evidence to the output Volume; never commit replaceable cache state."""
+    if provenance:
+        _write_wrapper_state(run_dir, provenance, "failed", _redact_text(error))
+    output_volume.commit()
+
+
+def _commit_preflight_failure(run_dir: Path, provenance: dict, error: str) -> None:
+    """Record failure before full input identity without claiming the run namespace."""
+    failure_dir = run_dir.parent / "_preflight_failures"
+    failure_dir.mkdir(parents=True, exist_ok=True)
+    payload = dict(provenance)
+    payload.update({"status": "failed", "error": _redact_text(error)[:2000]})
+    (failure_dir / f"{run_dir.name}.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    output_volume.commit()
+
+
+def _run_training_impl(
     trainer_type: str = "sft",
     repo_url: str = "",
     repo_branch: str = "main",
@@ -544,6 +1021,7 @@ def run_training(
     config_path: str = "",
     config_sha256: str = "",
     dataset_sha256: str = "",
+    run_id: str = "",
 ):
     """Run SFT or KTO training inside the Modal container.
 
@@ -563,6 +1041,8 @@ def run_training(
         publish_target_repo: HuggingFace Hub repo ID to push trained model to
         config_overrides: JSON object of CLI argument overrides. Programmatic
             callers may continue to pass a mapping for backward compatibility.
+        run_id: Optional stable, path-safe run identifier. Config-driven SFT
+            retries with the same identifier resume the same canonical run.
     """
     config_overrides = _config_overrides_mapping(config_overrides)
 
@@ -581,17 +1061,22 @@ def run_training(
         raise ValueError(
             "config-driven Modal SFT jobs retain private Volume artifacts and cannot publish to the Hub."
         )
+    run_id = _stable_run_id(run_id)
+    if run_id and not config_path:
+        raise ValueError("run_id is currently supported only for config-driven Modal SFT jobs.")
     repo_url = _credential_free_repo_url(repo_url)
-    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_timestamp = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_namespace = Path(OUTPUT_MOUNT_PATH) / "outputs" / "runs" / "modal" / trainer_type
     modal_run_dir = (
-        Path(OUTPUT_MOUNT_PATH)
-        / "outputs"
-        / "runs"
-        / "modal"
-        / trainer_type
-        / f"{run_timestamp}-{repo_commit[:8].lower()}"
+        run_namespace / f"{run_timestamp}-{repo_commit[:8].lower()}"
     )
+    if run_id:
+        _reload_output_volume()
+        _validate_stable_namespace_location(
+            namespace=run_namespace, run_dir=modal_run_dir, run_id=run_id
+        )
     job_provenance = None
+    staged_inputs = None
     if config_path:
         job_provenance = _modal_provenance(
             repo_branch=repo_branch,
@@ -601,13 +1086,68 @@ def run_training(
             dataset_path="",
             dataset_sha256=dataset_sha256,
             inputs_verified=False,
+            run_id=run_id,
         )
-        _write_wrapper_state(modal_run_dir, job_provenance, "validating_inputs")
+        try:
+            config_file, dataset_file_path, config_sha, dataset_sha = _validate_staged_sft_config(
+                config_path, config_sha256, dataset_sha256
+            )
+        except Exception as exc:
+            error = _redact_text(str(exc))
+            # Never claim or overwrite a stable canonical namespace before its
+            # complete mounted-input identity has been verified.
+            if run_id:
+                _commit_preflight_failure(modal_run_dir, job_provenance, error)
+            else:
+                _commit_failed_state(modal_run_dir, job_provenance, error)
+            raise RuntimeError(error) from None
+        staged_inputs = {
+            "config_path": str(config_file),
+            "config_sha256": config_sha,
+            "dataset_path": str(dataset_file_path),
+            "dataset_sha256": dataset_sha,
+        }
+        job_provenance = _modal_provenance(
+            repo_branch=repo_branch,
+            repo_commit=repo_commit,
+            config_path=str(config_file),
+            config_sha256=config_sha,
+            dataset_path=str(dataset_file_path),
+            dataset_sha256=dataset_sha,
+            inputs_verified=True,
+            run_id=run_id,
+        )
+        if run_id:
+            _validate_stable_namespace(
+                namespace=run_namespace,
+                run_dir=modal_run_dir,
+                run_id=run_id,
+                expected_provenance=job_provenance,
+            )
+            completed = _is_completed_retry(modal_run_dir, job_provenance)
+            if not completed:
+                completed = _promote_ready_completion(modal_run_dir, job_provenance)
+            if completed:
+                print(
+                    f"[Modal] Stable run {run_id!r} has committed complete artifacts; "
+                    "retry is a no-op."
+                )
+                return {
+                    "status": "completed",
+                    "no_op": True,
+                    "trainer_type": trainer_type,
+                    "repo_commit": repo_commit.lower(),
+                    "staged_inputs": staged_inputs,
+                    "artifact_root": str(modal_run_dir),
+                }
+        _write_wrapper_state(modal_run_dir, job_provenance, "preparing_source")
         output_volume.commit()
 
     # Point HuggingFace cache at the persistent volume to avoid re-downloading models
     os.environ["HF_HOME"] = "/cache/huggingface"
     os.environ["TRANSFORMERS_CACHE"] = "/cache/huggingface"
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    sys.dont_write_bytecode = True
 
     # Dodge the hf_xet download hang (see apply_hf_xet_mitigation).
     apply_hf_xet_mitigation(os.environ)
@@ -626,110 +1166,64 @@ def run_training(
     if repo_commit:
         os.environ["CLOUD_REPO_COMMIT"] = repo_commit
 
-    # Clone the repo
-    workspace = "/workspace/toolset-training"
-    if repo_url:
-        print(f"[Modal] Cloning credential-free repo (branch: {repo_branch})")
-        clone_result = subprocess.run(
-            ["git", "clone", "--branch", repo_branch, "--depth", "1", repo_url, workspace],
-            capture_output=True,
-            text=True,
+    workspace = Path("/workspace/toolset-training")
+    try:
+        print(f"[Modal] Materializing exact source (branch: {repo_branch})")
+        _checkout_workspace(
+            repo_url=repo_url,
+            repo_branch=repo_branch,
+            repo_commit=repo_commit,
+            workspace=workspace,
         )
-        if clone_result.returncode != 0:
-            # Scrub any credentials from stderr before logging/raising
-            safe_stderr = re.sub(r'https?://[^@\s]+@', 'https://[REDACTED]@', clone_result.stderr)
-            error = _redact_text(safe_stderr)
-            if job_provenance:
-                _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
-                output_volume.commit()
-            print(f"[Modal] Git clone failed: {error}")
-            raise RuntimeError(f"Failed to clone repo: {error}")
-        if repo_commit:
-            checkout_result = subprocess.run(
-                ["git", "checkout", repo_commit],
-                cwd=workspace,
-                capture_output=True,
-                text=True,
-            )
-            if checkout_result.returncode != 0:
-                error = _redact_text(checkout_result.stderr)
-                if job_provenance:
-                    _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
-                    output_volume.commit()
-                raise RuntimeError(f"Failed to checkout commit {repo_commit}: {error}")
-            head_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=workspace, capture_output=True, text=True
-            )
-            resolved_head = head_result.stdout.strip().lower()
-            if head_result.returncode != 0 or resolved_head != repo_commit.lower():
-                error = (
-                    f"Exact source verification failed: requested {repo_commit}, "
-                    f"got {resolved_head or 'unknown'}."
-                )
-                if job_provenance:
-                    _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
-                    output_volume.commit()
-                raise RuntimeError(error)
-    else:
-        print("[Modal] No repo_url provided, skipping clone.")
-        print("[Modal] Ensure training code is available in the container.")
-        raise ValueError(
-            "repo_url is required. Provide the git URL of your Toolset-Training repo."
-        )
+    except Exception as exc:
+        error = _redact_text(str(exc))
+        _commit_failed_state(modal_run_dir, job_provenance, error)
+        raise RuntimeError(error) from None
 
     # The cloned repo provides shared/; resolve the path helpers here because
     # the container image does not carry the repo source at module-import time.
-    if workspace not in sys.path:
-        sys.path.insert(0, workspace)
+    workspace_str = str(workspace)
+    if workspace_str not in sys.path:
+        sys.path.insert(0, workspace_str)
     from shared.utilities.paths import (  # noqa: F811 (module-scope import is best-effort)
         get_canonical_output_dir_name,
         get_canonical_trainer_dir_name,
     )
 
     # Determine trainer directory and script
-    trainer_dir = os.path.join(workspace, "Trainers", get_canonical_trainer_dir_name(trainer_type))
+    trainer_dir = os.path.join(
+        workspace_str, "Trainers", get_canonical_trainer_dir_name(trainer_type)
+    )
     train_script = f"train_{trainer_type}.py"
 
     if not os.path.isfile(os.path.join(trainer_dir, train_script)):
+        error = f"Training script not found: {os.path.join(trainer_dir, train_script)}"
+        _commit_failed_state(modal_run_dir, job_provenance, error)
         raise FileNotFoundError(
-            f"Training script not found: {os.path.join(trainer_dir, train_script)}"
+            error
         )
 
-    # Build training command with CLI overrides
-    cmd = build_training_command(train_script=train_script, run_timestamp=run_timestamp)
+    try:
+        resume_checkpoint = _latest_valid_checkpoint(modal_run_dir) if run_id else None
+    except Exception as exc:
+        error = _redact_text(str(exc))
+        _commit_failed_state(modal_run_dir, job_provenance, error)
+        raise RuntimeError(error) from None
+    cmd = build_training_command(
+        train_script=train_script,
+        run_timestamp=run_timestamp,
+        config_path=str(config_file) if config_path else "",
+        resume_from_checkpoint=str(resume_checkpoint) if resume_checkpoint else "",
+    )
 
-    staged_inputs = None
-    if config_path:
-        try:
-            config_file, dataset_file_path, config_sha, dataset_sha = _validate_staged_sft_config(
-                config_path, config_sha256, dataset_sha256
-            )
-        except Exception as exc:
-            error = _redact_text(str(exc))
-            _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
-            output_volume.commit()
-            raise RuntimeError(error) from None
-        cmd.extend(["--config", str(config_file)])
-        staged_inputs = {
-            "config_path": str(config_file),
-            "config_sha256": config_sha,
-            "dataset_path": str(dataset_file_path),
-            "dataset_sha256": dataset_sha,
-        }
-        job_provenance = _modal_provenance(
-            repo_branch=repo_branch,
-            repo_commit=repo_commit,
-            config_path=str(config_file),
-            config_sha256=config_sha,
-            dataset_path=str(dataset_file_path),
-            dataset_sha256=dataset_sha,
-            inputs_verified=True,
-        )
+    if job_provenance:
         os.environ["SYNAPTIC_CLOUD_JOB_PROVENANCE_JSON"] = json.dumps(
             job_provenance, sort_keys=True, separators=(",", ":")
         )
         _write_wrapper_state(modal_run_dir, job_provenance, "running")
         output_volume.commit()
+    if resume_checkpoint:
+        print(f"[Modal] Resuming stable run from {resume_checkpoint}")
 
     if model_name:
         # Model name override requires modifying config before training.
@@ -739,7 +1233,7 @@ def run_training(
 
     if dataset_path:
         # Convert relative dataset path to absolute within the workspace
-        abs_dataset = os.path.join(workspace, dataset_path)
+        abs_dataset = os.path.join(workspace_str, dataset_path)
         cmd.extend(["--local-file", abs_dataset])
     if dataset_name:
         # Pull the dataset from the Hugging Face Hub instead of the config
@@ -767,39 +1261,120 @@ def run_training(
     print(f"[Modal] Running: {' '.join(cmd)}")
     print(f"[Modal] Working directory: {trainer_dir}")
 
-    # Run training
-    process = subprocess.run(
-        cmd,
-        cwd=trainer_dir,
-        env={**os.environ},
-    )
-
-    if process.returncode != 0:
-        print(f"[Modal] Training failed with exit code {process.returncode}")
-        if job_provenance:
-            _write_wrapper_state(
-                modal_run_dir,
-                job_provenance,
-                "failed",
-                f"Training script exited with code {process.returncode}",
-            )
-        output_volume.commit()
-        raise RuntimeError(f"Training script exited with code {process.returncode}")
+    try:
+        returncode = _run_with_periodic_output_commits(
+            cmd, cwd=trainer_dir, env={**os.environ}
+        )
+        if returncode != 0:
+            raise RuntimeError(f"Training script exited with code {returncode}")
+    except Exception as exc:
+        error = _redact_text(str(exc))
+        print(f"[Modal] Training failed: {error}")
+        _commit_failed_state(modal_run_dir, job_provenance, error)
+        raise RuntimeError(error) from None
 
     print("[Modal] Training completed successfully")
 
-    # Persist result/provenance before opportunistic cache state.
-    if job_provenance:
-        _write_wrapper_state(modal_run_dir, job_provenance, "completed")
-    commit_success_volumes()
+    # Stable jobs require complete canonical artifacts and a commit-confirmed
+    # DONE marker. Legacy jobs retain their historical single output/cache
+    # commit behavior and never acquire retry markers.
+    if run_id:
+        _commit_stable_completion(modal_run_dir, job_provenance)
+    else:
+        if job_provenance:
+            _write_wrapper_state(modal_run_dir, job_provenance, "completed")
+        commit_success_volumes()
 
     return {
         "status": "completed",
         "trainer_type": trainer_type,
         "repo_commit": repo_commit.lower(),
         "staged_inputs": staged_inputs,
-        "artifact_root": f"{OUTPUT_MOUNT_PATH}/outputs/runs/modal/{trainer_type}",
+        "artifact_root": (
+            str(modal_run_dir)
+            if run_id
+            else f"{OUTPUT_MOUNT_PATH}/outputs/runs/modal/{trainer_type}"
+        ),
     }
+
+
+def _modal_function_options() -> dict:
+    """Shared dependency graph for both public direct-remote entrypoints."""
+    return {
+        "gpu": FUNCTION_GPU,
+        "timeout": FUNCTION_TIMEOUT_SECONDS,
+        "volumes": function_volumes,
+        # Scope credentials and the module-import Modal contract explicitly.
+        "secrets": [modal.Secret.from_dict(FUNCTION_SECRET_ENV)],
+    }
+
+
+@app.function(**_modal_function_options())
+def run_training(
+    trainer_type: str = "sft",
+    repo_url: str = "",
+    repo_branch: str = "main",
+    repo_commit: str = "",
+    model_name: str = "",
+    dataset_path: str = "",
+    dataset_name: str = "",
+    dataset_file: str = "",
+    publish_final_model: bool = False,
+    publish_target_repo: str = "",
+    config_overrides: str = "",
+    config_path: str = "",
+    config_sha256: str = "",
+    dataset_sha256: str = "",
+):
+    """Legacy direct Modal entrypoint; retains its historical no-retry semantics."""
+    return _run_training_impl(
+        trainer_type=trainer_type,
+        repo_url=repo_url,
+        repo_branch=repo_branch,
+        repo_commit=repo_commit,
+        model_name=model_name,
+        dataset_path=dataset_path,
+        dataset_name=dataset_name,
+        dataset_file=dataset_file,
+        publish_final_model=publish_final_model,
+        publish_target_repo=publish_target_repo,
+        config_overrides=config_overrides,
+        config_path=config_path,
+        config_sha256=config_sha256,
+        dataset_sha256=dataset_sha256,
+        run_id="",
+    )
+
+
+@app.function(
+    **_modal_function_options(),
+    retries=modal.Retries(max_retries=3, backoff_coefficient=2.0, initial_delay=1.0),
+)
+def run_stable_training(
+    trainer_type: str = "sft",
+    repo_url: str = "",
+    repo_branch: str = "main",
+    repo_commit: str = "",
+    config_path: str = "",
+    config_sha256: str = "",
+    dataset_sha256: str = "",
+    run_id: str = "",
+):
+    """Retry-enabled direct entrypoint for stable config-driven SFT jobs only."""
+    if not _stable_run_id(run_id):
+        raise ValueError("run_stable_training requires a non-empty stable run_id.")
+    if not config_path:
+        raise ValueError("run_stable_training requires a config_path.")
+    return _run_training_impl(
+        trainer_type=trainer_type,
+        repo_url=repo_url,
+        repo_branch=repo_branch,
+        repo_commit=repo_commit,
+        config_path=config_path,
+        config_sha256=config_sha256,
+        dataset_sha256=dataset_sha256,
+        run_id=run_id,
+    )
 
 
 def _upload_to_hub(trainer_type: str, trainer_dir: str, hub_repo: str):

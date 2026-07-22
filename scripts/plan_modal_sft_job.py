@@ -29,6 +29,11 @@ def parse_args(argv=None):
     parser.add_argument("--output-mount", default="/vol/artifacts")
     parser.add_argument("--input-mount", default="/vol/inputs")
     parser.add_argument("--cache-volume", default="toolset-model-cache")
+    parser.add_argument(
+        "--run-id",
+        default="",
+        help="Optional stable retry identifier for one canonical Modal run directory",
+    )
     return parser.parse_args(argv)
 
 
@@ -48,6 +53,7 @@ def main(argv=None) -> int:
         output_mount_path=args.output_mount,
         input_mount_path=args.input_mount,
         cache_volume_name=args.cache_volume,
+        run_id=args.run_id,
     )
     print(json.dumps(plan, indent=2, sort_keys=True))
     return 0
