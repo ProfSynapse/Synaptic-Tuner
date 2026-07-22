@@ -483,6 +483,7 @@ def test_merged_model_roundtrip_is_default_off():
 def test_forced_4bit_merge_candidate_uses_fresh_pinned_base_and_saved_adapter(
     tmp_path, monkeypatch
 ):
+    huggingface_hub = pytest.importorskip("huggingface_hub")
     transformers = pytest.importorskip("transformers")
     peft = pytest.importorskip("peft")
     quantization = {
@@ -533,6 +534,15 @@ def test_forced_4bit_merge_candidate_uses_fresh_pinned_base_and_saved_adapter(
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
     revision = "a" * 40
+    snapshot = tmp_path / "snapshots" / revision
+    snapshot.mkdir(parents=True)
+    snapshot_calls = []
+
+    def fake_snapshot_download(**kwargs):
+        snapshot_calls.append(kwargs)
+        return str(snapshot)
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
     metadata = {
         "base_model_provenance": {
             "requested_repo": "test-org/test-model",
@@ -541,13 +551,21 @@ def test_forced_4bit_merge_candidate_uses_fresh_pinned_base_and_saved_adapter(
         "model_vocab_size_after": 4,
     }
 
-    candidate, device, invariants = (
+    candidate, device, invariants, resolved_snapshot = (
         special_tokens_module._fresh_forced_4bit_merge_candidate(tmp_path, metadata)
     )
 
     assert candidate is base
     assert device == "cuda:2"
     assert invariants == quantization
+    assert resolved_snapshot == snapshot.resolve()
+    assert snapshot_calls == [
+        {
+            "repo_id": "test-org/test-model",
+            "revision": revision,
+            "local_files_only": True,
+        }
+    ]
     assert load_calls == [
         (
             "test-org/test-model",
@@ -614,10 +632,347 @@ def test_forced_4bit_invariants_require_exact_source_match():
         "bnb_4bit_quant_type": "nf4",
     }
     saved = dict(source, bnb_4bit_quant_type="fp4")
-    with pytest.raises(RuntimeError, match="differ from the fresh pinned base"):
+    with pytest.raises(RuntimeError, match="canonical BitsAndBytes config differs"):
         special_tokens_module._require_bnb_4bit_invariants(
             saved, description="saved model", expected=source
         )
+
+
+@pytest.mark.parametrize(
+    "field,different",
+    [
+        ("bnb_4bit_use_double_quant", False),
+        ("bnb_4bit_compute_dtype", "float16"),
+        ("bnb_4bit_quant_storage", "float16"),
+        ("llm_int8_enable_fp32_cpu_offload", True),
+    ],
+)
+def test_forced_4bit_canonical_config_requires_all_fields(field, different):
+    source = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_use_double_quant": True,
+        "bnb_4bit_compute_dtype": "bfloat16",
+        "bnb_4bit_quant_storage": "uint8",
+        "llm_int8_enable_fp32_cpu_offload": False,
+    }
+    changed = dict(source, **{field: different})
+    with pytest.raises(RuntimeError, match="canonical BitsAndBytes config differs"):
+        special_tokens_module._require_bnb_4bit_invariants(
+            changed, description="saved model", expected=source
+        )
+
+
+def test_forced_save_compat_temporarily_maps_object_config_and_restores(
+    tmp_path, monkeypatch
+):
+    transformers = pytest.importorskip("transformers")
+    model = TinyCausalLM()
+    original = transformers.BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_quant_type="nf4"
+    )
+    original_values = original.to_dict()
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+    monkeypatch.setattr(
+        special_tokens_module,
+        "_compute_post_merge_skip_modules",
+        lambda candidate: ["lm_head"],
+    )
+
+    def fake_save(path, tokenizer, *, save_method):
+        assert save_method == "merged_4bit_forced"
+        assert isinstance(model.config.quantization_config, dict)
+        assert model.config._name_or_path == str(snapshot.resolve())
+        model.config.quantization_config["llm_int8_skip_modules"] = ["lm_head"]
+
+    result = special_tokens_module._save_merged_with_quantization_config_compat(
+        model,
+        fake_save,
+        tmp_path,
+        FakeTokenizer(),
+        save_method="merged_4bit_forced",
+        pinned_local_snapshot=snapshot,
+        source_quantization=source_quantization,
+    )
+    assert result["applied"] is True
+    assert result["reason"] == "unsloth_detached_mapping_compatibility"
+    assert result["original_type"] == "BitsAndBytesConfig"
+    assert result["original_mapping_detached"] is True
+    assert result["computed_skip_modules"] == ["lm_head"]
+    assert result["expected_saved_quantization"]["llm_int8_skip_modules"] == [
+        "lm_head"
+    ]
+    assert result["pinned_local_snapshot_used"] is True
+    assert result["restored"] is True
+    assert model.config.quantization_config is original
+    assert original.to_dict() == original_values
+    assert model.config._name_or_path == "original/model-id"
+
+
+def test_forced_save_compat_restores_object_config_when_save_fails(tmp_path):
+    transformers = pytest.importorskip("transformers")
+    model = TinyCausalLM()
+    original = transformers.BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_quant_type="fp4"
+    )
+    original_values = original.to_dict()
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+
+    def failing_save(path, tokenizer, *, save_method):
+        assert isinstance(model.config.quantization_config, dict)
+        assert model.config._name_or_path == str(snapshot.resolve())
+        model.config.quantization_config["llm_int8_skip_modules"] = ["lm_head"]
+        raise RuntimeError("third-party save failed")
+
+    with pytest.raises(RuntimeError, match="third-party save failed"):
+        special_tokens_module._save_merged_with_quantization_config_compat(
+            model,
+            failing_save,
+            tmp_path,
+            FakeTokenizer(),
+            save_method="merged_4bit_forced",
+            pinned_local_snapshot=snapshot,
+            source_quantization=source_quantization,
+        )
+    assert model.config.quantization_config is original
+    assert original.to_dict() == original_values
+    assert model.config._name_or_path == "original/model-id"
+
+
+def test_forced_save_compat_detaches_mapping_and_restores_original(
+    tmp_path, monkeypatch
+):
+    model = TinyCausalLM()
+    original = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+    }
+    original_values = dict(original)
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+    monkeypatch.setattr(
+        special_tokens_module,
+        "_compute_post_merge_skip_modules",
+        lambda candidate: ["lm_head"],
+    )
+
+    def fake_save(path, tokenizer, *, save_method):
+        assert model.config.quantization_config is not original
+        assert model.config.quantization_config == original
+        assert model.config._name_or_path == str(snapshot.resolve())
+        model.config.quantization_config["llm_int8_skip_modules"] = ["lm_head"]
+
+    result = special_tokens_module._save_merged_with_quantization_config_compat(
+        model,
+        fake_save,
+        tmp_path,
+        FakeTokenizer(),
+        save_method="merged_4bit_forced",
+        pinned_local_snapshot=snapshot,
+        source_quantization=source_quantization,
+    )
+    assert result["applied"] is True
+    assert result["reason"] == "unsloth_detached_mapping_compatibility"
+    assert result["original_type"] == "dict"
+    assert result["computed_skip_modules"] == ["lm_head"]
+    assert model.config.quantization_config is original
+    assert original == original_values
+    assert model.config._name_or_path == "original/model-id"
+
+
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        (
+            lambda config: config.__setitem__(
+                "bnb_4bit_compute_dtype", "float16"
+            ),
+            "fields other than llm_int8_skip_modules",
+        ),
+        (
+            lambda config: config.__setitem__(
+                "llm_int8_skip_modules", ["lm_head", "lm_head"]
+            ),
+            "unique list",
+        ),
+    ],
+)
+def test_forced_save_compat_rejects_unapproved_config_mutation_and_restores(
+    tmp_path, mutation, message
+):
+    model = TinyCausalLM()
+    original = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_compute_dtype": "bfloat16",
+    }
+    original_values = dict(original)
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+
+    def fake_save(path, tokenizer, *, save_method):
+        mutation(model.config.quantization_config)
+
+    with pytest.raises(RuntimeError, match=message):
+        special_tokens_module._save_merged_with_quantization_config_compat(
+            model,
+            fake_save,
+            tmp_path / "save",
+            FakeTokenizer(),
+            save_method="merged_4bit_forced",
+            pinned_local_snapshot=snapshot,
+            source_quantization=source_quantization,
+        )
+    assert model.config.quantization_config is original
+    assert original == original_values
+    assert model.config._name_or_path == "original/model-id"
+
+
+def test_forced_save_compat_rejects_skip_list_that_disagrees_with_scan(
+    tmp_path, monkeypatch
+):
+    model = TinyCausalLM()
+    original = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "llm_int8_skip_modules": None,
+    }
+    model.config.quantization_config = original
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+    monkeypatch.setattr(
+        special_tokens_module,
+        "_compute_post_merge_skip_modules",
+        lambda candidate: ["different_head"],
+    )
+
+    def fake_save(path, tokenizer, *, save_method):
+        model.config.quantization_config["llm_int8_skip_modules"] = ["lm_head"]
+
+    with pytest.raises(RuntimeError, match="does not match the post-merge module scan"):
+        special_tokens_module._save_merged_with_quantization_config_compat(
+            model,
+            fake_save,
+            tmp_path / "save",
+            FakeTokenizer(),
+            save_method="merged_4bit_forced",
+            pinned_local_snapshot=snapshot,
+            source_quantization=source_quantization,
+        )
+    assert model.config.quantization_config is original
+    assert model.config._name_or_path == "original/model-id"
+
+
+def test_forced_save_compat_rejects_candidate_drift_before_saver(tmp_path):
+    model = TinyCausalLM()
+    original = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "bnb_4bit_compute_dtype": "bfloat16",
+    }
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    original["bnb_4bit_compute_dtype"] = "float16"
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+    save_called = False
+
+    def fake_save(path, tokenizer, *, save_method):
+        nonlocal save_called
+        save_called = True
+
+    with pytest.raises(RuntimeError, match="canonical BitsAndBytes config differs"):
+        special_tokens_module._save_merged_with_quantization_config_compat(
+            model,
+            fake_save,
+            tmp_path / "save",
+            FakeTokenizer(),
+            save_method="merged_4bit_forced",
+            pinned_local_snapshot=snapshot,
+            source_quantization=source_quantization,
+        )
+    assert save_called is False
+    assert model.config.quantization_config is original
+    assert original["bnb_4bit_compute_dtype"] == "float16"
+    assert model.config._name_or_path == "original/model-id"
+
+
+def test_forced_save_compat_rejects_unchanged_skip_list_that_disagrees_with_scan(
+    tmp_path, monkeypatch
+):
+    model = TinyCausalLM()
+    original = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+        "llm_int8_skip_modules": ["lm_head"],
+    }
+    original_values = dict(original)
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        original, description="captured source"
+    )
+    model.config.quantization_config = original
+    model.config._name_or_path = "original/model-id"
+    snapshot = tmp_path / ("a" * 40)
+    snapshot.mkdir()
+    monkeypatch.setattr(
+        special_tokens_module,
+        "_compute_post_merge_skip_modules",
+        lambda candidate: ["different_head"],
+    )
+
+    def fake_save(path, tokenizer, *, save_method):
+        assert model.config.quantization_config["llm_int8_skip_modules"] == [
+            "lm_head"
+        ]
+
+    with pytest.raises(RuntimeError, match="does not match the post-merge module scan"):
+        special_tokens_module._save_merged_with_quantization_config_compat(
+            model,
+            fake_save,
+            tmp_path / "save",
+            FakeTokenizer(),
+            save_method="merged_4bit_forced",
+            pinned_local_snapshot=snapshot,
+            source_quantization=source_quantization,
+        )
+    assert model.config.quantization_config is original
+    assert original == original_values
+    assert model.config._name_or_path == "original/model-id"
 
 
 @pytest.mark.parametrize(
@@ -645,13 +1000,17 @@ def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(
     _set_merged_test_provenance(metadata)
     reloaded = TinyCausalLM(vocab_size=len(tokenizer))
     reloaded.load_state_dict(model.state_dict())
-    saved_quantization = {
+    source_quantization = {
         "quant_method": "bitsandbytes",
         "load_in_4bit": True,
         "bnb_4bit_quant_type": quant_type,
+        "bnb_4bit_use_double_quant": True,
+        "bnb_4bit_compute_dtype": "bfloat16",
+        "bnb_4bit_quant_storage": "uint8",
+        "llm_int8_enable_fp32_cpu_offload": False,
+        "llm_int8_skip_modules": None,
     }
     if save_method == "merged_4bit_forced":
-        reloaded.config.quantization_config = dict(saved_quantization)
         reloaded.is_loaded_in_4bit = True
     live_topology = [(name, id(module)) for name, module in model.named_modules()]
     live_input_rows = model.get_input_embeddings().weight[2:4].detach().clone()
@@ -663,19 +1022,33 @@ def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(
         save_targets.append("copy" if target is merge_candidate else "live")
         saved_tokenizer.save_pretrained(output_dir)
         (Path(output_dir) / "model.safetensors").write_bytes(b"merged")
-        config = (
-            {"quantization_config": saved_quantization}
-            if save_method == "merged_4bit_forced"
-            else {}
-        )
+        if save_method == "merged_4bit_forced":
+            assert target.config._name_or_path == str(snapshot.resolve())
+            target.config.quantization_config["llm_int8_skip_modules"] = [
+                "lm_head"
+            ]
+            artifact_quantization = dict(target.config.quantization_config)
+            reloaded.config.quantization_config = dict(artifact_quantization)
+            config = {"quantization_config": artifact_quantization}
+        else:
+            config = {}
         (Path(output_dir) / "config.json").write_text(json.dumps(config))
 
     target = model
     merge_candidate = None
     model.save_pretrained_merged = fake_save
+    snapshot = None
+    candidate_original_quantization = None
+    candidate_original_name = None
     if save_method == "merged_4bit_forced":
+        snapshot = tmp_path / "snapshots" / ("a" * 40)
+        snapshot.mkdir(parents=True)
         merge_candidate = TinyCausalLM(vocab_size=len(tokenizer))
         merge_candidate.load_state_dict(model.state_dict())
+        candidate_original_quantization = dict(source_quantization)
+        merge_candidate.config.quantization_config = candidate_original_quantization
+        candidate_original_name = "test-org/test-model"
+        merge_candidate.config._name_or_path = candidate_original_name
         merge_candidate.save_pretrained_merged = fake_save
         target = merge_candidate
         monkeypatch.setattr(
@@ -684,8 +1057,14 @@ def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(
             lambda output_dir, resolved_metadata: (
                 merge_candidate,
                 "cuda:0",
-                dict(saved_quantization),
+                dict(source_quantization),
+                snapshot.resolve(),
             ),
+        )
+        monkeypatch.setattr(
+            special_tokens_module,
+            "_compute_post_merge_skip_modules",
+            lambda candidate: ["lm_head"],
         )
     monkeypatch.setattr(
         transformers.AutoTokenizer,
@@ -739,6 +1118,24 @@ def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(
     )
     assert report["forward_executed"] is False
     assert report["live_model_configured_rows_preserved"] is True
+    if save_method == "merged_4bit_forced":
+        assert report["save_compatibility"]["reason"] == (
+            "unsloth_detached_mapping_compatibility"
+        )
+        assert report["save_compatibility"]["computed_skip_modules"] == [
+            "lm_head"
+        ]
+        assert report["source_quantization"] == source_quantization
+        assert report["saved_quantization"] == dict(
+            source_quantization, llm_int8_skip_modules=["lm_head"]
+        )
+        assert merge_candidate.config.quantization_config is candidate_original_quantization
+        assert merge_candidate.config.quantization_config == source_quantization
+        assert merge_candidate.config._name_or_path == candidate_original_name
+    else:
+        assert report["save_compatibility"]["reason"] == (
+            "save_method_not_forced_4bit"
+        )
     assert report["published"] is False
     assert report["temporary_artifacts_removed"] is True
     assert (output_dir / "merged_model_roundtrip.json").is_file()
@@ -768,8 +1165,15 @@ def test_merged_model_roundtrip_requires_saved_files_and_cleans(
 
     save_target = model
     if save_method == "merged_4bit_forced":
+        snapshot = tmp_path / "snapshots" / ("a" * 40)
+        snapshot.mkdir(parents=True)
         save_target = TinyCausalLM(vocab_size=len(tokenizer))
         save_target.load_state_dict(model.state_dict())
+        save_target.config.quantization_config = {
+            "quant_method": "bitsandbytes",
+            "load_in_4bit": True,
+            "bnb_4bit_quant_type": "nf4",
+        }
         monkeypatch.setattr(
             special_tokens_module,
             "_fresh_forced_4bit_merge_candidate",
@@ -781,7 +1185,13 @@ def test_merged_model_roundtrip_requires_saved_files_and_cleans(
                     "load_in_4bit": True,
                     "bnb_4bit_quant_type": "nf4",
                 },
+                snapshot.resolve(),
             ),
+        )
+        monkeypatch.setattr(
+            special_tokens_module,
+            "_compute_post_merge_skip_modules",
+            lambda candidate: [],
         )
     save_target.save_pretrained_merged = fake_save
     with pytest.raises(RuntimeError, match="produced no files"):

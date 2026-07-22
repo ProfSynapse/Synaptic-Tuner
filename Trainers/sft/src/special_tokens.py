@@ -604,6 +604,28 @@ def _tensor_sha256(tensor: torch.Tensor) -> str:
     return hashlib.sha256(value.view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
+def _canonical_quantization_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _canonical_quantization_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_quantization_value(item) for item in value]
+    enum_value = getattr(value, "value", None)
+    if isinstance(enum_value, (str, int, float, bool)) or enum_value is None:
+        if enum_value is not None:
+            return enum_value
+    if isinstance(value, torch.dtype):
+        return str(value).removeprefix("torch.")
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(
+        "Quantization configuration contains a non-canonical value of type "
+        f"{type(value).__name__}."
+    )
+
+
 def _require_bnb_4bit_invariants(
     quantization_config: Any,
     *,
@@ -614,39 +636,47 @@ def _require_bnb_4bit_invariants(
         quantization_config = quantization_config.to_dict()
     if not isinstance(quantization_config, dict):
         raise RuntimeError(f"{description} does not contain a BitsAndBytes configuration.")
-    quant_method = quantization_config.get("quant_method")
-    quant_method = getattr(quant_method, "value", quant_method)
-    invariants = {
-        "quant_method": quant_method,
-        "load_in_4bit": quantization_config.get("load_in_4bit"),
-        "bnb_4bit_quant_type": quantization_config.get("bnb_4bit_quant_type"),
-    }
-    quant_type = invariants["bnb_4bit_quant_type"]
+    canonical = _canonical_quantization_value(quantization_config)
+    quant_type = canonical.get("bnb_4bit_quant_type")
     if (
-        invariants["quant_method"] != "bitsandbytes"
-        or invariants["load_in_4bit"] is not True
+        canonical.get("quant_method") != "bitsandbytes"
+        or canonical.get("load_in_4bit") is not True
         or not isinstance(quant_type, str)
         or quant_type not in _SUPPORTED_BNB_4BIT_QUANT_TYPES
     ):
         raise RuntimeError(
             f"{description} is not a supported BitsAndBytes 4-bit representation: "
-            f"{invariants!r}."
+            f"{canonical!r}."
         )
-    if expected is not None and invariants != expected:
+    if expected is not None and canonical != expected:
         raise RuntimeError(
-            f"{description} BitsAndBytes invariants differ from the fresh pinned base: "
-            f"{invariants!r} != {expected!r}."
+            f"{description} canonical BitsAndBytes config differs from expected: "
+            f"{canonical!r} != {expected!r}."
         )
-    return invariants
+    return canonical
 
 
 def _fresh_forced_4bit_merge_candidate(
     output_dir: Path, metadata: Dict[str, Any]
-) -> tuple[nn.Module, str, Dict[str, Any]]:
+) -> tuple[nn.Module, str, Dict[str, Any], Path]:
     """Load a separate pinned base and attach the saved adapter for destructive merge."""
     provenance = metadata["base_model_provenance"]
     repo = provenance["requested_repo"]
     revision = provenance["requested_revision"]
+    from huggingface_hub import snapshot_download
+
+    snapshot_path = Path(
+        snapshot_download(
+            repo_id=repo,
+            revision=revision,
+            local_files_only=True,
+        )
+    ).resolve()
+    if not snapshot_path.is_dir() or snapshot_path.name.lower() != revision.lower():
+        raise RuntimeError(
+            "Fresh forced-merge base did not resolve to the exact pinned local snapshot: "
+            f"{snapshot_path}."
+        )
     device_map: Dict[str, Any]
     if torch.cuda.is_available():
         device_index = torch.cuda.current_device()
@@ -699,11 +729,144 @@ def _fresh_forced_4bit_merge_candidate(
     candidate = patch_saving_functions(candidate)
     if not callable(getattr(candidate, "save_pretrained_merged", None)):
         raise TypeError("Unsloth did not install save_pretrained_merged on the merge copy.")
-    return candidate, device_label, invariants
+    return candidate, device_label, invariants, snapshot_path
 
 
 def _module_topology_signature(model: nn.Module) -> list[tuple[str, int]]:
     return [(name, id(module)) for name, module in model.named_modules()]
+
+
+def _validate_unsloth_skip_module_mutation(
+    source: Dict[str, Any], mutated: Dict[str, Any]
+) -> tuple[list[str], Dict[str, Any]]:
+    source_other = dict(source)
+    mutated_other = dict(mutated)
+    source_other.pop("llm_int8_skip_modules", None)
+    mutated_other.pop("llm_int8_skip_modules", None)
+    if mutated_other != source_other:
+        raise RuntimeError(
+            "Unsloth forced save changed canonical quantization fields other than "
+            "llm_int8_skip_modules."
+        )
+    skip_modules = mutated.get("llm_int8_skip_modules")
+    if skip_modules is None:
+        computed: list[str] = []
+    elif (
+        not isinstance(skip_modules, list)
+        or any(not isinstance(name, str) or not name for name in skip_modules)
+        or len(skip_modules) != len(set(skip_modules))
+    ):
+        raise RuntimeError(
+            "Unsloth computed llm_int8_skip_modules must be a unique list of non-empty strings."
+        )
+    else:
+        computed = list(skip_modules)
+    return computed, mutated
+
+
+def _compute_post_merge_skip_modules(model: nn.Module) -> list[str]:
+    get_base_model = getattr(model, "get_base_model", None)
+    if not callable(get_base_model):
+        raise TypeError("Forced-merge candidate cannot expose its post-merge base model.")
+    post_merge_base = get_base_model()
+    from unsloth_zoo.saving_utils import find_skipped_quantized_modules
+
+    skipped, _ = find_skipped_quantized_modules(post_merge_base)
+    if (
+        not isinstance(skipped, list)
+        or any(not isinstance(name, str) or not name for name in skipped)
+        or len(skipped) != len(set(skipped))
+    ):
+        raise RuntimeError("Post-merge skipped modules are not a canonical name list.")
+    return list(skipped)
+
+
+def _save_merged_with_quantization_config_compat(
+    model: nn.Module,
+    save_merged: Any,
+    save_directory: Path,
+    tokenizer: Any,
+    *,
+    save_method: str,
+    pinned_local_snapshot: Optional[Path] = None,
+    source_quantization: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Bridge one Unsloth forced-save branch that indexes BnB config as a dict."""
+    if save_method != "merged_4bit_forced":
+        save_merged(str(save_directory), tokenizer, save_method=save_method)
+        return {"applied": False, "reason": "save_method_not_forced_4bit"}
+
+    if pinned_local_snapshot is None:
+        raise ValueError("Forced 4-bit merge requires an exact pinned local snapshot path.")
+    pinned_local_snapshot = Path(pinned_local_snapshot).resolve()
+    if not pinned_local_snapshot.is_dir():
+        raise ValueError(
+            f"Forced 4-bit pinned local snapshot is missing: {pinned_local_snapshot}."
+        )
+    model_config = getattr(model, "config", None)
+    quantization_config = getattr(model_config, "quantization_config", None)
+    if source_quantization is None:
+        raise ValueError("Forced 4-bit merge requires captured source quantization config.")
+    original_quantization = _require_bnb_4bit_invariants(
+        quantization_config,
+        description="Forced-save candidate quantization config",
+        expected=source_quantization,
+    )
+    temporary_mapping = _canonical_quantization_value(original_quantization)
+    if temporary_mapping is original_quantization:
+        raise RuntimeError("Forced-save quantization mapping was not detached.")
+    original_name_present = hasattr(model_config, "_name_or_path")
+    original_name_or_path = getattr(model_config, "_name_or_path", None)
+    model_config.quantization_config = temporary_mapping
+    model_config._name_or_path = str(pinned_local_snapshot)
+    mutated_quantization = None
+    computed_skip_modules = None
+    try:
+        save_merged(str(save_directory), tokenizer, save_method=save_method)
+        mutated_quantization = _require_bnb_4bit_invariants(
+            temporary_mapping,
+            description="Post-Unsloth forced-save quantization config",
+        )
+        observed_skip_modules, mutated_quantization = (
+            _validate_unsloth_skip_module_mutation(
+                original_quantization, mutated_quantization
+            )
+        )
+        computed_skip_modules = _compute_post_merge_skip_modules(model)
+        if observed_skip_modules != computed_skip_modules:
+            raise RuntimeError(
+                "Unsloth llm_int8_skip_modules does not match the post-merge module scan: "
+                f"{observed_skip_modules!r} != {computed_skip_modules!r}."
+            )
+    finally:
+        model_config.quantization_config = quantization_config
+        if original_name_present:
+            model_config._name_or_path = original_name_or_path
+        else:
+            delattr(model_config, "_name_or_path")
+    if model_config.quantization_config is not quantization_config:
+        raise RuntimeError("Forced-save compatibility shim did not restore quantization_config.")
+    if _require_bnb_4bit_invariants(
+        model_config.quantization_config,
+        description="Restored forced-save quantization config",
+    ) != original_quantization:
+        raise RuntimeError("Forced-save compatibility shim changed quantization config values.")
+    if original_name_present:
+        name_restored = model_config._name_or_path == original_name_or_path
+    else:
+        name_restored = not hasattr(model_config, "_name_or_path")
+    if not name_restored:
+        raise RuntimeError("Forced-save compatibility shim did not restore _name_or_path.")
+    return {
+        "applied": True,
+        "reason": "unsloth_detached_mapping_compatibility",
+        "original_type": type(quantization_config).__name__,
+        "original_mapping_detached": True,
+        "computed_skip_modules": computed_skip_modules,
+        "expected_saved_quantization": mutated_quantization,
+        "pinned_local_snapshot_used": True,
+        "restored": True,
+    }
 
 
 def verify_merged_model_roundtrip(
@@ -768,11 +931,18 @@ def verify_merged_model_roundtrip(
     reloaded_tokenizer = None
     merge_candidate = None
     merge_candidate_device = None
+    merge_candidate_snapshot = None
     source_quantization = None
+    save_compatibility = None
     report: Optional[Dict[str, Any]] = None
     try:
         if save_method == "merged_4bit_forced":
-            merge_candidate, merge_candidate_device, source_quantization = (
+            (
+                merge_candidate,
+                merge_candidate_device,
+                source_quantization,
+                merge_candidate_snapshot,
+            ) = (
                 _fresh_forced_4bit_merge_candidate(output_path, metadata)
             )
             if merge_candidate is model:
@@ -803,7 +973,15 @@ def verify_merged_model_roundtrip(
         else:
             save_merged = live_save_merged
 
-        save_merged(str(temporary_dir), tokenizer, save_method=save_method)
+        save_compatibility = _save_merged_with_quantization_config_compat(
+            merge_candidate if save_method == "merged_4bit_forced" else model,
+            save_merged,
+            temporary_dir,
+            tokenizer,
+            save_method=save_method,
+            pinned_local_snapshot=merge_candidate_snapshot,
+            source_quantization=source_quantization,
+        )
         if _module_topology_signature(model) != live_topology_before:
             raise RuntimeError("Merged-model verification changed the live model topology.")
         live_input_after_save = _selected_vocab_rows(
@@ -843,7 +1021,7 @@ def verify_merged_model_roundtrip(
             saved_quantization = _require_bnb_4bit_invariants(
                 saved_config.get("quantization_config"),
                 description="Saved forced-merge model",
-                expected=source_quantization,
+                expected=save_compatibility["expected_saved_quantization"],
             )
             saved_representation = (
                 "bitsandbytes_"
@@ -877,7 +1055,7 @@ def verify_merged_model_roundtrip(
             _require_bnb_4bit_invariants(
                 getattr(reloaded_model.config, "quantization_config", None),
                 description="Fresh forced-merge reload",
-                expected=source_quantization,
+                expected=saved_quantization,
             )
         elif getattr(reloaded_model, "is_loaded_in_4bit", False):
             raise RuntimeError("Fresh merged_16bit reload unexpectedly loaded in 4-bit mode.")
@@ -915,6 +1093,7 @@ def verify_merged_model_roundtrip(
             "merge_candidate_device": merge_candidate_device,
             "source_quantization": source_quantization,
             "saved_quantization": saved_quantization,
+            "save_compatibility": save_compatibility,
             "reload_loader": "transformers.AutoModelForCausalLM",
             "reload_device": "cpu",
             "local_files_only": True,
