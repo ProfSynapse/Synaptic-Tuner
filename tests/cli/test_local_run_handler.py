@@ -289,6 +289,8 @@ def test_local_run_sft_forwards_tokenizer_config_as_json(tmp_path):
         "train_new_lm_head_rows": True,
         "verify_tokenizer_roundtrip": True,
         "verify_adapter_roundtrip": True,
+        "verify_merged_model_roundtrip": True,
+        "merged_model_save_method": "merged_4bit_forced",
     }
     command = _compile_local_command(
         tmp_path,

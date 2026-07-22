@@ -24,6 +24,8 @@ from torch import nn
 
 _EXISTING_TOKEN_POLICIES = {"error", "reuse"}
 _INITIALIZATION_POLICIES = {"mean_existing_rows"}
+_MERGED_MODEL_SAVE_METHODS = {"merged_16bit", "merged_4bit_forced"}
+_SUPPORTED_BNB_4BIT_QUANT_TYPES = {"fp4", "nf4"}
 _FULL_COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
@@ -43,6 +45,9 @@ def _config_dict(config: Any) -> Dict[str, Any]:
         "verify_adapter_roundtrip": bool(config.verify_adapter_roundtrip),
         "verify_merged_model_roundtrip": bool(
             getattr(config, "verify_merged_model_roundtrip", False)
+        ),
+        "merged_model_save_method": getattr(
+            config, "merged_model_save_method", "merged_16bit"
         ),
     }
 
@@ -84,6 +89,12 @@ def validate_special_token_config(config: Any) -> None:
         value = getattr(config, field_name, False)
         if type(value) is not bool:
             raise ValueError(f"model.tokenizer.{field_name} must be a YAML boolean, got {value!r}.")
+    save_method = getattr(config, "merged_model_save_method", "merged_16bit")
+    if not isinstance(save_method, str) or save_method not in _MERGED_MODEL_SAVE_METHODS:
+        raise ValueError(
+            "model.tokenizer.merged_model_save_method must be one of "
+            f"{sorted(_MERGED_MODEL_SAVE_METHODS)}, got {save_method!r}."
+        )
 
 
 def _require_tokenizer_api(tokenizer: Any) -> None:
@@ -593,6 +604,108 @@ def _tensor_sha256(tensor: torch.Tensor) -> str:
     return hashlib.sha256(value.view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
+def _require_bnb_4bit_invariants(
+    quantization_config: Any,
+    *,
+    description: str,
+    expected: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if hasattr(quantization_config, "to_dict"):
+        quantization_config = quantization_config.to_dict()
+    if not isinstance(quantization_config, dict):
+        raise RuntimeError(f"{description} does not contain a BitsAndBytes configuration.")
+    quant_method = quantization_config.get("quant_method")
+    quant_method = getattr(quant_method, "value", quant_method)
+    invariants = {
+        "quant_method": quant_method,
+        "load_in_4bit": quantization_config.get("load_in_4bit"),
+        "bnb_4bit_quant_type": quantization_config.get("bnb_4bit_quant_type"),
+    }
+    quant_type = invariants["bnb_4bit_quant_type"]
+    if (
+        invariants["quant_method"] != "bitsandbytes"
+        or invariants["load_in_4bit"] is not True
+        or not isinstance(quant_type, str)
+        or quant_type not in _SUPPORTED_BNB_4BIT_QUANT_TYPES
+    ):
+        raise RuntimeError(
+            f"{description} is not a supported BitsAndBytes 4-bit representation: "
+            f"{invariants!r}."
+        )
+    if expected is not None and invariants != expected:
+        raise RuntimeError(
+            f"{description} BitsAndBytes invariants differ from the fresh pinned base: "
+            f"{invariants!r} != {expected!r}."
+        )
+    return invariants
+
+
+def _fresh_forced_4bit_merge_candidate(
+    output_dir: Path, metadata: Dict[str, Any]
+) -> tuple[nn.Module, str, Dict[str, Any]]:
+    """Load a separate pinned base and attach the saved adapter for destructive merge."""
+    provenance = metadata["base_model_provenance"]
+    repo = provenance["requested_repo"]
+    revision = provenance["requested_revision"]
+    device_map: Dict[str, Any]
+    if torch.cuda.is_available():
+        device_index = torch.cuda.current_device()
+        device_map = {"": device_index}
+        device_label = f"cuda:{device_index}"
+    else:
+        device_map = {"": "cpu"}
+        device_label = "cpu"
+
+    from transformers import AutoModelForCausalLM
+
+    base_model = AutoModelForCausalLM.from_pretrained(
+        repo,
+        revision=revision,
+        local_files_only=True,
+        trust_remote_code=False,
+        device_map=device_map,
+        dtype="auto",
+        low_cpu_mem_usage=True,
+    )
+    invariants = _require_bnb_4bit_invariants(
+        getattr(base_model.config, "quantization_config", None),
+        description="Fresh forced-merge base",
+    )
+    if getattr(base_model, "is_loaded_in_4bit", False) is not True:
+        raise RuntimeError("Fresh forced-merge base was not loaded in 4-bit mode.")
+
+    expected_vocab_size = int(metadata["model_vocab_size_after"])
+    actual_vocab_size = int(base_model.get_input_embeddings().weight.shape[0])
+    if actual_vocab_size > expected_vocab_size:
+        raise RuntimeError(
+            "Fresh pinned base vocabulary is larger than the recorded prepared model: "
+            f"{actual_vocab_size} > {expected_vocab_size}."
+        )
+    if actual_vocab_size < expected_vocab_size:
+        base_model.resize_token_embeddings(expected_vocab_size)
+
+    from peft import PeftModel
+
+    candidate = PeftModel.from_pretrained(
+        base_model,
+        str(output_dir),
+        is_trainable=False,
+        local_files_only=True,
+    )
+    verify_peft_trainable_token_adapters(candidate, metadata, require_trainable=False)
+
+    from unsloth.save import patch_saving_functions
+
+    candidate = patch_saving_functions(candidate)
+    if not callable(getattr(candidate, "save_pretrained_merged", None)):
+        raise TypeError("Unsloth did not install save_pretrained_merged on the merge copy.")
+    return candidate, device_label, invariants
+
+
+def _module_topology_signature(model: nn.Module) -> list[tuple[str, int]]:
+    return [(name, id(module)) for name, module in model.named_modules()]
+
+
 def verify_merged_model_roundtrip(
     model: nn.Module,
     tokenizer: Any,
@@ -608,10 +721,22 @@ def verify_merged_model_roundtrip(
         "verify_merged_model_roundtrip", False
     ):
         return None
-    save_merged = getattr(model, "save_pretrained_merged", None)
-    if not callable(save_merged):
+    resolved_config = metadata.get("resolved_config")
+    save_method = (
+        resolved_config.get("merged_model_save_method")
+        if isinstance(resolved_config, dict)
+        else None
+    )
+    if not isinstance(save_method, str) or save_method not in _MERGED_MODEL_SAVE_METHODS:
+        raise ValueError(
+            "Merged-model verification requires an explicit supported "
+            "model.tokenizer.merged_model_save_method; got "
+            f"{save_method!r}."
+        )
+    live_save_merged = getattr(model, "save_pretrained_merged", None)
+    if save_method == "merged_16bit" and not callable(live_save_merged):
         raise TypeError(
-            "verify_merged_model_roundtrip=true requires model.save_pretrained_merged()."
+            "merged_16bit verification requires model.save_pretrained_merged()."
         )
     token_ids = [int(entry["token_id"]) for entry in metadata["configured_tokens"]]
     if not token_ids:
@@ -633,6 +758,7 @@ def verify_merged_model_roundtrip(
     output_before = (
         _selected_vocab_rows(output_module, token_ids) if output_module is not None else None
     )
+    live_topology_before = _module_topology_signature(model)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     temporary_dir = Path(
@@ -640,26 +766,121 @@ def verify_merged_model_roundtrip(
     )
     reloaded_model = None
     reloaded_tokenizer = None
+    merge_candidate = None
+    merge_candidate_device = None
+    source_quantization = None
     report: Optional[Dict[str, Any]] = None
     try:
-        save_merged(str(temporary_dir), tokenizer, save_method="merged_16bit")
+        if save_method == "merged_4bit_forced":
+            merge_candidate, merge_candidate_device, source_quantization = (
+                _fresh_forced_4bit_merge_candidate(output_path, metadata)
+            )
+            if merge_candidate is model:
+                raise RuntimeError("Forced 4-bit merge candidate must not be the live model.")
+            candidate_input = _selected_vocab_rows(
+                merge_candidate.get_input_embeddings(), token_ids
+            )
+            if not torch.equal(input_before.to(dtype=candidate_input.dtype), candidate_input):
+                raise RuntimeError(
+                    "Fresh forced-merge candidate input rows differ from the live model."
+                )
+            candidate_output_module = merge_candidate.get_output_embeddings()
+            if (output_before is None) != (candidate_output_module is None):
+                raise RuntimeError(
+                    "Fresh forced-merge candidate changed output vocabulary module presence."
+                )
+            if output_before is not None:
+                candidate_output = _selected_vocab_rows(
+                    candidate_output_module, token_ids
+                )
+                if not torch.equal(
+                    output_before.to(dtype=candidate_output.dtype), candidate_output
+                ):
+                    raise RuntimeError(
+                        "Fresh forced-merge candidate output rows differ from the live model."
+                    )
+            save_merged = merge_candidate.save_pretrained_merged
+        else:
+            save_merged = live_save_merged
+
+        save_merged(str(temporary_dir), tokenizer, save_method=save_method)
+        if _module_topology_signature(model) != live_topology_before:
+            raise RuntimeError("Merged-model verification changed the live model topology.")
+        live_input_after_save = _selected_vocab_rows(
+            model.get_input_embeddings(), token_ids
+        )
+        if not torch.equal(input_before, live_input_after_save):
+            raise RuntimeError(
+                "Merged-model verification changed live configured input rows."
+            )
+        live_output_after_save = model.get_output_embeddings()
+        if (output_before is None) != (live_output_after_save is None):
+            raise RuntimeError(
+                "Merged-model verification changed live output vocabulary module presence."
+            )
+        if output_before is not None and not torch.equal(
+            output_before,
+            _selected_vocab_rows(live_output_after_save, token_ids),
+        ):
+            raise RuntimeError(
+                "Merged-model verification changed live configured output rows."
+            )
+        save_merged = None
+        del merge_candidate
+        merge_candidate = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         saved_paths = sorted(path for path in temporary_dir.rglob("*") if path.is_file())
         if not saved_paths:
             raise RuntimeError("Merged-model save produced no files.")
+        saved_config_path = temporary_dir / "config.json"
+        if not saved_config_path.is_file():
+            raise RuntimeError("Merged-model save omitted config.json.")
+        saved_config = json.loads(saved_config_path.read_text(encoding="utf-8"))
+        if save_method == "merged_4bit_forced":
+            saved_quantization = _require_bnb_4bit_invariants(
+                saved_config.get("quantization_config"),
+                description="Saved forced-merge model",
+                expected=source_quantization,
+            )
+            saved_representation = (
+                "bitsandbytes_"
+                f"{source_quantization['bnb_4bit_quant_type']}_4bit"
+            )
+        else:
+            if saved_config.get("quantization_config") is not None:
+                raise RuntimeError(
+                    "Saved merged_16bit model unexpectedly retained quantization_config."
+                )
+            saved_quantization = None
+            saved_representation = "unquantized_16bit"
 
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         reloaded_tokenizer = AutoTokenizer.from_pretrained(
-            str(temporary_dir), local_files_only=True
+            str(temporary_dir), local_files_only=True, trust_remote_code=False
         )
         _verify_atomic_tokens(reloaded_tokenizer, metadata)
         reloaded_model = AutoModelForCausalLM.from_pretrained(
             str(temporary_dir),
             local_files_only=True,
+            trust_remote_code=False,
             device_map={"": "cpu"},
             dtype="auto",
             low_cpu_mem_usage=True,
         )
+        if save_method == "merged_4bit_forced":
+            if getattr(reloaded_model, "is_loaded_in_4bit", False) is not True:
+                raise RuntimeError("Fresh forced-merge reload was not loaded in 4-bit mode.")
+            _require_bnb_4bit_invariants(
+                getattr(reloaded_model.config, "quantization_config", None),
+                description="Fresh forced-merge reload",
+                expected=source_quantization,
+            )
+        elif getattr(reloaded_model, "is_loaded_in_4bit", False):
+            raise RuntimeError("Fresh merged_16bit reload unexpectedly loaded in 4-bit mode.")
         input_after = _selected_vocab_rows(reloaded_model.get_input_embeddings(), token_ids)
         if not torch.equal(input_before.to(dtype=input_after.dtype), input_after):
             raise RuntimeError("Merged/reloaded input embedding rows differ for configured tokens.")
@@ -679,12 +900,32 @@ def verify_merged_model_roundtrip(
             }
 
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "requested": True,
             "result": "passed",
-            "method": "unsloth_merged_16bit_save_fresh_transformers_cpu_reload",
-            "save_method": "merged_16bit",
+            "method": f"unsloth_{save_method}_save_fresh_transformers_cpu_reload",
+            "save_method": save_method,
+            "requested_save_method": save_method,
+            "saved_representation": saved_representation,
+            "merge_source": (
+                "fresh_pinned_base_plus_saved_adapter"
+                if save_method == "merged_4bit_forced"
+                else "live_model_nondestructive_export"
+            ),
+            "merge_candidate_device": merge_candidate_device,
+            "source_quantization": source_quantization,
+            "saved_quantization": saved_quantization,
+            "reload_loader": "transformers.AutoModelForCausalLM",
+            "reload_device": "cpu",
             "local_files_only": True,
+            "trust_remote_code": False,
+            "reload_is_loaded_in_4bit": bool(
+                getattr(reloaded_model, "is_loaded_in_4bit", False)
+            ),
+            "verification_scope": "serialization_and_configured_token_rows_no_forward",
+            "forward_executed": False,
+            "live_model_topology_preserved": True,
+            "live_model_configured_rows_preserved": True,
             "configured_tokens": [dict(entry) for entry in metadata["configured_tokens"]],
             "base_model_provenance": dict(base_provenance),
             "input_rows": {
@@ -704,6 +945,7 @@ def verify_merged_model_roundtrip(
             "published": False,
         }
     finally:
+        del merge_candidate
         del reloaded_model
         del reloaded_tokenizer
         gc.collect()

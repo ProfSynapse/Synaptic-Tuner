@@ -21,6 +21,7 @@ from configs.config_loader import (  # noqa: E402
     resolve_model_revision,
     validate_model_revision_evidence,
 )
+import src.special_tokens as special_tokens_module  # noqa: E402
 from src.special_tokens import (  # noqa: E402
     _adapter_only_live_state,
     bind_adapter_artifact_lineage,
@@ -152,6 +153,7 @@ def _config(**overrides):
         "train_new_lm_head_rows": True,
         "verify_tokenizer_roundtrip": True,
         "verify_adapter_roundtrip": True,
+        "merged_model_save_method": "merged_16bit",
     }
     values.update(overrides)
     return TokenizerConfig(**values)
@@ -376,6 +378,8 @@ def test_collision_policy_is_explicit_and_reuse_never_trains_old_row():
         ({"additional_special_tokens": [""]}, "non-empty strings"),
         ({"additional_special_tokens": ["<MODE_A>"], "existing_token_policy": "guess"}, "must be one of"),
         ({"additional_special_tokens": ["<MODE_A>"], "initialization": "random"}, "must be one of"),
+        ({"additional_special_tokens": ["<MODE_A>"], "merged_model_save_method": "auto"}, "must be one of"),
+        ({"additional_special_tokens": ["<MODE_A>"], "merged_model_save_method": []}, "must be one of"),
         ({"additional_special_tokens": ["<MODE_A>"], "train_new_embedding_rows": "false"}, "YAML boolean"),
         ({"additional_special_tokens": ["<MODE_A>"], "unknown_knob": True}, "Unknown model.tokenizer"),
         ({"additional_special_tokens": ["<MODE_A>"], "verify_save_reload_roundtrip": True}, "Unknown model.tokenizer"),
@@ -476,44 +480,337 @@ def test_merged_model_roundtrip_is_default_off():
     assert verify_merged_model_roundtrip(model, tokenizer, "/unused", metadata) is None
 
 
-def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(tmp_path, monkeypatch):
+def test_forced_4bit_merge_candidate_uses_fresh_pinned_base_and_saved_adapter(
+    tmp_path, monkeypatch
+):
     transformers = pytest.importorskip("transformers")
+    peft = pytest.importorskip("peft")
+    quantization = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+    }
+    base = TinyCausalLM(vocab_size=2)
+    base.config.quantization_config = dict(quantization)
+    base.is_loaded_in_4bit = True
+    load_calls = []
+
+    def fake_base_load(repo, **kwargs):
+        load_calls.append((repo, kwargs))
+        return base
+
+    monkeypatch.setattr(
+        transformers.AutoModelForCausalLM, "from_pretrained", fake_base_load
+    )
+    adapter_calls = []
+
+    def fake_adapter_load(loaded_base, path, **kwargs):
+        adapter_calls.append((loaded_base, path, kwargs))
+        return loaded_base
+
+    monkeypatch.setattr(
+        peft.PeftModel, "from_pretrained", staticmethod(fake_adapter_load)
+    )
+    verified = []
+    monkeypatch.setattr(
+        special_tokens_module,
+        "verify_peft_trainable_token_adapters",
+        lambda candidate, metadata, require_trainable: verified.append(
+            (candidate, require_trainable)
+        ),
+    )
+    fake_unsloth = ModuleType("unsloth")
+    fake_unsloth_save = ModuleType("unsloth.save")
+
+    def fake_patch(candidate):
+        candidate.save_pretrained_merged = lambda *args, **kwargs: None
+        return candidate
+
+    fake_unsloth_save.patch_saving_functions = fake_patch
+    fake_unsloth.save = fake_unsloth_save
+    monkeypatch.setitem(sys.modules, "unsloth", fake_unsloth)
+    monkeypatch.setitem(sys.modules, "unsloth.save", fake_unsloth_save)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
+    revision = "a" * 40
+    metadata = {
+        "base_model_provenance": {
+            "requested_repo": "test-org/test-model",
+            "requested_revision": revision,
+        },
+        "model_vocab_size_after": 4,
+    }
+
+    candidate, device, invariants = (
+        special_tokens_module._fresh_forced_4bit_merge_candidate(tmp_path, metadata)
+    )
+
+    assert candidate is base
+    assert device == "cuda:2"
+    assert invariants == quantization
+    assert load_calls == [
+        (
+            "test-org/test-model",
+            {
+                "revision": revision,
+                "local_files_only": True,
+                "trust_remote_code": False,
+                "device_map": {"": 2},
+                "dtype": "auto",
+                "low_cpu_mem_usage": True,
+            },
+        )
+    ]
+    assert base.get_input_embeddings().weight.shape[0] == 4
+    assert adapter_calls == [
+        (
+            base,
+            str(tmp_path),
+            {"is_trainable": False, "local_files_only": True},
+        )
+    ]
+    assert verified == [(base, False)]
+    assert callable(candidate.save_pretrained_merged)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("quant_method", "gptq"),
+        ("load_in_4bit", False),
+        ("bnb_4bit_quant_type", ""),
+        ("bnb_4bit_quant_type", "int4"),
+    ],
+)
+def test_forced_4bit_invariants_fail_closed(field, value):
+    config = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+    }
+    config[field] = value
+    with pytest.raises(RuntimeError, match="not a supported BitsAndBytes 4-bit"):
+        special_tokens_module._require_bnb_4bit_invariants(
+            config, description="test model"
+        )
+
+
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+def test_forced_4bit_invariants_accept_supported_source_types(quant_type):
+    config = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": quant_type,
+    }
+    assert special_tokens_module._require_bnb_4bit_invariants(
+        config, description="fresh base"
+    ) == config
+
+
+def test_forced_4bit_invariants_require_exact_source_match():
+    source = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": "nf4",
+    }
+    saved = dict(source, bnb_4bit_quant_type="fp4")
+    with pytest.raises(RuntimeError, match="differ from the fresh pinned base"):
+        special_tokens_module._require_bnb_4bit_invariants(
+            saved, description="saved model", expected=source
+        )
+
+
+@pytest.mark.parametrize(
+    "save_method,quant_type",
+    [
+        ("merged_16bit", None),
+        ("merged_4bit_forced", "nf4"),
+        ("merged_4bit_forced", "fp4"),
+    ],
+)
+def test_merged_model_roundtrip_saves_reloads_compares_and_cleans(
+    tmp_path, monkeypatch, save_method, quant_type
+):
+    transformers = pytest.importorskip("transformers")
+    model = TinyCausalLM()
+    tokenizer = FakeTokenizer()
+    metadata = prepare_special_tokens(
+        model,
+        tokenizer,
+        _config(
+            verify_merged_model_roundtrip=True,
+            merged_model_save_method=save_method,
+        ),
+    )
+    _set_merged_test_provenance(metadata)
+    reloaded = TinyCausalLM(vocab_size=len(tokenizer))
+    reloaded.load_state_dict(model.state_dict())
+    saved_quantization = {
+        "quant_method": "bitsandbytes",
+        "load_in_4bit": True,
+        "bnb_4bit_quant_type": quant_type,
+    }
+    if save_method == "merged_4bit_forced":
+        reloaded.config.quantization_config = dict(saved_quantization)
+        reloaded.is_loaded_in_4bit = True
+    live_topology = [(name, id(module)) for name, module in model.named_modules()]
+    live_input_rows = model.get_input_embeddings().weight[2:4].detach().clone()
+    live_output_rows = model.get_output_embeddings().weight[2:4].detach().clone()
+    save_targets = []
+
+    def fake_save(output_dir, saved_tokenizer, save_method):
+        assert save_method == metadata["resolved_config"]["merged_model_save_method"]
+        save_targets.append("copy" if target is merge_candidate else "live")
+        saved_tokenizer.save_pretrained(output_dir)
+        (Path(output_dir) / "model.safetensors").write_bytes(b"merged")
+        config = (
+            {"quantization_config": saved_quantization}
+            if save_method == "merged_4bit_forced"
+            else {}
+        )
+        (Path(output_dir) / "config.json").write_text(json.dumps(config))
+
+    target = model
+    merge_candidate = None
+    model.save_pretrained_merged = fake_save
+    if save_method == "merged_4bit_forced":
+        merge_candidate = TinyCausalLM(vocab_size=len(tokenizer))
+        merge_candidate.load_state_dict(model.state_dict())
+        merge_candidate.save_pretrained_merged = fake_save
+        target = merge_candidate
+        monkeypatch.setattr(
+            special_tokens_module,
+            "_fresh_forced_4bit_merge_candidate",
+            lambda output_dir, resolved_metadata: (
+                merge_candidate,
+                "cuda:0",
+                dict(saved_quantization),
+            ),
+        )
+    monkeypatch.setattr(
+        transformers.AutoTokenizer,
+        "from_pretrained",
+        lambda path, local_files_only, trust_remote_code: FakeTokenizer.from_pretrained(
+            path, local_files_only=local_files_only
+        ),
+    )
+
+    def fake_model_reload(path, **kwargs):
+        assert Path(path).name.startswith(".merged-roundtrip-")
+        assert kwargs == {
+            "local_files_only": True,
+            "trust_remote_code": False,
+            "device_map": {"": "cpu"},
+            "dtype": "auto",
+            "low_cpu_mem_usage": True,
+        }
+        return reloaded
+
+    monkeypatch.setattr(
+        transformers.AutoModelForCausalLM, "from_pretrained", fake_model_reload
+    )
+
+    output_dir = tmp_path / "final_model"
+    report = verify_merged_model_roundtrip(model, tokenizer, output_dir, metadata)
+    assert report["result"] == "passed"
+    assert report["save_method"] == save_method
+    assert report["requested_save_method"] == save_method
+    assert report["saved_representation"] == (
+        f"bitsandbytes_{quant_type}_4bit"
+        if save_method == "merged_4bit_forced"
+        else "unquantized_16bit"
+    )
+    assert report["merge_source"] == (
+        "fresh_pinned_base_plus_saved_adapter"
+        if save_method == "merged_4bit_forced"
+        else "live_model_nondestructive_export"
+    )
+    assert save_targets == [
+        "copy" if save_method == "merged_4bit_forced" else "live"
+    ]
+    assert [(name, id(module)) for name, module in model.named_modules()] == live_topology
+    assert torch.equal(model.get_input_embeddings().weight[2:4], live_input_rows)
+    assert torch.equal(model.get_output_embeddings().weight[2:4], live_output_rows)
+    assert report["reload_loader"] == "transformers.AutoModelForCausalLM"
+    assert report["reload_device"] == "cpu"
+    assert report["trust_remote_code"] is False
+    assert report["reload_is_loaded_in_4bit"] is (
+        save_method == "merged_4bit_forced"
+    )
+    assert report["forward_executed"] is False
+    assert report["live_model_configured_rows_preserved"] is True
+    assert report["published"] is False
+    assert report["temporary_artifacts_removed"] is True
+    assert (output_dir / "merged_model_roundtrip.json").is_file()
+    assert metadata["merged_model_roundtrip"]["result"] == "passed"
+    assert not list(tmp_path.glob(".merged-roundtrip-*"))
+
+
+@pytest.mark.parametrize("save_method", ["merged_16bit", "merged_4bit_forced"])
+def test_merged_model_roundtrip_requires_saved_files_and_cleans(
+    tmp_path, monkeypatch, save_method
+):
+    model = TinyCausalLM()
+    tokenizer = FakeTokenizer()
+    metadata = prepare_special_tokens(
+        model,
+        tokenizer,
+        _config(
+            verify_merged_model_roundtrip=True,
+            merged_model_save_method=save_method,
+        ),
+    )
+    _set_merged_test_provenance(metadata)
+    received_methods = []
+
+    def fake_save(output_dir, saved_tokenizer, *, save_method):
+        received_methods.append(save_method)
+
+    save_target = model
+    if save_method == "merged_4bit_forced":
+        save_target = TinyCausalLM(vocab_size=len(tokenizer))
+        save_target.load_state_dict(model.state_dict())
+        monkeypatch.setattr(
+            special_tokens_module,
+            "_fresh_forced_4bit_merge_candidate",
+            lambda output_dir, resolved_metadata: (
+                save_target,
+                "cuda:0",
+                {
+                    "quant_method": "bitsandbytes",
+                    "load_in_4bit": True,
+                    "bnb_4bit_quant_type": "nf4",
+                },
+            ),
+        )
+    save_target.save_pretrained_merged = fake_save
+    with pytest.raises(RuntimeError, match="produced no files"):
+        verify_merged_model_roundtrip(model, tokenizer, tmp_path / "final", metadata)
+    assert received_methods == [save_method]
+    assert not list(tmp_path.glob(".merged-roundtrip-*"))
+
+
+def test_merged_model_roundtrip_rejects_unsupported_resolved_method_before_save(
+    tmp_path,
+):
     model = TinyCausalLM()
     tokenizer = FakeTokenizer()
     metadata = prepare_special_tokens(
         model, tokenizer, _config(verify_merged_model_roundtrip=True)
     )
     _set_merged_test_provenance(metadata)
-    reloaded = TinyCausalLM(vocab_size=len(tokenizer))
-    reloaded.load_state_dict(model.state_dict())
+    metadata["resolved_config"]["merged_model_save_method"] = "auto"
+    save_called = False
 
-    def fake_save(output_dir, saved_tokenizer, save_method):
-        assert save_method == "merged_16bit"
-        saved_tokenizer.save_pretrained(output_dir)
-        (Path(output_dir) / "model.safetensors").write_bytes(b"merged")
+    def fake_save(*args, **kwargs):
+        nonlocal save_called
+        save_called = True
 
     model.save_pretrained_merged = fake_save
-    monkeypatch.setattr(
-        transformers.AutoTokenizer,
-        "from_pretrained",
-        lambda path, local_files_only: FakeTokenizer.from_pretrained(
-            path, local_files_only=local_files_only
-        ),
-    )
-    monkeypatch.setattr(
-        transformers.AutoModelForCausalLM,
-        "from_pretrained",
-        lambda *args, **kwargs: reloaded,
-    )
-
-    output_dir = tmp_path / "final_model"
-    report = verify_merged_model_roundtrip(model, tokenizer, output_dir, metadata)
-    assert report["result"] == "passed"
-    assert report["published"] is False
-    assert report["temporary_artifacts_removed"] is True
-    assert (output_dir / "merged_model_roundtrip.json").is_file()
-    assert metadata["merged_model_roundtrip"]["result"] == "passed"
-    assert not list(tmp_path.glob(".merged-roundtrip-*"))
+    with pytest.raises(ValueError, match="explicit supported"):
+        verify_merged_model_roundtrip(model, tokenizer, tmp_path, metadata)
+    assert save_called is False
+    assert not list(tmp_path.parent.glob(".merged-roundtrip-*"))
 
 
 def test_merged_model_roundtrip_fails_closed_and_cleans_on_row_mismatch(
@@ -531,12 +828,13 @@ def test_merged_model_roundtrip_fails_closed_and_cleans_on_row_mismatch(
     def fake_save(output_dir, saved_tokenizer, save_method):
         saved_tokenizer.save_pretrained(output_dir)
         (Path(output_dir) / "model.safetensors").write_bytes(b"merged")
+        (Path(output_dir) / "config.json").write_text("{}")
 
     model.save_pretrained_merged = fake_save
     monkeypatch.setattr(
         transformers.AutoTokenizer,
         "from_pretrained",
-        lambda path, local_files_only: FakeTokenizer.from_pretrained(
+        lambda path, local_files_only, trust_remote_code: FakeTokenizer.from_pretrained(
             path, local_files_only=local_files_only
         ),
     )

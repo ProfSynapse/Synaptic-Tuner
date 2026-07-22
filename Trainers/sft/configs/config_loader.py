@@ -99,6 +99,7 @@ class TokenizerConfig:
     verify_tokenizer_roundtrip: bool = True
     verify_adapter_roundtrip: bool = True
     verify_merged_model_roundtrip: bool = False
+    merged_model_save_method: str = "merged_16bit"
 
 
 @dataclass
