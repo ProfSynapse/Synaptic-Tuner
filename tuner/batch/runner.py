@@ -11,6 +11,7 @@ Used by: tuner.handlers.batch_generate_handler / batch_capture_handler.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -22,6 +23,7 @@ from tuner.batch.engines import (
     get_generate_engine,
 )
 from tuner.batch.persistence import (
+    ConfigMismatchError,
     JsonlAppender,
     RunCheckpoint,
     atomic_write_bytes,
@@ -33,6 +35,7 @@ from tuner.batch.sync_hook import SyncHook
 
 
 COMPLETIONS_FILENAME = "completions.jsonl"
+PROVENANCE_FILENAME = "provenance.json"
 CAPTURE_INDEX_FILENAME = "capture.jsonl"
 _RESERVED_ROW_FIELDS = {"id", "prompt", "text", "token_ids", "positions"}
 
@@ -64,6 +67,7 @@ def run_batch_generate(
     out_dir: Path,
     model: str,
     model_revision: Optional[str] = None,
+    tokenizer_revision: Optional[str] = None,
     engine: str = "hf-batched",
     max_new_tokens: int = 48,
     min_new_tokens: int = 0,
@@ -74,13 +78,23 @@ def run_batch_generate(
     seed: Optional[int] = None,
     extra_eos_tokens: Optional[List[str]] = None,
     stop: Optional[List[str]] = None,
+    json_schema: Optional[Dict[str, Any]] = None,
+    structured_output_backend: str = "auto",
+    structured_output_disable_any_whitespace: bool = False,
+    expected_vllm_version: Optional[str] = None,
+    min_compute_capability: Optional[str] = None,
+    tensor_parallel_size: int = 1,
+    max_num_seqs: Optional[int] = None,
+    max_num_batched_tokens: Optional[int] = None,
+    max_model_len: Optional[int] = None,
+    limit_mm_per_prompt: Optional[Dict[str, int]] = None,
+    gpu_memory_utilization: Optional[float] = None,
     resume: bool = False,
     sync_every: int = 0,
     sync_cmd: Optional[str] = None,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
     dtype: Optional[str] = None,
     log: Optional[Callable[[str], None]] = None,
-    engine_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run ``batch-generate`` with incremental persistence + resume.
 
@@ -91,17 +105,68 @@ def run_batch_generate(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = _read_jsonl(Path(prompts_path))
+    prompts_sha256 = hashlib.sha256(Path(prompts_path).read_bytes()).hexdigest()
+    prompt_by_id: Dict[str, str] = {}
     for r in rows:
         if "id" not in r or "prompt" not in r:
             raise ValueError("Each prompts row must have 'id' and 'prompt' fields.")
+        row_id = str(r["id"])
+        if row_id in prompt_by_id:
+            raise ValueError(f"Duplicate prompt id: {row_id!r}")
+        if not isinstance(r["prompt"], str):
+            raise ValueError(f"Prompt for id {row_id!r} must be a string.")
+        prompt_by_id[row_id] = r["prompt"]
+    if json_schema is not None and not isinstance(json_schema, dict):
+        raise ValueError("json_schema must be a JSON object")
+    if json_schema is not None and engine != "vllm":
+        raise ValueError("json_schema structured outputs require engine='vllm'")
+    if engine != "vllm" and structured_output_backend != "auto":
+        raise ValueError("structured_output_backend requires engine='vllm'")
+    if engine != "vllm" and max_model_len is not None:
+        raise ValueError("max_model_len requires engine='vllm'")
+    if engine != "vllm" and limit_mm_per_prompt is not None:
+        raise ValueError("limit_mm_per_prompt requires engine='vllm'")
+    if structured_output_backend not in {"auto", "xgrammar"}:
+        raise ValueError(
+            "structured_output_backend must be one of: auto, xgrammar"
+        )
+    if max_model_len is not None and max_model_len < 1:
+        raise ValueError("max_model_len must be at least 1")
+    if limit_mm_per_prompt is not None:
+        if not isinstance(limit_mm_per_prompt, dict):
+            raise ValueError("limit_mm_per_prompt must be a JSON object")
+        if any(
+            not isinstance(key, str)
+            or not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+            for key, value in limit_mm_per_prompt.items()
+        ):
+            raise ValueError(
+                "limit_mm_per_prompt must map modality names to non-negative integers"
+            )
+    if gpu_memory_utilization is not None and not (
+        0.0 < gpu_memory_utilization <= 1.0
+    ):
+        raise ValueError("gpu_memory_utilization must be in the interval (0, 1]")
+
+    schema_hash = None
+    if json_schema is not None:
+        schema_bytes = json.dumps(
+            json_schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        schema_hash = hashlib.sha256(schema_bytes).hexdigest()
 
     # Config hash: everything that changes WHAT is produced. Not out-dir, resume,
     # or sync (those don't affect output content), matching the resume contract.
     config = {
         "verb": "batch-generate",
+        "prompts_sha256": prompts_sha256,
         "model": model,
         "model_revision": model_revision,
+        "tokenizer_revision": tokenizer_revision,
         "engine": engine,
+        "batch_size": batch_size,
         "max_new_tokens": max_new_tokens,
         "min_new_tokens": min_new_tokens,
         "do_sample": do_sample,
@@ -111,6 +176,27 @@ def run_batch_generate(
         "extra_eos_tokens": list(extra_eos_tokens) if extra_eos_tokens else None,
         "stop": list(stop) if stop else None,
         "dtype": dtype,
+        "trust_remote_code": trust_remote_code,
+        "json_schema_sha256": schema_hash,
+        "structured_output_backend": (
+            structured_output_backend if engine == "vllm" else None
+        ),
+        "structured_output_disable_any_whitespace": (
+            structured_output_disable_any_whitespace if engine == "vllm" else None
+        ),
+        "expected_vllm_version": expected_vllm_version,
+        "min_compute_capability": (
+            min_compute_capability if engine == "vllm" else None
+        ),
+        "vllm_batch_invariant": engine == "vllm",
+        "tensor_parallel_size": tensor_parallel_size if engine == "vllm" else None,
+        "max_num_seqs": max_num_seqs if engine == "vllm" else None,
+        "max_num_batched_tokens": max_num_batched_tokens if engine == "vllm" else None,
+        "max_model_len": max_model_len if engine == "vllm" else None,
+        "limit_mm_per_prompt": limit_mm_per_prompt if engine == "vllm" else None,
+        "gpu_memory_utilization": (
+            gpu_memory_utilization if engine == "vllm" else None
+        ),
     }
 
     completions_path = out_dir / COMPLETIONS_FILENAME
@@ -127,25 +213,84 @@ def run_batch_generate(
         f"done, {len(todo)} to process (engine={engine}, batch_size={batch_size})."
     )
     if not todo:
+        provenance_path = out_dir / PROVENANCE_FILENAME
+        if index_ids and not provenance_path.exists():
+            raise ConfigMismatchError(
+                "Cannot --resume: completed rows exist without provenance.json."
+            )
+        if provenance_path.exists():
+            existing_provenance = json.loads(
+                provenance_path.read_text(encoding="utf-8")
+            )
+            if (
+                existing_provenance.get("config_hash") != checkpoint.config_hash
+                or existing_provenance.get("config") != config
+            ):
+                raise ConfigMismatchError(
+                    "Cannot --resume: static provenance differs from the current run."
+                )
         sync.final()
-        return _summary(out_dir, completions_path, len(rows), 0, engine)
+        summary = _summary(out_dir, completions_path, len(rows), 0, engine)
+        summary["runtime_provenance_verified"] = False
+        return summary
 
-    gen_engine = get_generate_engine(
-        engine,
-        model_name=model,
-        revision=model_revision,
-        max_new_tokens=max_new_tokens,
-        min_new_tokens=min_new_tokens,
-        do_sample=do_sample,
-        temperature=temperature,
-        top_p=top_p,
-        seed=seed,
-        extra_eos_tokens=extra_eos_tokens,
-        stop=stop,
-        trust_remote_code=trust_remote_code,
-        dtype=dtype,
-        **(engine_overrides or {}),
-    )
+    engine_kwargs = {
+        "model_name": model,
+        "revision": model_revision,
+        "tokenizer_revision": tokenizer_revision,
+        "max_new_tokens": max_new_tokens,
+        "min_new_tokens": min_new_tokens,
+        "do_sample": do_sample,
+        "temperature": temperature,
+        "top_p": top_p,
+        "seed": seed,
+        "extra_eos_tokens": extra_eos_tokens,
+        "stop": stop,
+        "trust_remote_code": trust_remote_code,
+        "dtype": dtype,
+    }
+    if engine == "vllm":
+        engine_kwargs.update(
+            json_schema=json_schema,
+            structured_output_backend=structured_output_backend,
+            structured_output_disable_any_whitespace=(
+                structured_output_disable_any_whitespace
+            ),
+            expected_vllm_version=expected_vllm_version,
+            min_compute_capability=min_compute_capability,
+            tensor_parallel_size=tensor_parallel_size,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+            max_model_len=max_model_len,
+            limit_mm_per_prompt=limit_mm_per_prompt,
+            gpu_memory_utilization=gpu_memory_utilization,
+        )
+    gen_engine = get_generate_engine(engine, **engine_kwargs)
+    provenance = {
+        "version": 1,
+        "config_hash": checkpoint.config_hash,
+        "config": config,
+        "runtime": gen_engine.provenance(),
+    }
+    provenance_path = out_dir / PROVENANCE_FILENAME
+    if provenance_path.exists():
+        existing_provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        if existing_provenance != provenance:
+            gen_engine.close()
+            raise ConfigMismatchError(
+                "Cannot --resume: runtime provenance differs from the existing "
+                "run. vLLM resume requires the same version and hardware."
+            )
+    else:
+        if index_ids:
+            gen_engine.close()
+            raise ConfigMismatchError(
+                "Cannot --resume: completed rows exist without provenance.json."
+            )
+        atomic_write_bytes(
+            provenance_path,
+            (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        )
 
     def _on_oom(old: int, new: int) -> None:
         log(f"[batch-generate] CUDA OOM at batch_size={old}; halving to {new}.")
@@ -168,7 +313,11 @@ def run_batch_generate(
                     "id": res.id,
                     "completion_text": res.completion_text,
                     "completion_token_ids": res.completion_token_ids,
+                    "prompt_token_ids_sha256": res.prompt_token_ids_sha256,
                     "prompt_token_len": res.prompt_token_len,
+                    "prompt_sha256": hashlib.sha256(
+                        prompt_by_id[res.id].encode("utf-8")
+                    ).hexdigest(),
                     "finish_reason": res.finish_reason,
                 }
                 row.update(res.passthrough)
@@ -182,9 +331,11 @@ def run_batch_generate(
         gen_engine.close()
 
     sync.final()
-    return _summary(
+    summary = _summary(
         out_dir, completions_path, len(rows), processed, engine, peak_suffix()
     )
+    summary["runtime_provenance_verified"] = True
+    return summary
 
 
 def run_batch_capture(

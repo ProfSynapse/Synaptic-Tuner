@@ -9,6 +9,8 @@ Purpose: The abstract contract every engine implements, plus the small
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -21,6 +23,12 @@ class OutOfMemoryError(RuntimeError):
     torch. Engines translate their native OOM (e.g. ``torch.cuda.OutOfMemory``)
     into this type.
     """
+
+
+def hash_token_ids(token_ids: List[int]) -> str:
+    """Hash a token sequence without persisting potentially sensitive ids."""
+    payload = json.dumps(list(token_ids), separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass
@@ -39,6 +47,7 @@ class GenerateResult:
     id: str
     completion_text: str
     completion_token_ids: List[int]
+    prompt_token_ids_sha256: str
     prompt_token_len: int
     finish_reason: str
     passthrough: Dict[str, Any] = field(default_factory=dict)
@@ -98,6 +107,10 @@ class GenerateEngine(ABC):
 
     def close(self) -> None:  # pragma: no cover - trivial default
         """Release model/GPU resources. Optional."""
+
+    def provenance(self) -> Dict[str, Any]:
+        """Return runtime facts that should accompany generated artifacts."""
+        return {}
 
 
 class CaptureEngine(ABC):

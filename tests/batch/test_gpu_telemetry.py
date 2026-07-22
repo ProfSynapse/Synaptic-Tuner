@@ -103,6 +103,7 @@ class _FakeGenEngine:
                 id=it.id,
                 completion_text="x",
                 completion_token_ids=[1],
+                prompt_token_ids_sha256="0" * 64,
                 prompt_token_len=1,
                 finish_reason="length",
                 passthrough=it.passthrough,
@@ -112,6 +113,9 @@ class _FakeGenEngine:
 
     def close(self):
         pass
+
+    def provenance(self):
+        return {}
 
 
 def _write_prompts(tmp_path, n):

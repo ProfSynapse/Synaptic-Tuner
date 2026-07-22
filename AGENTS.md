@@ -23,6 +23,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - Generic runtime code may validate or transport configured formats, but it must not assume one specific wrapper such as `useTools`, one specific field set, or one specific command structure unless that behavior is itself config-driven.
 - When using environment-backed validation during generation, environment/runtime errors must be surfaced into the judge/improver inputs as structured context so the model can correct the response. Do not rely on ad hoc parser/executor repairs as the primary fix path.
 - If a process requirement is important enough to affect how generation/eval work is done repeatedly, encode it in `AGENTS.md`, the canonical skill under `.skills/`, and the relevant checked-in config/docs before continuing.
+- For new unsteered local batch generation, prefer `batch-generate --engine vllm`. Set `VLLM_BATCH_INVARIANT=1` before process startup and pin the exact vLLM version, documented minimum CUDA compute capability, model and tokenizer revisions, dtype, tensor parallel size, scheduler limits, structured-output backend, model context limit, multimodal limits, decode settings, and JSON Schema when formatting is incidental. Keep generated rows and token artifacts in the consuming project's private output directory.
 
 ## HF Jobs
 

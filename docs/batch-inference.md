@@ -36,8 +36,14 @@ incrementally per batch:
 
 ```json
 {"id": "...", "completion_text": "...", "completion_token_ids": [...],
- "prompt_token_len": 12, "finish_reason": "eos|length|stop", "...passthrough": ...}
+ "prompt_token_ids_sha256": "...", "prompt_token_len": 12,
+ "prompt_sha256": "...", "finish_reason": "eos|length|stop", "...passthrough": ...}
 ```
+
+The two prompt hashes make prompt identity auditable without persisting raw
+prompt token IDs. `prompt_sha256` hashes the exact UTF-8 prompt bytes;
+`prompt_token_ids_sha256` hashes the unpadded token sequence. Run-level engine
+settings and their checkpoint hash are written to `<out-dir>/provenance.json`.
 
 hf-batched engine specifics: length-sorted micro-batching, **left padding** for
 generation with correct attention masks, `use_cache=True`, bf16 on supported
@@ -91,7 +97,12 @@ vectors per position.
   half-written tensor.
 - **`checkpoint.json`** in the out-dir tracks the set of done ids plus a
   `config_hash` of the invocation (model, engine, decode params, seed, layers,
-  persist dtype). It is reconciled against the actual JSONL index at load time,
+  persist dtype). For generation this also covers model and tokenizer revisions,
+  batch size, schema hash, exact vLLM version, tensor parallelism, scheduler
+  limits, structured-output backend, model context limit, multimodal limits,
+  GPU-memory fraction, trust-remote-code choice, exact input JSONL byte hash,
+  dtype, and the batch-invariance requirement. It is reconciled against
+  the actual JSONL index at load time,
   so a row that landed in the index but not the checkpoint (crash between the
   two writes) still counts as done.
 - **`--resume`** re-invokes against the same `--out-dir`: it loads the
@@ -99,6 +110,10 @@ vectors per position.
   across a different config — a changed model/seed/decode param), skips all done
   ids **by id**, and continues. A completed-then-resumed run produces the
   identical artifact set as an uninterrupted run.
+- Resume requires the exact same input JSONL bytes. Appending rows, reordering
+  rows, or changing prompt/passthrough content requires a fresh output directory.
+  A resume that would add rows also compares the observed vLLM, CUDA, driver,
+  PyTorch, and GPU provenance and refuses to mix runtimes.
 - Without `--resume`, pointing at an out-dir that already holds a run is refused
   (no silent overwrite / mixing).
 
@@ -144,6 +159,42 @@ hidden-state extraction in v0.18.0 (prefill-only, connector-based), but its API
 is version-specific; until a vLLM is pinned and verified, `batch-capture
 --engine vllm` raises a clear error pointing at `hf-batched` (whose capture
 forward is already fast — generation, not capture, was the bottleneck).
+
+For a reproducible vLLM generation run, set batch invariance before process
+startup, pin the exact runtime and scheduler, and provide a JSON Schema when
+format is incidental to the experiment:
+
+```bash
+VLLM_BATCH_INVARIANT=1 python tuner.py batch-generate \
+  --prompts prompts.jsonl \
+  --model <hf-id-or-path> \
+  --model-revision <commit-sha> \
+  --tokenizer-revision <commit-sha> \
+  --out-dir runs/gen \
+  --engine vllm \
+  --expected-vllm-version 0.23.0 \
+  --min-compute-capability 8.0 \
+  --json-schema response.schema.json \
+  --structured-output-backend xgrammar \
+  --structured-output-disable-any-whitespace \
+  --tensor-parallel-size 1 \
+  --max-num-seqs 64 \
+  --max-num-batched-tokens 8192 \
+  --max-model-len 2048 \
+  --limit-mm-per-prompt '{"image":0,"audio":0}' \
+  --gpu-memory-utilization 0.90 \
+  --batch-size 20 \
+  --compute-dtype bfloat16 \
+  --max-new-tokens 96 \
+  --seed 0
+```
+
+The vLLM engine fails before model construction unless
+`VLLM_BATCH_INVARIANT=1` is already present, the installed version exactly
+matches `--expected-vllm-version`, every participating GPU meets
+`--min-compute-capability`, and the structured-output API exists. The
+schema content is canonicalized and hashed; changing the schema or any pinned
+engine setting makes `--resume` refuse the old output directory.
 
 ---
 
