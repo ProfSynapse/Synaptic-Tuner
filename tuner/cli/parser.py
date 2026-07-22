@@ -559,6 +559,7 @@ Examples:
     parser.add_argument("--base-dir", default=".tracking", help="Tracking base directory")
     parser.add_argument("--model", help="Model path for inference")
     parser.add_argument("--model-revision", dest="model_revision", help="Model commit SHA/revision for reproducible inference loads")
+    parser.add_argument("--tokenizer-revision", dest="tokenizer_revision", help="Tokenizer commit SHA/revision for reproducible inference loads")
     parser.add_argument("--dataset-path", help="Path to jsonl dataset")
     parser.add_argument("--max-seq-length", type=int, default=2048, help="Max sequence length")
     parser.add_argument("--no-completion-only", action="store_true", help="Disable completion-only masking")
@@ -587,6 +588,33 @@ Examples:
     parser.add_argument("--top-p", type=float, default=1.0, dest="top_p", help="Nucleus top-p for batch-generate --do-sample.")
     parser.add_argument("--extra-eos-token", action="append", dest="extra_eos_tokens", help="Additional tokenizer token to treat as EOS for batch-generate; may be repeated.")
     parser.add_argument("--stop-string", action="append", dest="stop_strings", help="Stop string for batch-generate; may be repeated.")
+    parser.add_argument("--json-schema", dest="json_schema", help="Path to a JSON Schema enforced by vLLM structured outputs (batch-generate).")
+    parser.add_argument(
+        "--structured-output-backend",
+        choices=["auto", "xgrammar"],
+        default="auto",
+        dest="structured_output_backend",
+        help="Pinned vLLM structured-output backend (default: auto).",
+    )
+    parser.add_argument(
+        "--structured-output-disable-any-whitespace",
+        action="store_true",
+        dest="structured_output_disable_any_whitespace",
+        help="Disallow arbitrary JSON whitespace in supported vLLM backends.",
+    )
+    parser.add_argument("--expected-vllm-version", dest="expected_vllm_version", help="Exact installed vLLM version required by --engine vllm.")
+    parser.add_argument("--min-compute-capability", dest="min_compute_capability", help="Minimum CUDA compute capability required for the pinned vLLM batch-invariance runtime, for example 8.0.")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1, dest="tensor_parallel_size", help="vLLM tensor parallel size (default: 1).")
+    parser.add_argument("--max-num-seqs", type=int, default=None, dest="max_num_seqs", help="Pinned vLLM scheduler maximum concurrent sequences.")
+    parser.add_argument("--max-num-batched-tokens", type=int, default=None, dest="max_num_batched_tokens", help="Pinned vLLM scheduler maximum batched tokens.")
+    parser.add_argument("--max-model-len", type=int, default=None, dest="max_model_len", help="Pinned vLLM maximum model context length.")
+    parser.add_argument(
+        "--limit-mm-per-prompt",
+        dest="limit_mm_per_prompt",
+        help='JSON modality limit mapping for vLLM, for example {"image":0,"audio":0}.',
+    )
+    parser.add_argument("--gpu-memory-utilization", type=float, default=None, dest="gpu_memory_utilization", help="Pinned vLLM fraction of GPU memory available to the executor.")
+    parser.add_argument("--trust-remote-code", action="store_true", dest="trust_remote_code", help="Allow model repository remote code for batch inference (default: false).")
     parser.add_argument("--layers", default="all", help="Layers to capture: 'all' or a comma list of hidden_states indices (batch-capture).")
     parser.add_argument(
         "--persist-dtype",

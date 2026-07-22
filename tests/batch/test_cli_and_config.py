@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from tuner.cli.parser import create_parser  # noqa: E402
 from tuner.batch import runner as batch_runner  # noqa: E402
 from tuner.batch.persistence import ConfigMismatchError  # noqa: E402
+from tuner.batch.engines.base import GenerateResult  # noqa: E402
 
 
 def test_parser_registers_batch_generate():
@@ -30,6 +31,7 @@ def test_parser_registers_batch_generate():
             "--prompts", "p.jsonl",
             "--model", "some/model",
             "--model-revision", "abc123",
+            "--tokenizer-revision", "tok456",
             "--out-dir", "out",
             "--engine", "hf-batched",
             "--batch-size", "32",
@@ -40,6 +42,17 @@ def test_parser_registers_batch_generate():
             "--top-p", "0.9",
             "--stop-string", "\n\n",
             "--stop-string", "END",
+            "--json-schema", "schema.json",
+            "--structured-output-backend", "xgrammar",
+            "--structured-output-disable-any-whitespace",
+            "--expected-vllm-version", "0.23.0",
+            "--min-compute-capability", "8.0",
+            "--tensor-parallel-size", "2",
+            "--max-num-seqs", "64",
+            "--max-num-batched-tokens", "8192",
+            "--max-model-len", "2048",
+            "--limit-mm-per-prompt", '{"image":0,"audio":0}',
+            "--gpu-memory-utilization", "0.90",
             "--resume",
             "--sync-every", "100",
             "--sync-cmd", "echo hi",
@@ -49,6 +62,7 @@ def test_parser_registers_batch_generate():
     assert args.prompts == "p.jsonl"
     assert args.model == "some/model"
     assert args.model_revision == "abc123"
+    assert args.tokenizer_revision == "tok456"
     assert args.out_dir == "out"
     assert args.engine == "hf-batched"
     assert args.batch_size == 32
@@ -58,6 +72,18 @@ def test_parser_registers_batch_generate():
     assert args.temperature == 0.7
     assert args.top_p == 0.9
     assert args.stop_strings == ["\n\n", "END"]
+    assert args.json_schema == "schema.json"
+    assert args.structured_output_backend == "xgrammar"
+    assert args.structured_output_disable_any_whitespace is True
+    assert args.expected_vllm_version == "0.23.0"
+    assert args.min_compute_capability == "8.0"
+    assert args.tensor_parallel_size == 2
+    assert args.max_num_seqs == 64
+    assert args.max_num_batched_tokens == 8192
+    assert args.max_model_len == 2048
+    assert args.limit_mm_per_prompt == '{"image":0,"audio":0}'
+    assert args.gpu_memory_utilization == 0.90
+    assert args.trust_remote_code is False
     assert args.resume is True
     assert args.sync_every == 100
     assert args.sync_cmd == "echo hi"
@@ -125,4 +151,146 @@ def test_runner_refuses_resume_on_changed_config(tmp_path):
         batch_runner.run_batch_generate(
             prompts_path=prompts, out_dir=out, model="m", seed=2, resume=True,
             log=lambda m: None,
+        )
+
+
+def test_vllm_provenance_and_resume_hash_cover_schema_and_scheduler(monkeypatch, tmp_path):
+    class FakeVLLMEngine:
+        def generate(self, items, *, batch_size, on_oom=None):
+            return [
+                GenerateResult(
+                    id=item.id,
+                    completion_text='{"answer":"ok"}',
+                    completion_token_ids=[1, 2],
+                    prompt_token_ids_sha256="a" * 64,
+                    prompt_token_len=3,
+                    finish_reason="stop",
+                    passthrough=item.passthrough,
+                )
+                for item in items
+            ]
+
+        def provenance(self):
+            return {
+                "vllm_version": "0.23.0",
+                "vllm_batch_invariant": True,
+                "structured_outputs": True,
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        batch_runner, "get_generate_engine", lambda *args, **kwargs: FakeVLLMEngine()
+    )
+    prompts = tmp_path / "p.jsonl"
+    prompts.write_text(json.dumps({"id": "a", "prompt": "hi"}) + "\n")
+    out = tmp_path / "out"
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+    batch_runner.run_batch_generate(
+        prompts_path=prompts,
+        out_dir=out,
+        model="m",
+        model_revision="model-sha",
+        tokenizer_revision="tokenizer-sha",
+        engine="vllm",
+        json_schema=schema,
+        structured_output_backend="xgrammar",
+        structured_output_disable_any_whitespace=True,
+        expected_vllm_version="0.23.0",
+        min_compute_capability="8.0",
+        tensor_parallel_size=1,
+        max_num_seqs=64,
+        max_num_batched_tokens=8192,
+        max_model_len=2048,
+        limit_mm_per_prompt={"image": 0, "audio": 0},
+        gpu_memory_utilization=0.90,
+        batch_size=20,
+        dtype="bfloat16",
+        log=lambda message: None,
+    )
+
+    provenance = json.loads((out / "provenance.json").read_text())
+    config = provenance["config"]
+    canonical_schema = json.dumps(
+        schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    import hashlib
+
+    assert config["json_schema_sha256"] == hashlib.sha256(canonical_schema).hexdigest()
+    assert config["structured_output_backend"] == "xgrammar"
+    assert config["structured_output_disable_any_whitespace"] is True
+    assert config["tokenizer_revision"] == "tokenizer-sha"
+    assert config["expected_vllm_version"] == "0.23.0"
+    assert config["min_compute_capability"] == "8.0"
+    assert config["vllm_batch_invariant"] is True
+    assert config["tensor_parallel_size"] == 1
+    assert config["max_num_seqs"] == 64
+    assert config["max_num_batched_tokens"] == 8192
+    assert config["max_model_len"] == 2048
+    assert config["limit_mm_per_prompt"] == {"image": 0, "audio": 0}
+    assert config["gpu_memory_utilization"] == 0.90
+    assert config["trust_remote_code"] is False
+    assert config["prompts_sha256"] == hashlib.sha256(prompts.read_bytes()).hexdigest()
+    assert config["batch_size"] == 20
+
+    completion = json.loads((out / "completions.jsonl").read_text())
+    assert completion["prompt_token_ids_sha256"] == "a" * 64
+    assert completion["prompt_sha256"] == hashlib.sha256(b"hi").hexdigest()
+
+    prompts.write_text(json.dumps({"id": "a", "prompt": "changed"}) + "\n")
+    with pytest.raises(ConfigMismatchError):
+        batch_runner.run_batch_generate(
+            prompts_path=prompts,
+            out_dir=out,
+            model="m",
+            model_revision="model-sha",
+            tokenizer_revision="tokenizer-sha",
+            engine="vllm",
+            json_schema=schema,
+            structured_output_backend="xgrammar",
+            structured_output_disable_any_whitespace=True,
+            expected_vllm_version="0.23.0",
+            min_compute_capability="8.0",
+            tensor_parallel_size=1,
+            max_num_seqs=64,
+            max_num_batched_tokens=8192,
+            max_model_len=2048,
+            limit_mm_per_prompt={"image": 0, "audio": 0},
+            gpu_memory_utilization=0.90,
+            batch_size=20,
+            dtype="bfloat16",
+            resume=True,
+            log=lambda message: None,
+        )
+    prompts.write_text(json.dumps({"id": "a", "prompt": "hi"}) + "\n")
+
+    with pytest.raises(ConfigMismatchError):
+        batch_runner.run_batch_generate(
+            prompts_path=prompts,
+            out_dir=out,
+            model="m",
+            model_revision="model-sha",
+            tokenizer_revision="tokenizer-sha",
+            engine="vllm",
+            json_schema=schema,
+            structured_output_backend="xgrammar",
+            structured_output_disable_any_whitespace=True,
+            expected_vllm_version="0.23.0",
+            min_compute_capability="8.0",
+            tensor_parallel_size=1,
+            max_num_seqs=32,
+            max_num_batched_tokens=8192,
+            max_model_len=2048,
+            limit_mm_per_prompt={"image": 0, "audio": 0},
+            gpu_memory_utilization=0.90,
+            batch_size=20,
+            dtype="bfloat16",
+            resume=True,
+            log=lambda message: None,
         )

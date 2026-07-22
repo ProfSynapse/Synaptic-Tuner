@@ -33,6 +33,7 @@ from tuner.batch.engines.base import (
     GenerateItem,
     GenerateResult,
     OutOfMemoryError,
+    hash_token_ids,
 )
 
 
@@ -61,7 +62,8 @@ class _ModelBundle:
         device: Optional[str] = None,
         dtype: Optional[str] = None,
         revision: Optional[str] = None,
-        trust_remote_code: bool = True,
+        tokenizer_revision: Optional[str] = None,
+        trust_remote_code: bool = False,
         model: Any = None,
         tokenizer: Any = None,
     ):
@@ -76,7 +78,7 @@ class _ModelBundle:
         if tokenizer is None:
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
-                revision=revision,
+                revision=tokenizer_revision or revision,
                 token=os.environ.get("HF_TOKEN") or None,
                 trust_remote_code=trust_remote_code,
             )
@@ -180,7 +182,8 @@ class HFBatchedGenerateEngine(GenerateEngine):
         extra_eos_tokens: Optional[List[str]] = None,
         stop: Optional[List[str]] = None,
         revision: Optional[str] = None,
-        trust_remote_code: bool = True,
+        tokenizer_revision: Optional[str] = None,
+        trust_remote_code: bool = False,
         model: Any = None,
         tokenizer: Any = None,
     ):
@@ -189,6 +192,7 @@ class HFBatchedGenerateEngine(GenerateEngine):
             device=device,
             dtype=dtype,
             revision=revision,
+            tokenizer_revision=tokenizer_revision,
             trust_remote_code=trust_remote_code,
             model=model,
             tokenizer=tokenizer,
@@ -280,11 +284,13 @@ class HFBatchedGenerateEngine(GenerateEngine):
                 finish_reason = "stop"
             # Real (non-pad) prompt length for this row.
             real_prompt_len = int(attention_mask[i].sum().item())
+            prompt_ids = input_ids[i][attention_mask[i].bool()].tolist()
             results.append(
                 GenerateResult(
                     id=it.id,
                     completion_text=text,
                     completion_token_ids=trimmed,
+                    prompt_token_ids_sha256=hash_token_ids(prompt_ids),
                     prompt_token_len=real_prompt_len,
                     finish_reason=finish_reason,
                     passthrough=it.passthrough,
@@ -347,6 +353,7 @@ class HFBatchedCaptureEngine(CaptureEngine):
         dtype: Optional[str] = None,
         layers: str = "all",
         revision: Optional[str] = None,
+        tokenizer_revision: Optional[str] = None,
         trust_remote_code: bool = True,
         model: Any = None,
         tokenizer: Any = None,
@@ -356,6 +363,7 @@ class HFBatchedCaptureEngine(CaptureEngine):
             device=device,
             dtype=dtype,
             revision=revision,
+            tokenizer_revision=tokenizer_revision,
             trust_remote_code=trust_remote_code,
             model=model,
             tokenizer=tokenizer,

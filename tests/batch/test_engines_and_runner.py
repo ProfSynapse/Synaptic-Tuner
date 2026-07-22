@@ -37,6 +37,7 @@ from tuner.batch.engines.hf_batched import (  # noqa: E402
     _run_with_oom_halving,
 )
 from tuner.batch import runner as batch_runner  # noqa: E402
+from tuner.batch.persistence import ConfigMismatchError  # noqa: E402
 
 
 HIDDEN = 32
@@ -206,7 +207,7 @@ def test_generate_runner_passthrough_and_index(monkeypatch, tmp_path, model_and_
     assert all("completion_token_ids" in r and "finish_reason" in r for r in rows)
 
 
-def test_generate_resume_matches_uninterrupted(monkeypatch, tmp_path, model_and_tok):
+def test_generate_resume_requires_identical_input(monkeypatch, tmp_path, model_and_tok):
     model, tok = model_and_tok
     _patch_engine_factory(monkeypatch, model, tok)
     prompts = _write_prompts(tmp_path, 6)
@@ -231,10 +232,16 @@ def test_generate_resume_matches_uninterrupted(monkeypatch, tmp_path, model_and_
         prompts_path=half, out_dir=part, model="m", max_new_tokens=3, batch_size=2,
         log=lambda m: None,
     )
-    # Resume with the full input and --resume.
+    # Expanding or changing the input is a different config and must not mix.
+    with pytest.raises(ConfigMismatchError):
+        batch_runner.run_batch_generate(
+            prompts_path=prompts, out_dir=part, model="m", max_new_tokens=3,
+            batch_size=2, resume=True, log=lambda m: None,
+        )
+    # The exact same input resumes safely as a no-op.
     batch_runner.run_batch_generate(
-        prompts_path=prompts, out_dir=part, model="m", max_new_tokens=3, batch_size=2,
-        resume=True, log=lambda m: None,
+        prompts_path=half, out_dir=part, model="m", max_new_tokens=3,
+        batch_size=2, resume=True, log=lambda m: None,
     )
     part_rows = sorted(
         (json.loads(l) for l in (part / "completions.jsonl").read_text().splitlines()),
@@ -242,9 +249,9 @@ def test_generate_resume_matches_uninterrupted(monkeypatch, tmp_path, model_and_
     )
 
     # Identical artifact set: same ids, same completions, no duplicates.
-    assert len(part_rows) == 6
-    assert [r["id"] for r in part_rows] == [r["id"] for r in ref_rows]
-    for a, b in zip(part_rows, ref_rows):
+    assert len(part_rows) == 3
+    assert [r["id"] for r in part_rows] == [r["id"] for r in ref_rows[:3]]
+    for a, b in zip(part_rows, ref_rows[:3]):
         assert a["completion_token_ids"] == b["completion_token_ids"]
 
 
