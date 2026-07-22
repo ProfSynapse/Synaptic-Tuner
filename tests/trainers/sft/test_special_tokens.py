@@ -975,6 +975,103 @@ def test_forced_save_compat_rejects_unchanged_skip_list_that_disagrees_with_scan
     assert model.config._name_or_path == "original/model-id"
 
 
+def test_transformers_bnb_internal_save_format_compat_reloads_exact_rows(tmp_path):
+    transformers = pytest.importorskip("transformers")
+    pytest.importorskip("bitsandbytes")
+
+    config = transformers.Qwen3Config(
+        vocab_size=19,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=2,
+        head_dim=4,
+        max_position_embeddings=16,
+        tie_word_embeddings=False,
+    )
+    torch.manual_seed(7)
+    source = transformers.Qwen3ForCausalLM(config)
+    source.save_pretrained(tmp_path / "float-source")
+    quantized = transformers.Qwen3ForCausalLM.from_pretrained(
+        tmp_path / "float-source",
+        quantization_config=transformers.BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4"
+        ),
+        device_map={"": "cpu"},
+        local_files_only=True,
+    )
+    quantized.save_pretrained(
+        tmp_path / "prequantized-source", save_original_format=False
+    )
+    model = transformers.Qwen3ForCausalLM.from_pretrained(
+        tmp_path / "prequantized-source",
+        device_map={"": "cpu"},
+        local_files_only=True,
+    )
+    assert special_tokens_module._has_nonreversible_bnb_deserialize_mapping(model)
+    source_quantization = special_tokens_module._require_bnb_4bit_invariants(
+        model.config.quantization_config, description="prequantized source"
+    )
+    configured_ids = [3, 11]
+    input_rows = model.get_input_embeddings().weight[configured_ids].detach().clone()
+    output_rows = model.get_output_embeddings().weight[configured_ids].detach().clone()
+    serialized_state = {
+        name: tensor.detach().cpu().clone()
+        for name, tensor in model.state_dict().items()
+    }
+
+    with pytest.raises(NotImplementedError):
+        model.save_pretrained(tmp_path / "default-format-fails")
+
+    assert "save_pretrained" not in model.__dict__
+    with pytest.raises(ValueError):
+        with special_tokens_module._transformers_bnb_internal_save_format_compat(
+            model
+        ) as failed_report:
+            model.save_pretrained(
+                tmp_path / "invalid-shard-size", max_shard_size="invalid"
+            )
+    assert failed_report["save_calls"] == 1
+    assert failed_report["restored"] is True
+    assert "save_pretrained" not in model.__dict__
+
+    with special_tokens_module._transformers_bnb_internal_save_format_compat(
+        model
+    ) as report:
+        model.save_pretrained(tmp_path / "internal-format")
+
+    assert report == {
+        "applied": True,
+        "reason": "transformers_bnb_deserialize_internal_format",
+        "save_original_format": False,
+        "save_calls": 1,
+        "restored": True,
+    }
+    assert "save_pretrained" not in model.__dict__
+
+    reloaded = transformers.Qwen3ForCausalLM.from_pretrained(
+        tmp_path / "internal-format",
+        device_map={"": "cpu"},
+        local_files_only=True,
+    )
+    assert special_tokens_module._require_bnb_4bit_invariants(
+        reloaded.config.quantization_config,
+        description="reloaded prequantized model",
+        expected=source_quantization,
+    ) == source_quantization
+    assert torch.equal(
+        input_rows, reloaded.get_input_embeddings().weight[configured_ids]
+    )
+    assert torch.equal(
+        output_rows, reloaded.get_output_embeddings().weight[configured_ids]
+    )
+    reloaded_state = reloaded.state_dict()
+    assert serialized_state.keys() == reloaded_state.keys()
+    for name, value in serialized_state.items():
+        assert torch.equal(value, reloaded_state[name].detach().cpu()), name
+
+
 @pytest.mark.parametrize(
     "save_method,quant_type",
     [

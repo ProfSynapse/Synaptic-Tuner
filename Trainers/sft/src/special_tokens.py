@@ -15,6 +15,8 @@ import json
 import re
 import shutil
 import tempfile
+import types
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -781,6 +783,98 @@ def _compute_post_merge_skip_modules(model: nn.Module) -> list[str]:
     return list(skipped)
 
 
+def _has_nonreversible_bnb_deserialize_mapping(model: nn.Module) -> bool:
+    """Detect the Transformers 5.x pre-quantized BnB loader conversion.
+
+    ``Bnb4bitDeserialize`` knows how to turn checkpoint tensors into
+    ``Params4bit`` but defines no reverse operation.  Transformers records the
+    operation on ``_weight_conversions`` and its default save path later tries
+    to reverse it, raising ``NotImplementedError`` before writing weights.
+    """
+    weight_conversions = getattr(model, "_weight_conversions", None)
+    if not isinstance(weight_conversions, list):
+        return False
+
+    from transformers.core_model_loading import WeightConverter
+    from transformers.integrations.bitsandbytes import Bnb4bitDeserialize
+
+    return any(
+        isinstance(conversion, WeightConverter)
+        and any(isinstance(operation, Bnb4bitDeserialize) for operation in conversion.operations)
+        for conversion in weight_conversions
+    )
+
+
+@contextmanager
+def _transformers_bnb_internal_save_format_compat(model: nn.Module):
+    """Use Transformers' supported internal-format save on one merge candidate.
+
+    Unsloth's forced-4-bit helper calls ``merged_model.save_pretrained`` without
+    forwarding Transformers' public ``save_original_format`` option.  Install a
+    temporary method only on the fresh merge candidate's base model so that the
+    non-reversible BnB deserializer is not reversed during save.  The normal
+    quantizer serialization still runs, and the caller reload-verifies the
+    resulting checkpoint before accepting it.
+    """
+    get_base_model = getattr(model, "get_base_model", None)
+    merged_base = get_base_model() if callable(get_base_model) else model
+    report = {
+        "applied": False,
+        "reason": "bnb_deserialize_mapping_not_present",
+        "save_original_format": None,
+        "save_calls": 0,
+        "restored": True,
+    }
+    if not _has_nonreversible_bnb_deserialize_mapping(merged_base):
+        yield report
+        return
+
+    original_save_pretrained = getattr(merged_base, "save_pretrained", None)
+    if not callable(original_save_pretrained):
+        raise TypeError("Forced-merge base does not expose save_pretrained().")
+    if "save_original_format" not in inspect.signature(original_save_pretrained).parameters:
+        raise RuntimeError(
+            "Transformers BnB save compatibility requires the public "
+            "save_original_format option."
+        )
+
+    original_instance_present = "save_pretrained" in getattr(merged_base, "__dict__", {})
+    original_instance_value = (
+        merged_base.__dict__["save_pretrained"] if original_instance_present else None
+    )
+    report.update(
+        {
+            "applied": True,
+            "reason": "transformers_bnb_deserialize_internal_format",
+            "save_original_format": False,
+            "restored": False,
+        }
+    )
+
+    def save_pretrained_internal_format(_self, *args, **kwargs):
+        requested = kwargs.get("save_original_format", False)
+        if requested is not False:
+            raise RuntimeError(
+                "Forced 4-bit merge cannot request original-format saving for a "
+                "non-reversible BnB deserializer mapping."
+            )
+        kwargs["save_original_format"] = False
+        report["save_calls"] += 1
+        return original_save_pretrained(*args, **kwargs)
+
+    merged_base.save_pretrained = types.MethodType(
+        save_pretrained_internal_format, merged_base
+    )
+    try:
+        yield report
+    finally:
+        if original_instance_present:
+            merged_base.save_pretrained = original_instance_value
+        else:
+            delattr(merged_base, "save_pretrained")
+        report["restored"] = True
+
+
 def _save_merged_with_quantization_config_compat(
     model: nn.Module,
     save_merged: Any,
@@ -821,8 +915,20 @@ def _save_merged_with_quantization_config_compat(
     model_config._name_or_path = str(pinned_local_snapshot)
     mutated_quantization = None
     computed_skip_modules = None
+    transformers_save_compatibility = None
     try:
-        save_merged(str(save_directory), tokenizer, save_method=save_method)
+        with _transformers_bnb_internal_save_format_compat(
+            model
+        ) as transformers_save_compatibility:
+            save_merged(str(save_directory), tokenizer, save_method=save_method)
+            if (
+                transformers_save_compatibility["applied"]
+                and transformers_save_compatibility["save_calls"] != 1
+            ):
+                raise RuntimeError(
+                    "Forced 4-bit merge did not exercise the candidate-local "
+                    "Transformers internal-format save exactly once."
+                )
         mutated_quantization = _require_bnb_4bit_invariants(
             temporary_mapping,
             description="Post-Unsloth forced-save quantization config",
@@ -865,6 +971,7 @@ def _save_merged_with_quantization_config_compat(
         "computed_skip_modules": computed_skip_modules,
         "expected_saved_quantization": mutated_quantization,
         "pinned_local_snapshot_used": True,
+        "transformers_save_compatibility": transformers_save_compatibility,
         "restored": True,
     }
 
