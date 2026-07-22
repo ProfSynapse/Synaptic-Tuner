@@ -603,6 +603,13 @@ Examples:
         help="Disallow arbitrary JSON whitespace in supported vLLM backends.",
     )
     parser.add_argument("--expected-vllm-version", dest="expected_vllm_version", help="Exact installed vLLM version required by --engine vllm.")
+    parser.add_argument(
+        "--vllm-model-runner",
+        choices=["v1", "v2"],
+        default=None,
+        dest="vllm_model_runner",
+        help="Pinned vLLM GPU model-runner implementation (v1 or v2).",
+    )
     parser.add_argument("--min-compute-capability", dest="min_compute_capability", help="Minimum CUDA compute capability required for the pinned vLLM batch-invariance runtime, for example 8.0.")
     parser.add_argument("--tensor-parallel-size", type=int, default=1, dest="tensor_parallel_size", help="vLLM tensor parallel size (default: 1).")
     parser.add_argument("--max-num-seqs", type=int, default=None, dest="max_num_seqs", help="Pinned vLLM scheduler maximum concurrent sequences.")

@@ -82,6 +82,7 @@ def run_batch_generate(
     structured_output_backend: str = "auto",
     structured_output_disable_any_whitespace: bool = False,
     expected_vllm_version: Optional[str] = None,
+    vllm_model_runner: Optional[str] = None,
     min_compute_capability: Optional[str] = None,
     tensor_parallel_size: int = 1,
     max_num_seqs: Optional[int] = None,
@@ -185,6 +186,7 @@ def run_batch_generate(
             structured_output_disable_any_whitespace if engine == "vllm" else None
         ),
         "expected_vllm_version": expected_vllm_version,
+        "vllm_model_runner": vllm_model_runner if engine == "vllm" else None,
         "min_compute_capability": (
             min_compute_capability if engine == "vllm" else None
         ),
@@ -257,6 +259,7 @@ def run_batch_generate(
                 structured_output_disable_any_whitespace
             ),
             expected_vllm_version=expected_vllm_version,
+            vllm_model_runner=vllm_model_runner,
             min_compute_capability=min_compute_capability,
             tensor_parallel_size=tensor_parallel_size,
             max_num_seqs=max_num_seqs,

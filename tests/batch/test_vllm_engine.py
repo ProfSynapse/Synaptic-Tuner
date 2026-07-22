@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 
@@ -86,6 +87,7 @@ def test_vllm_refuses_unpinned_or_mismatched_version(monkeypatch):
         VLLMGenerateEngine(
             "model",
             expected_vllm_version="0.17.1",
+            vllm_model_runner="v1",
             min_compute_capability="8.0",
         )
     with pytest.raises(ValueError, match="min-compute-capability"):
@@ -134,6 +136,7 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
         structured_output_backend="xgrammar",
         structured_output_disable_any_whitespace=True,
         expected_vllm_version="0.23.0",
+        vllm_model_runner="v1",
         min_compute_capability="8.0",
         tensor_parallel_size=2,
         max_num_seqs=64,
@@ -182,6 +185,7 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
     assert engine.provenance() == {
         "vllm_version": "0.23.0",
         "vllm_batch_invariant": True,
+        "vllm_model_runner": "v1",
         "structured_outputs": True,
         "structured_output_backend": "xgrammar",
         "structured_output_disable_any_whitespace": True,
@@ -189,6 +193,7 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
         "documented_compute_capability_floor": "8.0",
         "effective_compute_capability_floor": "8.0",
     }
+    assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == "0"
 
     original_generate = engine.llm.generate
     oom_calls = []
