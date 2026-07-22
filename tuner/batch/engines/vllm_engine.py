@@ -150,6 +150,7 @@ class VLLMGenerateEngine(GenerateEngine):
         structured_output_backend: str = "auto",
         structured_output_disable_any_whitespace: bool = False,
         expected_vllm_version: Optional[str] = None,
+        vllm_model_runner: Optional[str] = None,
         min_compute_capability: Optional[str] = None,
         tensor_parallel_size: int = 1,
         max_num_seqs: Optional[int] = None,
@@ -174,6 +175,14 @@ class VLLMGenerateEngine(GenerateEngine):
                 "--engine vllm requires --min-compute-capability so the batch-"
                 "invariance hardware requirement is checked before model load."
             )
+        if vllm_model_runner not in {"v1", "v2"}:
+            raise ValueError(
+                "--engine vllm requires --vllm-model-runner to pin v1 or v2 "
+                "before model construction."
+            )
+        os.environ["VLLM_USE_V2_MODEL_RUNNER"] = (
+            "1" if vllm_model_runner == "v2" else "0"
+        )
         vllm = _require_vllm()
         installed_version = getattr(vllm, "__version__", None)
         if installed_version != expected_vllm_version:
@@ -208,6 +217,7 @@ class VLLMGenerateEngine(GenerateEngine):
 
         self._SamplingParams = SamplingParams
         self._vllm_version = installed_version
+        self._vllm_model_runner = vllm_model_runner
         self._json_schema = json_schema
         self._structured_output_backend = structured_output_backend
         self._structured_output_disable_any_whitespace = bool(
@@ -361,6 +371,7 @@ class VLLMGenerateEngine(GenerateEngine):
         return {
             "vllm_version": self._vllm_version,
             "vllm_batch_invariant": True,
+            "vllm_model_runner": self._vllm_model_runner,
             "structured_outputs": self._json_schema is not None,
             "structured_output_backend": self._structured_output_backend,
             "structured_output_disable_any_whitespace": (

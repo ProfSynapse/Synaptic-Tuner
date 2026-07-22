@@ -104,6 +104,7 @@ class BatchGenerateHandler(BaseHandler):
                     args, "structured_output_disable_any_whitespace", False
                 ),
                 expected_vllm_version=getattr(args, "expected_vllm_version", None),
+                vllm_model_runner=getattr(args, "vllm_model_runner", None),
                 min_compute_capability=getattr(args, "min_compute_capability", None),
                 tensor_parallel_size=getattr(args, "tensor_parallel_size", 1),
                 max_num_seqs=getattr(args, "max_num_seqs", None),
