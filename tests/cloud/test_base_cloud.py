@@ -139,7 +139,13 @@ class TestResolveRepoSource:
         config_path = repo_root / "Trainers" / "sft" / "configs" / "config.yaml"
         config_path.write_text(config_path.read_text() + "\n# dirty\n")
 
-        with pytest.raises(CloudProviderError, match="clean tracked worktree"):
+        with pytest.raises(CloudProviderError, match="fully clean worktree"):
+            resolve_repo_source(repo_root)
+
+    def test_rejects_untracked_file(self, repo_root, clean_env):
+        (repo_root / "untracked-input.jsonl").write_text("{}\n")
+
+        with pytest.raises(CloudProviderError, match="fully clean worktree"):
             resolve_repo_source(repo_root)
 
     def test_rejects_unpushed_commit(self, repo_root, clean_env):
@@ -155,7 +161,20 @@ class TestResolveRepoSource:
             capture_output=True,
         )
 
-        with pytest.raises(CloudProviderError, match="exact commit to be pushed"):
+        with pytest.raises(CloudProviderError, match="remote branch tip"):
+            resolve_repo_source(repo_root)
+
+    def test_rejects_local_head_behind_remote_tip(self, repo_root, clean_env):
+        import subprocess
+
+        marker = repo_root / "remote-tip.txt"
+        marker.write_text("tip\n")
+        subprocess.run(["git", "add", "remote-tip.txt"], cwd=repo_root, check=True)
+        subprocess.run(["git", "commit", "-m", "Remote tip"], cwd=repo_root, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=repo_root, check=True)
+        subprocess.run(["git", "reset", "--hard", "HEAD^"], cwd=repo_root, check=True)
+
+        with pytest.raises(CloudProviderError, match="remote branch tip"):
             resolve_repo_source(repo_root)
 
     def test_handles_git_timeout(self, clean_env):

@@ -201,6 +201,11 @@ def repo_root(tmp_path):
     origin_repo = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", str(origin_repo)], check=True, capture_output=True)
     subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    # The bare test remote lives inside tmp_path.  Exclude it from the worktree
+    # so exact-source validation can require *all* untracked files to be absent
+    # without mistaking the fixture's transport repository for source input.
+    info_exclude = tmp_path / ".git" / "info" / "exclude"
+    info_exclude.write_text(info_exclude.read_text() + "\norigin.git/\n")
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "remote", "add", "origin", str(origin_repo)], cwd=tmp_path, check=True, capture_output=True)

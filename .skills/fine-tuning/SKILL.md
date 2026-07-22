@@ -78,6 +78,9 @@ Use `--tier` on the local SFT and KTO trainers when you want a preset instead of
 ## Key Directories
 
 - `Trainers/sft/` — active SFT trainer
+- SFT recipes may define an optional generic `model.tokenizer` block for ordered special-token registration and selective new-row training; see `reference/sft-training.md`
+- SFT model config may set an optional full 40-character Hugging Face commit `revision`; the loader resolves and verifies that exact local snapshot before Unsloth consumption and records requested/resolved evidence, while omission preserves default loading
+- Modal SFT with private inputs uses `scripts/plan_modal_sft_job.py` for a no-provider-mutation plan, then stages the hash-bound direct YAML and JSONL on a named input Volume and launches `Trainers/cloud/train_modal.py::run_training` directly with `modal run --detach`
 - `Trainers/recipes/` — unified training recipe configs (local Docker + HF Jobs); each recipe declares `target: local|cloud|both` and `method: sft|kto|grpo`
 - `Evaluator/recipes/` — unified evaluation recipe configs
 - `Trainers/kto/` — KTO trainer

@@ -43,7 +43,12 @@ from configs.config_loader import (
     get_13b_config,
     get_20b_config,
     load_config,
+    load_external_config,
+    load_tokenizer_config,
+    resolve_model_revision,
     validate_aux_head_coherence,
+    validate_model_revision,
+    validate_model_revision_evidence,
 )
 from src.data_loader import load_and_prepare_tokenized_dataset, print_dataset_samples
 from src.model_loader import (
@@ -158,6 +163,33 @@ def _check_lfm2_lora_targets(config) -> Optional[str]:
 MODEL_COMPATIBILITY_RULES = [
     (_is_lfm2_family, [_check_lfm2_4bit, _check_lfm2_lora_targets]),
 ]
+
+
+def load_cloud_job_provenance() -> Optional[Dict[str, Any]]:
+    """Load the non-secret wrapper provenance contract, when present."""
+    raw = os.environ.get("SYNAPTIC_CLOUD_JOB_PROVENANCE_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("SYNAPTIC_CLOUD_JOB_PROVENANCE_JSON is invalid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("SYNAPTIC_CLOUD_JOB_PROVENANCE_JSON must contain an object.")
+
+    def reject_secrets(value, path="cloud_job_provenance"):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized = str(key).lower().replace("-", "_")
+                if any(term in normalized for term in ("token", "secret", "password", "api_key")):
+                    raise ValueError(f"Secret-like field is forbidden in {path}: {key!r}.")
+                reject_secrets(nested, f"{path}.{key}")
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                reject_secrets(nested, f"{path}[{index}]")
+
+    reject_secrets(payload)
+    return payload
 
 UNSLOTH_ALLOWED_INIT_LORA_WEIGHTS = {"gaussian", "loftq", "corda"}
 UNSLOTH_BLOCKED_INIT_LORA_WEIGHTS = {"pissa", "eva", "olora"}
@@ -282,6 +314,10 @@ def build_training_lineage(
     training_time_seconds: Optional[float] = None,
     evolutionary_stats: Optional[Dict[str, Any]] = None,
     preprocessing_metadata: Optional[Dict[str, Any]] = None,
+    special_tokens_metadata: Optional[Dict[str, Any]] = None,
+    model_revision: Optional[str] = None,
+    model_revision_evidence: Optional[Dict[str, Any]] = None,
+    cloud_job_provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build SFT training lineage using shared base + SFT-specific fields."""
     # Get dataset source info
@@ -289,14 +325,22 @@ def build_training_lineage(
     if not dataset_source:
         dataset_source = f"{config.dataset.dataset_name}/{config.dataset.dataset_file}"
 
+    model_info = {
+        "base_model": config.model.model_name,
+        "max_seq_length": config.model.max_seq_length,
+        "load_in_4bit": config.model.load_in_4bit,
+        "dtype": str(config.model.dtype),
+    }
+    if model_revision is not None:
+        model_info["revision"] = model_revision
+        model_info["revision_resolution"] = validate_model_revision_evidence(
+            config.model.model_name,
+            model_revision,
+            model_revision_evidence,
+        )
     lineage = build_base_lineage(
         training_type="SFT",
-        model_info={
-            "base_model": config.model.model_name,
-            "max_seq_length": config.model.max_seq_length,
-            "load_in_4bit": config.model.load_in_4bit,
-            "dtype": str(config.model.dtype),
-        },
+        model_info=model_info,
         lora_info={
             "rank": config.lora.r,
             "alpha": config.lora.lora_alpha,
@@ -339,6 +383,10 @@ def build_training_lineage(
     # SFT-specific extensions
     if preprocessing_metadata:
         lineage["dataset"]["preprocessing"] = dict(preprocessing_metadata)
+    if special_tokens_metadata:
+        lineage["model"]["special_tokens"] = dict(special_tokens_metadata)
+    if cloud_job_provenance is not None:
+        lineage["cloud_job_provenance"] = dict(cloud_job_provenance)
 
     if hasattr(config, 'evolutionary') and config.evolutionary.enabled:
         lineage["evolutionary"] = {
@@ -375,6 +423,26 @@ def parse_args(argv=None):
                        help="Path to custom config file")
     parser.add_argument("--model-name", type=str,
                        help="Override Hugging Face model name/path")
+    parser.add_argument("--model-revision", type=str,
+                       help="Override the Hugging Face model/tokenizer revision")
+    parser.add_argument(
+        "--tokenizer-config",
+        type=str,
+        help="JSON object for the generic model.tokenizer special-token block",
+    )
+    parser.set_defaults(verify_merged_model_roundtrip=None)
+    parser.add_argument(
+        "--verify-merged-model-roundtrip",
+        action="store_true",
+        dest="verify_merged_model_roundtrip",
+        help="Smoke-only: merge, save, fresh-local-reload, and validate configured token rows.",
+    )
+    parser.add_argument(
+        "--no-verify-merged-model-roundtrip",
+        action="store_false",
+        dest="verify_merged_model_roundtrip",
+        help="Disable the expensive merged-model smoke verification.",
+    )
 
     # Training parameters
     parser.add_argument("--batch-size", type=int,
@@ -590,11 +658,7 @@ def run(args: argparse.Namespace):
     if args.config:
         # Custom config file
         print(f"Loading custom config from: {args.config}")
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("custom_config", args.config)
-        custom_config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(custom_config)
-        config = custom_config.Config()
+        config = load_external_config(args.config)
     elif args.model_size:
         # Use preset configuration
         if args.model_size == "3b":
@@ -669,6 +733,21 @@ def run(args: argparse.Namespace):
                 f"(got {type(parsed_chat_template_kwargs).__name__})."
             )
         config.training.chat_template_kwargs = parsed_chat_template_kwargs
+    if args.tokenizer_config is not None:
+        try:
+            parsed_tokenizer_config = json.loads(args.tokenizer_config)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"--tokenizer-config must be a JSON object string: {exc}") from exc
+        if not isinstance(parsed_tokenizer_config, dict):
+            raise ValueError(
+                "--tokenizer-config must decode to a JSON object "
+                f"(got {type(parsed_tokenizer_config).__name__})."
+            )
+        config.model.tokenizer = load_tokenizer_config(parsed_tokenizer_config)
+    if args.verify_merged_model_roundtrip is not None:
+        config.model.tokenizer.verify_merged_model_roundtrip = (
+            args.verify_merged_model_roundtrip
+        )
     # aux_head CLI overrides (local-run lane). config.aux_head always exists
     # (Config carries a default AuxHeadConfig), so each is a direct field set
     # guarded by is not None — an unset flag preserves the loaded config exactly.
@@ -727,6 +806,9 @@ def run(args: argparse.Namespace):
         config.lora.lora_dropout = args.lora_dropout
     if args.model_name:
         config.model.model_name = args.model_name
+    if args.model_revision is not None:
+        validate_model_revision(args.model_revision, field_name="--model-revision")
+        config.model.revision = args.model_revision
     if args.load_in_4bit is not None:
         config.model.load_in_4bit = args.load_in_4bit
     if args.lora_target_modules:
@@ -812,6 +894,7 @@ def run(args: argparse.Namespace):
     # exact commit that ran (see resolve_repo_provenance).
     repo_branch, repo_commit = resolve_repo_provenance()
     artifact_identifier = args.artifact_bucket or os.environ.get("CLOUD_ARTIFACT_IDENTIFIER")
+    cloud_job_provenance = load_cloud_job_provenance()
 
     # Create timestamped run directory (following KTO pattern)
     timestamp = args.run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -843,6 +926,7 @@ def run(args: argparse.Namespace):
             publish_final_model=args.publish_final_model,
             publish_target_repo=args.publish_target_repo,
             status="running",
+            cloud_job_provenance=cloud_job_provenance,
         )
         write_manifest(manifest_path, manifest)
         run_metadata["manifest_path"] = str(manifest_path)
@@ -870,14 +954,22 @@ def run(args: argparse.Namespace):
         }
     )
 
+    # Legacy custom Python Config model objects predate the optional revision
+    # field. Resolve it once so omission remains an exact behavioral no-op.
+    model_revision = resolve_model_revision(config.model)
+
     # Load model and tokenizer FIRST (needed for packing preprocessing)
     model, tokenizer = load_model_and_tokenizer(
         model_name=config.model.model_name,
         max_seq_length=config.model.max_seq_length,
         dtype=config.model.dtype,
         load_in_4bit=config.model.load_in_4bit,
-        hf_token=args.hf_token
+        hf_token=args.hf_token,
+        revision=model_revision,
     )
+    model_revision_evidence = getattr(model, "_synaptic_revision_evidence", None)
+    if model_revision is not None and not model_revision_evidence:
+        raise RuntimeError("Pinned model load did not return revision resolution evidence.")
 
     # Prefer the pretrained chat template when available; otherwise, apply a
     # family-specific fallback via Unsloth.
@@ -905,6 +997,19 @@ def run(args: argparse.Namespace):
 
         tokenizer = get_chat_template(tokenizer, chat_template=chat_template_name)
         print(f"✓ Applied {chat_template_name} chat template via Unsloth")
+
+    from src.special_tokens import prepare_special_tokens
+
+    tokenizer_config = getattr(config.model, "tokenizer", None)
+    if tokenizer_config is None:
+        tokenizer_config = load_tokenizer_config({})
+    special_tokens_metadata = prepare_special_tokens(model, tokenizer, tokenizer_config)
+    if special_tokens_metadata:
+        resolved = special_tokens_metadata["configured_tokens"]
+        print(
+            "✓ Configured special tokens: "
+            + ", ".join(f"{entry['token']!r}={entry['token_id']}" for entry in resolved)
+        )
 
     loss_mask_mode = "assistant_only" if config.training.completion_only_loss else "full_sequence"
     preprocessing_metadata = {
@@ -977,6 +1082,7 @@ def run(args: argparse.Namespace):
         use_rslora=config.lora.use_rslora,
         use_dora=config.lora.use_dora,
         init_lora_weights=config.lora.init_lora_weights,
+        special_tokens_metadata=special_tokens_metadata,
     )
 
     # Check initial GPU memory
@@ -1220,6 +1326,7 @@ def run(args: argparse.Namespace):
                     publish_final_model=args.publish_final_model,
                     publish_target_repo=args.publish_target_repo,
                     status=f"failed: {failure_message}",
+                    cloud_job_provenance=cloud_job_provenance,
                 ),
             )
             if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:
@@ -1243,7 +1350,64 @@ def run(args: argparse.Namespace):
 
     # Save final model
     print(f"\nSaving final model to: {final_model_path}")
+    from src.special_tokens import (
+        restore_portable_adapter_base_provenance,
+        verify_saved_adapter_base_provenance,
+    )
+
+    adapter_base_provenance = restore_portable_adapter_base_provenance(
+        trainer.model,
+        special_tokens_metadata,
+        requested_repo=config.model.model_name,
+        requested_revision=model_revision,
+        revision_evidence=model_revision_evidence,
+    )
     trainer.save_model(str(final_model_path))
+    if adapter_base_provenance is not None:
+        verify_saved_adapter_base_provenance(final_model_path, adapter_base_provenance)
+    if special_tokens_metadata:
+        from src.special_tokens import (
+            bind_adapter_artifact_lineage,
+            save_adapter_without_base_vocab,
+            verify_merged_model_roundtrip,
+            verify_saved_adapter_roundtrip,
+            verify_saved_special_tokenizer,
+            write_special_token_lineage,
+        )
+
+        adapter_artifact = save_adapter_without_base_vocab(
+            trainer.model, final_model_path, special_tokens_metadata
+        )
+        verify_saved_special_tokenizer(tokenizer, final_model_path, special_tokens_metadata)
+        adapter_roundtrip = verify_saved_adapter_roundtrip(
+            trainer.model, final_model_path, special_tokens_metadata
+        )
+        bind_adapter_artifact_lineage(
+            final_model_path,
+            special_tokens_metadata,
+            adapter_artifact,
+            adapter_roundtrip,
+        )
+        merged_roundtrip = verify_merged_model_roundtrip(
+            trainer.model, tokenizer, final_model_path, special_tokens_metadata
+        )
+        write_special_token_lineage(final_model_path, special_tokens_metadata)
+        print(f"[special_tokens] saved tokenizer and resolved lineage to: {final_model_path}")
+        if adapter_artifact:
+            print(
+                "[special_tokens] finalized adapter-only artifact: "
+                f"{adapter_artifact['tensor_count']} tensors (no base vocab weights)"
+            )
+        if adapter_roundtrip:
+            print(
+                "[special_tokens] verified saved PEFT adapter round-trip: "
+                f"{adapter_roundtrip['compared_tensor_count']} tensors"
+            )
+        if merged_roundtrip:
+            print(
+                "[special_tokens] verified merged-model save/reload for "
+                f"{len(merged_roundtrip['configured_tokens'])} configured tokens"
+            )
 
     # aux_head: trainer.save_model does NOT serialize the separately-held head, so
     # persist it as a portable sidecar (weights + resolved config) alongside the
@@ -1276,6 +1440,10 @@ def run(args: argparse.Namespace):
         training_time_seconds=training_time_seconds,
         evolutionary_stats=evo_wrapper.get_stats() if evo_wrapper else None,
         preprocessing_metadata=preprocessing_metadata,
+        special_tokens_metadata=special_tokens_metadata,
+        model_revision=model_revision,
+        model_revision_evidence=model_revision_evidence,
+        cloud_job_provenance=cloud_job_provenance,
     )
     actual_lineage_path = save_training_lineage(lineage, run_dir)
     run_metadata["lineage_path"] = str(actual_lineage_path)
@@ -1365,6 +1533,7 @@ def run(args: argparse.Namespace):
                 publish_final_model=args.publish_final_model,
                 publish_target_repo=args.publish_target_repo,
                 status="completed",
+                cloud_job_provenance=cloud_job_provenance,
             ),
         )
         if args.artifact_backend == "hf_bucket" and args.artifact_bucket and args.artifact_prefix:

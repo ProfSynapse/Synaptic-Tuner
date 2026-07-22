@@ -97,6 +97,31 @@ def test_build_manifest_records_provider_native_artifact_metadata(tmp_path):
     assert manifest["paths"]["run_dir"] == str(run_paths.run_dir)
 
 
+def test_build_manifest_binds_cloud_job_provenance(tmp_path):
+    run_paths = build_run_paths(
+        tmp_path / "outputs", "modal", "sft", "20260722_120000", "a" * 40
+    )
+    provenance = {
+        "source": {"commit": "a" * 40},
+        "inputs": {"config": {"sha256": "b" * 64}, "dataset": {"sha256": "c" * 64}},
+        "runtime": {"image": "example/train@sha256:" + "d" * 64, "pip_packages": []},
+    }
+    manifest = build_manifest(
+        provider="modal",
+        method="sft",
+        artifact_backend="modal_volume",
+        artifact_identifier="outputs",
+        run_paths=run_paths,
+        repo_branch="feature/smoke",
+        repo_commit="a" * 40,
+        publish_final_model=False,
+        publish_target_repo=None,
+        status="running",
+        cloud_job_provenance=provenance,
+    )
+    assert manifest["cloud_job_provenance"] == provenance
+
+
 def test_write_manifest_writes_stable_json(tmp_path):
     manifest_path = tmp_path / "manifest.json"
     payload = {"status": "completed", "provider": "hf_jobs"}
@@ -256,10 +281,14 @@ def test_sync_file_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
         bucket.bucket_id = f"test-user/{bucket_id.split('/')[-1]}"
         return bucket
 
-    def sync_bucket(src, dst, token=None):
-        calls.append((src, dst, token))
+    class HfApi:
+        def __init__(self, token=None):
+            self.token = token
 
-    mock_hub.sync_bucket = sync_bucket
+        def upload_file(self, **kwargs):
+            calls.append((self.token, kwargs))
+
+    mock_hub.HfApi = HfApi
     mock_hub.create_bucket = create_bucket
 
     with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
@@ -270,11 +299,17 @@ def test_sync_file_to_hf_bucket_uses_resolved_bucket_id(tmp_path):
             token="hf_test_token",
         )
 
-    assert (
-        str(local_file.parent),
-        "hf://buckets/test-user/toolset-training-artifacts/runs/hf_jobs/sft/20260314_120000-abcdef12/logs",
-        "hf_test_token",
-    ) in calls
+    assert calls == [
+        (
+            "hf_test_token",
+            {
+                "path_or_fileobj": str(local_file),
+                "path_in_repo": "runs/hf_jobs/sft/20260314_120000-abcdef12/logs/training.jsonl",
+                "repo_id": "test-user/toolset-training-artifacts",
+                "repo_type": "bucket",
+            },
+        )
+    ]
 
 
 def test_sync_directory_to_hf_bucket_raises_real_sync_error(tmp_path):

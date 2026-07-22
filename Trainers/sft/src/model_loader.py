@@ -4,7 +4,10 @@ Model loading with Unsloth optimizations for RTX 3090.
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from typing import Tuple, Optional
+from pathlib import Path
 import torch
+
+from configs.config_loader import validate_model_revision
 
 
 # Mistral-specific chat template (for models using [INST] format)
@@ -33,12 +36,66 @@ def _is_mistral_model(model_name: str) -> bool:
     return 'mistral' in model_name_lower
 
 
+def resolve_pinned_model_snapshot(
+    model_name: str,
+    revision: Optional[str],
+    hf_token: Optional[str] = None,
+) -> tuple[str, Optional[dict]]:
+    """Resolve an immutable Hub commit to a verified local snapshot path.
+
+    Unsloth model-family dispatchers do not consistently propagate ``revision``
+    to every downstream AutoConfig/model/tokenizer call. Passing a local
+    snapshot path establishes the pin at the filesystem boundary instead.
+    """
+    if revision is None:
+        return model_name, None
+    validate_model_revision(revision)
+    if Path(model_name).expanduser().exists():
+        raise ValueError(
+            "model.revision pins a Hugging Face repository and cannot be combined "
+            f"with an existing local model path: {model_name!r}."
+        )
+    try:
+        from huggingface_hub import snapshot_download
+
+        resolved = snapshot_download(
+            repo_id=model_name,
+            revision=revision,
+            token=hf_token,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to resolve pinned Hugging Face snapshot {model_name}@{revision}."
+        ) from exc
+    snapshot_path = Path(resolved).expanduser()
+    if not snapshot_path.is_dir():
+        raise RuntimeError(
+            "Pinned Hugging Face snapshot resolution returned a missing directory: "
+            f"{snapshot_path}."
+        )
+    resolved_commit = snapshot_path.name.lower()
+    if resolved_commit != revision.lower():
+        raise RuntimeError(
+            "Pinned Hugging Face snapshot commit mismatch: "
+            f"requested {revision}, resolved {resolved_commit} at {snapshot_path}."
+        )
+    evidence = {
+        "requested_repo": model_name,
+        "requested_revision": revision,
+        "resolved_snapshot_path": str(snapshot_path),
+        "resolved_commit": resolved_commit,
+        "resolution_method": "huggingface_hub.snapshot_download_local_snapshot",
+    }
+    return str(snapshot_path), evidence
+
+
 def load_model_and_tokenizer(
     model_name: str,
     max_seq_length: int = 2048,
     dtype: Optional[str] = None,
     load_in_4bit: bool = True,
-    hf_token: Optional[str] = None
+    hf_token: Optional[str] = None,
+    revision: Optional[str] = None,
 ) -> Tuple:
     """
     Load model and tokenizer with Unsloth optimizations.
@@ -49,6 +106,7 @@ def load_model_and_tokenizer(
         dtype: Data type (None for auto-detection)
         load_in_4bit: Whether to use 4-bit quantization
         hf_token: HuggingFace token for gated models
+        revision: Optional exact Hugging Face model/tokenizer revision
 
     Returns:
         Tuple of (model, tokenizer)
@@ -60,15 +118,24 @@ def load_model_and_tokenizer(
     print(f"Max sequence length: {max_seq_length}")
     print(f"4-bit quantization: {load_in_4bit}")
     print(f"dtype: {dtype if dtype else 'auto-detect'}")
+    if revision is not None:
+        print(f"Revision: {revision}")
 
-    # Load model and tokenizer
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_name,
+    # Resolve first because installed Unsloth family dispatchers do not reliably
+    # forward revision into every downstream model/tokenizer load.
+    resolved_model_name, revision_evidence = resolve_pinned_model_snapshot(
+        model_name, revision, hf_token
+    )
+    load_kwargs = dict(
+        model_name=resolved_model_name,
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
         token=hf_token,
     )
+    model, tokenizer = FastLanguageModel.from_pretrained(**load_kwargs)
+    if revision_evidence is not None:
+        model._synaptic_revision_evidence = revision_evidence
 
     # Note: Chat template is now applied via Unsloth's get_chat_template() in train_sft.py
     # This ensures proper handling for all model types including VL models
@@ -115,6 +182,7 @@ def apply_lora_adapters(
     use_rslora: bool = False,
     use_dora: bool = False,
     init_lora_weights: Optional[str] = None,
+    special_tokens_metadata: Optional[dict] = None,
 ):
     """
     Apply LoRA adapters to the model using Unsloth.
@@ -168,11 +236,32 @@ def apply_lora_adapters(
     )
     if init_lora_weights is not None:
         peft_kwargs["init_lora_weights"] = init_lora_weights
+    trainable_token_indices = (
+        special_tokens_metadata.get("trainable_token_indices", {})
+        if special_tokens_metadata
+        else {}
+    )
+    if trainable_token_indices:
+        from src.special_tokens import require_peft_trainable_token_support
+
+        require_peft_trainable_token_support(trainable_token_indices)
+        peft_kwargs["trainable_token_indices"] = trainable_token_indices
 
     model = FastLanguageModel.get_peft_model(
         model,
         **peft_kwargs,
     )
+
+    if trainable_token_indices:
+        from src.special_tokens import restore_verified_selective_token_deltas
+
+        restored_deltas = restore_verified_selective_token_deltas(
+            model, special_tokens_metadata
+        )
+        print(
+            f"Selective special-token rows enabled: {len(restored_deltas)} "
+            "verified float32 delta parameter(s)"
+        )
 
     # Print trainable parameters
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

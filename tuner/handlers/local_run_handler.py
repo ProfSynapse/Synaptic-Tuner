@@ -42,6 +42,7 @@ DEFAULT_STOP_TIMEOUT = 60
 DEFAULT_ACE_STEP_CORPUS_DIR = "Datasets/ace_step_corpus"
 
 _USER_FIELD_PATTERN = re.compile(r"^\d+:\d+$")
+_FULL_HF_COMMIT_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class LocalRunError(RuntimeError):
@@ -688,9 +689,25 @@ class LocalRunHandler(BaseHandler):
         # from their YAML config instead). Emitting them would make argparse
         # reject the command, so they are forwarded only for sft.
         sft_only = method == "sft"
+        model_revision = model_cfg.get("revision")
+        if model_revision is not None:
+            if (
+                not isinstance(model_revision, str)
+                or not model_revision
+                or model_revision != model_revision.strip()
+            ):
+                raise LocalRunError(
+                    "model.revision must be a non-empty string without surrounding whitespace."
+                )
+            if not _FULL_HF_COMMIT_PATTERN.fullmatch(model_revision):
+                raise LocalRunError(
+                    "model.revision must be a full 40-character Hugging Face commit SHA."
+                )
 
         command = ["python", trainer_file]
         _append_flag(command, "model_name", model_cfg.get("name") or model_cfg.get("model_name"))
+        if sft_only:
+            _append_flag(command, "model_revision", model_revision)
         _append_flag(command, "model_size", model_cfg.get("size"))
         if sft_only and "load_in_4bit" in model_cfg:
             command.append("--load-in-4bit" if bool(model_cfg["load_in_4bit"]) else "--no-load-in-4bit")
@@ -717,6 +734,11 @@ class LocalRunHandler(BaseHandler):
         ):
             _append_flag(command, key, training_cfg.get(key))
         if sft_only:
+            tokenizer_cfg = model_cfg.get("tokenizer")
+            if tokenizer_cfg is not None:
+                if not isinstance(tokenizer_cfg, dict):
+                    raise LocalRunError("model.tokenizer must be a mapping when provided.")
+                command.extend(["--tokenizer-config", json.dumps(tokenizer_cfg)])
             for key in ("save_steps", "save_total_limit"):
                 _append_flag(command, key, training_cfg.get(key))
             # chat_template_kwargs is a nested mapping, not a scalar, so it cannot

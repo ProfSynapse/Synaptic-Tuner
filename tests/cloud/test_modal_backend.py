@@ -45,7 +45,7 @@ def _cloud_config(**overrides):
         artifact_mount_path="/vol/artifacts",
         repo_url="https://github.com/test/repo.git",
         repo_branch="main",
-        repo_commit="abc12345def67890",
+        repo_commit="abc12345def67890abc12345def67890abc12345",
     )
     for key, value in overrides.items():
         setattr(config, key, value)
@@ -235,7 +235,41 @@ class TestModalExecute:
         assert called_env["MODAL_OUTPUT_VOLUME_NAME"] == "toolset-training-artifacts"
         assert called_env["MODAL_OUTPUT_MOUNT_PATH"] == "/vol/artifacts"
         assert called_env["CLOUD_REPO_BRANCH"] == "main"
-        assert called_env["CLOUD_REPO_COMMIT"] == "abc12345def67890"
+        assert called_env["CLOUD_REPO_COMMIT"] == "abc12345def67890abc12345def67890abc12345"
+
+        called_cmd = mock_popen.call_args.args[0]
+        assert called_cmd[:2] == ["modal", "run"]
+        assert "--detach" not in called_cmd
+        assert called_cmd[2].endswith("train_modal.py::run_training")
+        assert called_env["MODAL_GPU"] == "L40S"
+        assert called_env["MODAL_TIMEOUT_SECONDS"] == "21600"
+
+    def test_execute_uses_resolved_config_gpu_and_timeout(self, repo_root, clean_env):
+        backend = ModalBackend(repo_root)
+        config = _cloud_config(gpu_type="A10G", timeout_hours=2)
+        mock_process = MagicMock()
+        mock_process.wait.return_value = 0
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.subprocess.Popen",
+            return_value=mock_process,
+        ) as mock_popen:
+            backend.execute(config, python_path="python")
+        called_env = mock_popen.call_args.kwargs["env"]
+        assert called_env["MODAL_GPU"] == "A10G"
+        assert called_env["MODAL_TIMEOUT_SECONDS"] == "7200"
+
+    def test_execute_rejects_short_commit(self, repo_root, clean_env):
+        backend = ModalBackend(repo_root)
+        with pytest.raises(BackendError, match="full 40-character"):
+            backend.execute(_cloud_config(repo_commit="abc12345"), python_path="python")
+
+    def test_execute_rejects_credential_bearing_repo_url(self, repo_root, clean_env):
+        backend = ModalBackend(repo_root)
+        with pytest.raises(BackendError, match="Credential-bearing"):
+            backend.execute(
+                _cloud_config(repo_url="https://token@example.invalid/repo.git"),
+                python_path="python",
+            )
 
 
 class TestModalResolveRepoSource:

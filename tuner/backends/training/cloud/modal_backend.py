@@ -29,10 +29,12 @@ Dependencies:
 
 import logging
 import os
+import re
 import subprocess
 import yaml
 from pathlib import Path
 from typing import List, Tuple
+from urllib.parse import urlsplit
 
 from shared.utilities.paths import get_trainer_root
 from tuner.backends.training.base import ITrainingBackend
@@ -246,19 +248,29 @@ class ModalBackend(ITrainingBackend):
         cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
         cloud_config = load_cloud_config(cloud_config_path)
         modal_settings = cloud_config.get("modal", {})
-        gpu_type = modal_settings.get("gpu", DEFAULT_GPU)
-        timeout_hours = modal_settings.get("timeout_hours", DEFAULT_TIMEOUT_HOURS)
+        gpu_type = config.gpu_type or modal_settings.get("gpu", DEFAULT_GPU)
+        timeout_hours = config.timeout_hours or modal_settings.get(
+            "timeout_hours", DEFAULT_TIMEOUT_HOURS
+        )
 
         if not config.repo_url or not config.repo_branch or not config.repo_commit:
             raise BackendError("Modal cloud runs require exact repo source metadata.")
+        parsed_repo_url = urlsplit(config.repo_url)
+        if parsed_repo_url.scheme in {"http", "https"} and (
+            parsed_repo_url.username or parsed_repo_url.password
+        ):
+            raise BackendError(
+                "Credential-bearing repository URLs are forbidden for Modal; "
+                "configure a credential-free remote URL."
+            )
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", config.repo_commit):
+            raise BackendError("Modal cloud runs require a full 40-character repo commit SHA.")
 
         # Build the modal run command
         cmd = [
             "modal", "run",
-            str(wrapper_script),
+            f"{wrapper_script}::run_training",
             "--trainer-type", config.method,
-            "--gpu", gpu_type,
-            "--timeout-hours", str(timeout_hours),
             "--repo-url", config.repo_url,
             "--repo-branch", config.repo_branch,
             "--repo-commit", config.repo_commit,
@@ -283,6 +295,8 @@ class ModalBackend(ITrainingBackend):
                 "MODAL_CACHE_VOLUME_NAME": modal_settings.get("cache_volume_name", "toolset-model-cache"),
                 "MODAL_OUTPUT_VOLUME_NAME": config.artifact_identifier or "toolset-training-artifacts",
                 "MODAL_OUTPUT_MOUNT_PATH": config.artifact_mount_path or "/vol/artifacts",
+                "MODAL_GPU": gpu_type,
+                "MODAL_TIMEOUT_SECONDS": str(int(timeout_hours * 3600)),
                 "CLOUD_PROVIDER": "modal",
                 "CLOUD_GPU_TYPE": gpu_type,
                 "CLOUD_ARTIFACT_IDENTIFIER": config.artifact_identifier or "",

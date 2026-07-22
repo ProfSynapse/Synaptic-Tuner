@@ -406,8 +406,8 @@ def resolve_repo_source(repo_root: Path) -> RepoSource:
     code reviewed locally. This function enforces that requirement by verifying:
     - repository has a usable remote URL
     - current branch is not detached
-    - tracked files are clean
-    - HEAD is reachable from origin/<branch>
+    - tracked and untracked files are clean
+    - HEAD exactly equals the origin/<branch> tip
     """
     repo_root = Path(repo_root)
     url = os.environ.get("CLOUD_REPO_URL")
@@ -428,13 +428,13 @@ def resolve_repo_source(repo_root: Path) -> RepoSource:
             "Check out a branch instead of a detached HEAD."
         )
 
-    status_result = _run_git(repo_root, ["status", "--porcelain", "--untracked-files=no"])
+    status_result = _run_git(repo_root, ["status", "--porcelain", "--untracked-files=all"])
     if status_result.returncode != 0:
         raise CloudProviderError("Failed to inspect git status for cloud source validation.")
     if status_result.stdout.strip():
         raise CloudProviderError(
-            "Cloud training requires a clean tracked worktree. "
-            "Commit or stash tracked changes before launching a remote job."
+            "Cloud training requires a fully clean worktree, including no untracked files. "
+            "Commit, move, or stash changes before launching a remote job."
         )
 
     commit_result = _run_git(repo_root, ["rev-parse", "HEAD"])
@@ -450,11 +450,11 @@ def resolve_repo_source(repo_root: Path) -> RepoSource:
             f"Remote ref '{remote_ref}' was not found."
         )
 
-    pushed_result = _run_git(repo_root, ["merge-base", "--is-ancestor", commit, remote_ref])
-    if pushed_result.returncode != 0:
+    remote_commit = remote_result.stdout.strip()
+    if remote_commit != commit:
         raise CloudProviderError(
-            f"Cloud training requires the exact commit to be pushed. "
-            f"Commit {commit[:8]} is not reachable from {remote_ref}."
+            "Cloud training requires local HEAD to equal the remote branch tip. "
+            f"HEAD {commit[:8]} != {remote_ref} {remote_commit[:8]}."
         )
 
     return RepoSource(url=url, branch=branch, commit=commit)

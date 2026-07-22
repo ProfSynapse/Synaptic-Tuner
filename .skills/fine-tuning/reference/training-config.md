@@ -26,6 +26,7 @@ run:
   quiet: true
 model:
   name: Qwen/Qwen3.5-2B
+  revision: null            # Optional HF revision; prefer an immutable commit SHA
   max_seq_length: 2048
   load_in_4bit: false
 dataset:
@@ -109,10 +110,52 @@ Optional. When unset, persistent mode uses `local-run-<slugified-name>` and ephe
 ```yaml
 model:
   model_name: "unsloth/Qwen3-1.7B-unsloth-bnb-4bit"  # Base model
+  revision: null            # Optional exact HF model/tokenizer revision
   max_seq_length: 2048   # Context window
   dtype: null            # Auto-detection (BF16 on RTX 3090)
   load_in_4bit: true     # Essential for 24GB VRAM
 ```
+
+Set `model.revision` to a full 40-character immutable Hugging Face commit SHA
+when the exact model and tokenizer snapshot matters. The SFT loader resolves
+that commit with `huggingface_hub`, verifies the returned snapshot directory is
+the requested commit, and gives Unsloth the local snapshot path. This prevents
+model-family loaders from silently dropping a `revision` keyword. Training
+lineage records the requested repository/revision and resolved snapshot
+path/commit. Missing or mismatched snapshots fail before Unsloth loads.
+Omitting the field preserves the existing Hub/default-branch call exactly.
+
+Optional SFT-only tokenizer configuration:
+
+```yaml
+model:
+  tokenizer:
+    additional_special_tokens: ["<MODE_A>", "<MODE_B>"]
+    existing_token_policy: error       # error | reuse
+    initialization: mean_existing_rows
+    train_new_embedding_rows: true
+    train_new_lm_head_rows: true
+    verify_tokenizer_roundtrip: true
+    verify_adapter_roundtrip: true
+    verify_merged_model_roundtrip: false # smoke-only; expensive; never publishes
+```
+
+All fields are config-driven and token meanings remain outside the trainer.
+The ordered list is added before LoRA; new input and untied output rows are
+initialized deterministically. With row training enabled, PEFT 0.18+ exposes
+only the new rows to the optimizer. A model with tied input/output weights must
+set both row-training booleans identically. Unsupported tokenizer/model module
+types and vocabulary collisions fail before training (`reuse` accepts an
+existing token explicitly but does not train its old row).
+
+The identical `model.tokenizer` mapping is accepted by `Trainers/recipes/*.yaml`
+for `local-run` SFT jobs. The handler transports it through
+`--tokenizer-config`; absent mappings emit no flag.
+
+Final selective-token adapters are saved without full base embedding/head
+tensors. On reload, restore the saved tokenizer first and resize an unpadded
+base to `len(tokenizer)` before loading the PEFT adapter. Never shrink a padded
+base vocabulary that already contains every recorded token ID.
 
 ### LoRA Section
 ```yaml

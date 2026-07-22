@@ -6,9 +6,18 @@ a job needs a GPU class or an on-demand elasticity that the RunPod wrapper lane
 (`reference/runpod-jobs.md`) does not give you, or as a second independent
 provider when HF Jobs and RunPod are both flaky.
 
-Like the RunPod lane, this is for arbitrary wrapper work. Cloud TRAINING through
-the tuner still goes via `tuner.py cloud-run` / `cloud-pipeline`; see
-`reference/cloud-training.md`.
+The generic SFT wrapper also supports exact external YAML plus private data on a
+named input Volume. Inspect that path with
+`python scripts/plan_modal_sft_job.py ...`; it hashes the local config and
+dataset, validates YAML `dataset.local_file`, and prints staging and launch argv
+without importing Modal or creating an app, Volume, or job.
+
+Inspection requires a fully clean worktree whose local `HEAD` equals the
+`origin/<branch>` tip (not merely an ancestor), an immutable OCI image digest,
+and an exact pip overlay. Pip entries must be `name==version`, a URL bound by a
+full `#sha256` digest, or a `git+https` URL pinned to a full commit. Credential-
+bearing repository or package URLs are rejected before they can enter argv or
+logs.
 
 ---
 
@@ -23,7 +32,7 @@ For any job longer than a quick smoke, launch detached so the run outlives the
 client:
 
 ```bash
-modal run --detach <app_module>::<function>
+modal run --detach <app_module>::<remote_function>
 ```
 
 Monitor a detached run by its app id:
@@ -33,31 +42,39 @@ modal app logs <app-id>
 modal app list          # find the app id
 ```
 
-### `--detach` alone does not survive a graceful client death
+### Call the remote function directly
 
-`--detach` protects the APP from client disconnect, but not the in-flight call.
-If the client process receives a graceful signal (SIGINT/SIGTERM) while blocked
-on `.remote()`, the unwinding call sends an explicit input-cancel RPC -- the log
-shows "Received a cancellation signal while processing input" -- and the running
-function dies even though the app was detached. Only SIGKILL or a network drop
-leaves the input running.
+Do not route a governed run through a local entrypoint that calls `.remote()` or
+`.spawn()`. That nested submission shape can either remain client-bound or leave
+an app with zero running tasks. Target the decorated remote function directly:
 
-The robust fix is to remove the blocking client entirely: have the local
-entrypoint use `.spawn()` instead of `.remote()`.
-
-```python
-@app.local_entrypoint()
-def main():
-    call = my_fn.spawn(...)   # returns immediately after scheduling
-    print(f"spawned {call.object_id}")
+```bash
+modal run --detach Trainers/cloud/train_modal.py::run_training \
+  --trainer-type sft \
+  --repo-url <url> --repo-branch <branch> --repo-commit <full-sha>
 ```
 
-With `modal run --detach` + `.spawn()`, the client exits on its own within
-seconds and there is never an in-flight input for a dying client to cancel.
-Completion is then observed out-of-band: `modal app logs` plus a DONE marker on
-the checkpoint Volume (see the crash-proof pattern below). Note Modal's caveat
-that detach keeps only the LAST triggered function alive -- one spawn per
-`modal run` invocation.
+After submission, require a non-empty app id and prove `run_training` has a
+running or completed task with `modal app list --json` and
+`modal app logs <app-id>`. An app record by itself is not launch evidence.
+
+For private config-driven SFT, stage the inspected YAML and JSONL into the named
+input Volume paths printed by `plan_modal_sft_job.py`. Pass the printed SHA-256
+values to `run_training`; the remote wrapper re-hashes both files before model
+load and fails closed if either byte stream or mounted path differs.
+The wrapper writes `modal_job_provenance.json` before clone, upgrades it after
+input verification, and transports the non-secret record into both
+`manifest.json` and `training_lineage.json`. The record binds source commit,
+input hashes/paths and Volume, runtime image/pip/GPU/timeout, artifact Volume,
+and cache Volume. On a nonzero trainer exit—including adapter or merged-model
+qualification failure—the wrapper changes the canonical manifest to failed and
+commits the output Volume before touching the replaceable model cache.
+
+The interactive `python tuner.py cloud` route intentionally remains blocking:
+it calls the remote function directly without `--detach`, waits for its terminal
+exit, and only then lets the handler report completion. Detached submission is
+reserved for the inspected command emitted by `plan_modal_sft_job.py`, where the
+operator separately verifies a real task.
 
 ---
 

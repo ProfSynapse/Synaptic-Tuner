@@ -1,6 +1,7 @@
 import json
 from argparse import Namespace
 
+import pytest
 import yaml
 
 from tuner.handlers.local_run_handler import LocalRunHandler
@@ -39,7 +40,17 @@ def test_local_run_sft_config_compiles_repo_relative_dataset(tmp_path):
     assert plan["host_artifact_path"].name == "unit"
 
 
-def _compile_local_command(tmp_path, *, method, trainer, training, lora=None, aux_head=None):
+def _compile_local_command(
+    tmp_path,
+    *,
+    method,
+    trainer,
+    training,
+    lora=None,
+    aux_head=None,
+    tokenizer=None,
+    model_revision=None,
+):
     """Compile a local-docker recipe and return the built trainer command list."""
     dataset = tmp_path / "data.jsonl"
     dataset.write_text('{"conversations":[]}\n', encoding="utf-8")
@@ -61,6 +72,10 @@ def _compile_local_command(tmp_path, *, method, trainer, training, lora=None, au
         recipe["lora"] = lora
     if aux_head is not None:
         recipe["aux_head"] = aux_head
+    if tokenizer is not None:
+        recipe["model"]["tokenizer"] = tokenizer
+    if model_revision is not None:
+        recipe["model"]["revision"] = model_revision
     config.write_text(yaml.safe_dump(recipe), encoding="utf-8")
     handler = LocalRunHandler(args=Namespace(json=True, job_config=str(config)))
     plan = handler._compile(config, handler._load_yaml(config))
@@ -263,6 +278,113 @@ def test_local_run_dpo_omits_chat_template_kwargs(tmp_path):
         training={"max_steps": 1, "beta": 0.05, "chat_template_kwargs": {"enable_thinking": False}},
     )
     assert "--chat-template-kwargs" not in command
+
+
+def test_local_run_sft_forwards_tokenizer_config_as_json(tmp_path):
+    tokenizer_config = {
+        "additional_special_tokens": ["<MODE_A>", "<MODE_B>"],
+        "existing_token_policy": "error",
+        "initialization": "mean_existing_rows",
+        "train_new_embedding_rows": True,
+        "train_new_lm_head_rows": True,
+        "verify_tokenizer_roundtrip": True,
+        "verify_adapter_roundtrip": True,
+    }
+    command = _compile_local_command(
+        tmp_path,
+        method="sft",
+        trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+        tokenizer=tokenizer_config,
+    )
+    assert "--tokenizer-config" in command
+    payload = command[command.index("--tokenizer-config") + 1]
+    assert json.loads(payload) == tokenizer_config
+
+
+def test_local_run_omits_tokenizer_config_when_absent(tmp_path):
+    command = _compile_local_command(
+        tmp_path,
+        method="sft",
+        trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+    )
+    assert "--tokenizer-config" not in command
+
+
+def test_local_run_sft_forwards_model_revision_and_omits_it_when_absent(tmp_path):
+    command = _compile_local_command(
+        tmp_path,
+        method="sft",
+        trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+        model_revision="cad0bedfdd862093a12af478cb974ab2addd0e0a",
+    )
+    index = command.index("--model-revision")
+    assert command[index + 1] == "cad0bedfdd862093a12af478cb974ab2addd0e0a"
+    absent = _compile_local_command(
+        tmp_path,
+        method="sft",
+        trainer="Trainers/sft/train_sft.py",
+        training={"max_steps": 1},
+    )
+    assert "--model-revision" not in absent
+
+
+def test_local_run_non_sft_does_not_emit_unsupported_model_revision(tmp_path):
+    command = _compile_local_command(
+        tmp_path,
+        method="dpo",
+        trainer="Trainers/dpo/train_dpo.py",
+        training={"max_steps": 1, "beta": 0.05},
+        model_revision="cad0bedfdd862093a12af478cb974ab2addd0e0a",
+    )
+    assert "--model-revision" not in command
+
+
+@pytest.mark.parametrize(
+    "invalid_revision",
+    [False, True, 123, "", " cad0bedfdd862093a12af478cb974ab2addd0e0a", "cad0bedf"],
+)
+def test_local_run_rejects_invalid_model_revision_types_and_values(
+    tmp_path, invalid_revision
+):
+    from tuner.handlers.local_run_handler import LocalRunError
+
+    with pytest.raises(LocalRunError, match="model.revision"):
+        _compile_local_command(
+            tmp_path,
+            method="sft",
+            trainer="Trainers/sft/train_sft.py",
+            training={"max_steps": 1},
+            model_revision=invalid_revision,
+        )
+
+
+def test_local_run_rejects_falsy_non_mapping_tokenizer_config(tmp_path):
+    import pytest
+
+    from tuner.handlers.local_run_handler import LocalRunError
+
+    with pytest.raises(LocalRunError, match="model.tokenizer must be a mapping"):
+        _compile_local_command(
+            tmp_path,
+            method="sft",
+            trainer="Trainers/sft/train_sft.py",
+            training={"max_steps": 1},
+            tokenizer=[],
+        )
+
+
+def test_local_run_dpo_omits_tokenizer_config(tmp_path):
+    command = _compile_local_command(
+        tmp_path,
+        method="dpo",
+        trainer="Trainers/dpo/train_dpo.py",
+        training={"max_steps": 1, "beta": 0.05},
+        tokenizer={"additional_special_tokens": ["<MODE_A>"]},
+    )
+    assert "--tokenizer-config" not in command
 
 
 def test_local_run_sft_omits_aux_head_flags_when_absent(tmp_path):

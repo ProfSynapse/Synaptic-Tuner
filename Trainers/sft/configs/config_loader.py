@@ -3,10 +3,58 @@ YAML Configuration Loader for SFT Training
 Loads config.yaml and converts to Python dataclass objects
 """
 
-import yaml
+import re
+import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict
+
+import yaml
+
+
+_FULL_HF_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def validate_model_revision(revision: Optional[str], *, field_name: str = "model.revision") -> None:
+    """Require an immutable full Hugging Face commit when a revision is set."""
+    if revision is None:
+        return
+    if not isinstance(revision, str) or revision != revision.strip() or not revision:
+        raise ValueError(f"{field_name} must be a non-empty string without surrounding whitespace.")
+    if not _FULL_HF_COMMIT_RE.fullmatch(revision):
+        raise ValueError(f"{field_name} must be a full 40-character Hugging Face commit SHA.")
+
+
+def resolve_model_revision(model_config: Any) -> Optional[str]:
+    """Read the optional field without breaking legacy custom config objects."""
+    revision = getattr(model_config, "revision", None)
+    validate_model_revision(revision)
+    return revision
+
+
+def validate_model_revision_evidence(
+    model_name: str,
+    revision: str,
+    evidence: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Validate the resolved snapshot evidence before writing lineage."""
+    validate_model_revision(revision)
+    if not isinstance(evidence, dict):
+        raise RuntimeError("Pinned model lineage requires revision resolution evidence.")
+    required = {
+        "requested_repo": model_name,
+        "requested_revision": revision,
+        "resolved_commit": revision.lower(),
+    }
+    for key, expected in required.items():
+        if evidence.get(key) != expected:
+            raise RuntimeError(
+                f"Pinned model revision evidence mismatch for {key}: "
+                f"expected {expected!r}, got {evidence.get(key)!r}."
+            )
+    if not evidence.get("resolved_snapshot_path"):
+        raise RuntimeError("Pinned model revision evidence omitted resolved_snapshot_path.")
+    return dict(evidence)
 
 
 def load_yaml_config(config_path: str = None) -> Dict[str, Any]:
@@ -36,6 +84,21 @@ class ModelConfig:
     max_seq_length: int
     dtype: Optional[str]
     load_in_4bit: bool
+    revision: Optional[str] = None
+    tokenizer: "TokenizerConfig" = field(default_factory=lambda: TokenizerConfig())
+
+
+@dataclass
+class TokenizerConfig:
+    """Optional, generic special-token behavior for SFT."""
+    additional_special_tokens: List[str] = field(default_factory=list)
+    existing_token_policy: str = "error"
+    initialization: str = "mean_existing_rows"
+    train_new_embedding_rows: bool = True
+    train_new_lm_head_rows: bool = True
+    verify_tokenizer_roundtrip: bool = True
+    verify_adapter_roundtrip: bool = True
+    verify_merged_model_roundtrip: bool = False
 
 
 @dataclass
@@ -256,6 +319,35 @@ def dict_to_dataclass(cls, data: Dict[str, Any]):
     return cls(**converted_data)
 
 
+def load_tokenizer_config(tokenizer_data: Dict[str, Any]) -> TokenizerConfig:
+    """Load and validate the optional ``model.tokenizer`` mapping."""
+    if not isinstance(tokenizer_data, dict):
+        raise ValueError("model.tokenizer must be a YAML mapping.")
+    if not tokenizer_data:
+        return TokenizerConfig()
+    allowed_fields = set(TokenizerConfig.__dataclass_fields__)
+    unknown_fields = sorted(set(tokenizer_data) - allowed_fields)
+    if unknown_fields:
+        raise ValueError(
+            "Unknown model.tokenizer fields: " + ", ".join(unknown_fields)
+        )
+    config = dict_to_dataclass(TokenizerConfig, tokenizer_data)
+    from src.special_tokens import validate_special_token_config
+
+    validate_special_token_config(config)
+    return config
+
+
+def load_model_config(model_data: Dict[str, Any]) -> ModelConfig:
+    """Load model fields plus the nested tokenizer block."""
+    data = dict(model_data)
+    tokenizer_config = load_tokenizer_config(data.pop("tokenizer", {}))
+    config = dict_to_dataclass(ModelConfig, data)
+    validate_model_revision(config.revision)
+    config.tokenizer = tokenizer_config
+    return config
+
+
 def load_evolutionary_config(evo_data: Dict[str, Any]) -> EvolutionaryConfig:
     """Load evolutionary config from YAML dict."""
     if not evo_data:
@@ -430,7 +522,7 @@ def load_config(config_path: str = None) -> Config:
     yaml_config = load_yaml_config(config_path)
 
     # Convert each section to dataclass
-    model_config = dict_to_dataclass(ModelConfig, yaml_config['model'])
+    model_config = load_model_config(yaml_config['model'])
     lora_config = dict_to_dataclass(LoRAConfig, yaml_config['lora'])
     training_config = dict_to_dataclass(SFTTrainingConfig, yaml_config['training'])
     dataset_config = dict_to_dataclass(DatasetConfig, yaml_config['dataset'])
@@ -448,6 +540,23 @@ def load_config(config_path: str = None) -> Config:
         aux_head=aux_head_config,
         seed=yaml_config.get('seed', 42)
     )
+
+
+def load_external_config(config_path: str):
+    """Load an explicit YAML config or a legacy executable Python config.
+
+    YAML is the declarative path used by repeatable local and cloud jobs.  Any
+    other suffix intentionally retains the historical ``Config()`` import
+    behavior so existing custom Python configs keep working unchanged.
+    """
+    path = Path(config_path)
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        return load_config(str(path))
+
+    spec = importlib.util.spec_from_file_location("custom_config", str(path))
+    custom_config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(custom_config)
+    return custom_config.Config()
 
 
 # Backwards compatibility: Provide same function names as old Python config

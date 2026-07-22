@@ -172,9 +172,10 @@ def build_manifest(
     publish_final_model: bool,
     publish_target_repo: Optional[str],
     status: str,
+    cloud_job_provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the canonical cloud run manifest."""
-    return {
+    manifest = {
         "provider": provider,
         "method": method,
         "status": status,
@@ -194,6 +195,9 @@ def build_manifest(
             "per_example_losses": str(run_paths.per_example_losses_path) if run_paths.per_example_losses_path else None,
         },
     }
+    if cloud_job_provenance is not None:
+        manifest["cloud_job_provenance"] = dict(cloud_job_provenance)
+    return manifest
 
 
 def ensure_hf_bucket(bucket_id: str, token: Optional[str] = None) -> str:

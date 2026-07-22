@@ -14,7 +14,7 @@ python train_sft.py [options]
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--model-size {3b,7b,13b,20b}` | Use preset configuration | — |
-| `--config PATH` | Load custom Python config file | — |
+| `--config PATH` | Load direct SFT YAML (`.yaml`/`.yml`) or legacy Python config | — |
 
 ### Complexity Tiers
 | Flag | Description |
@@ -87,6 +87,83 @@ When `completion_only_loss: true` (default):
 - Loss computed only on assistant response tokens
 - User prompt tokens ignored during training
 - Prevents model from learning to generate user messages
+
+### Configured Special Tokens (`model.tokenizer`, optional)
+
+SFT can register any ordered list of special tokens without embedding their
+meaning in trainer code. The feature is off when the block is absent or the
+list is empty. The same block works in the direct SFT YAML and in a
+`local-run` recipe:
+
+```yaml
+model:
+  tokenizer:
+    additional_special_tokens:
+      - "<MODE_A>"
+      - "<MODE_B>"
+    existing_token_policy: error       # error | reuse
+    initialization: mean_existing_rows # deterministic; currently the only policy
+    train_new_embedding_rows: true
+    train_new_lm_head_rows: true
+    verify_tokenizer_roundtrip: true
+    verify_adapter_roundtrip: true
+    verify_merged_model_roundtrip: false # expensive smoke-only merge/save/fresh reload check
+```
+
+The list order is preserved. Empty strings and duplicates fail before the
+model is mutated. `existing_token_policy: error` rejects vocabulary collisions;
+`reuse` explicitly accepts them, but reused rows are never made trainable.
+New rows are initialized from the float32 mean of the pre-existing vocabulary
+rows before LoRA is applied.
+
+Selective row training uses PEFT's native `trainable_token_indices`: the old
+input/output rows remain frozen and do not enter AdamW weight decay or optimizer
+state. Both untied `torch.nn.Embedding` + `torch.nn.Linear` vocabularies and
+coherently configured tied vocabularies are supported. Unsupported module
+types, incoherent tied-head flags, or a PEFT version without selective-token
+support fail loudly. A current runtime with PEFT 0.18 or newer is required when
+either row-training flag is active; recipes should pin that runtime in
+`setup.pip` when the selected image does not already provide it.
+
+After training, the final model directory contains the tokenizer, the PEFT
+adapter (including selective rows), and `special_tokens_lineage.json`.
+`verify_tokenizer_roundtrip` reloads the saved tokenizer locally and proves every
+configured string still encodes to exactly its recorded single token ID.
+`verify_adapter_roundtrip` reloads the saved PEFT adapter into the already-live
+model under a temporary adapter name, compares the complete adapter state
+(LoRA plus selective rows), rechecks row IDs and tied-head sharing, then removes
+the temporary adapter and restores the original. It does not load a second copy
+of the base model and is not a full base-weight reload check. Before this check,
+the trainer explicitly re-saves the adapter with `save_embedding_layers=false`:
+selective-token deltas are absolute replacement rows, so the artifact contains
+no redundant full embedding or output-head weights. When loading this adapter
+elsewhere, load the saved tokenizer and resize an unpadded base model to
+`len(tokenizer)` before attaching the adapter; padded bases that already cover
+the recorded token IDs must not be shrunk.
+Only after the adapter-only save and requested verification pass does the
+trainer write success lineage. Both `special_tokens_lineage.json` and
+`training_lineage.json` bind the exact adapter config/state files by SHA-256,
+record a deterministic adapter tensor manifest (keys, shapes, and dtypes), and
+state that no full base vocabulary tensors are present. They also record token
+strings, IDs, vocab sizes, policies, module names, tied-weight status, and
+deterministic config/vocabulary SHA-256 hashes.
+
+For a bounded same-model smoke, set `verify_merged_model_roundtrip: true` (or
+pass `--verify-merged-model-roundtrip`). After the adapter-only and tokenizer
+checks pass, the trainer writes a temporary `merged_16bit` model, reloads it
+locally on CPU, rechecks every configured token ID, and compares the configured
+input/output vocabulary rows after the deterministic save dtype conversion. It
+then removes the temporary merged model and keeps only
+`merged_model_roundtrip.json` plus the same report embedded in
+`special_tokens_lineage.json`. The report is bound to validated original Hub
+repository + full model revision evidence. Before the first final adapter save,
+every live PEFT config is restored from any runtime cache/snapshot path to that
+portable repository/revision pair; the saved `adapter_config.json` is re-read
+and checked. The feature is off by default and never publishes.
+
+The `local-run` handler forwards this SFT-only block as one JSON object through
+`--tokenizer-config`. Recipes without the block emit no flag, and DPO/KTO ignore
+a stray block rather than receiving an unsupported trainer argument.
 
 ### Auxiliary Readout Head (`aux_head`, optional)
 An optional auxiliary scalar readout head that learns to predict a per-row
@@ -243,6 +320,7 @@ run:
   trainer: Trainers/sft/train_sft.py
 model:
   name: Qwen/Qwen3.5-2B
+  revision: null  # Optional; prefer an immutable Hugging Face commit SHA
   max_seq_length: 2048
   load_in_4bit: false
 dataset:
@@ -261,8 +339,16 @@ artifacts:
   run_timestamp: "{timestamp}"
 ```
 
+`model.revision` is optional in both direct SFT YAML and local-run recipes. Use
+a full 40-character immutable Hub commit SHA to pin the joint model/tokenizer
+snapshot. The trainer resolves and verifies that exact snapshot first, then
+passes its local path to Unsloth so downstream family loaders cannot drop the
+pin. Training lineage records requested and resolved source evidence. Missing
+or mismatched snapshots fail closed; omission preserves the prior load call.
+
 Key sections:
 - `model` — model name, seq length, quantization
+- `model.tokenizer` — optional generic special-token block described above
 - `lora` — rank, alpha, dropout, target modules
 - `training` — batch size, LR, epochs, packing, etc.
 - `dataset` — source, filtering, split

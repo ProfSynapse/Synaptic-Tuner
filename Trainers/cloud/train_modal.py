@@ -3,27 +3,28 @@ Location: Trainers/cloud/train_modal.py
 
 Purpose:
     Standalone Modal wrapper script for running SFT or KTO training in the cloud.
-    Can be invoked directly via `modal run Trainers/cloud/train_modal.py` or
+    Invoked via `modal run --detach Trainers/cloud/train_modal.py::run_training` or
     programmatically from the ModalBackend in tuner/backends/training/cloud/.
 
     The script defines a Modal App with GPU configuration, persistent volumes for
     caching model weights, and a container image with all training dependencies.
     Training runs execute the existing train_sft.py or train_kto.py scripts inside
-    the Modal container, then push results to HuggingFace Hub.
+    the Modal container and retain canonical artifacts on the output Volume.
+    Hub publication remains explicit opt-in behavior for the legacy CLI path.
 
 Usage:
     # Run SFT training on an L40S GPU (default)
-    modal run Trainers/cloud/train_modal.py --trainer-type sft
+    modal run --detach Trainers/cloud/train_modal.py::run_training --trainer-type sft
 
     # Run KTO training on an A100 GPU
-    modal run Trainers/cloud/train_modal.py --trainer-type kto --gpu A100
+    MODAL_GPU=A100 modal run --detach Trainers/cloud/train_modal.py::run_training --trainer-type kto
 
     # Specify a custom model and dataset
-    modal run Trainers/cloud/train_modal.py \\
+    modal run --detach Trainers/cloud/train_modal.py::run_training \\
         --trainer-type sft \\
         --model-name "unsloth/mistral-7b-v0.3-bnb-4bit" \\
         --dataset-path "Datasets/my_dataset.jsonl" \\
-        --hub-repo "myuser/my-model"
+        --publish-target-repo "myuser/my-model"
 
 Dependencies:
     - modal (pip install modal)
@@ -31,11 +32,16 @@ Dependencies:
     - HF_TOKEN environment variable (for model downloads and Hub uploads)
 """
 
+import hashlib
+import hmac
+import json
 import os
 import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
 
 # shared/ ships with the repo, not the container image: inside the Modal
 # container this module is imported BEFORE the repo is cloned, so the import
@@ -66,6 +72,66 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 HOURS = 60 * 60  # seconds
+VALID_GPU_TYPES = ["T4", "L4", "A10G", "L40S", "A100", "A100-80GB", "H100"]
+DEFAULT_GPU = "L40S"
+_OCI_DIGEST = re.compile(r"^.+@sha256:[0-9a-fA-F]{64}$")
+_EXACT_PIP = re.compile(r"^[A-Za-z0-9_.-]+(?:\[[A-Za-z0-9_,.-]+\])?==[^*<>=!~,;\s]+$")
+_HASHED_URL_PIP = re.compile(
+    r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?https://\S+#sha256=[0-9a-fA-F]{64}$"
+)
+_PINNED_GIT_PIP = re.compile(r"^(?:[A-Za-z0-9_.-]+\s*@\s*)?git\+https://\S+@[0-9a-fA-F]{40}(?:#\S+)?$")
+
+
+def _redact_text(value: str) -> str:
+    text = str(value)
+    text = re.sub(r"(https?://)[^/@\s]+@", r"\1[REDACTED]@", text)
+    text = re.sub(
+        r"(?i)(token|secret|password|api[_-]?key)(\s*[=:]\s*)[^\s,;]+",
+        r"\1\2[REDACTED]",
+        text,
+    )
+    return text
+
+
+def _credential_free_repo_url(value: str) -> str:
+    url = value.strip()
+    parsed = urlsplit(url)
+    if parsed.scheme in {"http", "https"} and (parsed.username or parsed.password):
+        raise ValueError(
+            "Credential-bearing repository URLs are forbidden; use a credential-free remote URL."
+        )
+    if not url or any(char in url for char in ("\n", "\r", "\x00")):
+        raise ValueError("Repository URL is empty or contains control characters.")
+    return url
+
+
+def _exact_pip_requirement(value: str) -> str:
+    requirement = value.strip()
+    if re.search(r"https?://[^/@\s]+@", requirement):
+        raise RuntimeError("Credential-bearing pip requirement URLs are forbidden.")
+    if not (
+        _EXACT_PIP.fullmatch(requirement)
+        or _HASHED_URL_PIP.fullmatch(requirement)
+        or _PINNED_GIT_PIP.fullmatch(requirement)
+    ):
+        raise RuntimeError(
+            "Modal pip overlays must be immutable: name==version, a URL with a full "
+            "#sha256 digest, or git+https pinned to a full commit."
+        )
+    return requirement
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer.") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero.")
+    return value
 
 # Persistent volume for caching HuggingFace model weights between runs.
 # This avoids re-downloading multi-GB models on every training run, saving
@@ -80,6 +146,17 @@ output_volume = modal.Volume.from_name(
 )
 OUTPUT_MOUNT_PATH = os.environ.get("MODAL_OUTPUT_MOUNT_PATH", "/vol/artifacts")
 
+# A private input Volume is opt-in so historical repo-local / Hub-dataset jobs
+# do not acquire a new prerequisite.  Config-driven private-input jobs set the
+# name before `modal run`; unlike output/cache storage it must already exist.
+INPUT_MOUNT_PATH = os.environ.get("MODAL_INPUT_MOUNT_PATH", "/vol/inputs")
+INPUT_VOLUME_NAME = os.environ.get("MODAL_INPUT_VOLUME_NAME", "").strip()
+input_volume = (
+    modal.Volume.from_name(INPUT_VOLUME_NAME, create_if_missing=False)
+    if INPUT_VOLUME_NAME
+    else None
+)
+
 # Container image with all training dependencies pre-installed.
 # Using debian_slim as the base keeps the image small while providing
 # a stable foundation. Dependencies are installed via pip_install since
@@ -88,9 +165,34 @@ OUTPUT_MOUNT_PATH = os.environ.get("MODAL_OUTPUT_MOUNT_PATH", "/vol/artifacts")
 # Version pins follow Modal's official unsloth example pattern. The CUDA 12.8 /
 # PyTorch 2.7.0 extras align with the unsloth Docker image used by HF Jobs and
 # RunPod (see cloud_config.yaml). Update these together when upgrading unsloth.
-training_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .pip_install(
+def _runtime_pip_packages() -> list[str]:
+    """Parse optional exact runtime requirements without invoking a shell."""
+    raw = os.environ.get("MODAL_TRAINING_PIP_PACKAGES_JSON", "").strip()
+    if not raw:
+        return []
+    try:
+        packages = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("MODAL_TRAINING_PIP_PACKAGES_JSON must be valid JSON.") from exc
+    if not isinstance(packages, list) or any(
+        not isinstance(item, str) or not item.strip() for item in packages
+    ):
+        raise RuntimeError("MODAL_TRAINING_PIP_PACKAGES_JSON must be a list of non-empty strings.")
+    return [_exact_pip_requirement(item) for item in packages]
+
+
+runtime_image_ref = os.environ.get("MODAL_TRAINING_IMAGE", "").strip()
+if runtime_image_ref:
+    if not _OCI_DIGEST.fullmatch(runtime_image_ref):
+        raise RuntimeError("MODAL_TRAINING_IMAGE must include a full immutable @sha256 digest.")
+    # Registry images such as Unsloth run a supervisor entrypoint by default;
+    # clear it so Modal can invoke the function.  The inspect planner requires
+    # an immutable @sha256 digest for this path.
+    training_image = modal.Image.from_registry(runtime_image_ref).entrypoint([])
+else:
+    # Preserve the historical default image byte-for-byte when no explicit
+    # runtime is configured.
+    training_image = modal.Image.debian_slim(python_version="3.11").pip_install(
         # Core ML stack — pinned to exact versions for reproducibility
         "torch==2.7.0",
         "unsloth[cu128-torch270]==2025.7.8",
@@ -109,9 +211,18 @@ training_image = (
         "hf_transfer",
         "python-dotenv",
         "rich",
+    ).apt_install("git")
+
+runtime_pips = _runtime_pip_packages()
+if runtime_pips:
+    training_image = training_image.pip_install(*runtime_pips)
+
+FUNCTION_GPU = os.environ.get("MODAL_GPU", DEFAULT_GPU).strip() or DEFAULT_GPU
+if FUNCTION_GPU not in VALID_GPU_TYPES:
+    raise RuntimeError(
+        f"MODAL_GPU must be one of {', '.join(VALID_GPU_TYPES)}; got {FUNCTION_GPU!r}."
     )
-    .apt_install("git")
-)
+FUNCTION_TIMEOUT_SECONDS = _positive_int_env("MODAL_TIMEOUT_SECONDS", 6 * HOURS)
 
 app = modal.App("toolset-training", image=training_image)
 
@@ -133,12 +244,6 @@ GPU_PRICING = {
     "A100-80GB": 3.72,
     "H100": 4.89,
 }
-
-# Valid GPU types that can be passed to Modal
-VALID_GPU_TYPES = ["T4", "L4", "A10G", "L40S", "A100", "A100-80GB", "H100"]
-
-DEFAULT_GPU = "L40S"
-
 
 # The hf_xet CAS backend hangs without timeout on multi-GB model pulls (py-spy:
 # workers frozen in xet_get at file_download.py:626), which froze two Modal A0
@@ -166,13 +271,180 @@ def apply_hf_xet_mitigation(env) -> None:
 # Training Function (runs remotely on Modal)
 # ---------------------------------------------------------------------------
 
+function_volumes = {
+    "/cache/huggingface": model_cache,
+    OUTPUT_MOUNT_PATH: output_volume,
+}
+if input_volume is not None:
+    function_volumes[INPUT_MOUNT_PATH] = input_volume
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _mounted_input_file(path_value: str, label: str) -> Path:
+    """Resolve a staged file and prove it stays inside the input mount."""
+    if not INPUT_VOLUME_NAME:
+        raise ValueError(f"{label} requires MODAL_INPUT_VOLUME_NAME to be set.")
+    if not path_value:
+        raise ValueError(f"{label} is required for a config-driven Modal run.")
+    mount = Path(INPUT_MOUNT_PATH).resolve(strict=True)
+    path = Path(path_value).resolve(strict=True)
+    try:
+        path.relative_to(mount)
+    except ValueError as exc:
+        raise ValueError(f"{label} must resolve inside {INPUT_MOUNT_PATH}: {path}") from exc
+    if not path.is_file():
+        raise ValueError(f"{label} must be a regular file: {path}")
+    return path
+
+
+def _validate_staged_sft_config(
+    config_path: str,
+    expected_config_sha256: str,
+    expected_dataset_sha256: str,
+) -> tuple[Path, Path, str, str]:
+    """Hash-bind a staged direct SFT YAML and its configured private dataset."""
+    import yaml
+
+    config = _mounted_input_file(config_path, "config_path")
+    if config.suffix.lower() not in {".yaml", ".yml"}:
+        raise ValueError("Config-driven Modal SFT requires a .yaml or .yml config file.")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_config_sha256 or ""):
+        raise ValueError("config_sha256 must be a full 64-character SHA-256 digest.")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_dataset_sha256 or ""):
+        raise ValueError("dataset_sha256 must be a full 64-character SHA-256 digest.")
+
+    config_sha = _sha256(config)
+    if not hmac.compare_digest(config_sha.lower(), expected_config_sha256.lower()):
+        raise ValueError(
+            f"Staged config SHA-256 mismatch: expected {expected_config_sha256}, got {config_sha}."
+        )
+    try:
+        document = yaml.safe_load(config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"Cannot parse staged SFT YAML config {config}: {exc}") from exc
+    if not isinstance(document, dict) or not isinstance(document.get("dataset"), dict):
+        raise ValueError("Staged SFT YAML must contain a top-level dataset mapping.")
+    dataset_value = document["dataset"].get("local_file")
+    if not isinstance(dataset_value, str) or not dataset_value:
+        raise ValueError("Staged SFT YAML dataset.local_file must be a non-empty string.")
+    dataset = _mounted_input_file(dataset_value, "dataset.local_file")
+    dataset_sha = _sha256(dataset)
+    if not hmac.compare_digest(dataset_sha.lower(), expected_dataset_sha256.lower()):
+        raise ValueError(
+            f"Staged dataset SHA-256 mismatch: expected {expected_dataset_sha256}, got {dataset_sha}."
+        )
+    return config, dataset, config_sha, dataset_sha
+
+
+def build_training_command(
+    *, train_script: str, run_timestamp: str, config_path: str = ""
+) -> list[str]:
+    """Construct the shell-free trainer argv shared by remote execution/tests."""
+    command = [
+        "python",
+        train_script,
+        "--run-timestamp",
+        run_timestamp,
+        "--output-root",
+        f"{OUTPUT_MOUNT_PATH}/outputs",
+        "--cloud-provider",
+        "modal",
+        "--artifact-backend",
+        "modal_volume",
+    ]
+    if config_path:
+        command.extend(["--config", config_path])
+    return command
+
+
+def commit_success_volumes() -> None:
+    """Persist canonical outputs before the replaceable model cache."""
+    output_volume.commit()
+    model_cache.commit()
+
+
+def _modal_provenance(
+    *,
+    repo_branch: str,
+    repo_commit: str,
+    config_path: str,
+    config_sha256: str,
+    dataset_path: str,
+    dataset_sha256: str,
+    inputs_verified: bool,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "provider": "modal",
+        "source": {"branch": repo_branch, "commit": repo_commit.lower()},
+        "inputs": {
+            "config": {"mounted_path": config_path or None, "sha256": config_sha256 or None},
+            "dataset": {"mounted_path": dataset_path or None, "sha256": dataset_sha256 or None},
+            "verified": inputs_verified,
+            "volume_name": INPUT_VOLUME_NAME or None,
+            "mount_path": INPUT_MOUNT_PATH if INPUT_VOLUME_NAME else None,
+        },
+        "runtime": {
+            "image": runtime_image_ref or "legacy_builtin_modal_image",
+            "pip_packages": list(runtime_pips),
+            "gpu": FUNCTION_GPU,
+            "timeout_seconds": FUNCTION_TIMEOUT_SECONDS,
+        },
+        "artifacts": {
+            "volume_name": os.environ.get(
+                "MODAL_OUTPUT_VOLUME_NAME", "toolset-training-artifacts"
+            ),
+            "mount_path": OUTPUT_MOUNT_PATH,
+        },
+        "cache": {
+            "volume_name": os.environ.get("MODAL_CACHE_VOLUME_NAME", "toolset-model-cache"),
+            "mount_path": "/cache/huggingface",
+        },
+        "publish_final_model": False,
+    }
+
+
+def _write_wrapper_state(run_dir: Path, provenance: dict, status: str, error: str = "") -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    payload = dict(provenance)
+    payload["status"] = status
+    if error:
+        payload["error"] = _redact_text(error)[:2000]
+    (run_dir / "modal_job_provenance.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    manifest_path = run_dir / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+    else:
+        manifest = {}
+    manifest.update(
+        {
+            "provider": "modal",
+            "method": "sft",
+            "status": status if not error else f"failed: {_redact_text(error)[:500]}",
+            "repo_branch": provenance["source"]["branch"],
+            "repo_commit": provenance["source"]["commit"],
+            "cloud_job_provenance": payload,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 @app.function(
-    gpu=DEFAULT_GPU,
-    timeout=6 * HOURS,
-    volumes={
-        "/cache/huggingface": model_cache,
-        OUTPUT_MOUNT_PATH: output_volume,
-    },
+    gpu=FUNCTION_GPU,
+    timeout=FUNCTION_TIMEOUT_SECONDS,
+    volumes=function_volumes,
     # Scope secrets to only the env vars needed for training, rather than
     # exposing the entire .env file via Secret.from_dotenv().
     #
@@ -206,6 +478,9 @@ def run_training(
     publish_final_model: bool = False,
     publish_target_repo: str = "",
     config_overrides: dict = None,
+    config_path: str = "",
+    config_sha256: str = "",
+    dataset_sha256: str = "",
 ):
     """Run SFT or KTO training inside the Modal container.
 
@@ -228,9 +503,44 @@ def run_training(
     if config_overrides is None:
         config_overrides = {}
 
-    # Validate trainer type
+    # Validate trainer type and exact source metadata.
     if trainer_type not in ("sft", "kto"):
         raise ValueError(f"Invalid trainer_type: {trainer_type}. Must be 'sft' or 'kto'.")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", repo_commit or ""):
+        raise ValueError("repo_commit must be a full 40-character git commit SHA.")
+    if config_path and trainer_type != "sft":
+        raise ValueError("External YAML config_path is currently supported only for SFT.")
+    if config_path and any((dataset_path, dataset_name, dataset_file, model_name, config_overrides)):
+        raise ValueError(
+            "config_path is authoritative and cannot be combined with model, dataset, or training overrides."
+        )
+    if config_path and (publish_final_model or publish_target_repo):
+        raise ValueError(
+            "config-driven Modal SFT jobs retain private Volume artifacts and cannot publish to the Hub."
+        )
+    repo_url = _credential_free_repo_url(repo_url)
+    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    modal_run_dir = (
+        Path(OUTPUT_MOUNT_PATH)
+        / "outputs"
+        / "runs"
+        / "modal"
+        / trainer_type
+        / f"{run_timestamp}-{repo_commit[:8].lower()}"
+    )
+    job_provenance = None
+    if config_path:
+        job_provenance = _modal_provenance(
+            repo_branch=repo_branch,
+            repo_commit=repo_commit,
+            config_path=config_path,
+            config_sha256=config_sha256,
+            dataset_path="",
+            dataset_sha256=dataset_sha256,
+            inputs_verified=False,
+        )
+        _write_wrapper_state(modal_run_dir, job_provenance, "validating_inputs")
+        output_volume.commit()
 
     # Point HuggingFace cache at the persistent volume to avoid re-downloading models
     os.environ["HF_HOME"] = "/cache/huggingface"
@@ -256,7 +566,7 @@ def run_training(
     # Clone the repo
     workspace = "/workspace/toolset-training"
     if repo_url:
-        print(f"[Modal] Cloning repo: {repo_url} (branch: {repo_branch})")
+        print(f"[Modal] Cloning credential-free repo (branch: {repo_branch})")
         clone_result = subprocess.run(
             ["git", "clone", "--branch", repo_branch, "--depth", "1", repo_url, workspace],
             capture_output=True,
@@ -265,8 +575,12 @@ def run_training(
         if clone_result.returncode != 0:
             # Scrub any credentials from stderr before logging/raising
             safe_stderr = re.sub(r'https?://[^@\s]+@', 'https://[REDACTED]@', clone_result.stderr)
-            print(f"[Modal] Git clone failed: {safe_stderr}")
-            raise RuntimeError(f"Failed to clone repo: {safe_stderr}")
+            error = _redact_text(safe_stderr)
+            if job_provenance:
+                _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
+                output_volume.commit()
+            print(f"[Modal] Git clone failed: {error}")
+            raise RuntimeError(f"Failed to clone repo: {error}")
         if repo_commit:
             checkout_result = subprocess.run(
                 ["git", "checkout", repo_commit],
@@ -275,7 +589,24 @@ def run_training(
                 text=True,
             )
             if checkout_result.returncode != 0:
-                raise RuntimeError(f"Failed to checkout commit {repo_commit}: {checkout_result.stderr}")
+                error = _redact_text(checkout_result.stderr)
+                if job_provenance:
+                    _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
+                    output_volume.commit()
+                raise RuntimeError(f"Failed to checkout commit {repo_commit}: {error}")
+            head_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=workspace, capture_output=True, text=True
+            )
+            resolved_head = head_result.stdout.strip().lower()
+            if head_result.returncode != 0 or resolved_head != repo_commit.lower():
+                error = (
+                    f"Exact source verification failed: requested {repo_commit}, "
+                    f"got {resolved_head or 'unknown'}."
+                )
+                if job_provenance:
+                    _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
+                    output_volume.commit()
+                raise RuntimeError(error)
     else:
         print("[Modal] No repo_url provided, skipping clone.")
         print("[Modal] Ensure training code is available in the container.")
@@ -302,13 +633,40 @@ def run_training(
         )
 
     # Build training command with CLI overrides
-    cmd = ["python", train_script]
-    cmd.extend([
-        "--run-timestamp", datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
-        "--output-root", f"{OUTPUT_MOUNT_PATH}/outputs",
-        "--cloud-provider", "modal",
-        "--artifact-backend", "modal_volume",
-    ])
+    cmd = build_training_command(train_script=train_script, run_timestamp=run_timestamp)
+
+    staged_inputs = None
+    if config_path:
+        try:
+            config_file, dataset_file_path, config_sha, dataset_sha = _validate_staged_sft_config(
+                config_path, config_sha256, dataset_sha256
+            )
+        except Exception as exc:
+            error = _redact_text(str(exc))
+            _write_wrapper_state(modal_run_dir, job_provenance, "failed", error)
+            output_volume.commit()
+            raise RuntimeError(error) from None
+        cmd.extend(["--config", str(config_file)])
+        staged_inputs = {
+            "config_path": str(config_file),
+            "config_sha256": config_sha,
+            "dataset_path": str(dataset_file_path),
+            "dataset_sha256": dataset_sha,
+        }
+        job_provenance = _modal_provenance(
+            repo_branch=repo_branch,
+            repo_commit=repo_commit,
+            config_path=str(config_file),
+            config_sha256=config_sha,
+            dataset_path=str(dataset_file_path),
+            dataset_sha256=dataset_sha,
+            inputs_verified=True,
+        )
+        os.environ["SYNAPTIC_CLOUD_JOB_PROVENANCE_JSON"] = json.dumps(
+            job_provenance, sort_keys=True, separators=(",", ":")
+        )
+        _write_wrapper_state(modal_run_dir, job_provenance, "running")
+        output_volume.commit()
 
     if model_name:
         # Model name override requires modifying config before training.
@@ -355,16 +713,30 @@ def run_training(
 
     if process.returncode != 0:
         print(f"[Modal] Training failed with exit code {process.returncode}")
+        if job_provenance:
+            _write_wrapper_state(
+                modal_run_dir,
+                job_provenance,
+                "failed",
+                f"Training script exited with code {process.returncode}",
+            )
         output_volume.commit()
         raise RuntimeError(f"Training script exited with code {process.returncode}")
 
     print("[Modal] Training completed successfully")
 
-    # Commit volumes to persist cached models and artifacts
-    model_cache.commit()
-    output_volume.commit()
+    # Persist result/provenance before opportunistic cache state.
+    if job_provenance:
+        _write_wrapper_state(modal_run_dir, job_provenance, "completed")
+    commit_success_volumes()
 
-    return {"status": "completed", "trainer_type": trainer_type}
+    return {
+        "status": "completed",
+        "trainer_type": trainer_type,
+        "repo_commit": repo_commit.lower(),
+        "staged_inputs": staged_inputs,
+        "artifact_root": f"{OUTPUT_MOUNT_PATH}/outputs/runs/modal/{trainer_type}",
+    }
 
 
 def _upload_to_hub(trainer_type: str, trainer_dir: str, hub_repo: str):
@@ -421,7 +793,6 @@ def _upload_to_hub(trainer_type: str, trainer_dir: str, hub_repo: str):
 # Local Entrypoint (runs locally, dispatches to Modal)
 # ---------------------------------------------------------------------------
 
-@app.local_entrypoint()
 def main(
     trainer_type: str = "sft",
     gpu: str = DEFAULT_GPU,
@@ -439,6 +810,9 @@ def main(
     batch_size: int = 0,
     max_steps: int = 0,
     timeout_hours: int = 6,
+    config_path: str = "",
+    config_sha256: str = "",
+    dataset_sha256: str = "",
 ):
     """Local entrypoint for Modal cloud training.
 
@@ -464,6 +838,9 @@ def main(
     if gpu not in VALID_GPU_TYPES:
         print(f"Error: Invalid GPU type '{gpu}'")
         print(f"Valid options: {', '.join(VALID_GPU_TYPES)}")
+        sys.exit(1)
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", repo_commit or ""):
+        print("Error: --repo-commit must be a full 40-character git commit SHA.")
         sys.exit(1)
 
     # Auto-detect repo URL from local git remote if not provided.
@@ -533,21 +910,9 @@ def main(
         timeout=timeout_hours * HOURS,
     )
 
-    # Dispatch to Modal (this call blocks until training completes)
-    print("[Modal] Submitting training job...")
-    result = training_fn.remote(
-        trainer_type=trainer_type,
-        repo_url=repo_url,
-        repo_branch=repo_branch,
-        repo_commit=repo_commit,
-        model_name=model_name,
-        dataset_path=dataset_path,
-        dataset_name=dataset_name,
-        dataset_file=dataset_file,
-        publish_final_model=publish_final_model,
-        publish_target_repo=publish_target_repo,
-        config_overrides=config_overrides,
+    raise RuntimeError(
+        "The local Modal entrypoint is intentionally disabled because nested "
+        "remote/spawn submission can create an app with zero running tasks. "
+        "Launch the remote function directly with: "
+        "modal run --detach Trainers/cloud/train_modal.py::run_training ..."
     )
-
-    print(f"\n[Modal] Job result: {result}")
-    print("[Modal] Done.")

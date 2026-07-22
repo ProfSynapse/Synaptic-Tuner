@@ -170,3 +170,18 @@ def test_train_sft_revalidates_aux_head_coherence_after_cli_overrides() -> None:
     # The B-M1 ERROR guard is DISTINCT from the prompt_render WARN guard — both
     # must coexist; the remediation must not merge or remove the WARN.
     assert "WARNING: aux_head token_position='end_of_prompt'" in source
+
+
+def test_portable_adapter_provenance_is_restored_before_first_final_save() -> None:
+    source = (REPO_ROOT / "Trainers" / "sft" / "train_sft.py").read_text(
+        encoding="utf-8"
+    )
+    restore_idx = source.index("restore_portable_adapter_base_provenance(")
+    first_save_idx = source.index("trainer.save_model(str(final_model_path))")
+    assert restore_idx < first_save_idx
+    final_save_section = source[source.index("# Save final model") : first_save_idx]
+    assert "if special_tokens_metadata:" not in final_save_section
+    assert "if adapter_base_provenance is not None:" in source
+    assert "requested_repo=config.model.model_name" in source
+    assert "requested_revision=model_revision" in source
+    assert "revision_evidence=model_revision_evidence" in source

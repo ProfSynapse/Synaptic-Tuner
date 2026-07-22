@@ -59,12 +59,35 @@ When enabled:
 
 ## Smoke-Test Workflow
 
-1. Confirm the branch is clean and pushed.
+1. Confirm the branch is fully clean (tracked and untracked), pushed, and local `HEAD` equals the remote branch tip.
 2. Point the trainer config at a remote dataset when possible.
 3. Run `python tuner.py cloud`.
 4. Choose provider and method.
 5. Start with a short smoke test (`max_steps`, small dataset slice, or one epoch).
 6. Verify artifacts in provider-native storage before enabling final-model publish.
+
+For a private, external-config Modal SFT smoke, use the inspect-only planner
+before any provider mutation:
+
+```bash
+python scripts/plan_modal_sft_job.py \
+  --config /path/to/direct-sft.yaml \
+  --dataset /path/to/private.jsonl \
+  --input-volume <volume> \
+  --input-prefix <unique-run-prefix> \
+  --runtime-image '<registry/image@sha256:...>' \
+  --pip-package 'peft==0.18.1' \
+  --gpu A10G --timeout-hours 2
+```
+
+Inspect the source SHA, both input hashes, immutable image, exact dependency
+list, staging argv, launch environment, and direct `::run_training` argv. The
+planner is read-only. Execute its staging/launch commands only after approval,
+then verify a real remote task and the canonical Modal Volume artifact path.
+Treat `modal_job_provenance.json`, `manifest.json`, and
+`training_lineage.json` as a three-way provenance check: all must agree on the
+source commit, input hashes, immutable runtime, and Volume contract. A failed
+adapter/merge qualification is a failed run even when optimizer steps finished.
 
 Recommended first-pass checks:
 - `hf_jobs`: inspect the configured bucket prefix under `runs/hf_jobs/...`
