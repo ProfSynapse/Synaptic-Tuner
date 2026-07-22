@@ -1147,12 +1147,12 @@ def verify_saved_adapter_roundtrip(
     """
     if metadata is None or not metadata["resolved_config"]["verify_adapter_roundtrip"]:
         return None
-    required_methods = ("load_adapter", "delete_adapter", "set_adapter")
+    required_methods = ("add_adapter", "load_adapter", "delete_adapter", "set_adapter")
     missing = [name for name in required_methods if not callable(getattr(model, name, None))]
     if missing or not isinstance(getattr(model, "peft_config", None), dict):
         raise TypeError(
-            "verify_adapter_roundtrip=true requires a mutable PEFT model with load_adapter, "
-            "delete_adapter, set_adapter, and peft_config. Missing: "
+            "verify_adapter_roundtrip=true requires a mutable PEFT model with add_adapter, "
+            "load_adapter, delete_adapter, set_adapter, and peft_config. Missing: "
             + ", ".join(missing or ["peft_config"])
         )
     active_names = _active_adapter_names(model)
@@ -1184,6 +1184,45 @@ def verify_saved_adapter_roundtrip(
         tied_output_base_layer = tied_output_adapter.base_layer
     temporary_loaded = False
     try:
+        # PeftModel.from_pretrained creates and autocasts its initial adapter
+        # before loading checkpoint tensors, so a fresh bf16 base preserves
+        # float32 adapter bytes exactly. PeftModel.load_adapter instead creates
+        # a second adapter in bf16, copies into it (rounding), and only then
+        # autocasts to float32. Reproduce the fresh-load ordering explicitly:
+        # precreate, autocast, then ask PEFT to load into the existing adapter.
+        try:
+            from peft import PeftConfig
+        except ImportError as exc:
+            raise RuntimeError("Adapter round-trip verification requires PEFT.") from exc
+        temporary_config = PeftConfig.from_pretrained(str(output_dir))
+        temporary_config.inference_mode = True
+        model.add_adapter(temporary_adapter, temporary_config)
+        cast_adapter_dtype = getattr(
+            getattr(model, "base_model", None), "_cast_adapter_dtype", None
+        )
+        if not callable(cast_adapter_dtype):
+            raise TypeError(
+                "Exact secondary-adapter verification requires PEFT base_model._cast_adapter_dtype()."
+            )
+        cast_adapter_dtype(
+            adapter_name=temporary_adapter,
+            autocast_adapter_dtype=True,
+        )
+        precreated_state = _adapter_only_live_state(model, temporary_adapter)
+        if set(precreated_state) != set(artifact_state):
+            raise RuntimeError(
+                "Precreated verification adapter state keys differ from the saved artifact."
+            )
+        for key in sorted(artifact_state):
+            if (
+                precreated_state[key].shape != artifact_state[key].shape
+                or precreated_state[key].dtype != artifact_state[key].dtype
+            ):
+                raise RuntimeError(
+                    "Precreated verification adapter did not match saved tensor layout for "
+                    f"{key!r}: {tuple(precreated_state[key].shape)}/{precreated_state[key].dtype} "
+                    f"vs {tuple(artifact_state[key].shape)}/{artifact_state[key].dtype}."
+                )
         model.load_adapter(
             str(output_dir),
             adapter_name=temporary_adapter,
@@ -1198,13 +1237,14 @@ def verify_saved_adapter_roundtrip(
             raise RuntimeError("Saved adapter state omitted the configured selective-token deltas.")
         _verify_loaded_adapter_rows(model, metadata, temporary_adapter)
         return {
-            "method": "temporary_adapter_load_adapter_only_exact_tensor_compare",
+            "method": "temporary_adapter_precreate_autocast_then_exact_tensor_compare",
             "requested": True,
             "result": "passed",
             "source_adapter": source_adapter,
             "temporary_adapter": temporary_adapter,
             "compared_tensor_count": len(source_state),
             "compared_keys": sorted(source_state),
+            "parameter_preparation": "peft_add_adapter_then_cast_before_load",
         }
     finally:
         try:

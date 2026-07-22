@@ -22,6 +22,7 @@ from configs.config_loader import (  # noqa: E402
     validate_model_revision_evidence,
 )
 from src.special_tokens import (  # noqa: E402
+    _adapter_only_live_state,
     bind_adapter_artifact_lineage,
     prepare_special_tokens,
     restore_portable_adapter_base_provenance,
@@ -777,6 +778,104 @@ def test_adapter_only_artifact_matrix_has_no_full_vocab_and_restores_live_model(
     _assert_state_dict_equal(model, live_before)
     assert model.active_adapters == active_before
     assert set(model.peft_config) == {"default"}
+
+
+def test_adapter_roundtrip_preserves_float32_selective_rows_over_bf16_padded_tied_base(
+    tmp_path,
+):
+    """Match the Qwen runtime layout omitted by the original float32 fixtures."""
+    peft = pytest.importorskip("peft")
+    transformers = pytest.importorskip("transformers")
+    if "trainable_token_indices" not in peft.LoraConfig.__dataclass_fields__:
+        pytest.skip("installed PEFT lacks selective token rows")
+
+    base = transformers.GPT2LMHeadModel(
+        transformers.GPT2Config(
+            vocab_size=6,
+            n_embd=8,
+            n_layer=1,
+            n_head=1,
+            n_positions=8,
+            tie_word_embeddings=True,
+        )
+    ).to(dtype=torch.bfloat16)
+    metadata = prepare_special_tokens(base, FakeTokenizer(), _config())
+    assert metadata["resize_applied"] is False
+    model = peft.get_peft_model(
+        base,
+        peft.LoraConfig(
+            r=2,
+            lora_alpha=2,
+            target_modules=["c_attn"],
+            trainable_token_indices=metadata["trainable_token_indices"],
+        ),
+    )
+    deltas = restore_verified_selective_token_deltas(model, metadata)
+    assert len(deltas) == 1
+    assert deltas[0].dtype == torch.float32
+    with torch.no_grad():
+        # Perturb every floating adapter tensor off the bf16 grid. This covers
+        # LoRA A/B and the selective replacement rows, not just the tensor that
+        # exposed the original failure.
+        live_adapter_state = _adapter_only_live_state(model, "default")
+        for index, tensor in enumerate(live_adapter_state.values(), start=1):
+            if not tensor.is_floating_point():
+                continue
+            offsets = torch.linspace(
+                index * 1e-5,
+                index * 1e-5 + 7e-5,
+                tensor.numel(),
+                dtype=tensor.dtype,
+                device=tensor.device,
+            ).reshape_as(tensor)
+            tensor.add_(offsets)
+            assert not torch.equal(
+                tensor,
+                tensor.to(torch.bfloat16).to(dtype=tensor.dtype),
+            )
+
+    _bind_test_base_provenance(model, metadata)
+    save_adapter_without_base_vocab(model, tmp_path, metadata)
+    source_state = {
+        key: tensor.detach().clone()
+        for key, tensor in _adapter_only_live_state(model, "default").items()
+    }
+    assert any("lora_A" in key for key in source_state)
+    assert any("lora_B" in key for key in source_state)
+    assert any("trainable_tokens_delta" in key for key in source_state)
+    live_before_verify = _clone_state_dict(model)
+    topology_before_verify = {
+        name: id(module) for name, module in model.named_modules()
+    }
+    report = verify_saved_adapter_roundtrip(model, tmp_path, metadata)
+    assert report["result"] == "passed"
+    assert report["parameter_preparation"] == "peft_add_adapter_then_cast_before_load"
+    assert report["compared_tensor_count"] == len(source_state)
+    assert report["compared_keys"] == sorted(source_state)
+    _assert_state_dict_equal(model, live_before_verify)
+    assert {name: id(module) for name, module in model.named_modules()} == topology_before_verify
+    assert model.active_adapters == ["default"]
+    assert set(model.peft_config) == {"default"}
+
+    fresh_base = transformers.GPT2LMHeadModel(
+        transformers.GPT2Config(
+            vocab_size=6,
+            n_embd=8,
+            n_layer=1,
+            n_head=1,
+            n_positions=8,
+            tie_word_embeddings=True,
+        )
+    ).to(dtype=torch.bfloat16)
+    fresh_metadata = prepare_special_tokens(fresh_base, FakeTokenizer(), _config())
+    reloaded = peft.PeftModel.from_pretrained(fresh_base, tmp_path)
+    fresh_initial_state = _adapter_only_live_state(reloaded, "default")
+    assert set(fresh_initial_state) == set(source_state)
+    for key in source_state:
+        assert torch.equal(source_state[key], fresh_initial_state[key])
+    verify_peft_trainable_token_adapters(
+        reloaded, fresh_metadata, require_trainable=False
+    )
 
 
 def test_corrupt_adapter_delta_fails_closed_without_mutating_live_model(tmp_path):
