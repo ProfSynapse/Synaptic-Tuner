@@ -5,7 +5,11 @@ on the remote training container while still honoring an explicit override
 forwarded from the local launch env.
 """
 
+import importlib.util
 import inspect
+import os
+import sys
+from pathlib import Path
 
 import click
 import pytest
@@ -17,7 +21,9 @@ modal = pytest.importorskip("modal")
 
 from Trainers.cloud.train_modal import (  # noqa: E402
     HF_XET_MITIGATION,
+    MODULE_IMPORT_MODAL_ENV_KEYS,
     _config_overrides_mapping,
+    _function_secret_env,
     _sha256,
     _validate_staged_sft_config,
     _write_wrapper_state,
@@ -75,6 +81,143 @@ def test_modal_cli_can_build_help_for_remote_function_annotations():
     result = CliRunner().invoke(command, ["--help"])
     assert result.exit_code == 0, result.output
     assert "--config-overrides TEXT" in result.output
+
+
+def _import_modal_wrapper(module_name):
+    path = Path(__file__).resolve().parents[2] / "Trainers/cloud/train_modal.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module_name, None)
+    return module
+
+
+def _explicit_dependency_signature(module):
+    from modal._utils.async_utils import synchronizer
+
+    function = synchronizer._translate_in(module.run_training)
+    dependencies = function.deps(only_explicit_mounts=True)
+    secret_environment = dependencies[0]._load_env_dict()
+    return {
+        "types": [type(dependency).__name__ for dependency in dependencies],
+        "secret": repr(dependencies[0]),
+        "module_environment": {
+            key: secret_environment.get(key, "") for key in MODULE_IMPORT_MODAL_ENV_KEYS
+        },
+        "volumes": [repr(dependency) for dependency in dependencies[2:]],
+        "mounts": list(module.function_volumes),
+    }
+
+
+def _roundtrip_dependency_signatures(monkeypatch, launch_env):
+    with monkeypatch.context() as local_environment:
+        for key in MODULE_IMPORT_MODAL_ENV_KEYS:
+            local_environment.delenv(key, raising=False)
+        for key, value in launch_env.items():
+            local_environment.setenv(key, value)
+        local_module = _import_modal_wrapper("_test_train_modal_local_submit")
+        submitted_signature = _explicit_dependency_signature(local_module)
+        forwarded_environment = dict(local_module.FUNCTION_SECRET_ENV)
+
+    with monkeypatch.context() as remote_environment:
+        for key in MODULE_IMPORT_MODAL_ENV_KEYS:
+            remote_environment.delenv(key, raising=False)
+        assert not any(os.environ.get(key) for key in MODULE_IMPORT_MODAL_ENV_KEYS)
+        # Modal injects the submitted Function Secret before importing user code.
+        for key, value in forwarded_environment.items():
+            remote_environment.setenv(key, value)
+        remote_module = _import_modal_wrapper("_test_train_modal_remote_reimport")
+        remote_signature = _explicit_dependency_signature(remote_module)
+
+    return submitted_signature, remote_signature
+
+
+def test_remote_reimport_reconstructs_exact_dependency_graph_from_function_secret(
+    monkeypatch,
+):
+    """Reproduce Modal hydration with no inherited ambient launch config."""
+    launch_env = {
+        "MODAL_TRAINING_IMAGE": "registry.example/train@sha256:" + "b" * 64,
+        "MODAL_TRAINING_PIP_PACKAGES_JSON": '["peft==0.18.1"]',
+        "MODAL_GPU": "A10G",
+        "MODAL_TIMEOUT_SECONDS": "7200",
+        "MODAL_CACHE_VOLUME_NAME": "cache-selected-by-config",
+        "MODAL_OUTPUT_VOLUME_NAME": "output-selected-by-config",
+        "MODAL_OUTPUT_MOUNT_PATH": "/vol/custom-artifacts",
+        "MODAL_INPUT_VOLUME_NAME": "input-selected-by-config",
+        "MODAL_INPUT_MOUNT_PATH": "/vol/custom-inputs",
+    }
+    submitted_signature, remote_signature = _roundtrip_dependency_signatures(
+        monkeypatch, launch_env
+    )
+
+    assert submitted_signature == remote_signature
+    assert submitted_signature["module_environment"] == launch_env
+    assert submitted_signature["types"] == [
+        "_Secret",
+        "_Image",
+        "_Volume",
+        "_Volume",
+        "_Volume",
+    ]
+    assert submitted_signature["volumes"] == [
+        "modal.Volume.from_name('cache-selected-by-config')",
+        "modal.Volume.from_name('output-selected-by-config')",
+        "modal.Volume.from_name('input-selected-by-config')",
+    ]
+    assert submitted_signature["mounts"] == [
+        "/cache/huggingface",
+        "/vol/custom-artifacts",
+        "/vol/custom-inputs",
+    ]
+
+
+def test_remote_reimport_preserves_legacy_graph_without_private_input(monkeypatch):
+    submitted_signature, remote_signature = _roundtrip_dependency_signatures(
+        monkeypatch,
+        {
+            "MODAL_CACHE_VOLUME_NAME": "legacy-cache",
+            "MODAL_OUTPUT_VOLUME_NAME": "legacy-output",
+            "MODAL_OUTPUT_MOUNT_PATH": "/vol/legacy-output",
+        },
+    )
+    assert submitted_signature == remote_signature
+    assert submitted_signature["types"] == ["_Secret", "_Image", "_Volume", "_Volume"]
+    assert submitted_signature["volumes"] == [
+        "modal.Volume.from_name('legacy-cache')",
+        "modal.Volume.from_name('legacy-output')",
+    ]
+    assert submitted_signature["mounts"] == [
+        "/cache/huggingface",
+        "/vol/legacy-output",
+    ]
+
+
+def test_existing_function_secret_carries_every_module_import_modal_key():
+    payload = _function_secret_env(
+        {
+            key: f"value-{index}"
+            for index, key in enumerate(MODULE_IMPORT_MODAL_ENV_KEYS)
+        }
+    )
+    assert {key: payload[key] for key in MODULE_IMPORT_MODAL_ENV_KEYS} == {
+        key: f"value-{index}" for index, key in enumerate(MODULE_IMPORT_MODAL_ENV_KEYS)
+    }
+
+
+def test_function_secret_omits_empty_import_values_so_remote_defaults_survive():
+    payload = _function_secret_env(
+        {
+            "MODAL_INPUT_VOLUME_NAME": "",
+            "MODAL_OUTPUT_VOLUME_NAME": "configured-output",
+        }
+    )
+    assert "MODAL_INPUT_VOLUME_NAME" not in payload
+    assert payload["MODAL_OUTPUT_VOLUME_NAME"] == "configured-output"
 
 
 @pytest.mark.parametrize(

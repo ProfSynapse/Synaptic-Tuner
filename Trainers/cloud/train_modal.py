@@ -274,6 +274,49 @@ GPU_PRICING = {
 # resolve-endpoint HTTP path.
 HF_XET_MITIGATION = {"HF_HUB_DISABLE_XET": "1", "HF_HUB_ENABLE_HF_TRANSFER": "0"}
 
+# Modal re-imports this module inside the remote container before hydrating the
+# submitted Function dependencies.  Every environment key that changes a
+# module-scope Modal object or its mount/config must therefore be present before
+# that import.  Keep these values on the existing Function Secret dependency so
+# local submission and remote re-import construct the same ordered graph:
+# secret, image, cache Volume, output Volume, optional input Volume.
+MODULE_IMPORT_MODAL_ENV_KEYS = (
+    "MODAL_TRAINING_IMAGE",
+    "MODAL_TRAINING_PIP_PACKAGES_JSON",
+    "MODAL_GPU",
+    "MODAL_TIMEOUT_SECONDS",
+    "MODAL_CACHE_VOLUME_NAME",
+    "MODAL_OUTPUT_VOLUME_NAME",
+    "MODAL_OUTPUT_MOUNT_PATH",
+    "MODAL_INPUT_VOLUME_NAME",
+    "MODAL_INPUT_MOUNT_PATH",
+)
+
+
+def _function_secret_env(env=os.environ) -> dict[str, str]:
+    """Build the exact pre-import environment for the remote Function."""
+    payload = {
+        "HF_TOKEN": env.get("HF_TOKEN", ""),
+        "WANDB_API_KEY": env.get("WANDB_API_KEY", ""),
+        "UNSLOTH_COMPILE_DISABLE": env.get("UNSLOTH_COMPILE_DISABLE", ""),
+        "HF_HUB_DISABLE_XET": env.get("HF_HUB_DISABLE_XET", ""),
+        "HF_HUB_ENABLE_HF_TRANSFER": env.get("HF_HUB_ENABLE_HF_TRANSFER", ""),
+    }
+    # Omit unset/empty import keys instead of injecting empty strings. Several
+    # module-scope declarations use ``os.environ.get(key, default)``; an empty
+    # injected value would suppress that default and change the remote graph.
+    payload.update(
+        {
+            key: value
+            for key in MODULE_IMPORT_MODAL_ENV_KEYS
+            if (value := env.get(key, ""))
+        }
+    )
+    return payload
+
+
+FUNCTION_SECRET_ENV = _function_secret_env()
+
 
 def apply_hf_xet_mitigation(env) -> None:
     """Set the hf_xet-hang mitigation defaults on a mutable env mapping.
@@ -480,13 +523,11 @@ def _write_wrapper_state(run_dir: Path, provenance: dict, status: str, error: st
     # so the xet-hang mitigation applies even on a bare `modal run` (see there).
     # An empty string here does NOT override the setdefault (only a real value
     # forwarded from the local env does).
-    secrets=[modal.Secret.from_dict({
-        "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
-        "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
-        "UNSLOTH_COMPILE_DISABLE": os.environ.get("UNSLOTH_COMPILE_DISABLE", ""),
-        "HF_HUB_DISABLE_XET": os.environ.get("HF_HUB_DISABLE_XET", ""),
-        "HF_HUB_ENABLE_HF_TRANSFER": os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", ""),
-    })],
+    #
+    # The same Secret also carries the non-sensitive MODAL_* import contract.
+    # Modal injects it before re-importing this module in the container, which
+    # keeps the image/Volume dependency graph identical to local submission.
+    secrets=[modal.Secret.from_dict(FUNCTION_SECRET_ENV)],
 )
 def run_training(
     trainer_type: str = "sft",
