@@ -78,6 +78,7 @@ def run_batch_generate(
     seed: Optional[int] = None,
     extra_eos_tokens: Optional[List[str]] = None,
     stop: Optional[List[str]] = None,
+    suppress_tokens: Optional[List[str]] = None,
     json_schema: Optional[Dict[str, Any]] = None,
     structured_output_backend: str = "auto",
     structured_output_disable_any_whitespace: bool = False,
@@ -123,6 +124,8 @@ def run_batch_generate(
         raise ValueError("json_schema structured outputs require engine='vllm'")
     if engine != "vllm" and structured_output_backend != "auto":
         raise ValueError("structured_output_backend requires engine='vllm'")
+    if suppress_tokens and engine != "vllm":
+        raise ValueError("suppress_tokens require engine='vllm'")
     if engine != "vllm" and max_model_len is not None:
         raise ValueError("max_model_len requires engine='vllm'")
     if engine != "vllm" and limit_mm_per_prompt is not None:
@@ -200,6 +203,8 @@ def run_batch_generate(
             gpu_memory_utilization if engine == "vllm" else None
         ),
     }
+    if suppress_tokens:
+        config["suppress_tokens"] = list(suppress_tokens)
 
     completions_path = out_dir / COMPLETIONS_FILENAME
     index_ids = read_jsonl_ids(completions_path, id_field="id")
@@ -267,6 +272,7 @@ def run_batch_generate(
             max_model_len=max_model_len,
             limit_mm_per_prompt=limit_mm_per_prompt,
             gpu_memory_utilization=gpu_memory_utilization,
+            suppress_tokens=suppress_tokens,
         )
     gen_engine = get_generate_engine(engine, **engine_kwargs)
     provenance = {

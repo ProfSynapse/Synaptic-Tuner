@@ -22,6 +22,7 @@ Notes
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
 from typing import Any, Callable, List, Optional
@@ -158,6 +159,7 @@ class VLLMGenerateEngine(GenerateEngine):
         max_model_len: Optional[int] = None,
         limit_mm_per_prompt: Optional[dict] = None,
         gpu_memory_utilization: Optional[float] = None,
+        suppress_tokens: Optional[List[str]] = None,
         **_ignored: Any,
     ):
         if os.environ.get("VLLM_BATCH_INVARIANT") != "1":
@@ -180,6 +182,14 @@ class VLLMGenerateEngine(GenerateEngine):
                 "--engine vllm requires --vllm-model-runner to pin v1 or v2 "
                 "before model construction."
             )
+        configured_suppressions = list(suppress_tokens or [])
+        if any(
+            not isinstance(token, str) or not token
+            for token in configured_suppressions
+        ):
+            raise ValueError("suppress_tokens must contain non-empty strings")
+        if len(configured_suppressions) != len(set(configured_suppressions)):
+            raise ValueError("suppress_tokens must not contain duplicate strings")
         os.environ["VLLM_USE_V2_MODEL_RUNNER"] = (
             "1" if vllm_model_runner == "v2" else "0"
         )
@@ -216,6 +226,15 @@ class VLLMGenerateEngine(GenerateEngine):
             ) from exc
 
         self._SamplingParams = SamplingParams
+        if (
+            configured_suppressions
+            and "_bad_words_token_ids"
+            not in inspect.signature(SamplingParams).parameters
+        ):
+            raise RuntimeError(
+                f"vLLM {installed_version} does not expose the pinned exact-ID "
+                "suppression API `_bad_words_token_ids`"
+            )
         self._vllm_version = installed_version
         self._vllm_model_runner = vllm_model_runner
         self._json_schema = json_schema
@@ -284,6 +303,8 @@ class VLLMGenerateEngine(GenerateEngine):
                 )
             llm_kwargs["gpu_memory_utilization"] = float(gpu_memory_utilization)
         self.llm = LLM(**llm_kwargs)
+        self._suppress_tokens = configured_suppressions
+        self._suppressed_token_ids = self._resolve_suppressed_tokens()
         self.max_new_tokens = int(max_new_tokens)
         self.min_new_tokens = int(min_new_tokens)
         self.do_sample = bool(do_sample)
@@ -293,6 +314,57 @@ class VLLMGenerateEngine(GenerateEngine):
         all_stops = list(stop) if stop else []
         all_stops.extend(list(extra_eos_tokens) if extra_eos_tokens else [])
         self.stop = all_stops or None
+
+    @staticmethod
+    def _canonical_eos_ids(tokenizer: Any) -> set[int]:
+        raw = getattr(tokenizer, "eos_token_id", None)
+        if raw is None:
+            return set()
+        values = raw if isinstance(raw, (list, tuple, set)) else [raw]
+        if any(
+            not isinstance(token_id, int)
+            or isinstance(token_id, bool)
+            or token_id < 0
+            for token_id in values
+        ):
+            raise ValueError(
+                "loaded tokenizer eos_token_id must be a non-negative integer "
+                "or sequence of non-negative integers"
+            )
+        return set(values)
+
+    def _resolve_suppressed_tokens(self) -> list[int]:
+        if not self._suppress_tokens:
+            return []
+        tokenizer = self.llm.get_tokenizer()
+        canonical_eos_ids = self._canonical_eos_ids(tokenizer)
+        resolved: list[int] = []
+        for token in self._suppress_tokens:
+            token_ids = tokenizer.encode(text=token, add_special_tokens=False)
+            if (
+                not isinstance(token_ids, list)
+                or len(token_ids) != 1
+                or not isinstance(token_ids[0], int)
+                or isinstance(token_ids[0], bool)
+                or token_ids[0] < 0
+            ):
+                raise ValueError(
+                    f"--suppress-token {token!r} must encode to exactly one "
+                    "non-negative token ID with the loaded tokenizer"
+                )
+            intended_id = token_ids[0]
+            if intended_id in canonical_eos_ids:
+                raise ValueError(
+                    f"--suppress-token {token!r} resolves to canonical EOS token "
+                    f"ID {intended_id}; canonical EOS suppression is forbidden"
+                )
+            resolved.append(intended_id)
+        if len(resolved) != len(set(resolved)):
+            raise ValueError(
+                "suppress_tokens must resolve to distinct token IDs with the "
+                "loaded tokenizer"
+            )
+        return resolved
 
     def _sampling_params(self):
         kwargs = dict(
@@ -305,6 +377,10 @@ class VLLMGenerateEngine(GenerateEngine):
             kwargs["seed"] = self.seed
         if self._structured_outputs is not None:
             kwargs["structured_outputs"] = self._structured_outputs
+        if self._suppress_tokens:
+            kwargs["_bad_words_token_ids"] = [
+                [token_id] for token_id in self._suppressed_token_ids
+            ]
         try:
             return self._SamplingParams(**kwargs, min_tokens=self.min_new_tokens)
         except TypeError:
@@ -368,7 +444,7 @@ class VLLMGenerateEngine(GenerateEngine):
         return results
 
     def provenance(self) -> dict:
-        return {
+        result = {
             "vllm_version": self._vllm_version,
             "vllm_batch_invariant": True,
             "vllm_model_runner": self._vllm_model_runner,
@@ -385,6 +461,13 @@ class VLLMGenerateEngine(GenerateEngine):
                 self._effective_compute_capability_floor
             ),
         }
+        if self._suppress_tokens:
+            result["suppress_tokens"] = list(self._suppress_tokens)
+            result["suppressed_token_ids"] = list(self._suppressed_token_ids)
+            result["suppressed_bad_word_token_ids"] = [
+                [token_id] for token_id in self._suppressed_token_ids
+            ]
+        return result
 
 
 class VLLMCaptureEngine(CaptureEngine):

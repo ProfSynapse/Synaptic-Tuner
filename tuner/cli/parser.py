@@ -588,6 +588,15 @@ Examples:
     parser.add_argument("--top-p", type=float, default=1.0, dest="top_p", help="Nucleus top-p for batch-generate --do-sample.")
     parser.add_argument("--extra-eos-token", action="append", dest="extra_eos_tokens", help="Additional tokenizer token to treat as EOS for batch-generate; may be repeated.")
     parser.add_argument("--stop-string", action="append", dest="stop_strings", help="Stop string for batch-generate; may be repeated.")
+    parser.add_argument(
+        "--suppress-token",
+        action="append",
+        dest="suppress_tokens",
+        help=(
+            "Exact tokenizer token string to prohibit during vLLM generation; "
+            "may be repeated. Each value must encode to exactly one token."
+        ),
+    )
     parser.add_argument("--json-schema", dest="json_schema", help="Path to a JSON Schema enforced by vLLM structured outputs (batch-generate).")
     parser.add_argument(
         "--structured-output-backend",
