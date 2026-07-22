@@ -14,8 +14,37 @@ from tuner.batch.engines import vllm_engine
 from tuner.batch.engines.vllm_engine import VLLMGenerateEngine
 
 
-def _install_fake_vllm(monkeypatch, *, version: str = "0.23.0"):
+def _install_fake_vllm(
+    monkeypatch, *, version: str = "0.23.0", eos_token_id=1,
+):
     calls = {}
+
+    class FakeTokenizer:
+        tokenizations = {
+            "<turn|>": [106],
+            # A normal bad_words string would also inspect this different
+            # leading-space tokenization. The exact-ID path must not.
+            " <turn|>": [400, 106],
+            "<|tool_response>": [50],
+            " <|tool_response>": [50],
+            "<same-id>": [106],
+            " <same-id>": [106],
+            "two tokens": [7, 8],
+            " two tokens": [9, 10],
+            "<leading-alias>": [77],
+            " <leading-alias>": [88],
+            "<canonical-eos>": [1],
+            " <canonical-eos>": [1],
+        }
+
+        def __init__(self):
+            self.eos_token_id = eos_token_id
+
+        def encode(self, text, add_special_tokens=False):
+            calls.setdefault("tokenizer_encodes", []).append(
+                (text, add_special_tokens)
+            )
+            return list(self.tokenizations.get(text, [999]))
 
     class FakeStructuredOutputsParams:
         def __init__(self, **kwargs):
@@ -28,13 +57,18 @@ def _install_fake_vllm(monkeypatch, *, version: str = "0.23.0"):
             self.kwargs = kwargs
 
     class FakeSamplingParams:
-        def __init__(self, **kwargs):
+        def __init__(self, _bad_words_token_ids=None, **kwargs):
+            if _bad_words_token_ids is not None:
+                kwargs["_bad_words_token_ids"] = _bad_words_token_ids
             calls["sampling"] = kwargs
             self.kwargs = kwargs
 
     class FakeLLM:
         def __init__(self, **kwargs):
             calls["llm"] = kwargs
+
+        def get_tokenizer(self):
+            return FakeTokenizer()
 
         def generate(self, prompts, params):
             calls["prompts"] = prompts
@@ -144,6 +178,7 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
         max_model_len=2048,
         limit_mm_per_prompt={"image": 0, "audio": 0},
         gpu_memory_utilization=0.90,
+        suppress_tokens=["<turn|>", "<|tool_response>"],
     )
 
     assert calls["structured_config"] == {
@@ -180,6 +215,12 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
     assert calls["sampling"]["seed"] == 17
     assert calls["sampling"]["temperature"] == 0.25
     assert calls["sampling"]["top_p"] == 0.8
+    assert calls["sampling"]["_bad_words_token_ids"] == [[106], [50]]
+    assert "bad_words" not in calls["sampling"]
+    assert calls["tokenizer_encodes"] == [
+        ("<turn|>", False),
+        ("<|tool_response>", False),
+    ]
     assert results[0].prompt_token_len == 2
     assert results[0].prompt_token_ids_sha256 == hash_token_ids([10, 0])
     assert engine.provenance() == {
@@ -192,6 +233,9 @@ def test_vllm_pins_engine_schema_sampling_and_prompt_evidence(monkeypatch):
         "hardware": hardware,
         "documented_compute_capability_floor": "8.0",
         "effective_compute_capability_floor": "8.0",
+        "suppress_tokens": ["<turn|>", "<|tool_response>"],
+        "suppressed_token_ids": [106, 50],
+        "suppressed_bad_word_token_ids": [[106], [50]],
     }
     assert os.environ["VLLM_USE_V2_MODEL_RUNNER"] == "0"
 
@@ -217,3 +261,120 @@ def test_documented_batch_invariance_floor_cannot_be_lowered():
     assert vllm_engine._documented_batch_invariance_floor("0.18.0") == (9, 0)
     assert vllm_engine._documented_batch_invariance_floor("0.22.1") == (9, 0)
     assert vllm_engine._documented_batch_invariance_floor("0.23.0") == (8, 0)
+
+
+@pytest.mark.parametrize(
+    ("suppress_tokens", "message"),
+    [
+        ([""], "non-empty strings"),
+        (["<turn|>", "<turn|>"], "duplicate strings"),
+        (["two tokens"], "exactly one"),
+        (["<turn|>", "<same-id>"], "distinct token IDs"),
+    ],
+)
+def test_vllm_rejects_invalid_suppress_tokens(
+    monkeypatch, suppress_tokens, message,
+):
+    monkeypatch.setenv("VLLM_BATCH_INVARIANT", "1")
+    _install_fake_vllm(monkeypatch)
+    monkeypatch.setattr(
+        vllm_engine,
+        "_require_batch_invariant_hardware",
+        lambda minimum, tensor_parallel_size: {
+            "devices": [],
+            "nvidia_driver_versions": [],
+            "cuda_runtime": "test",
+            "torch_version": "test",
+        },
+    )
+    with pytest.raises(ValueError, match=message):
+        VLLMGenerateEngine(
+            "model",
+            expected_vllm_version="0.23.0",
+            vllm_model_runner="v1",
+            min_compute_capability="8.0",
+            suppress_tokens=suppress_tokens,
+        )
+
+
+def test_vllm_default_omits_suppression_sampling_and_provenance(monkeypatch):
+    monkeypatch.setenv("VLLM_BATCH_INVARIANT", "1")
+    calls = _install_fake_vllm(monkeypatch)
+    monkeypatch.setattr(
+        vllm_engine,
+        "_require_batch_invariant_hardware",
+        lambda minimum, tensor_parallel_size: {
+            "devices": [],
+            "nvidia_driver_versions": [],
+            "cuda_runtime": "test",
+            "torch_version": "test",
+        },
+    )
+    engine = VLLMGenerateEngine(
+        "model",
+        expected_vllm_version="0.23.0",
+        vllm_model_runner="v1",
+        min_compute_capability="8.0",
+    )
+    engine._sampling_params()
+    assert "bad_words" not in calls["sampling"]
+    assert "_bad_words_token_ids" not in calls["sampling"]
+    assert "suppress_tokens" not in engine.provenance()
+    assert "suppressed_token_ids" not in engine.provenance()
+    assert "suppressed_bad_word_token_ids" not in engine.provenance()
+
+
+@pytest.mark.parametrize("eos_token_id", [1, [1, 106]])
+def test_vllm_rejects_canonical_eos_suppression(monkeypatch, eos_token_id):
+    monkeypatch.setenv("VLLM_BATCH_INVARIANT", "1")
+    _install_fake_vllm(monkeypatch, eos_token_id=eos_token_id)
+    monkeypatch.setattr(
+        vllm_engine,
+        "_require_batch_invariant_hardware",
+        lambda minimum, tensor_parallel_size: {
+            "devices": [],
+            "nvidia_driver_versions": [],
+            "cuda_runtime": "test",
+            "torch_version": "test",
+        },
+    )
+    suppressed = "<canonical-eos>" if eos_token_id == 1 else "<turn|>"
+    with pytest.raises(ValueError, match="canonical EOS suppression is forbidden"):
+        VLLMGenerateEngine(
+            "model",
+            expected_vllm_version="0.23.0",
+            vllm_model_runner="v1",
+            min_compute_capability="8.0",
+            suppress_tokens=[suppressed],
+        )
+
+
+def test_vllm_refuses_suppression_without_exact_id_api(monkeypatch):
+    monkeypatch.setenv("VLLM_BATCH_INVARIANT", "1")
+    _install_fake_vllm(monkeypatch)
+
+    class SamplingParamsWithoutExactIds:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(
+        sys.modules["vllm"], "SamplingParams", SamplingParamsWithoutExactIds
+    )
+    monkeypatch.setattr(
+        vllm_engine,
+        "_require_batch_invariant_hardware",
+        lambda minimum, tensor_parallel_size: {
+            "devices": [],
+            "nvidia_driver_versions": [],
+            "cuda_runtime": "test",
+            "torch_version": "test",
+        },
+    )
+    with pytest.raises(RuntimeError, match="exact-ID suppression API"):
+        VLLMGenerateEngine(
+            "model",
+            expected_vllm_version="0.23.0",
+            vllm_model_runner="v1",
+            min_compute_capability="8.0",
+            suppress_tokens=["<turn|>"],
+        )

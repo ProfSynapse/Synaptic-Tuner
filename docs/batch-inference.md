@@ -196,6 +196,19 @@ matches `--expected-vllm-version`, every participating GPU meets
 schema content is canonicalized and hashed; changing the schema or any pinned
 engine setting makes `--resume` refuse the old output directory.
 
+Some model generation configs register multiple EOS-like special tokens. When
+one of those tokens can terminate a structured response before its grammar is
+complete, prohibit only that alternate token with repeatable
+`--suppress-token '<exact-token-string>'`. This option is vLLM-only. Each value
+must encode to exactly one distinct non-EOS token under the loaded tokenizer.
+For the pinned runtime, the engine uses vLLM 0.23's internal
+`_bad_words_token_ids` sampling field so suppression is applied to that exact
+ID without `bad_words` retokenizing a leading-space variant. The engine checks
+that this internal field exists and otherwise fails closed. Configured strings
+enter the resume hash; the strings and every masked ID enter runtime
+provenance. Canonical EOS suppression is rejected so structured generation can
+stop normally after completing the grammar.
+
 ---
 
 ## Worked example: a preemption-safe cloud job

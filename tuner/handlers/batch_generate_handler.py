@@ -96,6 +96,7 @@ class BatchGenerateHandler(BaseHandler):
                 seed=getattr(args, "seed", None),
                 extra_eos_tokens=getattr(args, "extra_eos_tokens", None),
                 stop=stop,
+                suppress_tokens=getattr(args, "suppress_tokens", None),
                 json_schema=json_schema,
                 structured_output_backend=getattr(
                     args, "structured_output_backend", "auto"
