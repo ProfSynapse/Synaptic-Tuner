@@ -51,6 +51,20 @@ def _select_dtype(torch, device: str):
     return torch.float32
 
 
+def _is_local_peft_adapter_dir(model_name: str) -> bool:
+    """True if ``model_name`` is a local directory holding a PEFT adapter.
+
+    A bare ``AutoModelForCausalLM.from_pretrained`` on such a directory loads
+    whatever tensors line up with the base architecture's own state-dict keys
+    and silently drops anything that doesn't (e.g. a ``trainable_tokens``
+    embedding delta), because it never constructs a ``PeftModel`` wrapper.
+    Adapter directories need the PEFT-aware loader below instead.
+    """
+    return os.path.isdir(model_name) and os.path.isfile(
+        os.path.join(model_name, "adapter_config.json")
+    )
+
+
 class _ModelBundle:
     """Lazily loads and holds a transformers model + tokenizer on a device."""
 
@@ -86,13 +100,33 @@ class _ModelBundle:
             torch_dtype = (
                 getattr(torch, dtype) if dtype else _select_dtype(torch, device)
             )
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                revision=revision,
-                token=os.environ.get("HF_TOKEN") or None,
-                trust_remote_code=trust_remote_code,
-                torch_dtype=torch_dtype,
-            )
+            if _is_local_peft_adapter_dir(model_name):
+                # A PEFT adapter directory (e.g. a LoRA/trainable-tokens fine-
+                # tune) is not itself a full model checkpoint: it must be
+                # loaded as a base model plus an applied adapter, not as a
+                # flat state-dict merge. AutoPeftModelForCausalLM reads the
+                # base model id/revision straight out of the adapter's own
+                # adapter_config.json and applies every adapter component
+                # (LoRA deltas, trainable-token embedding deltas, etc.)
+                # through PEFT's own loader rather than a generic state-dict
+                # load.
+                from peft import AutoPeftModelForCausalLM
+
+                model = AutoPeftModelForCausalLM.from_pretrained(
+                    model_name,
+                    revision=revision,
+                    token=os.environ.get("HF_TOKEN") or None,
+                    trust_remote_code=trust_remote_code,
+                    torch_dtype=torch_dtype,
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    revision=revision,
+                    token=os.environ.get("HF_TOKEN") or None,
+                    trust_remote_code=trust_remote_code,
+                    torch_dtype=torch_dtype,
+                )
             model.to(device)
         self.model = model
         self.model.eval()

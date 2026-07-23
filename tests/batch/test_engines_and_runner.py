@@ -34,6 +34,8 @@ from tuner.batch.engines.base import GenerateItem, CaptureItem, GenerateResult, 
 from tuner.batch.engines.hf_batched import (  # noqa: E402
     HFBatchedCaptureEngine,
     HFBatchedGenerateEngine,
+    _ModelBundle,
+    _is_local_peft_adapter_dir,
     _run_with_oom_halving,
 )
 from tuner.batch import runner as batch_runner  # noqa: E402
@@ -347,3 +349,105 @@ def test_oom_reraises_at_batch_size_one():
 
     with pytest.raises(OutOfMemoryError):
         _run_with_oom_halving(_always_oom, [1, 2], batch_size=1, on_oom=None, torch=torch)
+
+
+def test_is_local_peft_adapter_dir(tmp_path):
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    (plain_dir / "config.json").write_text("{}")
+    assert _is_local_peft_adapter_dir(str(plain_dir)) is False
+    assert _is_local_peft_adapter_dir("some/hub/repo-id") is False  # not a local dir at all
+
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_config.json").write_text("{}")
+    assert _is_local_peft_adapter_dir(str(adapter_dir)) is True
+
+
+def test_model_bundle_loads_local_adapter_dir_with_trainable_token_deltas_applied(tmp_path):
+    """Regression guard for the silently-dropped trainable-tokens bug.
+
+    A bare ``AutoModelForCausalLM.from_pretrained`` on a local PEFT adapter
+    directory loads whatever tensors line up with the base architecture's own
+    state-dict keys and drops anything that doesn't -- including a
+    ``trainable_token_indices`` embedding delta (transformers reports it as
+    UNEXPECTED/MISSING and moves on rather than raising). ``_ModelBundle``
+    must detect the adapter directory and load it through
+    ``peft.AutoPeftModelForCausalLM`` instead, so every adapter component --
+    standard LoRA deltas AND the trainable-token embedding delta -- is
+    actually applied.
+    """
+    peft = pytest.importorskip("peft")
+    pytest.importorskip("safetensors.torch")
+    if "trainable_token_indices" not in peft.LoraConfig.__dataclass_fields__:
+        pytest.skip("installed PEFT lacks selective token rows")
+
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    config = GPT2Config(
+        vocab_size=6,
+        n_embd=8,
+        n_layer=1,
+        n_head=1,
+        n_positions=8,
+        tie_word_embeddings=False,
+    )
+    base_model = GPT2LMHeadModel(config)
+    base_model.eval()
+    base_dir = tmp_path / "base"
+    base_model.save_pretrained(base_dir)
+    base_embed_before = base_model.get_input_embeddings().weight.detach().clone()
+
+    lora_config = peft.LoraConfig(
+        r=2,
+        lora_alpha=2,
+        target_modules=["c_attn"],
+        trainable_token_indices={"transformer.wte": [4, 5]},
+    )
+    peft_model = peft.get_peft_model(base_model, lora_config)
+    embed_wrapper = next(
+        module
+        for name, module in peft_model.named_modules()
+        if name.endswith("transformer.wte") and hasattr(module, "token_adapter")
+    )
+    optimizer = torch.optim.AdamW(
+        [p for p in peft_model.parameters() if p.requires_grad], lr=0.5
+    )
+    loss = peft_model(input_ids=torch.tensor([[4, 5]]), labels=torch.tensor([[5, 4]])).loss
+    loss.backward()
+    optimizer.step()
+    trained_delta = embed_wrapper.token_adapter.trainable_tokens_delta["default"].detach()
+    assert trained_delta.abs().sum().item() > 0  # the gradient step actually moved it
+
+    adapter_dir = tmp_path / "adapter"
+    peft_model.peft_config["default"].base_model_name_or_path = str(base_dir)
+    peft_model.save_pretrained(adapter_dir)
+    assert _is_local_peft_adapter_dir(str(adapter_dir)) is True
+
+    bundle = _ModelBundle(str(adapter_dir), device="cpu", tokenizer=_tiny_tokenizer())
+    assert type(bundle.model).__module__.startswith("peft")
+    assert any("token_adapter" in name for name, _ in bundle.model.named_modules())
+
+    loaded_embed = bundle.model.get_input_embeddings().weight.detach()
+    # Trained rows must have moved away from their pristine base value...
+    assert not torch.allclose(loaded_embed[4], base_embed_before[4])
+    assert not torch.allclose(loaded_embed[5], base_embed_before[5])
+    # ...while a row outside trainable_token_indices is untouched.
+    assert torch.equal(loaded_embed[0], base_embed_before[0])
+
+
+def test_model_bundle_plain_local_dir_without_adapter_config_uses_bare_loader(tmp_path):
+    """Non-adapter local paths (plain saved checkpoints, and hub ids) must
+    keep loading through the original AutoModelForCausalLM path -- the new
+    adapter-detection branch must not misfire on an ordinary model dir."""
+    pytest.importorskip("safetensors.torch")
+    from transformers import GPT2Config, GPT2LMHeadModel
+
+    config = GPT2Config(vocab_size=6, n_embd=8, n_layer=1, n_head=1, n_positions=8)
+    model = GPT2LMHeadModel(config)
+    model_dir = tmp_path / "plain_model"
+    model.save_pretrained(model_dir)
+    assert _is_local_peft_adapter_dir(str(model_dir)) is False
+
+    bundle = _ModelBundle(str(model_dir), device="cpu", tokenizer=_tiny_tokenizer())
+    assert type(bundle.model).__name__ == "GPT2LMHeadModel"
