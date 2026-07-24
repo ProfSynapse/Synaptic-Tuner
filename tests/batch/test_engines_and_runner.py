@@ -35,7 +35,9 @@ from tuner.batch.engines.hf_batched import (  # noqa: E402
     HFBatchedCaptureEngine,
     HFBatchedGenerateEngine,
     _ModelBundle,
+    _is_composite_text_config,
     _is_local_peft_adapter_dir,
+    _load_causal_lm_with_fallback,
     _run_with_oom_halving,
 )
 from tuner.batch import runner as batch_runner  # noqa: E402
@@ -451,3 +453,205 @@ def test_model_bundle_plain_local_dir_without_adapter_config_uses_bare_loader(tm
 
     bundle = _ModelBundle(str(model_dir), device="cpu", tokenizer=_tiny_tokenizer())
     assert type(bundle.model).__name__ == "GPT2LMHeadModel"
+
+
+# --- Composite (vision-language) config fallback -----------------------------
+#
+# Reproduces the real reported failure: a checkpoint whose config nests the
+# text fields (vocab_size, hidden_size, ...) under `text_config` rather than
+# at the top level (e.g. Qwen/Qwen3.5-4B, architecture
+# Qwen3_5ForConditionalGeneration). `AutoModelForCausalLM` resolves such a
+# config to a *different*, text-only architecture class
+# (Qwen3_5ForCausalLM) whose flat `config.vocab_size` access satisfies
+# construction, but whose state-dict key namespace (`model.*`) does not
+# match the checkpoint's (`model.language_model.*`, `model.visual.*`,
+# `lm_head.*`) at all -- `from_pretrained` does not raise, it just loads
+# with every tensor reported MISSING/UNEXPECTED, silently producing a
+# freshly-initialized (garbage) model. `AutoModelForImageTextToText`
+# resolves the same config to `Qwen3_5ForConditionalGeneration`, whose
+# nested structure matches the checkpoint.
+
+
+def _tiny_multimodal_config(hidden=HIDDEN, n_layers=N_LAYERS, vocab=VOCAB):
+    from transformers.models.qwen3_5.configuration_qwen3_5 import (
+        Qwen3_5Config,
+        Qwen3_5TextConfig,
+        Qwen3_5VisionConfig,
+    )
+
+    text_cfg = Qwen3_5TextConfig(
+        vocab_size=vocab,
+        hidden_size=hidden,
+        intermediate_size=2 * hidden,
+        num_hidden_layers=n_layers,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=16,
+        max_position_embeddings=64,
+        pad_token_id=vocab - 3,
+        eos_token_id=vocab - 2,
+        linear_conv_kernel_dim=2,
+        linear_key_head_dim=8,
+        linear_value_head_dim=8,
+        linear_num_key_heads=2,
+        linear_num_value_heads=2,
+        full_attention_interval=2,
+    )
+    vision_cfg = Qwen3_5VisionConfig(
+        depth=1,
+        hidden_size=8,
+        num_heads=1,
+        intermediate_size=16,
+        patch_size=4,
+        spatial_merge_size=1,
+        temporal_patch_size=1,
+        out_hidden_size=hidden,
+        num_position_embeddings=16,
+    )
+    return Qwen3_5Config(text_config=text_cfg, vision_config=vision_cfg, tie_word_embeddings=False)
+
+
+@pytest.fixture(scope="module")
+def tiny_multimodal_checkpoint(tmp_path_factory):
+    """A saved, on-disk tiny Qwen3_5ForConditionalGeneration checkpoint --
+    randomly initialized, no downloads -- with the same composite-config
+    shape as the real Qwen3.5 checkpoints."""
+    try:
+        from transformers.models.qwen3_5.modeling_qwen3_5 import (
+            Qwen3_5ForConditionalGeneration,
+        )
+    except ImportError:
+        pytest.skip("installed transformers lacks the qwen3_5 model family")
+
+    cfg = _tiny_multimodal_config()
+    torch.manual_seed(0)
+    model = Qwen3_5ForConditionalGeneration(cfg)
+    model.eval()
+    d = tmp_path_factory.mktemp("qwen3_5_tiny")
+    model.save_pretrained(d)
+    return d
+
+
+def test_is_composite_text_config_generic_detection():
+    """`_is_composite_text_config` must use transformers' own generic
+    `get_text_config()` accessor -- not a per-architecture name check -- so
+    it applies to any nested-config model, not just Qwen3.5."""
+    from transformers import LlamaConfig
+    from transformers.models.qwen3_5.configuration_qwen3_5 import (
+        Qwen3_5Config,
+        Qwen3_5TextConfig,
+    )
+
+    llama_cfg = LlamaConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=1)
+    assert _is_composite_text_config(llama_cfg) is False
+
+    flat_text_cfg = Qwen3_5TextConfig(
+        vocab_size=10, hidden_size=8, num_hidden_layers=1,
+        num_attention_heads=1, num_key_value_heads=1, head_dim=8,
+    )
+    assert _is_composite_text_config(flat_text_cfg) is False
+
+    composite_cfg = Qwen3_5Config(text_config=flat_text_cfg)
+    assert _is_composite_text_config(composite_cfg) is True
+
+
+def test_model_bundle_loads_composite_multimodal_config_via_fallback(tiny_multimodal_checkpoint):
+    """The real regression guard: loading the composite checkpoint through
+    `_ModelBundle` (i.e. through `_load_causal_lm_with_fallback`) must
+    resolve to the correct nested-aware architecture class AND actually
+    load the checkpoint's real weights (not silently reinitialize them).
+
+    Weights are checked against a reference load via
+    `AutoModelForImageTextToText` directly (the known-correct loader for
+    this config) rather than a hardcoded state-dict key name, since
+    composite models' saved key prefixes are an internal implementation
+    detail this test should not need to hardcode.
+    """
+    from transformers import AutoModelForImageTextToText
+
+    tok = _tiny_tokenizer()
+    bundle = _ModelBundle(str(tiny_multimodal_checkpoint), device="cpu", tokenizer=tok)
+    assert type(bundle.model).__name__ == "Qwen3_5ForConditionalGeneration"
+
+    reference = AutoModelForImageTextToText.from_pretrained(str(tiny_multimodal_checkpoint))
+    reference.eval()
+
+    loaded_embed = bundle.model.get_input_embeddings().weight.detach()
+    reference_embed = reference.get_input_embeddings().weight.detach()
+    assert torch.allclose(loaded_embed, reference_embed), (
+        "loaded embedding weights must match a reference "
+        "AutoModelForImageTextToText load -- a mismatch means the fallback "
+        "resolved the wrong (flat-config) architecture class and the real "
+        "weights were silently dropped"
+    )
+
+    # And a forward pass must actually agree numerically, not just at the
+    # embedding table -- confirms every layer's weights loaded correctly,
+    # not only the embedding.
+    enc = tok(["t1 t2 t3"], return_tensors="pt")
+    with torch.no_grad():
+        bundle_out = bundle.model(**enc, use_cache=False).logits
+        reference_out = reference(**enc, use_cache=False).logits
+    assert torch.allclose(bundle_out, reference_out, atol=1e-5)
+
+
+def test_load_causal_lm_with_fallback_direct(tiny_multimodal_checkpoint):
+    """Unit-level check of the loader helper itself, independent of
+    `_ModelBundle`, so a future refactor of the bundle can't hide a
+    regression here."""
+    model = _load_causal_lm_with_fallback(
+        str(tiny_multimodal_checkpoint),
+        revision=None,
+        token=None,
+        trust_remote_code=True,
+        torch_dtype=torch.float32,
+    )
+    assert type(model).__name__ == "Qwen3_5ForConditionalGeneration"
+
+
+def test_generate_engine_through_multimodal_wrapper(tiny_multimodal_checkpoint):
+    """Generation must work end-to-end through the ConditionalGeneration
+    wrapper resolved by the fallback (get_input_embeddings/generate must be
+    correctly delegated through the nested model.language_model)."""
+    tok = _tiny_tokenizer()
+    eng = HFBatchedGenerateEngine(
+        str(tiny_multimodal_checkpoint), device="cpu", tokenizer=tok, max_new_tokens=3
+    )
+    items = [GenerateItem(id="a", prompt="t1 t2 t3"), GenerateItem(id="b", prompt="t4 t5")]
+    res = eng.generate(items, batch_size=2)
+    assert len(res) == 2
+    for r in res:
+        assert isinstance(r.completion_token_ids, list)
+        assert r.finish_reason in ("length", "eos", "stop")
+
+
+def test_capture_engine_hidden_states_through_multimodal_wrapper_match_text_indexing(
+    tiny_multimodal_checkpoint,
+):
+    """Hidden-state layer indexing through the ConditionalGeneration wrapper
+    must match plain text-model semantics exactly: index 0 = embeddings,
+    1..N = per-decoder-layer outputs, count == num_hidden_layers + 1, with
+    numerically identical values to a direct forward call. This is what
+    lets the engine's generic `len(hidden_states)` / index-based layer
+    selection work unchanged for a multimodal wrapper -- no per-wrapper
+    special-casing needed for hidden-state extraction."""
+    tok = _tiny_tokenizer()
+    eng = HFBatchedCaptureEngine(
+        str(tiny_multimodal_checkpoint), device="cpu", tokenizer=tok, layers="all"
+    )
+    item = CaptureItem(id="x", text="t1 t2 t3 t4", positions={"last": "last"})
+    res = eng.capture([item], batch_size=1)[0]
+
+    assert res.n_layers == N_LAYERS + 1  # embeddings + N_LAYERS decoder layers
+    assert res.hidden_dim == HIDDEN
+
+    enc = tok(["t1 t2 t3 t4"], return_tensors="pt")
+    with torch.no_grad():
+        out = eng.bundle.model(**enc, output_hidden_states=True, use_cache=False)
+    assert len(out.hidden_states) == N_LAYERS + 1
+
+    last_idx = int(enc["attention_mask"][0].sum()) - 1
+    for layer in range(len(out.hidden_states)):
+        exp = out.hidden_states[layer][0, last_idx].to(torch.float32)
+        got = res.tensors[f"last__L{layer}"]
+        assert torch.allclose(got, exp, atol=1e-5), f"layer {layer} mismatch"

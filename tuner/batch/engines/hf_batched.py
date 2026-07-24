@@ -22,6 +22,7 @@ Padding discipline
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -34,6 +35,13 @@ from tuner.batch.engines.base import (
     GenerateResult,
     OutOfMemoryError,
 )
+
+logger = logging.getLogger(__name__)
+
+# Exceptions that can surface from a CausalLM constructor rejecting a config
+# it wasn't built for (e.g. a composite/multimodal config whose real fields
+# live on a nested sub-config rather than at the top level).
+_MODEL_LOAD_FALLBACK_EXCEPTIONS = (TypeError, AttributeError, ValueError, KeyError)
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
@@ -65,6 +73,113 @@ def _is_local_peft_adapter_dir(model_name: str) -> bool:
     )
 
 
+def _is_composite_text_config(config: Any) -> bool:
+    """True if ``config`` nests a separate text sub-config.
+
+    Composite (e.g. vision-language) configs store the fields a text-only
+    architecture expects -- ``vocab_size``, ``hidden_size``, etc. -- on a
+    nested sub-config (commonly ``config.text_config``) rather than at the
+    top level. ``PreTrainedConfig.get_text_config()`` is transformers' own
+    generic accessor for this: on a plain text config it returns ``self``,
+    on a composite config it returns the nested text config instead. Using
+    it here (rather than checking specific class/architecture names) keeps
+    this detection generic across every composite model transformers knows
+    about, not just one family.
+    """
+    try:
+        return config.get_text_config() is not config
+    except Exception:  # noqa: BLE001 - best-effort probe, never fatal
+        return False
+
+
+def _load_causal_lm_with_fallback(
+    model_name: str,
+    *,
+    revision: Optional[str],
+    token: Optional[str],
+    trust_remote_code: bool,
+    torch_dtype: Any,
+) -> Any:
+    """Load a checkpoint as a causal LM, falling back to an image-text-to-text
+    loader for composite (e.g. vision-language) checkpoints.
+
+    Some composite configs make ``AutoModelForCausalLM`` resolve to a
+    text-only architecture class whose constructor expects the config's
+    fields at the top level (``config.vocab_size``, ...) instead of nested
+    under a sub-config (``config.text_config.vocab_size``). Depending on the
+    transformers version and call path this can either raise outright
+    (``AttributeError``/``TypeError``/``KeyError`` during construction) or --
+    more dangerously -- silently "succeed": the resolved class's state-dict
+    key namespace does not match the checkpoint's at all, so every tensor is
+    reported MISSING/UNEXPECTED and the model loads with freshly
+    initialized (i.e. untrained/garbage) weights, no exception raised.
+
+    Because that second failure mode cannot be caught after the fact, the
+    primary signal used here is a cheap, weight-free config pre-check
+    (``_is_composite_text_config``) that decides the loader *before*
+    attempting a load at all. The try/except fallback below is a secondary
+    safety net for cases the pre-check cannot cover (config introspection
+    itself failing, or a construction-time exception firing regardless).
+    """
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText
+
+    common_kwargs: Dict[str, Any] = dict(
+        revision=revision,
+        token=token,
+        trust_remote_code=trust_remote_code,
+        torch_dtype=torch_dtype,
+    )
+
+    is_composite = False
+    try:
+        probe_config = AutoConfig.from_pretrained(
+            model_name,
+            revision=revision,
+            token=token,
+            trust_remote_code=trust_remote_code,
+        )
+        is_composite = _is_composite_text_config(probe_config)
+    except Exception as exc:  # noqa: BLE001 - best-effort probe, never fatal
+        logger.debug(
+            "Config pre-check for %s failed (%s: %s); proceeding with the "
+            "default AutoModelForCausalLM attempt.",
+            model_name,
+            type(exc).__name__,
+            exc,
+        )
+
+    if not is_composite:
+        try:
+            model = AutoModelForCausalLM.from_pretrained(model_name, **common_kwargs)
+            logger.info("Loaded %s via AutoModelForCausalLM.", model_name)
+            return model
+        except _MODEL_LOAD_FALLBACK_EXCEPTIONS as exc:
+            logger.info(
+                "AutoModelForCausalLM failed to load %s (%s: %s); retrying "
+                "with AutoModelForImageTextToText.",
+                model_name,
+                type(exc).__name__,
+                exc,
+            )
+    else:
+        logger.info(
+            "%s has a composite config (nested text_config); loading via "
+            "AutoModelForImageTextToText instead of AutoModelForCausalLM.",
+            model_name,
+        )
+
+    try:
+        model = AutoModelForImageTextToText.from_pretrained(model_name, **common_kwargs)
+        logger.info("Loaded %s via AutoModelForImageTextToText.", model_name)
+        return model
+    except _MODEL_LOAD_FALLBACK_EXCEPTIONS as exc:
+        raise RuntimeError(
+            f"Failed to load {model_name!r} as either a causal LM or an "
+            f"image-text-to-text model; last error from "
+            f"AutoModelForImageTextToText: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 class _ModelBundle:
     """Lazily loads and holds a transformers model + tokenizer on a device."""
 
@@ -80,7 +195,7 @@ class _ModelBundle:
         tokenizer: Any = None,
     ):
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoTokenizer
 
         self.torch = torch
         if device is None:
@@ -120,7 +235,7 @@ class _ModelBundle:
                     torch_dtype=torch_dtype,
                 )
             else:
-                model = AutoModelForCausalLM.from_pretrained(
+                model = _load_causal_lm_with_fallback(
                     model_name,
                     revision=revision,
                     token=os.environ.get("HF_TOKEN") or None,
