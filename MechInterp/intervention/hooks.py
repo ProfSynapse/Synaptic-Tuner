@@ -50,6 +50,10 @@ _LAYER_PATHS = (
     "model.decoder.layers",
     "transformer.h",
     "model.model.layers",
+    # transformers 5.x multimodal wrappers (e.g. Gemma4ForConditionalGeneration)
+    # nest the text decoder directly under model.language_model, with sibling
+    # vision/audio towers; this path names the text stack unambiguously.
+    "model.language_model.layers",
 )
 
 
