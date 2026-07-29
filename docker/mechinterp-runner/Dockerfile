@@ -11,6 +11,16 @@ FROM nvidia/cuda@sha256:4a801ef9232d2b05e69df4eb8aa054dbbe2824e5499e1e6e857320bb
 
 ARG MECHINTERP_RUNNER_GIT_REVISION=unknown
 ENV MECHINTERP_RUNNER_GIT_REVISION=${MECHINTERP_RUNNER_GIT_REVISION}
+
+# transformers is parameterized because an instrument validated against one
+# modeling implementation is not automatically valid under another: internal
+# model attributes (e.g. Gemma4's KV-sharing layout) change between releases,
+# and a consumer whose patches/hooks read those internals must run under the
+# version it was validated against. The default stays the image's standard
+# stack; a consumer overrides it at build time and records the resulting
+# image digest plus this version in its run provenance.
+ARG TRANSFORMERS_VERSION=5.12.1
+ENV MECHINTERP_RUNNER_TRANSFORMERS_VERSION=${TRANSFORMERS_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV VIRTUAL_ENV=/opt/venv
@@ -44,7 +54,7 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         torch==2.9.1 \
         --index-url https://download.pytorch.org/whl/cu128 \
     && /opt/venv/bin/pip install --no-cache-dir \
-        transformers==5.12.1 \
+        transformers==${TRANSFORMERS_VERSION} \
         flash-linear-attention==0.5.1 \
         safetensors==0.8.0 \
         scikit-learn==1.7.2 \
