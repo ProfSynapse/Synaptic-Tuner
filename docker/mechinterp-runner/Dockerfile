@@ -27,12 +27,18 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV HF_HUB_ENABLE_HF_TRANSFER=0
 
+# gcc is required at RUNTIME, not only build time: triton JIT-compiles its
+# CUDA driver utils and model kernels (e.g. flash-linear-attention for
+# Qwen3.5's gated-deltanet layers) on first use and fails with "Failed to
+# find C compiler" without one in the image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3.10 \
         python3.10-venv \
         python3-pip \
         git \
+        gcc \
+        libc6-dev \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
