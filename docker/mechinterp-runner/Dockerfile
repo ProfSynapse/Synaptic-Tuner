@@ -48,7 +48,10 @@ RUN python3.10 -m venv /opt/venv
 # reason (2.3+ requires >=3.11, 2.5+ requires >=3.12); the base image ships
 # Ubuntu 22.04's stock Python 3.10. accelerate is required by transformers'
 # device_map= loading path (from_pretrained raises without it); 1.14.0 is the
-# newest release this venv's Python 3.10 pip resolves.
+# newest release this venv's Python 3.10 pip resolves. pydantic is required
+# by MechInterp.config (BaseModel/field_validator imports at module load, so
+# any consumer of MechInterp.cell needs it); v2 API, pinned to the version
+# validated on the local stack.
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
     && /opt/venv/bin/pip install --no-cache-dir \
         torch==2.9.1 \
@@ -61,7 +64,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         numpy==2.2.6 \
         pyyaml==6.0.3 \
         huggingface_hub==1.23.0 \
-        accelerate==1.14.0
+        accelerate==1.14.0 \
+        pydantic==2.12.4
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY print_provenance.py /usr/local/bin/print_provenance.py
