@@ -27,12 +27,21 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV HF_HUB_ENABLE_HF_TRANSFER=0
 
+# gcc and the Python headers are required at RUNTIME, not only build time:
+# triton JIT-compiles its CUDA driver utils and model kernels (e.g.
+# flash-linear-attention for Qwen3.5's gated-deltanet layers) on first use.
+# Without gcc it fails with "Failed to find C compiler"; without
+# python3.10-dev the stub compile fails with "Python.h: No such file or
+# directory" (triton passes -I/usr/include/python3.10).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3.10 \
         python3.10-venv \
+        python3.10-dev \
         python3-pip \
         git \
+        gcc \
+        libc6-dev \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -48,7 +57,10 @@ RUN python3.10 -m venv /opt/venv
 # reason (2.3+ requires >=3.11, 2.5+ requires >=3.12); the base image ships
 # Ubuntu 22.04's stock Python 3.10. accelerate is required by transformers'
 # device_map= loading path (from_pretrained raises without it); 1.14.0 is the
-# newest release this venv's Python 3.10 pip resolves.
+# newest release this venv's Python 3.10 pip resolves. pydantic is required
+# by MechInterp.config (BaseModel/field_validator imports at module load, so
+# any consumer of MechInterp.cell needs it); v2 API, pinned to the version
+# validated on the local stack.
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
     && /opt/venv/bin/pip install --no-cache-dir \
         torch==2.9.1 \
@@ -61,7 +73,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         numpy==2.2.6 \
         pyyaml==6.0.3 \
         huggingface_hub==1.23.0 \
-        accelerate==1.14.0
+        accelerate==1.14.0 \
+        pydantic==2.12.4
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY print_provenance.py /usr/local/bin/print_provenance.py
