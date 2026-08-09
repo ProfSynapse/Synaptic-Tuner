@@ -64,6 +64,10 @@ RUN python3.10 -m venv /opt/venv
 # router at dispatch time and peft by _load_model_and_tokenizer whenever
 # --adapter is passed, so a local extract against an adapter-bearing
 # checkpoint needs both; pinned to the versions validated on the local stack.
+# pandas is imported by five cloud/experiment handler modules that
+# router.route_command eagerly imports before dispatching ANY verb, so even
+# a pure mechinterp verb fails without it; the full 22-handler import sweep
+# found pandas to be the only remaining gap.
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
     && /opt/venv/bin/pip install --no-cache-dir \
         torch==2.9.1 \
@@ -79,7 +83,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         accelerate==1.14.0 \
         pydantic==2.12.4 \
         requests==2.32.3 \
-        peft==0.18.1
+        peft==0.18.1 \
+        pandas==2.2.3
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY print_provenance.py /usr/local/bin/print_provenance.py
