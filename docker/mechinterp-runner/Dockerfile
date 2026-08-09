@@ -60,7 +60,10 @@ RUN python3.10 -m venv /opt/venv
 # newest release this venv's Python 3.10 pip resolves. pydantic is required
 # by MechInterp.config (BaseModel/field_validator imports at module load, so
 # any consumer of MechInterp.cell needs it); v2 API, pinned to the version
-# validated on the local stack.
+# validated on the local stack. requests is imported by the MechInterp.cli
+# router at dispatch time and peft by _load_model_and_tokenizer whenever
+# --adapter is passed, so a local extract against an adapter-bearing
+# checkpoint needs both; pinned to the versions validated on the local stack.
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
     && /opt/venv/bin/pip install --no-cache-dir \
         torch==2.9.1 \
@@ -74,7 +77,9 @@ RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip==26.1.2 \
         pyyaml==6.0.3 \
         huggingface_hub==1.23.0 \
         accelerate==1.14.0 \
-        pydantic==2.12.4
+        pydantic==2.12.4 \
+        requests==2.32.3 \
+        peft==0.18.1
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY print_provenance.py /usr/local/bin/print_provenance.py
