@@ -280,3 +280,58 @@ def test_strength_length_mismatch_raises():
     hook.attention_mask = torch.ones(2, 2, dtype=torch.long)
     with pytest.raises(ValueError):
         hook(None, None, hidden)
+
+
+def test_hook_readback_offtarget_zero_for_untouched_inactive_rows():
+    # Regression: off-target must measure MOVEMENT (|post - pre|), not the
+    # inactive row's natural projection onto the direction. A gated arm whose
+    # inactive rows carry large natural projections must read exactly 0.0
+    # off-target, because the hook never touches them. The old implementation
+    # reported the natural projection itself, failing any gated smoke arm on
+    # ~1-sigma projections against the 1e-3 tolerance (found via
+    # caution-install-bounded-site-sweep stage 6; same failure previously in
+    # aq-sycophancy-activation-actuator).
+    d = _unit([1.0, 0.0, 0.0, 0.0])
+    hook = InterventionHook(
+        "erase_write", d, strength=[2.0, 0.0, 0.0], sigma=3.0,
+        position="final", measure_readback=True,
+    )
+    # Row 0 active; rows 1-2 inactive with large natural projections (5.0, -4.0).
+    hidden = torch.zeros(3, 4, 4)
+    hidden[0, 3, 0] = 1.0
+    hidden[1, 3, 0] = 5.0
+    hidden[2, 3, 0] = -4.0
+    out = hook(None, None, hidden.clone())
+    rb = hook.last_readback
+    assert rb["active_rows"] == [0]
+    assert rb["offtarget_abs_max"] == 0.0
+    assert rb["offtarget_abs_mean"] == 0.0
+    # The active row still lands at its commanded setpoint.
+    assert rb["commanded"] == [pytest.approx(6.0)]
+    assert rb["measured"] == [pytest.approx(6.0)]
+    # And the inactive rows' values are genuinely untouched.
+    assert float(out[1, 3, 0]) == 5.0
+    assert float(out[2, 3, 0]) == -4.0
+
+
+def test_hook_readback_offtarget_catches_real_inactive_movement():
+    # The repaired metric must still catch a hook that DOES move a row it
+    # should not: force-activate a zero-gain row via active_override and
+    # confirm the movement of a row excluded from the readback's active set
+    # is visible as off-target. We simulate a buggy edit by comparing a
+    # readback computed against a stale pre-edit snapshot.
+    d = _unit([0.0, 1.0, 0.0, 0.0])
+    hook = InterventionHook(
+        "erase_write", d, strength=[2.0, 0.0], sigma=1.0,
+        position="final", measure_readback=True,
+    )
+    hidden = torch.zeros(2, 3, 4)
+    hidden[1, 2, 1] = 3.0
+    pre = hook._projections(hidden, d.to(torch.float64), True,
+                            torch.tensor([2, 2]), None)
+    # Mutate the inactive row as a buggy edit would, then read back.
+    moved = hidden.clone()
+    moved[1, 2, 1] = 5.0
+    rb = hook._readback(moved, d, True, torch.tensor([2, 2]), None,
+                        torch.tensor([2.0, 0.0]), pre)
+    assert rb["offtarget_abs_max"] == pytest.approx(2.0)
