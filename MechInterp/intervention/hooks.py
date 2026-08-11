@@ -393,6 +393,12 @@ class InterventionHook:
 
         active_override = _resolve_force_active(self.force_active, batch, device)
 
+        pre_proj = None
+        if self.measure_readback:
+            pre_proj = self._projections(
+                hidden, self.direction.detach().to(torch.float64), per_row, final_pos, columns
+            )
+
         if self.law == "additive":
             alpha = _strength_per_row(self.strength, batch, device, dtype)
             hidden = additive_push(
@@ -411,49 +417,50 @@ class InterventionHook:
 
         if self.measure_readback:
             self.last_readback = self._readback(
-                hidden, c, per_row, final_pos, columns, gain_for_readback, active_override
+                hidden, c, per_row, final_pos, columns, gain_for_readback,
+                pre_proj, active_override
             )
 
         if is_tuple:
             return (hidden,) + rest
         return hidden
 
-    def _readback(self, hidden, c, per_row, final_pos, columns, gain_row, active_override=None) -> dict:
-        """Measure realized projection onto the direction (float64) after the edit.
-
-        Returns per-row commanded vs measured projection for active rows and the
-        mean absolute projection of inactive rows (off-target parity check).
-        """
-        c64 = c.detach().to(torch.float64)
+    def _projections(self, hidden, c64, per_row, final_pos, columns) -> list:
+        """Float64 projection of every batch row onto the direction at its
+        measured position: the row's final position under the per-row policy,
+        else the first masked column for shared-column policies."""
         batch = hidden.shape[0]
         if per_row:
-            active = _resolve_active(gain_row, active_override)
-            rows = torch.nonzero(active, as_tuple=False).squeeze(1)
-            inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)
-            measured = []
-            for b in rows.tolist():
-                col = int(final_pos[b].item())
-                measured.append(
-                    float(hidden[b, col, :].to(torch.float64) @ c64)
-                )
-            off = []
-            for b in inactive.tolist():
-                col = int(final_pos[b].item())
-                off.append(abs(float(hidden[b, col, :].to(torch.float64) @ c64)))
-        else:
-            col_idx = torch.nonzero(columns, as_tuple=False).squeeze(1)
-            first_col = int(col_idx[0].item()) if col_idx.numel() else hidden.shape[1] - 1
-            active = _resolve_active(gain_row, active_override)
-            rows = torch.nonzero(active, as_tuple=False).squeeze(1)
-            inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)
-            measured = [
-                float(hidden[b, first_col, :].to(torch.float64) @ c64)
-                for b in rows.tolist()
+            return [
+                float(hidden[b, int(final_pos[b].item()), :].to(torch.float64) @ c64)
+                for b in range(batch)
             ]
-            off = [
-                abs(float(hidden[b, first_col, :].to(torch.float64) @ c64))
-                for b in inactive.tolist()
-            ]
+        col_idx = torch.nonzero(columns, as_tuple=False).squeeze(1)
+        first_col = int(col_idx[0].item()) if col_idx.numel() else hidden.shape[1] - 1
+        return [
+            float(hidden[b, first_col, :].to(torch.float64) @ c64)
+            for b in range(batch)
+        ]
+
+    def _readback(self, hidden, c, per_row, final_pos, columns, gain_row, pre_proj, active_override=None) -> dict:
+        """Measure realized projection onto the direction (float64) after the edit.
+
+        Returns per-row commanded vs measured projection for active rows, and
+        the movement |post - pre| of inactive rows (off-target parity check).
+        Off-target is genuine movement against the pre-edit snapshot taken in
+        __call__ -- an untouched row reads exactly 0.0. The previous
+        implementation reported the inactive rows' NATURAL projection (no
+        before/after), which made any gated smoke arm fail the 1e-3 tolerance
+        on ~1-sigma natural projections while an ungated arm made the check
+        vacuous (empty inactive set).
+        """
+        c64 = c.detach().to(torch.float64)
+        active = _resolve_active(gain_row, active_override)
+        rows = torch.nonzero(active, as_tuple=False).squeeze(1)
+        inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)
+        post = self._projections(hidden, c64, per_row, final_pos, columns)
+        measured = [post[b] for b in rows.tolist()]
+        off = [abs(post[b] - pre_proj[b]) for b in inactive.tolist()]
         if self.law == "erase_write":
             commanded = [float(gain_row[b].item()) * self.sigma for b in rows.tolist()]
         else:
