@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-event-v1.schema.json",
+  "title": "Synaptic Event Envelope v1",
+  "type": "object",
+  "required": ["schema_version", "event", "capability", "run_id", "sequence", "data", "final", "timestamp"],
+  "properties": {
+    "schema_version": {"const": "synaptic-event/v1"},
+    "event": {"type": "string", "minLength": 1},
+    "capability": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 0},
+    "data": {"type": "object"},
+    "final": {"type": "boolean"},
+    "result": {"$ref": "synaptic-result-v1.schema.json"},
+    "timestamp": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {"if": {"properties": {"final": {"const": true}}}, "then": {"required": ["result"]}},
+    {"if": {"properties": {"final": {"const": false}}}, "then": {"not": {"required": ["result"]}}}
+  ],
+  "additionalProperties": false
+}
