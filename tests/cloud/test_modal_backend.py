@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tuner.backends.training.cloud.base_cloud import load_gpu_pricing
+from tuner.backends.training.cloud.base_cloud import RepoSource, load_gpu_pricing
 from tuner.backends.training.cloud.modal_backend import (
     DEFAULT_GPU,
     DEFAULT_TIMEOUT_HOURS,
@@ -24,6 +24,7 @@ from tuner.backends.training.cloud.modal_backend import (
 )
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import BackendError, ConfigurationError
+from tuner.project.source_bundle import GitSource, RepositoryLocation
 
 
 def _cloud_config(**overrides):
@@ -50,6 +51,29 @@ def _cloud_config(**overrides):
     for key, value in overrides.items():
         setattr(config, key, value)
     return config
+
+
+def _canonical_repo_source(repo_root: Path) -> RepoSource:
+    """Return a hermetic paid-cloud source pinned to the fixture repository HEAD."""
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=commit,
+        pushed=True,
+    )
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch="main",
+        commit=commit,
+        canonical_source=source,
+    )
 
 
 class TestModalBackendProperties:
@@ -124,7 +148,12 @@ class TestModalValidateEnvironment:
 class TestModalLoadConfig:
     def test_loads_sft_config(self, repo_root):
         backend = ModalBackend(repo_root)
-        config = backend.load_config("sft")
+        repo_source = _canonical_repo_source(repo_root)
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.resolve_repo_source",
+            return_value=repo_source,
+        ):
+            config = backend.load_config("sft")
         assert isinstance(config, CloudTrainingConfig)
         assert config.method == "sft"
         assert config.platform == "modal"
@@ -137,11 +166,16 @@ class TestModalLoadConfig:
         assert config.artifact_backend == "modal_volume"
         assert config.artifact_identifier == "toolset-training-artifacts"
         assert config.repo_branch == "main"
-        assert config.repo_commit
+        assert config.repo_commit == repo_source.commit
 
     def test_loads_kto_config(self, repo_root):
         backend = ModalBackend(repo_root)
-        config = backend.load_config("kto")
+        repo_source = _canonical_repo_source(repo_root)
+        with patch(
+            "tuner.backends.training.cloud.modal_backend.resolve_repo_source",
+            return_value=repo_source,
+        ):
+            config = backend.load_config("kto")
         assert config.method == "kto"
         assert config.model_name == "test-org/test-model-kto"
         assert config.artifact_mount_path == "/vol/artifacts"

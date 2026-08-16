@@ -26,10 +26,31 @@ from shared.experiment_tracking import Experiment, ExperimentSpec, TrackingServi
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
 from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.per_example_loss import save_losses
+from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
+from tuner.project.source_bundle import GitSource, RepositoryLocation
 from shared.experiment_tracking import StageResult
 from tuner.handlers.stages import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner
+
+
+_FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _canonical_repo_source() -> RepoSource:
+    source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=_FIXTURE_HEAD,
+        dirty=False,
+        pushed=True,
+    )
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch=source.branch,
+        commit=source.commit,
+        canonical_source=source,
+    )
 
 
 def _experiment() -> Experiment:
@@ -929,11 +950,15 @@ def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path:
         },
     )()
 
-    command = runner._build_command(
-        spec=spec,
-        training_run=training_run,
-        results_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
-    )
+    with patch(
+        "tuner.backends.training.cloud.base_cloud.resolve_repo_source",
+        return_value=_canonical_repo_source(),
+    ):
+        command = runner._build_command(
+            spec=spec,
+            training_run=training_run,
+            results_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
+        )
 
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m shared.experiment_tracking.cloud_loss_job" in command

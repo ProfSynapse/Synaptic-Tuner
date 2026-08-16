@@ -24,9 +24,31 @@ from tuner.backends.training.cloud.hf_jobs_backend import (
     HFJobsBackend,
     _parse_timeout,
 )
+from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
+from tuner.project.source_bundle import GitSource, RepositoryLocation
+
+
+_FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.fixture
+def canonical_repo_source():
+    canonical_source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=_FIXTURE_HEAD,
+        dirty=False,
+        pushed=True,
+    )
+    return RepoSource(
+        url=canonical_source.location.canonical_url,
+        branch=canonical_source.branch,
+        commit=canonical_source.commit,
+        canonical_source=canonical_source,
+    )
 
 
 def _cloud_config(**overrides):
@@ -133,9 +155,13 @@ class TestHFJobsValidateEnvironment:
 
 
 class TestHFJobsLoadConfig:
-    def test_loads_sft_config(self, repo_root):
+    def test_loads_sft_config(self, repo_root, canonical_repo_source):
         backend = HFJobsBackend(repo_root)
-        config = backend.load_config("sft")
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=canonical_repo_source,
+        ):
+            config = backend.load_config("sft")
         assert isinstance(config, CloudTrainingConfig)
         assert config.method == "sft"
         assert config.platform == "hf_jobs"
@@ -147,18 +173,27 @@ class TestHFJobsLoadConfig:
         assert config.model_name == "test-org/test-model-sft"
         assert config.artifact_backend == "hf_bucket"
         assert config.artifact_identifier == "toolset-training-artifacts"
+        assert config.repo_url == "https://github.com/test/repo.git"
         assert config.repo_branch == "main"
-        assert config.repo_commit
+        assert config.repo_commit == _FIXTURE_HEAD
 
-    def test_loads_kto_config(self, repo_root):
+    def test_loads_kto_config(self, repo_root, canonical_repo_source):
         backend = HFJobsBackend(repo_root)
-        config = backend.load_config("kto")
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=canonical_repo_source,
+        ):
+            config = backend.load_config("kto")
         assert config.method == "kto"
         assert config.artifact_mount_path == "/workspace/outputs"
 
-    def test_loads_grpo_config(self, repo_root):
+    def test_loads_grpo_config(self, repo_root, canonical_repo_source):
         backend = HFJobsBackend(repo_root)
-        config = backend.load_config("grpo")
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=canonical_repo_source,
+        ):
+            config = backend.load_config("grpo")
         assert config.method == "grpo"
         assert config.config_path.name == "env_config.yaml"
         assert config.dataset_name == "professorsynapse/nexus-synthetic-data"

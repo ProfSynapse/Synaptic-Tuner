@@ -2,34 +2,59 @@ from argparse import Namespace
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+from tuner.project.source_bundle import GitSource, RepositoryLocation
+
+
+_FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _canonical_repo_source() -> RepoSource:
+    source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=_FIXTURE_HEAD,
+        dirty=False,
+        pushed=True,
+    )
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch=source.branch,
+        commit=source.commit,
+        canonical_source=source,
+    )
 
 
 def test_build_eval_command_uses_cloud_job_helper(repo_root):
     handler = CloudEvalHandler(args=Namespace())
     handler._repo_root = repo_root
 
-    command = handler._build_eval_command(
-        helper_module="Evaluator.cloud_hf_job",
-        bucket_id="test-user/toolset-training-artifacts",
-        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
-        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
-        preset="full",
-        scenarios=None,
-        tags=None,
-        pip_packages=None,
-        env_backend="local",
-        env_template=None,
-        env_tool_schema=None,
-        env_exec_config=None,
-        upload_to_hf=None,
-        update_model_card=False,
-        with_loss=False,
-        loss_dataset_name=None,
-        loss_dataset_file=None,
-        loss_max_seq_length=None,
-        loss_completion_only=True,
-    )
+    with patch(
+        "tuner.handlers.cloud_eval_handler.resolve_repo_source",
+        return_value=_canonical_repo_source(),
+    ):
+        command = handler._build_eval_command(
+            helper_module="Evaluator.cloud_hf_job",
+            bucket_id="test-user/toolset-training-artifacts",
+            run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+            eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+            preset="full",
+            scenarios=None,
+            tags=None,
+            pip_packages=None,
+            env_backend="local",
+            env_template=None,
+            env_tool_schema=None,
+            env_exec_config=None,
+            upload_to_hf=None,
+            update_model_card=False,
+            with_loss=False,
+            loss_dataset_name=None,
+            loss_dataset_file=None,
+            loss_max_seq_length=None,
+            loss_completion_only=True,
+        )
 
     assert "Evaluator.cloud_hf_job" in command
     assert "--bucket-id" in command
@@ -70,27 +95,31 @@ def test_build_eval_command_can_include_same_job_loss(repo_root):
     handler = CloudEvalHandler(args=Namespace())
     handler._repo_root = repo_root
 
-    command = handler._build_eval_command(
-        helper_module="Evaluator.cloud_hf_job",
-        bucket_id="test-user/toolset-training-artifacts",
-        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
-        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
-        preset="full",
-        scenarios=None,
-        tags=None,
-        pip_packages=None,
-        env_backend="none",
-        env_template=None,
-        env_tool_schema=None,
-        env_exec_config=None,
-        upload_to_hf=None,
-        update_model_card=False,
-        with_loss=True,
-        loss_dataset_name="professorsynapse/claudesidian-synthetic-dataset",
-        loss_dataset_file="train.jsonl",
-        loss_max_seq_length=2048,
-        loss_completion_only=True,
-    )
+    with patch(
+        "tuner.handlers.cloud_eval_handler.resolve_repo_source",
+        return_value=_canonical_repo_source(),
+    ):
+        command = handler._build_eval_command(
+            helper_module="Evaluator.cloud_hf_job",
+            bucket_id="test-user/toolset-training-artifacts",
+            run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+            eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+            preset="full",
+            scenarios=None,
+            tags=None,
+            pip_packages=None,
+            env_backend="none",
+            env_template=None,
+            env_tool_schema=None,
+            env_exec_config=None,
+            upload_to_hf=None,
+            update_model_card=False,
+            with_loss=True,
+            loss_dataset_name="professorsynapse/claudesidian-synthetic-dataset",
+            loss_dataset_file="train.jsonl",
+            loss_max_seq_length=2048,
+            loss_completion_only=True,
+        )
 
     assert "--with-loss" in command
     assert "--loss-dataset-name" in command
@@ -104,27 +133,31 @@ def test_build_eval_command_installs_stage_pip_packages(repo_root):
     handler = CloudEvalHandler(args=Namespace())
     handler._repo_root = repo_root
 
-    command = handler._build_eval_command(
-        helper_module="Evaluator.cloud_hf_job_vllm",
-        bucket_id="test-user/toolset-training-artifacts",
-        run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
-        eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
-        preset="full",
-        scenarios=None,
-        tags=None,
-        pip_packages=["vllm==0.12.0", "transformers==5.3.0"],
-        env_backend="none",
-        env_template=None,
-        env_tool_schema=None,
-        env_exec_config=None,
-        upload_to_hf=None,
-        update_model_card=False,
-        with_loss=False,
-        loss_dataset_name=None,
-        loss_dataset_file=None,
-        loss_max_seq_length=None,
-        loss_completion_only=True,
-    )
+    with patch(
+        "tuner.handlers.cloud_eval_handler.resolve_repo_source",
+        return_value=_canonical_repo_source(),
+    ):
+        command = handler._build_eval_command(
+            helper_module="Evaluator.cloud_hf_job_vllm",
+            bucket_id="test-user/toolset-training-artifacts",
+            run_prefix="runs/hf_jobs/sft/20260314_191223-abc12345",
+            eval_prefix="runs/hf_jobs/sft/20260314_191223-abc12345/evaluations/vllm/20260314_200000",
+            preset="full",
+            scenarios=None,
+            tags=None,
+            pip_packages=["vllm==0.12.0", "transformers==5.3.0"],
+            env_backend="none",
+            env_template=None,
+            env_tool_schema=None,
+            env_exec_config=None,
+            upload_to_hf=None,
+            update_model_card=False,
+            with_loss=False,
+            loss_dataset_name=None,
+            loss_dataset_file=None,
+            loss_max_seq_length=None,
+            loss_completion_only=True,
+        )
 
     assert "pip install --upgrade vllm==0.12.0 transformers==5.3.0" in command
 
@@ -293,22 +326,26 @@ def test_handle_submits_hf_eval_job(repo_root, clean_env):
     mock_job.url = "https://hf.co/jobs/eval-job-123"
     mock_hub.run_job.return_value = mock_job
 
-    with patch.object(handler, "_validate_environment", return_value=mock_hub):
-        with patch.object(handler, "_resolve_bucket_id", return_value="test-user/toolset-training-artifacts"):
-            with patch.object(
-                handler,
-                "_list_remote_runs",
-                return_value=[
-                    {
-                        "method": "sft",
-                        "slug": "20260314_191223-abc12345",
-                        "prefix": "runs/hf_jobs/sft/20260314_191223-abc12345",
-                    }
-                ],
-            ):
-                with patch("tuner.handlers.cloud_eval_handler.confirm", return_value=True):
-                    with patch.object(handler, "_poll_job", return_value=0):
-                        exit_code = handler.handle()
+    with patch(
+        "tuner.handlers.cloud_eval_handler.resolve_repo_source",
+        return_value=_canonical_repo_source(),
+    ):
+        with patch.object(handler, "_validate_environment", return_value=mock_hub):
+            with patch.object(handler, "_resolve_bucket_id", return_value="test-user/toolset-training-artifacts"):
+                with patch.object(
+                    handler,
+                    "_list_remote_runs",
+                    return_value=[
+                        {
+                            "method": "sft",
+                            "slug": "20260314_191223-abc12345",
+                            "prefix": "runs/hf_jobs/sft/20260314_191223-abc12345",
+                        }
+                    ],
+                ):
+                    with patch("tuner.handlers.cloud_eval_handler.confirm", return_value=True):
+                        with patch.object(handler, "_poll_job", return_value=0):
+                            exit_code = handler.handle()
 
     assert exit_code == 0
     kwargs = mock_hub.run_job.call_args.kwargs

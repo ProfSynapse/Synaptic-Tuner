@@ -23,8 +23,10 @@ from tuner.backends.training.cloud.hf_jobs_backend import (
     DEFAULT_IMAGE as HF_DEFAULT_IMAGE,
     HFJobsBackend,
 )
+from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.backends.training.cloud.runpod_backend import RunPodBackend
 from tuner.core.config import CloudTrainingConfig
+from tuner.project.source_bundle import GitSource, RepositoryLocation
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ from tuner.core.config import CloudTrainingConfig
 
 EXPECTED_PROJECT_DEPS = {"pyyaml", "wandb", "hf_transfer", "python-dotenv", "rich"}
 EXPECTED_UNSLOTH_IMAGE = "unsloth/unsloth:2026.1.2-pt2.9.0-cu12.8-update@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
+_FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
 
 # Packages pre-installed in the unsloth Docker image that backends
 # must NOT pip-install (doing so causes version conflicts)
@@ -70,6 +73,22 @@ def _hf_cloud_config(**overrides):
     for key, value in overrides.items():
         setattr(config, key, value)
     return config
+
+
+def _canonical_repo_source() -> RepoSource:
+    source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=_FIXTURE_HEAD,
+        dirty=False,
+        pushed=True,
+    )
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch=source.branch,
+        commit=source.commit,
+        canonical_source=source,
+    )
 
 
 def _runpod_cloud_config(**overrides):
@@ -280,7 +299,11 @@ class TestDefaultImageTags:
 
     def test_hf_jobs_config_loads_unsloth_image(self, repo_root):
         backend = HFJobsBackend(repo_root)
-        config = backend.load_config("sft")
+        with patch(
+            "tuner.backends.training.cloud.hf_jobs_backend.resolve_repo_source",
+            return_value=_canonical_repo_source(),
+        ):
+            config = backend.load_config("sft")
         assert config.cloud_image == EXPECTED_UNSLOTH_IMAGE
 
     def test_runpod_hardcoded_fallback_is_unsloth(self):
