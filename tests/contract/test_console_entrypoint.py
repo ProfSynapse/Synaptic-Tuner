@@ -32,7 +32,7 @@ def _stage_editable_source(destination: Path) -> None:
         source = REPO_ROOT / filename
         if source.is_file():
             shutil.copy2(source, destination / filename)
-    for package_name in ("tuner", "synaptic_tuner"):
+    for package_name in ("tuner", "synaptic_tuner", "shared"):
         source = REPO_ROOT / package_name
         if source.is_dir():
             shutil.copytree(
