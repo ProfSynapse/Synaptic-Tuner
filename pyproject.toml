@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synaptic-tuner"
+dynamic = ["version"]
+description = "Agentic-first toolkit for synthetic data, model training, evaluation, and deployment"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Synaptic Labs" }]
+dependencies = [
+  "PyYAML>=6,<7",
+  "jsonschema>=4.18,<5",
+  "packaging>=23,<26",
+  "python-dotenv>=1,<2",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+synaptic = "tuner.cli.main:main"
+
+# Third-party distributions declare logical bindings in authoritative,
+# versioned groups such as `synaptic_tuner.plugins.renderer.v1`. Synaptic Tuner
+# itself intentionally ships no default project plug-ins.
+
+[tool.setuptools.dynamic]
+version = { attr = "synaptic_tuner._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "tuner*",
+  "synaptic_tuner*",
+  "shared*",
+  "SynthChat*",
+  "Evaluator*",
+  "MechInterp*",
+  "Trainers*",
+]
+namespaces = true
+
+# This metadata supports source and editable installs. Runtime scripts, schemas,
+# templates, containers, and configuration assets are not yet declared package
+# data. A self-contained wheel and publication remain gated on the Node R asset
+# inventory and clean-environment verification.
