@@ -18,11 +18,11 @@ The architectural center is a strict, versioned project contract:
 4. `project_v1` path rules make config interpretation independent of cwd.
 5. `.synaptic/{artifacts,state,tracking,cache,tmp}` are host-owned writable roots; host source and engine source are read-only during execution.
 6. `tuner/project/source_bundle.py` produces one schema-versioned source lock containing both the host and engine source identities.
-7. `tuner/cloud/checkout.py` and `tuner/cloud/runtime_layout.py` reconstruct and verify those sources for every provider.
+7. `tuner/cloud/bootstrap_core.py`, `tuner/cloud/checkout.py`, and `tuner/cloud/runtime_layout.py` reconstruct and verify those sources for every provider; the same bootstrap core runs locally and from a verified remote capsule.
 8. The canonical cloud path clones the exact host superproject and initializes the engine recursively at the recorded gitlink. A verified dual-clone layout is secondary, for cases where a provider or host layout cannot use a submodule checkout.
 9. Agent capabilities become machine-discoverable, including input schemas, side effects, cost/GPU requirements, confirmation requirements, resumability, and structured results/events.
 
-The first implementation slice should establish `ProjectContext`, the host manifest, path semantics, the source lock, and a synthetic downstream-superproject contract test. That foundation is required before broad handler, Docker, or cloud changes. HF Jobs is the first provider integration; Modal and RunPod follow only after the provider-neutral source/runtime contract is proven.
+The first implementation slice should establish `ProjectContext`, the host manifest, path semantics, the source lock, and a synthetic downstream-superproject contract test. That foundation is required before broad handler, Docker, or cloud changes. Before HF Jobs integration, node J0 must package the accepted checkout implementation as a deterministic, hash-bound capsule with a transport-neutral bounded verifier. Node J then mounts and invokes that capsule through the HF client. HF Jobs is the first provider integration; Modal and RunPod follow only after the provider-neutral source/runtime contract is proven.
 
 This is an architectural evolution, not a rewrite. Existing standalone commands, trainers, evaluator behavior, config-first discipline, provider-native artifact layouts, and historical lineage remain valid.
 
@@ -659,6 +659,24 @@ Standalone credentials are declared only through the opaque identifiers `SYNAPTI
 
 Host topology is established before provider selection. The engine path and canonical URL are read from the committed root `.gitmodules` without includes, interpolation, duplicate keys, or config expansion, then matched to the project context, gitlink, engine origin, and requested `source_mode`. A requested mode that disagrees with discovered `standalone`, `superproject`, or `dual_clone` topology fails before provider discovery. The legacy paid-cloud `RepoSource` path is a deprecated standalone compatibility view and may proceed only when it contains the same validated canonical `GitSource`, clean worktree, named branch, and exact pushed proof.
 
+### J0 bootstrap capsule contract
+
+HF Jobs can transport an image, command, environment, secrets, labels, and mounted volumes, but the accepted checkout Python otherwise lives inside the repository that it must verify. J0 closes that bootstrap cycle without introducing a second source model:
+
+1. `tuner/cloud/bootstrap_core.py` owns the canonical stdlib-only repository reconstruction algorithm. Local `checkout_source_lock()` and the remote capsule both call this core; neither reimplements `.gitmodules`, gitlink, URL, credential-scope, or recursive verification semantics.
+2. `tuner/cloud/bootstrap_capsule.py` deterministically emits a bounded capsule containing the exact bootstrap modules and a `synaptic-bootstrap-capsule/v1` manifest. Stable path ordering, normalized metadata, fixed encoding, and content-derived hashes make identical inputs byte-identical.
+3. J0 computes and exposes the capsule manifest SHA-256 beside the capsule. J consumes that value and the trusted local launcher embeds it in the HF job specification. The source lock remains the only host/engine identity model; the capsule manifest describes bootstrap bytes, not repository sources.
+4. The primary transport is a Hugging Face volume mounted read-only, owned and proven by J rather than J0. This relies on the official HF Jobs contract that `run_job(..., volumes=[Volume(...)])` supports repository/bucket volumes and `Volume(..., read_only=True)` requests a read-only mount; see [Hugging Face Jobs volume documentation](https://huggingface.co/docs/huggingface_hub/en/guides/jobs#mount-a-volume). During J, the installed client must prove these features hermetically before submission; documentation alone is not a runtime capability claim.
+5. J0 supplies and locally tests a transport-neutral, deliberately minimal stdlib-only verifier. It may only open a supplied manifest/capsule root with no-follow semantics where available, require regular files, enforce fixed per-file and aggregate size limits, validate the expected manifest digest and every declared file hash, copy verified bytes into a newly created private scratch directory, re-hash the copies, and invoke the verified capsule. It may not parse a source lock, inspect Git, resolve credentials, interpret `.gitmodules`, implement checkout policy, construct an HF `Volume`, or call `run_job`. J owns embedding the expected digest and invoking this verifier against the mounted HF path.
+6. The verified capsule deserializes the canonical `SourceLock` and invokes `bootstrap_core` to reconstruct and validate the sources before dependency installation, model download, bucket mutation, or paid workload execution.
+7. Mounted capsule bytes remain read-only. Scratch is per-job, mode-restricted, non-shared, and removed on success and failure. Capsule paths, manifest entries, duplicate names, links, devices, FIFOs, oversize content, hash mismatches, and post-copy changes fail closed.
+
+Transport profiles are explicit and never selected by silent fallback:
+
+- **C — primary:** read-only HF volume with launcher-bound manifest SHA-256. J0 produces the verified capsule/verifier contract; J exclusively implements and tests its HF volume transport.
+- **B — deferred fallback:** immutable URL plus an independently supplied expected hash. It is disabled by default, cannot be selected automatically when C feature detection fails, and requires a later N-owned policy/documentation/CI approval before use.
+- **A — deferred hardened profile:** digest-pinned images containing the bootstrap capsule. This remains a future supply-chain hardening option, not a Wave 6 prerequisite or current capability claim.
+
 ### Canonical `superproject` mode
 
 1. Validate that the host and engine worktrees are clean for cloud execution.
@@ -863,6 +881,8 @@ Gate:
 
 Deliver:
 
+- J0 first: deterministic stdlib-only capsule, manifest schema/digest, bounded transport-neutral verifier, shared bootstrap core, local/capsule parity, and an explicit no-publication boundary.
+- J second: HF read-only-volume transport, launcher digest binding, and hermetic installed-client feature detection for `Volume`, `read_only`, and `run_job(..., volumes=...)`; unsupported or signature-drifted clients fail closed without an automatic transport change.
 - Provider-neutral checkout and runtime layout.
 - Host-superproject recursive checkout.
 - Gitlink, commit, config, plug-in, and input verification.
@@ -871,6 +891,9 @@ Deliver:
 
 Gate:
 
+- J0 exit: capsule builds are byte-deterministic, manifest-bound, size-limited, link/device resistant, copy safely to private scratch, reuse the same bootstrap core as local checkout, and remain unpublished.
+- J entry: consume only the accepted J0 capsule, verifier, manifest digest, and shared checkout contract.
+- J exit: a fake/recording HF client proves the exact read-only volume request, launcher digest binding, and rejection of absent or drifted volume support before `run_job`, alongside the HF integration tests.
 - An HF dry-run proves the exact remote command and verification sequence.
 - A minimal paid smoke occurs only after explicit user approval.
 
@@ -920,6 +943,18 @@ Residual boundary: all accepted checkout/security evidence is local and hermetic
 
 ---
 
+## PACT imPACT/rePACT Decision Record — 2026-08-16, J0 Bootstrap Prerequisite
+
+**Blocker:** Node J cannot invoke the accepted checkout/runtime Python before obtaining the engine repository that the same code must verify. HF job transport exposes command/env/secrets/labels and, according to official documentation, mounted volumes; the existing shell clone would duplicate and weaken the accepted source contract. The public wheel remains intentionally blocked on the runtime-asset boundary.
+
+**Accepted decision:** insert single-owner node J0 after I and the R asset investigation, before J. J0 builds a deterministic stdlib-only capsule, moves the canonical checkout algorithm into shared `bootstrap_core`, and proves capsule determinism, manifest integrity, bounded verification, shared-core parity, and the publication boundary without implementing provider transport. J then binds the capsule manifest SHA-256, proves profile C HF client/read-only-volume transport hermetically, and integrates it into HF submission. Remote verifier code checks only regular-file identity, sizes, and hashes before copying verified bytes to private scratch. Canonical checkout begins only inside the verified capsule.
+
+**Accepted alternatives:** profile B, immutable URL plus independently supplied hash, is an explicit non-automatic fallback deferred to N approval. Profile A, a digest-pinned bootstrap image, is deferred as a hardened deployment profile. Neither is an implicit response to missing or drifted HF volume support.
+
+**Capability boundary:** this decision makes no live HF volume, authentication, private checkout, network, GPU, or paid-compute claim. J0 makes no HF-client compatibility claim. During J, the installed client is accepted only after hermetic feature detection; unsupported parameters, missing `Volume`, changed signatures, or semantics that cannot be proven locally fail closed. `cloud.launch` remains unavailable until J and the protected provider gate pass.
+
+---
+
 ## Exhaustive File Inventory
 
 The inventory is intentionally broader than the first draft because root coupling reaches CLI handlers, discovery, batch execution, evaluator/generation entry points, and provider bootstrap. Every Create and Modify row has exactly one DAG owner. Ownership is validated by the plan audit described below; a worker may not edit another node's row without an explicit root-mediated ownership transfer and inventory update.
@@ -932,6 +967,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `schemas/synaptic-resolved-config-v1.schema.json` | Effective config/source-map schema | A / Worker 1 |
 | `schemas/synaptic-source-lock-v1.schema.json` | Sole host/engine source lock schema | A / Worker 1 |
 | `schemas/synaptic-secret-ref-v1.schema.json` | Credential-reference schema; no literal secrets | A / Worker 1 |
+| `schemas/synaptic-bootstrap-capsule-v1.schema.json` | Deterministic capsule manifest, bounded file table, and digest contract | J0 / Worker 2 |
 | `schemas/synaptic-capability-v1.schema.json` | Agent capability schema | H / Worker 3 |
 | `schemas/synaptic-result-v1.schema.json` | Single-result envelope | H / Worker 3 |
 | `schemas/synaptic-event-v1.schema.json` | Streaming event envelope | H / Worker 3 |
@@ -948,8 +984,11 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/project/secrets.py` | `SecretRef` parsing/resolution/redaction boundary | A / Worker 1 |
 | `tuner/project/errors.py` | Stable project/path/source/security errors | A / Worker 1 |
 | `tuner/project/plugins.py` | Manifest/versioned-entry-point/legacy trusted plug-ins; authoritative reserved-namespace metadata validation without import | B / Worker 2 |
-| `tuner/cloud/checkout.py` | Superproject/dual-clone secure checkout | I / Worker 1 |
+| `tuner/cloud/bootstrap_core.py` | Sole stdlib-only recursive reconstruction algorithm shared by local checkout and verified capsule | J0 / Worker 2 |
+| `tuner/cloud/bootstrap_capsule.py` | Deterministic capsule builder/loader and manifest validation | J0 / Worker 2 |
+| `tuner/cloud/checkout.py` | Local policy/credential adapter delegating canonical reconstruction to `bootstrap_core` | J0 / Worker 2 |
 | `tuner/cloud/runtime_layout.py` | Logical filesystem/mount mapping | I / Worker 1 |
+| `tuner/cloud/hf_volume_transport.py` | J-owned read-only HF volume request, feature detection, manifest-digest binding, and minimal verifier command | J / Worker 1 |
 | `synaptic_tuner/__init__.py` | Supported distribution facade; re-export canonical `1.1.0` version | B / Worker 2 |
 | `synaptic_tuner/_version.py` | Canonical public/distribution/legacy/CLI version source, initially `1.1.0` | B / Worker 2 |
 | `synaptic_tuner/api/__init__.py` | Public API namespace | B / Worker 2 |
@@ -974,7 +1013,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `docs/PUBLIC_API.md` | Supported facade and stability | N / Worker 2 |
 | `docs/AGENT_CAPABILITIES.md` | Capability/result/event protocols | N / Worker 2 |
 | `docs/CLOUD_SOURCE_LOCK.md` | Secure URLs, source lock, checkout, runtime layout | N / Worker 2 |
-| `docs/preparation/synaptic-runtime-asset-inventory.md` | Enumerate every file/package/container asset required outside Python modules | R / Worker 3 |
+| `docs/preparation/synaptic-runtime-asset-inventory.md` | J0-owned accepted runtime-asset inventory extended with exact capsule members and publication boundary; historical R investigation remains recorded | J0 / Worker 2 |
 | `.github/workflows/submodule-contract.yml` | Windows/Linux recursive-submodule, editable, build, isolated-wheel, skill-sync, no-write CI | N / Worker 2 |
 | `.github/workflows/provider-smoke.yml` | Protected manual provider smoke; environment approval and no automatic paid launch | N / Worker 2 |
 | `tests/project/test_context.py` | Root precedence/ambiguity | A / Worker 1 |
@@ -986,20 +1025,22 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/plugins/test_project_plugins.py` | Binding/entry-point/legacy/trust behavior; reserved namespace shape/kind/API fail-closed and no-import cases; public/package canonical-version coherence | B / Worker 2 |
 | `tests/capabilities/test_registry.py` | Descriptor discovery | H / Worker 3 |
 | `tests/capabilities/test_events.py` | JSON/JSONL protocol | H / Worker 3 |
-| `tests/cloud/test_checkout.py` | Superproject/dual-clone/security checkout | I / Worker 1 |
+| `tests/cloud/test_checkout.py` | Local checkout proves delegation to the same canonical `bootstrap_core` used by the capsule | J0 / Worker 2 |
 | `tests/cloud/test_runtime_layout.py` | Read-only/writable mapping | I / Worker 1 |
+| `tests/cloud/test_bootstrap_capsule.py` | Determinism, schema, regular-file/size/hash/copy/race rejection, and no-source-model duplication | J0 / Worker 2 |
+| `tests/cloud/test_hf_volume_transport.py` | Hermetic client feature detection, exact read-only volume request, digest binding, and fail-closed drift behavior | J / Worker 1 |
 | `tests/contract/test_embedded_host.py` | Nested-host end-to-end contract | C / Worker 3 |
 | `tests/contract/test_engine_read_only.py` | Container and engine-managed no-write contract | C / Worker 3 |
 | `tests/contract/test_native_no_write.py` | Native pre/post tree and Git-diff detection | C / Worker 3 |
 | `tests/contract/test_console_entrypoint.py` | Editable console from unrelated cwd | C / Worker 3 |
-| `tests/contract/test_runtime_assets.py` | Wheel/runtime-asset publication gate | R / Worker 3 |
+| `tests/contract/test_runtime_assets.py` | J0-owned capsule/runtime-asset completeness and publication gate; historical R ownership remains in the accepted commit record | J0 / Worker 2 |
 | `tests/contract/test_source_url_security.py` | Credential/query/host/scheme negative cases | C / Worker 3 |
 | `tests/contract/fixtures/host-project/**` | Directory-owned generic host-fixture surface; node C freezes its complete member list before work starts, and wildcard members are not counted as additional literal files | C / Worker 3 |
 | `tests/handlers/test_ml_handler.py` | Host ML declaring-document inputs, artifact-root outputs, unchanged cwd, no temporary config rewrite, and standalone compatibility | G / Worker 1 |
 | `tests/acceptance/submodule_engine/test_acceptance.py` | Independent end-to-end acceptance only | M / independent QA worker |
 | `docs/review/submodule-engine-acceptance.md` | Independent QA/security evidence report | M / independent QA worker |
 
-**Create count after Wave 5 reconciliation: 70 rows.**
+**Create count after J0 rePACT reconciliation: 76 rows.**
 
 ### Files to modify
 
@@ -1096,7 +1137,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/cloud_train_handler.py` | Provider-neutral source lock before provider choice | I / Worker 1 |
 | `tuner/handlers/cloud_jobs_handler.py` | Sanitized source/job inspection and context | I / Worker 1 |
 | `tuner/backends/training/cloud/base_cloud.py` | Delegate one-repo source logic to source lock | I / Worker 1 |
-| `tuner/cloud/__init__.py` | Import-light lazy exports for checkout/runtime-layout and existing cloud helpers without eager provider imports | I / Worker 1 |
+| `tuner/cloud/__init__.py` | J0-owned import-light exports for bootstrap core/capsule, checkout/runtime layout, and existing helpers without eager provider imports | J0 / Worker 2 |
 | `tests/cloud/test_base_cloud.py` | Source-lock delegation and baseline compatibility | I / Worker 1 |
 | `tuner/handlers/cloud_run_handler.py` | HF source-lock submission | J / Worker 1 |
 | `tuner/handlers/cloud_pipeline_handler.py` | One lock across HF train/eval | J / Worker 1 |
@@ -1117,6 +1158,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/cloud/test_cloud_deps.py` | Hermetic canonical-source fixture for HF-adjacent dependency/config coverage | J / Worker 1 |
 | `tests/cloud/test_cloud_eval_handler.py` | Hermetic canonical-source fixture for HF evaluation command/submission coverage | J / Worker 1 |
 | `tests/cloud/test_hf_jobs_backend.py` | Recursive checkout/verification | J / Worker 1 |
+| `tuner/cloud/hf_jobs.py` | HF transport accepts explicit read-only volumes and preserves secret/label redaction without becoming a source model | J / Worker 1 |
 | `tuner/backends/training/cloud/modal_backend.py` | Shared source/runtime contract | K / Worker 2 |
 | `MechInterp/cloud/modal_runner.py` | Modal source-lock checkout/layout | K / Worker 2 |
 | `tests/cloud/test_modal_backend.py` | Modal contract | K / Worker 2 |
@@ -1130,7 +1172,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/cloud-training.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, source-lock, evaluation, generation, deployment, and provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
 | `tests/cli/test_parser.py` | New verbs/flags, env-file selection, process-value precedence, pre-dotenv engine-root resolution, legacy parsing, and CLI/legacy canonical-version coherence | D / Worker 1 |
 
-**Modify count after Wave 5 reconciliation: 124 rows.**
+**Modify count after J0 rePACT reconciliation: 125 rows.**
 
 ### Explicit no-change inventory for this initiative
 
@@ -1261,6 +1303,7 @@ git status --short
 | Environment | Explicit `--env-file`, implicit host `.env`, standalone engine `.env`, existing process value, pre-dotenv engine-root override |
 | Installation | Source wrapper, `python -m tuner`, editable `synaptic` console; all version surfaces report canonical `1.1.0` |
 | Cloud source | Superproject recursive checkout, dual clone |
+| HF bootstrap transport | J0 deterministic capsule/verifier parity; then J read-only Volume supported, missing, and signature-drifted clients; profile B/A remain disabled |
 | Path behavior | Relative, every URI scheme, Windows absolute, symlink escape |
 | Plug-ins | Manifest local, versioned installed entry point, legacy callable, malformed/unversioned/unsupported reserved group, requested kind/API mismatch, unrelated group, no-import rejection |
 | Output | Human, JSON result, JSONL events |
@@ -1275,15 +1318,18 @@ git status --short
 2. run on Windows and Linux with the supported Python matrix;
 3. run the exact focused baseline command and report the ten known node IDs distinctly;
 4. run project, plug-in, capability, source-security, native/container no-write, tracking, MechInterp, local-run, and cloud checkout contract suites;
-5. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
-6. build sdist and wheel without publishing;
-7. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
-8. assert source, editable, built-distribution, public, legacy, and CLI version surfaces all resolve canonically to `1.1.0`, then run runtime-asset and console/capability smokes from that isolated install;
-9. run canonical skill sync in check mode;
-10. run `git diff --check` and assert the engine checkout is clean after host-mode tests;
-11. upload test/build reports but never artifacts containing credentials or private source URLs.
+5. build the J0 capsule twice in clean temporary roots and require byte-identical outputs plus manifest, bounded-verifier, shared-core, and no-publication checks; after J starts, run J-owned HF-volume transport tests with fake clients covering supported, absent, and drifted features;
+6. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
+7. build sdist and wheel without publishing;
+8. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
+9. assert source, editable, built-distribution, public, legacy, and CLI version surfaces all resolve canonically to `1.1.0`, then run runtime-asset and console/capability smokes from that isolated install;
+10. run canonical skill sync in check mode;
+11. run `git diff --check` and assert the engine checkout is clean after host-mode tests;
+12. upload test/build reports but never capsules, manifests, credentials, or private source URLs unless a separately approved non-secret test artifact is required.
 
 `.github/workflows/provider-smoke.yml` is manual `workflow_dispatch` only, uses a protected environment with required reviewer approval, accepts only non-secret run identifiers plus `SecretRef` names, and runs provider dry-run/source verification before any optional paid smoke. HF Jobs is enabled first. Modal and RunPod jobs remain disabled until their implementation gates pass. The workflow cannot publish a package, update a release, merge, cancel unrelated jobs, or launch paid work without the protected-environment approval.
+
+J0 CI is hermetic, provider-agnostic, and cost-free. It validates only capsule determinism, manifest integrity, bounded verifier behavior, private-scratch copying, shared-core parity, runtime-asset completeness, and the no-publication gate. It may not import or instantiate the HF client, inspect job kwargs, upload a capsule, create/mount a volume, authenticate, probe remote behavior, or invoke `run_job`. J-owned hermetic tests add fake-client and job-kwargs coverage; live volume semantics belong only to the protected provider-smoke workflow after J completes.
 
 No package publication workflow is added in this plan. Publication remains prohibited until:
 
@@ -1393,6 +1439,10 @@ This is a separate PR after the engine contract is merged and pinned.
 | Tracking race becomes worse | Medium | Medium | Reproduce current failure, add locking/atomic-write tests, report separately |
 | Host source read-only conflicts with workflows that write beside configs | High | Medium | Redirect outputs/state to `.synaptic`; explicit export step for checked-in summaries |
 | Provider implementation leaks HF assumptions into core | Medium | High | Checkout/runtime layout contract tests shared by all providers |
+| Bootstrap cycle causes J to duplicate checkout in shell/inline code | High without J0 | Critical | J0 capsule calls one shared `bootstrap_core`; inline code verifies bytes only |
+| HF client accepts different or missing volume parameters across installed versions | Medium | High | Hermetic signature/feature detection; fail closed before submission; no automatic profile fallback |
+| Mounted capsule is replaced, linked, oversized, or changed during verification | Low | Critical | Read-only mount, regular-file/no-follow checks, strict size limits, manifest/file hashes, private copy, re-hash before import |
+| Profile B URL fallback silently weakens profile C | Medium | Critical | B is disabled and explicit; independent expected hash plus later N approval required; never auto-select on C failure |
 | Console JSON still contains direct prints | High | Medium | Incremental event writer, stdout capture tests, descriptor marks unsupported until clean |
 | EHR migration accidentally rewrites governance evidence | Low | Critical | Separate PR and explicit no-change list |
 | Users mistake trusted plug-ins for a sandbox | Medium | High | Documentation, capability effects, and security review state full authority |
@@ -1424,7 +1474,7 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 2 | `feat(project): add host manifest context paths and layers` | A | `schemas/synaptic-project-v1.schema.json`, `schemas/synaptic-resolved-config-v1.schema.json`, `examples/host-project/synaptic.yaml`, `examples/host-project/.gitignore`, `examples/host-project/experiments/example.yaml`, `tuner/project/__init__.py`, `tuner/project/manifest.py`, `tuner/project/context.py`, `tuner/project/path_refs.py`, `tuner/project/config_layers.py`, `tuner/project/errors.py`, `tests/project/test_context.py`, `tests/project/test_manifest.py`, `tests/project/test_path_refs.py`, and `tests/project/test_config_layers.py` |
 | 3 | `feat(project): add secure source lock and secret references` | A | `schemas/synaptic-source-lock-v1.schema.json`, `schemas/synaptic-secret-ref-v1.schema.json`, `tuner/project/source_bundle.py`, `tuner/project/secrets.py`, `tests/project/test_source_bundle.py`, and `tests/project/test_secret_refs.py` |
 | 4 | `test(contract): add embedded host security and native no-write fixtures` | C | C-owned contract/security fixtures only; excludes runtime-asset tests |
-| 5 | `docs(packaging): inventory the runtime asset boundary` | R | R-owned preparation report and `test_runtime_assets.py` only |
+| 5 | `docs(packaging): inventory the runtime asset boundary` | R | Historical R creation of the preparation report and `test_runtime_assets.py`; J0 assumes subsequent ownership through an explicit transfer |
 | 6 | `feat(cli): inject project context with standalone compatibility` | D | D-owned CLI/base/config compatibility rows and D-owned tests |
 | 7 | `feat(api): add editable console public api v1 and plugin contracts` | B | `pyproject.toml`, `examples/host-project/plugins/example.py`, `tuner/project/plugins.py`, `synaptic_tuner/__init__.py`, `synaptic_tuner/_version.py`, `synaptic_tuner/api/__init__.py`, `synaptic_tuner/api/v1/__init__.py`, `synaptic_tuner/api/v1/context.py`, `synaptic_tuner/api/v1/plugins.py`, `synaptic_tuner/api/v1/capabilities.py`, `synaptic_tuner/api/v1/events.py`, `synaptic_tuner/api/v1/sources.py`, `synaptic_tuner/api/v1/secrets.py`, and `tests/plugins/test_project_plugins.py` |
 | 8 | `feat(tracking): route state and provenance through project roots` | E | E-owned tracking modules/handlers/tests |
@@ -1432,16 +1482,17 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 10 | `feat(runtime): adopt project roots in local discovery and batch paths` | F | F-owned local/container, discovery, batch, bucket, conversion, merge, and WebLLM rows and F-owned tests |
 | 11 | `feat(domains): adopt context across evaluation generation ml and mechinterp` | G | G-owned Evaluator, SynthChat, prompt-optimization, ML, flywheel, MechInterp, and domain handler rows/tests, including `Trainers/ml/train.py` and `tests/handlers/test_ml_handler.py` |
 | 12 | `feat(agent): add capability discovery and structured protocols` | H | H-owned capability modules/handlers/tests |
-| 13 | `feat(cloud): add verified checkout and runtime layout` | I | I-owned source-bundle/cloud foundation rows/tests; one owner only |
-| 14 | `feat(hf-jobs): launch recursive verified host superprojects` | J | J-owned HF backend/builders/stage/handlers/tests |
-| 15 | `feat(modal): adopt verified source lock and runtime layout` | K | K-owned Modal runner/tests only |
-| 16 | `feat(runpod): adopt verified source lock and runtime layout` | L | L-owned RunPod backend/tests only |
-| 17 | `test(acceptance): verify embedded engine release candidate` | M | M-exclusive acceptance test/report paths only; no feature-test edits |
-| 18 | `ci(contract): gate submodule and protected provider smoke` | N | N-owned workflow files only |
-| 19 | `docs(adoption): document host api capabilities security and cloud` | N | N-owned README/changelog/docs/example documentation rows |
-| 20 | `docs(skills): update canonical workflows and sync mirrors` | N | N-owned `AGENTS.md`, canonical skills, generated mirrors, and sync evidence |
+| 13 | `feat(cloud): add verified source identity and runtime layout` | I | I-owned source-lock/runtime-layout foundation rows/tests; checkout/capsule transfers are excluded after J0 begins |
+| 14 | `feat(bootstrap): add deterministic verified capsule and shared core` | J0 | All `J0 / Worker 2` rows: shared core, capsule/schema, bounded transport-neutral verifier, transferred checkout/assets/exports, and hermetic non-provider tests |
+| 15 | `feat(hf-jobs): launch recursive verified host superprojects` | J | J-owned HF backend/builders/stage/handlers, explicit HF volume transport, shared HF job transport, and tests |
+| 16 | `feat(modal): adopt verified source lock and runtime layout` | K | K-owned Modal runner/tests only |
+| 17 | `feat(runpod): adopt verified source lock and runtime layout` | L | L-owned RunPod backend/tests only |
+| 18 | `test(acceptance): verify embedded engine release candidate` | M | M-exclusive acceptance test/report paths only; no feature-test edits |
+| 19 | `ci(contract): gate submodule and protected provider smoke` | N | N-owned workflow files only |
+| 20 | `docs(adoption): document host api capabilities security and cloud` | N | N-owned README/changelog/docs/example documentation rows |
+| 21 | `docs(skills): update canonical workflows and sync mirrors` | N | N-owned `AGENTS.md`, canonical skills, generated mirrors, and sync evidence |
 
-Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. No package-publication commit or workflow may be added until commits 17–20 are green and the runtime-asset decision is closed.
+Provider commits remain separate so HF assumptions are reviewable and Modal/RunPod prove the shared abstraction. No package-publication commit or workflow may be added until commits 18–21 are green and the runtime-asset decision is closed.
 
 ---
 
@@ -1453,16 +1504,16 @@ The plan is sized for a root orchestrator plus three concurrent worker slots. Ro
 
 ```text
 P0 Plan approved and baseline pinned
- ├── A Project contracts ─┬── D CLI/context ─┬── E Tracking ─── I Cloud foundation ─── J HF ─┬── K Modal ─┐
- │                        │                  │                                              └── L RunPod ─┤
- │                        └── B Public API/plugins ── G Domain adapters ──────────────────────────────────┤
- ├── C Contract/security fixtures ────────── F Local/discovery/batch ────────────────────────────────────┤
- └── R Runtime-asset boundary ────────────── H Capabilities ──────────────────────────────────────────────┤
-                                                                                                         M Independent QA
-                                                                                                              │
-                                                                                                         N Docs/CI/release
-                                                                                                              │
-                                                                                                         O Separate EHR PR
+ ├── A Project contracts ─┬── D CLI/context ─┬── E Tracking ─── I Cloud foundation ─┐
+ │                        │                  │                                      ├── J0 Verified capsule ─── J HF ─┬── K Modal ─┐
+ │                        └── B Public API/plugins ── G Domain adapters ─────────────┤                              └── L RunPod ─┤
+ ├── C Contract/security fixtures ────────── F Local/discovery/batch ───────────────┤                                            │
+ └── R Runtime-asset boundary ────────────── H Capabilities ────────────────────────┘                                            │
+                                                                                                                        M Independent QA
+                                                                                                                             │
+                                                                                                                        N Docs/CI/release
+                                                                                                                             │
+                                                                                                                        O Separate EHR PR
 ```
 
 ### Node ownership
@@ -1472,18 +1523,19 @@ P0 Plan approved and baseline pinned
 | P0 | Root coordinator | Plan and pinned baseline evidence only | None | Approved plan and ownership ledger |
 | A | Worker 1 | Every inventory row labeled `A / Worker 1` | P0 | Manifest, roots, layers, secure source-lock primitives |
 | C | Worker 3 | Every inventory row labeled `C / Worker 3` | P0 | Embedded-host, URL-policy, private-submodule, and native no-write fixtures |
-| R | Worker 3 | Every inventory row labeled `R / Worker 3` | P0 | Runtime-asset inventory and isolated-wheel boundary test |
+| R | Worker 3, historical completed node | No remaining future write scope: the two R-created asset-boundary rows transfer exclusively to J0 before J0 starts | P0 | Accepted runtime-asset inventory and isolated-wheel boundary evidence |
 | D | Worker 1 | Every inventory row labeled `D / Worker 1` | A, C | Context-aware CLI with standalone compatibility |
 | B | Worker 2 | Every inventory row labeled `B / Worker 2` | A | Public API, console, and plugin contracts |
 | E | Worker 2 | Every inventory row labeled `E / Worker 2` | A, D | Tracking roots, provenance references, and isolated race fix |
 | F | Worker 3 | Every inventory row labeled `F / Worker 3` | D, C | Local/container, discovery, batch, conversion, and related adapters |
 | G | Worker 1 | Every inventory row labeled `G / Worker 1` | D, B, C | Evaluation, generation, ML, flywheel, prompt, and MechInterp adapters |
 | H | Worker 3 | Every inventory row labeled `H / Worker 3` | D, B | Capability discovery and structured agent protocols |
-| I | Worker 1 | Every inventory row labeled `I / Worker 1` | A, D, E, R | Provider-neutral verified checkout/runtime layout; exactly one owner |
-| J | Worker 1 | Every inventory row labeled `J / Worker 1` | I, E, G, H | HF Jobs canonical recursive-superproject support |
+| I | Worker 1 | Every inventory row labeled `I / Worker 1` | A, D, E, R | Provider-neutral source identity and runtime layout; checkout rows transfer to J0 |
+| J0 | Worker 2 | Every inventory row labeled `J0 / Worker 2`, including the explicit I/R transfers | I, R | Deterministic stdlib-only capsule, manifest integrity, bounded verifier, shared-core parity, and no-publication proof; no provider transport |
+| J | Worker 1 | Every inventory row labeled `J / Worker 1` | J0, E, G, H | HF client feature detection, read-only-volume/digest binding, and canonical recursive-superproject integration through the accepted capsule |
 | K | Worker 2 | Every inventory row labeled `K / Worker 2` | J | Modal adoption without a competing source model |
 | L | Worker 3 | Every inventory row labeled `L / Worker 3` | J | RunPod adoption without a competing source model |
-| M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J, K, L | Independent cross-platform/security/baseline report, including unrelated-cwd ML source-cleanliness and artifact-root acceptance; no fixes |
+| M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J0, J, K, L | Independent cross-platform/security/baseline report, including capsule integrity, unrelated-cwd ML source-cleanliness, and artifact-root acceptance; no fixes |
 | N | Worker 2 | Every inventory row labeled `N / Worker 2` | M | CI, docs, release gates, skills, and sync evidence |
 | O | Separate downstream owner | EHR repository only | N and accepted engine commit/release | Independent EHR migration PR |
 
@@ -1499,18 +1551,22 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 | 3 | Run CLI barrier; merge E | Idle; review only | E tracking/provenance | Idle; review only |
 | 4 | Run standalone/embedded barrier; merge both | G domain adapters | Idle; review only | F local/discovery/batch |
 | 5 | Run runtime-adapter barrier; merge both | I cloud foundation | Idle; review only | H capabilities |
-| 6 | Run checkout/reconstruction/capability barrier; merge J | J HF Jobs | Idle; review only | Idle; review only |
-| 7 | Run protected HF dry-run gate; merge both | Idle; review only | K Modal | L RunPod |
-| 8 | Commission fresh QA; accept report or return defects to original node owner | Idle; no feature edits | M independent QA in an isolated worktree/assignment | Idle; no feature edits |
-| 9 | Audit every release gate; merge N | Idle; review only | N docs/CI/release | Idle; review only |
-| 10 | Authorize separate downstream work only after engine release acceptance | O separate EHR owner | — | — |
+| 6 | Run source/runtime barrier; transfer the five I/R rows; merge J0 after capsule/core/no-publication gates | Idle; review only | J0 deterministic capsule, bounded verifier, and shared-core parity | Idle; review only |
+| 7 | Give J the accepted capsule; run HF client/volume/digest/integration barrier; merge J | J HF Jobs and volume transport | Idle; review only | Idle; review only |
+| 8 | Run protected HF dry-run gate; merge both | Idle; review only | K Modal | L RunPod |
+| 9 | Commission fresh QA; accept report or return defects to original node owner | Idle; no feature edits | M independent QA in an isolated worktree/assignment | Idle; no feature edits |
+| 10 | Audit every release gate; merge N | Idle; review only | N docs/CI/release | Idle; review only |
+| 11 | Authorize separate downstream work only after engine release acceptance | O separate EHR owner | — | — |
 
 ### Overlap rules
 
 - Root does not edit implementation, tests, workflows, docs, or skills. Root maintains the ownership ledger, enforces barriers, audits diffs, and merges accepted commits.
-- `tuner/project/source_bundle.py` is the only source-lock model. I/J/K/L consume it and may not introduce provider-local source dataclasses that duplicate it.
+- `tuner/project/source_bundle.py` is the only source-lock model. I/J0/J/K/L consume it and may not introduce provider-local source dataclasses that duplicate it. `bootstrap_core` executes that model; it is not a second model.
 - A owns `tuner/project/__init__.py`, `tuner/project/manifest.py`, `tuner/project/context.py`, `tuner/project/path_refs.py`, `tuner/project/config_layers.py`, `tuner/project/errors.py`, `tuner/project/secrets.py`, and `tuner/project/source_bundle.py`. B owns only `tuner/project/plugins.py`. This is the only intentional split inside `tuner/project/**`, and their waves prevent concurrent edits.
-- Provider boundaries are exclusive: I owns shared cloud foundation, J owns HF surfaces, K owns Modal surfaces, and L owns RunPod surfaces.
+- Provider boundaries are exclusive: I owns shared source/runtime foundation; J0 owns the shared bootstrap core, capsule, and transferred checkout/asset rows; J owns HF surfaces and volume transport; K owns Modal; L owns RunPod.
+- Before J0 starts, root records one atomic ownership transfer of `tuner/cloud/checkout.py`, `tuner/cloud/__init__.py`, `tests/cloud/test_checkout.py`, `docs/preparation/synaptic-runtime-asset-inventory.md`, and `tests/contract/test_runtime_assets.py`. I and historical R must not edit those paths afterward.
+- J0's minimal inline verifier may validate only a bounded manifest and regular-file bytes, reject links/devices/oversize content, and copy verified bytes to private scratch. It may not parse source locks, run Git, resolve credentials, perform checkout, or implement a provider-local source policy.
+- J may feature-detect the installed HF client against a hermetic fake/fixture and fail closed when a read-only volume cannot be expressed. It may not silently select the immutable-URL fallback, upload a capsule, or claim live mounted-volume support from unit tests.
 - QA owns only the two M paths. Feature tests remain with A–L/R/C, so QA never collides with implementation workers and never fixes what it audits.
 - A failed M gate returns the defect to the original node owner in a new remediation wave. After that fix merges, a fresh QA specialist reruns M.
 - N owns canonical skills and generated mirrors, but mirrors change only via the sync script. N also owns both workflow files.
@@ -1521,10 +1577,11 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 1. Wave 1 (`A`, `C`) must merge before Wave 2 (`D`, `B`, `R`).
 2. `D` and `B` must merge before `E`; `E` must merge before Wave 4 (`F`, `G`).
 3. `A`, `D`, `E`, and `R` are hard dependencies of the single-owner `I` node.
-4. Wave 4 must merge before Wave 5 (`I`, `H`); `I`, `E`, and `G` plus `H` must merge before `J`.
-5. Protected HF smoke must pass before `K` or `L` starts; both must merge before independent QA node `M`.
-6. `M` must pass before `N`; no publication workflow or release is authorized before `N` passes.
-7. `O` begins only after `N` and an accepted engine commit/release.
+4. Wave 4 must merge before Wave 5 (`I`, `H`); both `I` and historical `R` evidence must be accepted before the explicit transfer and J0.
+5. J0's deterministic-build, manifest-integrity, private-scratch, no-link/device/oversize, canonical-core-delegation, and no-publication gates must pass before `J` starts. HF installed-client, `Volume`, fake-client drift, digest-binding, and provider-integration gates belong exclusively to J and are J exit gates, not J entry prerequisites.
+6. `J0`, `E`, `G`, and `H` must merge before `J`. J's hermetic HF client/volume/integration gates and protected HF smoke must pass before `K` or `L` starts; both must merge before independent QA node `M`.
+7. `M` must pass before `N`; no publication workflow or release is authorized before `N` passes.
+8. `O` begins only after `N` and an accepted engine commit/release.
 
 ---
 
@@ -1588,10 +1645,15 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - [ ] One `synaptic-source-lock/v1` records both host and engine sources.
 - [ ] Host gitlink equals engine commit before cloud launch.
 - [ ] Both commits are exact, clean, and pushed for paid runs.
+- [ ] J0 builds the bootstrap capsule twice with byte-identical results and validates it against `synaptic-bootstrap-capsule/v1`.
+- [ ] J binds the accepted J0 capsule manifest SHA-256 in the trusted launcher; the inline verifier accepts only bounded regular files and copies verified bytes from the read-only mount to private scratch.
+- [ ] Local checkout and verified-capsule checkout execute the same `bootstrap_core`; no shell, inline, or provider-local checkout model exists.
+- [ ] After J0 passes, J-owned hermetic HF client fixtures prove explicit `read_only=True` volume construction and fail closed on missing or drifted support without invoking `run_job`.
+- [ ] Profile B immutable-URL transport is never automatic and remains disabled pending a later N approval; profile A digest-pinned images remain a deferred hardened profile.
 - [ ] Canonical checkout clones host and initializes submodules recursively.
 - [ ] Remote bootstrap verifies source/config/plug-in/input hashes before GPU work.
 - [ ] Dual clone still verifies the host gitlink relationship.
-- [ ] HF Jobs passes first.
+- [ ] HF Jobs passes first; no live mounted-volume capability is claimed until the protected provider smoke proves it.
 - [ ] Modal and RunPod adopt the same lock/layout without schema forks.
 
 ### Compatibility and evidence
@@ -1603,6 +1665,7 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - [ ] Existing lineage and historical tracking files are not rewritten.
 - [ ] Engine tree remains byte/Git clean after embedded-host smokes.
 - [ ] `.github/workflows/submodule-contract.yml` passes on Windows and Linux with recursive submodules, editable install, package build, isolated-wheel/runtime-asset checks, skill sync, and no-write checks.
+- [ ] J0 gates are provider-agnostic, hermetic, and cost-free; they test capsule/core/verifier/no-publication behavior and do not import the HF client, inspect job kwargs, upload capsules, mount provider volumes, authenticate, or call `run_job`.
 - [ ] Protected provider smoke requires environment approval; package publication remains absent or blocked until every contract and asset gate is green.
 
 ### Documentation and downstream
@@ -1618,8 +1681,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 - **Overall complexity:** Very High
 - **Primary risk:** Cross-cutting filesystem and source-identity assumptions
-- **Planned existing files modified:** 124 inventory rows
-- **Planned new files/surfaces:** 70 inventory rows including schemas, public facade, workflows, docs, and tests
+- **Planned existing files modified:** 125 inventory rows
+- **Planned new files/surfaces:** 76 inventory rows including schemas, public facade, workflows, docs, bootstrap capsule surfaces, and tests
 - **Provider order:** HF Jobs → Modal → RunPod
 - **Required specialists:** backend/project-context, packaging/API, local runtime/DevOps, cloud provider, test/QA, security, documentation
 - **External dependencies:** None required for the root contract; packaging uses standard Python metadata and `importlib.metadata`
