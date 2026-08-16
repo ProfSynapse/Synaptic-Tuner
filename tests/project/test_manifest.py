@@ -5,7 +5,11 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from tuner.project.errors import ManifestValidationError, ManifestVersionError
-from tuner.project.manifest import load_project_manifest
+from tuner.project.manifest import (
+    ProjectManifest,
+    load_project_manifest,
+    validate_engine_requirement,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -141,3 +145,94 @@ provider:
 def test_all_owned_schemas_are_well_formed() -> None:
     for path in sorted((REPO_ROOT / "schemas").glob("synaptic-*-v1.schema.json")):
         Draft202012Validator.check_schema(json.loads(path.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize(
+    "duplicate_yaml",
+    [
+        """schema_version: synaptic-project/v1
+schema_version: duplicate-value-must-not-leak
+project: {id: test, name: Test}
+engine: {requires: '>=1', api: v1}
+""",
+        """schema_version: synaptic-project/v1
+project: {id: test, name: Test}
+engine: {requires: '>=1', api: v1}
+plugins:
+  bindings:
+    same:
+      kind: renderer
+      api: v1
+      target: safe.module:first
+    same:
+      kind: grader
+      api: v1
+      target: secret.module:value_must_not_leak
+""",
+    ],
+)
+def test_manifest_rejects_duplicate_mapping_keys_without_values(
+    tmp_path: Path, duplicate_yaml: str
+) -> None:
+    path = tmp_path / "synaptic.yaml"
+    path.write_text(duplicate_yaml, encoding="utf-8")
+
+    with pytest.raises(ManifestValidationError) as error:
+        load_project_manifest(path)
+
+    assert error.value.details["reason"] == "duplicate_mapping_key"
+    assert "duplicate-value-must-not-leak" not in str(error.value)
+    assert "duplicate-value-must-not-leak" not in repr(error.value.details)
+    assert "secret.module:value_must_not_leak" not in str(error.value)
+    assert "secret.module:value_must_not_leak" not in repr(error.value.details)
+
+
+def _manifest_with_requirement(tmp_path: Path, requirement: str) -> ProjectManifest:
+    path = tmp_path / "synaptic.yaml"
+    path.write_text(
+        f"""schema_version: synaptic-project/v1
+project: {{id: test, name: Test}}
+engine: {{requires: {requirement!r}, api: v1}}
+""",
+        encoding="utf-8",
+    )
+    return load_project_manifest(path)
+
+
+@pytest.mark.parametrize("engine_version", ["1.5.0", "1.9.0"])
+def test_engine_requirement_accepts_compatible_version(
+    tmp_path: Path, engine_version: str
+) -> None:
+    manifest = _manifest_with_requirement(tmp_path, ">=1.0,<2")
+    validate_engine_requirement(manifest, engine_version)
+
+
+def test_engine_requirement_rejects_incompatible_version(tmp_path: Path) -> None:
+    manifest = _manifest_with_requirement(tmp_path, ">=1.0,<2")
+
+    with pytest.raises(ManifestValidationError) as error:
+        validate_engine_requirement(manifest, "2.0.0")
+
+    assert error.value.details == {
+        "reason": "engine_version_incompatible",
+        "requires": ">=1.0,<2",
+        "engine_version": "2.0.0",
+    }
+
+
+def test_engine_requirement_rejects_invalid_specifier(tmp_path: Path) -> None:
+    manifest = _manifest_with_requirement(tmp_path, "definitely-not-a-specifier")
+
+    with pytest.raises(ManifestValidationError) as error:
+        validate_engine_requirement(manifest, "1.0.0")
+
+    assert error.value.details["reason"] == "invalid_engine_requirement"
+
+
+def test_engine_requirement_rejects_invalid_engine_version(tmp_path: Path) -> None:
+    manifest = _manifest_with_requirement(tmp_path, ">=1")
+
+    with pytest.raises(ManifestValidationError) as error:
+        validate_engine_requirement(manifest, "not-a-version")
+
+    assert error.value.details["reason"] == "invalid_engine_version"

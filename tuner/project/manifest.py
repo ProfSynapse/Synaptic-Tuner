@@ -9,6 +9,8 @@ from typing import Any, Mapping
 
 import yaml
 from jsonschema import Draft202012Validator
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from .context import ProjectContext
 from .errors import (
@@ -30,6 +32,42 @@ _TOP_LEVEL_FIELDS = {
     "plugins",
     "policies",
 }
+
+
+class _DuplicateKeyError(yaml.YAMLError):
+    """Internal parse error whose text never includes YAML values."""
+
+    def __init__(self, key: object, *, line: int, column: int) -> None:
+        self.key = key
+        self.line = line
+        self.column = column
+        super().__init__("Duplicate YAML mapping key")
+
+
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate keys in every mapping."""
+
+    def construct_mapping(
+        self, node: yaml.nodes.MappingNode, deep: bool = False
+    ) -> dict[object, object]:
+        self.flatten_mapping(node)
+        seen: set[object] = set()
+        for key_node, _value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in seen
+            except TypeError:
+                # Delegate invalid, unhashable mapping keys to SafeLoader's
+                # normal validation rather than weakening its semantics.
+                return super().construct_mapping(node, deep=deep)
+            if duplicate:
+                raise _DuplicateKeyError(
+                    key,
+                    line=key_node.start_mark.line + 1,
+                    column=key_node.start_mark.column + 1,
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 
 @dataclass(frozen=True)
@@ -104,7 +142,19 @@ def load_project_manifest(
             details={"path": str(manifest_path)},
         )
     try:
-        parsed = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        parsed = yaml.load(
+            manifest_path.read_text(encoding="utf-8"), Loader=_UniqueKeySafeLoader
+        )
+    except _DuplicateKeyError as exc:
+        raise ManifestValidationError(
+            f"Duplicate YAML mapping key {exc.key!r}",
+            details={
+                "reason": "duplicate_mapping_key",
+                "key": str(exc.key),
+                "line": exc.line,
+                "column": exc.column,
+            },
+        ) from exc
     except (OSError, yaml.YAMLError) as exc:
         raise ManifestValidationError(f"Could not parse project manifest: {exc}") from exc
     if not isinstance(parsed, dict):
@@ -146,6 +196,45 @@ def load_project_manifest(
             stacklevel=2,
         )
     return ProjectManifest(path=manifest_path, data=parsed)
+
+
+def validate_engine_requirement(
+    manifest: ProjectManifest, engine_version: str
+) -> None:
+    """Validate that a running engine version satisfies the host requirement."""
+
+    requirement = manifest.engine_requires
+    try:
+        specifier = SpecifierSet(requirement)
+    except InvalidSpecifier as exc:
+        raise ManifestValidationError(
+            "Project manifest declares an invalid engine version requirement",
+            details={
+                "reason": "invalid_engine_requirement",
+                "requires": requirement,
+            },
+        ) from exc
+
+    try:
+        parsed_version = Version(engine_version)
+    except InvalidVersion as exc:
+        raise ManifestValidationError(
+            "Running engine reports an invalid version",
+            details={
+                "reason": "invalid_engine_version",
+                "engine_version": engine_version,
+            },
+        ) from exc
+
+    if not specifier.contains(parsed_version, prereleases=None):
+        raise ManifestValidationError(
+            "Running engine version does not satisfy the project requirement",
+            details={
+                "reason": "engine_version_incompatible",
+                "requires": requirement,
+                "engine_version": str(parsed_version),
+            },
+        )
 
 
 def _validate_context_roots(context: ProjectContext) -> None:

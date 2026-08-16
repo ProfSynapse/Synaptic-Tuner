@@ -8,7 +8,7 @@ from .config_layers import (
     resolve_config_layers,
 )
 from .context import ProjectContext, discover_project_context, find_nearest_manifest
-from .manifest import ProjectManifest, load_project_manifest
+from .manifest import ProjectManifest, load_project_manifest, validate_engine_requirement
 from .path_refs import PathRef, resolve_path
 from .secrets import SecretRef, redact_secrets, reject_literal_secrets, resolve_secret
 from .source_bundle import (
@@ -43,4 +43,5 @@ __all__ = [
     "resolve_path",
     "resolve_relative_repository_url",
     "resolve_secret",
+    "validate_engine_requirement",
 ]
