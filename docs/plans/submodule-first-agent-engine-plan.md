@@ -510,12 +510,27 @@ Capability descriptor:
   "confirmation": {"required": true, "reason": "gpu"},
   "resumable": true,
   "supports": {
-    "dry_run": true,
-    "json_result": true,
-    "jsonl_events": true
+    "available": true,
+    "dry_run": false,
+    "json_result": false,
+    "jsonl_events": false
   }
 }
 ```
+
+Wave 5 fixes discovery to two import-light operations: `capabilities list` and `capabilities describe [capability_id]`. The parser accepts `--json` in the global or subcommand position, and the router reaches the capability handler before importing the legacy heavyweight handler graph. `tuner`, `tuner.handlers`, and `tuner.cloud` preserve compatibility exports through lazy package resolution.
+
+The accepted built-in registry contains exactly seven descriptors:
+
+1. `training.local-run`
+2. `experiment.run`
+3. `mechinterp.steer`
+4. `evaluation.run`
+5. `generation.batch`
+6. `cloud.launch`
+7. `cloud.inspect`
+
+Discovery is descriptive, not authorization. `cloud.launch` remains registered with `supports.available: false` until node J attaches the provider command to the accepted source-lock/runtime-layout contract and passes the protected launch gates. The other descriptors report their implemented support flags rather than promising JSON, event, or dry-run modes that their handlers do not yet provide.
 
 Result envelope:
 
@@ -533,6 +548,10 @@ Result envelope:
 ```
 
 Event mode is newline-delimited `synaptic-event/v1`. Human output must never be mixed into machine-readable stdout. Diagnostics use stderr, and the final event contains or points to the result.
+
+Machine writers prepare, redact, validate, and strictly serialize a complete payload before the first stdout write. They reject non-string mapping keys, unsupported Python objects, and non-finite floats (`NaN`, positive infinity, and negative infinity), preserve JSON booleans as booleans, emit no partial stdout on failure, and write one redacted JSON diagnostic to stderr.
+
+Redaction is string-aware rather than based on broad substrings. Explicit credential-key variants, authorization/cookie headers, URL userinfo, assignment forms, and caller-supplied sensitive values are redacted recursively. Short explicit secrets are replaced only at Unicode alphanumeric boundaries, including direct, percent-encoded, and base64 forms, so values such as `Q` or `123` do not corrupt benign words or identifiers. Benign descriptor metadata such as `access`, `permission`, `private: false`, `privateMaterial`, `client`, and `clientMetadata` remains intact.
 
 ---
 
@@ -634,6 +653,12 @@ Rules:
 
 Negative tests must cover HTTPS tokens in userinfo, query credentials, fragments, SSH passwords, unapproved hosts, `file://`, protocol rewrite attempts, excessive nesting, an unexpected nested submodule, host-confused URLs, credential leakage in exceptions/events, and a private submodule whose `SecretRef` is absent or scoped to the wrong host.
 
+Wave 5 makes pushed proof exact-origin rather than remote-tracking inference. Local inspection reads the literal local `remote.origin.url` and branch/upstream settings in a scrubbed, noninteractive Git environment. A source is `pushed: true` only when the validated current origin advertises the exact local `HEAD` at the exact `refs/heads/...` upstream; stale `origin/*` containment, a changed origin, detached HEAD, missing origin/upstream, ambiguous output, timeouts, and probe failures fail closed. Rejected URLs and remote stderr are never echoed.
+
+Standalone credentials are declared only through the opaque identifiers `SYNAPTIC_GIT_CREDENTIAL_PROVIDER` and `SYNAPTIC_GIT_CREDENTIAL_NAME`; half-declarations, blank values, and unsupported providers fail before resolution. Controlled SSH is an all-or-none policy declared by `SYNAPTIC_GIT_SSH_EXECUTABLE`, `SYNAPTIC_GIT_SSH_AGENT_SOCKET`, and `SYNAPTIC_GIT_SSH_KNOWN_HOSTS`. It requires an absolute executable, explicit agent socket identifier, and absolute regular non-symlink `known_hosts`; ambient SSH/Git controls are discarded, strict host checking and batch mode are forced, and forwarding, proxy, local-command, and interactive fallbacks are disabled.
+
+Host topology is established before provider selection. The engine path and canonical URL are read from the committed root `.gitmodules` without includes, interpolation, duplicate keys, or config expansion, then matched to the project context, gitlink, engine origin, and requested `source_mode`. A requested mode that disagrees with discovered `standalone`, `superproject`, or `dual_clone` topology fails before provider discovery. The legacy paid-cloud `RepoSource` path is a deprecated standalone compatibility view and may proceed only when it contains the same validated canonical `GitSource`, clean worktree, named branch, and exact pushed proof.
+
 ### Canonical `superproject` mode
 
 1. Validate that the host and engine worktrees are clean for cloud execution.
@@ -708,6 +733,8 @@ Read-only has two different enforcement levels:
 2. **Native-process policy:** the path resolver and engine-managed writers reject source-root outputs, while a pre/post-run Git status plus tree snapshot detects accidental changes. This is policy and detection, not a sandbox. A trusted project plug-in runs with full process authority and can bypass engine-managed path APIs or write directly wherever the native process account permits.
 
 Native no-write contract tests run representative built-in dry runs and CPU-safe operations, compare engine and host-source snapshots before/after, and assert that all engine-managed writes land below the declared `.synaptic` roots. Documentation and capability descriptors must not imply that native trusted plug-ins are contained. Projects needing containment for untrusted code must use a separate read-only container/process boundary; sandboxing is outside this plan.
+
+In standalone mode, engine and project source mounts intentionally project the same source identity while the five writable mounts project `<engine>/.synaptic/{artifacts,state,tracking,cache,tmp}` as explicit Contract 8 carve-outs. Validation walks each lexical child from the source boundary and rejects a symlink, Windows junction, or other reparse-point redirect at `.synaptic` or any individual writable child; validating one safe child never authorizes a redirected sibling.
 
 ---
 
@@ -877,6 +904,22 @@ Gate:
 
 ---
 
+## Accepted Decision and Security Audit Record — 2026-08-16, Wave 5
+
+Wave 5 received an independent PASS for nodes H and I plus the narrow D/H CLI integration and C contract activation. Release identity remains **1.1.0**; this record narrows implemented behavior without rewriting the plan's earlier decisions or authorizing node J provider launch.
+
+Accepted gates and evidence:
+
+- Capability schemas, seven descriptors, strict result/event writers, lazy discovery, and list/describe CLI are active. Focused capability evidence was **14 passed**; joined capability/plug-in/console evidence was **30 passed**; D/H parser and compatibility selections were **56 passed** and **83 passed**.
+- Provider-neutral source lock, checkout, runtime layout, handler wiring, exact-origin proof, and import-light cloud exports are active. Accepted selections reported **56 owned**, **110 HF-adjacent**, **73 CLI**, **7 CloudTrain**, **60 Modal/RunPod-adjacent**, and **9 final checkout** tests passing.
+- Node C activated recursive private checkout, credential cleanup on success/failure, and pre-fetch nested-submodule rejection against local bare repositories. Evidence was **16 focused**, **52 adjacent**, and **50 contract tests passed with zero skips**.
+- Evaluator import/reload no longer takes ownership of caller capture streams; Windows UTF-8 setup occurs only at `main()` and reconfigures eligible TTY streams in place.
+- Hermetic canonical-source fixtures remain with their future implementation owners: HF dependency/eval/backend fixtures are J, Modal is K, RunPod is L, experiment tracking remains E, and evaluator stream capture remains G. These compatibility fixtures do not authorize those providers to bypass their future gates.
+
+Residual boundary: all accepted checkout/security evidence is local and hermetic. No provider job, paid compute, real hosted private-repository checkout, provider authentication, or remote network checkout was exercised. Those remain protected live-provider work for J, then K/L. `cloud.launch` therefore stays unavailable, and local fixture success must not be reported as live-provider validation.
+
+---
+
 ## Exhaustive File Inventory
 
 The inventory is intentionally broader than the first draft because root coupling reaches CLI handlers, discovery, batch execution, evaluator/generation entry points, and provider bootstrap. Every Create and Modify row has exactly one DAG owner. Ownership is validated by the plan audit described below; a worker may not edit another node's row without an explicit root-mediated ownership transfer and inventory update.
@@ -905,7 +948,6 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/project/secrets.py` | `SecretRef` parsing/resolution/redaction boundary | A / Worker 1 |
 | `tuner/project/errors.py` | Stable project/path/source/security errors | A / Worker 1 |
 | `tuner/project/plugins.py` | Manifest/versioned-entry-point/legacy trusted plug-ins; authoritative reserved-namespace metadata validation without import | B / Worker 2 |
-| `tuner/cloud/__init__.py` | Provider-neutral cloud exports | I / Worker 1 |
 | `tuner/cloud/checkout.py` | Superproject/dual-clone secure checkout | I / Worker 1 |
 | `tuner/cloud/runtime_layout.py` | Logical filesystem/mount mapping | I / Worker 1 |
 | `synaptic_tuner/__init__.py` | Supported distribution facade; re-export canonical `1.1.0` version | B / Worker 2 |
@@ -952,13 +994,12 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/contract/test_console_entrypoint.py` | Editable console from unrelated cwd | C / Worker 3 |
 | `tests/contract/test_runtime_assets.py` | Wheel/runtime-asset publication gate | R / Worker 3 |
 | `tests/contract/test_source_url_security.py` | Credential/query/host/scheme negative cases | C / Worker 3 |
-| `tests/contract/test_private_submodule_checkout.py` | Scoped private/nested submodule credentials and policy | C / Worker 3 |
 | `tests/contract/fixtures/host-project/**` | Directory-owned generic host-fixture surface; node C freezes its complete member list before work starts, and wildcard members are not counted as additional literal files | C / Worker 3 |
 | `tests/handlers/test_ml_handler.py` | Host ML declaring-document inputs, artifact-root outputs, unchanged cwd, no temporary config rewrite, and standalone compatibility | G / Worker 1 |
 | `tests/acceptance/submodule_engine/test_acceptance.py` | Independent end-to-end acceptance only | M / independent QA worker |
 | `docs/review/submodule-engine-acceptance.md` | Independent QA/security evidence report | M / independent QA worker |
 
-**Create count after revision: 72 rows.**
+**Create count after Wave 5 reconciliation: 70 rows.**
 
 ### Files to modify
 
@@ -967,6 +1008,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/cli/main.py` | Resolve engine root before dotenv, build context, select the mode-appropriate dotenv, and preserve process values | D / Worker 1 |
 | `tuner/cli/parser.py` | Project/manifest/profile/env-file/event/capability/source flags and canonical CLI version reporting | D / Worker 1 |
 | `tuner/cli/router.py` | Pass context and route new verbs | D / Worker 1 |
+| `tuner/handlers/__init__.py` | Preserve legacy handler exports through lazy resolution without importing the heavyweight handler graph on capability CLI cold start | D / Worker 1 |
 | `tuner/handlers/base.py` | Context roots, compatibility alias, results/events | D / Worker 1 |
 | `shared/utilities/paths.py` | Separate engine resources from host paths; explicit/process/module engine-root precedence | D / Worker 1 |
 | `shared/utilities/env.py` | Single-dotenv selection, `override=False` process-value precedence, and redaction | D / Worker 1 |
@@ -1031,6 +1073,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/surgery_handler.py` | Host config/model/artifact roots | G / Worker 1 |
 | `Evaluator/__main__.py` | Remove source-root import assumption; enter through context | G / Worker 1 |
 | `Evaluator/cli.py` | Context-aware configs/rubrics/results | G / Worker 1 |
+| `tests/cloud/test_evaluator_cli_vllm.py` | Prove evaluator import/reload preserves caller-owned capture streams and Windows UTF-8 setup reconfigures owned TTY streams in place | G / Worker 1 |
 | `Evaluator/interactive_cli.py` | Host scenarios and writable results | G / Worker 1 |
 | `Evaluator/lmstudio_cli.py` | Engine default prompts versus host result roots | G / Worker 1 |
 | `Evaluator/config_loader.py` | Declaring-document/config-root resolution | G / Worker 1 |
@@ -1053,6 +1096,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/cloud_train_handler.py` | Provider-neutral source lock before provider choice | I / Worker 1 |
 | `tuner/handlers/cloud_jobs_handler.py` | Sanitized source/job inspection and context | I / Worker 1 |
 | `tuner/backends/training/cloud/base_cloud.py` | Delegate one-repo source logic to source lock | I / Worker 1 |
+| `tuner/cloud/__init__.py` | Import-light lazy exports for checkout/runtime-layout and existing cloud helpers without eager provider imports | I / Worker 1 |
 | `tests/cloud/test_base_cloud.py` | Source-lock delegation and baseline compatibility | I / Worker 1 |
 | `tuner/handlers/cloud_run_handler.py` | HF source-lock submission | J / Worker 1 |
 | `tuner/handlers/cloud_pipeline_handler.py` | One lock across HF train/eval | J / Worker 1 |
@@ -1070,12 +1114,15 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/backends/training/cloud/_hf_post_training.py` | Preserve source identity across jobs | J / Worker 1 |
 | `Evaluator/cloud_hf_job.py` | Runtime-layout/context bootstrap | J / Worker 1 |
 | `Evaluator/cloud_hf_job_vllm.py` | Runtime-layout/context bootstrap | J / Worker 1 |
+| `tests/cloud/test_cloud_deps.py` | Hermetic canonical-source fixture for HF-adjacent dependency/config coverage | J / Worker 1 |
+| `tests/cloud/test_cloud_eval_handler.py` | Hermetic canonical-source fixture for HF evaluation command/submission coverage | J / Worker 1 |
 | `tests/cloud/test_hf_jobs_backend.py` | Recursive checkout/verification | J / Worker 1 |
 | `tuner/backends/training/cloud/modal_backend.py` | Shared source/runtime contract | K / Worker 2 |
 | `MechInterp/cloud/modal_runner.py` | Modal source-lock checkout/layout | K / Worker 2 |
 | `tests/cloud/test_modal_backend.py` | Modal contract | K / Worker 2 |
 | `tuner/backends/training/cloud/runpod_backend.py` | Shared source/runtime contract | L / Worker 3 |
 | `tests/cloud/test_runpod_backend.py` | RunPod contract | L / Worker 3 |
+| `tests/contract/test_private_submodule_checkout.py` | Activated local-bare-repository gates for recursive private checkout, credential cleanup, and pre-fetch nested-submodule rejection | C / Worker 3 |
 | `README.md` | Hosting/install/ownership/capabilities | N / Worker 2 |
 | `.env.example` | Host roots and secret-ref guidance | N / Worker 2 |
 | `.gitignore` | Engine build/test products only | N / Worker 2 |
@@ -1083,7 +1130,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/cloud-training.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, source-lock, evaluation, generation, deployment, and provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
 | `tests/cli/test_parser.py` | New verbs/flags, env-file selection, process-value precedence, pre-dotenv engine-root resolution, legacy parsing, and CLI/legacy canonical-version coherence | D / Worker 1 |
 
-**Modify count after revision: 117 rows.**
+**Modify count after Wave 5 reconciliation: 124 rows.**
 
 ### Explicit no-change inventory for this initiative
 
@@ -1110,7 +1157,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `shared/validation/**` and `shared/verifiers/**` | Validation behavior is unrelated to root/source reconstruction |
 | `tuner/core/interfaces.py` | Internal interfaces are not made public or redesigned in v1 |
 | `tuner/backends/registry.py` | Execution backend registry stays separate from trusted project plug-ins |
-| `tuner/handlers/__init__.py`, `tuner/handlers/stages/__init__.py` | Export-only modules; router owns registration |
+| `tuner/handlers/stages/__init__.py` | Export-only stage module; its existing registration does not change in this initiative |
 | Existing configs/recipes under `Trainers/`, `Evaluator/`, `SynthChat/`, and `MechInterp/configs/templates/` | Remain bundled defaults/examples; loaders change semantics |
 | Existing `.tracking/**`, run directories, lineage JSON, manifests, and benchmark records | Historical provenance is never rewritten |
 | `.agents/skills/**` and `.claude/skills/**` | Generated mirrors; sync from canonical `.skills/` only |
@@ -1571,8 +1618,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 - **Overall complexity:** Very High
 - **Primary risk:** Cross-cutting filesystem and source-identity assumptions
-- **Planned existing files modified:** 118 inventory rows
-- **Planned new files/surfaces:** 72 inventory rows including schemas, public facade, workflows, docs, and tests
+- **Planned existing files modified:** 124 inventory rows
+- **Planned new files/surfaces:** 70 inventory rows including schemas, public facade, workflows, docs, and tests
 - **Provider order:** HF Jobs → Modal → RunPod
 - **Required specialists:** backend/project-context, packaging/API, local runtime/DevOps, cloud provider, test/QA, security, documentation
 - **External dependencies:** None required for the root contract; packaging uses standard Python metadata and `importlib.metadata`
