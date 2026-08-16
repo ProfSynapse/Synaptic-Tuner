@@ -2,6 +2,7 @@ import json
 import importlib
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -13,6 +14,222 @@ from tuner.cli.main import build_project_context, main as cli_main
 from tuner.cli.parser import create_parser
 from tuner.cli.router import route_command
 from tuner.project import ProjectContext
+
+
+def test_capabilities_parser_supports_list_describe_and_json_placement():
+    parser = create_parser()
+
+    listed = parser.parse_args(["capabilities", "list", "--json"])
+    described = parser.parse_args(
+        ["--json", "capabilities", "describe", "mechinterp.steer"]
+    )
+
+    assert (listed.command, listed.subcommand, listed.capability_id, listed.json) == (
+        "capabilities",
+        "list",
+        None,
+        True,
+    )
+    assert (
+        described.command,
+        described.subcommand,
+        described.capability_id,
+        described.json,
+    ) == ("capabilities", "describe", "mechinterp.steer", True)
+
+
+def test_tuner_legacy_exports_resolve_lazily_and_preserve_normal_errors(tmp_path):
+    engine_root = Path(__file__).parents[2].resolve()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    probe = """
+import json
+import sys
+import tuner
+
+before = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+training_config = tuner.TrainingConfig
+after_config = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+backend_error = tuner.BackendError
+after_error = sorted(name for name in sys.modules if name.startswith("tuner.core."))
+try:
+    tuner.not_a_public_export
+except AttributeError as exc:
+    error = str(exc)
+else:
+    raise AssertionError("unknown package attributes must raise AttributeError")
+print(json.dumps({
+    "before": before,
+    "after_config": after_config,
+    "after_error": after_error,
+    "training_config_module": training_config.__module__,
+    "backend_error_module": backend_error.__module__,
+    "all_contains_exports": all(
+        name in tuner.__all__ for name in ("TrainingConfig", "BackendError")
+    ),
+    "dir_contains_exports": all(
+        name in dir(tuner) for name in ("TrainingConfig", "BackendError")
+    ),
+    "normal_error": "not_a_public_export" in error,
+}))
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["before"] == []
+    expected_core_modules = {
+        "tuner.core.config",
+        "tuner.core.exceptions",
+        "tuner.core.interfaces",
+    }
+    assert set(payload["after_config"]) == expected_core_modules
+    assert set(payload["after_error"]) == expected_core_modules
+    assert payload["training_config_module"] == "tuner.core.config"
+    assert payload["backend_error_module"] == "tuner.core.exceptions"
+    assert payload["all_contains_exports"] is True
+    assert payload["dir_contains_exports"] is True
+    assert payload["normal_error"] is True
+
+
+def test_handler_package_exports_are_lazy_and_isolated(tmp_path):
+    engine_root = Path(__file__).parents[2].resolve()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    probe = """
+import json
+import sys
+import tuner.handlers as handlers
+
+before = sorted(name for name in sys.modules if name.startswith("tuner.handlers."))
+status_handler = handlers.StatusHandler
+after = sorted(name for name in sys.modules if name.startswith("tuner.handlers."))
+try:
+    handlers.not_a_handler
+except AttributeError as exc:
+    error = str(exc)
+else:
+    raise AssertionError("unknown handler attributes must raise AttributeError")
+print(json.dumps({
+    "before": before,
+    "after": after,
+    "module": status_handler.__module__,
+    "all_contains_export": "StatusHandler" in handlers.__all__,
+    "dir_contains_export": "StatusHandler" in dir(handlers),
+    "normal_error": "not_a_handler" in error,
+}))
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["before"] == []
+    assert "tuner.handlers.status_handler" in payload["after"]
+    assert not any(
+        name in payload["after"]
+        for name in (
+            "tuner.handlers.train_handler",
+            "tuner.handlers.eval_handler",
+            "tuner.handlers.ml_handler",
+            "tuner.handlers.cloud_train_handler",
+        )
+    )
+    assert payload["module"] == "tuner.handlers.status_handler"
+    assert payload["all_contains_export"] is True
+    assert payload["dir_contains_export"] is True
+    assert payload["normal_error"] is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["capabilities"],
+        ["capabilities", "unknown"],
+        ["capabilities", "list", "mechinterp.steer"],
+        ["capabilities", "describe"],
+        ["list", "datasets", "unexpected"],
+    ],
+)
+def test_capabilities_parser_rejects_invalid_positional_combinations(argv):
+    with pytest.raises(SystemExit) as exc_info:
+        create_parser().parse_args(argv)
+
+    assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_capability"),
+    [
+        (["capabilities", "list", "--json"], "capabilities.list"),
+        (
+            ["capabilities", "describe", "mechinterp.steer", "--json"],
+            "capabilities.describe",
+        ),
+    ],
+)
+def test_synaptic_capability_discovery_is_import_light_from_unrelated_cwd(
+    tmp_path, arguments, expected_capability
+):
+    engine_root = Path(__file__).parents[2].resolve()
+    module_log = tmp_path / "modules.json"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(engine_root), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    env["SYNAPTIC_TEST_MODULE_LOG"] = str(module_log)
+    probe = (
+        "import json, os, sys; from pathlib import Path; "
+        "from tuner.cli.main import main; code = 0\n"
+        "try: main()\n"
+        "except SystemExit as exc: code = exc.code\n"
+        "Path(os.environ['SYNAPTIC_TEST_MODULE_LOG']).write_text("
+        "json.dumps(sorted(sys.modules)), encoding='utf-8')\n"
+        "raise SystemExit(code)"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, *arguments],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["schema_version"] == "synaptic-result/v1"
+    assert payload["success"] is True
+    assert payload["capability"] == expected_capability
+    imported = set(json.loads(module_log.read_text(encoding="utf-8")))
+    forbidden = {
+        "torch",
+        "transformers",
+        "huggingface_hub",
+        "modal",
+        "runpod",
+    }
+    assert not (forbidden & imported)
 
 
 def test_parser_supports_yes_alias_for_auto_confirm():

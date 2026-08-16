@@ -84,6 +84,12 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
     json_mode = getattr(args, 'json', False)
     command = getattr(args, 'command', None)
 
+    # Capability discovery is deliberately routed before runtime handlers so
+    # agents can inspect the engine without importing ML or provider stacks.
+    if command == "capabilities":
+        from tuner.handlers.capabilities_handler import CapabilitiesHandler
+        return CapabilitiesHandler(args=args, context=context).handle()
+
     if command == "batch-generate":
         from tuner.handlers.batch_generate_handler import BatchGenerateHandler
         return _bind_context(BatchGenerateHandler(args=args), context).handle()

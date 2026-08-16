@@ -21,6 +21,29 @@ import argparse
 from shared.utilities.paths import TRAINING_METHODS
 
 
+class _SynapticArgumentParser(argparse.ArgumentParser):
+    """Validate command-specific positionals used by the flat CLI grammar."""
+
+    def parse_args(self, args=None, namespace=None):
+        parsed = super().parse_args(args=args, namespace=namespace)
+        command = getattr(parsed, "command", None)
+        capability_id = getattr(parsed, "capability_id", None)
+
+        if command != "capabilities":
+            if capability_id is not None:
+                self.error(f"unrecognized arguments: {capability_id}")
+            return parsed
+
+        action = getattr(parsed, "subcommand", None)
+        if action not in {"list", "describe"}:
+            self.error("capabilities requires an action: list or describe")
+        if action == "list" and capability_id is not None:
+            self.error("capabilities list does not accept a capability id")
+        if action == "describe" and capability_id is None:
+            self.error("capabilities describe requires a capability id")
+        return parsed
+
+
 def create_parser() -> argparse.ArgumentParser:
     """
     Create argument parser for Synaptic Tuner CLI.
@@ -62,7 +85,7 @@ def create_parser() -> argparse.ArgumentParser:
         >>> args.list_subcommand
         'datasets'
     """
-    parser = argparse.ArgumentParser(
+    parser = _SynapticArgumentParser(
         description="Synaptic Tuner - Fine-tuning CLI for Nexus MCP",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -92,9 +115,10 @@ Commands:
   experiment-loop  Autonomous hyperparameter search (LLM + surrogate)
   prompt-optimize Deterministic config-first prompt optimization
   surgery     LoRA weight surgery (eval-guided post-training optimization)
+  project     Inspect or validate the selected host project
+  capabilities Discover agent-readable capabilities and their effects
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
-  project     Inspect or validate the selected host project
 
 Flywheel Subcommands:
   flywheel status       Show flywheel system status
@@ -134,6 +158,8 @@ Examples:
   python tuner.py cloud-jobs logs --job professorsynapse/<job-id> --tail 200
   python tuner.py run-experiment --experiment-spec Trainers/cloud/experiments/smollm2_full_cycle_smoke.yaml --yes
   python tuner.py analyze-experiment --experiment-id latest
+  synaptic capabilities list --json
+  synaptic capabilities describe mechinterp.steer --json
   python tuner.py doctor       # Run diagnostics
   python tuner.py doctor --fix     # Auto-fix simple issues
   python tuner.py list datasets    # List datasets
@@ -147,7 +173,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "capabilities", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -160,6 +186,12 @@ Examples:
         nargs="?",
         default=None,
         help="Sub-command (e.g., 'datasets' for list, 'train' for ml)"
+    )
+    parser.add_argument(
+        "capability_id",
+        nargs="?",
+        default=None,
+        help="Capability id (only used with 'capabilities describe')",
     )
 
     # Global flags

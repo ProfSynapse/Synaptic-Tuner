@@ -22,29 +22,42 @@ Entry points:
 
 from __future__ import annotations
 
+from importlib import import_module
+
 from synaptic_tuner._version import __version__
 __author__ = "Synaptic Tuner Team"
 
-# Export key classes for convenience
-from tuner.core.interfaces import (
-    ITrainingBackend,
-    IEvaluationBackend,
-    IHandler,
-    IDiscoveryService,
-)
-from tuner.core.config import (
-    TrainingConfig,
-    CheckpointInfo,
-    UploadConfig,
-    EvalConfig,
-)
-from tuner.core.exceptions import (
-    TunerError,
-    ConfigurationError,
-    BackendError,
-    DiscoveryError,
-    ValidationError,
-)
+_LAZY_EXPORTS = {
+    "ITrainingBackend": ("tuner.core.interfaces", "ITrainingBackend"),
+    "IEvaluationBackend": ("tuner.core.interfaces", "IEvaluationBackend"),
+    "IHandler": ("tuner.core.interfaces", "IHandler"),
+    "IDiscoveryService": ("tuner.core.interfaces", "IDiscoveryService"),
+    "TrainingConfig": ("tuner.core.config", "TrainingConfig"),
+    "CheckpointInfo": ("tuner.core.config", "CheckpointInfo"),
+    "UploadConfig": ("tuner.core.config", "UploadConfig"),
+    "EvalConfig": ("tuner.core.config", "EvalConfig"),
+    "TunerError": ("tuner.core.exceptions", "TunerError"),
+    "ConfigurationError": ("tuner.core.exceptions", "ConfigurationError"),
+    "BackendError": ("tuner.core.exceptions", "BackendError"),
+    "DiscoveryError": ("tuner.core.exceptions", "DiscoveryError"),
+    "ValidationError": ("tuner.core.exceptions", "ValidationError"),
+}
+
+
+def __getattr__(name: str):
+    """Resolve legacy convenience exports only when callers request them."""
+
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
 
 __all__ = [
     # Version
