@@ -17,11 +17,20 @@ Supports --json flag for AI-parseable output.
 """
 
 import logging
+import os
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tuner.backends.training.cloud.base_cloud import resolve_cloud_image
+from tuner.cloud import (
+    build_runtime_layout,
+    build_source_lock,
+    checkout_policy_from_context,
+    ssh_checkout_policy_from_environment,
+    standalone_credential_from_environment,
+)
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -140,6 +149,33 @@ class CloudTrainHandler(BaseHandler):
             "providers": providers,
         }
 
+    def _prepare_source_contract(self):
+        """Build and validate source/layout provenance before provider choice."""
+
+        run_id = getattr(self.args, "run_id", None) or (
+            "cloud-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        )
+        standalone_credential = standalone_credential_from_environment(os.environ)
+        ssh_policy = ssh_checkout_policy_from_environment(os.environ)
+        source_lock = build_source_lock(
+            self.context,
+            run_id=run_id,
+            mode=getattr(self.args, "source_mode", None),
+            environment=os.environ,
+            provider_secret=getattr(self, "_source_provider_secret", None),
+            credential_helper=getattr(self, "_source_credential_helper", None),
+            standalone_credential=standalone_credential,
+            ssh_policy=ssh_policy,
+        )
+        policy = checkout_policy_from_context(
+            self.context,
+            ssh_policy=ssh_policy,
+            source_lock=source_lock,
+        )
+        policy.validate(source_lock.project_source.location)
+        policy.validate(source_lock.engine_source.location)
+        return source_lock, build_runtime_layout(self.context), policy
+
     def _build_provider_menu(self, providers: List[Dict]) -> List[Tuple[str, str]]:
         """
         Build menu options for provider selection.
@@ -189,6 +225,14 @@ class CloudTrainHandler(BaseHandler):
             return 0
 
         print_header("CLOUD TRAINING", "Train models on cloud GPU providers")
+
+        # Source identity, cleanliness, pushed state, policy, and filesystem
+        # layout are established before provider selection or paid execution.
+        try:
+            source_lock, runtime_layout, checkout_policy = self._prepare_source_contract()
+        except Exception as exc:
+            print_error(f"Cloud source preflight failed: {exc}")
+            return 1
 
         # Step 1: Check provider availability
         providers = self._get_provider_status()
@@ -248,6 +292,11 @@ class CloudTrainHandler(BaseHandler):
         try:
             config = backend.load_config(method)
             config = self._apply_training_overrides(config)
+            # Provider integrations consume these canonical objects as they
+            # migrate; attaching rather than re-modeling keeps one source SSOT.
+            config.source_lock = source_lock
+            config.runtime_layout = runtime_layout
+            config.checkout_policy = checkout_policy
         except Exception as e:
             print_error(f"Failed to load configuration: {e}")
             return 1

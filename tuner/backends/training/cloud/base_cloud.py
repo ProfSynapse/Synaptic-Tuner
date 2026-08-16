@@ -23,6 +23,8 @@ from typing import Callable, Optional
 
 from shared.utilities.paths import TRAINING_METHODS
 from tuner.core.exceptions import CloudProviderError
+from tuner.project.errors import SourceLockError
+from tuner.project.source_bundle import GitSource, RepositoryLocation, inspect_git_source
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +34,12 @@ _GPU_PRICING_CACHE: Optional[dict] = None
 
 @dataclass(frozen=True)
 class RepoSource:
-    """Exact git source metadata for cloud execution."""
+    """Deprecated standalone compatibility view over the canonical GitSource."""
 
     url: str
     branch: str
     commit: str
+    canonical_source: Optional[GitSource] = None
 
 
 def _run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess:
@@ -398,7 +401,11 @@ def resolve_repo_url() -> str:
     )
 
 
-def resolve_repo_source(repo_root: Path) -> RepoSource:
+def resolve_repo_source(
+    repo_root: Path,
+    *,
+    remote_proof: Callable[[RepositoryLocation, str, str], str | bool | None] | None = None,
+) -> RepoSource:
     """
     Resolve the exact repository source for cloud execution.
 
@@ -410,54 +417,37 @@ def resolve_repo_source(repo_root: Path) -> RepoSource:
     - HEAD is reachable from origin/<branch>
     """
     repo_root = Path(repo_root)
-    url = os.environ.get("CLOUD_REPO_URL")
-    if not url:
-        url_result = _run_git(repo_root, ["remote", "get-url", "origin"])
-        url = url_result.stdout.strip() if url_result.returncode == 0 else ""
-    if not url:
+    try:
+        source = inspect_git_source(repo_root, remote_proof=remote_proof)
+        override = os.environ.get("CLOUD_REPO_URL")
+        if override is not None:
+            override_location = RepositoryLocation.parse(override)
+            if override_location.canonical_url != source.location.canonical_url:
+                raise SourceLockError("Cloud repository override does not match origin")
+    except SourceLockError:
+        # Do not echo rejected URLs: they can contain credentials or tokens.
         raise CloudProviderError(
-            "Cannot determine repo URL for cloud code sync. "
-            "Set CLOUD_REPO_URL environment variable or ensure git remote 'origin' is configured."
-        )
+            "Cloud repository source failed canonical identity validation."
+        ) from None
 
-    branch_result = _run_git(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])
-    branch = branch_result.stdout.strip()
-    if branch_result.returncode != 0 or not branch or branch == "HEAD":
-        raise CloudProviderError(
-            "Cloud training requires a named git branch. "
-            "Check out a branch instead of a detached HEAD."
-        )
-
-    status_result = _run_git(repo_root, ["status", "--porcelain", "--untracked-files=no"])
-    if status_result.returncode != 0:
-        raise CloudProviderError("Failed to inspect git status for cloud source validation.")
-    if status_result.stdout.strip():
+    if source.dirty:
         raise CloudProviderError(
             "Cloud training requires a clean tracked worktree. "
             "Commit or stash tracked changes before launching a remote job."
         )
-
-    commit_result = _run_git(repo_root, ["rev-parse", "HEAD"])
-    commit = commit_result.stdout.strip()
-    if commit_result.returncode != 0 or not commit:
-        raise CloudProviderError("Failed to resolve HEAD commit for cloud source validation.")
-
-    remote_ref = f"origin/{branch}"
-    remote_result = _run_git(repo_root, ["rev-parse", "--verify", remote_ref])
-    if remote_result.returncode != 0:
+    if not source.branch:
         raise CloudProviderError(
-            f"Cloud training requires a pushed remote branch. "
-            f"Remote ref '{remote_ref}' was not found."
+            "Cloud training requires a named git branch. "
+            "Check out a branch instead of a detached HEAD."
         )
-
-    pushed_result = _run_git(repo_root, ["merge-base", "--is-ancestor", commit, remote_ref])
-    if pushed_result.returncode != 0:
-        raise CloudProviderError(
-            f"Cloud training requires the exact commit to be pushed. "
-            f"Commit {commit[:8]} is not reachable from {remote_ref}."
-        )
-
-    return RepoSource(url=url, branch=branch, commit=commit)
+    if not source.pushed:
+        raise CloudProviderError("Cloud training requires the exact commit to be pushed.")
+    return RepoSource(
+        url=source.location.canonical_url,
+        branch=source.branch,
+        commit=source.commit,
+        canonical_source=source,
+    )
 
 
 def poll_until_done(
