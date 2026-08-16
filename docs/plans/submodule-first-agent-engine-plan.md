@@ -161,7 +161,7 @@ The engine change is successful when the downstream repository can remove cwd sw
 1. A Git submodule is a repository embedded at a path in a superproject, and the superproject records the commit expected at that path. `git submodule update` checks out the commit recorded by the superproject; `--recursive` extends that behavior to nested submodules. This supports exact dependency pinning and is the basis for the canonical cloud checkout. See the [Git submodule command documentation](https://git-scm.com/docs/git-submodule) and [Git submodule guide](https://git-scm.com/docs/gitsubmodules).
 2. Git submodule status distinguishes an uninitialized submodule, a checkout that differs from the recorded gitlink, and a conflicted submodule. The cloud preflight must make those states explicit rather than treating engine `HEAD` alone as sufficient. See [Git's submodule status semantics](https://git-scm.com/docs/git-submodule#Documentation/git-submodule.txt-status--cached--recursive--ltpathgt82308203).
 3. GitHub's official checkout action supports recursive submodule checkout. CI should use `submodules: recursive` and should still verify the exact gitlink after checkout. See [actions/checkout](https://github.com/actions/checkout).
-4. Python console commands and plug-in discovery have standardized entry-point semantics. The `synaptic` command should use a `console_scripts` entry point, while installed plug-ins should use a dedicated entry-point group. See the [PyPA entry-points specification](https://packaging.python.org/en/latest/specifications/entry-points/).
+4. Python console commands and plug-in discovery have standardized entry-point semantics. The `synaptic` command should use a `console_scripts` entry point, while installed plug-ins should use the dedicated, versioned `synaptic_tuner.plugins.<kind>.<vN>` entry-point group namespace defined by this plan. See the [PyPA entry-points specification](https://packaging.python.org/en/latest/specifications/entry-points/).
 5. A `src/` layout reduces accidental imports from the repository root, but adopting it now would combine packaging with a high-risk repository-wide import migration. The public facade can be added without a full layout conversion; a future packaging RFC may revisit it. See [PyPA's src-layout discussion](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/).
 6. Semantic Versioning applies only after a public API is declared. This plan versions the manifest, source lock, capability schema, result/event envelopes, and `synaptic_tuner.api.v1`; it does not promise stability for all current internal modules. See [Semantic Versioning 2.0.0](https://semver.org/).
 7. Host `AGENTS.md` files should remain authoritative for host-project agent instructions. The engine should expose machine-readable capabilities and generic operational context, not copy consumer instructions into the submodule. See the [AGENTS.md convention](https://agents.md/).
@@ -198,6 +198,8 @@ The engine change is successful when the downstream repository can remove cwd sw
 | Architectural posture | Submodule-first, not submodule-coupled | Exact pins without cwd/path coupling |
 | Internal project subsystem | `tuner/project/**` | One owner for roots, paths, manifests, configuration, plug-ins, and sources |
 | Public Python facade | `synaptic_tuner/api/v1` | Stable surface without freezing internals |
+| Initial public release | Synaptic Tuner `1.1.0`; `synaptic_tuner._version.__version__` is canonical | Records the approved additive release and prevents package, public, legacy, and CLI version drift |
+| Engine/environment precedence | Resolve engine root before dotenv; select one mode-appropriate dotenv; preserve existing process values | Prevents a dotenv file from redirecting engine code or overwriting operator/provider environment |
 | Host manifest | `synaptic.yaml`, schema `synaptic-project/v1` | Visible, versioned project identity |
 | Strict path mode | `project_v1` | Deterministic config-relative and URI semantics |
 | Compatibility mode | Standalone legacy when no host contract is selected | Prevents an involuntary breaking release |
@@ -210,7 +212,7 @@ The engine change is successful when the downstream repository can remove cwd sw
 | Runtime filesystem mapping | `tuner/cloud/runtime_layout.py` | One mapping shared by local Docker and cloud providers |
 | Provider order | HF Jobs, then Modal, then RunPod | Proves the current canonical cloud lane first |
 | Plug-in trust | Full-authority trusted extensions | Honest threat model; no false sandbox claim |
-| Plug-in compatibility | Logical bindings and entry points, with raw `module:callable` adapter | Improves discovery without breaking current configs |
+| Plug-in compatibility | Logical bindings, authoritative versioned entry-point groups, and raw `module:callable` adapter | Improves discovery without breaking current configs while making installed kind/API metadata verifiable without import |
 | Wheel release | Gated on a defined runtime-asset boundary | The engine depends on scripts/configs outside `tuner`; a premature wheel would be incomplete |
 | Downstream adoption | Separate Epistemic-Humility PR | Keeps generic engine review separate from consumer migration |
 | Historical records | No rewrites | Existing provenance remains evidence of the execution contract at that time |
@@ -249,16 +251,16 @@ If the config document and cwd discover different manifests, fail with `PROJECT_
 
 ### Engine-root rules
 
-- Source execution derives the engine root from package/module resources.
-- Installed execution uses package-resource metadata and the configured runtime-asset boundary.
-- `SYNAPTIC_ENGINE_ROOT` is a development/test override, not normal host configuration.
+- Engine-root precedence is: explicit Python `engine_root` argument, then the pre-existing process value of `SYNAPTIC_ENGINE_ROOT`, then the package/module-location fallback.
+- The package/module-location fallback derives the engine root from package/module resources for source execution and uses package-resource metadata plus the configured runtime-asset boundary for installed execution.
+- `SYNAPTIC_ENGINE_ROOT` is a process-level development/test override, not normal host or dotenv configuration.
+- Engine-root resolution completes before any dotenv file is selected or loaded. A value read from `--env-file`, host `.env`, or standalone engine `.env` cannot retroactively change the resolved engine root.
 - The host manifest cannot silently redirect the engine implementation root.
 
 ### Environment loading
 
-- Explicit `--env-file` is highest priority.
-- Host mode loads the host `.env` if present.
-- Standalone legacy mode retains engine-root `.env` behavior.
+- Dotenv **file selection** is: explicit `--env-file`; otherwise host `.env` in host mode; otherwise engine-root `.env` in standalone legacy mode. This ordering selects a file and is not value precedence.
+- The selected dotenv is loaded with `override=False`; pre-existing process environment values win over values in that file.
 - Host mode does not automatically load the engine checkout's `.env`.
 - Secrets are never copied into source locks, resolved configs, events, or artifacts.
 
@@ -408,7 +410,7 @@ from synaptic_tuner.api.v1 import (
 )
 ```
 
-The v1 facade re-exports stable contract types. It does not re-export all current `tuner`, `shared`, trainer, evaluator, or MechInterp internals.
+The v1 facade re-exports stable contract types. It does not re-export all current `tuner`, `shared`, trainer, evaluator, or MechInterp internals. Synaptic Tuner `1.1.0` is the first release governed by this facade. `synaptic_tuner._version.__version__` is the canonical version source; `synaptic_tuner.__version__`, legacy `tuner.__version__`, distribution metadata, and CLI-reported version must derive from it and agree exactly.
 
 ### Plug-in signatures
 
@@ -436,8 +438,17 @@ class PluginFactory(Protocol):
 Discovery precedence:
 
 1. host-manifest binding;
-2. installed entry point in `synaptic_tuner.plugins`;
+2. installed entry point in an authoritative versioned group `synaptic_tuner.plugins.<kind>.<vN>`;
 3. legacy raw `module:callable` adapter.
+
+Installed entry-point metadata contract:
+
+- The entry-point group, not a caller-supplied request, is authoritative for both plug-in kind and public API major. For example, `synaptic_tuner.plugins.renderer.v1` declares renderer kind and v1 compatibility.
+- Bulk discovery enumerates and validates the complete reserved `synaptic_tuner.plugins.*` namespace before applying a requested kind/API filter.
+- Every reserved group must have exactly the `synaptic_tuner.plugins.<kind>.<vN>` shape and name a supported kind and API version. Malformed, unversioned, or unsupported reserved groups fail closed.
+- Metadata discovery and all rejection paths operate without importing or loading plug-in code. Code is imported only through the existing explicit trusted-load boundary after metadata and the requested contract agree.
+- Entry points outside the reserved `synaptic_tuner.plugins.*` namespace are unrelated and ignored.
+- Manifest bindings retain first precedence, and the legacy raw adapter remains last; this metadata contract does not change either compatibility path.
 
 Configs may use:
 
@@ -454,7 +465,7 @@ Trust rules:
 - Path containment protects engine-managed reads/writes; it does not sandbox plug-in code.
 - Cloud launch must include plug-in identity/hash in the source lock.
 - Imports are validated before GPU or paid submission.
-- Duplicate bindings and API-kind mismatches are fatal.
+- Duplicate bindings, malformed or unsupported reserved entry-point groups, and API-kind mismatches are fatal before plug-in import.
 
 ---
 
@@ -717,15 +728,16 @@ Native no-write contract tests run representative built-in dry runs and CPU-safe
 
 Release rules:
 
-1. Schema majors and `synaptic_tuner.api.v1` are supported contracts.
-2. Internal modules remain free to evolve unless explicitly re-exported by the public facade.
-3. Additive same-major schema fields are permitted; incompatible changes require a new schema/API major.
-4. Legacy mode deprecations require warnings and at least one minor release before removal.
-5. The console entry point may initially be supported for editable/source installs.
-6. A self-contained wheel cannot be published until all required runtime assets are inventoried and one of these boundaries is approved:
+1. Synaptic Tuner `1.1.0` is the approved initial release for the public facade. `synaptic_tuner._version.__version__` is canonical, and the public facade, legacy compatibility namespace, distribution metadata, and CLI version output must remain coherent with it.
+2. Schema majors and `synaptic_tuner.api.v1` are supported contracts.
+3. Internal modules remain free to evolve unless explicitly re-exported by the public facade.
+4. Additive same-major schema fields are permitted; incompatible changes require a new schema/API major.
+5. Legacy mode deprecations require warnings and at least one minor release before removal.
+6. The console entry point may initially be supported for editable/source installs.
+7. A self-contained wheel cannot be published until all required runtime assets are inventoried and one of these boundaries is approved:
    - package trainer/evaluator/MechInterp scripts, schemas, templates, and launch assets as package data; or
    - declare an external engine-runtime checkout as a required installation component.
-7. Wheel CI must install into an empty environment and run representative local, config, and capability smokes without access to the source checkout before publication is allowed.
+8. Wheel CI must install into an empty environment and run representative local, config, and capability smokes without access to the source checkout before publication is allowed.
 
 ---
 
@@ -763,7 +775,8 @@ Gate:
 Deliver:
 
 - Global project flags.
-- Context-aware environment loading.
+- Pre-dotenv engine-root resolution using explicit Python argument, process override, then module fallback.
+- Context-aware single-dotenv selection with process-environment-preserving `override=False` loading.
 - Base handler root properties.
 - Host tracking/state/artifact defaults.
 - Standalone compatibility tests.
@@ -772,6 +785,7 @@ Gate:
 
 - Existing standalone smoke commands remain behaviorally equivalent.
 - Host-mode dry runs create no files below engine root.
+- Explicit `--env-file`, implicit host `.env`, and standalone engine `.env` selection tests pass without overwriting existing process values or retroactively changing engine root.
 
 ### Phase 3: Public facade, plug-ins, and MechInterp
 
@@ -779,12 +793,15 @@ Deliver:
 
 - Source/editable package metadata and `synaptic` console script.
 - `synaptic_tuner.api.v1`.
-- Manifest/entry-point/legacy plug-in resolution.
+- Canonical `1.1.0` version propagation across the public facade, legacy namespace, package metadata, and CLI reporting.
+- Manifest/versioned-entry-point/legacy plug-in resolution, with authoritative kind/API group metadata and import-free fail-closed validation of the reserved namespace.
 - Context-aware MechInterp configs, pipelines, graders, renderers, and outputs.
 
 Gate:
 
 - Reference host MechInterp dry runs work from unrelated cwd without manual `PYTHONPATH`.
+- Every supported version surface reports `1.1.0` from the canonical version source.
+- Installed plug-in discovery rejects malformed, unversioned, unsupported, and requested-contract-mismatched reserved groups without importing plug-in code; unrelated entry-point groups are ignored.
 
 ### Phase 4: Local Docker and discovery
 
@@ -886,12 +903,12 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/project/source_bundle.py` | Sole source-lock model, Git/gitlink inspection, sanitized URLs | A / Worker 1 |
 | `tuner/project/secrets.py` | `SecretRef` parsing/resolution/redaction boundary | A / Worker 1 |
 | `tuner/project/errors.py` | Stable project/path/source/security errors | A / Worker 1 |
-| `tuner/project/plugins.py` | Manifest/entry-point/legacy trusted plug-ins | B / Worker 2 |
+| `tuner/project/plugins.py` | Manifest/versioned-entry-point/legacy trusted plug-ins; authoritative reserved-namespace metadata validation without import | B / Worker 2 |
 | `tuner/cloud/__init__.py` | Provider-neutral cloud exports | I / Worker 1 |
 | `tuner/cloud/checkout.py` | Superproject/dual-clone secure checkout | I / Worker 1 |
 | `tuner/cloud/runtime_layout.py` | Logical filesystem/mount mapping | I / Worker 1 |
-| `synaptic_tuner/__init__.py` | Supported distribution facade | B / Worker 2 |
-| `synaptic_tuner/_version.py` | Public/distribution version source | B / Worker 2 |
+| `synaptic_tuner/__init__.py` | Supported distribution facade; re-export canonical `1.1.0` version | B / Worker 2 |
+| `synaptic_tuner/_version.py` | Canonical public/distribution/legacy/CLI version source, initially `1.1.0` | B / Worker 2 |
 | `synaptic_tuner/api/__init__.py` | Public API namespace | B / Worker 2 |
 | `synaptic_tuner/api/v1/__init__.py` | Stable v1 exports | B / Worker 2 |
 | `synaptic_tuner/api/v1/context.py` | Public context/path views | B / Worker 2 |
@@ -907,7 +924,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/capabilities/events.py` | Result/event writers | H / Worker 3 |
 | `tuner/handlers/project_handler.py` | Project validate/inspect/migrate dry-run | D / Worker 1 |
 | `tuner/handlers/capabilities_handler.py` | Capability list/describe | H / Worker 3 |
-| `pyproject.toml` | Editable/source build and console metadata; publication gated | B / Worker 2 |
+| `pyproject.toml` | Editable/source build, canonical dynamic version, console and versioned plug-in group metadata; publication gated | B / Worker 2 |
 | `CHANGELOG.md` | Public contract/release history | N / Worker 2 |
 | `docs/SUBMODULE_HOSTING.md` | Host pin/update/ownership guide | N / Worker 2 |
 | `docs/CONFIG_AND_PATHS.md` | Manifest/layer/path/no-write semantics | N / Worker 2 |
@@ -923,7 +940,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/project/test_config_layers.py` | Merge/source-map/hash | A / Worker 1 |
 | `tests/project/test_source_bundle.py` | Git/gitlink/source-lock serialization | A / Worker 1 |
 | `tests/project/test_secret_refs.py` | Opaque secret refs and redaction | A / Worker 1 |
-| `tests/plugins/test_project_plugins.py` | Binding/entry-point/legacy/trust behavior | B / Worker 2 |
+| `tests/plugins/test_project_plugins.py` | Binding/entry-point/legacy/trust behavior; reserved namespace shape/kind/API fail-closed and no-import cases; public/package canonical-version coherence | B / Worker 2 |
 | `tests/capabilities/test_registry.py` | Descriptor discovery | H / Worker 3 |
 | `tests/capabilities/test_events.py` | JSON/JSONL protocol | H / Worker 3 |
 | `tests/cloud/test_checkout.py` | Superproject/dual-clone/security checkout | I / Worker 1 |
@@ -945,13 +962,13 @@ The inventory is intentionally broader than the first draft because root couplin
 
 | File | Exact responsibility | DAG owner |
 |---|---|---|
-| `tuner/cli/main.py` | Build context and load correct env | D / Worker 1 |
-| `tuner/cli/parser.py` | Project/manifest/profile/event/capability/source flags | D / Worker 1 |
+| `tuner/cli/main.py` | Resolve engine root before dotenv, build context, select the mode-appropriate dotenv, and preserve process values | D / Worker 1 |
+| `tuner/cli/parser.py` | Project/manifest/profile/env-file/event/capability/source flags and canonical CLI version reporting | D / Worker 1 |
 | `tuner/cli/router.py` | Pass context and route new verbs | D / Worker 1 |
 | `tuner/handlers/base.py` | Context roots, compatibility alias, results/events | D / Worker 1 |
-| `shared/utilities/paths.py` | Separate engine resources from host paths | D / Worker 1 |
-| `shared/utilities/env.py` | Context-aware env and redaction | D / Worker 1 |
-| `tuner/__init__.py` | Version/compatibility linkage | D / Worker 1 |
+| `shared/utilities/paths.py` | Separate engine resources from host paths; explicit/process/module engine-root precedence | D / Worker 1 |
+| `shared/utilities/env.py` | Single-dotenv selection, `override=False` process-value precedence, and redaction | D / Worker 1 |
+| `tuner/__init__.py` | Legacy compatibility re-export of canonical `synaptic_tuner._version.__version__` (`1.1.0` initially) | D / Worker 1 |
 | `tuner/handlers/status_handler.py` | Report project/engine/source mode | D / Worker 1 |
 | `tuner/handlers/doctor_handler.py` | Validate roots/assets/plugins/gitlink/source security | D / Worker 1 |
 | `tuner/handlers/main_menu_handler.py` | Display project/engine identity | D / Worker 1 |
@@ -1061,7 +1078,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `.gitignore` | Engine build/test products only | N / Worker 2 |
 | `AGENTS.md` | No-write/source-lock/config-root process | N / Worker 2 |
 | `.skills/fine-tuning/SKILL.md`<br>`.skills/fine-tuning/reference/cloud-training.md`<br>`.skills/fine-tuning/reference/modal-jobs.md`<br>`.skills/fine-tuning/reference/runpod-jobs.md`<br>`.skills/evaluation/SKILL.md`<br>`.skills/evaluation/reference/cli-commands.md`<br>`.skills/synethetic-data-generation/SKILL.md`<br>`.skills/synethetic-data-generation/reference/cli-commands.md`<br>`.skills/upload-deployment/SKILL.md` | Exact canonical host-mode, source-lock, evaluation, generation, deployment, and provider-command guidance; modify only after the corresponding commands exist | N / Worker 2 |
-| `tests/cli/test_parser.py` | New verbs/flags and legacy parsing | D / Worker 1 |
+| `tests/cli/test_parser.py` | New verbs/flags, env-file selection, process-value precedence, pre-dotenv engine-root resolution, legacy parsing, and CLI/legacy canonical-version coherence | D / Worker 1 |
 
 **Modify count after revision: 117 rows.**
 
@@ -1188,10 +1205,11 @@ git status --short
 | Project mode | Standalone legacy, explicit host root, manifest discovery |
 | Engine location | Repository root, nonstandard nested submodule path |
 | Invocation cwd | Host root, config directory, engine root, unrelated directory |
-| Installation | Source wrapper, `python -m tuner`, editable `synaptic` console |
+| Environment | Explicit `--env-file`, implicit host `.env`, standalone engine `.env`, existing process value, pre-dotenv engine-root override |
+| Installation | Source wrapper, `python -m tuner`, editable `synaptic` console; all version surfaces report canonical `1.1.0` |
 | Cloud source | Superproject recursive checkout, dual clone |
 | Path behavior | Relative, every URI scheme, Windows absolute, symlink escape |
-| Plug-ins | Manifest local, installed entry point, legacy callable, mismatch |
+| Plug-ins | Manifest local, versioned installed entry point, legacy callable, malformed/unversioned/unsupported reserved group, requested kind/API mismatch, unrelated group, no-import rejection |
 | Output | Human, JSON result, JSONL events |
 
 ### Owned CI and release gates
@@ -1207,7 +1225,7 @@ git status --short
 5. install the repository editable and smoke the `synaptic` console from an unrelated cwd;
 6. build sdist and wheel without publishing;
 7. install the wheel into a fresh isolated environment with no source checkout on `PYTHONPATH`;
-8. run runtime-asset and console/capability smokes from that isolated install;
+8. assert source, editable, built-distribution, public, legacy, and CLI version surfaces all resolve canonically to `1.1.0`, then run runtime-asset and console/capability smokes from that isolated install;
 9. run canonical skill sync in check mode;
 10. run `git diff --check` and assert the engine checkout is clean after host-mode tests;
 11. upload test/build reports but never artifacts containing credentials or private source URLs.
@@ -1222,7 +1240,7 @@ No package publication workflow is added in this plan. Publication remains prohi
 - source-security negative tests are green;
 - skill mirrors are synchronized;
 - independent QA/security acceptance is approved;
-- the owner chooses the initial public version.
+- the approved `1.1.0` version is derived from `synaptic_tuner._version.__version__` and matches public, legacy, distribution, and CLI surfaces.
 
 ### No-write gate
 
@@ -1308,9 +1326,12 @@ This is a separate PR after the engine contract is merged and pinned.
 |---|---:|---:|---|
 | Root assumptions are more widespread than the inventory | High | High | `rg` audit, context adapter, contract fixture, update inventory before touching new files |
 | Relative-path behavior changes existing configs | High | High | Strict semantics only in `project_v1`; standalone remains legacy |
+| Dotenv selection is mistaken for value precedence or redirects engine root | Medium | High | Resolve engine root before dotenv, load only the selected mode-appropriate file with `override=False`, and test all three precedence axes |
 | Local Docker refactor breaks Windows copy mode | Medium | High | Dedicated Windows tests and separate logical layout mapper |
 | Remote host inputs are untracked/private | Medium | High | Declared transport required; fail before paid work |
 | Plug-in API freezes too much | Medium | Medium | Narrow public protocols; keep execution backends internal |
+| Installed plug-in metadata is caller-inferred or a malformed reserved group is filtered out | Medium | High | Make `synaptic_tuner.plugins.<kind>.<vN>` authoritative, validate the whole reserved namespace before filtering, and fail without import |
+| Public, legacy, package, and CLI versions drift | Medium | High | Keep `synaptic_tuner._version.__version__` canonical and assert every surface equals approved release `1.1.0` |
 | Wheel omits runtime scripts/configs | High if rushed | High | Publication gate and empty-environment asset tests |
 | Duplicate provenance models diverge | Medium | High | One `source_bundle.py` and one source-lock schema; other lineage references it |
 | Tracking race becomes worse | Medium | Medium | Reproduce current failure, add locking/atomic-write tests, report separately |
@@ -1326,12 +1347,14 @@ This is a separate PR after the engine contract is merged and pinned.
 
 Joseph approved all six owner decisions on 2026-08-16. These are now implementation constraints rather than open questions.
 
-1. **Initial public version:** align the first distribution version that declares `synaptic_tuner.api.v1` and schema v1 with the next planned Synaptic Tuner release. Do not invent `1.0.0` solely for this refactor.
+1. **Initial public version:** Joseph confirmed on 2026-08-16 that the next Synaptic Tuner release is `1.1.0`. That release is the first distribution version declaring `synaptic_tuner.api.v1` and schema v1. `synaptic_tuner._version.__version__` is canonical; `synaptic_tuner.__version__`, legacy `tuner.__version__`, package metadata, and CLI reporting must derive from it and agree. The earlier instruction not to invent `1.0.0` is preserved as superseded rationale: `1.0.0` was rejected as an unconfirmed value for this refactor, not as a statement about historical repository identifiers.
 2. **Legacy deprecation duration:** retain legacy compatibility for at least two minor releases and through one successful EHR migration. Legacy mode remains on the eventual removal roadmap; the compatibility window is a migration runway, not an indefinite support promise. Removal requires a separately reviewed breaking-release decision and migration evidence.
 3. **Dual-clone delivery timing:** include dual-clone validation and schema support in the first release, then add provider execution after canonical superproject mode passes its gates.
 4. **Checked-in derived outputs:** allow selected summaries to move from `.synaptic/artifacts` into source-controlled project directories only through an explicit `export` capability. Normal run output never writes into host source.
 5. **Wheel runtime boundary:** defer public wheel publication until the runtime-asset inventory measures and resolves wheel size, editable-install behavior, shell-script needs, package resources, and container launch requirements.
 6. **Tracking race scope:** fix the pre-existing `RunRegistry` concurrency race during the state-root phase in its own reviewable commit with a regression test.
+
+The Wave 2 plug-in contract was clarified on 2026-08-16: installed plug-ins declare authoritative kind and API-major metadata through `synaptic_tuner.plugins.<kind>.<vN>`. Bulk discovery validates the complete reserved namespace before filtering; malformed, unversioned, and unsupported reserved groups fail closed without import, while unrelated groups are ignored. Manifest precedence and explicit trusted loading remain unchanged.
 
 ---
 
@@ -1462,6 +1485,9 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 ### Paths and configuration
 
+- [ ] Engine root resolves before dotenv as explicit Python `engine_root` > process `SYNAPTIC_ENGINE_ROOT` > package/module-location fallback; dotenv cannot change the result retroactively.
+- [ ] Dotenv file selection is explicit `--env-file` > host `.env` in host mode > engine-root `.env` in standalone legacy mode.
+- [ ] Existing process environment values win over the selected dotenv through `override=False` loading.
 - [ ] Bare config paths resolve from their declaring documents.
 - [ ] URI schemes resolve portably on Windows and Linux.
 - [ ] Symlink/traversal escapes fail closed.
@@ -1473,8 +1499,10 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 ### API and plug-ins
 
 - [ ] `synaptic_tuner.api.v1` exports only approved contract types.
+- [ ] `synaptic_tuner._version.__version__` is `1.1.0` and is the single source for the public, legacy, distribution, and CLI version surfaces.
 - [ ] `synaptic` console works in an editable/source installation.
-- [ ] Manifest, installed-entry-point, and legacy callable plug-ins work.
+- [ ] Manifest, authoritative `synaptic_tuner.plugins.<kind>.<vN>` installed-entry-point, and legacy callable plug-ins work in the declared precedence order.
+- [ ] Bulk discovery validates the entire reserved plug-in namespace before filtering; malformed, unversioned, unsupported, and requested-contract-mismatched entries fail closed without import, while unrelated groups are ignored.
 - [ ] Plug-in identity/API/source is recorded.
 - [ ] Documentation says plug-ins are trusted full-authority code, not sandboxed.
 - [ ] Wheel publication remains blocked until runtime-asset tests pass.
