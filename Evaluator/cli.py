@@ -16,15 +16,6 @@ from typing import Any, Dict, List
 
 import yaml
 
-# Force UTF-8 output for Windows to handle unicode characters like ✓
-if sys.platform == "win32":
-    import io
-    # Check if stdout/stderr are attached to a terminal or file (have buffer)
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    if hasattr(sys.stderr, 'buffer'):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
 # Rich console for colored output (optional)
 try:
     from rich.console import Console
@@ -80,6 +71,30 @@ from tuner.project import (
     load_project_manifest,
     resolve_path,
 )
+
+
+def _configure_utf8_console() -> None:
+    """Best-effort UTF-8 setup for owned Windows console streams.
+
+    Stream objects can belong to a caller, test capture layer, or redirect.  Do
+    not replace or wrap them; a supported in-place console reconfiguration is
+    the only safe adjustment here.
+    """
+    if sys.platform != "win32":
+        return
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        isatty = getattr(stream, "isatty", None)
+        if not callable(reconfigure) or not callable(isatty):
+            continue
+        try:
+            if isatty():
+                reconfigure(encoding="utf-8")
+        except (OSError, TypeError, ValueError):
+            # Some redirected/capture streams expose these methods without
+            # supporting runtime encoding changes.
+            continue
 
 
 def load_display_config(config_dir: Path) -> Dict[str, Any]:
@@ -564,6 +579,7 @@ def main(
     project_context: ProjectContext | None = None,
 ) -> int:
     """Main entry point for CLI evaluation."""
+    _configure_utf8_console()
     args = parse_args(argv or sys.argv[1:])
     context = project_context or _evaluator_context(args)
 
