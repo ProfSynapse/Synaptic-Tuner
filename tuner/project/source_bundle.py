@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 from .errors import RepositoryUrlError, SourceLockError
@@ -23,6 +24,10 @@ _SCP_RE = re.compile(
     r"(?P<path>[A-Za-z0-9._~/-]+)$"
 )
 _SAFE_REPO_PATH_RE = re.compile(r"^/[A-Za-z0-9._~/-]+$")
+_REMOTE_BRANCH_REF_RE = re.compile(r"^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_REMOTE_PROOF_TIMEOUT_SECONDS = 3
+
+RemoteProof = Callable[["RepositoryLocation", str, str], str | bool | None]
 
 
 def _normalize_repo_path(value: str) -> str:
@@ -307,6 +312,38 @@ class SourceLock:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
 
 
+def _minimal_git_environment() -> dict[str, str]:
+    """Return an ambient-independent environment for read-only Git inspection."""
+
+    inherited = {
+        key: os.environ[key]
+        for key in (
+            "PATH",
+            "SystemRoot",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "LANG",
+            "LC_ALL",
+        )
+        if key in os.environ
+    }
+    inherited.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "Never",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+    )
+    return inherited
+
+
 def _git(repository: Path, *args: str, allow_failure: bool = False) -> str:
     try:
         result = subprocess.run(
@@ -315,10 +352,74 @@ def _git(repository: Path, *args: str, allow_failure: bool = False) -> str:
             capture_output=True,
             text=True,
             timeout=20,
+            env=_minimal_git_environment(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise SourceLockError(f"Could not inspect Git source at {repository}: {exc}") from exc
     return result.stdout.strip()
+
+
+def _remote_probe_environment() -> dict[str, str]:
+    """Build a minimal noninteractive environment for an untrusted remote probe."""
+
+    inherited = _minimal_git_environment()
+    inherited.update(
+        {
+            "GIT_SSH_COMMAND": (
+                f"ssh -F {os.devnull} -oBatchMode=yes -oClearAllForwardings=yes "
+                "-oProxyCommand=none -oProxyJump=none -oPermitLocalCommand=no "
+                "-oIdentityAgent=none -oIdentitiesOnly=yes -oIdentityFile=none "
+                "-oPreferredAuthentications=none -oCanonicalizeHostname=no"
+            ),
+            "GIT_SSH_VARIANT": "ssh",
+        }
+    )
+    return inherited
+
+
+def _valid_remote_branch_ref(ref: str) -> bool:
+    return bool(
+        _REMOTE_BRANCH_REF_RE.fullmatch(ref)
+        and ".." not in ref
+        and "//" not in ref
+        and "@{" not in ref
+        and not ref.endswith(("/", ".", ".lock"))
+    )
+
+
+def _remote_ref_sha(location: RepositoryLocation, ref: str) -> str | None:
+    """Return the exact SHA advertised by a validated origin ref, if provable."""
+
+    if location.credential is not None:
+        return None
+    if (
+        not _valid_remote_branch_ref(ref)
+    ):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--exit-code", location.canonical_url, ref],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_REMOTE_PROOF_TIMEOUT_SECONDS,
+            env=_remote_probe_environment(),
+            cwd=Path(location.canonical_url).anchor or Path.cwd().anchor,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    matches: list[str] = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[1] != ref or not _COMMIT_RE.fullmatch(fields[0]):
+            return None
+        matches.append(fields[0].lower())
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def inspect_git_source(
@@ -327,22 +428,61 @@ def inspect_git_source(
     submodule_path: str | None = None,
     gitlink_commit: str | None = None,
     credential: SecretRef | None = None,
+    remote_proof: RemoteProof | None = None,
 ) -> GitSource:
-    """Inspect one local source without persisting authentication material."""
+    """Inspect one local source without persisting authentication material.
+
+    ``remote_proof`` is a trusted authenticated boundary. It receives only a
+    validated repository location, exact upstream ref, and expected HEAD. A
+    boolean true is accepted as the caller's assertion that it verified that
+    exact tuple; returning the advertised SHA is preferred.
+    """
 
     commit = _git(repository, "rev-parse", "HEAD")
-    url = _git(repository, "remote", "get-url", "origin")
+    url = _git(repository, "config", "--local", "--get", "remote.origin.url")
+    # Reject unsafe or credential-bearing origins before any remote operation.
+    location = RepositoryLocation.parse(url, credential=credential)
     branch = _git(repository, "branch", "--show-current", allow_failure=True) or None
     # Normal status includes untracked source files while respecting .gitignore,
     # so host-owned .synaptic runtime data does not make a source dirty.
     dirty = bool(_git(repository, "status", "--porcelain", "--untracked-files=normal"))
-    contains = _git(repository, "branch", "-r", "--contains", commit, allow_failure=True)
+    pushed = False
+    if branch:
+        upstream_remote = _git(
+            repository,
+            "config",
+            "--local",
+            "--get",
+            f"branch.{branch}.remote",
+            allow_failure=True,
+        )
+        upstream_ref = _git(
+            repository,
+            "config",
+            "--local",
+            "--get",
+            f"branch.{branch}.merge",
+            allow_failure=True,
+        )
+        if upstream_remote == "origin" and _valid_remote_branch_ref(upstream_ref):
+            if remote_proof is not None:
+                try:
+                    proof = remote_proof(location, upstream_ref, commit.lower())
+                except Exception:
+                    proof = None
+                if isinstance(proof, bool):
+                    pushed = proof
+                elif isinstance(proof, str) and _COMMIT_RE.fullmatch(proof):
+                    pushed = proof.lower() == commit.lower()
+            elif location.credential is None:
+                advertised = _remote_ref_sha(location, upstream_ref)
+                pushed = advertised == commit.lower()
     return GitSource(
-        location=RepositoryLocation.parse(url, credential=credential),
+        location=location,
         commit=commit,
         branch=branch,
         dirty=dirty,
-        pushed=bool(contains),
+        pushed=pushed,
         submodule_path=submodule_path,
         gitlink_commit=gitlink_commit,
     )
