@@ -203,6 +203,7 @@ The engine change is successful when the downstream repository can remove cwd sw
 | Host manifest | `synaptic.yaml`, schema `synaptic-project/v1` | Visible, versioned project identity |
 | Strict path mode | `project_v1` | Deterministic config-relative and URI semantics |
 | Compatibility mode | Standalone legacy when no host contract is selected | Prevents an involuntary breaking release |
+| ML host adapter seam | Resolve host ML data/output references in `MLHandler`, then call a reusable validated-config seam in `Trainers/ml/train.py`; retain standalone `main(config_path)` | Handler-only adaptation cannot work because the trainer reopens unresolved YAML; this boundary avoids cwd mutation, temporary rewritten configs, and duplicated trainer orchestration |
 | Writable roots | `.synaptic/{artifacts,state,tracking,cache,tmp}` | Keeps source trees immutable and separates durability classes |
 | Source roots | Host and engine source are read-only at runtime | Prevents dirty submodules and evidence/source mixing |
 | Canonical cloud source | Recursive host-superproject checkout plus exact gitlink verification | Uses the host commit as the dependency lock |
@@ -953,10 +954,11 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tests/contract/test_source_url_security.py` | Credential/query/host/scheme negative cases | C / Worker 3 |
 | `tests/contract/test_private_submodule_checkout.py` | Scoped private/nested submodule credentials and policy | C / Worker 3 |
 | `tests/contract/fixtures/host-project/**` | Directory-owned generic host-fixture surface; node C freezes its complete member list before work starts, and wildcard members are not counted as additional literal files | C / Worker 3 |
+| `tests/handlers/test_ml_handler.py` | Host ML declaring-document inputs, artifact-root outputs, unchanged cwd, no temporary config rewrite, and standalone compatibility | G / Worker 1 |
 | `tests/acceptance/submodule_engine/test_acceptance.py` | Independent end-to-end acceptance only | M / independent QA worker |
 | `docs/review/submodule-engine-acceptance.md` | Independent QA/security evidence report | M / independent QA worker |
 
-**Create count after revision: 71 rows.**
+**Create count after revision: 72 rows.**
 
 ### Files to modify
 
@@ -1019,6 +1021,7 @@ The inventory is intentionally broader than the first draft because root couplin
 | `tuner/handlers/eval_handler.py` | Host scenarios/config/results | G / Worker 1 |
 | `tuner/handlers/synthchat_handler.py` | Host configs/rubrics/output roots | G / Worker 1 |
 | `tuner/handlers/ml_handler.py` | Host configs and artifact roots | G / Worker 1 |
+| `Trainers/ml/train.py` | Reusable validated-config execution seam for resolved host inputs/outputs while preserving standalone `main(config_path)` | G / Worker 1 |
 | `tuner/handlers/flywheel_handler.py` | Host state/dataset/artifact roots | G / Worker 1 |
 | `tuner/handlers/generate_handler.py` | Host scenarios and artifact outputs | G / Worker 1 |
 | `tuner/handlers/improve_handler.py` | Host datasets/rubrics/output | G / Worker 1 |
@@ -1168,6 +1171,7 @@ python -m pytest tests/plugins -q
 python -m pytest tests/capabilities -q
 python -m pytest tests/contract -q
 python -m pytest tests/mech_interp/test_config.py tests/mech_interp/test_pipeline.py -q
+python -m pytest tests/handlers/test_ml_handler.py tests/trainers/ml -q
 python -m pytest tests/shared/experiment_tracking -q
 python -m pytest tests/cli/test_local_run_handler.py tests/tuner/handlers/test_local_run_handler.py -q
 python -m pytest tests/cloud/test_checkout.py tests/cloud/test_runtime_layout.py -q
@@ -1175,6 +1179,8 @@ python -m pytest tests/cloud/test_base_cloud.py tests/cloud/test_hf_jobs_backend
 ```
 
 Run the repository's established focused Windows selection and compare against the recorded 244 passed / 10 pre-existing failures baseline. The implementation PR must record the exact node list used; do not rely on an ambiguous directory glob wrapper.
+
+The Wave 4 ML barrier must prove that a host config selected from an unrelated cwd resolves bare train/test inputs from that YAML document's directory, resolves explicit `artifact://` outputs below `artifact_root`, and defaults an omitted output to `.synaptic/artifacts/ml`. An explicit bare output into the config or another source directory must fail closed. The test must snapshot cwd and the host/engine/temporary roots to prove that adaptation neither changes cwd nor writes a temporary rewritten config. The unchanged standalone `Trainers.ml.train.main(config_path)` path remains covered by the existing `tests/trainers/ml` suite.
 
 ### CLI contract smokes
 
@@ -1251,6 +1257,8 @@ For every host-mode contract smoke:
 3. Assert no engine file changed or appeared.
 4. Assert all writes are below the declared `.synaptic` roots.
 
+Node M must additionally invoke embedded-host ML training from an unrelated cwd, then verify that both host and engine source trees remain clean, no rewritten config appears below `tmp_root`, and every ML run artifact lands below the declared `artifact_root`.
+
 ### Cloud gate
 
 No paid launch until:
@@ -1326,6 +1334,7 @@ This is a separate PR after the engine contract is merged and pinned.
 |---|---:|---:|---|
 | Root assumptions are more widespread than the inventory | High | High | `rg` audit, context adapter, contract fixture, update inventory before touching new files |
 | Relative-path behavior changes existing configs | High | High | Strict semantics only in `project_v1`; standalone remains legacy |
+| ML handler resolves only the config filename while the trainer reloads unresolved YAML | High | High | Give G the minimal `Trainers/ml/train.py` validated-config seam; resolve host data/output references in the handler without cwd mutation or temporary YAML, and preserve standalone `main(config_path)` |
 | Dotenv selection is mistaken for value precedence or redirects engine root | Medium | High | Resolve engine root before dotenv, load only the selected mode-appropriate file with `override=False`, and test all three precedence axes |
 | Local Docker refactor breaks Windows copy mode | Medium | High | Dedicated Windows tests and separate logical layout mapper |
 | Remote host inputs are untracked/private | Medium | High | Declared transport required; fail before paid work |
@@ -1374,7 +1383,7 @@ Each commit is owned by exactly one DAG node and is restricted to that node's in
 | 8 | `feat(tracking): route state and provenance through project roots` | E | E-owned tracking modules/handlers/tests |
 | 9 | `fix(tracking): make registry writes concurrency-safe` | E | `shared/experiment_tracking/registry.py` and its E-owned regression test only; retain as a separate review even when delivered in the same phase |
 | 10 | `feat(runtime): adopt project roots in local discovery and batch paths` | F | F-owned local/container, discovery, batch, bucket, conversion, merge, and WebLLM rows and F-owned tests |
-| 11 | `feat(domains): adopt context across evaluation generation ml and mechinterp` | G | G-owned Evaluator, SynthChat, prompt-optimization, ML, flywheel, MechInterp, and domain handler rows/tests |
+| 11 | `feat(domains): adopt context across evaluation generation ml and mechinterp` | G | G-owned Evaluator, SynthChat, prompt-optimization, ML, flywheel, MechInterp, and domain handler rows/tests, including `Trainers/ml/train.py` and `tests/handlers/test_ml_handler.py` |
 | 12 | `feat(agent): add capability discovery and structured protocols` | H | H-owned capability modules/handlers/tests |
 | 13 | `feat(cloud): add verified checkout and runtime layout` | I | I-owned source-bundle/cloud foundation rows/tests; one owner only |
 | 14 | `feat(hf-jobs): launch recursive verified host superprojects` | J | J-owned HF backend/builders/stage/handlers/tests |
@@ -1427,7 +1436,7 @@ P0 Plan approved and baseline pinned
 | J | Worker 1 | Every inventory row labeled `J / Worker 1` | I, E, G, H | HF Jobs canonical recursive-superproject support |
 | K | Worker 2 | Every inventory row labeled `K / Worker 2` | J | Modal adoption without a competing source model |
 | L | Worker 3 | Every inventory row labeled `L / Worker 3` | J | RunPod adoption without a competing source model |
-| M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J, K, L | Independent cross-platform/security/baseline report; no fixes |
+| M | Fresh QA specialist | Only `tests/acceptance/submodule_engine/test_acceptance.py` and `docs/review/submodule-engine-acceptance.md` | C, R, F, G, H, J, K, L | Independent cross-platform/security/baseline report, including unrelated-cwd ML source-cleanliness and artifact-root acceptance; no fixes |
 | N | Worker 2 | Every inventory row labeled `N / Worker 2` | M | CI, docs, release gates, skills, and sync evidence |
 | O | Separate downstream owner | EHR repository only | N and accepted engine commit/release | Independent EHR migration PR |
 
@@ -1516,6 +1525,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 - [ ] No host data is staged beneath engine `scratch/`.
 - [ ] Persistent containers are project/source-layout specific.
 - [ ] Windows bind/copy tests pass or retain only explicitly documented baseline failures.
+- [ ] Embedded-host ML invoked from an unrelated cwd resolves train/test inputs from the declaring config, writes only below the declared artifact root, leaves host and engine source clean, and creates no temporary rewritten config.
+- [ ] Standalone `Trainers.ml.train.main(config_path)` retains its existing legacy behavior.
 
 ### Agent interface
 
@@ -1560,8 +1571,8 @@ This schedule uses strict merge barriers: no node in a wave starts until every n
 
 - **Overall complexity:** Very High
 - **Primary risk:** Cross-cutting filesystem and source-identity assumptions
-- **Planned existing files modified:** 117 inventory rows
-- **Planned new files/surfaces:** 71 inventory rows including schemas, public facade, workflows, docs, and tests
+- **Planned existing files modified:** 118 inventory rows
+- **Planned new files/surfaces:** 72 inventory rows including schemas, public facade, workflows, docs, and tests
 - **Provider order:** HF Jobs → Modal → RunPod
 - **Required specialists:** backend/project-context, packaging/API, local runtime/DevOps, cloud provider, test/QA, security, documentation
 - **External dependencies:** None required for the root contract; packaging uses standard Python metadata and `importlib.metadata`
