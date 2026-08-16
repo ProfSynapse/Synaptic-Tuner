@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-project-v1.schema.json",
+  "title": "Synaptic Host Project v1",
+  "type": "object",
+  "required": ["schema_version", "project", "engine"],
+  "properties": {
+    "schema_version": {"const": "synaptic-project/v1"},
+    "project": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+        "name": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "engine": {
+      "type": "object",
+      "required": ["requires", "api"],
+      "properties": {
+        "requires": {"type": "string", "minLength": 1},
+        "api": {"const": "v1"}
+      },
+      "additionalProperties": true
+    },
+    "paths": {
+      "type": "object",
+      "properties": {
+        "configs": {"$ref": "#/$defs/pathRef"},
+        "artifacts": {"$ref": "#/$defs/pathRef"},
+        "state": {"$ref": "#/$defs/pathRef"},
+        "tracking": {"$ref": "#/$defs/pathRef"},
+        "cache": {"$ref": "#/$defs/pathRef"},
+        "tmp": {"$ref": "#/$defs/pathRef"}
+      },
+      "additionalProperties": false
+    },
+    "configuration": {
+      "type": "object",
+      "properties": {
+        "default_profile": {"type": "string"},
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/pathRef"}
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "plugins": {
+      "type": "object",
+      "properties": {
+        "search_paths": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/pathRef"},
+          "uniqueItems": true
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["kind", "api", "target"],
+            "properties": {
+              "kind": {"type": "string", "minLength": 1},
+              "api": {"type": "string", "minLength": 1},
+              "target": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "policies": {
+      "type": "object",
+      "properties": {
+        "engine_writes": {"const": "deny"},
+        "source_writes": {"const": "deny"},
+        "external_paths": {"enum": ["deny", "warn_local_deny_cloud", "allow"]},
+        "dirty_sources": {"enum": ["allow_local_deny_cloud", "deny_cloud", "deny"]},
+        "repository_schemes": {
+          "type": "array",
+          "items": {"enum": ["https", "ssh"]},
+          "uniqueItems": true
+        },
+        "repository_hosts": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "nested_submodules": {"type": "boolean"},
+        "max_submodule_depth": {"type": "integer", "minimum": 0, "maximum": 16}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "pathRef": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

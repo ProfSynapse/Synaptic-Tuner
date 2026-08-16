@@ -1,0 +1,14 @@
+schema_version: synaptic-experiment/v1
+
+model:
+  name: example/model
+
+dataset:
+  train: project://datasets/train.jsonl
+
+training:
+  method: sft
+  max_steps: 20
+
+outputs:
+  run: artifact://runs/example
