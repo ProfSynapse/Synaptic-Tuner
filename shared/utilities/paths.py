@@ -5,7 +5,10 @@ Path utilities for trainer directories and training outputs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tuner.project.context import ProjectContext
 
 
 TRAINING_METHODS = ("sft", "kto", "grpo", "dpo", "embedding", "ace_step")
@@ -25,6 +28,33 @@ def get_project_root() -> Path:
         Path to project root.
     """
     return Path(__file__).resolve().parents[2]
+
+
+def get_engine_root(context: "ProjectContext | None" = None) -> Path:
+    """Return the immutable engine source root.
+
+    Without a context this preserves the historical module-relative behavior.
+    """
+
+    return context.engine_root if context is not None else get_project_root()
+
+
+def get_host_project_root(context: "ProjectContext | None" = None) -> Path:
+    """Return the consuming project root, or the engine root in legacy mode."""
+
+    return context.project_root if context is not None else get_project_root()
+
+
+def get_writable_roots(context: "ProjectContext") -> dict[str, Path]:
+    """Return named runtime roots without creating any directories."""
+
+    return {
+        "artifacts": context.artifact_root,
+        "state": context.state_root,
+        "tracking": context.tracking_root,
+        "cache": context.cache_root,
+        "tmp": context.tmp_root,
+    }
 
 
 def get_trainers_dir(repo_root: Optional[Path] = None) -> Path:

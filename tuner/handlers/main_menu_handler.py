@@ -22,7 +22,8 @@ from argparse import Namespace
 from typing import Dict, Optional
 
 from tuner.handlers.base import BaseHandler
-from tuner.utils import detect_environment, load_env_file
+from tuner.project import ProjectContext
+from tuner.utils import detect_environment
 
 # Import shared UI components (delegates to Trainers/shared/ui/)
 from shared.ui import (
@@ -57,9 +58,13 @@ class MainMenuHandler(BaseHandler):
         # Returns 0 when user exits gracefully
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self,
+        args: Optional[Namespace] = None,
+        context: ProjectContext | None = None,
+    ):
         """Initialize handler with optional args."""
-        super().__init__(args=args)
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -83,7 +88,9 @@ class MainMenuHandler(BaseHandler):
         """
         status_info = {
             "Environment": env.upper(),
-            "Repo": str(self.repo_root),
+            "Project": str(self.project_root),
+            "Engine": str(self.engine_root),
+            "Mode": self.context.mode,
         }
 
         if env_loaded:
@@ -130,9 +137,9 @@ class MainMenuHandler(BaseHandler):
         except ImportError:
             has_cloud = False
 
-        # Step 1: Detect environment and load .env
+        # Step 1: Environment was selected and loaded once during CLI bootstrap.
         env = detect_environment()
-        env_loaded = load_env_file(self.repo_root / ".env")
+        env_loaded = bool(getattr(self.args, "_env_loaded", False))
 
         # Step 2: Build status info
         status_info = self._build_status_info(env, env_loaded)
@@ -157,21 +164,21 @@ class MainMenuHandler(BaseHandler):
 
         # Step 4: Create handler instances (pass args for consistency)
         handlers = {
-            "train": TrainHandler(args=self.args),
-            "local-run": LocalRunHandler(args=self.args),
-            "cloud-run": CloudRunHandler(args=self.args),
-            "cloud-pipeline": CloudPipelineHandler(args=self.args),
-            "eval": EvalHandler(args=self.args),
-            "cloud-eval": CloudEvalHandler(args=self.args),
-            "cloud-gym": CloudGymHandler(args=self.args),
-            "cloud-inspect": CloudInspectHandler(args=self.args),
-            "synthchat": SynthChatHandler(args=self.args),
-            "modelops": ModelOpsHandler(args=self.args),
-            "ml": MLHandler(args=self.args),
-            "surgery": SurgeryHandler(args=self.args),
+            "train": self.bind_handler(TrainHandler(args=self.args)),
+            "local-run": self.bind_handler(LocalRunHandler(args=self.args)),
+            "cloud-run": self.bind_handler(CloudRunHandler(args=self.args)),
+            "cloud-pipeline": self.bind_handler(CloudPipelineHandler(args=self.args)),
+            "eval": self.bind_handler(EvalHandler(args=self.args)),
+            "cloud-eval": self.bind_handler(CloudEvalHandler(args=self.args)),
+            "cloud-gym": self.bind_handler(CloudGymHandler(args=self.args)),
+            "cloud-inspect": self.bind_handler(CloudInspectHandler(args=self.args)),
+            "synthchat": self.bind_handler(SynthChatHandler(args=self.args)),
+            "modelops": self.bind_handler(ModelOpsHandler(args=self.args)),
+            "ml": self.bind_handler(MLHandler(args=self.args)),
+            "surgery": self.bind_handler(SurgeryHandler(args=self.args)),
         }
         if has_cloud:
-            handlers["cloud"] = CloudTrainHandler(args=self.args)
+            handlers["cloud"] = self.bind_handler(CloudTrainHandler(args=self.args))
 
         # Step 5: Main menu loop
         first_run = True

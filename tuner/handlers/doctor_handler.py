@@ -27,8 +27,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 from shared.utilities.paths import TRAINING_METHODS, get_trainer_root, iter_training_output_dirs
+from shared.utilities.env import redact_env_value
 from tuner.handlers.base import BaseHandler
-from tuner.utils.validation import load_env_file
+from tuner.project import ProjectContext, inspect_git_source, load_project_manifest
+from tuner.project.errors import ProjectError
 
 
 # =============================================================================
@@ -135,7 +137,12 @@ class DoctorHandler(BaseHandler):
         exit_code = handler.handle()
     """
 
-    def __init__(self, json_output: bool = False, auto_fix: bool = False):
+    def __init__(
+        self,
+        json_output: bool = False,
+        auto_fix: bool = False,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the doctor handler.
 
@@ -143,7 +150,7 @@ class DoctorHandler(BaseHandler):
             json_output: If True, output results as JSON
             auto_fix: If True, attempt to auto-fix simple issues
         """
-        super().__init__()
+        super().__init__(context=context)
         self.json_output = json_output
         self.auto_fix = auto_fix
         self.report = DiagnosticReport()
@@ -173,16 +180,16 @@ class DoctorHandler(BaseHandler):
         Returns:
             Exit code (0 = all checks pass, 1 = warnings, 2 = failures)
         """
-        # Load environment variables
-        env_path = self.repo_root / ".env"
-        if env_path.exists():
-            load_env_file(env_path)
-            self._env_loaded = True
+        selected_env_root = (
+            self.project_root if self.context.mode == "host" else self.engine_root
+        )
+        self._env_loaded = (selected_env_root / ".env").is_file()
 
         if not self.json_output:
             self._print_header()
 
         # Run all diagnostic sections
+        self.report.add_section(self._check_project_context())
         self.report.add_section(self._check_environment())
         self.report.add_section(self._check_gpu_cuda())
         self.report.add_section(self._check_dependencies())
@@ -217,6 +224,139 @@ class DoctorHandler(BaseHandler):
     # =========================================================================
     # DIAGNOSTIC SECTIONS
     # =========================================================================
+
+    def _check_project_context(self) -> DiagnosticSection:
+        """Validate root identity and the selected host manifest without writes."""
+
+        section = DiagnosticSection("Project Context")
+        section.add(CheckResult(
+            name="Mode",
+            status=STATUS_OK,
+            message=f"{self.context.mode} ({self.context.path_mode})",
+            details=f"project={self.project_root}; engine={self.engine_root}",
+        ))
+        if self.context.mode == "standalone":
+            section.add(CheckResult(
+                name="Manifest",
+                status=STATUS_SKIP,
+                message="not required in standalone compatibility mode",
+            ))
+            return section
+
+        manifest_path = self.context.manifest_path
+        manifest = None
+        if manifest_path is None or not manifest_path.is_file():
+            section.add(CheckResult(
+                name="Manifest",
+                status=STATUS_FAIL,
+                message="missing",
+                details=str(manifest_path or self.project_root / "synaptic.yaml"),
+            ))
+        else:
+            try:
+                manifest = load_project_manifest(manifest_path)
+                resolved = manifest.create_context(
+                    engine_root=self.engine_root,
+                    invocation_cwd=self.context.invocation_cwd,
+                )
+                section.add(CheckResult(
+                    name="Manifest",
+                    status=STATUS_OK,
+                    message=f"{manifest.schema_version} ({manifest.project_id})",
+                ))
+                if resolved != self.context:
+                    section.add(CheckResult(
+                        name="Resolved roots",
+                        status=STATUS_FAIL,
+                        message="bootstrap and manifest contexts differ",
+                    ))
+                try:
+                    from tuner.project.plugins import manifest_bindings
+
+                    bindings = manifest_bindings(manifest)
+                    section.add(CheckResult(
+                        name="Plug-in metadata",
+                        status=STATUS_OK,
+                        message=f"{len(bindings)} trusted binding(s) declared",
+                        details="Metadata checked without importing project code",
+                    ))
+                except ImportError:
+                    section.add(CheckResult(
+                        name="Plug-in metadata",
+                        status=STATUS_SKIP,
+                        message="plug-in registry not installed",
+                    ))
+                except Exception as exc:
+                    section.add(CheckResult(
+                        name="Plug-in metadata",
+                        status=STATUS_FAIL,
+                        message=f"invalid: {type(exc).__name__}",
+                    ))
+            except ProjectError as exc:
+                section.add(CheckResult(
+                    name="Manifest",
+                    status=STATUS_FAIL,
+                    message=f"{exc.code}: {exc}",
+                ))
+
+        engine = self.engine_root.resolve(strict=False)
+        for name, root in zip(
+            ("artifacts", "state", "tracking", "cache", "tmp"),
+            self.context.writable_roots,
+        ):
+            inside_engine = root.resolve(strict=False).is_relative_to(engine)
+            section.add(CheckResult(
+                name=f"{name} root",
+                status=STATUS_FAIL if inside_engine else STATUS_OK,
+                message=str(root),
+                details="Writable host roots cannot be inside engine source" if inside_engine else None,
+            ))
+
+        source_roots = [("Engine source", self.engine_root)]
+        if self.project_root != self.engine_root:
+            source_roots.insert(0, ("Project source", self.project_root))
+        inspected_sources = {}
+        for label, root in source_roots:
+            try:
+                source = inspect_git_source(root)
+                inspected_sources[label] = source
+                section.add(CheckResult(
+                    name=label,
+                    status=STATUS_WARN if source.dirty else STATUS_OK,
+                    message=f"{source.commit[:12]} ({'dirty' if source.dirty else 'clean'})",
+                    details=source.location.canonical_url,
+                ))
+            except ProjectError as exc:
+                section.add(CheckResult(
+                    name=label,
+                    status=STATUS_WARN,
+                    message=f"source identity unavailable: {exc.code}",
+                ))
+
+        if self.project_root != self.engine_root:
+            try:
+                relative_engine = self.engine_root.relative_to(self.project_root).as_posix()
+            except ValueError:
+                relative_engine = None
+            engine_source = inspected_sources.get("Engine source")
+            if relative_engine and engine_source is not None:
+                result = subprocess.run(
+                    ["git", "-C", str(self.project_root), "ls-tree", "HEAD", "--", relative_engine],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                parts = result.stdout.strip().split()
+                gitlink = parts[2] if len(parts) >= 4 and parts[0] == "160000" else None
+                matches = bool(gitlink and gitlink.lower() == engine_source.commit.lower())
+                section.add(CheckResult(
+                    name="Engine gitlink",
+                    status=STATUS_OK if matches else STATUS_FAIL,
+                    message="matches engine HEAD" if matches else "missing or does not match engine HEAD",
+                    details=relative_engine,
+                ))
+        return section
 
     def _check_environment(self) -> DiagnosticSection:
         """Check environment setup (conda, Python, cwd)."""
@@ -482,7 +622,8 @@ class DoctorHandler(BaseHandler):
         section = DiagnosticSection("Configuration")
 
         # .env file
-        env_path = self.repo_root / ".env"
+        env_root = self.project_root if self.context.mode == "host" else self.engine_root
+        env_path = env_root / ".env"
         if env_path.exists():
             section.add(CheckResult(
                 name=".env file",
@@ -510,12 +651,12 @@ class DoctorHandler(BaseHandler):
         for var_name, required, description in env_vars:
             value = os.environ.get(var_name, "")
             if value:
-                # Mask sensitive values
-                masked = value[:4] + "..." if len(value) > 8 else "configured"
+                display_value = redact_env_value(var_name, value)
+                display_value = "configured" if display_value == "<redacted>" else display_value
                 section.add(CheckResult(
                     name=var_name,
                     status=STATUS_OK,
-                    message=masked
+                    message=display_value
                 ))
             else:
                 if required:

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from tuner.core.interfaces import IHandler
+from tuner.project import ProjectContext
 from tuner.utils.conda import get_conda_python
 
 
@@ -58,14 +59,20 @@ class BaseHandler(IHandler, ABC):
                 return 0
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self,
+        args: Optional[Namespace] = None,
+        context: Optional[ProjectContext] = None,
+    ):
         """
         Initialize the base handler.
 
         Args:
             args: Parsed command-line arguments. If None, JSON mode is disabled.
         """
-        self._repo_root = None
+        engine_root = Path(__file__).parent.parent.parent.resolve()
+        self._context = context or ProjectContext.standalone(engine_root=engine_root)
+        self._repo_root = self._context.engine_root
         self._conda_python = None
         self._args = args
         self._json_mode = getattr(args, 'json', False) if args else False
@@ -85,12 +92,51 @@ class BaseHandler(IHandler, ABC):
             >>> root = handler.repo_root
             >>> print(root / "Datasets")
         """
-        if self._repo_root is None:
-            # Calculate repo root from this file's location
-            # /mnt/f/Code/Toolset-Training/tuner/handlers/base.py
-            # -> parent.parent.parent = /mnt/f/Code/Toolset-Training
-            self._repo_root = Path(__file__).parent.parent.parent.resolve()
+        # Compatibility shim: legacy handlers still use repo_root for engine
+        # resources until their owning DAG nodes migrate them explicitly.
         return self._repo_root
+
+    @property
+    def context(self) -> ProjectContext:
+        """Resolved engine/host/runtime roots for this invocation."""
+
+        return self._context
+
+    @property
+    def engine_root(self) -> Path:
+        return self._context.engine_root
+
+    @property
+    def project_root(self) -> Path:
+        return self._context.project_root
+
+    @property
+    def artifact_root(self) -> Path:
+        return self._context.artifact_root
+
+    @property
+    def state_root(self) -> Path:
+        return self._context.state_root
+
+    @property
+    def tracking_root(self) -> Path:
+        return self._context.tracking_root
+
+    @property
+    def cache_root(self) -> Path:
+        return self._context.cache_root
+
+    def bind_context(self, context: ProjectContext) -> "BaseHandler":
+        """Inject the invocation context into a legacy-compatible handler."""
+
+        self._context = context
+        self._repo_root = context.engine_root
+        return self
+
+    def bind_handler(self, handler: "BaseHandler") -> "BaseHandler":
+        """Propagate this invocation's context to a child handler."""
+
+        return handler.bind_context(self._context)
 
     def get_conda_python(self) -> str:
         """

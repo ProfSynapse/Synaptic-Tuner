@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import ProjectContext
 from tuner.utils.environment import detect_environment
 from tuner.utils.conda import UNSLOTH_ENV, get_conda_python
 
@@ -70,6 +71,11 @@ class StatusInfo:
     # Configuration
     hf_token_configured: bool = False
     working_directory: str = ""
+    project_mode: str = ""
+    path_mode: str = ""
+    engine_root: str = ""
+    project_root: str = ""
+    manifest_path: str = ""
 
     # Resources
     sft_datasets: int = 0
@@ -102,14 +108,18 @@ class StatusHandler(BaseHandler):
         exit_code = handler.handle()  # Prints JSON
     """
 
-    def __init__(self, json_output: bool = False):
+    def __init__(
+        self,
+        json_output: bool = False,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize status handler.
 
         Args:
             json_output: If True, output JSON instead of formatted text
         """
-        super().__init__()
+        super().__init__(context=context)
         self.json_output = json_output
 
     @property
@@ -265,19 +275,6 @@ class StatusHandler(BaseHandler):
         """Check if HuggingFace token is configured."""
         token = os.environ.get("HF_TOKEN", "")
 
-        # Also check .env file in repo root
-        if not token:
-            env_file = self.repo_root / ".env"
-            if env_file.exists():
-                try:
-                    content = env_file.read_text()
-                    for line in content.splitlines():
-                        if line.startswith("HF_TOKEN="):
-                            token = line.split("=", 1)[1].strip()
-                            break
-                except Exception:
-                    pass
-
         return bool(token and token.startswith("hf_"))
 
     def _count_datasets(self) -> Tuple[int, int, int]:
@@ -334,19 +331,6 @@ class StatusHandler(BaseHandler):
         Returns:
             StatusInfo with all checks completed
         """
-        # Load .env file to populate environment variables
-        env_file = self.repo_root / ".env"
-        if env_file.exists():
-            try:
-                for line in env_file.read_text().splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, value = line.split("=", 1)
-                        if key not in os.environ:
-                            os.environ[key] = value.strip()
-            except Exception:
-                pass
-
         status = StatusInfo()
 
         # Environment
@@ -391,7 +375,14 @@ class StatusHandler(BaseHandler):
 
         # Configuration
         status.hf_token_configured = self._check_hf_token()
-        status.working_directory = str(self.repo_root)
+        status.working_directory = str(self.context.invocation_cwd)
+        status.project_mode = self.context.mode
+        status.path_mode = self.context.path_mode
+        status.engine_root = str(self.engine_root)
+        status.project_root = str(self.project_root)
+        status.manifest_path = (
+            str(self.context.manifest_path) if self.context.manifest_path else ""
+        )
 
         # Resources
         sft_ds, kto_ds, behavior_ds = self._count_datasets()
@@ -473,6 +464,11 @@ class StatusHandler(BaseHandler):
             table.add_row("HF Token", hf_status)
 
             table.add_row("Working Dir", status.working_directory)
+            table.add_row("Project Mode", f"{status.project_mode} ({status.path_mode})")
+            table.add_row("Project Root", status.project_root)
+            table.add_row("Engine Root", status.engine_root)
+            if status.manifest_path:
+                table.add_row("Manifest", status.manifest_path)
 
             # Resources section
             datasets_info = f"SFT: {status.sft_datasets}, Behavior: {status.behavior_datasets}, GSPO: {status.kto_datasets}"
@@ -523,6 +519,11 @@ class StatusHandler(BaseHandler):
             print(f"HF Token: {hf_status}")
 
             print(f"Working Directory: {status.working_directory}")
+            print(f"Project Mode: {status.project_mode} ({status.path_mode})")
+            print(f"Project Root: {status.project_root}")
+            print(f"Engine Root: {status.engine_root}")
+            if status.manifest_path:
+                print(f"Manifest: {status.manifest_path}")
             print(f"Datasets: SFT: {status.sft_datasets}, Behavior: {status.behavior_datasets}, GSPO: {status.kto_datasets}")
             print(f"Training Runs: SFT: {status.sft_training_runs}, KTO: {status.kto_training_runs}, GRPO: {status.grpo_training_runs}")
             print()

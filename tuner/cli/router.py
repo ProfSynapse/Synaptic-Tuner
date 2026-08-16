@@ -23,9 +23,21 @@ Args are passed to handlers to support global flags like --json.
 import json
 from argparse import Namespace
 from datetime import datetime
+from pathlib import Path
+
+from tuner.project import ProjectContext
 
 
-def route_command(args: Namespace) -> int:
+def _default_context() -> ProjectContext:
+    return ProjectContext.standalone(engine_root=Path(__file__).parents[2])
+
+
+def _bind_context(handler, context: ProjectContext):
+    binder = getattr(handler, "bind_context", None)
+    return binder(context) if callable(binder) else handler
+
+
+def route_command(args: Namespace, context: ProjectContext | None = None) -> int:
     """
     Route command to appropriate handler.
 
@@ -66,17 +78,19 @@ def route_command(args: Namespace) -> int:
         >>> args = parser.parse_args(['list', 'datasets'])
         >>> exit_code = route_command(args)  # List datasets
     """
+    context = context or _default_context()
+
     # Check for JSON mode - affects error output
     json_mode = getattr(args, 'json', False)
     command = getattr(args, 'command', None)
 
     if command == "batch-generate":
         from tuner.handlers.batch_generate_handler import BatchGenerateHandler
-        return BatchGenerateHandler(args=args).handle()
+        return _bind_context(BatchGenerateHandler(args=args), context).handle()
 
     if command == "batch-capture":
         from tuner.handlers.batch_capture_handler import BatchCaptureHandler
-        return BatchCaptureHandler(args=args).handle()
+        return _bind_context(BatchCaptureHandler(args=args), context).handle()
 
     if command == "local-run":
         try:
@@ -95,7 +109,26 @@ def route_command(args: Namespace) -> int:
             else:
                 print(f"Error: Local run handler import failed: {e}")
             return 1
-        return LocalRunHandler(args=args).handle()
+        return _bind_context(LocalRunHandler(args=args), context).handle()
+
+    # Keep project introspection independent from optional runtime handlers.
+    # These commands must remain cheap and side-effect free.
+    if command == "project":
+        from tuner.handlers.project_handler import ProjectHandler
+        return ProjectHandler(args=args, context=context).handle()
+
+    if command == "status":
+        from tuner.handlers.status_handler import StatusHandler
+        return StatusHandler(json_output=json_mode, context=context).handle()
+
+    if command == "doctor":
+        from tuner.handlers.doctor_handler import DoctorHandler
+        doctor_fix = getattr(args, "doctor_fix", False)
+        return DoctorHandler(
+            json_output=json_mode,
+            auto_fix=doctor_fix,
+            context=context,
+        ).handle()
 
     # Import handlers (deferred to avoid circular imports)
     try:
@@ -153,21 +186,12 @@ def route_command(args: Namespace) -> int:
         print(json.dumps(output, indent=2))
         return 1
 
-    # Special handling for status command (uses json_output parameter)
-    if command == 'status':
-        handler = StatusHandler(json_output=json_mode)
-        return handler.handle()
-
-    # Special handling for doctor command (has json_output and auto_fix parameters)
-    if command == 'doctor':
-        doctor_fix = getattr(args, 'doctor_fix', False)
-        handler = DoctorHandler(json_output=json_mode, auto_fix=doctor_fix)
-        return handler.handle()
-
     # Special handling for list command (has subcommand and json_output)
     if command == 'list':
         list_subcommand = getattr(args, 'subcommand', None)
-        handler = ListHandler(subcommand=list_subcommand, output_json=json_mode)
+        handler = _bind_context(
+            ListHandler(subcommand=list_subcommand, output_json=json_mode), context
+        )
         return handler.handle()
 
     # list-runs: query unified experiment tracking registry
@@ -180,18 +204,18 @@ def route_command(args: Namespace) -> int:
         # Map the generic subcommand to ml_subcommand for the handler
         if args is not None:
             args.ml_subcommand = ml_sub
-        handler = MLHandler(args=args)
+        handler = _bind_context(MLHandler(args=args), context)
         return handler.handle()
 
     # Special handling for mechinterp command (has subcommand)
     if command == 'mechinterp':
         from tuner.handlers.mechinterp_handler import MechInterpHandler
-        handler = MechInterpHandler(args=args)
+        handler = _bind_context(MechInterpHandler(args=args), context)
         return handler.handle()
 
     # Special handling for flywheel command (has subcommand)
     if command == 'flywheel':
-        handler = FlywheelHandler(args=args)
+        handler = _bind_context(FlywheelHandler(args=args), context)
         return handler.handle()
 
     # Autonomous experiment loop
@@ -200,12 +224,12 @@ def route_command(args: Namespace) -> int:
 
     if command == 'prompt-optimize':
         from tuner.handlers.prompt_optimize_handler import PromptOptimizeHandler
-        handler = PromptOptimizeHandler(args=args)
+        handler = _bind_context(PromptOptimizeHandler(args=args), context)
         return handler.handle()
 
     # Surgery command
     if command == 'surgery':
-        handler = SurgeryHandler(args=args)
+        handler = _bind_context(SurgeryHandler(args=args), context)
         return handler.handle()
 
     # Experiment pipeline
@@ -265,11 +289,11 @@ def route_command(args: Namespace) -> int:
     # Execute handler with args
     if command and command in handlers:
         handler_class = handlers[command]
-        handler = handler_class(args=args)
+        handler = _bind_context(handler_class(args=args), context)
         return handler.handle()
     else:
         # No command = interactive menu
-        handler = MainMenuHandler(args=args)
+        handler = MainMenuHandler(args=args, context=context)
         return handler.handle()
 
 

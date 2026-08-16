@@ -22,7 +22,7 @@ Entry points:
 
 from __future__ import annotations
 
-__version__ = "1.0.0"
+from synaptic_tuner._version import __version__
 __author__ = "Synaptic Tuner Team"
 
 # Export key classes for convenience

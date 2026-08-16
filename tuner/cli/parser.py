@@ -94,6 +94,7 @@ Commands:
   surgery     LoRA weight surgery (eval-guided post-training optimization)
   list        Discover available resources
   list-runs   Query unified experiment tracking registry
+  project     Inspect or validate the selected host project
 
 Flywheel Subcommands:
   flywheel status       Show flywheel system status
@@ -146,7 +147,7 @@ Examples:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
+        choices=["train", "cloud", "cloud-run", "local-run", "cloud-jobs", "plan-hardware", "cloud-pipeline", "cloud-eval", "cloud-gym", "cloud-inspect", "cloud-extract", "batch-generate", "batch-capture", "bucket", "run-experiment", "analyze-experiment", "eval", "synthchat", "modelops", "ml", "mechinterp", "flywheel", "experiment-loop", "prompt-optimize", "surgery", "status", "doctor", "project", "list", "list-runs", "compute-losses", "compare-runs", "judge-sample", "create-experiment", "cloud-compare", "download-experiment"],
         help="Command to run (optional, defaults to interactive menu)"
     )
 
@@ -166,6 +167,32 @@ Examples:
         "--json",
         action="store_true",
         help="Output in JSON format for AI-parseable output (disables interactive menus)"
+    )
+    parser.add_argument(
+        "--project-root",
+        help="Explicit host-project root. Selects strict project mode.",
+    )
+    parser.add_argument(
+        "--manifest",
+        help="Explicit synaptic project manifest path (normally synaptic.yaml).",
+    )
+    parser.add_argument(
+        "--env-file",
+        help="Explicit dotenv file; selected instead of the host or engine .env.",
+    )
+    parser.add_argument(
+        "--profile",
+        help="Named project configuration profile.",
+    )
+    parser.add_argument(
+        "--events",
+        choices=["jsonl"],
+        help="Emit machine-readable lifecycle events when supported.",
+    )
+    parser.add_argument(
+        "--source-mode",
+        choices=["standalone", "superproject", "dual_clone"],
+        help="Expected source reconstruction mode for commands that create a source lock.",
     )
     parser.add_argument(
         "--yes",
