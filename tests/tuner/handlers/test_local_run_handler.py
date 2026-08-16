@@ -8,12 +8,16 @@ No docker, no network, no filesystem side effects (tmp_path OK).
 
 from __future__ import annotations
 
+from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+import yaml
 
 from tuner.handlers.local_run_handler import (
+    LocalRunHandler,
+    CopyEntry,
     LocalRunError,
     UserSpec,
     _build_bash_wrapper,
@@ -26,11 +30,64 @@ from tuner.handlers.local_run_handler import (
     _ensure_host_cache_dirs,
     _pip_marker_hash,
     _resolve_tty_flags,
+    _resolve_transfer_mode,
     _resolve_user_spec,
     _validate_bool_field,
     _validate_tty_field,
     _validate_user_field,
 )
+from tuner.project import ProjectContext
+from tuner.project.errors import WriteAccessError
+
+
+def _mount_table(argv):
+    """Parse Docker ``-v`` pairs without assuming host path separators."""
+
+    mounts = {}
+    for index, token in enumerate(argv[:-1]):
+        if token != "-v":
+            continue
+        spec = argv[index + 1]
+        mode = "rw"
+        if spec.endswith(":ro"):
+            spec = spec[:-3]
+            mode = "ro"
+        source, target = spec.rsplit(":", 1)
+        mounts[target] = (source.replace("\\", "/"), mode)
+    return mounts
+
+
+def _host_fixture(tmp_path):
+    engine = tmp_path / "engine"
+    project = tmp_path / "host"
+    (engine / "Trainers" / "sft").mkdir(parents=True)
+    (engine / "Trainers" / "sft" / "train_sft.py").write_text("", encoding="utf-8")
+    (engine / "shared").mkdir()
+    (engine / "tuner").mkdir()
+    (project / "experiments").mkdir(parents=True)
+    (project / "data").mkdir()
+    (project / "data" / "input.jsonl").write_text('{"prompt":"x"}\n', encoding="utf-8")
+    manifest = project / "synaptic.yaml"
+    manifest.write_text("schema_version: synaptic-project/v1\n", encoding="utf-8")
+    context = ProjectContext.host(
+        engine_root=engine, project_root=project, manifest_path=manifest
+    )
+    config = project / "experiments" / "job.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "name": "embedded",
+                "provider": "local_docker",
+                "job": {"transfer": "bind", "persist": True},
+                "run": {"method": "sft"},
+                "dataset": {"local_file": "../data/input.jsonl"},
+                "training": {"max_steps": 1},
+                "artifacts": {"run_timestamp": "unit"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return context, config
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +683,8 @@ class TestBuildPersistentDockerRunArgs:
         assert args[idx + 1] == "0:0"
         # Repo bind-mount.
         assert "-v" in args
-        assert "/repo:/workspace/repo" in args
+        mounts = _mount_table(args)
+        assert mounts["/workspace/repo"] == ("/repo", "rw")
         # Entrypoint + sleep infinity tail.
         assert args[-4:] == ["unsloth/unsloth:latest", "-c", "sleep infinity"][-3:] or args[-3:] == [
             "unsloth/unsloth:latest",
@@ -640,13 +698,17 @@ class TestBuildPersistentDockerRunArgs:
     def test_hf_cache_mount_toggle(self):
         plan = self._base_plan(mount_hf_cache=True, mount_pip_cache=False)
         args = _build_persistent_docker_run_args(plan, Path("/repo"), Path("/home/u"))
-        assert "/home/u/.cache/huggingface:/root/.cache/huggingface" in args
+        assert _mount_table(args)["/root/.cache/huggingface"] == (
+            "/home/u/.cache/huggingface", "rw"
+        )
         assert not any("pip:" in a for a in args)
 
     def test_pip_cache_mount_toggle(self):
         plan = self._base_plan(mount_hf_cache=False, mount_pip_cache=True)
         args = _build_persistent_docker_run_args(plan, Path("/repo"), Path("/home/u"))
-        assert "/home/u/.cache/pip:/root/.cache/pip" in args
+        assert _mount_table(args)["/root/.cache/pip"] == (
+            "/home/u/.cache/pip", "rw"
+        )
         assert not any("huggingface:" in a for a in args)
 
     def test_no_cache_mounts(self):
@@ -765,19 +827,24 @@ class TestCacheMountArgs:
         plan = {"mount_hf_cache": True, "mount_pip_cache": True}
         args = _cache_mount_args(plan, Path("/home/u"))
         assert "-v" in args
-        assert "/home/u/.cache/huggingface:/root/.cache/huggingface" in args
-        assert "/home/u/.cache/pip:/root/.cache/pip" in args
+        mounts = _mount_table(args)
+        assert mounts["/root/.cache/huggingface"][1] == "rw"
+        assert mounts["/root/.cache/pip"][1] == "rw"
         assert args.count("-v") == 2
 
     def test_hf_only(self):
         plan = {"mount_hf_cache": True, "mount_pip_cache": False}
         args = _cache_mount_args(plan, Path("/home/u"))
-        assert args == ["-v", "/home/u/.cache/huggingface:/root/.cache/huggingface"]
+        assert _mount_table(args) == {
+            "/root/.cache/huggingface": ("/home/u/.cache/huggingface", "rw")
+        }
 
     def test_pip_only(self):
         plan = {"mount_hf_cache": False, "mount_pip_cache": True}
         args = _cache_mount_args(plan, Path("/home/u"))
-        assert args == ["-v", "/home/u/.cache/pip:/root/.cache/pip"]
+        assert _mount_table(args) == {
+            "/root/.cache/pip": ("/home/u/.cache/pip", "rw")
+        }
 
     def test_neither(self):
         plan = {"mount_hf_cache": False, "mount_pip_cache": False}
@@ -871,8 +938,8 @@ class TestBuildPersistentDockerRunArgsDefaults:
             "mount_pip_cache": True,
         }
         args = _build_persistent_docker_run_args(plan, Path("/repo"), Path("/home/u"))
-        assert "/home/u/.cache/huggingface:/root/.cache/huggingface" in args
-        assert "/home/u/.cache/pip:/root/.cache/pip" in args
+        mounts = _mount_table(args)
+        assert set(mounts) >= {"/root/.cache/huggingface", "/root/.cache/pip"}
 
 
 # ---------------------------------------------------------------------------
@@ -909,8 +976,8 @@ class TestEphemeralBindModeCacheMounts:
         argv = check_mock.call_args[0][0]
         assert argv[:2] == ["docker", "run"]
         assert "--rm" in argv
-        assert "/home/testuser/.cache/huggingface:/root/.cache/huggingface" in argv
-        assert "/home/testuser/.cache/pip:/root/.cache/pip" in argv
+        mounts = _mount_table(argv)
+        assert set(mounts) >= {"/root/.cache/huggingface", "/root/.cache/pip"}
 
     def test_opt_out_removes_cache_mounts(self, monkeypatch):
         h, plan = self._handler_and_plan(
@@ -929,5 +996,180 @@ class TestEphemeralBindModeCacheMounts:
         with patch.object(h, "_check") as check_mock:
             h._execute_bind_mode(plan)
         argv = check_mock.call_args[0][0]
-        assert "/home/testuser/.cache/huggingface:/root/.cache/huggingface" in argv
+        assert "/root/.cache/huggingface" in _mount_table(argv)
         assert not any(".cache/pip" in a for a in argv)
+
+
+class TestEmbeddedProjectRuntimeLayout:
+    def test_compile_uses_split_sources_and_writable_roots(self, tmp_path):
+        context, config = _host_fixture(tmp_path)
+        handler = LocalRunHandler(
+            args=Namespace(json=True, job_config=str(config)), context=context
+        )
+        plan = handler._compile(config, handler._load_yaml(config))
+
+        assert plan["workdir"] == "/workspace/engine/Trainers/sft"
+        local_file = plan["command"][plan["command"].index("--local-file") + 1]
+        assert local_file == "/workspace/project/data/input.jsonl"
+        assert plan["host_artifact_path"] == (
+            context.artifact_root / "runs/local_docker/sft/embedded/unit"
+        ).resolve()
+        assert plan["container_artifact_path"] == (
+            "/workspace/artifacts/runs/local_docker/sft/embedded/unit"
+        )
+
+        mounts = {item["container"]: item for item in plan["runtime_mounts"]}
+        assert mounts["/workspace/engine"]["mode"] == "ro"
+        assert mounts["/workspace/project"]["mode"] == "ro"
+        for target in (
+            "/workspace/artifacts",
+            "/workspace/state",
+            "/workspace/tracking",
+            "/workspace/cache",
+            "/workspace/tmp",
+        ):
+            assert mounts[target]["mode"] == "rw"
+
+    def test_bind_command_enforces_portable_mount_permissions(self, tmp_path):
+        context, config = _host_fixture(tmp_path)
+        handler = LocalRunHandler(context=context)
+        plan = handler._compile(config, handler._load_yaml(config))
+
+        with patch.object(handler, "_check") as check_mock:
+            handler._execute_bind_mode(plan)
+        mounts = _mount_table(check_mock.call_args[0][0])
+        assert mounts["/workspace/engine"][1] == "ro"
+        assert mounts["/workspace/project"][1] == "ro"
+        assert mounts["/workspace/artifacts"][1] == "rw"
+        assert "/workspace/repo" not in mounts
+
+    def test_persistent_identity_is_stable_and_context_specific(self, tmp_path):
+        context, config = _host_fixture(tmp_path)
+        first_handler = LocalRunHandler(context=context)
+        first = first_handler._compile(config, first_handler._load_yaml(config))
+        repeated = first_handler._compile(config, first_handler._load_yaml(config))
+        assert first["runtime_identity"] == repeated["runtime_identity"]
+        assert first["persistent_container_name"] == repeated["persistent_container_name"]
+
+        context.manifest_path.write_text(
+            "schema_version: synaptic-project/v1\nproject: changed\n",
+            encoding="utf-8",
+        )
+        second_handler = LocalRunHandler(context=context)
+        second = second_handler._compile(config, second_handler._load_yaml(config))
+        assert first["runtime_identity"] != second["runtime_identity"]
+        assert first["persistent_container_name"] != second["persistent_container_name"]
+
+    def test_copy_mode_separates_engine_and_project_inputs(self, tmp_path):
+        context, config = _host_fixture(tmp_path)
+        handler = LocalRunHandler(context=context)
+        payload = handler._load_yaml(config)
+        payload["job"] = {"transfer": "copy"}
+        plan = handler._compile(config, payload)
+
+        with patch.object(handler, "_check") as check_mock:
+            handler._copy_into_container(
+                "container", plan["copy_paths"], copy_entries=plan["copy_entries"]
+            )
+        commands = [call.args[0] for call in check_mock.call_args_list]
+        copy_commands = [command for command in commands if command[:2] == ["docker", "cp"]]
+        assert any(command[-1].endswith(":/workspace/engine/Trainers/sft") for command in copy_commands)
+        assert any(command[-1].endswith(":/workspace/project/data/input.jsonl") for command in copy_commands)
+        chmod = next(command for command in commands if "chmod" in command)
+        assert chmod[-2:] == ["/workspace/engine", "/workspace/project"]
+        assert not any("scratch" in part for command in commands for part in command)
+
+    def test_nested_config_canonicalizes_windows_copy_dataset_once(self, tmp_path):
+        engine = tmp_path / "engine files"
+        project = tmp_path / "host project"
+        config_root = project / "experiments with spaces"
+        config_dir = config_root / "nested" / "deeper"
+        dataset = project / "data files" / "data set.jsonl"
+        (engine / "Trainers" / "sft").mkdir(parents=True)
+        (engine / "shared").mkdir()
+        (engine / "tuner").mkdir()
+        config_dir.mkdir(parents=True)
+        dataset.parent.mkdir()
+        expected_bytes = b'{"id":"canonical"}\n'
+        dataset.write_bytes(expected_bytes)
+        manifest = project / "synaptic.yaml"
+        manifest.write_text("schema_version: synaptic-project/v1\n", encoding="utf-8")
+        context = ProjectContext.host(
+            engine_root=engine,
+            project_root=project,
+            config_root=config_root,
+            manifest_path=manifest,
+        )
+        config = config_dir / "job with spaces.yaml"
+        config.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "nested-copy",
+                    "provider": "local_docker",
+                    "job": {"transfer": "auto"},
+                    "run": {"method": "sft"},
+                    "dataset": {"local_file": "../../../data files/data set.jsonl"},
+                    "artifacts": {"run_timestamp": "unit"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        handler = LocalRunHandler(context=context)
+        with patch(
+            "tuner.handlers.local_run_handler._resolve_transfer_mode",
+            side_effect=lambda raw: _resolve_transfer_mode(raw, platform_name="nt"),
+        ):
+            plan = handler._compile(config, handler._load_yaml(config))
+        dataset_entry = next(
+            entry for entry in plan["copy_entries"] if entry.source == dataset.resolve()
+        )
+
+        assert plan["transfer"] == "copy"
+        assert dataset_entry.destination == "/workspace/project/data files/data set.jsonl"
+        assert dataset_entry.source.read_bytes() == expected_bytes
+        local_arg = plan["command"][plan["command"].index("--local-file") + 1]
+        assert local_arg == dataset_entry.destination
+        with patch.object(handler, "_check") as check_mock:
+            handler._copy_into_container(
+                "container", plan["copy_paths"], copy_entries=plan["copy_entries"]
+            )
+        copy_commands = [
+            call.args[0]
+            for call in check_mock.call_args_list
+            if call.args[0][:2] == ["docker", "cp"]
+        ]
+        assert [
+            command for command in copy_commands if command[2] == str(dataset.resolve())
+        ] == [
+            [
+                "docker", "cp", str(dataset.resolve()),
+                "container:/workspace/project/data files/data set.jsonl",
+            ]
+        ]
+
+    def test_copy_hardens_both_sources_when_only_engine_has_inputs(self, tmp_path):
+        context, _config = _host_fixture(tmp_path)
+        handler = LocalRunHandler(context=context)
+        source = context.engine_root / "shared"
+        entry = CopyEntry(source, "/workspace/engine/shared", "engine")
+        with patch.object(handler, "_check") as check_mock:
+            handler._copy_into_container(
+                "container", [Path("shared")], copy_entries=[entry]
+            )
+        commands = [call.args[0] for call in check_mock.call_args_list]
+        chmod = next(command for command in commands if "chmod" in command)
+        assert chmod == [
+            "docker", "exec", "-u", "root", "container", "chmod", "-R", "a-w",
+            "/workspace/engine", "/workspace/project",
+        ]
+
+    def test_host_mode_rejects_source_root_output(self, tmp_path):
+        context, config = _host_fixture(tmp_path)
+        handler = LocalRunHandler(context=context)
+        payload = handler._load_yaml(config)
+        payload["artifacts"] = {
+            "output_root": "project://generated",
+            "run_timestamp": "unit",
+        }
+        with pytest.raises(WriteAccessError, match="outside project writable roots"):
+            handler._compile(config, payload)

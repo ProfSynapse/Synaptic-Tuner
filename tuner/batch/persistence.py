@@ -169,11 +169,18 @@ class RunCheckpoint:
     as done — the artifacts, not the bookkeeping, define completion.
     """
 
-    def __init__(self, out_dir: Path, config_hash: str):
+    def __init__(
+        self,
+        out_dir: Path,
+        config_hash: str,
+        *,
+        state_dir: Path | None = None,
+    ):
         self.out_dir = Path(out_dir)
+        self.state_dir = Path(state_dir) if state_dir is not None else self.out_dir
         self.config_hash = config_hash
         self.done_ids: Set[str] = set()
-        self.path = self.out_dir / CHECKPOINT_FILENAME
+        self.path = self.state_dir / CHECKPOINT_FILENAME
 
     @classmethod
     def load_or_create(
@@ -183,6 +190,7 @@ class RunCheckpoint:
         *,
         resume: bool,
         index_ids: Optional[Iterable[str]] = None,
+        state_dir: Path | None = None,
     ) -> "RunCheckpoint":
         """Load an existing checkpoint (verifying config) or create a fresh one.
 
@@ -197,9 +205,11 @@ class RunCheckpoint:
         """
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+        selected_state_dir = Path(state_dir) if state_dir is not None else out_dir
+        selected_state_dir.mkdir(parents=True, exist_ok=True)
         config_hash = compute_config_hash(config)
-        cp = cls(out_dir, config_hash)
-        cp_path = out_dir / CHECKPOINT_FILENAME
+        cp = cls(out_dir, config_hash, state_dir=selected_state_dir)
+        cp_path = selected_state_dir / CHECKPOINT_FILENAME
 
         if cp_path.exists():
             existing = json.loads(cp_path.read_text(encoding="utf-8"))

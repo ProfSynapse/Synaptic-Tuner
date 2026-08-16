@@ -14,6 +14,8 @@ from typing import List, Tuple, NamedTuple
 
 import yaml
 
+from tuner.project import ProjectContext
+
 
 class PromptSetInfo(NamedTuple):
     """Information about a scenario."""
@@ -21,6 +23,7 @@ class PromptSetInfo(NamedTuple):
     description: str
     count: int
     path: Path
+    declaring_root: Path | None = None
 
 
 class PromptSetDiscovery:
@@ -45,17 +48,32 @@ class PromptSetDiscovery:
         ("behavior_prompts", "Behavior Prompts - Behavioral pattern evaluation"),
     ]
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(
+        self,
+        repo_root: Path = None,
+        *,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the prompt set discovery service.
 
         Args:
             repo_root: Repository root path. If None, uses current working directory's parent.
         """
-        if repo_root is None:
-            self.repo_root = Path(__file__).parent.parent.parent
-        else:
-            self.repo_root = repo_root
+        self.context = context
+        self.repo_root = context.engine_root if context else (repo_root or Path(__file__).parent.parent.parent)
+
+    def _scenario_dirs(self) -> list[Path]:
+        roots: list[Path] = []
+        if self.context is not None and self.context.mode == "host":
+            roots.extend(
+                [
+                    self.context.config_root / "scenarios",
+                    self.context.project_root / "Evaluator" / "config" / "scenarios",
+                ]
+            )
+        roots.append(self.repo_root / "Evaluator" / "config" / "scenarios")
+        return list(dict.fromkeys(root.resolve(strict=False) for root in roots))
 
     def discover(self) -> List[Tuple[str, str, int]]:
         """
@@ -74,61 +92,56 @@ class PromptSetDiscovery:
         Returns:
             List of PromptSetInfo objects for all discovered scenarios.
         """
-        scenarios_dir = self.repo_root / "Evaluator" / "config" / "scenarios"
-
-        if not scenarios_dir.exists():
-            return []
-
         results: List[PromptSetInfo] = []
         seen_names = set()
-
-        # First, iterate through known scenarios (maintains preferred order)
-        for name, description in self.KNOWN_SCENARIOS:
-            filepath = scenarios_dir / f"{name}.yaml"
-
-            if not filepath.exists():
+        for scenarios_dir in self._scenario_dirs():
+            if not scenarios_dir.exists():
                 continue
+            # Known scenarios retain preferred order within each declaring root.
+            for name, description in self.KNOWN_SCENARIOS:
+                if name in seen_names:
+                    continue
+                filepath = scenarios_dir / f"{name}.yaml"
 
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
+                if not filepath.exists():
+                    continue
 
-                count = self._count_tests(data)
-                desc = data.get("description", description)
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
 
-                results.append(PromptSetInfo(
-                    name=name,
-                    description=desc,
-                    count=count,
-                    path=filepath,
-                ))
-                seen_names.add(name)
+                    count = self._count_tests(data)
+                    desc = data.get("description", description)
 
-            except Exception:
-                continue
-
-        # Then, discover any additional YAML files
-        for filepath in sorted(scenarios_dir.glob("*.yaml")):
-            name = filepath.stem
-            if name in seen_names:
-                continue
-
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-
-                count = self._count_tests(data)
-                if count > 0:
-                    desc = data.get("description", name.replace("_", " ").title())
                     results.append(PromptSetInfo(
-                        name=name,
-                        description=desc,
-                        count=count,
-                        path=filepath,
+                        name=name, description=desc, count=count, path=filepath,
+                        declaring_root=scenarios_dir,
                     ))
+                    seen_names.add(name)
 
-            except Exception:
-                continue
+                except Exception:
+                    continue
+
+            for filepath in sorted(scenarios_dir.glob("*.yaml")):
+                name = filepath.stem
+                if name in seen_names:
+                    continue
+
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f)
+
+                    count = self._count_tests(data)
+                    if count > 0:
+                        desc = data.get("description", name.replace("_", " ").title())
+                        results.append(PromptSetInfo(
+                            name=name, description=desc, count=count, path=filepath,
+                            declaring_root=scenarios_dir,
+                        ))
+                        seen_names.add(name)
+
+                except Exception:
+                    continue
 
         return results
 

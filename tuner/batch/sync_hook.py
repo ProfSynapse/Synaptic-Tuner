@@ -40,9 +40,11 @@ class SyncHook:
         sync_cmd: Optional[str],
         sync_every: int = 0,
         *,
+        state_dir: Path | None = None,
         warn=None,
     ):
         self.out_dir = Path(out_dir)
+        self.state_dir = Path(state_dir) if state_dir is not None else None
         self.sync_cmd = sync_cmd or None
         self.sync_every = max(0, int(sync_every or 0))
         self._since_last = 0
@@ -72,6 +74,8 @@ class SyncHook:
         env = dict(os.environ)
         env["TUNER_SYNC_DIR"] = str(self.out_dir)
         env["TUNER_SYNC_REASON"] = reason
+        if self.state_dir is not None:
+            env["TUNER_SYNC_STATE_DIR"] = str(self.state_dir)
         try:
             result = subprocess.run(
                 self.sync_cmd,

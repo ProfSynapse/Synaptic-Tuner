@@ -16,6 +16,7 @@ from typing import Optional, List
 
 from .base import BaseHandler
 from tuner.discovery import CheckpointDiscovery
+from tuner.project import ProjectContext
 from tuner.ui import (
     print_header,
     print_menu,
@@ -52,8 +53,8 @@ class ConvertHandler(BaseHandler):
         """This handler supports direct CLI invocation."""
         return True
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, context: ProjectContext | None = None):
+        super().__init__(context=context)
 
     def handle(self) -> int:
         """
@@ -79,7 +80,7 @@ class ConvertHandler(BaseHandler):
             output_format = format_choice
 
             # Find training runs using discovery service
-            discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+            discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
             sft_paths = discovery.discover('sft', limit=10)
             kto_paths = discovery.discover('kto', limit=10)
 
@@ -123,7 +124,9 @@ class ConvertHandler(BaseHandler):
             selected_run = all_runs[int(selected_key)]
 
             # Discover checkpoints with metrics
-            checkpoints = CheckpointDiscovery.discover(selected_run['path'])
+            checkpoints = CheckpointDiscovery.discover(
+                selected_run['path'], context=self.context
+            )
 
             if not checkpoints:
                 print_error(f"No checkpoints found in {selected_run['path']}")
@@ -209,8 +212,8 @@ class ConvertHandler(BaseHandler):
             # Show configuration summary
             print_config({
                 "Format": format_label,
-                "Source": str(model_path.relative_to(self.repo_root)),
-                "Output": str(output_dir.relative_to(self.repo_root)),
+                "Source": str(model_path),
+                "Output": str(output_dir),
                 "Name": model_name,
                 "Quantizations": ", ".join(quantizations),
             }, "Conversion Summary")
@@ -256,7 +259,7 @@ class ConvertHandler(BaseHandler):
             int: Exit code
         """
         # Add shared module to path
-        sys.path.insert(0, str(self.repo_root / "Trainers"))
+        sys.path.insert(0, str(self.engine_root / "Trainers"))
 
         try:
             if output_format == "gguf":

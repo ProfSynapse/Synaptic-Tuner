@@ -58,7 +58,7 @@ class MergeHandler(BaseHandler):
 
     def _find_lora_checkpoints(self) -> List[dict]:
         """Find all LoRA checkpoints across training outputs."""
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
 
         checkpoints = []
 
@@ -172,8 +172,8 @@ class MergeHandler(BaseHandler):
         # Show config
         print()
         print_config({
-            "LoRA Path": str(lora_path.relative_to(self.repo_root)),
-            "Output": str(output_dir.relative_to(self.repo_root)),
+            "LoRA Path": str(lora_path),
+            "Output": str(output_dir),
             "Type": selected['type'],
         }, "Merge Configuration")
 

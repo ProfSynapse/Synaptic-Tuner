@@ -24,6 +24,7 @@ from argparse import Namespace
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import ProjectContext
 from tuner.ui import (
     print_header,
     print_menu,
@@ -65,9 +66,11 @@ class ModelOpsHandler(BaseHandler):
         exit_code = handler.handle()  # Returns JSON status
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
         """Initialize handler with optional args."""
-        super().__init__(args=args)
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -95,7 +98,7 @@ class ModelOpsHandler(BaseHandler):
         from tuner.discovery import TrainingRunDiscovery
 
         # Count available training runs
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
 
         sft_runs = discovery.discover("sft", limit=100)
         kto_runs = discovery.discover("kto", limit=100)
@@ -228,7 +231,7 @@ class ModelOpsHandler(BaseHandler):
             if handler_class:
                 try:
                     # Instantiate and run handler
-                    handler = handler_class()
+                    handler = self.bind_handler(handler_class())
                     exit_code = handler.handle()
 
                     # Show brief status after operation completes

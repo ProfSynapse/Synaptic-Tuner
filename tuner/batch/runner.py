@@ -32,12 +32,43 @@ from tuner.batch.persistence import (
 )
 from tuner.batch.gpu_telemetry import peak_suffix, reset_peak
 from tuner.batch.sync_hook import SyncHook
+from tuner.project import ProjectContext
 
 
 COMPLETIONS_FILENAME = "completions.jsonl"
 PROVENANCE_FILENAME = "provenance.json"
 CAPTURE_INDEX_FILENAME = "capture.jsonl"
 _RESERVED_ROW_FIELDS = {"id", "prompt", "text", "token_ids", "positions"}
+
+
+def _context_identity(context: ProjectContext | None) -> Dict[str, Any] | None:
+    if context is None:
+        return None
+    manifest_sha256 = None
+    if context.manifest_path and context.manifest_path.is_file():
+        manifest_sha256 = hashlib.sha256(context.manifest_path.read_bytes()).hexdigest()
+    return {
+        "mode": context.mode,
+        "path_mode": context.path_mode,
+        "engine_root": str(context.engine_root),
+        "project_root": str(context.project_root),
+        "manifest_sha256": manifest_sha256,
+    }
+
+
+def _runtime_dirs(
+    out_dir: Path, context: ProjectContext | None
+) -> tuple[Path, Path | None]:
+    resolved = out_dir.resolve(strict=False)
+    if context is None or context.mode == "standalone":
+        return resolved, None
+    artifact_root = context.artifact_root.resolve(strict=False)
+    if not resolved.is_relative_to(artifact_root):
+        raise ValueError(
+            f"Batch output directory must be below the project artifact root: {artifact_root}"
+        )
+    identity = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:20]
+    return resolved, context.state_root / "batch" / identity
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -97,13 +128,14 @@ def run_batch_generate(
     trust_remote_code: bool = False,
     dtype: Optional[str] = None,
     log: Optional[Callable[[str], None]] = None,
+    context: ProjectContext | None = None,
 ) -> Dict[str, Any]:
     """Run ``batch-generate`` with incremental persistence + resume.
 
     Returns a small summary dict (counts + artifact paths).
     """
     log = log or (lambda m: print(m))
-    out_dir = Path(out_dir)
+    out_dir, state_dir = _runtime_dirs(Path(out_dir), context)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = _read_jsonl(Path(prompts_path))
@@ -202,6 +234,7 @@ def run_batch_generate(
         "gpu_memory_utilization": (
             gpu_memory_utilization if engine == "vllm" else None
         ),
+        "project_context": _context_identity(context),
     }
     if suppress_tokens:
         config["suppress_tokens"] = list(suppress_tokens)
@@ -209,10 +242,10 @@ def run_batch_generate(
     completions_path = out_dir / COMPLETIONS_FILENAME
     index_ids = read_jsonl_ids(completions_path, id_field="id")
     checkpoint = RunCheckpoint.load_or_create(
-        out_dir, config, resume=resume, index_ids=index_ids
+        out_dir, config, resume=resume, index_ids=index_ids, state_dir=state_dir
     )
     appender = JsonlAppender(completions_path)
-    sync = SyncHook(out_dir, sync_cmd, sync_every, warn=log)
+    sync = SyncHook(out_dir, sync_cmd, sync_every, state_dir=state_dir, warn=log)
 
     todo = [r for r in rows if not checkpoint.is_done(r["id"])]
     log(
@@ -364,10 +397,11 @@ def run_batch_capture(
     dtype: Optional[str] = None,
     log: Optional[Callable[[str], None]] = None,
     engine_overrides: Optional[Dict[str, Any]] = None,
+    context: ProjectContext | None = None,
 ) -> Dict[str, Any]:
     """Run ``batch-capture`` with incremental per-row safetensors + resume."""
     log = log or (lambda m: print(m))
-    out_dir = Path(out_dir)
+    out_dir, state_dir = _runtime_dirs(Path(out_dir), context)
     tensors_dir = out_dir / "tensors"
     tensors_dir.mkdir(parents=True, exist_ok=True)
 
@@ -391,15 +425,16 @@ def run_batch_capture(
         "layers": layers,
         "persist_dtype": persist_dtype,
         "dtype": dtype,
+        "project_context": _context_identity(context),
     }
 
     index_path = out_dir / CAPTURE_INDEX_FILENAME
     index_ids = read_jsonl_ids(index_path, id_field="id")
     checkpoint = RunCheckpoint.load_or_create(
-        out_dir, config, resume=resume, index_ids=index_ids
+        out_dir, config, resume=resume, index_ids=index_ids, state_dir=state_dir
     )
     appender = JsonlAppender(index_path)
-    sync = SyncHook(out_dir, sync_cmd, sync_every, warn=log)
+    sync = SyncHook(out_dir, sync_cmd, sync_every, state_dir=state_dir, warn=log)
 
     todo = [r for r in rows if not checkpoint.is_done(r["id"])]
     log(

@@ -1,9 +1,20 @@
 import json
+import posixpath
 from argparse import Namespace
 
 import yaml
 
 from tuner.handlers.local_run_handler import LocalRunHandler
+from tuner.discovery import (
+    BaseModelDiscovery,
+    DatasetDiscovery,
+    PromptSetDiscovery,
+    RubricDiscovery,
+    TrainingRunDiscovery,
+    list_recipes,
+)
+from tuner.project import ProjectContext
+from tuner.batch.runner import _runtime_dirs
 
 
 def test_local_run_sft_config_compiles_repo_relative_dataset(tmp_path):
@@ -35,8 +46,91 @@ def test_local_run_sft_config_compiles_repo_relative_dataset(tmp_path):
     assert plan["transfer"] == "copy"
     assert plan["command"][:3] == ["python", "train_sft.py", "--model-name"]
     local_file_index = plan["command"].index("--local-file") + 1
-    assert plan["command"][local_file_index].startswith("../../")
+    dataset_entry = next(
+        entry for entry in plan["copy_entries"] if entry.source == dataset.resolve()
+    )
+    expected_dataset_arg = posixpath.relpath(
+        dataset_entry.destination, plan["workdir"]
+    )
+    assert plan["command"][local_file_index] == expected_dataset_arg
+    assert ":" not in dataset_entry.destination.split("/workspace/repo/", 1)[-1]
     assert plan["host_artifact_path"].name == "unit"
+
+
+def test_embedded_catalogs_are_host_first_with_declaring_roots(tmp_path):
+    engine = tmp_path / "engine"
+    project = tmp_path / "host"
+    config_root = project / "experiments"
+    for root in (engine, project, config_root):
+        root.mkdir(parents=True, exist_ok=True)
+    context = ProjectContext.host(
+        engine_root=engine, project_root=project, config_root=config_root
+    )
+
+    for root, marker in ((engine, "engine"), (project, "host")):
+        datasets = root / "Datasets"
+        datasets.mkdir()
+        (datasets / "shared.jsonl").write_text(
+            json.dumps({"prompt": marker}) + "\n", encoding="utf-8"
+        )
+        rubrics = root / "SynthChat" / "rubrics"
+        rubrics.mkdir(parents=True)
+        (rubrics / "shared.yaml").write_text(
+            yaml.safe_dump({"name": marker, "description": marker}), encoding="utf-8"
+        )
+        scenarios = root / "Evaluator" / "config" / "scenarios"
+        scenarios.mkdir(parents=True)
+        (scenarios / "shared.yaml").write_text(
+            yaml.safe_dump({"description": marker, "tests": [{"id": marker}]}),
+            encoding="utf-8",
+        )
+        recipes = root / "Trainers" / "recipes"
+        recipes.mkdir(parents=True)
+        (recipes / "shared.yaml").write_text(
+            yaml.safe_dump({"name": marker, "target": "local", "method": "sft"}),
+            encoding="utf-8",
+        )
+
+    dataset = DatasetDiscovery(context=context).discover_all()[0]
+    rubric = RubricDiscovery(context=context).discover_all()[0]
+    prompt_set = PromptSetDiscovery(context=context).discover_all()[0]
+    recipe = list_recipes(engine, context=context)[0]
+    assert dataset.path.is_relative_to(project)
+    assert dataset.declaring_root == project / "Datasets"
+    assert rubric.description == "host"
+    assert rubric.declaring_root == project / "SynthChat" / "rubrics"
+    assert prompt_set.description == "host"
+    assert prompt_set.declaring_root == project / "Evaluator" / "config" / "scenarios"
+    assert recipe.name == "host"
+    assert recipe.declaring_root == project / "Trainers" / "recipes"
+
+
+def test_embedded_run_and_model_discovery_use_artifact_and_host_config_roots(tmp_path):
+    engine = tmp_path / "engine"
+    project = tmp_path / "host"
+    config_root = project / "experiments"
+    config_root.mkdir(parents=True)
+    context = ProjectContext.host(
+        engine_root=engine, project_root=project, config_root=config_root
+    )
+    run = context.artifact_root / "runs" / "local_docker" / "sft" / "demo" / "001"
+    (run / "final_model").mkdir(parents=True)
+    engine_run = engine / "Trainers" / "sft" / "sft_output" / "002"
+    (engine_run / "final_model").mkdir(parents=True)
+    (config_root / "train.yaml").write_text(
+        yaml.safe_dump({"model": {"model_name": "host/model"}}), encoding="utf-8"
+    )
+
+    discovered = TrainingRunDiscovery(context=context).discover("sft")
+    base_models, finetuned = BaseModelDiscovery(context=context).discover_all()
+    assert discovered == [run, engine_run]
+    assert base_models[0].name == "host/model"
+    assert base_models[0].declaring_root == config_root
+    assert finetuned[0].path == str(run.relative_to(project) / "final_model")
+
+    output, state = _runtime_dirs(context.artifact_root / "batch" / "demo", context)
+    assert output == (context.artifact_root / "batch" / "demo").resolve()
+    assert state is not None and state.parent == context.state_root / "batch"
 
 
 def _compile_local_command(tmp_path, *, method, trainer, training, lora=None, aux_head=None):

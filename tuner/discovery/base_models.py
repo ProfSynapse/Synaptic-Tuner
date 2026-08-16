@@ -17,6 +17,8 @@ from typing import List, Optional, Tuple
 import yaml
 
 from shared.utilities.paths import TRAINING_METHODS, get_trainer_root, iter_training_output_dirs
+from tuner.discovery.training_runs import TrainingRunDiscovery
+from tuner.project import ProjectContext
 
 
 @dataclass
@@ -26,6 +28,7 @@ class ModelInfo:
     model_type: str  # 'base' or 'finetuned'
     source: str  # 'HuggingFace', 'SFT', 'KTO', 'GRPO'
     path: Optional[str]  # Local path for fine-tuned models
+    declaring_root: Optional[Path] = None
 
 
 class BaseModelDiscovery:
@@ -63,17 +66,20 @@ class BaseModelDiscovery:
         "unsloth/mistral-7b-v0.3-bnb-4bit",
     ]
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(
+        self,
+        repo_root: Path = None,
+        *,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the base model discovery service.
 
         Args:
             repo_root: Repository root path. If None, uses module location to find repo root.
         """
-        if repo_root is None:
-            self.repo_root = Path(__file__).parent.parent.parent
-        else:
-            self.repo_root = repo_root
+        self.context = context
+        self.repo_root = context.engine_root if context else (repo_root or Path(__file__).parent.parent.parent)
 
     def discover_all(self) -> Tuple[List[ModelInfo], List[ModelInfo]]:
         """
@@ -100,10 +106,15 @@ class BaseModelDiscovery:
         seen_models = set()
 
         # Check each trainer config
-        config_paths = [
-            get_trainer_root("sft", self.repo_root) / "configs" / "config.yaml",
-            get_trainer_root("kto", self.repo_root) / "configs" / "config.yaml",
-        ]
+        config_paths: list[Path] = []
+        if self.context is not None and self.context.mode == "host" and self.context.config_root.exists():
+            config_paths.extend(sorted(self.context.config_root.rglob("*.yaml")))
+        config_paths.extend(
+            [
+                get_trainer_root("sft", self.repo_root) / "configs" / "config.yaml",
+                get_trainer_root("kto", self.repo_root) / "configs" / "config.yaml",
+            ]
+        )
 
         for config_path in config_paths:
             if config_path.exists():
@@ -118,6 +129,7 @@ class BaseModelDiscovery:
                             model_type='base',
                             source='HuggingFace',
                             path=None,
+                            declaring_root=config_path.parent,
                         ))
                         seen_models.add(model_name)
                 except Exception:
@@ -131,6 +143,7 @@ class BaseModelDiscovery:
                     model_type='base',
                     source='HuggingFace',
                     path=None,
+                    declaring_root=self.repo_root,
                 ))
                 seen_models.add(model_name)
 
@@ -150,27 +163,25 @@ class BaseModelDiscovery:
         # including embedding and ace_step — is discoverable here and never silently
         # invisible. iter_training_output_dirs() resolves every method's dir (verified),
         # and the inner final_model/ check naturally skips methods without one.
+        discovery = TrainingRunDiscovery(repo_root=self.repo_root, context=self.context)
         for trainer_type in TRAINING_METHODS:
-            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
-                if not output_dir.exists():
+            for run_dir in discovery.discover(trainer_type, limit=None):
+                final_model = run_dir / "final_model"
+                if not final_model.exists():
                     continue
-
-                for run_dir in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                    if not run_dir.is_dir():
-                        continue
-
-                    final_model = run_dir / "final_model"
-                    if final_model.exists():
-                        try:
-                            relative_path = str(final_model.relative_to(self.repo_root))
-                        except ValueError:
-                            relative_path = str(final_model)
-
-                        results.append(ModelInfo(
-                            name=run_dir.name,
-                            model_type='finetuned',
-                            source=trainer_type.upper(),
-                            path=relative_path,
-                        ))
+                try:
+                    relative_path = str(final_model.relative_to(self.context.project_root if self.context else self.repo_root))
+                except ValueError:
+                    relative_path = str(final_model)
+                results.append(ModelInfo(
+                    name=run_dir.name,
+                    model_type='finetuned',
+                    source=trainer_type.upper(),
+                    path=relative_path,
+                    declaring_root=next(
+                        (root for root in discovery.output_roots(trainer_type) if final_model.is_relative_to(root)),
+                        final_model.parent,
+                    ),
+                ))
 
         return results

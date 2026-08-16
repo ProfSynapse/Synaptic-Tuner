@@ -17,6 +17,7 @@ from typing import Optional
 
 from shared.utilities.paths import TRAINING_METHODS
 from tuner.handlers.base import BaseHandler
+from tuner.project import ProjectContext
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
     print_menu,
@@ -100,9 +101,11 @@ class TrainHandler(BaseHandler):
         exit_code = handler.handle()  # Returns JSON status
     """
 
-    def __init__(self, args: Optional[Namespace] = None):
+    def __init__(
+        self, args: Optional[Namespace] = None, context: ProjectContext | None = None
+    ):
         """Initialize handler with optional args."""
-        super().__init__(args=args)
+        super().__init__(args=args, context=context)
 
     @property
     def name(self) -> str:
@@ -194,7 +197,9 @@ class TrainHandler(BaseHandler):
 
         # Step 2: Get backend
         try:
-            backend = TrainingBackendRegistry.get(platform_choice, repo_root=self.repo_root)
+            # Backend code/config defaults are engine assets. Context-aware
+            # local execution is provided by the local-run command.
+            backend = TrainingBackendRegistry.get(platform_choice, repo_root=self.engine_root)
         except ValueError as e:
             print_error(str(e))
             return 1

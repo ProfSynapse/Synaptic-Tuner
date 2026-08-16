@@ -15,6 +15,7 @@ from tuner.backends.training.cloud.base_cloud import load_cloud_config
 from tuner.cloud import load_huggingface_hub, resolve_hf_bucket_id
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
+from tuner.project import PathRef
 
 
 class BucketHandler(BaseHandler):
@@ -28,7 +29,7 @@ class BucketHandler(BaseHandler):
         return True
 
     def _cloud_config_path(self) -> Path:
-        return self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        return self.engine_root / "Trainers" / "cloud" / "cloud_config.yaml"
 
     def _default_bucket_id(self) -> Optional[str]:
         settings = load_cloud_config(self._cloud_config_path()).get("hf_jobs", {})
@@ -315,12 +316,21 @@ class BucketHandler(BaseHandler):
     def _handle_pull(self) -> int:
         path = self._require_path()
         bucket_id = self._bucket_for_path(path)
-        destination = str(getattr(self.args, "dest", "") or ".").strip() or "."
-        local_path = pull_artifacts(path, bucket_id=bucket_id, destination=destination)
+        requested = str(getattr(self.args, "dest", "") or "").strip()
+        if self.context.mode == "host":
+            raw = requested or "artifact://bucket"
+            if requested and "://" not in raw and not Path(raw).is_absolute():
+                raw = "artifact://" + raw.replace("\\", "/")
+            destination_path = PathRef.parse(raw).resolve(
+                self.context, from_cli=True, access="write"
+            )
+        else:
+            destination_path = Path(requested or ".").resolve()
+        local_path = pull_artifacts(path, bucket_id=bucket_id, destination=str(destination_path))
         payload = {
             "path": path,
             "bucket": bucket_id,
-            "destination": str(Path(destination).resolve()),
+            "destination": str(destination_path),
             "local_path": str(local_path),
         }
         if self.json_mode:
@@ -331,12 +341,14 @@ class BucketHandler(BaseHandler):
 
     def _handle_push(self) -> int:
         path = self._require_path()
-        source = Path(path)
+        source = PathRef.parse(path).resolve(
+            self.context, from_cli=True, access="read"
+        )
         if not source.exists():
             raise CloudProviderError(f"Local source path not found: {path}")
         bucket_id = self._require_bucket_id()
         destination = str(getattr(self.args, "dest", "") or "").strip() or None
-        remote_uri = push_artifacts(path, bucket_id=bucket_id, destination=destination)
+        remote_uri = push_artifacts(str(source), bucket_id=bucket_id, destination=destination)
         payload = {
             "path": str(source.resolve()),
             "bucket": bucket_id,

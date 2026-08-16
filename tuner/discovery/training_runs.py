@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List
 
 from shared.utilities.paths import iter_training_output_dirs
+from tuner.project import ProjectContext
 
 
 class TrainingRunDiscovery:
@@ -41,18 +42,33 @@ class TrainingRunDiscovery:
         all_runs = discovery.discover('sft', limit=None)
     """
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(
+        self,
+        repo_root: Path = None,
+        *,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the training run discovery service.
 
         Args:
             repo_root: Repository root path. If None, uses current working directory's parent.
         """
-        if repo_root is None:
-            # Default to repo root (assumes we're in tuner/ or subdirectory)
-            self.repo_root = Path(__file__).parent.parent.parent
-        else:
-            self.repo_root = repo_root
+        self.context = context
+        self.repo_root = context.engine_root if context else (repo_root or Path(__file__).parent.parent.parent)
+
+    def output_roots(self, trainer_type: str) -> list[Path]:
+        roots: list[Path] = []
+        if self.context is not None and self.context.mode == "host":
+            roots.extend(
+                [
+                    self.context.artifact_root / "runs" / "local_docker" / trainer_type,
+                    self.context.artifact_root / "runs" / trainer_type,
+                    self.context.artifact_root / trainer_type,
+                ]
+            )
+        roots.extend(iter_training_output_dirs(trainer_type, self.repo_root))
+        return list(dict.fromkeys(root.resolve(strict=False) for root in roots))
 
     def discover(self, trainer_type: str, limit: int = 10) -> List[Path]:
         """
@@ -100,21 +116,29 @@ class TrainingRunDiscovery:
         """
         runs = []
 
-        for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+        seen: set[Path] = set()
+        for output_dir in self.output_roots(trainer_type):
             if not output_dir.exists():
                 continue
+            candidates = [path.parent for path in output_dir.rglob("final_model") if path.is_dir()]
+            candidates.extend(
+                path.parent
+                for path in output_dir.rglob("checkpoints")
+                if path.is_dir() and any(path.iterdir())
+            )
+            for candidate in sorted(
+                set(candidates), key=lambda p: (-p.stat().st_mtime, p.as_posix())
+            ):
+                resolved = candidate.resolve(strict=False)
+                if resolved not in seen:
+                    runs.append(candidate)
+                    seen.add(resolved)
 
-            for d in sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-                if not d.is_dir():
-                    continue
-
-                has_final = (d / "final_model").exists()
-                has_checkpoints = (d / "checkpoints").exists() and any((d / "checkpoints").iterdir())
-
-                if has_final or has_checkpoints:
-                    runs.append(d)
-
-        runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        # Host mode preserves declaring-root precedence: project artifacts are
+        # always listed before engine-local legacy defaults. Standalone keeps
+        # the historical global newest-first ordering.
+        if self.context is None or self.context.mode == "standalone":
+            runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         if limit is not None:
             runs = runs[:limit]
 

@@ -88,7 +88,14 @@ class InferenceHandler(BaseHandler):
 
     def _get_trainers_dir(self) -> Path:
         """Get the Trainers directory."""
-        return self.repo_root / "Trainers"
+        return self.engine_root / "Trainers"
+
+    def _training_output_dirs(self, trainer_type: str) -> list[Path]:
+        from tuner.discovery.training_runs import TrainingRunDiscovery
+
+        return TrainingRunDiscovery(
+            repo_root=self.engine_root, context=self.context
+        ).output_roots(trainer_type)
 
     def _get_llama_cpp_path(self) -> Optional[Path]:
         """Find llama.cpp executable."""
@@ -106,7 +113,7 @@ class InferenceHandler(BaseHandler):
         models = []
 
         for trainer_type in ("sft", "kto"):
-            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+            for output_dir in self._training_output_dirs(trainer_type):
                 if not output_dir.exists():
                     continue
 
@@ -149,7 +156,7 @@ class InferenceHandler(BaseHandler):
         models = []
 
         for trainer_type in ("sft", "kto"):
-            for output_dir in iter_training_output_dirs(trainer_type, self.repo_root):
+            for output_dir in self._training_output_dirs(trainer_type):
                 if not output_dir.exists():
                     continue
 
@@ -263,7 +270,7 @@ class InferenceHandler(BaseHandler):
 
         try:
             # Run interactively
-            result = subprocess.run(cmd, cwd=str(self.repo_root))
+            result = subprocess.run(cmd, cwd=str(self.engine_root))
             return result.returncode
         except KeyboardInterrupt:
             print("\n")
@@ -283,7 +290,7 @@ class InferenceHandler(BaseHandler):
         print_header("INTERACTIVE CHAT", f"Model: {model.display_name}")
 
         # Use the existing inference.py script
-        inference_script = get_trainer_root("sft", self.repo_root) / "src" / "inference.py"
+        inference_script = get_trainer_root("sft", self.engine_root) / "src" / "inference.py"
 
         if not inference_script.exists():
             print_error("inference.py not found.")
@@ -297,7 +304,7 @@ class InferenceHandler(BaseHandler):
         print()
 
         try:
-            result = subprocess.run(cmd, cwd=str(self.repo_root))
+            result = subprocess.run(cmd, cwd=str(self.engine_root))
             return result.returncode
         except KeyboardInterrupt:
             print("\n")

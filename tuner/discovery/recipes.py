@@ -22,6 +22,8 @@ from typing import Any
 
 import yaml
 
+from tuner.project import ProjectContext
+
 
 RECIPE_DIRNAME = "Trainers/recipes"
 
@@ -41,6 +43,7 @@ class RecipeMeta:
     description: str
     target: str
     method: str
+    declaring_root: Path | None = None
 
 
 def _recipes_dir(repo_root: Path) -> Path:
@@ -69,6 +72,7 @@ def list_recipes(
     *,
     target: str | None = None,
     method: str | None = None,
+    context: ProjectContext | None = None,
 ) -> list[RecipeMeta]:
     """Scan ``Trainers/recipes/*.yaml`` and return matching recipe headers.
 
@@ -76,40 +80,50 @@ def list_recipes(
     dict, are skipped silently. ``target=both`` recipes match both
     ``target='local'`` and ``target='cloud'`` filters.
     """
-    recipes_dir = _recipes_dir(repo_root)
-    if not recipes_dir.exists():
-        return []
-
     results: list[RecipeMeta] = []
-    for path in sorted(recipes_dir.glob("*.yaml")):
-        if not path.is_file():
+    if context is not None and context.mode == "host":
+        recipe_dirs = [
+            context.config_root,
+            context.project_root / RECIPE_DIRNAME,
+            context.engine_root / RECIPE_DIRNAME,
+        ]
+    else:
+        recipe_dirs = [_recipes_dir(repo_root)]
+    seen_names: set[str] = set()
+    for recipes_dir in dict.fromkeys(path.resolve(strict=False) for path in recipe_dirs):
+        if not recipes_dir.exists():
             continue
-        data = _read_header(path)
-        if data is None:
-            continue
-
-        recipe_target = str(data.get("target", "")).strip().lower()
-        if not recipe_target:
-            continue
-
-        if target is not None:
-            wanted = target.strip().lower()
-            if recipe_target != wanted and recipe_target != "both":
+        for path in sorted(recipes_dir.glob("*.yaml")):
+            if not path.is_file() or path.name in seen_names:
+                continue
+            data = _read_header(path)
+            if data is None:
                 continue
 
-        recipe_method = str(data.get("method", "")).strip().lower()
-        if method is not None and recipe_method != method.strip().lower():
-            continue
+            recipe_target = str(data.get("target", "")).strip().lower()
+            if not recipe_target:
+                continue
 
-        results.append(
-            RecipeMeta(
-                path=path,
-                name=str(data.get("name") or path.stem),
-                description=str(data.get("description", "")).strip(),
-                target=recipe_target,
-                method=recipe_method,
+            if target is not None:
+                wanted = target.strip().lower()
+                if recipe_target != wanted and recipe_target != "both":
+                    continue
+
+            recipe_method = str(data.get("method", "")).strip().lower()
+            if method is not None and recipe_method != method.strip().lower():
+                continue
+
+            results.append(
+                RecipeMeta(
+                    path=path,
+                    name=str(data.get("name") or path.stem),
+                    description=str(data.get("description", "")).strip(),
+                    target=recipe_target,
+                    method=recipe_method,
+                    declaring_root=recipes_dir,
+                )
             )
-        )
+            seen_names.add(path.name)
 
     return results
 

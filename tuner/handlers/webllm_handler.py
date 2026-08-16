@@ -115,7 +115,7 @@ class WebLLMHandler(BaseHandler):
             return 0
 
         # Step 2: List training runs
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
         runs = discovery.discover(trainer_type=model_type, limit=10)
 
         if not runs:
@@ -152,7 +152,7 @@ class WebLLMHandler(BaseHandler):
             print_error("Invalid selection.")
 
         # Step 4: Select checkpoint with metrics
-        checkpoints = CheckpointDiscovery.discover(selected_run)
+        checkpoints = CheckpointDiscovery.discover(selected_run, context=self.context)
 
         if not checkpoints:
             print_error("No checkpoints found in training run")
@@ -190,7 +190,7 @@ class WebLLMHandler(BaseHandler):
         default_name = selected_run.name.replace("_", "-")
         model_name = prompt("Model name for WebLLM", default_name)
 
-        output_dir = self.repo_root / "webllm_output" / f"{model_name}-q4f16_1-MLC"
+        output_dir = self.artifact_root / "webllm" / f"{model_name}-q4f16_1-MLC"
 
         # Step 6: Quantization selection
         quant = print_menu([
@@ -206,7 +206,7 @@ class WebLLMHandler(BaseHandler):
         repo_id = None
 
         if upload_to_hf:
-            env_file = self.repo_root / ".env"
+            env_file = self.project_root / ".env"
             load_env_file(env_file)
 
             hf_token = os.environ.get("HF_TOKEN")
@@ -225,10 +225,9 @@ class WebLLMHandler(BaseHandler):
 
         # Step 8: Confirmation
         config_display = {
-            "Source": str(lora_path.relative_to(self.repo_root)) if needs_merge
-                     else str(merged_path.relative_to(self.repo_root)),
+            "Source": str(lora_path) if needs_merge else str(merged_path),
             "Merge Required": "Yes" if needs_merge else "No (using existing)",
-            "Output": str(output_dir.relative_to(self.repo_root)),
+            "Output": str(output_dir),
             "Quantization": quant,
         }
         if upload_to_hf:

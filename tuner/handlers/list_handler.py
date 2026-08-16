@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import ProjectContext
 from tuner.discovery import (
     DatasetDiscovery,
     DatasetInfo,
@@ -63,7 +64,12 @@ class ListHandler(BaseHandler):
         exit_code = handler.handle()
     """
 
-    def __init__(self, subcommand: str = None, output_json: bool = False):
+    def __init__(
+        self,
+        subcommand: str = None,
+        output_json: bool = False,
+        context: ProjectContext | None = None,
+    ):
         """
         Initialize the list handler.
 
@@ -71,7 +77,7 @@ class ListHandler(BaseHandler):
             subcommand: Which resource to list (datasets, models, runs, rubrics, scenarios)
             output_json: If True, output JSON instead of formatted tables
         """
-        super().__init__()
+        super().__init__(context=context)
         self.subcommand = subcommand
         self.output_json = output_json
 
@@ -132,7 +138,7 @@ class ListHandler(BaseHandler):
 
     def _list_datasets(self) -> int:
         """List available datasets."""
-        discovery = DatasetDiscovery(repo_root=self.repo_root)
+        discovery = DatasetDiscovery(repo_root=self.engine_root, context=self.context)
         datasets = discovery.discover_all()
 
         if self.output_json:
@@ -202,7 +208,7 @@ class ListHandler(BaseHandler):
 
     def _list_models(self) -> int:
         """List available models."""
-        discovery = BaseModelDiscovery(repo_root=self.repo_root)
+        discovery = BaseModelDiscovery(repo_root=self.engine_root, context=self.context)
         base_models, finetuned_models = discovery.discover_all()
 
         if self.output_json:
@@ -278,7 +284,7 @@ class ListHandler(BaseHandler):
 
     def _list_runs(self) -> int:
         """List training runs."""
-        discovery = TrainingRunDiscovery(repo_root=self.repo_root)
+        discovery = TrainingRunDiscovery(repo_root=self.engine_root, context=self.context)
 
         # Discover runs for each trainer type
         sft_runs = discovery.discover('sft', limit=None)
@@ -343,7 +349,10 @@ class ListHandler(BaseHandler):
 
         # Calculate relative path
         try:
-            relative_path = str(run_path.relative_to(self.repo_root))
+            try:
+                relative_path = str(run_path.relative_to(self.project_root))
+            except ValueError:
+                relative_path = str(run_path)
         except ValueError:
             relative_path = str(run_path)
 
@@ -428,7 +437,7 @@ class ListHandler(BaseHandler):
 
     def _list_rubrics(self) -> int:
         """List available rubrics."""
-        discovery = RubricDiscovery(repo_root=self.repo_root)
+        discovery = RubricDiscovery(repo_root=self.engine_root, context=self.context)
         rubrics = discovery.discover_all()
 
         if self.output_json:
@@ -481,7 +490,7 @@ class ListHandler(BaseHandler):
 
     def _list_scenarios(self) -> int:
         """List evaluation scenarios."""
-        discovery = PromptSetDiscovery(repo_root=self.repo_root)
+        discovery = PromptSetDiscovery(repo_root=self.engine_root, context=self.context)
         scenarios = discovery.discover_all()
 
         if self.output_json:
@@ -491,7 +500,7 @@ class ListHandler(BaseHandler):
                         "name": s.name,
                         "description": s.description,
                         "tests": s.count,
-                        "path": str(s.path.relative_to(self.repo_root)) if s.path else None,
+                        "path": str(s.path) if s.path else None,
                     }
                     for s in scenarios
                 ]
