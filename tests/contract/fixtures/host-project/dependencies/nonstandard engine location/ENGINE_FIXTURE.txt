@@ -1,0 +1,1 @@
+This file preserves the clone-safe nested engine fixture path.

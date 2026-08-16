@@ -1,0 +1,35 @@
+schema_version: synaptic-project/v1
+
+project:
+  id: contract-host-project
+  name: Contract Host Project
+
+engine:
+  requires: ">=1.0,<2.0"
+  api: v1
+  path: project://dependencies/nonstandard engine location
+
+paths:
+  configs: project://configs
+  artifacts: project://.synaptic/artifacts
+  state: project://.synaptic/state
+  tracking: project://.synaptic/tracking
+  cache: project://.synaptic/cache
+  tmp: project://.synaptic/tmp
+
+plugins:
+  search_paths:
+    - project://plugins
+
+policies:
+  engine_writes: deny
+  source_writes: deny
+  external_paths: warn_local_deny_cloud
+  dirty_sources: deny_cloud
+  repository_hosts:
+    - example.test
+  repository_schemes:
+    - https
+    - ssh
+  nested_submodules: true
+  max_submodule_depth: 2
