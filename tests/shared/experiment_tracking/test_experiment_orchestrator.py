@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from shared.experiment_tracking import ExperimentOrchestrator, ExperimentSpec, StageResult, TrackingService
-from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
+from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, ExecutionStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
 from shared.experiment_tracking.schema import LossResult, RunRecord
+from shared.experiment_tracking.service import ProvenanceIntegrityError
+from tuner.project import (
+    ConfigDocument,
+    GitSource,
+    ProjectContext,
+    RepositoryLocation,
+    SourceLock,
+    resolve_config_layers,
+)
 
 
 class _StaticRunner:
@@ -118,6 +130,179 @@ def test_experiment_orchestrator_runs_full_lifecycle(tmp_path: Path):
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     assert payload["status"] == "completed"
     assert payload["run_count"] == 3
+
+
+def test_orchestrator_reuses_one_resolved_config_across_all_stage_records(tmp_path: Path):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+    spec = ExperimentSpec(
+        name="portable",
+        provider="hf_jobs",
+        method="sft",
+        dataset=DatasetSpec(source="org/data", file="train.jsonl"),
+        training=TrainingStageSpec(model_name="org/model"),
+        evaluation=EvaluationStageSpec(enabled=True),
+        loss=LossStageSpec(enabled=True),
+        execution=ExecutionStageSpec(stages=["training", "evaluation", "loss"]),
+    )
+    spec.resolved_config = resolve_config_layers(
+        [
+            ConfigDocument.from_mapping(
+                uri="project://experiments/portable.yaml",
+                data={"experiment": {"name": "portable"}},
+                precedence=0,
+            )
+        ]
+    )
+    service = TrackingService(project_context=context)
+    experiment = service.create_experiment(
+        name=spec.name,
+        dataset_path=spec.dataset.identifier,
+        dataset_hash=spec.dataset.hash,
+        base_model_name=spec.training.model_name,
+        provider=spec.provider,
+        method=spec.method,
+    )
+    source_lock = SourceLock(
+        run_id=experiment.experiment_id,
+        mode="superproject",
+        project_source=GitSource(
+            location=RepositoryLocation.parse("https://github.com/org/host.git"),
+            commit="1" * 40,
+            pushed=True,
+        ),
+        engine_source=GitSource(
+            location=RepositoryLocation.parse("https://github.com/org/engine.git"),
+            commit="2" * 40,
+            pushed=True,
+            submodule_path="vendor/engine",
+            gitlink_commit="2" * 40,
+        ),
+        project={"id": "host"},
+        configuration={"resolved_uri": "tracking://resolved-config.json"},
+    )
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_StaticRunner(StageResult("completed", _record(run_id="train", run_type="sft", stage="training"))),
+        eval_runner=_StaticRunner(StageResult("completed", _record(run_id="eval", run_type="evaluation", stage="evaluation"))),
+        loss_runner=_StaticRunner(StageResult("completed", _record(run_id="loss", run_type="loss", stage="loss"))),
+        project_context=context,
+        source_lock=source_lock,
+    )
+
+    experiment = orchestrator.run(
+        spec,
+        spec_path="project://experiments/portable.yaml",
+        experiment=experiment,
+    )
+
+    assert experiment.resolved_config_uri == (
+        f"tracking://experiments/{experiment.experiment_id}/resolved-config.json"
+    )
+    assert experiment.spec_path is None
+    resolved_path = service.resolve_uri(experiment.resolved_config_uri or "")
+    assert experiment.resolved_config_sha256 == hashlib.sha256(resolved_path.read_bytes()).hexdigest()
+    assert experiment.source_lock_uri == (
+        f"tracking://experiments/{experiment.experiment_id}/source-lock.json"
+    )
+    assert len(experiment.source_lock_sha256 or "") == 64
+    records = service.registry.find_runs()
+    assert len(records) == 3
+    assert {record.resolved_config_uri for record in records} == {experiment.resolved_config_uri}
+    assert {record.resolved_config_sha256 for record in records} == {
+        experiment.resolved_config_sha256
+    }
+    assert {record.source_lock_uri for record in records} == {experiment.source_lock_uri}
+    assert {record.source_lock_sha256 for record in records} == {
+        experiment.source_lock_sha256
+    }
+    assert not (engine / ".tracking").exists()
+
+    source_path = service.resolve_uri(experiment.source_lock_uri or "")
+    source_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    source_payload["project"]["id"] = "tampered"
+    source_path.write_bytes(
+        (json.dumps(source_payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    )
+    with pytest.raises(ProvenanceIntegrityError, match="SHA-256"):
+        service.verify_experiment_provenance(experiment)
+
+
+def test_resume_rejects_tampered_provenance_before_any_stage(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    spec = ExperimentSpec(
+        name="resume-integrity",
+        provider="hf_jobs",
+        method="sft",
+        dataset=DatasetSpec(source="org/data", file="train.jsonl"),
+        training=TrainingStageSpec(model_name="org/model"),
+        execution=ExecutionStageSpec(stages=["training"]),
+    )
+    spec.resolved_config = resolve_config_layers(
+        [ConfigDocument.from_mapping(uri="project://spec.yaml", data={"value": 1}, precedence=0)]
+    )
+    experiment = service.create_experiment(
+        name=spec.name,
+        dataset_path=spec.dataset.identifier,
+        dataset_hash="",
+        base_model_name=spec.training.model_name,
+        provider=spec.provider,
+        method=spec.method,
+    )
+    service.persist_resolved_config(experiment, spec.resolved_config)
+    path = service.resolve_uri(experiment.resolved_config_uri or "")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["config"]["value"] = 2
+    path.write_bytes(
+        (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    )
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_FailIfCalledRunner(),
+    )
+
+    with pytest.raises(ProvenanceIntegrityError, match="SHA-256|does not match|canonically"):
+        orchestrator.run(spec, experiment=experiment)
+
+    assert experiment.stage_statuses == {}
+
+
+def test_new_host_experiment_persists_portable_spec_uri(tmp_path: Path):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+    service = TrackingService(project_context=context)
+    spec = ExperimentSpec(
+        name="portable-spec",
+        provider="hf_jobs",
+        method="sft",
+        dataset=DatasetSpec(source="org/data", file="train.jsonl"),
+        training=TrainingStageSpec(model_name="org/model"),
+        execution=ExecutionStageSpec(stages=["training"]),
+    )
+    spec.resolved_config = resolve_config_layers(
+        [
+            ConfigDocument.from_mapping(
+                uri="project://experiments/portable.yaml",
+                data={"experiment": {"name": "portable-spec"}},
+                precedence=0,
+            )
+        ]
+    )
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_StaticRunner(
+            StageResult("completed", _record(run_id="train-portable", run_type="sft", stage="training"))
+        ),
+        project_context=context,
+    )
+
+    experiment = orchestrator.run(spec, spec_path=str(host / "experiments" / "portable.yaml"))
+
+    assert experiment.spec_path == "project://experiments/portable.yaml"
 
 
 def test_experiment_orchestrator_resumes_from_completed_training_stage(tmp_path: Path):

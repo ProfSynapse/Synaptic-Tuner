@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +10,45 @@ from typing import Any
 from shared.utilities.unique_ids import unique_prefixed_id
 
 logger = logging.getLogger(__name__)
+
+
+def _canonical_json_bytes(payload: Any) -> bytes:
+    return (
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Replace one complete file using a unique same-directory temporary."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    _atomic_write_bytes(path, text.encode("utf-8"))
 
 @dataclass
 class Experiment:
@@ -37,6 +78,10 @@ class Experiment:
     stage_details: dict[str, dict[str, Any]] = field(default_factory=dict)
     hypothesis_context_path: str | None = None
     next_run_candidates_path: str | None = None
+    source_lock_uri: str | None = None
+    source_lock_sha256: str | None = None
+    resolved_config_uri: str | None = None
+    resolved_config_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""
@@ -84,13 +129,13 @@ def create_experiment(
     return experiment
 
 def save_experiment(experiment: Experiment, base_dir: Path | str = ".tracking") -> None:
-    """Save an experiment.json to disk."""
+    """Atomically save experiment.json without rewriting records during reads."""
     exp_dir = Path(base_dir) / "experiments" / experiment.experiment_id
     exp_dir.mkdir(parents=True, exist_ok=True)
     
     exp_file = exp_dir / "experiment.json"
-    with open(exp_file, "w", encoding="utf-8") as f:
-        json.dump(experiment.to_dict(), f, indent=2)
+    payload = json.dumps(experiment.to_dict(), indent=2).encode("utf-8")
+    _atomic_write_bytes(exp_file, payload)
 
 def load_experiment(experiment_id: str, base_dir: Path | str = ".tracking") -> Experiment:
     """Load an experiment.json from disk."""

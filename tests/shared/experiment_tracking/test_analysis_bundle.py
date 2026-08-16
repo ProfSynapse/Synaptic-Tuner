@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 
 import yaml
+import pytest
 
 import shared.experiment_tracking.analysis_bundle as analysis_bundle
 import shared.experiment_tracking.benchmark_ledger as benchmark_ledger
 from shared.experiment_tracking.experiment import Experiment
 from shared.experiment_tracking.schema import LossResult, RunRecord
+from tuner.project import ProjectContext
 
 
 def test_write_analysis_bundle_materializes_summary_and_features(tmp_path: Path, monkeypatch):
@@ -137,3 +139,92 @@ def test_write_analysis_bundle_materializes_summary_and_features(tmp_path: Path,
     draft_spec_payload = yaml.safe_load(Path(outputs["draft_next_spec_yaml"]).read_text(encoding="utf-8"))
     assert draft_spec_payload["experiment"]["recommendation"]["selected_candidate_rank"] == 1
     assert draft_spec_payload["experiment"]["training"]["model_name"] == experiment.base_model_name
+
+
+def test_host_analysis_outputs_are_portable_and_do_not_write_engine(tmp_path: Path, monkeypatch):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+    ledger = context.artifact_root / "benchmark-ledger" / "docs" / "benchmarks" / "model_hardware_benchmark_ledger.csv"
+    monkeypatch.setattr(analysis_bundle, "upsert_benchmark_ledger", lambda **_: str(ledger))
+    experiment = Experiment(
+        experiment_id="exp_portable",
+        name="portable",
+        created_at="2026-08-16T00:00:00+00:00",
+        dataset_path="project://data/train.jsonl",
+        dataset_hash="abc",
+        base_model_name="org/model",
+        status="completed",
+        source_lock_uri="tracking://experiments/exp_portable/source-lock.json",
+        source_lock_sha256="a" * 64,
+        resolved_config_uri="tracking://experiments/exp_portable/resolved-config.json",
+        resolved_config_sha256="b" * 64,
+    )
+
+    outputs = analysis_bundle.write_analysis_bundle(
+        experiment=experiment,
+        runs=[],
+        base_dir=context.tracking_root,
+        project_context=context,
+    )
+
+    assert outputs["experiment_summary_json"].startswith("tracking://")
+    assert outputs["benchmark_ledger_csv"].startswith("artifact://")
+    summary_path = context.tracking_root / outputs["experiment_summary_json"].removeprefix("tracking://")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["provenance"]["source_lock"]["sha256"] == "a" * 64
+    assert summary["provenance"]["resolved_config"]["sha256"] == "b" * 64
+    assert list(engine.rglob("*")) == []
+    assert list(context.tracking_root.rglob("*.tmp")) == []
+
+
+def test_host_analysis_rejects_external_base_before_creating_files(tmp_path: Path):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+    outside = tmp_path / "outside"
+    experiment = Experiment(
+        experiment_id="exp_escape",
+        name="escape",
+        created_at="2026-08-16T00:00:00+00:00",
+        dataset_path="project://data/train.jsonl",
+        dataset_hash="abc",
+        base_model_name="org/model",
+    )
+
+    with pytest.raises(ValueError, match="tracking_root"):
+        analysis_bundle.write_analysis_bundle(
+            experiment=experiment,
+            runs=[],
+            base_dir=outside,
+            project_context=context,
+        )
+
+    assert not outside.exists()
+
+
+def test_host_analysis_rejects_traversal_experiment_id_before_write(tmp_path: Path):
+    host = tmp_path / "host"
+    engine = host / "vendor" / "engine"
+    engine.mkdir(parents=True)
+    context = ProjectContext.host(engine_root=engine, project_root=host)
+    experiment = Experiment(
+        experiment_id="../../escape",
+        name="escape",
+        created_at="2026-08-16T00:00:00+00:00",
+        dataset_path="project://data/train.jsonl",
+        dataset_hash="abc",
+        base_model_name="org/model",
+    )
+
+    with pytest.raises(ValueError, match="escapes"):
+        analysis_bundle.write_analysis_bundle(
+            experiment=experiment,
+            runs=[],
+            base_dir=context.tracking_root,
+            project_context=context,
+        )
+
+    assert not (context.tracking_root / "experiments").exists()

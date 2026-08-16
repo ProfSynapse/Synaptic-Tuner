@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Protocol
 
 from .analysis_bundle import write_analysis_bundle
@@ -9,6 +10,7 @@ from .experiment import Experiment
 from .experiment_spec import EXPERIMENT_STAGES, ExperimentSpec
 from .schema import LossResult, RunRecord
 from .service import TrackingService
+from tuner.project import ProjectContext, SourceLock
 
 
 @dataclass
@@ -32,13 +34,17 @@ class ExperimentOrchestrator:
         training_runner: StageRunner,
         eval_runner: Optional[StageRunner] = None,
         loss_runner: Optional[StageRunner] = None,
-        base_dir: str = ".tracking",
+        base_dir: str | Path | None = None,
+        project_context: ProjectContext | None = None,
+        source_lock: SourceLock | None = None,
     ) -> None:
         self.tracking_service = tracking_service
         self.training_runner = training_runner
         self.eval_runner = eval_runner
         self.loss_runner = loss_runner
-        self.base_dir = base_dir
+        self.base_dir = Path(base_dir) if base_dir is not None else tracking_service.base_dir
+        self.project_context = project_context or tracking_service.project_context
+        self.source_lock = source_lock
 
     @staticmethod
     def _should_run_stage(
@@ -182,6 +188,7 @@ class ExperimentOrchestrator:
     ) -> Experiment:
         if experiment is not None:
             return experiment
+        canonical_spec_path = spec.config_uri or spec_path
         return self.tracking_service.create_experiment(
             name=spec.name,
             dataset_path=spec.dataset.identifier,
@@ -190,7 +197,7 @@ class ExperimentOrchestrator:
             provider=spec.provider,
             method=spec.method,
             objective=spec.objective,
-            spec_path=spec_path,
+            spec_path=canonical_spec_path,
         )
 
     def run(
@@ -201,6 +208,11 @@ class ExperimentOrchestrator:
         experiment: Optional[Experiment] = None,
     ) -> Experiment:
         experiment = self._resolve_or_create_experiment(spec, spec_path=spec_path, experiment=experiment)
+        self.tracking_service.prepare_experiment_provenance(
+            experiment,
+            resolved_config=spec.resolved_config,
+            source_lock=self.source_lock,
+        )
         selected_stages = self._selected_stage_names(spec)
         run_analysis = "analysis" in selected_stages or "recommendation" in selected_stages
         training = self._restore_stage_result(experiment, "training")
@@ -289,6 +301,7 @@ class ExperimentOrchestrator:
                 experiment=experiment,
                 runs=resolved_runs,
                 base_dir=self.base_dir,
+                project_context=self.project_context,
                 eval_payload=eval_result.eval_payload if eval_result else None,
                 loss_results=loss_result.loss_results if loss_result else None,
             )

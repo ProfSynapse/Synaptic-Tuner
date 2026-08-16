@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 import yaml
 
 from shared.utilities.paths import TRAINING_METHODS
+from tuner.project import ConfigDocument, ProjectContext, ResolvedConfig, resolve_config_layers
 
 
 EXPERIMENT_STAGES = ("training", "evaluation", "loss", "analysis", "recommendation")
@@ -203,6 +204,14 @@ class ExperimentSpec:
     loss: LossStageSpec = field(default_factory=LossStageSpec)
     post_training: PostTrainingSpec = field(default_factory=PostTrainingSpec)
     features: FeaturesStageSpec = field(default_factory=FeaturesStageSpec)
+    resolved_config: ResolvedConfig | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def config_uri(self) -> str | None:
+        if self.resolved_config is None or not self.resolved_config.sources:
+            return None
+        value = self.resolved_config.sources[0].get("uri")
+        return str(value) if value else None
 
     def validate(self) -> list[str]:
         issues: list[str] = []
@@ -259,11 +268,38 @@ class ExperimentSpec:
         )
 
 
-def load_experiment_spec(path: str | Path) -> ExperimentSpec:
-    spec_path = Path(path)
+def _portable_config_uri(path: Path, context: ProjectContext | None) -> str:
+    resolved = path.resolve()
+    if context is not None:
+        for scheme, root in (
+            ("project", context.project_root),
+            ("engine", context.engine_root),
+            ("tracking", context.tracking_root),
+        ):
+            try:
+                relative = resolved.relative_to(root.resolve())
+            except ValueError:
+                continue
+            return f"{scheme}://{relative.as_posix()}"
+    return resolved.as_uri()
+
+
+def load_experiment_spec(
+    path: str | Path,
+    *,
+    project_context: ProjectContext | None = None,
+) -> ExperimentSpec:
+    spec_path = Path(path).resolve()
     with spec_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
     spec = ExperimentSpec.from_dict(raw)
+    document = ConfigDocument.from_mapping(
+        uri=_portable_config_uri(spec_path, project_context),
+        data=raw,
+        precedence=0,
+        declaring_file=spec_path,
+    )
+    spec.resolved_config = resolve_config_layers([document])
     issues = spec.validate()
     if issues:
         raise ValueError("Experiment spec validation failed: " + "; ".join(issues))

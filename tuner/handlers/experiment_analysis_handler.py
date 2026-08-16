@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from shared.experiment_tracking import load_experiment
+from shared.experiment_tracking import TrackingService, load_experiment
 
 from .base import BaseHandler
 
@@ -19,12 +19,18 @@ class ExperimentAnalysisHandler(BaseHandler):
     def can_handle_direct_mode(self) -> bool:
         return True
 
+    def _tracking_service(self) -> TrackingService:
+        return TrackingService(
+            getattr(self.args, "base_dir", None),
+            project_context=self.context,
+        )
+
     def _resolve_experiment_id(self) -> str:
         requested = getattr(self.args, "experiment_id", None) or "latest"
         if requested != "latest":
             return requested
 
-        experiments_root = self.repo_root / getattr(self.args, "base_dir", ".tracking") / "experiments"
+        experiments_root = self._tracking_service().base_dir / "experiments"
         if not experiments_root.exists():
             raise FileNotFoundError(f"No experiments found under {experiments_root}")
 
@@ -45,11 +51,10 @@ class ExperimentAnalysisHandler(BaseHandler):
             raise FileNotFoundError(f"No experiments found under {experiments_root}")
         return latest_id
 
-    @staticmethod
-    def _load_json_if_exists(path_str: str | None) -> dict[str, Any] | None:
+    def _load_json_if_exists(self, path_str: str | None) -> dict[str, Any] | None:
         if not path_str:
             return None
-        path = Path(path_str)
+        path = self._tracking_service().resolve_uri(path_str)
         if not path.exists():
             return None
         try:
@@ -60,7 +65,7 @@ class ExperimentAnalysisHandler(BaseHandler):
     def handle(self) -> int:
         try:
             experiment_id = self._resolve_experiment_id()
-            base_dir = self.repo_root / getattr(self.args, "base_dir", ".tracking")
+            base_dir = self._tracking_service().base_dir
             experiment = load_experiment(experiment_id, base_dir=base_dir)
         except Exception as exc:
             self.output_error(str(exc), code="EXPERIMENT_NOT_FOUND")

@@ -69,6 +69,10 @@ class RunRecord:
     job_ref: str | None = None
     source_commit: str | None = None
     stage: str | None = None
+    source_lock_uri: str | None = None
+    source_lock_sha256: str | None = None
+    resolved_config_uri: str | None = None
+    resolved_config_sha256: str | None = None
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""

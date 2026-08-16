@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import json
+import multiprocessing
+import os
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _emit_stage_event_process(log_dir: str, index: int, start, results) -> None:
+    try:
+        from shared.cloud_stage_logging import CloudStageLogger
+
+        start.wait(timeout=20)
+        CloudStageLogger(Path(log_dir), stage="evaluation").emit(
+            f"process-{index}"
+        )
+        results.put((0, index, ""))
+    except BaseException as exc:
+        results.put((1, index, repr(exc)))
 
 from shared.experiment_tracking import Experiment, ExperimentSpec, TrackingService
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
@@ -958,3 +975,221 @@ def test_experiment_handler_applies_stage_overrides_to_spec(tmp_path: Path):
     assert updated.execution.from_stage is None
     assert updated.execution.skip_stages == ["loss", "analysis"]
     assert updated.execution.selected_stages() == ["evaluation"]
+
+
+def test_experiment_handler_loads_host_spec_with_injected_context(tmp_path: Path):
+    from argparse import Namespace
+
+    from tuner.handlers.experiment_handler import ExperimentHandler
+    from tuner.project import ProjectContext
+
+    host = tmp_path / "host"
+    engine = host / "dependencies" / "synaptic-tuner"
+    spec_path = host / "experiments" / "smoke.yaml"
+    engine.mkdir(parents=True)
+    spec_path.parent.mkdir(parents=True)
+    spec_path.write_text(
+        """experiment:
+  name: host-smoke
+  provider: hf_jobs
+  method: sft
+  dataset: {source: org/data, file: train.jsonl}
+  training: {model_name: org/model}
+""",
+        encoding="utf-8",
+    )
+    context = ProjectContext.host(
+        engine_root=engine,
+        project_root=host,
+        invocation_cwd=host,
+    )
+    handler = ExperimentHandler(
+        Namespace(json=False, experiment_spec="experiments/smoke.yaml"),
+        context=context,
+    )
+
+    spec, resolved_path = handler._load_spec()
+
+    assert resolved_path == spec_path
+    assert spec.resolved_config is not None
+    assert spec.resolved_config.sources[0]["uri"] == "project://experiments/smoke.yaml"
+    assert not (engine / ".tracking").exists()
+
+
+def test_cloud_manifest_atomic_failure_preserves_previous_bytes(tmp_path: Path):
+    from unittest.mock import patch
+
+    from shared.cloud_artifacts import write_manifest
+
+    path = tmp_path / "manifest.json"
+    path.write_bytes(b"previous\n")
+    with patch(
+        "shared.experiment_tracking.experiment.os.replace",
+        side_effect=PermissionError("injected manifest replace failure"),
+    ):
+        with pytest.raises(PermissionError, match="injected manifest"):
+            write_manifest(path, {"status": "new"})
+
+    assert path.read_bytes() == b"previous\n"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_cloud_stage_event_appends_remain_parseable_under_threads(tmp_path: Path):
+    import threading
+
+    from shared.cloud_stage_logging import CloudStageLogger
+
+    logger = CloudStageLogger(tmp_path / "logs", stage="evaluation")
+    threads = [
+        threading.Thread(target=logger.emit, args=(f"event-{index}",))
+        for index in range(12)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    rows = [
+        json.loads(line)
+        for line in logger.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 12
+    assert {row["event"] for row in rows} == {f"event-{index}" for index in range(12)}
+
+
+def test_cloud_stage_event_appends_are_serialized_across_processes(tmp_path: Path):
+    from shared.cloud_stage_logging import STAGE_EVENTS_FILENAME, STAGE_SUMMARY_FILENAME
+
+    log_dir = tmp_path / "logs"
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    process_count = 16
+    processes = [
+        context.Process(
+            target=_emit_stage_event_process,
+            args=(str(log_dir), index, start, results),
+        )
+        for index in range(process_count)
+    ]
+    for process in processes:
+        process.start()
+    start.set()
+    received = []
+    try:
+        received = [results.get(timeout=40) for _ in range(process_count)]
+    finally:
+        deadline = time.monotonic() + 40
+        for process in processes:
+            process.join(timeout=max(0.0, deadline - time.monotonic()))
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+
+    assert all(process.exitcode == 0 for process in processes)
+    assert all(code == 0 for code, _index, _error in received), received
+    rows = [
+        json.loads(line)
+        for line in (log_dir / STAGE_EVENTS_FILENAME).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == process_count
+    assert {row["event"] for row in rows} == {
+        f"process-{index}" for index in range(process_count)
+    }
+    summary = json.loads((log_dir / STAGE_SUMMARY_FILENAME).read_text(encoding="utf-8"))
+    assert summary["event_count"] == process_count
+
+
+def test_cloud_stage_event_retries_short_writes(tmp_path: Path, monkeypatch):
+    from shared.cloud_stage_logging import CloudStageLogger
+
+    logger = CloudStageLogger(tmp_path / "logs", stage="evaluation")
+    logger.emit("prior")
+    real_write = logger._write_event_bytes
+    calls = 0
+
+    def short_once(fd: int, data: memoryview) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return real_write(fd, data[: max(1, len(data) // 2)])
+        return real_write(fd, data)
+
+    monkeypatch.setattr(logger, "_write_event_bytes", short_once)
+    logger.emit("short-success")
+
+    rows = [json.loads(line) for line in logger.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["event"] for row in rows] == ["prior", "short-success"]
+    assert calls >= 2
+
+
+@pytest.mark.parametrize("failure", ["error", "zero", "fsync", "summary"])
+def test_cloud_stage_event_failure_rolls_back_exact_complete_bytes(
+    tmp_path: Path, monkeypatch, failure: str
+):
+    from shared.cloud_stage_logging import CloudStageLogger
+
+    logger = CloudStageLogger(tmp_path / "logs", stage="evaluation")
+    logger.emit("prior")
+    prior_events = logger.events_path.read_bytes()
+    prior_summary = logger.summary_path.read_bytes()
+
+    if failure in {"error", "zero"}:
+        real_write = logger._write_event_bytes
+        calls = 0
+
+        def failed_write(fd: int, data: memoryview) -> int:
+            nonlocal calls
+            calls += 1
+            if calls == 1 and failure == "error":
+                real_write(fd, data[: max(1, len(data) // 2)])
+                return max(1, len(data) // 2)
+            if (calls == 2 and failure == "error") or failure == "zero":
+                if failure == "zero":
+                    return 0
+                raise OSError("injected event write failure")
+            return real_write(fd, data)
+
+        monkeypatch.setattr(logger, "_write_event_bytes", failed_write)
+    elif failure == "fsync":
+        real_fsync = logger._fsync_event_file
+        calls = 0
+
+        def failed_fsync(fd: int) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("injected event fsync failure")
+            real_fsync(fd)
+
+        monkeypatch.setattr(logger, "_fsync_event_file", failed_fsync)
+    else:
+        monkeypatch.setattr(
+            logger,
+            "_write_summary",
+            lambda _payload: (_ for _ in ()).throw(OSError("injected summary failure")),
+        )
+
+    with pytest.raises(OSError):
+        logger.emit("must-rollback")
+
+    assert logger.events_path.read_bytes() == prior_events
+    assert logger.summary_path.read_bytes() == prior_summary
+    assert [
+        json.loads(line)["event"]
+        for line in logger.events_path.read_text(encoding="utf-8").splitlines()
+    ] == ["prior"]
+
+
+def test_cloud_stage_event_discards_incomplete_legacy_tail(tmp_path: Path):
+    from shared.cloud_stage_logging import CloudStageLogger
+
+    logger = CloudStageLogger(tmp_path / "logs", stage="evaluation")
+    logger.emit("prior")
+    with logger.events_path.open("ab") as handle:
+        handle.write(b'{"event":"partial"')
+    logger.emit("after-partial")
+
+    rows = [json.loads(line) for line in logger.events_path.read_text(encoding="utf-8").splitlines()]
+    assert [row["event"] for row in rows] == ["prior", "after-partial"]
