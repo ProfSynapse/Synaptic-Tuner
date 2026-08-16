@@ -9,12 +9,18 @@ Used by: local_tracker.py (auto-registration), adapters.py (manual registration)
 """
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
+import sys
 import tempfile
+import threading
+import time
+import uuid
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from .schema import RunFilter, RunRecord
 
@@ -23,6 +29,235 @@ logger = logging.getLogger(__name__)
 # Link records are stored as separate JSONL lines alongside RunRecords.
 # They have a "__link__" marker to distinguish them from run entries.
 _LINK_MARKER = "__link__"
+
+_LOCK_TIMEOUT_SECONDS = 10.0
+_LOCK_POLL_SECONDS = 0.01
+_REPLACE_TIMEOUT_SECONDS = 10.0
+_REPLACE_POLL_SECONDS = 0.01
+_THREAD_LOCKS: dict[Path, threading.RLock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _is_lock_contention(error: OSError) -> bool:
+    """Return whether an open/publish error is transient lock contention."""
+
+    return (
+        isinstance(error, PermissionError)
+        or error.errno in {errno.EACCES, errno.EAGAIN, errno.EBUSY}
+        or getattr(error, "winerror", None) in {32, 33}
+    )
+
+
+def _is_windows_replace_contention(error: OSError) -> bool:
+    """Classify only Windows sharing/access violations as retryable."""
+
+    return os.name == "nt" and getattr(error, "winerror", None) in {5, 32, 33}
+
+
+def _replace_with_retry(source: Path | str, target: Path | str) -> None:
+    """Replace a registry while retaining its complete temp across contention."""
+
+    deadline = time.monotonic() + _REPLACE_TIMEOUT_SECONDS
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except OSError as exc:
+            if not _is_windows_replace_contention(exc):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Timed out replacing registry after Windows sharing violation: {target}"
+                ) from exc
+            time.sleep(min(_REPLACE_POLL_SECONDS, remaining))
+
+
+def _thread_lock_for(path: Path) -> threading.RLock:
+    key = path.resolve()
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(key, threading.RLock())
+
+
+class _PathLock(AbstractContextManager["_PathLock"]):
+    """Bounded thread/process lock backed by a kernel-owned file lock.
+
+    The adjacent file persists as diagnostic owner metadata. Recovery never
+    relies on age or PID probing: the operating system releases the lock when
+    its owning process exits, including abnormal termination.
+    """
+
+    def __init__(self, target: Path) -> None:
+        self._target = target.resolve()
+        self._lock_path = self._target.with_name(f"{self._target.name}.lock")
+        self._thread_lock = _thread_lock_for(self._target)
+        self._token = uuid.uuid4().hex
+        self._handle: BinaryIO | None = None
+
+    def __enter__(self) -> "_PathLock":
+        self._thread_lock.acquire()
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        try:
+            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+            while True:
+                handle = self._open_published_lock_file()
+                if handle is not None and self._try_native_lock(handle):
+                    self._handle = handle
+                    self._write_owner_metadata()
+                    return self
+                if handle is not None:
+                    handle.close()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Timed out acquiring registry lock: {self._lock_path}"
+                    )
+                time.sleep(_LOCK_POLL_SECONDS)
+        except Exception:
+            self._thread_lock.release()
+            raise
+
+    def _open_published_lock_file(self) -> BinaryIO | None:
+        """Open only a complete sentinel, publishing it atomically if absent."""
+
+        if not self._lock_path.exists() and not self._publish_lock_sentinel():
+            return None
+        try:
+            handle = self._lock_path.open("r+b")
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            # Windows sharing violations during another process's open/close
+            # are contention, not terminal failures.
+            if _is_lock_contention(exc):
+                return None
+            raise
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() < 1:
+                handle.close()
+                return None
+            handle.seek(0)
+            return handle
+        except OSError:
+            handle.close()
+            return None
+
+    def _publish_lock_sentinel(self) -> bool:
+        """Publish a fully flushed sentinel without exposing an empty file."""
+
+        fd = -1
+        tmp = ""
+        try:
+            fd, tmp = tempfile.mkstemp(
+                dir=str(self._lock_path.parent),
+                prefix=f".{self._lock_path.name}.",
+                suffix=".init",
+            )
+            if os.write(fd, b"\0") != 1:
+                raise OSError("Could not initialize registry lock sentinel")
+            os.fsync(fd)
+            os.close(fd)
+            fd = -1
+            try:
+                os.link(tmp, self._lock_path)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                if _is_lock_contention(exc):
+                    return False
+                raise
+            return self._lock_path.exists()
+        except OSError as exc:
+            if _is_lock_contention(exc):
+                return False
+            raise
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except FileNotFoundError:
+                    pass
+
+    @staticmethod
+    def _try_native_lock(handle: BinaryIO) -> bool:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            elif sys.platform.startswith(("linux", "darwin", "freebsd")):
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                raise RuntimeError("No supported native registry lock is available")
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                return False
+            raise
+        return True
+
+    def _write_owner_metadata(self) -> None:
+        assert self._handle is not None
+        payload = json.dumps(
+            {
+                "pid": os.getpid(),
+                "token": self._token,
+                "acquired_at_ns": time.time_ns(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        self._handle.seek(0)
+        self._handle.truncate()
+        self._handle.write(b"\0" + payload)
+        self._handle.flush()
+        os.fsync(self._handle.fileno())
+
+    def _release_owner_metadata(self) -> None:
+        assert self._handle is not None
+        self._handle.seek(1)
+        try:
+            payload = json.loads(self._handle.read().decode("ascii"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        if payload.get("token") != self._token:
+            logger.error("Registry lock owner token changed before release: %s", self._lock_path)
+            return
+        self._handle.seek(0)
+        self._handle.truncate()
+        self._handle.write(b"\0")
+        self._handle.flush()
+        os.fsync(self._handle.fileno())
+
+    @staticmethod
+    def _native_unlock(handle: BinaryIO) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        try:
+            if self._handle is not None:
+                try:
+                    self._release_owner_metadata()
+                finally:
+                    try:
+                        self._native_unlock(self._handle)
+                    finally:
+                        self._handle.close()
+                        self._handle = None
+        finally:
+            self._thread_lock.release()
 
 
 def _default_registry_path() -> Path:
@@ -77,38 +312,40 @@ class RunRegistry:
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Idempotency guard: skip if output_dir already registered
-        existing = self._load_records()
-        for existing_record in existing:
-            if existing_record.output_dir == record.output_dir:
-                logger.warning(
-                    "Skipping duplicate registration for output_dir %s (existing run: %s)",
-                    record.output_dir, existing_record.run_id,
-                )
-                return existing_record.run_id
-
         line = record.to_json_line() + "\n"
 
-        if not self._path.exists():
-            # First write: use atomic temp-file rename
-            fd, tmp = tempfile.mkstemp(
-                dir=str(self._path.parent), suffix=".tmp"
-            )
-            fd_closed = False
+        with _PathLock(self._path):
+            # Re-read under the path lock so idempotency covers all writers.
+            existing = self._scan_records()
+            for existing_record in existing:
+                if existing_record.output_dir == record.output_dir:
+                    logger.warning(
+                        "Skipping duplicate registration for output_dir %s (existing run: %s)",
+                        record.output_dir, existing_record.run_id,
+                    )
+                    return existing_record.run_id
+
+            previous = self._path.read_bytes() if self._path.exists() else b""
+            separator = b"" if not previous or previous.endswith((b"\n", b"\r")) else b"\n"
+            fd, tmp = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
             try:
-                os.write(fd, line.encode("utf-8"))
-                os.close(fd)
-                fd_closed = True
-                os.replace(tmp, str(self._path))
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(previous)
+                    handle.write(separator)
+                    handle.write(line.encode("utf-8"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                _replace_with_retry(tmp, self._path)
             except Exception:
-                if not fd_closed:
+                try:
                     os.close(fd)
-                if os.path.exists(tmp):
+                except OSError:
+                    pass
+                try:
                     os.unlink(tmp)
+                except FileNotFoundError:
+                    pass
                 raise
-        else:
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(line)
 
         self._invalidate_cache()
         logger.info("Registered run %s (%s)", record.run_id, record.run_type)

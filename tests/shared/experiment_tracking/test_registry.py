@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from shared.experiment_tracking.registry import RunRegistry
+import shared.experiment_tracking.registry as registry_module
 from shared.experiment_tracking.schema import RunFilter, RunRecord
 
 
@@ -26,6 +32,139 @@ def _make_record(**overrides) -> RunRecord:
     )
     defaults.update(overrides)
     return RunRecord(**defaults)
+
+
+def _hold_registry_lock(path: str, ready, release) -> None:
+    from shared.experiment_tracking.registry import _PathLock
+
+    with _PathLock(Path(path)):
+        ready.set()
+        release.wait(timeout=10)
+
+
+def _acquire_registry_lock_then_exit(path: str, ready) -> None:
+    from shared.experiment_tracking.registry import _PathLock
+
+    with _PathLock(Path(path)):
+        ready.set()
+        os._exit(0)
+
+
+_LIGHTWEIGHT_REGISTRY_CHILD = r"""
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+repo_root = pathlib.Path(sys.argv[1])
+registry_path = sys.argv[2]
+index = int(sys.argv[3])
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+try:
+    shared = types.ModuleType("shared")
+    shared.__path__ = [str(repo_root / "shared")]
+    tracking = types.ModuleType("shared.experiment_tracking")
+    tracking.__path__ = [str(repo_root / "shared" / "experiment_tracking")]
+    shared.experiment_tracking = tracking
+    sys.modules["shared"] = shared
+    sys.modules["shared.experiment_tracking"] = tracking
+    schema = load_module(
+        "shared.experiment_tracking.schema",
+        repo_root / "shared" / "experiment_tracking" / "schema.py",
+    )
+    registry = load_module(
+        "shared.experiment_tracking.registry",
+        repo_root / "shared" / "experiment_tracking" / "registry.py",
+    )
+    if sys.stdin.buffer.read(1) != b"1":
+        raise RuntimeError("parent did not release start gate")
+    record = schema.RunRecord(
+        run_id=f"process-{index}",
+        run_type="sft",
+        name="SFT run",
+        timestamp="2026-03-14T18:00:00+00:00",
+        status="completed",
+        output_dir=f"/runs/process-{index}",
+    )
+    run_id = registry.RunRegistry(registry_path).register_run(record)
+    result = {
+        "rc": 0,
+        "run_id": run_id,
+        "heavy_modules_absent": not any(
+            name == "torch" or name.startswith("torch.")
+            or name == "transformers" or name.startswith("transformers.")
+            for name in sys.modules
+        ),
+    }
+except BaseException as exc:
+    result = {"rc": 1, "run_id": f"process-{index}", "error": repr(exc)}
+print(json.dumps(result), flush=True)
+"""
+
+
+def _run_lightweight_first_writers(
+    repo_root: Path, path: Path, process_count: int
+) -> list[dict[str, object]]:
+    processes: list[subprocess.Popen[bytes]] = []
+    outputs: list[tuple[bytes, bytes]] = []
+    deadline = time.monotonic() + 45
+    try:
+        for index in range(process_count):
+            processes.append(
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        _LIGHTWEIGHT_REGISTRY_CHILD,
+                        str(repo_root),
+                        str(path),
+                        str(index),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=False,
+                )
+            )
+        for process in processes:
+            assert process.stdin is not None
+            process.stdin.write(b"1")
+            process.stdin.flush()
+        for process in processes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, 45)
+            outputs.append(process.communicate(timeout=remaining))
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+        for process in processes:
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+        for process in processes:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
+
+    assert all(process.returncode == 0 for process in processes)
+    results = []
+    for stdout, stderr in outputs:
+        assert not stderr, stderr.decode("utf-8", errors="replace")
+        results.append(json.loads(stdout.decode("utf-8")))
+    return results
 
 
 # ===========================================================================
@@ -317,6 +456,19 @@ class TestRunRegistryEdgeCases:
         runs = registry.find_runs()
         assert [r.run_id for r in runs] == [f"run-{i:03d}" for i in range(10)]
 
+    def test_append_preserves_historical_bytes_without_trailing_newline(self, tmp_path: Path):
+        path = tmp_path / "registry.jsonl"
+        original = _make_record(run_id="legacy", output_dir="/runs/legacy").to_json_line().encode()
+        path.write_bytes(original)
+
+        RunRegistry(path).register_run(
+            _make_record(run_id="new", output_dir="/runs/new")
+        )
+
+        updated = path.read_bytes()
+        assert updated.startswith(original + b"\n")
+        assert [record.run_id for record in RunRegistry(path).find_runs()] == ["legacy", "new"]
+
     def test_get_linked_runs_no_registry_file(self, tmp_path: Path):
         registry = RunRegistry(tmp_path / "nonexistent.jsonl")
         assert registry.get_linked_runs("any-id") == []
@@ -360,14 +512,224 @@ class TestRunRegistryEdgeCases:
             assert "run_id" in data, f"Line {i} missing run_id"
 
         expected = num_threads * records_per_thread
-        # The idempotency guard may race under concurrent writes (no file
-        # locking), so a small number of records can be silently deduplicated.
-        # The important guarantees are: no corruption and no data loss beyond
-        # the expected race window.
-        assert len(lines) >= expected - 4, (
-            f"Too many records lost: got {len(lines)}, expected ~{expected}"
+        assert len(lines) == expected
+        assert {json.loads(line)["run_id"] for line in lines} == {
+            f"t{thread_id}-r{record_id}"
+            for thread_id in range(num_threads)
+            for record_id in range(records_per_thread)
+        }
+
+    def test_concurrent_duplicate_registration_is_idempotent(self, tmp_path: Path):
+        """The complete idempotency check and write form one transaction."""
+        import threading
+
+        path = tmp_path / "registry.jsonl"
+        barrier = threading.Barrier(8)
+        results: list[str] = []
+        errors: list[Exception] = []
+
+        def register_duplicate(thread_id: int) -> None:
+            try:
+                barrier.wait()
+                results.append(
+                    RunRegistry(path).register_run(
+                        _make_record(
+                            run_id=f"candidate-{thread_id}",
+                            output_dir="/runs/shared",
+                        )
+                    )
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=register_duplicate, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert not errors
+        assert len(set(results)) == 1
+        assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+        assert path.with_name("registry.jsonl.lock").read_bytes() == b"\0"
+
+    def test_active_owner_is_never_stolen_when_lock_mtime_is_old(
+        self, tmp_path: Path, monkeypatch
+    ):
+        path = tmp_path / "registry.jsonl"
+        RunRegistry(path).register_run(
+            _make_record(run_id="original", output_dir="/runs/original")
         )
-        assert len(lines) <= expected
+        context = multiprocessing.get_context("spawn")
+        ready = context.Event()
+        release = context.Event()
+        process = context.Process(
+            target=_hold_registry_lock,
+            args=(str(path), ready, release),
+        )
+        process.start()
+        try:
+            assert ready.wait(timeout=5)
+            lock_path = path.with_name("registry.jsonl.lock")
+            os.utime(lock_path, (1, 1))
+            monkeypatch.setattr(registry_module, "_LOCK_TIMEOUT_SECONDS", 0.2)
+
+            with pytest.raises(TimeoutError, match="Timed out acquiring registry lock"):
+                RunRegistry(path).register_run(
+                    _make_record(run_id="blocked", output_dir="/runs/blocked")
+                )
+
+            assert [record.run_id for record in RunRegistry(path).find_runs()] == [
+                "original"
+            ]
+        finally:
+            release.set()
+            process.join(timeout=5)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+
+        RunRegistry(path).register_run(
+            _make_record(run_id="after-release", output_dir="/runs/after-release")
+        )
+        assert [record.run_id for record in RunRegistry(path).find_runs()] == [
+            "original",
+            "after-release",
+        ]
+
+    def test_dead_owner_lock_is_recovered_by_the_kernel(self, tmp_path: Path):
+        path = tmp_path / "registry.jsonl"
+        context = multiprocessing.get_context("spawn")
+        ready = context.Event()
+        process = context.Process(
+            target=_acquire_registry_lock_then_exit,
+            args=(str(path), ready),
+        )
+        process.start()
+        assert ready.wait(timeout=5)
+        process.join(timeout=5)
+        assert not process.is_alive()
+
+        RunRegistry(path).register_run(
+            _make_record(run_id="recovered", output_dir="/runs/recovered")
+        )
+
+        assert [record.run_id for record in RunRegistry(path).find_runs()] == [
+            "recovered"
+        ]
+        assert path.with_name("registry.jsonl.lock").read_bytes() == b"\0"
+
+    def test_spawned_first_writers_publish_one_complete_sentinel_without_loss(
+        self, tmp_path: Path
+    ):
+        process_count = 32
+        repo_root = Path(__file__).resolve().parents[3]
+        for round_index in range(2):
+            path = tmp_path / f"round-{round_index}" / "registry.jsonl"
+            path.parent.mkdir()
+            received = _run_lightweight_first_writers(
+                repo_root, path, process_count
+            )
+
+            assert all(result["rc"] == 0 for result in received), received
+            assert all(result["heavy_modules_absent"] for result in received)
+            assert {result["run_id"] for result in received} == {
+                f"process-{index}" for index in range(process_count)
+            }
+            records = RunRegistry(path).find_runs()
+            assert len(records) == process_count
+            assert {record.run_id for record in records} == {
+                f"process-{index}" for index in range(process_count)
+            }
+            assert len(path.read_text(encoding="utf-8").splitlines()) == process_count
+            assert path.with_name("registry.jsonl.lock").read_bytes() == b"\0"
+            assert list(path.parent.glob("*.init")) == []
+            assert list(path.parent.glob("*.tmp")) == []
+
+    def test_registry_replace_retries_transient_windows_failure(self, tmp_path: Path, monkeypatch):
+        path = tmp_path / "registry.jsonl"
+        RunRegistry(path).register_run(
+            _make_record(run_id="original", output_dir="/runs/original")
+        )
+        real_replace = registry_module.os.replace
+        calls = 0
+
+        def transient_then_success(source, target):
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                error = PermissionError(13, "injected Windows sharing violation")
+                error.winerror = 5
+                raise error
+            return real_replace(source, target)
+
+        monkeypatch.setattr(registry_module.os, "replace", transient_then_success)
+        RunRegistry(path).register_run(
+            _make_record(run_id="after-retry", output_dir="/runs/after-retry")
+        )
+
+        assert calls == 3
+        assert [record.run_id for record in RunRegistry(path).find_runs()] == [
+            "original",
+            "after-retry",
+        ]
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_registry_replace_timeout_preserves_old_bytes_and_cleans_temp(
+        self, tmp_path: Path, monkeypatch
+    ):
+        path = tmp_path / "registry.jsonl"
+        RunRegistry(path).register_run(
+            _make_record(run_id="original", output_dir="/runs/original")
+        )
+        original = path.read_bytes()
+        calls = 0
+
+        def persistent_transient(_source, _target):
+            nonlocal calls
+            calls += 1
+            error = PermissionError(13, "injected persistent Windows sharing violation")
+            error.winerror = 32
+            raise error
+
+        monkeypatch.setattr(registry_module.os, "replace", persistent_transient)
+        monkeypatch.setattr(registry_module, "_REPLACE_TIMEOUT_SECONDS", 0.03)
+        monkeypatch.setattr(registry_module, "_REPLACE_POLL_SECONDS", 0.005)
+
+        with pytest.raises(TimeoutError, match="Timed out replacing registry"):
+            RunRegistry(path).register_run(
+                _make_record(run_id="must-not-land", output_dir="/runs/must-not-land")
+            )
+
+        assert calls >= 2
+        assert path.read_bytes() == original
+        assert [record.run_id for record in RunRegistry(path).find_runs()] == ["original"]
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_registry_replace_does_not_retry_non_transient_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        path = tmp_path / "registry.jsonl"
+        RunRegistry(path).register_run(
+            _make_record(run_id="original", output_dir="/runs/original")
+        )
+        original = path.read_bytes()
+        calls = 0
+
+        def semantic_failure(_source, _target):
+            nonlocal calls
+            calls += 1
+            raise FileNotFoundError(2, "injected semantic path failure")
+
+        monkeypatch.setattr(registry_module.os, "replace", semantic_failure)
+        with pytest.raises(FileNotFoundError, match="semantic path failure"):
+            RunRegistry(path).register_run(
+                _make_record(run_id="must-not-land", output_dir="/runs/must-not-land")
+            )
+
+        assert calls == 1
+        assert path.read_bytes() == original
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_unicode_content_roundtrips(self, tmp_path: Path):
         """Unicode model names and tags survive JSONL serialization."""
