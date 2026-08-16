@@ -1,7 +1,12 @@
 """CPU tests for MechInterp recipe parsing and validation."""
 
+from pathlib import Path
+
 import pytest
 import yaml
+
+from tuner.project import ProjectContext
+from tuner.project.errors import WriteAccessError
 
 from MechInterp.config import (
     SteerCellConfig,
@@ -140,3 +145,37 @@ def test_load_steer_config_roundtrip(tmp_path):
     p.write_text(yaml.safe_dump(_minimal_steer_dict()))
     cfg = load_steer_config(p)
     assert cfg.arms[1].threshold == 1.0
+
+
+def test_host_config_resolves_declaring_document_and_uri_paths(tmp_path):
+    engine = tmp_path / "engine"
+    project = tmp_path / "host"
+    recipe = project / "experiments" / "cell.yaml"
+    recipe.parent.mkdir(parents=True)
+    (recipe.parent / "rows.jsonl").write_text("{}\n", encoding="utf-8")
+    (project / "directions").mkdir()
+    (project / "directions" / "d.json").write_text("{}", encoding="utf-8")
+    data = _minimal_steer_dict()
+    data["readouts"][0]["path"] = "project://directions/d.json"
+    data["execution"]["output_path"] = "artifact://mechinterp/rows.jsonl"
+    recipe.write_text(yaml.safe_dump(data), encoding="utf-8")
+    context = ProjectContext.host(engine_root=engine, project_root=project)
+
+    cfg = load_steer_config(recipe, context=context)
+
+    assert Path(cfg.surface.rows_path) == recipe.parent / "rows.jsonl"
+    assert Path(cfg.readouts[0].path) == project / "directions" / "d.json"
+    assert Path(cfg.execution.output_path) == context.artifact_root / "mechinterp" / "rows.jsonl"
+
+
+def test_host_config_rejects_source_tree_output(tmp_path):
+    project = tmp_path / "host"
+    recipe = project / "experiments" / "cell.yaml"
+    recipe.parent.mkdir(parents=True)
+    data = _minimal_steer_dict()
+    data["execution"]["output_path"] = "rows-out.jsonl"
+    recipe.write_text(yaml.safe_dump(data), encoding="utf-8")
+    context = ProjectContext.host(engine_root=tmp_path / "engine", project_root=project)
+
+    with pytest.raises(WriteAccessError):
+        load_steer_config(recipe, context=context)

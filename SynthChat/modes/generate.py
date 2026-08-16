@@ -9,8 +9,11 @@ Usage: Called by SynthChat.run.main() when command is 'generate'.
 
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from tuner.project import ProjectContext, resolve_path
 
 from ..config.privacy import resolve_privacy_settings
 from ..utils.logger import get_logger
@@ -24,7 +27,14 @@ from ..parallel.workers import (
 )
 
 
-def generate_mode(args, *, load_settings, create_llm_client, create_environment_validator):
+def generate_mode(
+    args,
+    *,
+    load_settings,
+    create_llm_client,
+    create_environment_validator,
+    project_context: ProjectContext | None = None,
+):
     """Generate new dataset from scenarios.
 
     Args:
@@ -41,6 +51,73 @@ def generate_mode(args, *, load_settings, create_llm_client, create_environment_
         5. Save results
     """
     print("=== SynthChat: Generate Mode ===\n")
+
+    if project_context is not None:
+        engine_root = project_context.engine_root / "SynthChat"
+        host_root = project_context.config_root / "SynthChat"
+        selected_root = (
+            host_root
+            if project_context.mode == "host" and host_root.is_dir()
+            else engine_root
+        )
+        if not args.config_dir:
+            args.config_dir = str(
+                selected_root / "config"
+                if (selected_root / "config").is_dir()
+                else selected_root
+            )
+        if not args.scenarios_dir:
+            args.scenarios_dir = str(selected_root / "scenarios")
+        if not args.rubrics_dir:
+            args.rubrics_dir = str(selected_root / "rubrics")
+        for attr in ("config_dir", "scenarios_dir", "rubrics_dir"):
+            setattr(
+                args,
+                attr,
+                str(
+                    resolve_path(
+                        getattr(args, attr),
+                        project_context,
+                        from_cli=True,
+                        access="read",
+                    )
+                ),
+            )
+        if getattr(args, "targets_file", None):
+            args.targets_file = str(
+                resolve_path(
+                    args.targets_file,
+                    project_context,
+                    from_cli=True,
+                    access="read",
+                )
+            )
+        if getattr(args, "prompt_opt_artifact", None):
+            args.prompt_opt_artifact = str(
+                resolve_path(
+                    args.prompt_opt_artifact,
+                    project_context,
+                    from_cli=True,
+                    access="read",
+                )
+            )
+        if getattr(args, "output", None):
+            args.output = str(
+                resolve_path(
+                    args.output,
+                    project_context,
+                    from_cli=True,
+                    access="write",
+                )
+            )
+        elif project_context.mode == "host":
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            args.output = str(
+                project_context.artifact_root
+                / "synthchat"
+                / f"generated_{stamp}.jsonl"
+            )
+        args._project_context = project_context
 
     # Load configuration
     config_dir = Path(args.config_dir or "SynthChat/config")
@@ -228,7 +305,11 @@ def _prepare_prompt_optimization(args, *, generator, scenarios_dir: Path, config
             raise RuntimeError(
                 "Prompt optimization requested, but shared.prompt_optimization is not importable."
             ) from exc
-        result = PromptOptimizationService.from_config(config_path, overrides=None).run()
+        result = PromptOptimizationService.from_config(
+            config_path,
+            overrides=None,
+            project_context=getattr(args, "_project_context", None),
+        ).run()
         artifact_path = result.output_dir
         print(f"Prompt optimization artifact: {artifact_path}")
 

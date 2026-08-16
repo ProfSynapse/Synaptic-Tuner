@@ -19,6 +19,8 @@ from typing import Any, Iterable
 
 import yaml
 
+from tuner.project import ProjectContext, resolve_path
+
 
 class PromptOptimizationError(RuntimeError):
     """Raised when prompt optimization config or execution is invalid."""
@@ -86,10 +88,20 @@ class EvolutionCandidate:
 class PromptOptimizationService:
     """Run config-first prompt optimization from a YAML config."""
 
-    def __init__(self, config: dict[str, Any], config_path: Path):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        config_path: Path,
+        project_context: ProjectContext | None = None,
+    ):
         self.config = config
         self.config_path = config_path.resolve()
-        self.repo_root = _find_repo_root(self.config_path.parent)
+        self.project_context = project_context
+        self.repo_root = (
+            project_context.engine_root
+            if project_context is not None
+            else _find_repo_root(self.config_path.parent)
+        )
         self._llm_clients: dict[str, Any] = {}
 
     @classmethod
@@ -97,8 +109,13 @@ class PromptOptimizationService:
         cls,
         path: str | Path,
         overrides: dict[str, Any] | None = None,
+        project_context: ProjectContext | None = None,
     ) -> "PromptOptimizationService":
-        config_path = Path(path).expanduser().resolve()
+        config_path = (
+            resolve_path(path, project_context, from_cli=True)
+            if project_context is not None
+            else Path(path).expanduser().resolve()
+        )
         if not config_path.exists():
             raise PromptOptimizationError(f"Prompt optimization config not found: {config_path}")
         with config_path.open("r", encoding="utf-8") as fh:
@@ -108,7 +125,11 @@ class PromptOptimizationService:
             raise PromptOptimizationError("Prompt optimization config must be a YAML mapping.")
         if overrides:
             config = _deep_merge(config, overrides)
-        return cls(config=config, config_path=config_path)
+        return cls(
+            config=config,
+            config_path=config_path,
+            project_context=project_context,
+        )
 
     def run(self) -> PromptOptimizationResult:
         if self._is_evolutionary_config():
@@ -210,6 +231,7 @@ class PromptOptimizationService:
                 evaluation_config=_mapping(self.config.get("evaluation"), "evaluation"),
                 config_path=self.config_path,
                 repo_root=self.repo_root,
+                project_context=self.project_context,
                 score_floor=float(self.config.get("score_floor", 0.0)),
             )
         else:
@@ -424,7 +446,19 @@ class PromptOptimizationService:
         )
 
     def _resolve_output_dir(self, run_id: str) -> Path:
-        raw = self.config.get("output_dir", f".tracking/prompt_optimization/{run_id}")
+        default = (
+            f"tracking://prompt_optimization/{run_id}"
+            if self.project_context is not None and self.project_context.mode == "host"
+            else f".tracking/prompt_optimization/{run_id}"
+        )
+        raw = self.config.get("output_dir", default)
+        if self.project_context is not None:
+            return resolve_path(
+                str(raw),
+                self.project_context,
+                declaring_file=self.config_path,
+                access="write",
+            )
         path = Path(str(raw)).expanduser()
         if not path.is_absolute():
             path = self.repo_root / path
@@ -476,6 +510,16 @@ class PromptOptimizationService:
         return subjects
 
     def _resolve_input_path(self, raw_path: str) -> Path:
+        if self.project_context is not None:
+            path = resolve_path(
+                raw_path,
+                self.project_context,
+                declaring_file=self.config_path,
+                access="read",
+            )
+            if path.exists():
+                return path
+            raise PromptOptimizationError(f"Referenced YAML path not found: {raw_path}")
         path = Path(raw_path).expanduser()
         candidates = []
         if path.is_absolute():

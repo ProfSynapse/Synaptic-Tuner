@@ -20,6 +20,7 @@ from .protocols import BackendError as LMStudioError
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
+from tuner.project import ProjectContext, resolve_path
 
 DEFAULT_PROMPT_SET = Path(__file__).resolve().parent / "prompts" / "tool_prompts.json"
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -63,9 +64,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(
+    argv: List[str] | None = None,
+    *,
+    project_context: ProjectContext | None = None,
+) -> int:
     """Main entry point."""
     args = parse_args(argv or sys.argv[1:])
+    args.project_context = project_context
 
     if args.command == "list-models":
         return list_models_command(args)
@@ -98,8 +104,23 @@ def list_models_command(args: argparse.Namespace) -> int:
 
 def run_full_coverage_command(args: argparse.Namespace) -> int:
     """Run full coverage evaluation."""
-    prompt_path = expand_path(args.prompt_set)
-    results_dir = expand_path(args.output_dir)
+    context = getattr(args, "project_context", None)
+    prompt_path = (
+        resolve_path(args.prompt_set, context, from_cli=True, access="read")
+        if context is not None and args.prompt_set != str(DEFAULT_PROMPT_SET)
+        else expand_path(args.prompt_set)
+    )
+    results_dir = (
+        context.artifact_root / "evaluations"
+        if context is not None
+        and context.mode == "host"
+        and args.output_dir == str(DEFAULT_RESULTS_DIR)
+        else (
+            resolve_path(args.output_dir, context, from_cli=True, access="write")
+            if context is not None
+            else expand_path(args.output_dir)
+        )
+    )
     results_dir.mkdir(parents=True, exist_ok=True)
 
     settings_kwargs = build_settings_kwargs(args)

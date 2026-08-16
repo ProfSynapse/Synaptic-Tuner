@@ -37,8 +37,6 @@ except ImportError:
 
 # Import live dashboard and UI components
 try:
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).parent.parent))
     from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
     from .ui import rich_summary, rich_failure_details, print_evaluation_header
     _DASHBOARD_AVAILABLE = True
@@ -76,6 +74,12 @@ from shared.experiment_tracking.lineage_enrichment import (
     write_json as write_lineage_json,
 )
 from shared.experiment_tracking.runtime_autotune import recommend_eval_max_workers
+from tuner.project import (
+    ProjectContext,
+    discover_project_context,
+    load_project_manifest,
+    resolve_path,
+)
 
 
 def load_display_config(config_dir: Path) -> Dict[str, Any]:
@@ -201,6 +205,7 @@ def _compute_optional_loss_outputs(
     args: argparse.Namespace,
     client: Any,
     training_run_id: str | None,
+    project_context: ProjectContext | None = None,
 ) -> None:
     if not (
         args.loss_dataset_path
@@ -220,14 +225,28 @@ def _compute_optional_loss_outputs(
     from shared.experiment_tracking.per_example_loss import IncrementalLossWriter, compute_per_example_losses, save_losses
 
     hf_token = args.hf_token or os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
+    resolved_dataset_path = (
+        str(resolve_path(args.loss_dataset_path, project_context, from_cli=True, access="read"))
+        if args.loss_dataset_path and project_context is not None
+        else args.loss_dataset_path
+    )
     dataset_path = _resolve_loss_dataset_path(
-        dataset_path=args.loss_dataset_path,
+        dataset_path=resolved_dataset_path,
         dataset_name=args.loss_dataset_name,
         dataset_file=args.loss_dataset_file,
         token=hf_token,
     )
     writer = None
-    loss_output_path = expand_path(args.loss_output_jsonl) if args.loss_output_jsonl else None
+    def output_path(value: str | None) -> Path | None:
+        if not value:
+            return None
+        return (
+            resolve_path(value, project_context, from_cli=True, access="write")
+            if project_context is not None
+            else expand_path(value)
+        )
+
+    loss_output_path = output_path(args.loss_output_jsonl)
     if args.loss_output_jsonl:
         if loss_output_path.name == "per_example_losses.jsonl":
             writer = IncrementalLossWriter(loss_output_path.parent)
@@ -256,24 +275,29 @@ def _compute_optional_loss_outputs(
     ]
 
     if args.loss_feature_jsonl:
-        feature_jsonl = expand_path(args.loss_feature_jsonl)
+        feature_jsonl = output_path(args.loss_feature_jsonl)
+        assert feature_jsonl is not None
         feature_jsonl.parent.mkdir(parents=True, exist_ok=True)
         with feature_jsonl.open("w", encoding="utf-8") as handle:
             for row in loss_rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     if args.loss_feature_csv:
-        _write_loss_rows(expand_path(args.loss_feature_csv), loss_rows)
+        feature_csv = output_path(args.loss_feature_csv)
+        assert feature_csv is not None
+        _write_loss_rows(feature_csv, loss_rows)
 
     if args.loss_high_loss_jsonl:
-        high_loss_path = expand_path(args.loss_high_loss_jsonl)
+        high_loss_path = output_path(args.loss_high_loss_jsonl)
+        assert high_loss_path is not None
         high_loss_path.parent.mkdir(parents=True, exist_ok=True)
         with high_loss_path.open("w", encoding="utf-8") as handle:
             for row in sorted(loss_rows, key=lambda row: row["loss"], reverse=True)[:25]:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     if args.loss_summary_json:
-        summary_path = expand_path(args.loss_summary_json)
+        summary_path = output_path(args.loss_summary_json)
+        assert summary_path is not None
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "dataset_path": str(dataset_path),
@@ -284,7 +308,8 @@ def _compute_optional_loss_outputs(
         summary_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     if args.loss_lineage_json:
-        lineage_output_path = expand_path(args.loss_lineage_json)
+        lineage_output_path = output_path(args.loss_lineage_json)
+        assert lineage_output_path is not None
         loss_root = (
             loss_output_path.parent
             if loss_output_path and loss_output_path.name == "per_example_losses.jsonl"
@@ -512,9 +537,35 @@ def _is_mlc_model(model_path: str) -> bool:
     return False
 
 
-def main(argv: List[str] | None = None) -> int:
+def _evaluator_context(args: argparse.Namespace) -> ProjectContext:
+    engine_root = Path(__file__).resolve().parents[1]
+    raw_config = Path(args.config_dir)
+    primary_config = (
+        raw_config
+        if raw_config.is_absolute()
+        else Path.cwd() / raw_config
+    )
+    context = discover_project_context(
+        engine_root=engine_root,
+        primary_config=primary_config,
+        invocation_cwd=Path.cwd(),
+    )
+    if context.mode == "host" and context.manifest_path and context.manifest_path.is_file():
+        return load_project_manifest(context.manifest_path).create_context(
+            engine_root=engine_root,
+            invocation_cwd=context.invocation_cwd,
+        )
+    return context
+
+
+def main(
+    argv: List[str] | None = None,
+    *,
+    project_context: ProjectContext | None = None,
+) -> int:
     """Main entry point for CLI evaluation."""
     args = parse_args(argv or sys.argv[1:])
+    context = project_context or _evaluator_context(args)
 
     # Auto-detect MLC models if backend not specified
     if args.backend is None:
@@ -526,7 +577,21 @@ def main(argv: List[str] | None = None) -> int:
     # Handle MLC backend specially - requires browser-based evaluation
     if args.backend == "mlc":
         from .mlc_eval_handler import run_mlc_evaluation
-        config_dir = expand_path(args.config_dir)
+        if args.config_dir == "Evaluator/config":
+            host_config = (
+                context.config_root
+                if (context.config_root / "scenarios").is_dir()
+                else context.config_root / "Evaluator"
+            )
+            config_dir = (
+                host_config
+                if context.mode == "host" and host_config.is_dir()
+                else context.engine_root / "Evaluator" / "config"
+            )
+        else:
+            config_dir = resolve_path(
+                args.config_dir, context, from_cli=True, access="read"
+            )
         return run_mlc_evaluation(
             model_path=args.model,
             config_dir=config_dir,
@@ -535,13 +600,35 @@ def main(argv: List[str] | None = None) -> int:
         )
 
     # Resolve paths
-    output_path = expand_path(args.output) if args.output else default_output_path()
-    markdown_path = expand_path(args.markdown) if args.markdown else None
-    partial_output_path = expand_path(args.partial_output_json) if args.partial_output_json else None
-    partial_markdown_path = expand_path(args.partial_markdown) if args.partial_markdown else None
-    failure_path = expand_path(args.failure_json) if args.failure_json else None
+    output_path = (
+        resolve_path(args.output, context, from_cli=True, access="write")
+        if args.output
+        else (
+            context.artifact_root / "evaluations" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            if context.mode == "host"
+            else default_output_path()
+        )
+    )
+    markdown_path = resolve_path(args.markdown, context, from_cli=True, access="write") if args.markdown else None
+    partial_output_path = resolve_path(args.partial_output_json, context, from_cli=True, access="write") if args.partial_output_json else None
+    partial_markdown_path = resolve_path(args.partial_markdown, context, from_cli=True, access="write") if args.partial_markdown else None
+    failure_path = resolve_path(args.failure_json, context, from_cli=True, access="write") if args.failure_json else None
     partial_write_every = max(1, int(args.partial_write_every or 5))
-    config_dir = expand_path(args.config_dir)
+    if args.config_dir == "Evaluator/config":
+        host_config = (
+            context.config_root
+            if (context.config_root / "scenarios").is_dir()
+            else context.config_root / "Evaluator"
+        )
+        config_dir = (
+            host_config
+            if context.mode == "host" and host_config.is_dir()
+            else context.engine_root / "Evaluator" / "config"
+        )
+    else:
+        config_dir = resolve_path(
+            args.config_dir, context, from_cli=True, access="read"
+        )
 
     # Require --scenario or --preset
     if not args.scenarios and not args.preset:
@@ -549,7 +636,7 @@ def main(argv: List[str] | None = None) -> int:
         return 1
 
     # Load run config so execution defaults can come from eval_run.yaml/preset.
-    loader = ConfigLoader(config_dir)
+    loader = ConfigLoader(config_dir, project_context=context)
     run_config = loader.load_eval_run(args.preset)
 
     # Load from YAML config system
@@ -559,6 +646,7 @@ def main(argv: List[str] | None = None) -> int:
         scenario_files=args.scenarios,
         preset=args.preset,
         tag_filter=tag_filter,
+        project_context=context,
     )
 
     if args.limit and len(selected_cases) > args.limit:
@@ -735,7 +823,11 @@ def main(argv: List[str] | None = None) -> int:
             interaction_logger = None
             if judge_cfg.log_interactions:
                 interaction_logger = InteractionLogger(
-                    output_dir=Path("Evaluator/interactions"),
+                    output_dir=(
+                        context.tracking_root / "evaluator" / "interactions"
+                        if context.mode == "host"
+                        else Path("Evaluator/interactions")
+                    ),
                     enabled=True,
                     prefix="judge",
                 )
@@ -939,6 +1031,7 @@ def main(argv: List[str] | None = None) -> int:
             args=args,
             client=client,
             training_run_id=getattr(args, "training_run", None),
+            project_context=context,
         )
 
     # Generate evaluation lineage if requested
@@ -964,7 +1057,9 @@ def main(argv: List[str] | None = None) -> int:
 
         # Save lineage to file if path provided
         if args.lineage:
-            lineage_path = expand_path(args.lineage)
+            lineage_path = resolve_path(
+                args.lineage, context, from_cli=True, access="write"
+            )
             lineage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(lineage_path, 'w', encoding='utf-8') as f:
                 json.dump(lineage, f, indent=2)

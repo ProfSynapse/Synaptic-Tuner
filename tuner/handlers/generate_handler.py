@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 
 # Import shared UI components
 from shared.ui import (
@@ -40,10 +41,6 @@ from shared.ui import (
     BOX,
     LiveSynthChatDashboard,
 )
-
-# Add SynthChat to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 
 class GenerateHandler(BaseHandler):
     """
@@ -67,6 +64,18 @@ class GenerateHandler(BaseHandler):
     def can_handle_direct_mode(self) -> bool:
         """This handler supports direct CLI invocation."""
         return True
+
+    def _synthchat_root(self) -> Path:
+        if self.context.mode == "host":
+            candidate = self.context.config_root / "SynthChat"
+            if candidate.is_dir():
+                return candidate
+        return self.engine_root / "SynthChat"
+
+    def _config_dir(self) -> Path:
+        root = self._synthchat_root()
+        candidate = root / "config"
+        return candidate if candidate.is_dir() else root
 
     def _check_lmstudio_connection(self) -> Optional[object]:
         """
@@ -120,7 +129,7 @@ class GenerateHandler(BaseHandler):
         try:
             from SynthChat.generator import ScenarioLoader
 
-            scenarios_dir = self.repo_root / "SynthChat" / "scenarios"
+            scenarios_dir = self._synthchat_root() / "scenarios"
             loader = ScenarioLoader(scenarios_dir)
 
             return {key: loader.get_scenario(key) for key in loader.list_scenarios()}
@@ -219,12 +228,21 @@ class GenerateHandler(BaseHandler):
         ], prompt="Select generation mode")
 
         # Determine output file
-        output_base = self.repo_root / "SynthChat" / "output" / f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        output_base = (
+            self.artifact_root / "synthchat"
+            if self.context.mode == "host"
+            else self.engine_root / "SynthChat" / "output"
+        ) / f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
         output_file = prompt(f"\nOutput file (default: {output_base})").strip()
         if not output_file:
             output_file = str(output_base)
 
-        output_path = Path(output_file)
+        output_path = resolve_path(
+            output_file,
+            self.context,
+            from_cli=True,
+            access="write",
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Configure based on mode
@@ -286,9 +304,9 @@ class GenerateHandler(BaseHandler):
             from shared.llm import create_client
 
             # Setup paths
-            config_dir = self.repo_root / "SynthChat" / "config"
-            scenarios_dir = self.repo_root / "SynthChat" / "scenarios"
-            rubrics_dir = self.repo_root / "SynthChat" / "rubrics"
+            config_dir = self._config_dir()
+            scenarios_dir = self._synthchat_root() / "scenarios"
+            rubrics_dir = self._synthchat_root() / "rubrics"
 
             print_info(f"Starting generation of {num_examples} examples...")
             print()
@@ -377,12 +395,16 @@ class GenerateHandler(BaseHandler):
 
             # Ask about splitting
             if confirm("\nSplit into individual dataset files?"):
-                split_script = self.repo_root / "Tools" / "split_synthchat_dataset.py"
+                split_script = self.engine_root / "Tools" / "split_synthchat_dataset.py"
 
                 if split_script.exists():
                     import subprocess
 
-                    datasets_dir = self.repo_root / "Datasets"
+                    datasets_dir = (
+                        self.artifact_root / "datasets"
+                        if self.context.mode == "host"
+                        else self.engine_root / "Datasets"
+                    )
 
                     with spinner("Splitting into dataset folders..."):
                         result = subprocess.run([

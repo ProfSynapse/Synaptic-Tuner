@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from tuner.project import ProjectContext, resolve_path
+
 from .service import PromptOptimizationError, PromptSubject
 
 
@@ -33,10 +35,12 @@ class EvaluatorScoringAdapter:
         config_path: Path,
         repo_root: Path,
         score_floor: float,
+        project_context: ProjectContext | None = None,
     ) -> None:
         self.evaluation_config = dict(evaluation_config)
         self.config_path = config_path
         self.repo_root = repo_root
+        self.project_context = project_context
         self.score_floor = _clamp_score(score_floor)
         self.evaluator_config = _mapping(
             self.evaluation_config.get("evaluator") or self.evaluation_config,
@@ -96,7 +100,9 @@ class EvaluatorScoringAdapter:
         from Evaluator.runner import evaluate_cases
 
         config_dir = self._resolve_path(str(self.evaluator_config.get("config_dir", "Evaluator/config")))
-        loader = ConfigLoader(config_dir)
+        loader = ConfigLoader(
+            config_dir, project_context=self.project_context
+        )
 
         preset = self.evaluator_config.get("preset")
         scenario_files = self.evaluator_config.get("scenarios")
@@ -343,6 +349,25 @@ class EvaluatorScoringAdapter:
         return injected
 
     def _resolve_path(self, raw_path: str) -> Path:
+        if self.project_context is not None:
+            if raw_path == "Evaluator/config":
+                if (self.project_context.config_root / "scenarios").is_dir():
+                    return self.project_context.config_root
+                host_dir = self.project_context.config_root / "Evaluator"
+                if host_dir.is_dir():
+                    return host_dir
+                return self.project_context.engine_root / "Evaluator" / "config"
+            path = resolve_path(
+                raw_path,
+                self.project_context,
+                declaring_file=self.config_path,
+                access="read",
+            )
+            if path.exists():
+                return path
+            raise EvaluatorScoringConfigError(
+                f"Evaluator config path not found: {raw_path}"
+            )
         path = Path(raw_path).expanduser()
         candidates = [path] if path.is_absolute() else [self.repo_root / path, self.config_path.parent / path]
         for candidate in candidates:
@@ -428,7 +453,11 @@ class EvaluatorScoringAdapter:
             from pathlib import Path as _Path
 
             interaction_logger = InteractionLogger(
-                output_dir=_Path("Evaluator/interactions"),
+                output_dir=(
+                    self.project_context.tracking_root / "prompt_optimization" / "judge"
+                    if self.project_context is not None
+                    else _Path("Evaluator/interactions")
+                ),
                 enabled=True,
                 prefix="judge_opt",
             )

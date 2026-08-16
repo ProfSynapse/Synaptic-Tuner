@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ class MechInterpHandler(BaseHandler):
             or self._arg("mechinterp_config")
         )
 
+    def _input_path(self, value: str) -> Path:
+        return resolve_path(value, self.context, from_cli=True, access="read")
+
     def _handle_run(self) -> int:
         from MechInterp.pipeline import (
             build_pipeline_plan,
@@ -132,11 +136,13 @@ class MechInterpHandler(BaseHandler):
             return 1
 
         try:
-            cfg = load_pipeline_config(config_path)
+            resolved_config_path = self._input_path(config_path)
+            cfg = load_pipeline_config(resolved_config_path, context=self.context)
             provider = self._arg("provider") or cfg.runtime.provider
             plan = build_pipeline_plan(
                 cfg,
                 repo_root=self.repo_root,
+                context=self.context,
                 provider=provider,
                 only_step=self._arg("only_step"),
                 from_step=self._arg("from_step"),
@@ -163,6 +169,7 @@ class MechInterpHandler(BaseHandler):
                 return run_local_pipeline(
                     cfg,
                     repo_root=self.repo_root,
+                    context=self.context,
                     only_step=self._arg("only_step"),
                     from_step=self._arg("from_step"),
                     skip_steps=self._arg("skip_step") or [],
@@ -180,7 +187,7 @@ class MechInterpHandler(BaseHandler):
                     code="CONFIRMATION_REQUIRED",
                 )
                 return 2
-            return self._submit_modal_pipeline(config_path, cfg)
+            return self._submit_modal_pipeline(str(resolved_config_path), cfg)
 
         self.output_error(f"Unsupported mechinterp provider: {provider}", code="BAD_PROVIDER")
         return 1
@@ -261,7 +268,9 @@ class MechInterpHandler(BaseHandler):
         model = self._require("model", "--model")
         if not config_path or not model:
             return 1
-        config = load_extract_config(config_path)
+        config = load_extract_config(
+            self._input_path(config_path), context=self.context
+        )
         return run_extract(
             config,
             model_name=model,
@@ -277,7 +286,9 @@ class MechInterpHandler(BaseHandler):
         config_path = self._require("mechinterp_config", "--mi-config")
         if not config_path:
             return 1
-        config = load_probe_fit_config(config_path)
+        config = load_probe_fit_config(
+            self._input_path(config_path), context=self.context
+        )
         return run_probe_fit(config)
 
     def _handle_steer(self) -> int:
@@ -288,7 +299,9 @@ class MechInterpHandler(BaseHandler):
         model = self._require("model", "--model")
         if not config_path or not model:
             return 1
-        config = load_steer_config(config_path)
+        config = load_steer_config(
+            self._input_path(config_path), context=self.context
+        )
         render_fn = self._arg("render_fn") or config.execution.render_fn
         if not render_fn:
             self.output_error(
@@ -304,6 +317,7 @@ class MechInterpHandler(BaseHandler):
             render_fn_spec=render_fn,
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
             force=bool(self._arg("force_full_run", False)),
+            project_context=self.context,
         )
 
     def _handle_dose_calibrate(self) -> int:
@@ -314,7 +328,9 @@ class MechInterpHandler(BaseHandler):
         model = self._require("model", "--model")
         if not config_path or not model:
             return 1
-        config = load_dose_calibration_config(config_path)
+        config = load_dose_calibration_config(
+            self._input_path(config_path), context=self.context
+        )
         render_fn = self._arg("render_fn") or config.execution.render_fn
         if not render_fn:
             self.output_error(
@@ -328,6 +344,7 @@ class MechInterpHandler(BaseHandler):
             adapter=self._arg("adapter"),
             render_fn_spec=render_fn,
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
+            project_context=self.context,
         )
 
     def _handle_score_gates(self) -> int:
@@ -338,5 +355,7 @@ class MechInterpHandler(BaseHandler):
         if not gates_path or not rows_path:
             return 1
         return run_score_gates(
-            gates_path, rows_path, arm_field=self._arg("arm_field", "arm") or "arm"
+            str(self._input_path(gates_path)),
+            str(self._input_path(rows_path)),
+            arm_field=self._arg("arm_field", "arm") or "arm",
         )

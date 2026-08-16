@@ -8,6 +8,7 @@ from shared.experiment_tracking import ExperimentSpec, load_experiment_spec
 from tuner.cloud.hardware_planner import format_stage_plan_json, plan_experiment_hardware
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 from tuner.ui import print_config, print_error, print_header, print_info
 
 
@@ -23,10 +24,10 @@ class HardwarePlanHandler(BaseHandler):
         spec_path = getattr(self.args, "experiment_spec", None)
         if not spec_path:
             raise CloudProviderError("plan-hardware requires --experiment-spec <path>.")
-        path = Path(spec_path).expanduser().resolve()
+        path = resolve_path(spec_path, self.context, from_cli=True, access="read")
         if not path.exists():
             raise CloudProviderError(f"Experiment spec not found: {path}")
-        return load_experiment_spec(path), path
+        return load_experiment_spec(path, project_context=self.context), path
 
     def handle(self) -> int:
         try:

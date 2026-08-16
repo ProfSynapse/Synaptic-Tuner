@@ -33,10 +33,10 @@ from .vllm_client import VLLMClient
 from .prompt_sets import load_prompt_cases
 from .reporting import build_run_payload, console_summary, render_markdown, write_json
 from .runner import evaluate_cases
+from tuner.project import ProjectContext, resolve_path
 
 # Import live dashboard and UI components
 try:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
     from shared.ui import LiveEvaluationDashboard, RICH_AVAILABLE as _SHARED_RICH
     from .ui import rich_summary, rich_failure_details
     _DASHBOARD_AVAILABLE = True
@@ -76,9 +76,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(
+    argv: List[str] | None = None,
+    *,
+    project_context: ProjectContext | None = None,
+) -> int:
     """Main entry point for interactive CLI."""
     args = parse_args(argv or sys.argv[1:])
+    args.project_context = project_context
 
     print_banner("Model Evaluator", "Interactive CLI")
 
@@ -129,6 +134,21 @@ def _select_backend(preset: Optional[str]) -> Optional[BackendType]:
 # LM Studio Evaluation
 # ---------------------------------------------------------------------------
 
+def _resolve_input(value: str, args: argparse.Namespace) -> Path:
+    context = getattr(args, "project_context", None)
+    if context is None or value == str(DEFAULT_PROMPT_SET):
+        return expand_path(value)
+    return resolve_path(value, context, from_cli=True, access="read")
+
+
+def _resolve_output_dir(args: argparse.Namespace) -> Path:
+    context = getattr(args, "project_context", None)
+    if context is None:
+        return expand_path(args.output_dir)
+    if context.mode == "host" and args.output_dir == str(DEFAULT_RESULTS_DIR):
+        return context.artifact_root / "evaluations"
+    return resolve_path(args.output_dir, context, from_cli=True, access="write")
+
 def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
     """Run evaluation using LM Studio backend."""
     print(color("\n--- LM Studio Backend ---", "cyan"))
@@ -138,13 +158,13 @@ def _run_lmstudio_evaluation(args: argparse.Namespace) -> int:
 
     # Handle "Run All" option
     if isinstance(prompt_set_selection, list):
-        prompt_set_paths = [expand_path(p) for p in prompt_set_selection]
+        prompt_set_paths = [_resolve_input(p, args) for p in prompt_set_selection]
         run_all_suites = True
     else:
-        prompt_set_paths = [expand_path(prompt_set_selection)]
+        prompt_set_paths = [_resolve_input(prompt_set_selection, args)]
         run_all_suites = False
 
-    results_dir = expand_path(args.output_dir)
+    results_dir = _resolve_output_dir(args)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate prompt paths
@@ -245,13 +265,13 @@ def _run_vllm_evaluation(args: argparse.Namespace) -> int:
     prompt_set_selection = _select_prompt_set() if args.prompt_set == str(DEFAULT_PROMPT_SET) else args.prompt_set
 
     if isinstance(prompt_set_selection, list):
-        prompt_set_paths = [expand_path(p) for p in prompt_set_selection]
+        prompt_set_paths = [_resolve_input(p, args) for p in prompt_set_selection]
         run_all_suites = True
     else:
-        prompt_set_paths = [expand_path(prompt_set_selection)]
+        prompt_set_paths = [_resolve_input(prompt_set_selection, args)]
         run_all_suites = False
 
-    results_dir = expand_path(args.output_dir)
+    results_dir = _resolve_output_dir(args)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     for prompt_path in prompt_set_paths:
@@ -408,7 +428,9 @@ def _select_vllm_model(
             print(f"Could not list models: {e}")
 
     # Discover training runs
-    training_runs = vllm_setup.discover_training_runs()
+    training_runs = vllm_setup.discover_training_runs(
+        project_context=getattr(args, "project_context", None)
+    )
 
     print(color("\nSelect model source:", "magenta"))
     print(f"{color('[1]', 'yellow')} Training output (local fine-tuned model)")

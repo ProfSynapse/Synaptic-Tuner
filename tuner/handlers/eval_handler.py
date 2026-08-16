@@ -99,6 +99,20 @@ class EvalHandler(BaseHandler):
         """This handler supports direct CLI invocation."""
         return True
 
+    def _evaluation_config_dir(self) -> Path:
+        if self.context.mode == "host":
+            if (self.context.config_root / "scenarios").is_dir():
+                return self.context.config_root
+            host_dir = self.context.config_root / "Evaluator"
+            if host_dir.is_dir():
+                return host_dir
+        return self.engine_root / "Evaluator" / "config"
+
+    def _evaluation_results_dir(self) -> Path:
+        if self.context.mode == "host":
+            return self.artifact_root / "evaluations"
+        return self.engine_root / "Evaluator" / "results"
+
     def _get_eval_status(self) -> dict:
         """
         Get evaluation status for JSON output.
@@ -172,9 +186,9 @@ class EvalHandler(BaseHandler):
         Returns:
             List of PromptSetInfo objects
         """
-        from tuner.discovery import PromptSetDiscovery
-        discovery = PromptSetDiscovery(repo_root=self.repo_root)
-        return discovery.discover_all()
+        from tuner.discovery.prompt_sets import PromptSetDiscovery
+
+        return PromptSetDiscovery(context=self.context).discover_all()
 
     # -- Generic table display infrastructure ----------------------------------
 
@@ -689,11 +703,11 @@ class EvalHandler(BaseHandler):
         Returns:
             Exit code (0 = success)
         """
-        config_dir = self.repo_root / "Evaluator" / "config"
+        config_dir = self._evaluation_config_dir()
 
         # Generate timestamped output paths
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = self.repo_root / "Evaluator" / "results"
+        results_dir = self._evaluation_results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         output_json = results_dir / f"run_{timestamp}.json"
         output_md = results_dir / f"run_{timestamp}.md"
@@ -703,6 +717,7 @@ class EvalHandler(BaseHandler):
             cases = load_yaml_scenarios(
                 config_dir=config_dir,
                 scenario_files=[scenario.path.name],
+                project_context=self.context,
             )
         except Exception as e:
             print_error(f"Failed to load scenario: {e}")
@@ -795,8 +810,8 @@ class EvalHandler(BaseHandler):
             print_error(f"Failed to save results: {e}")
             return 1
 
-        print_info(f"Results saved to: {output_json.relative_to(self.repo_root)}")
-        print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
+        print_info(f"Results saved to: {output_json}")
+        print_info(f"Markdown report: {output_md}")
 
         # Return appropriate exit code
         passed = sum(1 for r in records if r.passed)
@@ -820,7 +835,7 @@ class EvalHandler(BaseHandler):
 
         # Generate timestamped output paths
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = self.repo_root / "Evaluator" / "results"
+        results_dir = self._evaluation_results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
 
         output_json = results_dir / f"run_{timestamp}.json"
@@ -830,6 +845,7 @@ class EvalHandler(BaseHandler):
             python, "-m", "Evaluator.cli",
             "--backend", backend,
             "--model", model,
+            "--config-dir", str(self._evaluation_config_dir()),
             "--scenario", scenario.path.name,
             "--output", str(output_json),
             "--markdown", str(output_md)
@@ -842,8 +858,8 @@ class EvalHandler(BaseHandler):
 
         if result.returncode == 0:
             print()
-            print_info(f"Results saved to: {output_json.relative_to(self.repo_root)}")
-            print_info(f"Markdown report: {output_md.relative_to(self.repo_root)}")
+            print_info(f"Results saved to: {output_json}")
+            print_info(f"Markdown report: {output_md}")
 
         return result.returncode
 
@@ -865,7 +881,7 @@ class EvalHandler(BaseHandler):
         print_info("Select tests in browser, then click 'Run Evaluation'")
         print()
 
-        config_dir = self.repo_root / "Evaluator" / "config"
+        config_dir = self._evaluation_config_dir()
 
         return run_mlc_evaluation(
             model_path=model_path,

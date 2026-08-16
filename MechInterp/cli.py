@@ -27,6 +27,8 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from tuner.project import ProjectContext
+
 from MechInterp import cell as cell_mod
 from MechInterp.config import (
     DoseCalibrationConfig,
@@ -463,6 +465,7 @@ def run_steer(
     render_fn_spec: str,
     gpu_ack: bool,
     force: bool = False,
+    project_context: ProjectContext | None = None,
 ) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
@@ -502,7 +505,11 @@ def run_steer(
     layer_module = get_decoder_layer(model, layer)
     handle = layer_module.register_forward_hook(controller)
 
-    grader = load_grader(config.execution.grader) if config.execution.grader else None
+    grader = (
+        load_grader(config.execution.grader, project_context=project_context)
+        if config.execution.grader
+        else None
+    )
 
     # Smoke gate: run n_rows through the intervention with readback and record.
     if not force and not cell_mod.smoke_passed(config.execution.output_path, config_sha):
@@ -644,6 +651,7 @@ def run_dose_calibration(
     adapter: Optional[str],
     render_fn_spec: str,
     gpu_ack: bool,
+    project_context: ProjectContext | None = None,
 ) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
@@ -671,7 +679,11 @@ def run_dose_calibration(
 
     rows = cell_mod.load_jsonl(config.surface.rows_path)
     render_fn = _load_callable(render_fn_spec)
-    grader = load_grader(config.execution.grader) if config.execution.grader else None
+    grader = (
+        load_grader(config.execution.grader, project_context=project_context)
+        if config.execution.grader
+        else None
+    )
     readout_by_name = {
         readout.name: load_frozen_direction(readout.path)
         for readout in config.readouts

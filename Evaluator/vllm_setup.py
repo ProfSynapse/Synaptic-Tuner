@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple
 import requests
 
 from shared.utilities.paths import iter_training_output_dirs
+from tuner.project import ProjectContext
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -224,7 +225,11 @@ def install_vllm(quiet: bool = False) -> bool:
 # Training Output Discovery
 # ---------------------------------------------------------------------------
 
-def discover_training_runs(base_dir: Optional[Path] = None) -> List[TrainingRun]:
+def discover_training_runs(
+    base_dir: Optional[Path] = None,
+    *,
+    project_context: ProjectContext | None = None,
+) -> List[TrainingRun]:
     """Discover available training runs.
 
     Scans the Trainers directory for SFT and KTO output directories
@@ -237,7 +242,11 @@ def discover_training_runs(base_dir: Optional[Path] = None) -> List[TrainingRun]
         List of TrainingRun objects, sorted by timestamp (newest first)
     """
     if base_dir is None:
-        base_dir = TRAINERS_DIR
+        base_dir = (
+            project_context.artifact_root
+            if project_context is not None and project_context.mode == "host"
+            else TRAINERS_DIR
+        )
 
     runs: List[TrainingRun] = []
     repo_root = base_dir.parent if base_dir.name == "Trainers" else base_dir

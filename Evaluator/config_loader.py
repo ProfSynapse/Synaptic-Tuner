@@ -14,6 +14,7 @@ import yaml
 
 from .prompt_sets import PromptCase
 from shared.environments.fixture_parser import EnvironmentFixture, merge_environment_fixture
+from tuner.project import ProjectContext, resolve_path
 
 
 @dataclass
@@ -52,13 +53,18 @@ class EvalRunConfig:
 class ConfigLoader:
     """Loads YAML configurations and converts to evaluation objects."""
 
-    def __init__(self, config_dir: Union[str, Path]):
+    def __init__(
+        self,
+        config_dir: Union[str, Path],
+        project_context: ProjectContext | None = None,
+    ):
         """Initialize with config directory path.
 
         Args:
             config_dir: Path to config directory (e.g., Evaluator/config)
         """
-        self.config_dir = Path(config_dir)
+        self.config_dir = Path(config_dir).resolve()
+        self.project_context = project_context
         self._tool_schema: Optional[Dict] = None
         self._templates: Optional[Dict] = None
 
@@ -139,10 +145,19 @@ class ConfigLoader:
         Returns:
             ScenarioConfig with test definitions
         """
-        full_path = self.config_dir / "scenarios" / scenario_path
-        if not full_path.exists():
-            # Try without scenarios/ prefix
-            full_path = self.config_dir / scenario_path
+        candidate = Path(scenario_path)
+        full_path = self.config_dir / "scenarios" / candidate
+        if candidate.is_absolute():
+            full_path = candidate
+        elif self.project_context is not None and "://" in scenario_path:
+            full_path = resolve_path(
+                scenario_path,
+                self.project_context,
+                declaring_file=self.config_dir / "eval_run.yaml",
+                access="read",
+            )
+        elif not full_path.exists():
+            full_path = self.config_dir / candidate
 
         with open(full_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -476,6 +491,7 @@ def load_yaml_scenarios(
     preset: Optional[str] = None,
     tag_filter: Optional[List[str]] = None,
     exclude_tags: Optional[List[str]] = None,
+    project_context: ProjectContext | None = None,
 ) -> List[PromptCase]:
     """Convenience function to load YAML scenarios.
 
@@ -489,7 +505,7 @@ def load_yaml_scenarios(
     Returns:
         List of PromptCase objects
     """
-    loader = ConfigLoader(config_dir)
+    loader = ConfigLoader(config_dir, project_context=project_context)
 
     # Get scenario list from eval_run or use provided
     if scenario_files:

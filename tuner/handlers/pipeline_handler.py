@@ -94,7 +94,7 @@ class PipelineHandler(BaseHandler):
 
         # Step 1: Training
         print_header("STEP 1: TRAINING")
-        train_handler = TrainHandler()
+        train_handler = self.bind_handler(TrainHandler())
         train_exit_code = train_handler.handle()
 
         if train_exit_code != 0:
@@ -106,7 +106,7 @@ class PipelineHandler(BaseHandler):
 
         # Step 2: Upload
         print_header("STEP 2: UPLOAD")
-        upload_handler = UploadHandler()
+        upload_handler = self.bind_handler(UploadHandler())
         upload_exit_code = upload_handler.handle()
 
         if upload_exit_code != 0:
@@ -118,7 +118,7 @@ class PipelineHandler(BaseHandler):
 
         # Step 3: Evaluation
         print_header("STEP 3: EVALUATION")
-        eval_handler = EvalHandler()
+        eval_handler = self.bind_handler(EvalHandler())
         eval_exit_code = eval_handler.handle()
 
         # Pipeline complete

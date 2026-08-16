@@ -24,6 +24,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 from shared.ui import (
     print_menu,
     print_header,
@@ -67,6 +68,28 @@ class SynthChatHandler(BaseHandler):
         """This handler supports direct CLI invocation."""
         return True
 
+    def _synthchat_root(self) -> Path:
+        if self.context.mode == "host":
+            host_root = self.context.config_root / "SynthChat"
+            if host_root.is_dir():
+                return host_root
+        return self.engine_root / "SynthChat"
+
+    def _synthchat_config_dir(self) -> Path:
+        root = self._synthchat_root()
+        candidate = root / "config"
+        return candidate if candidate.is_dir() else root
+
+    def _output_dir(self, raw: str) -> Path:
+        if self.context.mode == "host" and raw == "SynthChat/output":
+            return self.artifact_root / "synthchat"
+        return resolve_path(
+            raw,
+            self.context,
+            declaring_file=self._synthchat_config_dir() / "defaults.yaml",
+            access="write",
+        )
+
     def _get_synthchat_status(self) -> dict:
         """
         Get SynthChat status for JSON output.
@@ -97,7 +120,7 @@ class SynthChatHandler(BaseHandler):
         Returns:
             Dictionary with configuration defaults, or empty dict if not found
         """
-        defaults_path = self.repo_root / "SynthChat" / "config" / "defaults.yaml"
+        defaults_path = self._synthchat_config_dir() / "defaults.yaml"
         if defaults_path.exists():
             try:
                 import yaml
@@ -110,14 +133,14 @@ class SynthChatHandler(BaseHandler):
 
     def _list_scenarios(self) -> List[str]:
         """List available scenarios from SynthChat/scenarios/."""
-        scenarios_dir = self.repo_root / "SynthChat" / "scenarios"
+        scenarios_dir = self._synthchat_root() / "scenarios"
         if not scenarios_dir.exists():
             return []
         return [f.stem for f in scenarios_dir.glob("*.yaml") if not f.stem.startswith("_")]
 
     def _list_rubrics(self) -> List[str]:
         """List available rubrics from SynthChat/rubrics/."""
-        rubrics_dir = self.repo_root / "SynthChat" / "rubrics"
+        rubrics_dir = self._synthchat_root() / "rubrics"
         if not rubrics_dir.exists():
             return []
         return [
@@ -213,7 +236,7 @@ class SynthChatHandler(BaseHandler):
             import json
 
             # Create output path
-            output_path = Path(output_dir)
+            output_path = self._output_dir(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
             output_file = output_path / f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
 
@@ -222,9 +245,9 @@ class SynthChatHandler(BaseHandler):
             client = create_client(provider=backend, model=model or "auto")
 
             # Setup paths
-            config_dir = self.repo_root / "SynthChat" / "config"
-            scenarios_dir = self.repo_root / "SynthChat" / "scenarios"
-            rubrics_dir = self.repo_root / "SynthChat" / "rubrics"
+            config_dir = self._synthchat_config_dir()
+            scenarios_dir = self._synthchat_root() / "scenarios"
+            rubrics_dir = self._synthchat_root() / "rubrics"
 
             # Create improvement engine for validation
             engine = ImprovementEngine(
@@ -324,7 +347,7 @@ class SynthChatHandler(BaseHandler):
         try:
             from SynthChat.services.rubric_runner import RubricRunner
 
-            rubrics_dir = self.repo_root / "SynthChat" / "rubrics"
+            rubrics_dir = self._synthchat_root() / "rubrics"
 
             runner = RubricRunner(
                 rubrics_dir=rubrics_dir,

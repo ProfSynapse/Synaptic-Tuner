@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from shared.validation.validators import StructureValidator
+from tuner.project import ProjectContext
 
 
 @dataclass
@@ -52,7 +53,11 @@ class RubricValidator:
     consistent validation across training and evaluation.
     """
 
-    def __init__(self, rubrics_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        rubrics_dir: Optional[Path] = None,
+        project_context: ProjectContext | None = None,
+    ):
         """
         Initialize the validator.
 
@@ -60,7 +65,16 @@ class RubricValidator:
             rubrics_dir: Path to rubrics directory. Defaults to SynthChat/rubrics/
         """
         if rubrics_dir is None:
-            rubrics_dir = Path(__file__).parent.parent / 'SynthChat' / 'rubrics'
+            host_rubrics = (
+                project_context.config_root / "SynthChat" / "rubrics"
+                if project_context is not None and project_context.mode == "host"
+                else None
+            )
+            rubrics_dir = (
+                host_rubrics
+                if host_rubrics is not None and host_rubrics.is_dir()
+                else Path(__file__).parent.parent / "SynthChat" / "rubrics"
+            )
 
         self.rubrics_dir = Path(rubrics_dir)
         self.structure_validator = StructureValidator()

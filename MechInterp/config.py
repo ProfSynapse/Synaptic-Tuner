@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import yaml
+
+from tuner.project import ProjectContext, resolve_path
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -376,21 +378,134 @@ class ProbeFitConfig(BaseModel):
 
 
 def _load_yaml(path: str | Path) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def load_steer_config(path: str | Path) -> SteerCellConfig:
-    return SteerCellConfig(**_load_yaml(path))
+def _resolved(
+    value: str,
+    context: ProjectContext | None,
+    declaring_file: Path,
+    *,
+    access: str = "read",
+) -> str:
+    if context is None:
+        return value
+    return str(
+        resolve_path(
+            value,
+            context,
+            declaring_file=declaring_file,
+            access=access,
+        )
+    )
 
 
-def load_extract_config(path: str | Path) -> ExtractConfig:
-    return ExtractConfig(**_load_yaml(path))
+def _resolve_steer_paths(
+    config: SteerCellConfig | DoseCalibrationConfig,
+    context: ProjectContext | None,
+    declaring_file: Path,
+) -> SteerCellConfig | DoseCalibrationConfig:
+    if context is None:
+        return config
+    return config.model_copy(
+        update={
+            "surface": config.surface.model_copy(
+                update={
+                    "rows_path": _resolved(
+                        config.surface.rows_path, context, declaring_file
+                    )
+                }
+            ),
+            "readouts": [
+                readout.model_copy(
+                    update={
+                        "path": _resolved(readout.path, context, declaring_file)
+                    }
+                )
+                for readout in config.readouts
+            ],
+            "execution": config.execution.model_copy(
+                update={
+                    "output_path": _resolved(
+                        config.execution.output_path,
+                        context,
+                        declaring_file,
+                        access="write",
+                    )
+                }
+            ),
+        }
+    )
 
 
-def load_probe_fit_config(path: str | Path) -> ProbeFitConfig:
-    return ProbeFitConfig(**_load_yaml(path))
+def load_steer_config(
+    path: str | Path, *, context: ProjectContext | None = None
+) -> SteerCellConfig:
+    declaring_file = Path(path).resolve()
+    config = SteerCellConfig(**_load_yaml(declaring_file))
+    resolved = _resolve_steer_paths(config, context, declaring_file)
+    assert isinstance(resolved, SteerCellConfig)
+    return resolved
 
 
-def load_dose_calibration_config(path: str | Path) -> DoseCalibrationConfig:
-    return DoseCalibrationConfig(**_load_yaml(path))
+def load_extract_config(
+    path: str | Path, *, context: ProjectContext | None = None
+) -> ExtractConfig:
+    declaring_file = Path(path).resolve()
+    config = ExtractConfig(**_load_yaml(declaring_file))
+    if context is None:
+        return config
+    return config.model_copy(
+        update={
+            "rows_path": _resolved(config.rows_path, context, declaring_file),
+            "output_dir": _resolved(
+                config.output_dir, context, declaring_file, access="write"
+            ),
+        }
+    )
+
+
+def load_probe_fit_config(
+    path: str | Path, *, context: ProjectContext | None = None
+) -> ProbeFitConfig:
+    declaring_file = Path(path).resolve()
+    config = ProbeFitConfig(**_load_yaml(declaring_file))
+    if context is None:
+        return config
+    return config.model_copy(
+        update={
+            "activations_path": _resolved(
+                config.activations_path, context, declaring_file
+            ),
+            "labels_path": _resolved(config.labels_path, context, declaring_file),
+            "output_direction": _resolved(
+                config.output_direction, context, declaring_file, access="write"
+            ),
+        }
+    )
+
+
+def load_dose_calibration_config(
+    path: str | Path, *, context: ProjectContext | None = None
+) -> DoseCalibrationConfig:
+    declaring_file = Path(path).resolve()
+    config = DoseCalibrationConfig(**_load_yaml(declaring_file))
+    if context is None:
+        return config
+    steer_like = _resolve_steer_paths(config, context, declaring_file)
+    assert isinstance(steer_like, DoseCalibrationConfig)
+    return steer_like.model_copy(
+        update={
+            "execution": steer_like.execution.model_copy(
+                update={
+                    "summary_path": _resolved(
+                        config.execution.summary_path,
+                        context,
+                        declaring_file,
+                        access="write",
+                    )
+                }
+            )
+        }
+    )

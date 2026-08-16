@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,59 @@ class FlywheelHandler(BaseHandler):
     def _load_config(self) -> Any:
         """Load FlywheelConfig, respecting --flywheel-config override."""
         from shared.flywheel.config import load_flywheel_config
-        config_path = getattr(self.args, "flywheel_config", None) if self.args else None
-        return load_flywheel_config(config_path)
+        requested = getattr(self.args, "flywheel_config", None) if self.args else None
+        config_path = (
+            resolve_path(requested, self.context, from_cli=True, access="read")
+            if requested
+            else self.engine_root / "configs" / "flywheel" / "default.yaml"
+        )
+        config = load_flywheel_config(config_path)
+        if self.context.mode != "host":
+            return config
+
+        declaring_file = Path(config_path)
+
+        def read(value: str | None) -> str | None:
+            if not value:
+                return value
+            return str(
+                resolve_path(
+                    value,
+                    self.context,
+                    declaring_file=declaring_file,
+                    access="read",
+                )
+            )
+
+        def write(value: str) -> str:
+            return str(
+                resolve_path(
+                    value,
+                    self.context,
+                    declaring_file=declaring_file,
+                    access="write",
+                )
+            )
+
+        config.catalog_path = (
+            str(self.tracking_root / "flywheel.db")
+            if config.catalog_path == ".tracking/flywheel.db"
+            else write(config.catalog_path)
+        )
+        config.log_dir = (
+            str(self.state_root / "flywheel" / "logs")
+            if config.log_dir == "inference_logs"
+            else write(config.log_dir)
+        )
+        config.datasets_dir = (
+            str(self.artifact_root / "datasets" / "flywheel")
+            if config.datasets_dir == "Datasets/flywheel"
+            else write(config.datasets_dir)
+        )
+        config.fitness_config_path = read(config.fitness_config_path)
+        config.cloud_config_path = read(config.cloud_config_path)
+        config.vllm_adapter_path = read(config.vllm_adapter_path)
+        return config
 
     async def _build_orchestrator_async(self, config: Any) -> Any:
         """Construct a FlywheelOrchestrator with all pipeline components.
@@ -305,7 +357,9 @@ class FlywheelHandler(BaseHandler):
             self.output_error(f"Failed to load config: {exc}", code="CONFIG_ERROR")
             return 1
 
-        datasets_dir = Path(self.repo_root / config.datasets_dir)
+        datasets_dir = Path(config.datasets_dir)
+        if not datasets_dir.is_absolute():
+            datasets_dir = self.engine_root / datasets_dir
         if not datasets_dir.is_dir():
             if self.json_mode:
                 self.output_list([], "dataset_versions")
@@ -365,6 +419,12 @@ class FlywheelHandler(BaseHandler):
 
         try:
             config = self._load_config()
+            export_config = str(
+                resolve_path(export_config, self.context, from_cli=True, access="read")
+            )
+            output = str(
+                resolve_path(output, self.context, from_cli=True, access="write")
+            )
             result = asyncio.run(
                 self._export_fixtures_async(
                     config=config,

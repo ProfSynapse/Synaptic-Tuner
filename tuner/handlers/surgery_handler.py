@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from tuner.handlers.base import BaseHandler
+from tuner.project import resolve_path
 
 
 class SurgeryHandler(BaseHandler):
@@ -67,14 +68,38 @@ class SurgeryHandler(BaseHandler):
         config_path = getattr(self.args, "surgery_config", None)
         adapter_path = getattr(self.args, "subcommand", None)
 
-        if config_path and os.path.exists(config_path):
-            config = SurgeryConfig.from_yaml(config_path)
+        resolved_config_path = None
+        if config_path:
+            resolved_config_path = resolve_path(
+                config_path, self.context, from_cli=True, access="read"
+            )
+        if resolved_config_path and resolved_config_path.exists():
+            config = SurgeryConfig.from_yaml(str(resolved_config_path))
         else:
             config = SurgeryConfig()
 
+        declaring_file = resolved_config_path
+
+        def resolve_input(value: str) -> str:
+            return str(
+                resolve_path(
+                    value,
+                    self.context,
+                    declaring_file=declaring_file,
+                    from_cli=declaring_file is None,
+                    access="read",
+                )
+            )
+
         # Override adapter path from CLI if provided
-        if adapter_path and os.path.isdir(adapter_path):
-            config.adapter_path = adapter_path
+        if adapter_path:
+            candidate = resolve_path(
+                adapter_path, self.context, from_cli=True, access="read"
+            )
+            if candidate.is_dir():
+                config.adapter_path = str(candidate)
+        elif config.adapter_path:
+            config.adapter_path = resolve_input(config.adapter_path)
 
         # Interactive mode if adapter path not set
         if not config.adapter_path or not os.path.isdir(config.adapter_path):
@@ -90,7 +115,11 @@ class SurgeryHandler(BaseHandler):
                     code="INVALID_PATH",
                 )
                 return 1
-            config.adapter_path = adapter_input
+            config.adapter_path = str(
+                resolve_path(
+                    adapter_input, self.context, from_cli=True, access="read"
+                )
+            )
 
         # Verify adapter has required files
         adapter_config_path = os.path.join(config.adapter_path, "adapter_config.json")
@@ -116,7 +145,11 @@ class SurgeryHandler(BaseHandler):
         if not config.eval_scenario:
             eval_scenario = getattr(self.args, "eval_scenario", None)
             if eval_scenario:
-                config.eval_scenario = eval_scenario
+                config.eval_scenario = str(
+                    resolve_path(
+                        eval_scenario, self.context, from_cli=True, access="read"
+                    )
+                )
             else:
                 self.output_error(
                     "An eval scenario is required for surgery. "
@@ -124,6 +157,24 @@ class SurgeryHandler(BaseHandler):
                     code="MISSING_EVAL_SCENARIO",
                 )
                 return 1
+        elif config.eval_scenario:
+            config.eval_scenario = resolve_input(config.eval_scenario)
+
+        if self.context.mode == "host" and config.output_dir in {
+            "./surgery_output",
+            "surgery_results/",
+        }:
+            config.output_dir = str(self.artifact_root / "surgery")
+        else:
+            config.output_dir = str(
+                resolve_path(
+                    config.output_dir,
+                    self.context,
+                    declaring_file=declaring_file,
+                    from_cli=declaring_file is None,
+                    access="write",
+                )
+            )
 
         # Show config summary
         print(f"\n  Adapter: {config.adapter_path}")

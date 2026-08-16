@@ -5,7 +5,7 @@ from pathlib import Path
 
 from SynthChat.services.rubric_runner import RubricRunner
 from SynthChat.utils.dataset_scanner import DatasetScanner
-from SynthChat.utils.yaml_loader import load_config
+from SynthChat.utils.yaml_loader import load_config, load_yaml
 from SynthChat.utils.logger import ImproveLogger
 from shared.llm import create_client, LLMError
 from shared.ui import (
@@ -21,22 +21,33 @@ from shared.ui import (
     BOX,
 )
 from tuner.utils import load_env_file
+from tuner.project import ProjectContext
 
 
-def handle_improve():
+def handle_improve(project_context: ProjectContext | None = None):
     """Handle dataset improvement workflow via interactive CLI."""
 
     print_header("DATASET IMPROVEMENT ENGINE", "Improve dataset quality with LLM feedback")
 
     # Load environment variables from root .env
-    env_path = Path(__file__).parent.parent.parent / ".env"
-    env_loaded = load_env_file(env_path)
-    if not env_loaded:
-        print_info("Note: .env file not found; improvement settings may be incomplete")
+    engine_root = Path(__file__).resolve().parents[2]
+    if project_context is None:
+        env_loaded = load_env_file(engine_root / ".env")
+        if not env_loaded:
+            print_info("Note: .env file not found; improvement settings may be incomplete")
 
     # LLM defaults from settings.yaml (cloud-only defaults) with .env fallback
     try:
-        cfg = load_config("settings")
+        host_settings = (
+            project_context.config_root / "SynthChat" / "config" / "settings.yaml"
+            if project_context is not None and project_context.mode == "host"
+            else None
+        )
+        cfg = (
+            load_yaml(str(host_settings))
+            if host_settings is not None and host_settings.is_file()
+            else load_config("settings")
+        )
         llm_defaults = cfg.get("llm", {}).get("improvement", {}) if isinstance(cfg, dict) else {}
     except Exception:
         llm_defaults = {}
@@ -90,7 +101,12 @@ def handle_improve():
 
     # Scan datasets
     with spinner("Scanning datasets..."):
-        scanner = DatasetScanner()
+        dataset_root = (
+            project_context.project_root / "Datasets"
+            if project_context is not None and project_context.mode == "host"
+            else engine_root / "Datasets"
+        )
+        scanner = DatasetScanner(str(dataset_root))
         datasets = scanner.scan()
 
     # Select category (folder)
@@ -130,7 +146,17 @@ def handle_improve():
     # Get file paths
     input_file = scanner.get_file_path(category, agent, version)
     next_version = scanner.get_next_version(version)
-    output_file = scanner.get_file_path(category, agent, next_version)
+    output_file = (
+        str(
+            project_context.artifact_root
+            / "improved-datasets"
+            / category
+            / agent
+            / Path(scanner.get_file_path(category, agent, next_version)).name
+        )
+        if project_context is not None and project_context.mode == "host"
+        else scanner.get_file_path(category, agent, next_version)
+    )
 
     # Get settings
     try:
@@ -174,7 +200,16 @@ def handle_improve():
         return
 
     # Get rubrics directory
-    rubrics_dir = Path(__file__).parent.parent.parent / "SynthChat" / "rubrics"
+    host_rubrics = (
+        project_context.config_root / "SynthChat" / "rubrics"
+        if project_context is not None and project_context.mode == "host"
+        else None
+    )
+    rubrics_dir = (
+        host_rubrics
+        if host_rubrics is not None and host_rubrics.is_dir()
+        else engine_root / "SynthChat" / "rubrics"
+    )
 
     # Initialize RubricRunner
     runner = RubricRunner(
