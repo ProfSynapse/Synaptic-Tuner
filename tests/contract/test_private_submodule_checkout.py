@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Mapping
 
 import pytest
 import yaml
 
+import tuner.cloud.checkout as checkout_module
+from tuner.cloud.checkout import CheckoutPolicy, checkout_source_lock
 from tuner.project.errors import (
     ManifestValidationError,
     RepositoryUrlError,
@@ -28,37 +32,148 @@ from tuner.project.source_bundle import (
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "host-project"
 
 
-@pytest.mark.skip(
-    reason=(
-        "Node I activation gate: provider-neutral checkout must reconstruct the "
-        "locked private engine and its approved recursive submodules"
+def test_recursive_checkout_reconstructs_locked_private_submodules(
+    tmp_path: Path,
+) -> None:
+    fixture = _recursive_checkout_fixture(tmp_path)
+    before = _source_snapshot(fixture.source_roots)
+
+    result = checkout_source_lock(
+        fixture.lock,
+        tmp_path / "checkout",
+        policy=_checkout_policy(),
+        clone_url_resolver=fixture.resolve_clone,
+        provider_secret=lambda name: (
+            "private-engine-contract-secret"
+            if name == fixture.credential.name
+            else None
+        ),
     )
-)
-def test_deferred_node_i_recursive_checkout_reconstructs_locked_private_submodules() -> None:
-    """Activate with Node I's real checkout API and temporary private remotes."""
-    pytest.fail("Node I must replace this deferred gate with recursive checkout assertions")
 
-
-@pytest.mark.skip(
-    reason=(
-        "Node I activation gate: ephemeral host-scoped credential helpers must "
-        "exist and clean up after both successful and failed checkout"
+    engine_root = result.project_root / fixture.engine_path
+    plugin_root = engine_root / fixture.plugin_path
+    assert result.engine_root == engine_root.resolve()
+    assert _git("rev-parse", "HEAD", cwd=result.project_root) == fixture.host_commit
+    assert _git("rev-parse", "HEAD", cwd=engine_root) == fixture.engine_commit
+    assert _git("rev-parse", "HEAD", cwd=plugin_root) == fixture.plugin_commit
+    assert _git("ls-tree", "HEAD", fixture.engine_path, cwd=result.project_root).split()[2] == (
+        fixture.lock.engine_source.commit
     )
-)
-def test_deferred_node_i_scoped_credentials_are_removed_after_success_and_failure() -> None:
-    """Activate with Node I's credential-helper lifecycle implementation."""
-    pytest.fail("Node I must replace this deferred gate with cleanup assertions")
-
-
-@pytest.mark.skip(
-    reason=(
-        "Node I activation gate: recursive .gitmodules preflight must reject an "
-        "unexpected nested submodule before any fetch"
+    assert _git("ls-tree", "HEAD", fixture.plugin_path, cwd=engine_root).split()[2] == (
+        fixture.plugin_commit
     )
+    assert fixture.resolve_calls == ["host", "engine", "private-plugin"]
+    assert _source_snapshot(fixture.source_roots) == before
+
+
+def test_scoped_credentials_are_removed_after_success_and_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fixture = _recursive_checkout_fixture(tmp_path)
+    before = _source_snapshot(fixture.source_roots)
+    secret = "credential-value-that-must-never-be-logged"
+    helper_directories: list[Path] = []
+    command_surfaces: list[tuple[str, ...]] = []
+    process_environments: list[Mapping[str, str]] = []
+    original_run_git = checkout_module._run_git
+
+    def make_helper(prefix: str) -> str:
+        assert prefix == "synaptic-git-credential-"
+        path = tmp_path / f"ephemeral-helper-{len(helper_directories)}"
+        path.mkdir()
+        helper_directories.append(path)
+        return str(path)
+
+    def record_git(arguments: list[str], **kwargs: object) -> str:
+        command_surfaces.append(tuple(arguments))
+        environment = kwargs.get("env")
+        if isinstance(environment, Mapping):
+            process_environments.append(environment)
+        return original_run_git(arguments, **kwargs)
+
+    monkeypatch.setattr(checkout_module.tempfile, "mkdtemp", make_helper)
+    monkeypatch.setattr(checkout_module, "_run_git", record_git)
+
+    success = checkout_source_lock(
+        fixture.lock,
+        tmp_path / "success",
+        policy=_checkout_policy(),
+        clone_url_resolver=fixture.resolve_clone,
+        provider_secret=lambda name: secret if name == fixture.credential.name else None,
+    )
+    assert helper_directories
+    assert all(not path.exists() for path in helper_directories)
+    assert any(
+        argument.startswith("credential.https://example.test.helper=")
+        for arguments in command_surfaces
+        for argument in arguments
+    )
+    assert all("SYNAPTIC_GIT_SECRET" not in environment for environment in process_environments)
+    assert secret not in success.source_lock.to_json()
+    assert all(secret not in " ".join(arguments) for arguments in command_surfaces)
+    assert secret not in caplog.text
+
+    def missing_plugin(location: RepositoryLocation) -> str:
+        if Path(location.path).stem == "private-plugin":
+            return str(tmp_path / "missing-private-plugin.git")
+        return fixture.resolve_clone(location)
+
+    with pytest.raises(SourceLockError) as captured:
+        checkout_source_lock(
+            fixture.lock,
+            tmp_path / "failure",
+            policy=_checkout_policy(),
+            clone_url_resolver=missing_plugin,
+            provider_secret=lambda name: secret if name == fixture.credential.name else None,
+        )
+
+    assert secret not in str(captured.value)
+    assert secret not in repr(captured.value)
+    assert all(not path.exists() for path in helper_directories)
+    assert all("SYNAPTIC_GIT_SECRET" not in environment for environment in process_environments)
+    assert all(secret not in " ".join(arguments) for arguments in command_surfaces)
+    assert secret not in caplog.text
+    assert _source_snapshot(fixture.source_roots) == before
+
+
+@pytest.mark.parametrize(
+    ("nested_url", "maximum_depth", "message"),
+    [
+        ("ext::sh -c exploit", 2, "Rejected .gitmodules"),
+        ("https://evil.test/research/private-plugin.git", 2, "Rejected .gitmodules"),
+        ("./private-plugin.git", 1, "maximum depth"),
+    ],
 )
-def test_deferred_node_i_rejects_unexpected_nested_submodule_before_fetch() -> None:
-    """Activate with Node I's pre-fetch recursive submodule policy API."""
-    pytest.fail("Node I must replace this deferred gate with pre-fetch rejection assertions")
+def test_rejects_unexpected_nested_submodule_before_fetch(
+    tmp_path: Path,
+    nested_url: str,
+    maximum_depth: int,
+    message: str,
+) -> None:
+    fixture = _recursive_checkout_fixture(tmp_path, nested_url=nested_url)
+    before = _source_snapshot(fixture.source_roots)
+    attempted: list[str] = []
+
+    def reject_child_fetch(location: RepositoryLocation) -> str:
+        name = Path(location.path).stem
+        attempted.append(name)
+        if name == "private-plugin":
+            pytest.fail("nested .gitmodules policy must reject before child fetch")
+        return fixture.remotes[name]
+
+    with pytest.raises(SourceLockError, match=message):
+        checkout_source_lock(
+            fixture.lock,
+            tmp_path / "rejected",
+            policy=_checkout_policy(maximum_depth=maximum_depth),
+            clone_url_resolver=reject_child_fetch,
+            provider_secret=lambda _name: "test-only-secret",
+        )
+
+    assert attempted == ["host", "engine"]
+    assert _source_snapshot(fixture.source_roots) == before
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -91,6 +206,203 @@ def _repository(path: Path, remote: str, filename: str) -> str:
     )
     _git("remote", "add", "origin", remote, cwd=path)
     return _git("rev-parse", "HEAD", cwd=path)
+
+
+@dataclass
+class _RecursiveCheckoutFixture:
+    lock: SourceLock
+    credential: SecretRef
+    host_commit: str
+    engine_commit: str
+    plugin_commit: str
+    engine_path: str
+    plugin_path: str
+    remotes: dict[str, str]
+    source_roots: tuple[Path, ...]
+    resolve_calls: list[str]
+    resolve_clone: Callable[[RepositoryLocation], str]
+
+
+def _publish_bare(source: Path, destination: Path) -> None:
+    subprocess.run(
+        ["git", "clone", "--bare", str(source), str(destination)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def _source_snapshot(
+    roots: tuple[Path, ...],
+) -> tuple[tuple[str, tuple[tuple[str, bytes], ...]], ...]:
+    snapshot: list[tuple[str, tuple[tuple[str, bytes], ...]]] = []
+    for root in roots:
+        tracked = tuple(
+            (relative, (root / relative).read_bytes())
+            for relative in _git("ls-files", cwd=root).splitlines()
+            if (root / relative).is_file()
+        )
+        snapshot.append((_git("rev-parse", "HEAD", cwd=root), tracked))
+    return tuple(snapshot)
+
+
+def _checkout_policy(*, maximum_depth: int = 2) -> CheckoutPolicy:
+    return CheckoutPolicy(
+        allowed_hosts=frozenset({"example.test"}),
+        allowed_schemes=frozenset({"https"}),
+        nested_submodules=True,
+        max_submodule_depth=maximum_depth,
+    )
+
+
+def _recursive_checkout_fixture(
+    tmp_path: Path,
+    *,
+    nested_url: str = "./private-plugin.git",
+) -> _RecursiveCheckoutFixture:
+    plugin = tmp_path / "private plugin source"
+    plugin_commit = _repository(
+        plugin,
+        "https://example.test/research/private-plugin.git",
+        "plugin.txt",
+    )
+    plugin_bare = tmp_path / "private-plugin.git"
+    _publish_bare(plugin, plugin_bare)
+
+    engine = tmp_path / "private engine source"
+    _repository(
+        engine,
+        "https://example.test/research/engine.git",
+        "engine.txt",
+    )
+    plugin_path = "plugins/private plugin"
+    _git(
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--name",
+        "private-plugin",
+        str(plugin_bare),
+        plugin_path,
+        cwd=engine,
+    )
+    _git(
+        "config",
+        "--file",
+        str(engine / ".gitmodules"),
+        "submodule.private-plugin.url",
+        nested_url,
+        cwd=engine,
+    )
+    _git("add", ".", cwd=engine)
+    _git(
+        "-c",
+        "user.name=Contract Test",
+        "-c",
+        "user.email=contract@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "lock private plugin",
+        cwd=engine,
+    )
+    engine_commit = _git("rev-parse", "HEAD", cwd=engine)
+    engine_bare = tmp_path / "engine.git"
+    _publish_bare(engine, engine_bare)
+
+    host = tmp_path / "host source"
+    _repository(
+        host,
+        "https://example.test/research/host.git",
+        "host.txt",
+    )
+    engine_path = "dependencies/nonstandard engine location"
+    _git(
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--name",
+        "engine",
+        str(engine_bare),
+        engine_path,
+        cwd=host,
+    )
+    _git(
+        "config",
+        "--file",
+        str(host / ".gitmodules"),
+        "submodule.engine.url",
+        "https://example.test/research/engine.git",
+        cwd=host,
+    )
+    _git("add", ".", cwd=host)
+    _git(
+        "-c",
+        "user.name=Contract Test",
+        "-c",
+        "user.email=contract@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "lock private engine",
+        cwd=host,
+    )
+    host_commit = _git("rev-parse", "HEAD", cwd=host)
+    host_bare = tmp_path / "host.git"
+    _publish_bare(host, host_bare)
+
+    credential = SecretRef("provider_secret", "PRIVATE_GIT_TOKEN")
+    project_source = GitSource(
+        location=RepositoryLocation.parse("https://example.test/research/host.git"),
+        commit=host_commit,
+        pushed=True,
+    )
+    engine_source = GitSource(
+        location=RepositoryLocation.parse(
+            "https://example.test/research/engine.git",
+            credential=credential,
+        ),
+        commit=engine_commit,
+        pushed=True,
+        submodule_path=engine_path,
+        gitlink_commit=engine_commit,
+    )
+    lock = SourceLock(
+        run_id="contract-private-recursive",
+        mode="superproject",
+        project_source=project_source,
+        engine_source=engine_source,
+        project={"id": "contract-host-project"},
+        configuration={"manifest": "synaptic.yaml"},
+    )
+    remotes = {
+        "host": str(host_bare),
+        "engine": str(engine_bare),
+        "private-plugin": str(plugin_bare),
+    }
+    resolve_calls: list[str] = []
+
+    def resolve_clone(location: RepositoryLocation) -> str:
+        name = Path(location.path).stem
+        resolve_calls.append(name)
+        return remotes[name]
+
+    return _RecursiveCheckoutFixture(
+        lock=lock,
+        credential=credential,
+        host_commit=host_commit,
+        engine_commit=engine_commit,
+        plugin_commit=plugin_commit,
+        engine_path=engine_path,
+        plugin_path=plugin_path,
+        remotes=remotes,
+        source_roots=(host, engine, plugin),
+        resolve_calls=resolve_calls,
+        resolve_clone=resolve_clone,
+    )
 
 
 def test_private_engine_lock_records_exact_gitlink_and_only_secret_reference(
