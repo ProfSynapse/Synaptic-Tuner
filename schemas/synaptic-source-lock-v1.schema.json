@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-source-lock-v1.schema.json",
+  "title": "Synaptic Source Lock v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_at", "mode", "sources", "project", "configuration", "plugins", "inputs", "runtime", "outputs"],
+  "properties": {
+    "schema_version": {"const": "synaptic-source-lock/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "mode": {"enum": ["standalone", "superproject", "dual_clone"]},
+    "sources": {
+      "type": "object",
+      "required": ["project", "engine"],
+      "properties": {
+        "project": {"$ref": "#/$defs/gitSource"},
+        "engine": {"$ref": "#/$defs/gitSource"}
+      },
+      "additionalProperties": false
+    },
+    "project": {
+      "type": "object",
+      "required": ["manifest_uri", "manifest_sha256", "engine_requires"],
+      "properties": {
+        "manifest_uri": {"type": "string", "minLength": 1},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "engine_requires": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "configuration": {
+      "type": "object",
+      "required": ["resolved_uri", "resolved_sha256", "documents"],
+      "properties": {
+        "resolved_uri": {"type": "string", "minLength": 1},
+        "resolved_sha256": {"$ref": "#/$defs/sha256"},
+        "documents": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": true
+    },
+    "plugins": {"type": "array", "items": {"type": "object"}},
+    "inputs": {"type": "array", "items": {"type": "object"}},
+    "runtime": {"type": "object"},
+    "outputs": {"type": "object"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "secretRef": {
+      "type": "object",
+      "required": ["provider", "name"],
+      "properties": {
+        "provider": {"enum": ["env", "provider_secret", "credential_helper"]},
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$"}
+      },
+      "additionalProperties": false
+    },
+    "gitSource": {
+      "type": "object",
+      "required": ["url", "commit", "dirty", "pushed"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^(?:https|ssh)://"},
+        "commit": {"$ref": "#/$defs/commit"},
+        "branch": {"type": "string"},
+        "dirty": {"type": "boolean"},
+        "pushed": {"type": "boolean"},
+        "submodule_path": {"type": "string", "minLength": 1},
+        "gitlink_commit": {"$ref": "#/$defs/commit"},
+        "credential": {"$ref": "#/$defs/secretRef"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
