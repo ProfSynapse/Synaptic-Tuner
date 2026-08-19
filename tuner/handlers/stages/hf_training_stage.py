@@ -19,13 +19,15 @@ from shared.experiment_tracking import (
 from shared.experiment_tracking.schema import RunRecord
 from shared.utilities.env import get_hf_token
 from tuner.backends.registry import TrainingBackendRegistry
+from tuner.backends.training.cloud.base_cloud import load_cloud_config
 from tuner.cloud import (
     load_huggingface_hub,
     resolve_hf_bucket_id,
 )
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.core.exceptions import CloudProviderError
 
-from ._util import _optional_backend_value
+from ._util import _optional_backend_value, load_tracked_hf_source_preparation
 
 
 class HFTrainingStageRunner:
@@ -135,11 +137,11 @@ class HFTrainingStageRunner:
         recovered = self._recover_existing_training(experiment=experiment)
         if recovered is not None:
             return recovered
+        if experiment.source_transport_state in {"ACKNOWLEDGED", "CONSUMABLE"}:
+            require_current_hf_source_submission_authorization(route="stage.training")
         backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
-        is_valid, error = backend.validate_environment()
-        if not is_valid:
-            raise CloudProviderError(error or "HF Jobs environment validation failed.")
-
+        if self.tracking_service.project_context is not None:
+            backend.context = self.tracking_service.project_context
         config = backend.load_config(spec.method)
         config.model_name = spec.training.model_name
         config.dataset_name = spec.dataset.source
@@ -232,6 +234,57 @@ class HFTrainingStageRunner:
             )
         if spec.training.pip_packages:
             config.pip_packages = list(spec.training.pip_packages)
+        descriptor_path = (
+            self.tracking_service.base_dir / "experiments" / experiment.experiment_id
+            / "cloud" / "hf" / "source-transport" / "descriptor.json"
+        )
+        planned_source_lock_path = (
+            self.tracking_service.base_dir / "experiments" / experiment.experiment_id
+            / "source-lock.json"
+        )
+        config.source_lock_uri = self.tracking_service.tracking_uri(planned_source_lock_path)
+        config.source_transport_uri = self.tracking_service.tracking_uri(descriptor_path)
+        config.source_transport_root = descriptor_path.parent
+        if experiment.source_transport_state in {"ACKNOWLEDGED", "CONSUMABLE"}:
+            cloud_config = load_cloud_config(
+                self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+            )
+            volume_settings = cloud_config.get("hf_jobs", {}).get("bootstrap_volume", {})
+            if not isinstance(volume_settings, dict):
+                raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+            preparation = load_tracked_hf_source_preparation(
+                backend.context,
+                tracking_service=self.tracking_service,
+                experiment=experiment,
+                volume_settings=volume_settings,
+            )
+            backend.source_preparation = preparation
+            config.source_lock = preparation.source_lock
+            raise CloudProviderError(
+                "HF source transport is CONSUMABLE, but exact-run paid submission approval "
+                "is outside the current hermetic implementation authorization."
+            )
+        if experiment.source_transport_state is not None:
+            raise CloudProviderError(
+                "HF source transport is PREPARED and awaits separately approved external provisioning evidence."
+            )
+        preparation = backend.prepare_source(config, run_id=experiment.experiment_id)
+        self.tracking_service.persist_source_lock(experiment, preparation.source_lock)
+        if experiment.source_lock_uri != preparation.source_lock_uri:
+            raise CloudProviderError("Prepared HF transport changed the experiment SourceLock URI.")
+        self.tracking_service.record_source_transport_prepared(
+            experiment,
+            uri=preparation.descriptor_uri or "",
+            sha256=preparation.descriptor_sha256 or "",
+        )
+        raise CloudProviderError(
+            "HF source transport is PREPARED and awaits separately approved external provisioning; "
+            "no provider call or job submission was made."
+        )
+
+        # The protected exact-run submission boundary will resume here in a
+        # later authorized node after binding approval to descriptor/evidence,
+        # provider, hardware, and estimated cost.
         config.artifact_identifier = self._resolve_bucket_id(config.artifact_identifier)
 
         artifact_prefix, artifact_root = self._planned_training_state(experiment=experiment, config=config)

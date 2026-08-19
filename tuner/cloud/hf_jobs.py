@@ -6,9 +6,8 @@ import shlex
 import re
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, NoReturn, Optional
 
-from shared.cloud_artifacts import normalize_hf_bucket_id
 from shared.utilities.env import get_env_var, get_hf_token
 from tuner.core.exceptions import CloudProviderError
 
@@ -42,6 +41,9 @@ class CloudJobSpec:
     secrets: Dict[str, str] = field(default_factory=dict)
     namespace: Optional[str] = None
     labels: Dict[str, str] = field(default_factory=dict)
+    # Generic jobs may omit volumes. Secure source-launch routes must supply a
+    # semantically proven read-only volume from hf_volume_transport.
+    volumes: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,24 @@ class HFJobSubmission:
     job_id: str
     job_url: Optional[str] = None
     raw: Any = None
+
+
+def require_current_hf_source_submission_authorization(*, route: str) -> NoReturn:
+    """Fail closed until an exact-run secure-source approval contract exists.
+
+    This is the single current-authorization barrier for every HF route that
+    would consume a verified source volume.  Callers must invoke it before SDK
+    import, credential resolution, bucket access, provider-volume construction,
+    or config-derived command compilation.  Generic jobs without source
+    volumes remain isolated in :class:`HFJobExecutor`'s no-volume seam.
+    """
+
+    if not isinstance(route, str) or not route.strip():
+        raise CloudProviderError("HF secure source authorization route is invalid.")
+    raise CloudProviderError(
+        "HF secure source submission requires a separately authorized exact-run approval; "
+        "no approval contract is implemented and no provider-facing operation was performed."
+    )
 
 
 def load_huggingface_hub(*, require_apis: Iterable[str] = ()) -> Any:
@@ -190,6 +210,11 @@ def resolve_hf_bucket_id(
     private: bool = True,
 ) -> str:
     """Resolve or create a Hugging Face bucket and return its namespaced id."""
+    # Import only after the secure launch authorization boundary.  The shared
+    # artifact module carries optional ML/provider dependencies that must not
+    # load merely because an HF handler or this primitives module is imported.
+    from shared.cloud_artifacts import normalize_hf_bucket_id
+
     requested_bucket_id = normalize_hf_bucket_id(bucket_id)
     if not requested_bucket_id:
         raise CloudProviderError("HF bucket identifier is required.")
@@ -234,6 +259,22 @@ class HFJobExecutor:
 
     def submit(self, spec: CloudJobSpec) -> HFJobSubmission:
         """Submit a generic cloud job to Hugging Face Jobs."""
+        if spec.volumes:
+            from tuner.cloud.hf_volume_transport import HFVerifiedVolume
+            from tuner.cloud.hf_provisioning import revalidate_hf_verified_volume
+
+            # Local provenance validation is not authorization and has no
+            # provider effect.  It may precede the barrier so malformed inputs
+            # retain a precise fail-closed error, but nothing provider-facing
+            # is assembled or invoked before current authorization.
+            for volume in spec.volumes:
+                if not isinstance(volume, HFVerifiedVolume):
+                    raise CloudProviderError(
+                        "HF source volumes require exact CONSUMABLE descriptor/evidence binding."
+                    )
+                revalidate_hf_verified_volume(volume)
+            require_current_hf_source_submission_authorization(route="executor.submit")
+
         kwargs: Dict[str, Any] = {
             "image": spec.image,
             "command": spec.command,
@@ -252,11 +293,13 @@ class HFJobExecutor:
             sanitized_labels = sanitize_hf_job_labels(spec.labels)
             if sanitized_labels:
                 kwargs["labels"] = sanitized_labels
-
         try:
             job = self.huggingface_hub.run_job(**kwargs)
         except Exception as exc:
             error_msg = str(exc)
+            for secret in spec.secrets.values():
+                if secret:
+                    error_msg = error_msg.replace(secret, "[REDACTED]")
             if "hf_" in error_msg:
                 error_msg = "Job submission failed (check credentials and subscription)"
             raise CloudProviderError(f"Failed to submit HF Job: {error_msg}") from exc

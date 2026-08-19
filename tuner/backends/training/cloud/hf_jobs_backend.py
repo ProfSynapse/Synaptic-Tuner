@@ -22,6 +22,7 @@ Requirements:
 import logging
 import os
 import yaml
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -35,11 +36,18 @@ from tuner.cloud import (
     load_huggingface_hub,
     resolve_hf_bucket_id,
 )
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.ui import print_config
 from tuner.backends.training.base import ITrainingBackend
 from tuner.core.config import TrainingConfig, CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.core.interfaces import ExecuteResult
+from tuner.project import ProjectContext
+from tuner.handlers.stages._util import (
+    HFSourcePreparation,
+    preflight_hf_source_lock,
+    prepare_hf_source,
+)
 
 from .base_cloud import (
     load_cloud_config,
@@ -94,7 +102,7 @@ class HFJobsBackend(
     All mixins expect self.repo_root (set by __init__).
     """
 
-    def __init__(self, repo_root: Path):
+    def __init__(self, repo_root: Path, context: ProjectContext | None = None):
         """
         Initialize HF Jobs backend.
 
@@ -102,10 +110,80 @@ class HFJobsBackend(
             repo_root: Path to repository root directory
         """
         self.repo_root = Path(repo_root)
+        self.context = context or ProjectContext.standalone(engine_root=self.repo_root)
+        self.source_preparation: HFSourcePreparation | None = None
         self.show_post_training_actions = True
         self.last_artifact_prefix: Optional[str] = None
         self.last_bucket_id: Optional[str] = None
         self.last_job_id: Optional[str] = None
+        self.last_source_lock_uri: Optional[str] = None
+        self.last_source_lock_sha256: Optional[str] = None
+
+    def _remote_engine_root(self) -> str:
+        if self.source_preparation is None:
+            raise CloudProviderError("HF Jobs secure source preparation is unavailable.")
+        return self.source_preparation.remote_engine_root
+
+    def prepare_source(self, config: CloudTrainingConfig, *, run_id: str) -> HFSourcePreparation:
+        """Prepare one canonical lock and explicit pre-provisioned volume contract."""
+
+        cloud_config = load_cloud_config(self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml")
+        hf_settings = cloud_config.get("hf_jobs", {})
+        volume_settings = hf_settings.get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        accepted_layout = getattr(config, "runtime_layout", None)
+        preparation_context = self.context
+        if accepted_layout is not None:
+            writable = accepted_layout.writable_by_name
+            if accepted_layout.engine.source.resolve() == accepted_layout.project.source.resolve():
+                base_context = ProjectContext.standalone(engine_root=accepted_layout.engine.source)
+            else:
+                base_context = ProjectContext.host(
+                    engine_root=accepted_layout.engine.source,
+                    project_root=accepted_layout.project.source,
+                )
+            preparation_context = replace(
+                base_context,
+                artifact_root=writable["artifacts"].source.resolve(),
+                state_root=writable["state"].source.resolve(),
+                tracking_root=writable["tracking"].source.resolve(),
+                cache_root=writable["cache"].source.resolve(),
+                tmp_root=writable["tmp"].source.resolve(),
+            )
+            self.context = preparation_context
+        accepted_source_lock = getattr(config, "source_lock", None)
+        if accepted_source_lock is None:
+            accepted_source_lock = preflight_hf_source_lock(
+                preparation_context,
+                run_id=run_id,
+            )
+        preparation = prepare_hf_source(
+            preparation_context,
+            run_id=run_id,
+            config_path=Path(config.config_path),
+            volume_settings=volume_settings,
+            runtime={
+                "provider": "hf_jobs",
+                "image": config.cloud_image or DEFAULT_IMAGE,
+                "hardware": config.hf_flavor or config.gpu_type,
+            },
+            outputs={"artifact_root": config.artifact_identifier or ""},
+            source_lock=accepted_source_lock,
+            runtime_layout=getattr(config, "runtime_layout", None),
+            checkout_policy=getattr(config, "checkout_policy", None),
+            source_lock_uri=getattr(config, "source_lock_uri", None),
+            descriptor_uri=getattr(config, "source_transport_uri", None),
+            transport_root=getattr(config, "source_transport_root", None),
+        )
+        self.source_preparation = preparation
+        config.repo_url = preparation.source_lock.engine_source.location.canonical_url
+        config.repo_branch = preparation.source_lock.engine_source.branch
+        config.repo_commit = preparation.source_lock.engine_source.commit
+        config.artifact_mount_path = "/workspace/artifacts"
+        self.last_source_lock_uri = preparation.source_lock_uri
+        self.last_source_lock_sha256 = preparation.source_lock_sha256
+        return preparation
 
     @property
     def name(self) -> str:
@@ -156,7 +234,11 @@ class HFJobsBackend(
 
         # Check huggingface_hub is installed
         try:
-            load_huggingface_hub(require_apis=("run_job", "create_bucket"))
+            hub = load_huggingface_hub(require_apis=("run_job", "create_bucket", "Volume"))
+            # Semantic proof is per concrete volume and therefore occurs after
+            # source preparation, immediately before any provider mutation.
+            if not hasattr(hub, "Volume"):
+                raise CloudProviderError("Installed huggingface_hub lacks verified Jobs volume support.")
         except CloudProviderError as exc:
             return False, str(exc)
 
@@ -303,22 +385,28 @@ class HFJobsBackend(
             job_id.  Compares equal to ``int`` so callers that only check
             ``result == 0`` continue to work unchanged.
         """
-        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
-
         if not isinstance(config, CloudTrainingConfig):
             raise CloudProviderError(
                 "HF Jobs backend requires CloudTrainingConfig, "
                 f"got {type(config).__name__}"
             )
+        require_current_hf_source_submission_authorization(route="backend.execute")
+        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket", "Volume"))
 
         self.last_artifact_prefix = None
         self.last_bucket_id = None
         self.last_job_id = None
 
+        timestamp = self._new_run_timestamp()
+        if self.source_preparation is None:
+            accepted_lock = getattr(config, "source_lock", None)
+            run_id = accepted_lock.run_id if accepted_lock is not None else f"hf-training-{timestamp}"
+            self.prepare_source(config, run_id=run_id)
+        proven_volume = self.source_preparation.prove_volume(huggingface_hub)
+
         if config.artifact_backend == "hf_bucket":
             self._ensure_hf_bucket(config, huggingface_hub)
 
-        timestamp = self._new_run_timestamp()
         artifact_prefix = self._build_artifact_prefix(config, timestamp)
         self.last_artifact_prefix = artifact_prefix
         self.last_bucket_id = config.artifact_identifier
@@ -347,6 +435,7 @@ class HFJobsBackend(
                         "method": config.method,
                         "provider": config.provider,
                     },
+                    volumes=(proven_volume,),
                 )
             )
             job_id = submission.job_id

@@ -11,6 +11,22 @@ from shared.utilities.unique_ids import unique_prefixed_id
 
 logger = logging.getLogger(__name__)
 
+HF_SOURCE_TRANSPORT_STATES = (
+    "PREPARED",
+    "ACKNOWLEDGED",
+    "CONSUMABLE",
+    "SUBMITTED",
+)
+
+
+def _validate_reference_pair(*, kind: str, uri: str | None, sha256: str | None) -> None:
+    if (uri is None) != (sha256 is None):
+        raise ValueError(f"{kind} reference requires both URI and SHA-256")
+    if sha256 is not None and (
+        len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256)
+    ):
+        raise ValueError(f"{kind} SHA-256 must be 64 lowercase hexadecimal characters")
+
 
 def _canonical_json_bytes(payload: Any) -> bytes:
     return (
@@ -82,6 +98,38 @@ class Experiment:
     source_lock_sha256: str | None = None
     resolved_config_uri: str | None = None
     resolved_config_sha256: str | None = None
+    source_transport_uri: str | None = None
+    source_transport_sha256: str | None = None
+    provisioning_evidence_uri: str | None = None
+    provisioning_evidence_sha256: str | None = None
+    source_transport_state: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_reference_pair(
+            kind="Source transport",
+            uri=self.source_transport_uri,
+            sha256=self.source_transport_sha256,
+        )
+        _validate_reference_pair(
+            kind="Provisioning evidence",
+            uri=self.provisioning_evidence_uri,
+            sha256=self.provisioning_evidence_sha256,
+        )
+        if self.source_transport_state is not None:
+            if self.source_transport_state not in HF_SOURCE_TRANSPORT_STATES:
+                raise ValueError("Unknown source transport lifecycle state")
+            if self.source_transport_uri is None:
+                raise ValueError("Source transport lifecycle state requires a descriptor reference")
+        if self.provisioning_evidence_uri is not None:
+            if self.source_transport_uri is None:
+                raise ValueError("Provisioning evidence requires a source transport descriptor")
+            if self.source_transport_state == "PREPARED":
+                raise ValueError("PREPARED source transport cannot include provisioning evidence")
+        if self.source_transport_state in {"ACKNOWLEDGED", "CONSUMABLE", "SUBMITTED"}:
+            if self.provisioning_evidence_uri is None:
+                raise ValueError(
+                    f"{self.source_transport_state} source transport requires provisioning evidence"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""
@@ -106,6 +154,9 @@ def create_experiment(
     base_dir: Path | str = ".tracking",
 ) -> Experiment:
     """Create a new experiment, write to disk, and return the metadata."""
+    # Imported lazily because registry schema validation imports this module.
+    from .registry import _PathLock
+
     now = datetime.now(timezone.utc)
     timestamp_id = unique_prefixed_id("exp_", now=now)
     
@@ -122,14 +173,24 @@ def create_experiment(
         spec_path=spec_path,
     )
     
-    exp_dir = Path(base_dir) / "experiments" / timestamp_id
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    
-    save_experiment(experiment, base_dir=base_dir)
+    exp_file = Path(base_dir) / "experiments" / timestamp_id / "experiment.json"
+    with _PathLock(exp_file):
+        if exp_file.exists():
+            raise FileExistsError(f"Experiment file already exists: {exp_file}")
+        _save_experiment_unlocked_after_validation(experiment, base_dir=base_dir)
     return experiment
 
-def save_experiment(experiment: Experiment, base_dir: Path | str = ".tracking") -> None:
-    """Atomically save experiment.json without rewriting records during reads."""
+
+def _save_experiment_unlocked_after_validation(
+    experiment: Experiment, base_dir: Path | str = ".tracking"
+) -> None:
+    """Atomically write a record after the caller has locked and validated it.
+
+    This is deliberately private. The caller must already hold the path lock
+    for ``experiment.json`` and must have validated either neutral first
+    creation or the durable CAS/provenance contract. Public callers must use
+    :class:`TrackingService` instead.
+    """
     exp_dir = Path(base_dir) / "experiments" / experiment.experiment_id
     exp_dir.mkdir(parents=True, exist_ok=True)
     

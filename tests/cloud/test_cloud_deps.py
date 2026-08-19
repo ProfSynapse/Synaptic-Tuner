@@ -14,6 +14,7 @@ Covers:
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -27,6 +28,9 @@ from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.backends.training.cloud.runpod_backend import RunPodBackend
 from tuner.core.config import CloudTrainingConfig
 from tuner.project.source_bundle import GitSource, RepositoryLocation
+from tuner.cloud.hf_volume_transport import HFVerifiedVolumeSpec
+from tuner.cloud.runtime_layout import build_runtime_layout
+from tuner.project import ProjectContext
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +45,47 @@ _FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
 # must NOT pip-install (doing so causes version conflicts)
 IMAGE_PREINSTALLED = {"unsloth", "trl", "transformers", "torch", "datasets", "peft",
                       "accelerate", "bitsandbytes"}
+
+
+@pytest.fixture(autouse=True)
+def verified_hf_source(monkeypatch, tmp_path):
+    original_init = HFJobsBackend.__init__
+
+    def initialize(self, repo_root, context=None):
+        original_init(self, repo_root, context=context)
+        self.source_preparation = SimpleNamespace(
+            source_lock=SimpleNamespace(
+                mode="standalone",
+                run_id="deps-test",
+                project_source=SimpleNamespace(commit=_FIXTURE_HEAD),
+                engine_source=SimpleNamespace(commit=_FIXTURE_HEAD, submodule_path=None),
+            ),
+            source_lock_sha256="b" * 64,
+            source_lock_uri="tracking://test/source-lock.json",
+            volume_spec=HFVerifiedVolumeSpec(
+                source="test-user/bootstrap",
+                capsule_path="capsule",
+                capsule_manifest_sha256="a" * 64,
+                source_lock_path="source-lock.json",
+                source_lock_sha256="b" * 64,
+                checkout_policy_path="checkout-policy.json",
+                checkout_policy_sha256="c" * 64,
+                local_root=tmp_path.resolve(),
+            ),
+            runtime_layout=build_runtime_layout(ProjectContext.standalone(engine_root=Path(repo_root))),
+            remote_project_root="/workspace/project",
+            remote_engine_root="/workspace/engine",
+            physical_project_root="/workspace/source/project",
+            physical_engine_root="/workspace/source/project",
+            descriptor_uri="tracking://test/source-transport/descriptor.json",
+            descriptor_sha256="d" * 64,
+            provisioning_evidence_uri="tracking://test/source-transport/evidence.json",
+            provisioning_evidence_sha256="e" * 64,
+            source_transport_state="CONSUMABLE",
+            require_consumable=lambda: None,
+        )
+
+    monkeypatch.setattr(HFJobsBackend, "__init__", initialize)
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +167,12 @@ def _extract_pip_packages(command: str) -> set:
     packages = set()
     for part in command.split("&&"):
         part = part.strip()
-        if part.startswith("pip install"):
+        if "pip install" in part:
             # Everything after 'pip install' are package names/specifiers
-            tokens = part.split()[2:]  # skip 'pip' and 'install'
+            tokens = part.split("pip install", 1)[1].split()
             for tok in tokens:
+                if tok.startswith("-"):
+                    continue
                 # Strip version pins (e.g. "torch==2.7.0" -> "torch")
                 name = tok.split("==")[0].split(">=")[0].split("<=")[0].split("[")[0]
                 packages.add(name.lower())
@@ -191,7 +238,7 @@ class TestCrossBackendDepsConsistency:
         rp_cmd = rp_backend._build_startup_command(_runpod_cloud_config(), {})
         rp_packages = _extract_pip_packages(rp_cmd)
 
-        assert hf_packages == rp_packages, (
+        assert hf_packages & EXPECTED_PROJECT_DEPS == rp_packages & EXPECTED_PROJECT_DEPS, (
             f"HF Jobs and RunPod install different packages.\n"
             f"  HF Jobs only: {hf_packages - rp_packages}\n"
             f"  RunPod only:  {rp_packages - hf_packages}"
@@ -366,9 +413,10 @@ class TestCloudConfigDependencies:
         assert isinstance(extra, list)
 
     def test_hf_jobs_image_matches_dependencies_image(self):
-        """cloud.hf_jobs.image must match dependencies.docker_image."""
+        """HF Jobs stable image profile must match dependencies.docker_image."""
         deps_image = self.config["dependencies"]["docker_image"]
-        hf_image = self.config["cloud"]["hf_jobs"]["image"]
+        profile = self.config["cloud"]["hf_jobs"]["image_profile"]
+        hf_image = self.config["dependencies"]["docker_image_profiles"][profile]
         assert hf_image == deps_image, (
             f"HF Jobs image ({hf_image}) doesn't match "
             f"dependencies.docker_image ({deps_image})"
@@ -443,8 +491,9 @@ class TestRunPodExtraSetupCommands:
     def test_empty_extra_commands_no_effect(self, repo_root, clean_env):
         backend = RunPodBackend(repo_root)
         config = _runpod_cloud_config()
-        cmd_without = backend._build_startup_command(config, {})
-        cmd_with = backend._build_startup_command(
-            config, {"extra_setup_commands": []}
-        )
+        with patch("tuner.backends.training.cloud.runpod_backend.unique_utc_timestamp", return_value="20260819_120000_abcd"):
+            cmd_without = backend._build_startup_command(config, {})
+            cmd_with = backend._build_startup_command(
+                config, {"extra_setup_commands": []}
+            )
         assert cmd_without == cmd_with

@@ -1,54 +1,46 @@
-"""
-Cloud training backend implementations.
+"""Import-light compatibility facade for optional cloud backends."""
 
-Location: tuner/backends/training/cloud/__init__.py
-Purpose: Export cloud backend classes and register them in TrainingBackendRegistry
-Used by: tuner/backends/registry.py, tuner/handlers/cloud_train_handler.py
+from __future__ import annotations
 
-Each cloud provider backend is imported conditionally (try/except) so that
-the CLI works even when provider SDKs are not installed. Only backends whose
-SDKs are available will be exported and registered.
+from importlib import import_module
 
-Providers:
-- HFJobsBackend: HuggingFace Jobs (requires huggingface_hub >= 0.27.0)
-- ModalBackend: Modal (requires modal SDK)
-- RunPodBackend: RunPod (requires runpod SDK)
-"""
+_BACKEND_TARGETS = {
+    "hf_jobs": (".hf_jobs_backend", "HFJobsBackend"),
+    "modal": (".modal_backend", "ModalBackend"),
+    "runpod": (".runpod_backend", "RunPodBackend"),
+}
+_EXPORT_TARGETS = {
+    "HFJobsBackend": _BACKEND_TARGETS["hf_jobs"],
+    "ModalBackend": _BACKEND_TARGETS["modal"],
+    "RunPodBackend": _BACKEND_TARGETS["runpod"],
+}
 
-import logging
+__all__ = ["AVAILABLE_BACKENDS", "HFJobsBackend", "ModalBackend", "RunPodBackend"]
 
-logger = logging.getLogger(__name__)
 
-# Track which backends are available
-AVAILABLE_BACKENDS = {}
+def _resolve_backend(name: str):
+    module_name, attribute = _EXPORT_TARGETS[name]
+    value = getattr(import_module(module_name, __name__), attribute)
+    globals()[name] = value
+    return value
 
-# HuggingFace Jobs backend
-try:
-    from .hf_jobs_backend import HFJobsBackend
-    AVAILABLE_BACKENDS["hf_jobs"] = HFJobsBackend
-except ImportError as e:
-    logger.debug("HF Jobs backend not available: %s", e)
-    HFJobsBackend = None
 
-# Modal backend
-try:
-    from .modal_backend import ModalBackend
-    AVAILABLE_BACKENDS["modal"] = ModalBackend
-except ImportError as e:
-    logger.debug("Modal backend not available: %s", e)
-    ModalBackend = None
+def __getattr__(name: str):
+    if name in _EXPORT_TARGETS:
+        return _resolve_backend(name)
+    if name == "AVAILABLE_BACKENDS":
+        available = {}
+        for backend_id, (_module_name, attribute) in _BACKEND_TARGETS.items():
+            try:
+                backend = _resolve_backend(attribute)
+            except ImportError:
+                continue
+            if backend is not None:
+                available[backend_id] = backend
+        globals()[name] = available
+        return available
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-# RunPod backend
-try:
-    from .runpod_backend import RunPodBackend
-    AVAILABLE_BACKENDS["runpod"] = RunPodBackend
-except ImportError as e:
-    logger.debug("RunPod backend not available: %s", e)
-    RunPodBackend = None
 
-__all__ = [
-    "AVAILABLE_BACKENDS",
-    "HFJobsBackend",
-    "ModalBackend",
-    "RunPodBackend",
-]
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

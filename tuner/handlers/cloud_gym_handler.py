@@ -42,5 +42,5 @@ class CloudGymHandler(BaseHandler):
 
     def handle(self) -> int:
         handler = CloudEvalHandler(args=self._build_eval_args())
-        handler._repo_root = self.repo_root
+        handler.bind_context(self.context)
         return handler.handle()

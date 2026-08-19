@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import multiprocessing
 import os
+import subprocess
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -30,11 +32,148 @@ from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
 from tuner.project.source_bundle import GitSource, RepositoryLocation
+from tuner.project import ProjectContext
+from tuner.project.source_bundle import SourceLock
+from tuner.cloud.hf_provisioning import (
+    EVIDENCE_SCHEMA_VERSION,
+    canonical_json_bytes,
+    consume_hf_source_transport,
+    prepare_hf_source_transport,
+)
+from tuner.cloud.runtime_layout import build_runtime_layout
 from shared.experiment_tracking import StageResult
 from tuner.handlers.stages import HFEvalStageRunner, HFLossStageRunner, HFTrainingStageRunner
+from tuner.handlers.stages._util import (
+    HFSourcePreparation,
+    hf_source_preparation_from_consumable,
+)
 
 
 _FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
+_ENGINE_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _install_hf_source_transport(
+    *,
+    service: TrackingService,
+    experiment: Experiment,
+    acknowledged: bool,
+    record_prepared: bool = True,
+) -> HFSourcePreparation:
+    """Create real immutable descriptor/evidence fixtures without provider calls."""
+
+    repo_root = _ENGINE_REPO_ROOT
+    commit = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    source = GitSource(
+        location=RepositoryLocation.parse("https://github.com/test/repo.git"),
+        branch="main",
+        commit=commit,
+        dirty=False,
+        pushed=True,
+    )
+    source_lock = SourceLock(
+        run_id=experiment.experiment_id,
+        mode="standalone",
+        project_source=source,
+        engine_source=source,
+        project={},
+        configuration={},
+    )
+    context = ProjectContext.standalone(engine_root=repo_root)
+    service.persist_source_lock(experiment, source_lock)
+    descriptor_path = (
+        service.base_dir
+        / "experiments"
+        / experiment.experiment_id
+        / "cloud"
+        / "hf"
+        / "source-transport"
+        / "descriptor.json"
+    )
+    descriptor_uri = service.tracking_uri(descriptor_path)
+    prepared = prepare_hf_source_transport(
+        context,
+        source_lock=source_lock,
+        source_lock_uri=experiment.source_lock_uri,
+        descriptor_uri=descriptor_uri,
+        transport_root=descriptor_path.parent.resolve(),
+        volume_source="professorsynapse/toolset-training-bootstrap",
+        path_prefix="synaptic/source-transport",
+    )
+    if record_prepared:
+        service.record_source_transport_prepared(
+            experiment,
+            uri=prepared.descriptor_uri,
+            sha256=prepared.descriptor_sha256,
+        )
+    if not acknowledged:
+        return HFSourcePreparation(
+            source_lock=prepared.source_lock,
+            source_lock_sha256=str(prepared.descriptor["source_lock"]["sha256"]),
+            source_lock_uri=experiment.source_lock_uri,
+            volume_spec=None,
+            runtime_layout=build_runtime_layout(context),
+            staging_root=prepared.root,
+            descriptor_uri=prepared.descriptor_uri,
+            descriptor_sha256=prepared.descriptor_sha256,
+            source_transport_state="PREPARED",
+        )
+
+    if not record_prepared:
+        raise AssertionError("Acknowledged fixtures must first record PREPARED state")
+    descriptor = prepared.descriptor
+    volume = descriptor["volume"]
+    evidence = {
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "descriptor": {
+            "uri": prepared.descriptor_uri,
+            "sha256": prepared.descriptor_sha256,
+        },
+        "run_id": experiment.experiment_id,
+        "provider": "hf_jobs",
+        "profile": "C",
+        "volume": {
+            "source": volume["source"],
+            "path": volume["path"],
+            "type": "bucket",
+            "read_only": True,
+        },
+        "bundle_sha256": descriptor["bundle"]["content_sha256"],
+        "capsule_manifest_sha256": descriptor["capsule"]["manifest"]["sha256"],
+        "source_lock_sha256": descriptor["source_lock"]["sha256"],
+        "checkout_policy_sha256": descriptor["checkout_policy"]["sha256"],
+        "status": "provisioned",
+        "authority": "protected_workflow",
+        "actor": "fixture-workflow",
+        "asserted_at": "2026-08-19T12:00:00Z",
+        "provider_receipt_id": "fixture-receipt",
+    }
+    evidence_path = descriptor_path.with_name("provisioning-evidence.json")
+    evidence_path.write_bytes(canonical_json_bytes(evidence))
+    evidence_uri = service.tracking_uri(evidence_path)
+    evidence_sha256 = hashlib.sha256(canonical_json_bytes(evidence)).hexdigest()
+    service.record_provisioning_acknowledged(
+        experiment,
+        uri=evidence_uri,
+        sha256=evidence_sha256,
+    )
+    consumed = consume_hf_source_transport(
+        context,
+        transport_root=prepared.root,
+        descriptor_uri=prepared.descriptor_uri,
+        source_lock_uri=experiment.source_lock_uri,
+        evidence=evidence,
+    )
+    return hf_source_preparation_from_consumable(
+        consumed,
+        runtime_layout=build_runtime_layout(context),
+        provisioning_evidence_uri=evidence_uri,
+    )
 
 
 def _canonical_repo_source() -> RepoSource:
@@ -276,13 +415,21 @@ def test_training_stage_runner_forwards_lora_variant_fields_to_cloud_config(tmp_
         repo_commit="deadbeefcafebabe",
     )
 
+    backend.prepare_source.return_value = _install_hf_source_transport(
+        service=service,
+        experiment=experiment,
+        acknowledged=False,
+        record_prepared=False,
+    )
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
             with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
-                result = runner.run(spec=spec, experiment=experiment)
+                with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+                    runner.run(spec=spec, experiment=experiment)
 
-    assert result.status == "completed"
-    config = backend.execute.call_args.args[0]
+    config = backend.prepare_source.call_args.args[0]
+    backend.execute.assert_not_called()
+    assert experiment.source_transport_state == "PREPARED"
     assert config.lora_r == 128
     assert config.lora_alpha == 256
     assert config.lora_dropout == 0.05
@@ -341,13 +488,21 @@ def test_training_stage_runner_forwards_stage_pip_packages_to_cloud_config(tmp_p
         repo_commit="deadbeefcafebabe",
     )
 
+    backend.prepare_source.return_value = _install_hf_source_transport(
+        service=service,
+        experiment=experiment,
+        acknowledged=False,
+        record_prepared=False,
+    )
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
             with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
-                result = runner.run(spec=spec, experiment=experiment)
+                with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+                    runner.run(spec=spec, experiment=experiment)
 
-    assert result.status == "completed"
-    config = backend.execute.call_args.args[0]
+    config = backend.prepare_source.call_args.args[0]
+    backend.execute.assert_not_called()
+    assert experiment.source_transport_state == "PREPARED"
     assert config.pip_packages == ["unsloth==2026.4.2", "transformers==5.3.0"]
 
 
@@ -399,13 +554,21 @@ def test_training_stage_runner_does_not_forward_evolutionary_defaults_when_disab
         repo_commit="deadbeefcafebabe",
     )
 
+    backend.prepare_source.return_value = _install_hf_source_transport(
+        service=service,
+        experiment=experiment,
+        acknowledged=False,
+        record_prepared=False,
+    )
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
             with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
-                result = runner.run(spec=spec, experiment=experiment)
+                with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+                    runner.run(spec=spec, experiment=experiment)
 
-    assert result.status == "completed"
-    config = backend.execute.call_args.args[0]
+    config = backend.prepare_source.call_args.args[0]
+    backend.execute.assert_not_called()
+    assert experiment.source_transport_state == "PREPARED"
     assert config.evolutionary_enabled is False
     assert config.evolutionary_candidates is None
     assert config.evolutionary_eval_batch_size is None
@@ -492,13 +655,21 @@ def test_training_stage_runner_forwards_evolutionary_fields_to_cloud_config(tmp_
         repo_commit="deadbeefcafebabe",
     )
 
+    backend.prepare_source.return_value = _install_hf_source_transport(
+        service=service,
+        experiment=experiment,
+        acknowledged=False,
+        record_prepared=False,
+    )
     with patch.object(runner, "_recover_existing_training", return_value=None):
         with patch.object(runner, "_resolve_bucket_id", return_value="professorsynapse/toolset-training-artifacts"):
             with patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry.get", return_value=backend):
-                result = runner.run(spec=spec, experiment=experiment)
+                with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+                    runner.run(spec=spec, experiment=experiment)
 
-    assert result.status == "completed"
-    config = backend.execute.call_args.args[0]
+    config = backend.prepare_source.call_args.args[0]
+    backend.execute.assert_not_called()
+    assert experiment.source_transport_state == "PREPARED"
     assert config.evolutionary_enabled is True
     assert config.evolutionary_candidates == 4
     assert config.evolutionary_eval_batch_size == 2
@@ -522,6 +693,9 @@ def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_r
     service = TrackingService(tmp_path)
     experiment = _experiment()
     service.save_experiment(experiment)
+    source_preparation = _install_hf_source_transport(
+        service=service, experiment=experiment, acknowledged=True
+    )
     spec = ExperimentSpec(
         name="parallel-post-training",
         provider="hf_jobs",
@@ -533,7 +707,7 @@ def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_r
         loss=LossStageSpec(enabled=True),
         features=FeaturesStageSpec(enabled=False),
     )
-    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    runner = HFEvalStageRunner(repo_root=_ENGINE_REPO_ROOT, tracking_service=service)
     training = StageResult(
         status="completed",
         run_record=RunRecord(
@@ -554,28 +728,31 @@ def test_eval_stage_runner_defaults_to_parallel_loss_mode(tmp_path: Path, repo_r
         ),
     )
 
-    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
-        mock_handler = MagicMock()
-        mock_handler.handle.return_value = 0
-        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
-        mock_handler.last_job_id = "eval-job"
-        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
-        mock_handler_cls.return_value = mock_handler
-
-        result = runner.run(spec=spec, experiment=experiment, previous=training)
-
-    assert result.status == "completed"
-    args = mock_handler_cls.call_args.kwargs["args"]
+    args = runner.build_evaluation_plan_args(
+        spec=spec,
+        artifact_prefix=training.run_record.tags["artifact_prefix"],
+        bucket_id=training.run_record.tags["bucket_id"],
+        source_preparation=source_preparation,
+    )
     assert args.with_loss is False
     assert args.loss_dataset_name is None
     assert args.loss_dataset_file is None
     assert args.eval_pip_packages == []
+    assert args._source_preparation.source_transport_state == "CONSUMABLE"
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
+        with pytest.raises(CloudProviderError, match="separately authorized exact-run approval"):
+            runner.run(spec=spec, experiment=experiment, previous=training)
+        mock_handler_cls.assert_not_called()
+    assert experiment.source_transport_state == "CONSUMABLE"
 
 
 def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
     service.save_experiment(experiment)
+    source_preparation = _install_hf_source_transport(
+        service=service, experiment=experiment, acknowledged=True
+    )
     spec = ExperimentSpec(
         name="same-job-post-training",
         provider="hf_jobs",
@@ -588,7 +765,7 @@ def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root)
         features=FeaturesStageSpec(enabled=False),
     )
     spec.post_training.mode = "same_job"
-    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    runner = HFEvalStageRunner(repo_root=_ENGINE_REPO_ROOT, tracking_service=service)
     training = StageResult(
         status="completed",
         run_record=RunRecord(
@@ -609,28 +786,29 @@ def test_eval_stage_runner_can_use_same_job_loss_mode(tmp_path: Path, repo_root)
         ),
     )
 
-    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
-        mock_handler = MagicMock()
-        mock_handler.handle.return_value = 0
-        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
-        mock_handler.last_job_id = "eval-job"
-        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
-        mock_handler_cls.return_value = mock_handler
-
-        result = runner.run(spec=spec, experiment=experiment, previous=training)
-
-    assert result.status == "completed"
-    args = mock_handler_cls.call_args.kwargs["args"]
+    args = runner.build_evaluation_plan_args(
+        spec=spec,
+        artifact_prefix=training.run_record.tags["artifact_prefix"],
+        bucket_id=training.run_record.tags["bucket_id"],
+        source_preparation=source_preparation,
+    )
     assert args.with_loss is True
     assert args.loss_dataset_name == "repo/dataset"
     assert args.loss_dataset_file == "sample.jsonl"
     assert args.loss_no_completion_only is True
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
+        with pytest.raises(CloudProviderError, match="no approval contract is implemented"):
+            runner.run(spec=spec, experiment=experiment, previous=training)
+        mock_handler_cls.assert_not_called()
 
 
 def test_eval_stage_runner_forwards_stage_pip_packages(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     experiment = _experiment()
     service.save_experiment(experiment)
+    source_preparation = _install_hf_source_transport(
+        service=service, experiment=experiment, acknowledged=True
+    )
     spec = ExperimentSpec(
         name="eval-pip-packages",
         provider="hf_jobs",
@@ -646,7 +824,7 @@ def test_eval_stage_runner_forwards_stage_pip_packages(tmp_path: Path, repo_root
         loss=LossStageSpec(enabled=False),
         features=FeaturesStageSpec(enabled=False),
     )
-    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    runner = HFEvalStageRunner(repo_root=_ENGINE_REPO_ROOT, tracking_service=service)
     training = StageResult(
         status="completed",
         run_record=RunRecord(
@@ -667,19 +845,17 @@ def test_eval_stage_runner_forwards_stage_pip_packages(tmp_path: Path, repo_root
         ),
     )
 
-    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
-        mock_handler = MagicMock()
-        mock_handler.handle.return_value = 0
-        mock_handler.last_results_uri = "hf://buckets/test/runs/hf_jobs/sft/abc/evaluations/vllm/1234"
-        mock_handler.last_job_id = "eval-job"
-        mock_handler.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
-        mock_handler_cls.return_value = mock_handler
-
-        result = runner.run(spec=spec, experiment=experiment, previous=training)
-
-    assert result.status == "completed"
-    args = mock_handler_cls.call_args.kwargs["args"]
+    args = runner.build_evaluation_plan_args(
+        spec=spec,
+        artifact_prefix=training.run_record.tags["artifact_prefix"],
+        bucket_id=training.run_record.tags["bucket_id"],
+        source_preparation=source_preparation,
+    )
     assert args.eval_pip_packages == ["vllm==0.12.0", "transformers==5.3.0"]
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
+        with pytest.raises(CloudProviderError, match="separately authorized exact-run approval"):
+            runner.run(spec=spec, experiment=experiment, previous=training)
+        mock_handler_cls.assert_not_called()
 
 
 def test_loss_stage_runner_recovers_saved_losses_without_resubmitting(tmp_path: Path, repo_root):
@@ -774,7 +950,10 @@ def test_eval_stage_runner_requests_same_job_loss_when_post_training_mode_is_sam
     service = TrackingService(tmp_path)
     experiment = _experiment()
     service.save_experiment(experiment)
-    runner = HFEvalStageRunner(repo_root=repo_root, tracking_service=service)
+    source_preparation = _install_hf_source_transport(
+        service=service, experiment=experiment, acknowledged=True
+    )
+    runner = HFEvalStageRunner(repo_root=_ENGINE_REPO_ROOT, tracking_service=service)
     previous = StageResult(
         status="completed",
         run_record=RunRecord(
@@ -825,27 +1004,22 @@ def test_eval_stage_runner_requests_same_job_loss_when_post_training_mode_is_sam
         },
     )()
 
-    captured = {}
-
-    class _FakeCloudEvalHandler:
-        def __init__(self, args):
-            captured["args"] = args
-            self.last_results_uri = "hf://buckets/test/toolset-training-artifacts/runs/hf_jobs/sft/20260321_191536-deadbeef/evaluations/vllm/20260321_200000"
-            self.last_job_id = "eval-job-123"
-            self.last_eval_payload = {"summary": {"passed": 1, "failed": 0, "warned": 0, "total": 1}}
-
-        def handle(self):
-            return 0
-
-    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler", _FakeCloudEvalHandler):
-        result = runner.run(spec=spec, experiment=experiment, previous=previous)
-
-    assert result.status == "completed"
-    assert captured["args"].with_loss is True
-    assert captured["args"].eval_runtime == "vllm"
-    assert captured["args"].eval_image_profile == "fast_vllm"
-    assert captured["args"].loss_dataset_name == "professorsynapse/claudesidian-synthetic-dataset"
-    assert captured["args"].loss_dataset_file == "train.jsonl"
+    args = runner.build_evaluation_plan_args(
+        spec=spec,
+        artifact_prefix=previous.run_record.tags["artifact_prefix"],
+        bucket_id=previous.run_record.tags["bucket_id"],
+        source_preparation=source_preparation,
+    )
+    assert args.with_loss is True
+    assert args.eval_runtime == "vllm"
+    assert args._source_preparation.source_transport_state == "CONSUMABLE"
+    assert args.eval_image_profile == "fast_vllm"
+    assert args.loss_dataset_name == "professorsynapse/claudesidian-synthetic-dataset"
+    assert args.loss_dataset_file == "train.jsonl"
+    with patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler") as mock_handler_cls:
+        with pytest.raises(CloudProviderError, match="no approval contract is implemented"):
+            runner.run(spec=spec, experiment=experiment, previous=previous)
+        mock_handler_cls.assert_not_called()
 
 
 def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tmp_path: Path, repo_root):
@@ -907,6 +1081,11 @@ def test_loss_stage_runner_recovers_embedded_eval_losses_without_resubmitting(tm
 def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path: Path, repo_root):
     service = TrackingService(tmp_path)
     runner = HFLossStageRunner(repo_root=repo_root, tracking_service=service)
+    experiment = _experiment()
+    service.save_experiment(experiment)
+    source_preparation = _install_hf_source_transport(
+        service=service, experiment=experiment, acknowledged=True
+    )
     training_run = RunRecord(
         run_id="exp-training",
         run_type="sft",
@@ -950,21 +1129,19 @@ def test_loss_stage_runner_build_command_uses_python3_and_dataset_file(tmp_path:
         },
     )()
 
-    with patch(
-        "tuner.backends.training.cloud.base_cloud.resolve_repo_source",
-        return_value=_canonical_repo_source(),
-    ):
-        command = runner._build_command(
-            spec=spec,
-            training_run=training_run,
-            results_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
-        )
+    command = runner._build_command(
+        spec=spec,
+        training_run=training_run,
+        results_prefix="runs/hf_jobs/sft/20260321_191536-deadbeef/analysis/loss",
+        source_preparation=source_preparation,
+    )
 
     assert "$(command -v python3 || command -v python)" in command
     assert "python3 -m shared.experiment_tracking.cloud_loss_job" in command
     assert "--dataset-name professorsynapse/claudesidian-synthetic-dataset" in command
     assert "--dataset-file train.jsonl" in command
-    assert "pip install --upgrade --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in command
+    assert "pip install --upgrade --target /workspace/cache/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in command
+    assert command.index("_verify-identities") < command.index("cloud_loss_job")
     assert "pip install --upgrade transformers==5.3.0" in command
 
 

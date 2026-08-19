@@ -20,10 +20,9 @@ from shared.utilities.env import get_hf_token
 class CloudInspectHandler(BaseHandler):
     """Inspect saved HF Jobs cloud evaluation results."""
 
-    def __init__(self, args: Optional[Namespace] = None):
-        super().__init__(args=args)
-        self._cloud_eval = CloudEvalHandler(args=args)
-        self._cloud_eval._repo_root = self.repo_root
+    def __init__(self, args: Optional[Namespace] = None, context=None):
+        super().__init__(args=args, context=context)
+        self._cloud_eval = CloudEvalHandler(args=args, context=self.context)
 
     @property
     def name(self) -> str:
@@ -181,11 +180,37 @@ class CloudInspectHandler(BaseHandler):
                 f"Failure {index}",
             )
 
+    @staticmethod
+    def _bounded_source_provenance(payload: Dict) -> Dict[str, str]:
+        """Return only portable immutable refs, never provider transport data."""
+
+        result: Dict[str, str] = {}
+        for label, key in (
+            ("Source Lock", "source_lock"),
+            ("Source Transport", "source_transport"),
+            ("Provisioning Evidence", "provisioning_evidence"),
+        ):
+            value = payload.get(key)
+            if not isinstance(value, dict):
+                continue
+            uri = value.get("uri")
+            digest = value.get("sha256")
+            if (
+                isinstance(uri, str)
+                and uri.startswith("tracking://")
+                and isinstance(digest, str)
+                and len(digest) == 64
+            ):
+                result[label] = uri
+                result[f"{label} SHA-256"] = digest
+        return result
+
     def handle(self) -> int:
+        self._cloud_eval.bind_context(self.context)
         print_header("CLOUD INSPECT", "Inspect saved HF cloud evaluation results")
 
         try:
-            huggingface_hub = self._cloud_eval._validate_environment()
+            huggingface_hub = self._cloud_eval._validate_environment(for_launch=False)
             hf_settings = self._cloud_eval._hf_jobs_settings()
             bucket_id = self._cloud_eval._resolve_bucket_id(
                 huggingface_hub,
@@ -211,8 +236,7 @@ class CloudInspectHandler(BaseHandler):
 
         summary = payload.get("summary") or {}
         status_label = "partial" if artifacts.get("partial") else "final"
-        print_config(
-            {
+        display = {
                 "Bucket": bucket_id,
                 "Training Run": selected_run["prefix"],
                 "Evaluation Run": selected_eval["prefix"],
@@ -222,9 +246,9 @@ class CloudInspectHandler(BaseHandler):
                 "Failed": str(summary.get("failed", 0)),
                 "Total": str(summary.get("total", 0)),
                 "Request Errors": str(summary.get("request_errors", 0)),
-            },
-            "Cloud Evaluation Summary",
-        )
+        }
+        display.update(self._bounded_source_provenance(payload))
+        print_config(display, "Cloud Evaluation Summary")
         failure = artifacts.get("failure") or {}
         if failure:
             print_info(f"Failure artifact present: {failure.get('error', 'unknown error')}")

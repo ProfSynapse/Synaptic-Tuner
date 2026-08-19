@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -15,6 +19,40 @@ from tuner.cloud import (
     resolve_hf_bucket_id,
     sanitize_hf_job_labels,
 )
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_HEAVY_PROVIDER_ROOTS = {
+    "boto3",
+    "botocore",
+    "huggingface_hub",
+    "modal",
+    "runpod",
+    "transformers",
+}
+
+
+def _fresh_imported_provider_modules(module_name: str) -> list[str]:
+    code = (
+        "import importlib,json,sys;"
+        f"importlib.import_module({module_name!r});"
+        f"roots={sorted(_HEAVY_PROVIDER_ROOTS)!r};"
+        "print(json.dumps(sorted(name for name in sys.modules "
+        "if name.split('.')[0] in roots)))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=_REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_hf_jobs_primitives_and_cloud_facade_are_import_light_in_fresh_processes():
+    for module_name in ("tuner.cloud.hf_jobs", "tuner.cloud"):
+        assert _fresh_imported_provider_modules(module_name) == []
 
 
 def test_build_repo_checkout_steps_pins_exact_commit():

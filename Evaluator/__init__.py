@@ -1,130 +1,61 @@
-"""Evaluator module for testing tool-calling LLMs.
+"""Import-light compatibility facade for the evaluation harness."""
 
-This module provides a complete evaluation harness for testing models
-against prompt sets and validating configured correctness assertions.
+from __future__ import annotations
 
-Example usage:
-    from Evaluator import create_client, evaluate_cases, load_prompt_cases
-    from Evaluator.config import LMStudioSettings
+from importlib import import_module
 
-    settings = LMStudioSettings(model="my-model")
-    client = create_client("lmstudio", settings)
-    cases = load_prompt_cases(Path("prompts.json"))
-    records = evaluate_cases(cases, client)
-"""
-
-# Core protocols and types
-from .protocols import BackendClient, BackendError, BackendResponse, BackendSettings
-
-# Enums
-from .enums import BackendType, ResponseType, ToolCallFormat, ValidationLevel
-
-# Factory functions
-from .client_factory import (
-    create_client,
-    create_client_from_args,
-    create_settings,
-    get_supported_backends,
-)
-
-# Configuration
-from .config import (
-    BaseBackendSettings,
-    EvaluatorConfig,
-    LMStudioSettings,
-    OllamaSettings,
-    PromptFilter,
-    expand_path,
-    parse_tags,
-)
-
-# Clients
-# from .ollama_client import OllamaClient, OllamaError
-
-# Prompt handling
-from .prompt_sets import PromptCase, filter_prompts, load_prompt_cases
-
-# Validation
-from shared.verifiers.builtins.assertion_verifier import CorrectnessResult, evaluate_correctness
-from .schema_validator import ValidationResult, validate_assistant_response
-from .rubric_validator import (
-    RubricValidator,
-    RubricValidationResult,
-    FullValidationResult,
-    validate_response,
-)
-
-# Response parsing (from shared validation module)
-from shared.validation.parsing.response_parser import (
-    ParsedResponse,
-    ParsedToolCall,
-    parse_response,
-)
-
-# Evaluation
-from .runner import EvaluationRecord, evaluate_cases
-
-# Reporting
-from .reporting import (
-    aggregate_stats,
-    build_run_payload,
-    console_summary,
-    render_markdown,
-    write_json,
-)
+_EXPORT_MODULES = {
+    "BackendClient": ".protocols", "BackendError": ".protocols",
+    "BackendResponse": ".protocols", "BackendSettings": ".protocols",
+    "BackendType": ".enums", "ResponseType": ".enums",
+    "ToolCallFormat": ".enums", "ValidationLevel": ".enums",
+    "create_client": ".client_factory", "create_client_from_args": ".client_factory",
+    "create_settings": ".client_factory", "get_supported_backends": ".client_factory",
+    "BaseBackendSettings": ".config", "EvaluatorConfig": ".config",
+    "LMStudioSettings": ".config", "OllamaSettings": ".config",
+    "PromptFilter": ".config", "expand_path": ".config", "parse_tags": ".config",
+    "PromptCase": ".prompt_sets", "filter_prompts": ".prompt_sets",
+    "load_prompt_cases": ".prompt_sets",
+    "ValidationResult": ".schema_validator",
+    "validate_assistant_response": ".schema_validator",
+    "CorrectnessResult": "shared.verifiers.builtins.assertion_verifier",
+    "evaluate_correctness": "shared.verifiers.builtins.assertion_verifier",
+    "RubricValidator": ".rubric_validator",
+    "RubricValidationResult": ".rubric_validator",
+    "FullValidationResult": ".rubric_validator", "validate_response": ".rubric_validator",
+    "ParsedResponse": "shared.validation.parsing.response_parser",
+    "ParsedToolCall": "shared.validation.parsing.response_parser",
+    "parse_response": "shared.validation.parsing.response_parser",
+    "EvaluationRecord": ".runner", "evaluate_cases": ".runner",
+    "aggregate_stats": ".reporting", "build_run_payload": ".reporting",
+    "console_summary": ".reporting", "render_markdown": ".reporting",
+    "write_json": ".reporting",
+}
 
 __all__ = [
-    # Protocols
-    "BackendClient",
-    "BackendError",
-    "BackendResponse",
-    "BackendSettings",
-    # Enums
-    "BackendType",
-    "ResponseType",
-    "ToolCallFormat",
-    "ValidationLevel",
-    # Factory
-    "create_client",
-    "create_client_from_args",
-    "create_settings",
-    "get_supported_backends",
-    # Config
-    "BaseBackendSettings",
-    "EvaluatorConfig",
-    "LMStudioSettings",
-    "OllamaSettings",
-    "PromptFilter",
-    "expand_path",
-    "parse_tags",
-    # Clients
-    # "OllamaClient",
-    # "OllamaError",
-    # Prompts
-    "PromptCase",
-    "filter_prompts",
-    "load_prompt_cases",
-    # Validation
-    "ValidationResult",
-    "validate_assistant_response",
-    "CorrectnessResult",
-    "evaluate_correctness",
-    # Rubric validation (SynthChat integration)
-    "RubricValidator",
-    "RubricValidationResult",
-    "FullValidationResult",
-    "validate_response",
-    # Parsing
-    "ParsedResponse",
-    "ParsedToolCall",
-    "parse_response",
-    # Evaluation
-    "EvaluationRecord",
-    "evaluate_cases",
-    # Reporting
-    "aggregate_stats",
-    "build_run_payload",
-    "console_summary",
-    "render_markdown",
-    "write_json",
+    "BackendClient", "BackendError", "BackendResponse", "BackendSettings",
+    "BackendType", "ResponseType", "ToolCallFormat", "ValidationLevel",
+    "create_client", "create_client_from_args", "create_settings", "get_supported_backends",
+    "BaseBackendSettings", "EvaluatorConfig", "LMStudioSettings", "OllamaSettings",
+    "PromptFilter", "expand_path", "parse_tags", "PromptCase", "filter_prompts",
+    "load_prompt_cases", "ValidationResult", "validate_assistant_response",
+    "CorrectnessResult", "evaluate_correctness", "RubricValidator",
+    "RubricValidationResult", "FullValidationResult", "validate_response",
+    "ParsedResponse", "ParsedToolCall", "parse_response", "EvaluationRecord",
+    "evaluate_cases", "aggregate_stats", "build_run_payload", "console_summary",
+    "render_markdown", "write_json",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    package = __name__ if module_name.startswith(".") else None
+    value = getattr(import_module(module_name, package), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORT_MODULES))

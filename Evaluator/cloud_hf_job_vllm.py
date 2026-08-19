@@ -8,6 +8,7 @@ per-example loss with Transformers in the same job.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -18,7 +19,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Optional
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(os.environ.get("SYNAPTIC_ENGINE_ROOT") or Path(__file__).resolve().parent.parent).resolve()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -33,6 +34,37 @@ from shared.experiment_tracking.lineage_enrichment import (
 )
 from shared.experiment_tracking.per_example_loss import compute_per_example_losses_parallel
 from shared.utilities.env import get_hf_token
+
+
+def _bind_source_lock(lineage: dict) -> dict:
+    payload = dict(lineage)
+    uri = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_URI") or "").strip()
+    digest = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_SHA256") or "").strip()
+    if not uri or len(digest) != 64:
+        raise RuntimeError("Verified HF evaluation is missing its SourceLock identity.")
+    payload["source_lock"] = {"uri": uri, "sha256": digest}
+    descriptor_uri = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_URI") or "").strip()
+    descriptor_sha = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_SHA256") or "").strip()
+    evidence_uri = str(os.environ.get("SYNAPTIC_PROVISIONING_EVIDENCE_URI") or "").strip()
+    evidence_sha = str(os.environ.get("SYNAPTIC_PROVISIONING_EVIDENCE_SHA256") or "").strip()
+    state = str(os.environ.get("SYNAPTIC_SOURCE_TRANSPORT_STATE") or "").strip()
+    if not descriptor_uri or len(descriptor_sha) != 64 or not evidence_uri or len(evidence_sha) != 64 or state != "CONSUMABLE":
+        raise RuntimeError("Verified HF evaluation is missing its CONSUMABLE source-transport identity.")
+    payload["source_transport"] = {"uri": descriptor_uri, "sha256": descriptor_sha, "state": state}
+    payload["provisioning_evidence"] = {"uri": evidence_uri, "sha256": evidence_sha}
+    return payload
+
+
+def _persist_source_lock(results_dir: Path) -> None:
+    source_value = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_PATH") or "").strip()
+    if not source_value:
+        raise RuntimeError("Verified HF evaluation is missing its mounted SourceLock path.")
+    source = Path(source_value)
+    expected = str(os.environ.get("SYNAPTIC_SOURCE_LOCK_SHA256") or "")
+    content = source.read_bytes()
+    if len(expected) != 64 or hashlib.sha256(content).hexdigest() != expected:
+        raise RuntimeError("Verified HF evaluation SourceLock artifact mismatch.")
+    (results_dir / "source-lock.json").write_bytes(content)
 
 from .cloud_hf_job import _PeriodicBucketSyncer, _finalize_cloud_exit_code, _install_termination_handler
 
@@ -255,7 +287,7 @@ def _compute_exact_loss_outputs(
         started_at=loss_started_at,
         finished_at=loss_finished_at,
     )
-    write_lineage_json(analysis_dir / "loss_lineage.json", loss_lineage)
+    write_lineage_json(analysis_dir / "loss_lineage.json", _bind_source_lock(loss_lineage))
     progress_syncer.sync_once()
 
 
@@ -283,6 +315,7 @@ def main() -> int:
     model_dir = output_root / "model"
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
+    _persist_source_lock(results_dir)
     progress_dir = results_dir / "logs"
     progress_log_path = progress_dir / EVAL_PROGRESS_LOG_FILENAME
     stage_logger = StageLogger(
@@ -440,7 +473,7 @@ def main() -> int:
                 tensor_parallel_size=args.vllm_tensor_parallel_size or None,
                 worker_count=args.loss_workers or None,
             )
-            write_lineage_json(lineage_json, enriched)
+            write_lineage_json(lineage_json, _bind_source_lock(enriched))
         if args.with_loss:
             stage_logger.emit(
                 "work_started",

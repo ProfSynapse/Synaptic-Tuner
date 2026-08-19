@@ -12,7 +12,7 @@ Covers:
 
 import os
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,14 +24,74 @@ from tuner.backends.training.cloud.hf_jobs_backend import (
     HFJobsBackend,
     _parse_timeout,
 )
+from tuner.handlers.cloud_eval_handler import CloudEvalHandler
+from tuner.handlers.cloud_pipeline_handler import CloudPipelineHandler
+from tuner.handlers.cloud_run_handler import CloudRunHandler
 from tuner.backends.training.cloud.base_cloud import RepoSource
 from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
 from tuner.core.config import CloudTrainingConfig, TrainingConfig
 from tuner.core.exceptions import CloudProviderError, ConfigurationError
 from tuner.project.source_bundle import GitSource, RepositoryLocation
+from tuner.cloud.hf_volume_transport import HFVerifiedVolume, HFVerifiedVolumeSpec
+from tuner.cloud.runtime_layout import build_runtime_layout
+from tuner.project import ProjectContext
 
 
 _FIXTURE_HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.fixture(autouse=True)
+def verified_source_preparation(monkeypatch, tmp_path):
+    """Give legacy backend tests an explicit, non-provider verified-source seam."""
+
+    original_init = HFJobsBackend.__init__
+    provider_volume = object()
+
+    def initialize(self, repo_root, context=None):
+        original_init(self, repo_root, context=context)
+        volume_spec = HFVerifiedVolumeSpec(
+            source="test-user/bootstrap",
+            capsule_path="capsule",
+            capsule_manifest_sha256="a" * 64,
+            source_lock_path="source-lock.json",
+            source_lock_sha256="b" * 64,
+            checkout_policy_path="checkout-policy.json",
+            checkout_policy_sha256="c" * 64,
+            local_root=tmp_path.resolve(),
+        )
+        source_lock = SimpleNamespace(
+            mode="standalone",
+            run_id="test-run",
+            project_source=SimpleNamespace(commit=_FIXTURE_HEAD),
+            engine_source=SimpleNamespace(
+                commit=_FIXTURE_HEAD,
+                branch="main",
+                submodule_path=None,
+                location=SimpleNamespace(canonical_url="https://github.com/test/repo.git"),
+            ),
+        )
+        self.source_preparation = SimpleNamespace(
+            source_lock=source_lock,
+            source_lock_sha256="b" * 64,
+            source_lock_uri="tracking://test/source-lock.json",
+            volume_spec=volume_spec,
+            runtime_layout=build_runtime_layout(ProjectContext.standalone(engine_root=Path(repo_root))),
+            remote_project_root="/workspace/project",
+            remote_engine_root="/workspace/engine",
+            physical_project_root="/workspace/source/project",
+            physical_engine_root="/workspace/source/project",
+            descriptor_uri="tracking://test/source-transport/descriptor.json",
+            descriptor_sha256="d" * 64,
+            provisioning_evidence_uri="tracking://test/source-transport/evidence.json",
+            provisioning_evidence_sha256="e" * 64,
+            source_transport_state="CONSUMABLE",
+            require_consumable=lambda: None,
+            prove_volume=lambda hub: HFVerifiedVolume(
+                volume_spec, provider_volume, "d" * 64, "e" * 64
+            ),
+        )
+
+    monkeypatch.setattr(HFJobsBackend, "__init__", initialize)
 
 
 @pytest.fixture
@@ -219,7 +279,7 @@ class TestHFJobsExecute:
         config = self._make_config()
         with patch.dict("sys.modules", {"huggingface_hub": None}):
             with patch("builtins.__import__", side_effect=ImportError):
-                with pytest.raises(CloudProviderError, match="not installed"):
+                with pytest.raises(CloudProviderError, match="exact-run approval"):
                     backend.execute(config, python_path="")
 
     def test_raises_when_wrong_config_type(self, repo_root):
@@ -235,7 +295,7 @@ class TestHFJobsExecute:
             with pytest.raises(CloudProviderError, match="requires CloudTrainingConfig"):
                 backend.execute(config, python_path="")
 
-    def test_masks_token_in_error_messages(self, repo_root, clean_env):
+    def test_forged_volume_binding_precedes_provider_error_path(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
@@ -247,11 +307,26 @@ class TestHFJobsExecute:
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             with pytest.raises(CloudProviderError) as exc_info:
                 backend.execute(config, python_path="")
-        # Token value should be masked
         assert "hf_abc123" not in str(exc_info.value)
-        assert "check credentials" in str(exc_info.value).lower()
+        assert "exact-run approval" in str(exc_info.value).lower()
+        mock_hub.run_job.assert_not_called()
 
-    def test_successful_job_returns_zero(self, repo_root, clean_env):
+    def test_volume_proof_failure_precedes_bucket_mutation_and_submission(self, repo_root, clean_env):
+        clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
+        backend = HFJobsBackend(repo_root)
+
+        def reject(_hub):
+            raise CloudProviderError("pre-provisioned member digest mismatch")
+
+        backend.source_preparation.prove_volume = reject
+        mock_hub = MagicMock()
+        with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
+            with pytest.raises(CloudProviderError, match="exact-run approval"):
+                backend.execute(self._make_config(), python_path="")
+        mock_hub.create_bucket.assert_not_called()
+        mock_hub.run_job.assert_not_called()
+
+    def test_legacy_success_fixture_cannot_bypass_secure_submission_gate(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
@@ -273,22 +348,12 @@ class TestHFJobsExecute:
 
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
-                exit_code = backend.execute(config, python_path="")
-        assert exit_code == 0
-        mock_hub.create_bucket.assert_called_once_with(
-            "toolset-training-artifacts",
-            exist_ok=True,
-            private=True,
-            token="hf_test_token_12345",
-        )
-        assert mock_hub.run_job.call_args.kwargs["secrets"] == {
-            "HF_TOKEN": "hf_test_token_12345",
-            "HF_API_KEY": "hf_test_token_12345",
-        }
-        submitted_command = mock_hub.run_job.call_args.kwargs["command"][2]
-        assert "--artifact-bucket test-user/toolset-training-artifacts" in submitted_command
+                with pytest.raises(CloudProviderError, match="exact-run approval"):
+                    backend.execute(config, python_path="")
+        mock_hub.create_bucket.assert_not_called()
+        mock_hub.run_job.assert_not_called()
 
-    def test_failed_job_returns_one(self, repo_root, clean_env):
+    def test_legacy_failure_fixture_cannot_bypass_secure_submission_gate(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
@@ -309,10 +374,11 @@ class TestHFJobsExecute:
 
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
             with patch("tuner.backends.training.cloud.base_cloud.time.sleep"):
-                exit_code = backend.execute(config, python_path="")
-        assert exit_code == 1
+                with pytest.raises(CloudProviderError, match="exact-run approval"):
+                    backend.execute(config, python_path="")
+        mock_hub.run_job.assert_not_called()
 
-    def test_polling_path_recovers_completed_run_from_bucket(self, repo_root, clean_env):
+    def test_polling_path_is_unreachable_before_secure_submission_gate(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
         backend = HFJobsBackend(repo_root)
         config = self._make_config()
@@ -336,13 +402,11 @@ class TestHFJobsExecute:
                 with patch.object(backend, "_should_use_remote_dashboard", return_value=False):
                     with patch.object(backend, "_recover_completed_run_from_bucket", return_value=True):
                         with patch.object(backend, "_finalize_completed_job", return_value=0) as mock_finalize:
-                            exit_code = backend.execute(config, python_path="")
+                            with pytest.raises(CloudProviderError, match="exact-run approval"):
+                                backend.execute(config, python_path="")
 
-        assert exit_code == 0
-        mock_finalize.assert_called_once_with(
-            config=config,
-            artifact_prefix=backend.last_artifact_prefix,
-        )
+        mock_finalize.assert_not_called()
+        mock_hub.run_job.assert_not_called()
 
     def test_raises_when_bucket_api_unavailable(self, repo_root, clean_env):
         clean_env.setenv("HF_TOKEN", "hf_test_token_12345")
@@ -351,8 +415,123 @@ class TestHFJobsExecute:
         mock_hub = MagicMock(spec=["run_job", "__version__"])
         mock_hub.__version__ = "1.2.3"
         with patch.dict("sys.modules", {"huggingface_hub": mock_hub}):
-            with pytest.raises(CloudProviderError, match="Buckets API"):
+            with pytest.raises(CloudProviderError, match="exact-run approval"):
                 backend.execute(config, python_path="")
+
+
+def test_execute_authorization_barrier_precedes_sdk_and_config_helpers(repo_root) -> None:
+    backend = HFJobsBackend(repo_root)
+    events: list[str] = []
+
+    def barrier(*, route: str):
+        events.append(f"barrier:{route}")
+        raise CloudProviderError("authorization stopped")
+
+    with patch(
+        "tuner.backends.training.cloud.hf_jobs_backend."
+        "require_current_hf_source_submission_authorization",
+        side_effect=barrier,
+    ), patch(
+        "tuner.backends.training.cloud.hf_jobs_backend.load_huggingface_hub"
+    ) as load_hub, patch.object(
+        backend, "prepare_source"
+    ) as prepare_source, patch.object(
+        backend, "_build_training_command"
+    ) as build_command, patch.object(
+        backend, "_ensure_hf_bucket"
+    ) as ensure_bucket:
+        with pytest.raises(CloudProviderError, match="authorization stopped"):
+            backend.execute(_cloud_config(), python_path="")
+
+    assert events == ["barrier:backend.execute"]
+    load_hub.assert_not_called()
+    prepare_source.assert_not_called()
+    build_command.assert_not_called()
+    ensure_bucket.assert_not_called()
+
+
+def test_cloud_run_barrier_precedes_defaults_source_provider_and_command_helpers(repo_root) -> None:
+    handler = CloudRunHandler(args=SimpleNamespace())
+    handler._repo_root = repo_root
+    events: list[str] = []
+
+    def barrier(*, route: str):
+        events.append(f"barrier:{route}")
+        raise CloudProviderError("authorization stopped")
+
+    with patch(
+        "tuner.handlers.cloud_run_handler.require_current_hf_source_submission_authorization",
+        side_effect=barrier,
+    ), patch.object(handler, "_hf_defaults") as defaults, patch(
+        "tuner.handlers.cloud_run_handler.preflight_hf_source_lock"
+    ) as preflight, patch(
+        "tuner.handlers.cloud_run_handler.load_huggingface_hub"
+    ) as load_hub, patch(
+        "tuner.handlers.cloud_run_handler.resolve_hf_bucket_id"
+    ) as resolve_bucket, patch(
+        "tuner.handlers.cloud_run_handler.build_bash_command"
+    ) as build_command:
+        with pytest.raises(CloudProviderError, match="authorization stopped"):
+            handler._compile_hf_job(repo_root / "job.yaml", {"provider": "hf_jobs"})
+
+    assert events == ["barrier:cloud-run.compile"]
+    defaults.assert_not_called()
+    preflight.assert_not_called()
+    load_hub.assert_not_called()
+    resolve_bucket.assert_not_called()
+    build_command.assert_not_called()
+
+
+def test_cloud_eval_barrier_precedes_settings_source_provider_and_command_helpers(repo_root) -> None:
+    handler = CloudEvalHandler(args=SimpleNamespace(json=False))
+    handler._repo_root = repo_root
+    events: list[str] = []
+
+    def barrier(*, route: str):
+        events.append(f"barrier:{route}")
+        raise CloudProviderError("authorization stopped")
+
+    with patch(
+        "tuner.handlers.cloud_eval_handler.require_current_hf_source_submission_authorization",
+        side_effect=barrier,
+    ), patch.object(handler, "_hf_jobs_settings") as settings, patch.object(
+        handler, "_prepare_source"
+    ) as prepare_source, patch.object(
+        handler, "_validate_environment"
+    ) as validate_environment, patch.object(
+        handler, "_build_eval_command"
+    ) as build_command:
+        assert handler.handle() == 1
+
+    assert events == ["barrier:cloud-eval.handle"]
+    settings.assert_not_called()
+    prepare_source.assert_not_called()
+    validate_environment.assert_not_called()
+    build_command.assert_not_called()
+
+
+def test_cloud_pipeline_barrier_precedes_backend_and_plan_compilation(repo_root) -> None:
+    handler = CloudPipelineHandler(args=SimpleNamespace(json=False))
+    handler._repo_root = repo_root
+    events: list[str] = []
+
+    def barrier(*, route: str):
+        events.append(f"barrier:{route}")
+        raise CloudProviderError("authorization stopped")
+
+    with patch(
+        "tuner.handlers.cloud_pipeline_handler.require_current_hf_source_submission_authorization",
+        side_effect=barrier,
+    ), patch(
+        "tuner.handlers.cloud_pipeline_handler.TrainingBackendRegistry.get"
+    ) as backend_get, patch(
+        "tuner.handlers.cloud_pipeline_handler.CloudEvalHandler"
+    ) as eval_handler:
+        assert handler.handle() == 1
+
+    assert events == ["barrier:cloud-pipeline.handle"]
+    backend_get.assert_not_called()
+    eval_handler.assert_not_called()
 
 
 class TestBuildTrainingCommand:
@@ -371,18 +550,27 @@ class TestBuildTrainingCommand:
         cmd = backend._build_training_command(config, timestamp="20260314_181946")
         assert "$(command -v python3 || command -v python) -m pip install --disable-pip-version-check" in cmd
         assert "$(command -v python3 || command -v python) -m pip install --upgrade pyyaml" not in cmd
-        assert "mkdir -p /tmp/hf-bucket-sync-site" in cmd
-        assert "$(command -v python3 || command -v python) -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in cmd
+        assert "mkdir -p /workspace/cache/hf-bucket-sync-site" in cmd
+        assert "$(command -v python3 || command -v python) -m pip install --upgrade --no-deps --target /workspace/cache/hf-bucket-sync-site 'huggingface_hub>=1.5.0' hf_transfer hf_xet" in cmd
         assert " huggingface_hub>=1.5.0 " not in cmd
         assert "export HF_BUCKET_SYNC_PYTHON=$(command -v python3 || command -v python)" in cmd
-        assert "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site" in cmd
+        assert "export HF_BUCKET_SYNC_PYTHONPATH=/workspace/cache/hf-bucket-sync-site" in cmd
         assert "export CLOUD_PROVIDER=hf_jobs" in cmd
         assert "export CLOUD_GPU_TYPE=a10g-small" in cmd
-        assert "git clone --branch main" in cmd
-        assert "git checkout abc12345def67890" in cmd
-        assert "cd /workspace/repo/Trainers/sft" in cmd
+        assert "git clone" not in cmd
+        assert "synaptic-bootstrap-capsule.json" in cmd
+        assert cmd.index("synaptic-bootstrap-capsule.json") < cmd.index("-m tuner.cloud.hf_volume_transport _verify-identities")
+        identity_index = cmd.index("-m tuner.cloud.hf_volume_transport _verify-identities")
+        projection_index = cmd.index("-m tuner.cloud.hf_volume_transport _project-layout")
+        workload_index = cmd.index("pip install --disable-pip-version-check")
+        assert identity_index < projection_index < workload_index
+        projection_end = cmd.index(" && ", projection_index)
+        assert "/workspace/source" not in cmd[projection_end:]
+        assert "export SYNAPTIC_PROJECT_ROOT=/workspace/project" in cmd
+        assert "export SYNAPTIC_ENGINE_ROOT=/workspace/engine" in cmd
+        assert "cd /workspace/engine/Trainers/sft" in cmd
         assert "python train_sft.py" in cmd
-        assert "--output-root /workspace/outputs" in cmd
+        assert "--output-root /workspace/artifacts" in cmd
         assert "--artifact-backend hf_bucket" in cmd
         assert "--artifact-bucket toolset-training-artifacts" in cmd
         assert "--artifact-prefix runs/hf_jobs/sft/20260314_181946-abc12345" in cmd
@@ -591,11 +779,11 @@ class TestBuildTrainingCommand:
         assert config.seed is None
         assert config.beta is None
 
-    def test_raises_when_no_repo_url(self, repo_root, clean_env):
+    def test_raises_when_verified_source_is_missing(self, repo_root, clean_env):
         backend = HFJobsBackend(repo_root)
-        config = _cloud_config(repo_url="")
-        with pytest.raises(CloudProviderError, match="exact repo source metadata"):
-            backend._build_training_command(config)
+        backend.source_preparation = None
+        with pytest.raises(CloudProviderError, match="secure source preparation"):
+            backend._build_training_command(_cloud_config())
 
     def test_grpo_command_uses_env_runtime_bootstrap_and_bucket_sync(self, repo_root):
         backend = HFJobsBackend(repo_root)
@@ -610,13 +798,13 @@ class TestBuildTrainingCommand:
 
         cmd = backend._build_training_command(config, timestamp="20260322_170000")
 
-        assert "$(command -v python3 || command -v python) -m virtualenv --no-download /workspace/.venvs/grpo-openenv" in cmd
-        assert "cd /workspace/repo/Trainers/grpo && python train_env_grpo.py --config /workspace/repo/Trainers/grpo/configs/env_config.yaml" in cmd
+        assert "$(command -v python3 || command -v python) -m virtualenv --no-download /workspace/cache/venvs/grpo-openenv" in cmd
+        assert "cd /workspace/engine/Trainers/grpo && python train_env_grpo.py --config /workspace/engine/Trainers/grpo/configs/env_config.yaml" in cmd
         assert "--model-name professorsynapse/Nexus-Quark-L2.5.28" in cmd
         assert "--dataset-name professorsynapse/nexus-synthetic-data" in cmd
         assert "--dataset-file environment_rollouts/canonical/vault_shared_seed_dynamic_roles_aggregate_20260316.jsonl" in cmd
-        assert "--output-dir /workspace/repo/Trainers/grpo/env_grpo_output/20260322_170000" in cmd
-        assert "python -m shared.hf_bucket_sync_helper /workspace/repo/Trainers/grpo/env_grpo_output/20260322_170000" in cmd
+        assert "--output-dir /workspace/artifacts/grpo/20260322_170000" in cmd
+        assert "python -m shared.hf_bucket_sync_helper /workspace/artifacts/grpo/20260322_170000" in cmd
 
     def test_build_artifact_prefix(self, repo_root):
         backend = HFJobsBackend(repo_root)

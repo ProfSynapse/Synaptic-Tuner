@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-hf-provisioning-evidence-v1.schema.json",
+  "title": "Synaptic Hugging Face provisioning evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "descriptor", "run_id", "provider", "profile", "volume", "bundle_sha256", "capsule_manifest_sha256", "source_lock_sha256", "checkout_policy_sha256", "status", "authority", "actor", "asserted_at", "provider_receipt_id"],
+  "properties": {
+    "schema_version": {"const": "synaptic-hf-provisioning-evidence/v1"},
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"$ref": "#/$defs/trackingUri"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "run_id": {"$ref": "#/$defs/segment"},
+    "provider": {"const": "hf_jobs"},
+    "profile": {"const": "C"},
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "path", "type", "read_only"],
+      "properties": {
+        "source": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$", "maxLength": 255},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "type": {"const": "bucket"},
+        "read_only": {"const": true}
+      }
+    },
+    "bundle_sha256": {"$ref": "#/$defs/sha256"},
+    "capsule_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "source_lock_sha256": {"$ref": "#/$defs/sha256"},
+    "checkout_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "status": {"const": "provisioned"},
+    "authority": {"enum": ["operator", "protected_workflow"]},
+    "actor": {"$ref": "#/$defs/actorValue"},
+    "asserted_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$", "maxLength": 64},
+    "provider_receipt_id": {"$ref": "#/$defs/receiptValue"},
+    "provider_revision": {"$ref": "#/$defs/receiptValue"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "relativePath": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "maxLength": 1024},
+    "trackingUri": {"type": "string", "pattern": "^tracking://[A-Za-z0-9][A-Za-z0-9._/-]*$", "maxLength": 2048},
+    "actorValue": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$"},
+    "receiptValue": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"}
+  }
+}

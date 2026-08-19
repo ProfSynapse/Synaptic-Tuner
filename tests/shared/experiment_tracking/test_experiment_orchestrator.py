@@ -12,6 +12,11 @@ from shared.experiment_tracking import ExperimentOrchestrator, ExperimentSpec, S
 from shared.experiment_tracking.experiment_spec import DatasetSpec, EvaluationStageSpec, ExecutionStageSpec, FeaturesStageSpec, LossStageSpec, TrainingStageSpec
 from shared.experiment_tracking.schema import LossResult, RunRecord
 from shared.experiment_tracking.service import ProvenanceIntegrityError
+from tests.shared.experiment_tracking.test_tracking_service import (
+    _descriptor,
+    _source_lock,
+    _write_canonical,
+)
 from tuner.project import (
     ConfigDocument,
     GitSource,
@@ -264,6 +269,46 @@ def test_resume_rejects_tampered_provenance_before_any_stage(tmp_path: Path):
     )
 
     with pytest.raises(ProvenanceIntegrityError, match="SHA-256|does not match|canonically"):
+        orchestrator.run(spec, experiment=experiment)
+
+    assert experiment.stage_statuses == {}
+
+
+def test_resume_rejects_tampered_source_transport_before_runner(tmp_path: Path):
+    service = TrackingService(tmp_path)
+    spec = ExperimentSpec(
+        name="resume-transport-integrity",
+        provider="hf_jobs",
+        method="sft",
+        dataset=DatasetSpec(source="org/data", file="train.jsonl"),
+        training=TrainingStageSpec(model_name="org/model"),
+        execution=ExecutionStageSpec(stages=["training"]),
+    )
+    experiment = service.create_experiment(
+        name=spec.name,
+        dataset_path=spec.dataset.identifier,
+        dataset_hash="",
+        base_model_name=spec.training.model_name,
+        provider=spec.provider,
+        method=spec.method,
+    )
+    service.persist_source_lock(experiment, _source_lock(experiment.experiment_id))
+    descriptor_uri, descriptor_sha = _write_canonical(
+        service, "descriptor.json", _descriptor(experiment)
+    )
+    service.record_source_transport_prepared(
+        experiment, uri=descriptor_uri, sha256=descriptor_sha
+    )
+    descriptor_path = service.resolve_uri(descriptor_uri)
+    descriptor_path.write_bytes(
+        descriptor_path.read_bytes().replace(b'"profile":"C"', b'"profile":"B"')
+    )
+    orchestrator = ExperimentOrchestrator(
+        tracking_service=service,
+        training_runner=_FailIfCalledRunner(),
+    )
+
+    with pytest.raises(ProvenanceIntegrityError, match="SHA-256|canonically"):
         orchestrator.run(spec, experiment=experiment)
 
     assert experiment.stage_statuses == {}

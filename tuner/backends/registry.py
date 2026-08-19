@@ -1,237 +1,92 @@
-"""
-Backend registry for training and evaluation backends.
+"""Lazy backend registries with metadata-only discovery."""
 
-Location: /mnt/f/Code/Toolset-Training/tuner/backends/registry.py
-Purpose: Central registry for backend discovery and instantiation
-Used by: Handlers to get backend instances without tight coupling
+from __future__ import annotations
 
-This module implements the Registry pattern to decouple handlers from concrete
-backend implementations. Handlers request backends by name (e.g., 'rtx', 'ollama')
-and the registry returns the appropriate implementation.
+from importlib import import_module
+from typing import Dict, List, Type
 
-Design decisions:
-- Pre-register all known backends at module import time
-- Use class methods for registry operations (singleton pattern)
-- Return instances from get() method (not classes)
-- Support dynamic registration for extensibility
-- Separate registries for training vs evaluation backends
-"""
+from tuner.core.interfaces import IEvaluationBackend, ITrainingBackend
 
-from typing import Dict, Type, List
-from pathlib import Path
+_BackendEntry = str | type
 
-from tuner.core.interfaces import ITrainingBackend, IEvaluationBackend
-from tuner.backends.training import RTXBackend, MacBackend
-from tuner.backends.evaluation import OllamaBackend, LMStudioBackend, LlamaCppBackend, UnslothBackend, MLCBackend
+
+def _resolve_target(target: str) -> type:
+    module_name, separator, attribute = target.partition(":")
+    if not separator or not module_name or not attribute:
+        raise ValueError(f"Invalid backend target: {target!r}")
+    return getattr(import_module(module_name), attribute)
 
 
 class TrainingBackendRegistry:
-    """
-    Registry for training backend implementations.
+    """Ordered registry that imports only the selected training backend."""
 
-    This registry manages the mapping between platform names ('rtx', 'mac')
-    and their corresponding backend implementations. It provides a central
-    point for backend discovery and instantiation.
-
-    The registry pre-registers known backends at module import time, but
-    supports dynamic registration for extensibility.
-
-    Example:
-        # Get a backend instance
-        backend = TrainingBackendRegistry.get('rtx', repo_root=Path('/path/to/repo'))
-
-        # List available backends
-        backends = TrainingBackendRegistry.list()  # ['rtx', 'mac']
-
-        # Register a custom backend
-        TrainingBackendRegistry.register('custom', CustomBackend)
-    """
-
-    _backends: Dict[str, Type[ITrainingBackend]] = {}
+    _backends: Dict[str, _BackendEntry] = {
+        "rtx": "tuner.backends.training.rtx_backend:RTXBackend",
+        "mac": "tuner.backends.training.mac_backend:MacBackend",
+        "hf_jobs": "tuner.backends.training.cloud.hf_jobs_backend:HFJobsBackend",
+        "modal": "tuner.backends.training.cloud.modal_backend:ModalBackend",
+        "runpod": "tuner.backends.training.cloud.runpod_backend:RunPodBackend",
+    }
+    _resolved: Dict[str, Type[ITrainingBackend]] = {}
 
     @classmethod
     def register(cls, name: str, backend: Type[ITrainingBackend]) -> None:
-        """
-        Register a new training backend.
-
-        Args:
-            name: Backend identifier (e.g., 'rtx', 'mac', 'custom')
-            backend: Backend class (not instance) implementing ITrainingBackend
-
-        Example:
-            class CustomBackend(ITrainingBackend):
-                # Implementation...
-                pass
-
-            TrainingBackendRegistry.register('custom', CustomBackend)
-
-        Note:
-            If a backend with the same name already exists, it will be overwritten.
-        """
         cls._backends[name] = backend
+        cls._resolved.pop(name, None)
 
     @classmethod
     def get(cls, name: str, **kwargs) -> ITrainingBackend:
-        """
-        Get a training backend instance by name.
-
-        Args:
-            name: Backend identifier (e.g., 'rtx', 'mac')
-            **kwargs: Arguments to pass to backend constructor
-
-        Returns:
-            Backend instance ready for use
-
-        Raises:
-            ValueError: If backend name is not registered
-
-        Example:
-            backend = TrainingBackendRegistry.get(
-                'rtx',
-                repo_root=Path('/path/to/repo')
-            )
-            methods = backend.get_available_methods()  # ['sft', 'kto']
-        """
         if name not in cls._backends:
             available = ", ".join(cls.list())
             raise ValueError(
-                f"Unknown training backend: '{name}'. "
-                f"Available backends: {available}"
+                f"Unknown training backend: '{name}'. Available backends: {available}"
             )
-        return cls._backends[name](**kwargs)
+        backend_type = cls._resolved.get(name)
+        if backend_type is None:
+            entry = cls._backends[name]
+            backend_type = _resolve_target(entry) if isinstance(entry, str) else entry
+            cls._resolved[name] = backend_type
+        return backend_type(**kwargs)
 
     @classmethod
     def list(cls) -> List[str]:
-        """
-        List all registered training backend names.
-
-        Returns:
-            List of backend identifiers (e.g., ['rtx', 'mac'])
-
-        Example:
-            for backend_name in TrainingBackendRegistry.list():
-                print(f"Available: {backend_name}")
-        """
-        return list(cls._backends.keys())
+        return list(cls._backends)
 
 
 class EvaluationBackendRegistry:
-    """
-    Registry for evaluation backend implementations.
+    """Ordered registry that imports only the selected evaluation backend."""
 
-    This registry manages the mapping between backend names ('ollama', 'lmstudio')
-    and their corresponding backend implementations. It provides a central
-    point for backend discovery and instantiation.
-
-    The registry pre-registers known backends at module import time, but
-    supports dynamic registration for extensibility.
-
-    Example:
-        # Get a backend instance
-        backend = EvaluationBackendRegistry.get('ollama')
-
-        # List available backends
-        backends = EvaluationBackendRegistry.list()  # ['ollama', 'lmstudio']
-
-        # Register a custom backend
-        EvaluationBackendRegistry.register('custom', CustomEvalBackend)
-    """
-
-    _backends: Dict[str, Type[IEvaluationBackend]] = {}
+    _backends: Dict[str, _BackendEntry] = {
+        "ollama": "tuner.backends.evaluation.ollama_backend:OllamaBackend",
+        "lmstudio": "tuner.backends.evaluation.lmstudio_backend:LMStudioBackend",
+        "llamacpp": "tuner.backends.evaluation.llamacpp_backend:LlamaCppBackend",
+        "unsloth": "tuner.backends.evaluation.unsloth_backend:UnslothBackend",
+        "mlc": "tuner.backends.evaluation.mlc_backend:MLCBackend",
+    }
+    _resolved: Dict[str, Type[IEvaluationBackend]] = {}
 
     @classmethod
     def register(cls, name: str, backend: Type[IEvaluationBackend]) -> None:
-        """
-        Register a new evaluation backend.
-
-        Args:
-            name: Backend identifier (e.g., 'ollama', 'lmstudio', 'custom')
-            backend: Backend class (not instance) implementing IEvaluationBackend
-
-        Example:
-            class CustomEvalBackend(IEvaluationBackend):
-                # Implementation...
-                pass
-
-            EvaluationBackendRegistry.register('custom', CustomEvalBackend)
-
-        Note:
-            If a backend with the same name already exists, it will be overwritten.
-        """
         cls._backends[name] = backend
+        cls._resolved.pop(name, None)
 
     @classmethod
     def get(cls, name: str, **kwargs) -> IEvaluationBackend:
-        """
-        Get an evaluation backend instance by name.
-
-        Args:
-            name: Backend identifier (e.g., 'ollama', 'lmstudio')
-            **kwargs: Arguments to pass to backend constructor (usually none needed)
-
-        Returns:
-            Backend instance ready for use
-
-        Raises:
-            ValueError: If backend name is not registered
-
-        Example:
-            backend = EvaluationBackendRegistry.get('ollama')
-            models = backend.list_models()  # ['llama2:7b', 'mistral:latest']
-        """
         if name not in cls._backends:
             available = ", ".join(cls.list())
             raise ValueError(
-                f"Unknown evaluation backend: '{name}'. "
-                f"Available backends: {available}"
+                f"Unknown evaluation backend: '{name}'. Available backends: {available}"
             )
-        return cls._backends[name](**kwargs)
+        backend_type = cls._resolved.get(name)
+        if backend_type is None:
+            entry = cls._backends[name]
+            backend_type = _resolve_target(entry) if isinstance(entry, str) else entry
+            cls._resolved[name] = backend_type
+        return backend_type(**kwargs)
 
     @classmethod
     def list(cls) -> List[str]:
-        """
-        List all registered evaluation backend names.
-
-        Returns:
-            List of backend identifiers (e.g., ['ollama', 'lmstudio'])
-
-        Example:
-            for backend_name in EvaluationBackendRegistry.list():
-                print(f"Available: {backend_name}")
-        """
-        return list(cls._backends.keys())
+        return list(cls._backends)
 
 
-# Pre-register known backends at module import time
-# This ensures they're always available without manual registration
-
-TrainingBackendRegistry.register("rtx", RTXBackend)
-TrainingBackendRegistry.register("mac", MacBackend)
-
-EvaluationBackendRegistry.register("ollama", OllamaBackend)
-EvaluationBackendRegistry.register("lmstudio", LMStudioBackend)
-EvaluationBackendRegistry.register("llamacpp", LlamaCppBackend)
-EvaluationBackendRegistry.register("unsloth", UnslothBackend)
-EvaluationBackendRegistry.register("mlc", MLCBackend)
-
-# Cloud backends (optional - registered only if SDK is available)
-try:
-    from tuner.backends.training.cloud import HFJobsBackend
-    if HFJobsBackend is not None:
-        TrainingBackendRegistry.register("hf_jobs", HFJobsBackend)
-except ImportError:
-    pass  # huggingface_hub not installed or too old
-
-try:
-    from tuner.backends.training.cloud import ModalBackend
-    if ModalBackend is not None:
-        TrainingBackendRegistry.register("modal", ModalBackend)
-except ImportError:
-    pass  # modal not installed
-
-try:
-    from tuner.backends.training.cloud import RunPodBackend
-    if RunPodBackend is not None:
-        TrainingBackendRegistry.register("runpod", RunPodBackend)
-except ImportError:
-    pass  # runpod not installed
+__all__ = ["TrainingBackendRegistry", "EvaluationBackendRegistry"]

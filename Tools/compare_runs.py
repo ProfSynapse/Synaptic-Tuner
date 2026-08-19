@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from shared.experiment_tracking import load_experiment, load_losses, save_experiment
+from shared.experiment_tracking import TrackingService, load_losses
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,8 @@ def main(args=None):
         
     logging.basicConfig(level=logging.INFO)
     
-    experiment = load_experiment(args.experiment_id, args.base_dir)
+    tracking_service = TrackingService(args.base_dir)
+    experiment = tracking_service.load_experiment(args.experiment_id)
     
     if not experiment.base_losses_path:
         raise ValueError("Experiment base_losses_path is empty. Run compute-losses on base model first.")
@@ -86,8 +87,11 @@ def main(args=None):
     merged_df.to_csv(out_csv, index=False)
     logger.info(f"Features saved to {out_csv}")
     
-    experiment.features_csv_path = f"experiments/{experiment.experiment_id}/features.csv"
-    save_experiment(experiment, args.base_dir)
+    tracking_service.set_derived_output(
+        experiment,
+        "features_csv",
+        f"experiments/{experiment.experiment_id}/features.csv",
+    )
     return 0
 
 if __name__ == "__main__":

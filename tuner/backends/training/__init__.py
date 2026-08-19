@@ -1,41 +1,33 @@
-"""
-Location: /mnt/f/Code/Toolset-Training/tuner/backends/training/__init__.py
+"""Import-light compatibility facade for training backends."""
 
-Purpose:
-    Export training backend implementations for easy importing.
+from __future__ import annotations
 
-Usage:
-    from tuner.backends.training import RTXBackend, MacBackend, ITrainingBackend
+from importlib import import_module
 
-Dependencies:
-    - tuner.backends.training.base (re-exports ITrainingBackend)
-    - tuner.backends.training.rtx_backend
-    - tuner.backends.training.mac_backend
-    - tuner.backends.training.cloud (optional cloud backends)
-"""
-
-from .base import ITrainingBackend
-from .rtx_backend import RTXBackend
-from .mac_backend import MacBackend
+_EXPORT_MODULES = {
+    "ITrainingBackend": ".base",
+    "RTXBackend": ".rtx_backend",
+    "MacBackend": ".mac_backend",
+    "HFJobsBackend": ".cloud",
+    "ModalBackend": ".cloud",
+    "RunPodBackend": ".cloud",
+    "AVAILABLE_BACKENDS": ".cloud",
+}
 
 __all__ = [
-    'ITrainingBackend',
-    'RTXBackend',
-    'MacBackend',
+    "ITrainingBackend", "RTXBackend", "MacBackend",
+    "HFJobsBackend", "ModalBackend", "RunPodBackend", "AVAILABLE_BACKENDS",
 ]
 
-# Conditionally export cloud backends if available
-try:
-    from .cloud import HFJobsBackend, ModalBackend, RunPodBackend, AVAILABLE_BACKENDS
-    if HFJobsBackend is not None:
-        __all__.append('HFJobsBackend')
-    if ModalBackend is not None:
-        __all__.append('ModalBackend')
-    if RunPodBackend is not None:
-        __all__.append('RunPodBackend')
-    __all__.append('AVAILABLE_BACKENDS')
-except ImportError:
-    AVAILABLE_BACKENDS = {}
-    HFJobsBackend = None
-    ModalBackend = None
-    RunPodBackend = None
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORT_MODULES))

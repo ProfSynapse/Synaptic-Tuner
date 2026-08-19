@@ -1,39 +1,35 @@
-"""
-Backend abstractions for Synaptic Tuner.
+"""Import-light compatibility facade for backend abstractions."""
 
-Location: /mnt/f/Code/Toolset-Training/tuner/backends/__init__.py
-Purpose: Export backend implementations and registries
+from __future__ import annotations
 
-Usage:
-    from tuner.backends import RTXBackend, MacBackend
-    from tuner.backends import TrainingBackendRegistry, EvaluationBackendRegistry
-"""
+from importlib import import_module
 
-from .training import (
-    ITrainingBackend,
-    RTXBackend,
-    MacBackend,
-)
-from .evaluation import (
-    IEvaluationBackend,
-    OllamaBackend,
-    LMStudioBackend,
-)
-from .registry import (
-    TrainingBackendRegistry,
-    EvaluationBackendRegistry,
-)
+_EXPORT_MODULES = {
+    "ITrainingBackend": ".training.base",
+    "RTXBackend": ".training.rtx_backend",
+    "MacBackend": ".training.mac_backend",
+    "IEvaluationBackend": ".evaluation.base",
+    "OllamaBackend": ".evaluation.ollama_backend",
+    "LMStudioBackend": ".evaluation.lmstudio_backend",
+    "TrainingBackendRegistry": ".registry",
+    "EvaluationBackendRegistry": ".registry",
+}
 
 __all__ = [
-    # Training backends
-    "ITrainingBackend",
-    "RTXBackend",
-    "MacBackend",
-    # Evaluation backends
-    "IEvaluationBackend",
-    "OllamaBackend",
-    "LMStudioBackend",
-    # Registries
-    "TrainingBackendRegistry",
-    "EvaluationBackendRegistry",
+    "ITrainingBackend", "RTXBackend", "MacBackend",
+    "IEvaluationBackend", "OllamaBackend", "LMStudioBackend",
+    "TrainingBackendRegistry", "EvaluationBackendRegistry",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORT_MODULES))

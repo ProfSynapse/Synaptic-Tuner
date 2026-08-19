@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from .experiment import HF_SOURCE_TRANSPORT_STATES, _validate_reference_pair
+
 logger = logging.getLogger(__name__)
 
 # Current schema version — bump when adding/removing fields.
@@ -73,6 +75,37 @@ class RunRecord:
     source_lock_sha256: str | None = None
     resolved_config_uri: str | None = None
     resolved_config_sha256: str | None = None
+    source_transport_uri: str | None = None
+    source_transport_sha256: str | None = None
+    provisioning_evidence_uri: str | None = None
+    provisioning_evidence_sha256: str | None = None
+    source_transport_state: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_reference_pair(
+            kind="Source transport",
+            uri=self.source_transport_uri,
+            sha256=self.source_transport_sha256,
+        )
+        _validate_reference_pair(
+            kind="Provisioning evidence",
+            uri=self.provisioning_evidence_uri,
+            sha256=self.provisioning_evidence_sha256,
+        )
+        if self.source_transport_state is not None:
+            if self.source_transport_state not in HF_SOURCE_TRANSPORT_STATES:
+                raise ValueError("Unknown source transport lifecycle state")
+            if self.source_transport_uri is None:
+                raise ValueError("Source transport lifecycle state requires a descriptor reference")
+        if self.provisioning_evidence_uri is not None and self.source_transport_uri is None:
+            raise ValueError("Provisioning evidence requires a source transport descriptor")
+        if self.source_transport_state == "PREPARED" and self.provisioning_evidence_uri is not None:
+            raise ValueError("PREPARED source transport cannot include provisioning evidence")
+        if self.source_transport_state in {"ACKNOWLEDGED", "CONSUMABLE", "SUBMITTED"}:
+            if self.provisioning_evidence_uri is None:
+                raise ValueError(
+                    f"{self.source_transport_state} source transport requires provisioning evidence"
+                )
 
     def to_json_line(self) -> str:
         """Serialize to a single JSON line for JSONL storage."""

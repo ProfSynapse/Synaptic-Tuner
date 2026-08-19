@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from shared.experiment_tracking.experiment import load_experiment, save_experiment
+from shared.experiment_tracking import TrackingService
 from shared.judge.judge_service import JudgeService
 from shared.judge.models import JudgeConfig
 from shared.judge.rubric_loader import RubricLoader
@@ -50,7 +50,8 @@ def process_sample(
     sample_size: int,
     rubric_key: str = "data_quality"
 ):
-    exp = load_experiment(experiment_id, base_dir=base_dir)
+    tracking_service = TrackingService(base_dir)
+    exp = tracking_service.load_experiment(experiment_id)
     if not exp.features_csv_path:
         logger.error(f"Experiment {experiment_id} has no features_csv_path set.")
         sys.exit(1)
@@ -141,8 +142,11 @@ def process_sample(
     df.to_csv(features_path, index=False)
     logger.info(f"Updated features CSV: {features_path}")
     
-    exp.judge_scores_path = f"experiments/{experiment_id}/judge_scores.jsonl"
-    save_experiment(exp, experiment_dir / experiment_id)
+    tracking_service.set_derived_output(
+        exp,
+        "judge_scores",
+        f"experiments/{experiment_id}/judge_scores.jsonl",
+    )
     logger.info(f"Updated experiment {experiment_id}")
 
 

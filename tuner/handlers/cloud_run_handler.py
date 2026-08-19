@@ -10,24 +10,28 @@ from typing import Any, Dict, Iterable, List, Optional
 import yaml
 
 from shared.utilities.unique_ids import unique_utc_timestamp
-from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps, resolve_repo_source
+from tuner.backends.training.cloud.base_cloud import load_cloud_config, load_project_deps
 from tuner.cloud import (
     CloudJobSpec,
     HF_BUCKET_SYNC_OVERLAY_PACKAGES,
     HFJobExecutor,
-    RepoCheckoutSpec,
     build_bash_command,
     build_secrets_from_env,
-    build_repo_checkout_steps,
     load_huggingface_hub,
     resolve_hf_bucket_id,
 )
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.core.exceptions import CloudProviderError
 from tuner.discovery.recipes import load_recipe
 from tuner.handlers.base import BaseHandler
+from tuner.handlers.stages._util import (
+    hf_verified_source_steps,
+    preflight_hf_source_lock,
+    prepare_hf_source,
+)
 from tuner.ui import BOX, confirm, print_config, print_error, print_header, print_info, print_menu
 
-_HF_SYNC_OVERLAY = "/tmp/hf-bucket-sync-site"
+_HF_SYNC_OVERLAY = "/workspace/cache/hf-bucket-sync-site"
 
 
 class _SafeTemplateDict(dict):
@@ -114,9 +118,8 @@ class CloudRunHandler(BaseHandler):
         provider = str(config.get("provider", "hf_jobs")).strip().lower()
         if provider != "hf_jobs":
             raise CloudProviderError(f"Unsupported provider for cloud-run: {provider}")
+        require_current_hf_source_submission_authorization(route="cloud-run.compile")
 
-        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
-        repo_source = resolve_repo_source(self.repo_root)
         hf_defaults = self._hf_defaults()
         job_cfg = config.get("job", {}) if isinstance(config.get("job"), dict) else {}
         repo_cfg = config.get("repo", {}) if isinstance(config.get("repo"), dict) else {}
@@ -126,14 +129,37 @@ class CloudRunHandler(BaseHandler):
 
         timestamp = self._new_job_timestamp()
         job_name = str(config.get("name") or config_path.stem).strip()
-        repo_dir = str(repo_cfg.get("clone_dir", "/workspace/repo")).strip() or "/workspace/repo"
-        output_dir = str(artifacts_cfg.get("output_dir", "/workspace/outputs")).strip() or "/workspace/outputs"
+        volume_settings = hf_defaults.get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        run_id = f"hf-run-{timestamp}"
+        source_lock = preflight_hf_source_lock(self.context, run_id=run_id)
+        source_preparation = prepare_hf_source(
+            self.context,
+            run_id=run_id,
+            config_path=config_path,
+            volume_settings=volume_settings,
+            runtime={"provider": "hf_jobs", "task": "custom", "job_name": job_name},
+            source_lock=source_lock,
+        )
+        source_preparation.require_consumable()
+        huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket", "Volume"))
+        proven_volume = source_preparation.prove_volume(huggingface_hub)
+        source_lock = source_preparation.source_lock
+        repo_dir = source_preparation.remote_engine_root
+        configured_clone_dir = str(repo_cfg.get("clone_dir") or "").strip()
+        if configured_clone_dir and configured_clone_dir != repo_dir:
+            raise CloudProviderError("HF secure source launch fixes repo.clone_dir to the verified engine root.")
+        artifact_target = source_preparation.runtime_layout.writable_by_name["artifacts"].target.as_posix()
+        output_dir = str(artifacts_cfg.get("output_dir", artifact_target)).strip() or artifact_target
+        if output_dir != artifact_target and not output_dir.startswith(f"{artifact_target}/"):
+            raise CloudProviderError(f"HF secure source launch requires artifacts.output_dir below {artifact_target}.")
         template_vars = {
             "provider": provider,
             "job_name": job_name,
             "timestamp": timestamp,
-            "commit": repo_source.commit,
-            "commit8": repo_source.commit[:8],
+            "commit": source_lock.engine_source.commit,
+            "commit8": source_lock.engine_source.commit[:8],
             "repo_dir": repo_dir,
             "output_dir": output_dir,
             "config_path": str(config_path),
@@ -158,18 +184,9 @@ class CloudRunHandler(BaseHandler):
             template_vars["artifact_prefix"] = artifact_prefix
             template_vars["artifact_uri"] = f"hf://buckets/{resolved_bucket}/{artifact_prefix}"
 
-        steps: List[str] = []
-        if bool(repo_cfg.get("checkout", True)):
-            steps.extend(
-                build_repo_checkout_steps(
-                    RepoCheckoutSpec(
-                        url=repo_source.url,
-                        branch=repo_source.branch,
-                        commit=repo_source.commit,
-                        clone_dir=repo_dir,
-                    )
-                )
-            )
+        if repo_cfg.get("checkout") is False:
+            raise CloudProviderError("HF secure source launch cannot disable verified checkout.")
+        steps: List[str] = hf_verified_source_steps(source_preparation)
 
         if bool(setup_cfg.get("use_project_deps", True)):
             project_deps = load_project_deps(self._cloud_config_path())
@@ -232,6 +249,7 @@ class CloudRunHandler(BaseHandler):
             secrets=secrets,
             namespace=str(job_cfg["namespace"]) if job_cfg.get("namespace") else None,
             labels=self._render_value(job_cfg.get("labels", {}), template_vars) if isinstance(job_cfg.get("labels"), dict) else {},
+            volumes=(proven_volume,),
         )
         metadata = {
             "name": job_name,
@@ -241,6 +259,7 @@ class CloudRunHandler(BaseHandler):
             "artifact_uri": template_vars.get("artifact_uri"),
             "command": spec.command[2] if len(spec.command) >= 3 else "",
             "config_path": str(config_path),
+            "source": source_preparation.metadata,
         }
         return spec, metadata
 
@@ -277,8 +296,8 @@ class CloudRunHandler(BaseHandler):
         print_header("CLOUD RUN", "Submit a config-driven cloud job")
 
         try:
-            huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket"))
             spec, metadata = self._compile_hf_job(config_path, config)
+            huggingface_hub = load_huggingface_hub(require_apis=("run_job", "create_bucket", "Volume"))
         except Exception as exc:
             print_error(str(exc))
             return 1

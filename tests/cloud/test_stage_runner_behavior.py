@@ -39,6 +39,34 @@ from tuner.handlers.stages import (
     HFLossStageRunner,
     HFTrainingStageRunner,
 )
+from tests.cloud.test_experiment_handler import _install_hf_source_transport
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+class _RecordingVolume:
+    def __init__(self, **kwargs):
+        self.type = kwargs["type"]
+        self.source = kwargs["source"]
+        self.mount_path = kwargs["mount_path"]
+        self.read_only = kwargs["read_only"]
+        self.path = kwargs.get("path")
+
+    def to_dict(self):
+        value = {
+            "type": self.type,
+            "source": self.source,
+            "mountPath": self.mount_path,
+            "readOnly": self.read_only,
+        }
+        if self.path is not None:
+            value["path"] = self.path
+        return value
+
+
+def _feature_detected_run_job(*, image=None, command=None, volumes=None):
+    raise AssertionError("feature detection must not call run_job")
 
 
 # =========================================================
@@ -152,20 +180,22 @@ class TestTrainingRunnerHappyPath:
         experiment = _make_experiment()
         spec = _make_spec()
         backend = _mock_backend(exit_code=0)
+        backend.prepare_source.return_value = _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=False,
+            record_prepared=False,
+        )
         mock_registry.get.return_value = backend
 
         # Mock _resolve_bucket_id to pass through
         runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
 
-        result = runner.run(spec, experiment)
+        with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+            runner.run(spec, experiment)
 
-        assert result.status == "completed"
-        assert result.run_record is not None
-        assert result.run_record.run_type == "sft"
-        assert result.run_record.stage == "training"
-        assert result.artifact_root is not None
-        assert "hf://buckets/" in result.artifact_root
-        backend.execute.assert_called_once()
+        assert experiment.source_transport_state == "PREPARED"
+        backend.execute.assert_not_called()
 
     @patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry")
     def test_run_maps_seed_and_beta_onto_config(self, mock_registry, tmp_path):
@@ -178,11 +208,18 @@ class TestTrainingRunnerHappyPath:
         spec.training.seed = 7
         spec.training.beta = 0.5
         backend = _mock_backend(exit_code=0)
+        backend.prepare_source.return_value = _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=False,
+            record_prepared=False,
+        )
         backend.load_config.return_value.method = "dpo"
         mock_registry.get.return_value = backend
         runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
 
-        runner.run(spec, experiment)
+        with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+            runner.run(spec, experiment)
 
         config = backend.load_config.return_value
         assert config.seed == 7
@@ -198,11 +235,18 @@ class TestTrainingRunnerHappyPath:
         spec = _make_spec(method="sft")
         spec.training.beta = 0.5
         backend = _mock_backend(exit_code=0)
+        backend.prepare_source.return_value = _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=False,
+            record_prepared=False,
+        )
         backend.load_config.return_value.method = "sft"
         mock_registry.get.return_value = backend
         runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
 
-        runner.run(spec, experiment)
+        with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+            runner.run(spec, experiment)
 
         config = backend.load_config.return_value
         assert "beta" not in config.__dict__
@@ -216,18 +260,24 @@ class TestTrainingRunnerHappyPath:
         experiment = _make_experiment()
         spec = _make_spec()
         backend = _mock_backend(exit_code=1)
+        backend.prepare_source.return_value = _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=False,
+            record_prepared=False,
+        )
         mock_registry.get.return_value = backend
 
         runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
 
-        result = runner.run(spec, experiment)
+        with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
+            runner.run(spec, experiment)
 
-        assert result.status == "failed"
-        assert result.run_record.status == "failed"
+        backend.execute.assert_not_called()
 
     @patch("tuner.handlers.stages.hf_training_stage.TrainingBackendRegistry")
     def test_run_raises_on_invalid_environment(self, mock_registry, tmp_path):
-        """run() should raise CloudProviderError when environment validation fails."""
+        """PREPARED is hermetic and must not probe provider environment state."""
         service = TrackingService(tmp_path)
         runner = HFTrainingStageRunner(repo_root=tmp_path, tracking_service=service)
 
@@ -235,12 +285,22 @@ class TestTrainingRunnerHappyPath:
         spec = _make_spec()
         backend = MagicMock()
         backend.validate_environment.return_value = (False, "Missing HF_TOKEN")
+        backend.load_config.return_value = _mock_backend().load_config.return_value
+        backend.prepare_source.return_value = _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=False,
+            record_prepared=False,
+        )
         mock_registry.get.return_value = backend
 
         runner._resolve_bucket_id = MagicMock(return_value="user/bucket")
 
-        with pytest.raises(CloudProviderError, match="Missing HF_TOKEN"):
+        with pytest.raises(CloudProviderError, match="awaits separately approved external provisioning"):
             runner.run(spec, experiment)
+
+        backend.validate_environment.assert_not_called()
+        assert experiment.source_transport_state == "PREPARED"
 
 
 # =========================================================
@@ -415,50 +475,49 @@ class TestTrainingRecoveryStateMachine:
 class TestEvalRunnerBehavior:
     @patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler")
     def test_run_completes_successfully(self, mock_handler_cls, tmp_path):
-        """run() should invoke CloudEvalHandler.handle() and return completed result."""
+        """Consumable evidence still stops before unapproved evaluation submission."""
         service = TrackingService(tmp_path)
-        runner = HFEvalStageRunner(repo_root=tmp_path, tracking_service=service)
+        runner = HFEvalStageRunner(repo_root=_REPO_ROOT, tracking_service=service)
 
         spec = _make_spec()
         experiment = _make_experiment()
+        service.save_experiment(experiment)
+        _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=True,
+        )
         previous = _make_training_result()
 
-        mock_handler = MagicMock()
-        mock_handler.handle.return_value = 0
-        mock_handler.last_results_uri = "hf://buckets/user/bucket/eval-results"
-        mock_handler.last_job_id = "eval-job-123"
-        mock_handler.last_eval_payload = {"accuracy": 0.95}
-        mock_handler_cls.return_value = mock_handler
+        with pytest.raises(CloudProviderError, match="separately authorized exact-run approval"):
+            runner.run(spec, experiment, previous=previous)
 
-        result = runner.run(spec, experiment, previous=previous)
-
-        assert result.status == "completed"
-        assert result.run_record.run_type == "evaluation"
-        assert result.run_record.stage == "evaluation"
-        assert result.eval_payload == {"accuracy": 0.95}
-        mock_handler.handle.assert_called_once()
+        assert experiment.source_transport_state == "CONSUMABLE"
+        mock_handler_cls.assert_not_called()
+        assert "evaluation" not in experiment.stage_details
 
     @patch("tuner.handlers.stages.hf_eval_stage.CloudEvalHandler")
     def test_run_returns_failed_on_nonzero_exit(self, mock_handler_cls, tmp_path):
-        """run() should return failed StageResult when eval handler returns exit_code=1."""
+        """No evaluator is constructed without exact-run submission approval."""
         service = TrackingService(tmp_path)
-        runner = HFEvalStageRunner(repo_root=tmp_path, tracking_service=service)
+        runner = HFEvalStageRunner(repo_root=_REPO_ROOT, tracking_service=service)
 
         spec = _make_spec()
         experiment = _make_experiment()
+        service.save_experiment(experiment)
+        _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=True,
+        )
         previous = _make_training_result()
 
-        mock_handler = MagicMock()
-        mock_handler.handle.return_value = 1
-        mock_handler.last_results_uri = None
-        mock_handler.last_job_id = "eval-job-fail"
-        mock_handler.last_eval_payload = None
-        mock_handler_cls.return_value = mock_handler
+        with pytest.raises(CloudProviderError, match="no approval contract is implemented"):
+            runner.run(spec, experiment, previous=previous)
 
-        result = runner.run(spec, experiment, previous=previous)
-
-        assert result.status == "failed"
-        assert result.run_record.status == "failed"
+        assert experiment.source_transport_state == "CONSUMABLE"
+        mock_handler_cls.assert_not_called()
+        assert "evaluation" not in experiment.stage_details
 
     def test_run_raises_without_previous_result(self, tmp_path):
         """run() should raise CloudProviderError when no previous training result."""
@@ -787,12 +846,18 @@ class TestLossRunnerRun:
     def test_run_submits_job_and_returns_result(
         self, mock_registry, mock_executor_cls, mock_load_hub, mock_build_cmd, mock_secrets, tmp_path
     ):
-        """run() should submit HF job, poll it, and return result."""
+        """Consumable evidence cannot authorize a loss-job submission."""
         service = TrackingService(tmp_path)
-        runner = HFLossStageRunner(repo_root=tmp_path, tracking_service=service)
+        runner = HFLossStageRunner(repo_root=_REPO_ROOT, tracking_service=service)
 
         spec = _make_spec()
         experiment = _make_experiment()
+        service.save_experiment(experiment)
+        _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=True,
+        )
         previous = _make_training_result()
 
         # Mock the build_command to avoid filesystem dependencies
@@ -801,6 +866,8 @@ class TestLossRunnerRun:
         runner._download_results = MagicMock(return_value=None)
 
         mock_hub = MagicMock()
+        mock_hub.Volume = _RecordingVolume
+        mock_hub.run_job = _feature_detected_run_job
         mock_load_hub.return_value = mock_hub
 
         mock_executor = MagicMock()
@@ -819,13 +886,19 @@ class TestLossRunnerRun:
         mock_backend.load_config.return_value = mock_cfg
         mock_registry.get.return_value = mock_backend
 
-        result = runner.run(spec, experiment, previous=previous)
+        with pytest.raises(CloudProviderError, match="separately authorized exact-run approval"):
+            runner.run(spec, experiment, previous=previous)
 
-        assert result.status == "completed"
-        assert result.run_record.run_type == "loss"
-        assert result.run_record.stage == "loss"
-        assert result.run_record.job_ref == "loss-job-789"
-        runner._poll_job.assert_called_once()
+        assert experiment.source_transport_state == "CONSUMABLE"
+        mock_load_hub.assert_not_called()
+        mock_executor_cls.assert_not_called()
+        mock_build_cmd.assert_not_called()
+        mock_secrets.assert_not_called()
+        mock_registry.get.assert_not_called()
+        runner._build_command.assert_not_called()
+        runner._poll_job.assert_not_called()
+        runner._download_results.assert_not_called()
+        assert "loss" not in experiment.stage_details
 
     @patch("tuner.handlers.stages.hf_loss_stage.build_hf_job_secrets")
     @patch("tuner.handlers.stages.hf_loss_stage.build_bash_command")
@@ -835,18 +908,26 @@ class TestLossRunnerRun:
     def test_run_returns_failed_when_poll_fails(
         self, mock_registry, mock_executor_cls, mock_load_hub, mock_build_cmd, mock_secrets, tmp_path
     ):
-        """run() should return failed status when job poll returns nonzero."""
+        """Provider polling remains unreachable without submission approval."""
         service = TrackingService(tmp_path)
-        runner = HFLossStageRunner(repo_root=tmp_path, tracking_service=service)
+        runner = HFLossStageRunner(repo_root=_REPO_ROOT, tracking_service=service)
 
         spec = _make_spec()
         experiment = _make_experiment()
+        service.save_experiment(experiment)
+        _install_hf_source_transport(
+            service=service,
+            experiment=experiment,
+            acknowledged=True,
+        )
         previous = _make_training_result()
 
         runner._build_command = MagicMock(return_value="echo test")
         runner._poll_job = MagicMock(return_value=1)
 
         mock_hub = MagicMock()
+        mock_hub.Volume = _RecordingVolume
+        mock_hub.run_job = _feature_detected_run_job
         mock_load_hub.return_value = mock_hub
 
         mock_executor = MagicMock()
@@ -864,10 +945,18 @@ class TestLossRunnerRun:
         mock_backend.load_config.return_value = mock_cfg
         mock_registry.get.return_value = mock_backend
 
-        result = runner.run(spec, experiment, previous=previous)
+        with pytest.raises(CloudProviderError, match="no approval contract is implemented"):
+            runner.run(spec, experiment, previous=previous)
 
-        assert result.status == "failed"
-        assert result.run_record.status == "failed"
+        assert experiment.source_transport_state == "CONSUMABLE"
+        mock_load_hub.assert_not_called()
+        mock_executor_cls.assert_not_called()
+        mock_build_cmd.assert_not_called()
+        mock_secrets.assert_not_called()
+        mock_registry.get.assert_not_called()
+        runner._build_command.assert_not_called()
+        runner._poll_job.assert_not_called()
+        assert "loss" not in experiment.stage_details
 
 
 # =========================================================

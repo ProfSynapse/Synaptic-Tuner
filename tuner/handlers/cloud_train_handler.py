@@ -31,6 +31,8 @@ from tuner.cloud import (
     ssh_checkout_policy_from_environment,
     standalone_credential_from_environment,
 )
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
+from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.ui import (
@@ -103,9 +105,13 @@ class CloudTrainHandler(BaseHandler):
         """Can be invoked as 'python tuner.py cloud'."""
         return True
 
-    def _get_provider_status(self) -> List[Dict]:
+    def _get_provider_status(self, *, validate_environment: bool = True) -> List[Dict]:
         """
         Check availability and status of each cloud provider.
+
+        ``validate_environment=False`` is the inspection-only path used by
+        JSON status output. It reports registry metadata without constructing
+        a backend or resolving provider credentials.
 
         Returns:
             List of dicts with provider id, name, status, and details
@@ -121,7 +127,7 @@ class CloudTrainHandler(BaseHandler):
                 "detail": "",
             }
 
-            if status["registered"]:
+            if status["registered"] and validate_environment:
                 try:
                     backend = TrainingBackendRegistry.get(provider_id, repo_root=self.repo_root)
                     is_valid, error = backend.validate_environment()
@@ -129,6 +135,8 @@ class CloudTrainHandler(BaseHandler):
                     status["detail"] = "" if is_valid else error
                 except Exception as e:
                     status["detail"] = str(e)
+            elif status["registered"]:
+                status["detail"] = "Registered; credentials not checked in inspection mode"
             else:
                 status["detail"] = f"Not installed (run: {info['install_hint']})"
 
@@ -142,10 +150,12 @@ class CloudTrainHandler(BaseHandler):
 
         Returns dict with available providers, their status, and methods.
         """
-        providers = self._get_provider_status()
+        providers = self._get_provider_status(validate_environment=False)
         return {
             "command": "cloud",
-            "status": "ready" if any(p["env_ready"] for p in providers) else "no_providers",
+            "status": "inspection_only",
+            "submission_enabled": False,
+            "credentials_checked": False,
             "providers": providers,
         }
 
@@ -232,6 +242,17 @@ class CloudTrainHandler(BaseHandler):
             source_lock, runtime_layout, checkout_policy = self._prepare_source_contract()
         except Exception as exc:
             print_error(f"Cloud source preflight failed: {exc}")
+            return 1
+
+        # Source preflight establishes what would run, but does not authorize
+        # provider interaction. Fail closed before capability probes, menus,
+        # SDK/backend construction, credential resolution, or compilation.
+        try:
+            require_current_hf_source_submission_authorization(
+                route="cloud-train.handle"
+            )
+        except CloudProviderError as exc:
+            print_error(f"Cloud launch authorization failed: {exc}")
             return 1
 
         # Step 1: Check provider availability

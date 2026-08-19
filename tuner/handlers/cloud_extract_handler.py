@@ -17,18 +17,10 @@ Design contract: docs/architecture/experiment-runner-probe-dataprep.md section 6
   (c) the contrast adapter is a local artifact -> consumed as a private hub
       model repo by id + revision.
 
-SACROSANCT off-the-signed-path guarantee (section 6.6): this module shares NO
-code path with cloud-pipeline's training execution or the signed v0.3 /
-Amendment A training recipes. It imports ONLY:
-  - tuner.cloud           (provider-agnostic HF Jobs primitives -- training-clean)
-  - tuner.handlers.base   (the I/O base handler -- training-clean)
-  - tuner.core.exceptions (shared error types)
-  - tuner.ui              (presentation helpers)
-  - huggingface_hub       (the lane-native publish/resolve mechanism)
-It deliberately does NOT import anything under ``tuner.backends.training.*``;
-repo source metadata is resolved via a local ``git`` subprocess helper rather
-than the training-namespace ``resolve_repo_source`` so the verb stays provably
-off the training tree.
+The extraction workload remains off the training implementation path, but its
+source bootstrap is intentionally shared with every secure HF Jobs launcher:
+one provider-neutral SourceLock, one verified capsule, and one read-only volume
+contract.  This module does not construct a second Git/clone source model.
 
 GPU boundary (section 10): every step this module performs locally
 (arg parsing, artifact resolution, publish, dry-run command assembly, job
@@ -39,33 +31,35 @@ the runner's capability + submodule-pushed + HF_TOKEN + artifact-resolution
 push-gate (section 6.5). ``--dry-run`` assembles and prints the job spec
 without submitting (and without requiring a token).
 
-RUNBOOK / SECURITY: the tuner repo's git origin (or any ``--repo-url``) MUST NOT
-embed credentials (e.g. a PAT in ``https://user:token@host/...``). The dry-run
-redacts URL userinfo before printing, but credential-free origins are the
-contract; use an HF/GitHub token via the environment, never in the URL.
+RUNBOOK / SECURITY: credentials remain provider secrets. They are never copied
+into generated shell, source-lock transport members, labels, or dry-run output.
 """
 
 from __future__ import annotations
 
 import shlex
-import subprocess
+import yaml
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit, urlunsplit
 
 from shared.utilities.env import get_hf_token, load_env_file
 from tuner.cloud import (
     CloudJobSpec,
     HFJobExecutor,
-    RepoCheckoutSpec,
     build_bash_command,
     build_hf_job_secrets,
-    build_repo_checkout_steps,
     load_huggingface_hub,
 )
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.core.exceptions import CloudProviderError
 from tuner.handlers.base import BaseHandler
+from tuner.handlers.stages._util import (
+    HFSourcePreparation,
+    hf_verified_source_steps,
+    preflight_hf_source_lock,
+    prepare_hf_source,
+)
 from tuner.ui import confirm, print_config, print_error, print_header, print_info, print_success
 
 # Default HF Jobs hardware flavor for a forward-only extraction pass. Extraction
@@ -80,36 +74,11 @@ _DEFAULT_TIMEOUT_HOURS = 2.0
 
 # Where the tuner repo is cloned inside the HF Job, and where the extraction
 # config is read from relative to that clone.
-_CLONE_DIR = "/workspace/repo"
-
 # The in-job entrypoint that runs the forward-only extraction against the
 # published artifacts. This is the tuner repo's own extraction runner (cloud
 # analog of the local probe harness); it is invoked by hub id, never by a local
 # path, because HF Jobs has no research-repo mount.
 _EXTRACTION_ENTRYPOINT = "python -m tuner.cloud.extraction_runner"
-
-
-def _redact_url_userinfo(url: str) -> str:
-    """Strip any ``user:pass@`` userinfo from a URL for safe display.
-
-    Operators MUST NOT embed credentials in the tuner repo's git origin (a PAT
-    in ``https://user:token@host/...`` would otherwise be echoed to stdout/JSON
-    by the dry-run). This redacts the userinfo component so the printed clone
-    URL never carries a secret; the value is display-only and does not alter the
-    URL actually used to clone inside the job. Returns the input unchanged when
-    there is no userinfo (or when the URL cannot be parsed).
-    """
-    if not url:
-        return url
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return url
-    if "@" not in parts.netloc:
-        return url
-    # netloc is "userinfo@host[:port]"; keep only the host[:port] tail.
-    host = parts.netloc.rsplit("@", 1)[1]
-    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 @dataclass(frozen=True)
@@ -132,7 +101,7 @@ class ExtractionLaunchPlan:
     flavor: str
     timeout_hours: float
     image: str
-    repo: RepoCheckoutSpec
+    source_preparation: HFSourcePreparation
 
     def as_display(self) -> Dict[str, str]:
         """Human-readable summary for ``print_config`` / JSON output."""
@@ -145,7 +114,7 @@ class ExtractionLaunchPlan:
             "Image": self.image,
             "GPU Flavor": self.flavor,
             "Timeout": f"{self.timeout_hours:.1f}h",
-            "Repo Commit": self.repo.commit,
+            "Repo Commit": self.source_preparation.source_lock.engine_source.commit,
         }
 
 
@@ -221,66 +190,6 @@ class CloudExtractHandler(BaseHandler):
             raise CloudProviderError("--timeout-hours must be positive.")
         return timeout
 
-    def _resolve_repo_source(self) -> RepoCheckoutSpec:
-        """Resolve the exact tuner-repo source to clone inside the job.
-
-        Deliberately uses a local ``git`` subprocess (not the training-namespace
-        ``resolve_repo_source``) to keep this module off ``tuner.backends.training.*``
-        (SACROSANCT, section 6.6). The remote URL / branch / commit can be
-        overridden via CLI flags for environments where git metadata is absent
-        or a specific pinned commit is desired (HF Jobs checks out the pinned
-        SHA -- it must be reachable on the remote, which the runner's
-        ``submodule_pushed`` gate enforces upstream).
-        """
-        override_url = getattr(self.args, "repo_url", None)
-        override_branch = getattr(self.args, "repo_branch", None)
-        override_commit = getattr(self.args, "repo_commit", None)
-
-        # An EXPLICIT override (including an empty string) is honored as a
-        # deliberate choice: `is not None` distinguishes "flag passed" from "flag
-        # absent". An explicit empty value therefore yields '' and is caught by
-        # the fail-closed guard below, rather than silently falling through to
-        # the git fallback (which would mask an operator mistake).
-        url = (
-            str(override_url).strip()
-            if override_url is not None
-            else self._git("config", "--get", "remote.origin.url")
-        )
-        branch = (
-            str(override_branch).strip()
-            if override_branch is not None
-            else self._git("rev-parse", "--abbrev-ref", "HEAD")
-        )
-        commit = (
-            str(override_commit).strip()
-            if override_commit is not None
-            else self._git("rev-parse", "HEAD")
-        )
-
-        if not url or not branch or not commit:
-            raise CloudProviderError(
-                "Could not resolve tuner repo source (url/branch/commit). Pass "
-                "--repo-url/--repo-branch/--repo-commit explicitly, or run inside "
-                "a git checkout with an 'origin' remote."
-            )
-        return RepoCheckoutSpec(url=url, branch=branch, commit=commit, clone_dir=_CLONE_DIR)
-
-    def _git(self, *args: str) -> str:
-        """Run a read-only ``git`` command in the repo root; '' on any failure."""
-        try:
-            result = subprocess.run(
-                ["git", *args],
-                cwd=str(self.repo_root),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        if result.returncode != 0:
-            return ""
-        return result.stdout.strip()
-
     def _resolve_image(self) -> str:
         """Resolve the job's Docker image. Overridable via --cloud-image.
 
@@ -301,6 +210,33 @@ class CloudExtractHandler(BaseHandler):
         submit path act on, which keeps the two paths from drifting.
         """
         values = self._collect_required_args()
+        config_path = Path(values["extraction_config"])
+        if not config_path.is_absolute():
+            config_path = self.repo_root / config_path
+        cloud_config_path = self.repo_root / "Trainers" / "cloud" / "cloud_config.yaml"
+        try:
+            cloud_config = yaml.safe_load(cloud_config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise CloudProviderError("Could not load HF bootstrap volume configuration.") from exc
+        cloud_settings = cloud_config.get("cloud")
+        if not isinstance(cloud_settings, dict):
+            raise CloudProviderError("cloud configuration must contain a cloud mapping.")
+        hf_settings = cloud_settings.get("hf_jobs")
+        if not isinstance(hf_settings, dict):
+            raise CloudProviderError("cloud.hf_jobs must be a mapping.")
+        volume_settings = hf_settings.get("bootstrap_volume", {})
+        if not isinstance(volume_settings, dict):
+            raise CloudProviderError("hf_jobs.bootstrap_volume must be a mapping.")
+        run_id = f"hf-extract-{self._new_launch_id()}"
+        source_lock = preflight_hf_source_lock(self.context, run_id=run_id)
+        source_preparation = prepare_hf_source(
+            self.context,
+            run_id=run_id,
+            config_path=config_path,
+            volume_settings=volume_settings,
+            runtime={"provider": "hf_jobs", "task": "extraction"},
+            source_lock=source_lock,
+        )
         return ExtractionLaunchPlan(
             extraction_config=values["extraction_config"],
             slice_dataset_name=values["slice_dataset_name"],
@@ -312,8 +248,13 @@ class CloudExtractHandler(BaseHandler):
             flavor=self._resolve_flavor(),
             timeout_hours=self._resolve_timeout_hours(),
             image=self._resolve_image(),
-            repo=self._resolve_repo_source(),
+            source_preparation=source_preparation,
         )
+
+    @staticmethod
+    def _new_launch_id() -> str:
+        from shared.utilities.unique_ids import unique_utc_timestamp
+        return unique_utc_timestamp()
 
     # ------------------------------------------------------------------ #
     # Job-spec assembly (GPU-free)
@@ -335,19 +276,21 @@ class CloudExtractHandler(BaseHandler):
             f"--adapter-revision {shlex.quote(plan.adapter_revision)}",
             f"--output-dataset-name {shlex.quote(plan.output_dataset_name)}",
         ]
+        engine_root = plan.source_preparation.remote_engine_root
         return [
-            *build_repo_checkout_steps(plan.repo),
-            f"cd {shlex.quote(plan.repo.clone_dir)}",
+            *hf_verified_source_steps(plan.source_preparation),
+            f"cd {shlex.quote(engine_root)}",
             " ".join(invocation),
         ]
 
-    def build_job_spec(self, plan: ExtractionLaunchPlan, *, token: Optional[str]) -> CloudJobSpec:
+    def build_job_spec(self, plan: ExtractionLaunchPlan, *, token: Optional[str], huggingface_hub) -> CloudJobSpec:
         """Assemble the provider-agnostic :class:`CloudJobSpec` (GPU-free).
 
         HF_TOKEN is injected as a job SECRET (never echoed into the command or
         labels). ``token`` may be None for dry-run, in which case no secret is
         attached.
         """
+        proven_volume = plan.source_preparation.prove_volume(huggingface_hub)
         secrets = build_hf_job_secrets(token) if token else {}
         labels = {
             "task": "extract",
@@ -363,14 +306,13 @@ class CloudExtractHandler(BaseHandler):
             timeout_hours=plan.timeout_hours,
             secrets=secrets,
             labels=labels,
+            volumes=(proven_volume,),
         )
 
     # ------------------------------------------------------------------ #
     # Entry point
     # ------------------------------------------------------------------ #
     def handle(self) -> int:
-        # Load .env so HF_TOKEN is available for a real (non-dry-run) submit.
-        load_env_file()
         dry_run = bool(getattr(self.args, "dry_run", False))
 
         try:
@@ -393,13 +335,14 @@ class CloudExtractHandler(BaseHandler):
         credentials in the first place; the runbook note above the verb
         documents this.
         """
-        spec = self.build_job_spec(plan, token=None)
+        try:
+            require_current_hf_source_submission_authorization(route="cloud-extract.dry-run")
+            plan.source_preparation.require_consumable()
+            huggingface_hub = load_huggingface_hub(require_apis=("run_job", "Volume"))
+            spec = self.build_job_spec(plan, token=None, huggingface_hub=huggingface_hub)
+        except Exception as exc:
+            return self._fail(exc, code="CLOUD_EXTRACT_ENV_ERROR")
         command_text = spec.command[-1] if spec.command else ""
-        # Redact any embedded credentials in the clone URL before display. Only
-        # the printed text is altered; the submitted command is unaffected.
-        safe_url = _redact_url_userinfo(plan.repo.url)
-        if safe_url != plan.repo.url:
-            command_text = command_text.replace(plan.repo.url, safe_url)
         if self.json_mode:
             self.output(
                 {
@@ -422,14 +365,17 @@ class CloudExtractHandler(BaseHandler):
     def _handle_submit(self, plan: ExtractionLaunchPlan) -> int:
         """Resolve the token + hub, confirm, and submit the extraction job."""
         try:
+            require_current_hf_source_submission_authorization(route="cloud-extract.submit")
+            plan.source_preparation.require_consumable()
+            load_env_file()
             token = get_hf_token()
             if not token:
                 raise CloudProviderError(
                     "HF_TOKEN not set. Required to submit cloud-extract. Set "
                     "HF_TOKEN (or HF_API_KEY) in your .env file or environment."
                 )
-            huggingface_hub = load_huggingface_hub(require_apis=("run_job",))
-            spec = self.build_job_spec(plan, token=token)
+            huggingface_hub = load_huggingface_hub(require_apis=("run_job", "Volume"))
+            spec = self.build_job_spec(plan, token=token, huggingface_hub=huggingface_hub)
         except Exception as exc:
             return self._fail(exc, code="CLOUD_EXTRACT_ENV_ERROR")
 

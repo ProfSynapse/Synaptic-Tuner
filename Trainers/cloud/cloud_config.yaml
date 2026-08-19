@@ -87,6 +87,11 @@ cloud:
     image_profile: stable
     python_version: "3.11"
     artifact_backend: hf_bucket
+    # Immutable profile-C source transport. This is preparation policy only:
+    # it never uploads, provisions, acknowledges, or submits a job.
+    bootstrap_volume:
+      source: "professorsynapse/toolset-training-bootstrap"
+      path_prefix: "synaptic/source-transport"
     # Bare names are fine; the launcher resolves them to the token's namespace and creates the bucket if needed.
     artifact_identifier: "toolset-training-artifacts"
     output_root: "/workspace/outputs"

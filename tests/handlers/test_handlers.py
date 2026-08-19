@@ -296,13 +296,102 @@ class TestCloudTrainHandler:
         args = Namespace(json=True)
         handler = self._make_handler(args)
 
-        with patch.object(handler, "_get_provider_status", return_value=[]):
+        with patch.object(handler, "_get_provider_status", return_value=[]) as get_status:
             code = handler.handle()
 
         assert code == 0
+        get_status.assert_called_once_with(validate_environment=False)
         output = capsys.readouterr().out
         assert "command" in output
         assert "cloud" in output
+        assert "inspection_only" in output
+        assert '"submission_enabled": false' in output.lower()
+        assert '"credentials_checked": false' in output.lower()
+
+    def test_json_status_does_not_construct_backends_or_resolve_credentials(self):
+        args = Namespace(json=True)
+        handler = self._make_handler(args)
+
+        with patch(
+            "tuner.handlers.cloud_train_handler.TrainingBackendRegistry.list",
+            return_value=["hf_jobs"],
+        ), patch(
+            "tuner.handlers.cloud_train_handler.TrainingBackendRegistry.get",
+            side_effect=AssertionError("inspection constructed a provider backend"),
+        ) as get_backend:
+            status = handler._get_cloud_status()
+
+        assert status["status"] == "inspection_only"
+        assert status["submission_enabled"] is False
+        assert status["credentials_checked"] is False
+        assert status["providers"][0]["registered"] is True
+        assert status["providers"][0]["env_ready"] is False
+        get_backend.assert_not_called()
+
+    def test_launch_authorization_precedes_provider_probe_and_menu(self, capsys):
+        from tuner.core.exceptions import CloudProviderError
+
+        args = Namespace(json=False)
+        handler = self._make_handler(args)
+        events = []
+
+        with patch.object(
+            handler,
+            "_prepare_source_contract",
+            side_effect=lambda: events.append("source_preflight") or (object(), object(), object()),
+        ), patch(
+            "tuner.handlers.cloud_train_handler.require_current_hf_source_submission_authorization",
+            side_effect=lambda **_kwargs: events.append("authorization_barrier")
+            or (_ for _ in ()).throw(CloudProviderError("approval required")),
+        ), patch.object(
+            handler,
+            "_get_provider_status",
+            side_effect=AssertionError("provider status ran before authorization"),
+        ) as get_status, patch(
+            "tuner.handlers.cloud_train_handler.TrainingBackendRegistry.get",
+            side_effect=AssertionError("backend constructed before authorization"),
+        ) as get_backend, patch(
+            "tuner.handlers.cloud_train_handler.print_menu",
+            side_effect=AssertionError("provider menu shown before authorization"),
+        ) as print_provider_menu:
+            code = handler.handle()
+
+        assert code == 1
+        assert events == ["source_preflight", "authorization_barrier"]
+        get_status.assert_not_called()
+        get_backend.assert_not_called()
+        print_provider_menu.assert_not_called()
+        assert "approval required" in capsys.readouterr().out
+
+    def test_launch_orders_barrier_before_provider_probe_and_menu(self):
+        args = Namespace(json=False)
+        handler = self._make_handler(args)
+        events = []
+
+        with patch.object(
+            handler,
+            "_prepare_source_contract",
+            side_effect=lambda: events.append("source_preflight") or (object(), object(), object()),
+        ), patch(
+            "tuner.handlers.cloud_train_handler.require_current_hf_source_submission_authorization",
+            side_effect=lambda **_kwargs: events.append("authorization_barrier"),
+        ), patch.object(
+            handler,
+            "_get_provider_status",
+            side_effect=lambda: events.append("provider_status") or [],
+        ), patch(
+            "tuner.handlers.cloud_train_handler.print_menu",
+            side_effect=lambda *_args, **_kwargs: events.append("provider_menu") or None,
+        ):
+            code = handler.handle()
+
+        assert code == 0
+        assert events == [
+            "source_preflight",
+            "authorization_barrier",
+            "provider_status",
+            "provider_menu",
+        ]
 
     def test_apply_training_overrides_no_args(self):
         args = Namespace(json=True)

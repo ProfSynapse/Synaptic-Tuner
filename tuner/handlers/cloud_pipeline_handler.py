@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 from tuner.backends.registry import TrainingBackendRegistry
 from tuner.core.exceptions import CloudProviderError
+from tuner.cloud.hf_jobs import require_current_hf_source_submission_authorization
 from tuner.handlers.base import BaseHandler
 from tuner.handlers.cloud_eval_handler import CloudEvalHandler
 from tuner.handlers.cloud_train_handler import CloudTrainHandler, PROVIDER_INFO
@@ -60,7 +61,7 @@ class CloudPipelineHandler(BaseHandler):
         display["Eval Tags"] = eval_tags or "-"
         return display
 
-    def _resolve_eval_args(self, *, training_config, artifact_prefix: str) -> Namespace:
+    def _resolve_eval_args(self, *, training_config, artifact_prefix: str, source_preparation) -> Namespace:
         preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
         scenarios = getattr(self.args, "scenario", None)
         return Namespace(
@@ -90,30 +91,37 @@ class CloudPipelineHandler(BaseHandler):
             loss_max_seq_length=getattr(self.args, "loss_max_seq_length", None),
             loss_no_completion_only=bool(getattr(self.args, "loss_no_completion_only", False)),
             auto_confirm=True,
+            _source_preparation=source_preparation,
         )
+
+    def _get_pipeline_status(self) -> Dict[str, object]:
+        """Return registry metadata without entering a provider launch path."""
+
+        return {
+            "command": "cloud-pipeline",
+            "status": "inspection_only",
+            "inspection_only": True,
+            "submission_enabled": False,
+            "credentials_checked": False,
+            "provider_registry": {
+                "id": "hf_jobs",
+                "name": PROVIDER_INFO["hf_jobs"]["name"],
+                "registered": "hf_jobs" in TrainingBackendRegistry.list(),
+            },
+            "pipeline_stages": ["training", "evaluation"],
+        }
 
     def handle(self) -> int:
         if self.json_mode:
-            try:
-                backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
-                is_valid, error = backend.validate_environment()
-                self.output(
-                    {
-                        "provider": "hf_jobs",
-                        "status": "ready" if is_valid else "invalid_env",
-                        "supports_eval": True,
-                        "error": error or None,
-                    }
-                )
-                return 0
-            except Exception as exc:
-                self.output_error(str(exc), code="CLOUD_PIPELINE_ERROR")
-                return 1
+            self.output(self._get_pipeline_status())
+            return 0
 
         print_header("CLOUD PIPELINE", "Train on HF Jobs, then evaluate on HF Jobs via vLLM")
 
         try:
+            require_current_hf_source_submission_authorization(route="cloud-pipeline.handle")
             backend = TrainingBackendRegistry.get("hf_jobs", repo_root=self.repo_root)
+            backend.context = self.context
             is_valid, error = backend.validate_environment()
             if not is_valid:
                 print_error(f"Environment validation failed: {error}")
@@ -127,7 +135,9 @@ class CloudPipelineHandler(BaseHandler):
                 backend.load_config(method)
             )
             eval_preset = getattr(self.args, "preset", None) or ("full" if not getattr(self.args, "scenario", None) else None)
-            eval_scenarios = CloudEvalHandler(args=self.args).resolve_display_scenarios(
+            display_handler = CloudEvalHandler(args=self.args)
+            display_handler.bind_context(self.context)
+            eval_scenarios = display_handler.resolve_display_scenarios(
                 preset=eval_preset,
                 scenarios=getattr(self.args, "scenario", None),
             )
@@ -167,6 +177,10 @@ class CloudPipelineHandler(BaseHandler):
 
         print_success("Cloud training completed successfully.")
         print_header("STEP 2: CLOUD EVALUATION")
-        eval_handler = CloudEvalHandler(args=self._resolve_eval_args(training_config=training_config, artifact_prefix=artifact_prefix))
-        eval_handler._repo_root = self.repo_root
+        eval_handler = CloudEvalHandler(args=self._resolve_eval_args(
+            training_config=training_config,
+            artifact_prefix=artifact_prefix,
+            source_preparation=backend.source_preparation,
+        ))
+        eval_handler.bind_context(self.context)
         return eval_handler.handle()

@@ -16,9 +16,10 @@ import yaml
 
 from shared.utilities.paths import get_canonical_trainer_dir_name
 from shared.utilities.unique_ids import unique_utc_timestamp
-from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES, RepoCheckoutSpec, build_repo_checkout_steps
+from tuner.cloud import HF_BUCKET_SYNC_OVERLAY_PACKAGES
 from tuner.core.config import CloudTrainingConfig
 from tuner.core.exceptions import CloudProviderError
+from tuner.handlers.stages._util import hf_verified_source_steps
 
 from .base_cloud import load_project_deps
 
@@ -80,8 +81,9 @@ class HFCommandBuilderMixin:
         Returns:
             Shell command string to pass as ["bash", "-c", command]
         """
-        if not config.repo_url or not config.repo_branch or not config.repo_commit:
-            raise CloudProviderError("HF Jobs requires exact repo source metadata.")
+        preparation = getattr(self, "source_preparation", None)
+        if preparation is None:
+            raise CloudProviderError("HF Jobs secure source preparation is required before command compilation.")
         if not config.artifact_identifier:
             raise CloudProviderError("HF Jobs requires an artifact bucket identifier.")
 
@@ -93,28 +95,22 @@ class HFCommandBuilderMixin:
         project_deps = load_project_deps(cloud_config_path)
         quoted_project_deps = " ".join(shlex.quote(dep) for dep in project_deps)
         sync_deps = " ".join(shlex.quote(dep) for dep in HF_BUCKET_SYNC_OVERLAY_PACKAGES)
-        checkout_steps = build_repo_checkout_steps(
-            RepoCheckoutSpec(
-                url=config.repo_url,
-                branch=config.repo_branch,
-                commit=config.repo_commit,
-            )
-        )
+        engine_root = self._remote_engine_root()
 
         python_cmd = "$(command -v python3 || command -v python)"
         parts = [
             # Install project-specific deps only; unsloth, trl, transformers,
             # datasets, peft, and PyTorch are pre-installed in the Docker image
-            f"{python_cmd} -m pip install --disable-pip-version-check {quoted_project_deps}",
-            "mkdir -p /tmp/hf-bucket-sync-site",
-            f"{python_cmd} -m pip install --upgrade --no-deps --target /tmp/hf-bucket-sync-site {sync_deps}",
+            *hf_verified_source_steps(preparation),
+            f"cd {engine_root} && {python_cmd} -m pip install --disable-pip-version-check {quoted_project_deps}",
+            "mkdir -p /workspace/cache/hf-bucket-sync-site",
+            f"{python_cmd} -m pip install --upgrade --no-deps --target /workspace/cache/hf-bucket-sync-site {sync_deps}",
             f"export HF_BUCKET_SYNC_PYTHON={python_cmd}",
-            "export HF_BUCKET_SYNC_PYTHONPATH=/tmp/hf-bucket-sync-site",
+            "export HF_BUCKET_SYNC_PYTHONPATH=/workspace/cache/hf-bucket-sync-site",
             f"export CLOUD_PROVIDER={config.provider}",
             f"export CLOUD_GPU_TYPE={config.hf_flavor or config.gpu_type}",
             # Enable fast HF transfers
             "export HF_HUB_ENABLE_HF_TRANSFER=1",
-            *checkout_steps,
         ]
         if config.pip_packages:
             quoted_pip_packages = " ".join(shlex.quote(pkg) for pkg in config.pip_packages)
@@ -216,7 +212,7 @@ class HFCommandBuilderMixin:
             training_args.append("--evolutionary-log-selected" if config.evolutionary_log_selected else "--evolutionary-no-log-selected")
         training_args_str = ""
         if config.method == "grpo":
-            output_dir = f"/workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}/env_grpo_output/{timestamp}"
+            output_dir = f"/workspace/artifacts/grpo/{timestamp}"
             training_args.extend(["--output-dir", output_dir])
         if training_args:
             training_args_str = " " + " ".join(shlex.quote(arg) for arg in training_args)
@@ -233,11 +229,11 @@ class HFCommandBuilderMixin:
             )
         else:
             parts.append(
-                f"cd /workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)} && "
+                f"cd {engine_root}/Trainers/{get_canonical_trainer_dir_name(config.method)} && "
                 "python "
                 f"{self._script_name_for_method(config.method)} "
                 f"--run-timestamp {timestamp} "
-                f"--output-root {config.artifact_mount_path} "
+                "--output-root /workspace/artifacts "
                 f"--cloud-provider {config.provider} "
                 f"--artifact-backend {config.artifact_backend} "
                 f"--artifact-bucket {config.artifact_identifier} "
@@ -262,26 +258,27 @@ class HFCommandBuilderMixin:
             raw_config = yaml.safe_load(f) or {}
 
         runtime_cfg = ((raw_config.get("env_training") or {}).get("runtime") or {})
-        venv_dir = str(runtime_cfg.get("isolated_venv_dir") or "/workspace/.venvs/grpo-openenv")
+        configured_venv = str(runtime_cfg.get("isolated_venv_dir") or "")
+        venv_dir = configured_venv if configured_venv.startswith("/workspace/cache/") else "/workspace/cache/venvs/grpo-openenv"
         python_packages = list(runtime_cfg.get("python_packages") or [])
         project_pip_deps = list(runtime_cfg.get("project_pip_deps") or [])
         install_args = " ".join(shlex.quote(str(part)) for part in ["pip", "setuptools", "wheel", *project_pip_deps, *python_packages])
-        trainer_dir = f"/workspace/repo/Trainers/{get_canonical_trainer_dir_name(config.method)}"
-        output_dir = f"{trainer_dir}/env_grpo_output/{timestamp}"
+        trainer_dir = f"{self._remote_engine_root()}/Trainers/{get_canonical_trainer_dir_name(config.method)}"
+        output_dir = f"/workspace/artifacts/grpo/{timestamp}"
         remote_uri = self._build_remote_run_uri(config, artifact_prefix)
 
         return [
-            "mkdir -p /tmp/grpo-openenv-bootstrap",
-            f"{python_cmd} -m pip install --upgrade --target /tmp/grpo-openenv-bootstrap virtualenv",
-            "export PYTHONPATH=/tmp/grpo-openenv-bootstrap:$PYTHONPATH",
+            "mkdir -p /workspace/cache/grpo-openenv-bootstrap",
+            f"{python_cmd} -m pip install --upgrade --target /workspace/cache/grpo-openenv-bootstrap virtualenv",
+            "export PYTHONPATH=/workspace/cache/grpo-openenv-bootstrap:$PYTHONPATH",
             f"{python_cmd} -m virtualenv --no-download {shlex.quote(venv_dir)}",
             f". {shlex.quote(venv_dir)}/bin/activate",
             f"python -m pip install --upgrade {install_args}",
             f"cd {trainer_dir} && python {self.ENV_GRPO_SCRIPT_NAME} --config {trainer_dir}/configs/{self.ENV_GRPO_CONFIG_NAME}{training_args}",
             (
                 f"if [ -d {shlex.quote(output_dir)} ]; then "
-                f"cd /workspace/repo && "
-                f"PYTHONPATH=/tmp/hf-bucket-sync-site:$PYTHONPATH python -m shared.hf_bucket_sync_helper "
+                f"cd {self._remote_engine_root()} && "
+                f"PYTHONPATH=/workspace/cache/hf-bucket-sync-site:$PYTHONPATH python -m shared.hf_bucket_sync_helper "
                 f"{shlex.quote(output_dir)} {shlex.quote(remote_uri)}; "
                 "fi"
             ),
