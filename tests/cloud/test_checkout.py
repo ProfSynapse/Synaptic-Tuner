@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import base64
+import copy
+import os
 import subprocess
+from types import SimpleNamespace
 from argparse import Namespace
 from pathlib import Path
+from urllib.parse import quote, quote_plus
 
 import pytest
 
+from tuner.cloud import bootstrap_core
 from tuner.cloud.checkout import (
     CheckoutPolicy,
     SSHCheckoutPolicy,
@@ -34,6 +40,16 @@ def _git(repository: Path, *args: str) -> str:
         timeout=30,
     )
     return result.stdout.strip()
+
+
+def _directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=True, capture_output=True, text=True,
+        )
+    else:
+        link.symlink_to(target, target_is_directory=True)
 
 
 def _repository(root: Path, name: str, *, filename: str = "source.txt") -> tuple[Path, Path, str]:
@@ -104,6 +120,251 @@ def _policy(**kwargs) -> CheckoutPolicy:
         nested_submodules=kwargs.get("nested_submodules", True),
         max_submodule_depth=kwargs.get("max_submodule_depth", 2),
     )
+
+
+def test_local_checkout_delegates_to_canonical_bootstrap_core(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    source = _source("standalone", "a" * 40)
+    lock = SourceLock("parity", "standalone", source, source, {}, {})
+    observed: dict[str, object] = {}
+
+    def fake_core(source_lock, destination, **kwargs):
+        observed.update(source_lock=source_lock, destination=destination, **kwargs)
+        return {
+            "project_root": str(tmp_path / "checkout/project"),
+            "engine_root": str(tmp_path / "checkout/project"),
+        }
+
+    monkeypatch.setattr(bootstrap_core, "reconstruct_source_lock", fake_core)
+    result = checkout_source_lock(
+        lock, tmp_path / "checkout",
+        policy=CheckoutPolicy(frozenset({"git.example.test"}), frozenset({"https"})),
+    )
+    assert observed["source_lock"] == lock.to_dict()
+    assert observed["policy"] == {
+        "allowed_hosts": ["git.example.test"],
+        "allowed_schemes": ["https"],
+        "nested_submodules": False,
+        "max_submodule_depth": 0,
+    }
+    assert result.project_root == result.engine_root == tmp_path / "checkout/project"
+
+
+def test_bootstrap_wire_documents_require_exact_shapes_and_boolean_types() -> None:
+    document = _standalone_lock("a" * 40).to_dict()
+    document["project"] = {
+        "manifest_uri": "project://synaptic.yaml",
+        "manifest_sha256": "d" * 64,
+        "engine_requires": ">=1,<2",
+    }
+    document["configuration"] = {
+        "resolved_uri": "tracking://runs/parity/resolved-config.json",
+        "resolved_sha256": "e" * 64,
+        "documents": [],
+    }
+    policy = {
+        "allowed_hosts": ["git.example.test"],
+        "allowed_schemes": ["https"],
+        "nested_submodules": False,
+        "max_submodule_depth": 0,
+    }
+    bootstrap_core.normalize_source_lock(document, bootstrap_core.normalize_policy(policy))
+
+    malformed_documents = []
+    missing = copy.deepcopy(document)
+    missing.pop("outputs")
+    malformed_documents.append(missing)
+    extra = copy.deepcopy(document)
+    extra["unexpected"] = True
+    malformed_documents.append(extra)
+    truncated = {"schema_version": "synaptic-source-lock/v1", "mode": "standalone"}
+    malformed_documents.append(truncated)
+    source_extra = copy.deepcopy(document)
+    source_extra["sources"]["project"]["unexpected"] = True
+    malformed_documents.append(source_extra)
+    for malformed in malformed_documents:
+        with pytest.raises(bootstrap_core.BootstrapError, match="canonical wire shape"):
+            bootstrap_core.normalize_source_lock(malformed, bootstrap_core.normalize_policy(policy))
+
+    incomplete_metadata = copy.deepcopy(document)
+    incomplete_metadata["project"].pop("manifest_sha256")
+    with pytest.raises(bootstrap_core.BootstrapError, match="project.manifest_sha256"):
+        bootstrap_core.normalize_source_lock(
+            incomplete_metadata, bootstrap_core.normalize_policy(policy),
+        )
+
+    for field, value in (("pushed", "false"), ("dirty", 0)):
+        malformed = copy.deepcopy(document)
+        malformed["sources"]["project"][field] = value
+        with pytest.raises(bootstrap_core.BootstrapError, match="must be a boolean"):
+            bootstrap_core.normalize_source_lock(malformed, bootstrap_core.normalize_policy(policy))
+
+    for field, value in (("nested_submodules", "false"), ("max_submodule_depth", True)):
+        malformed_policy = dict(policy)
+        malformed_policy[field] = value
+        with pytest.raises(bootstrap_core.BootstrapError):
+            bootstrap_core.normalize_policy(malformed_policy)
+
+    extra_policy = dict(policy, unexpected=True)
+    with pytest.raises(bootstrap_core.BootstrapError, match="canonical wire shape"):
+        bootstrap_core.normalize_policy(extra_policy)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["rev-parse", "HEAD"],
+        ["ls-tree", "HEAD", "--", "vendor/engine"],
+        ["show", "HEAD:.gitmodules"],
+    ],
+)
+def test_every_runtime_git_object_command_disables_replacement_refs(
+    arguments: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[dict[str, str]] = []
+
+    def fake_run(_command, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(bootstrap_core.subprocess, "run", fake_run)
+    assert bootstrap_core.run_git(
+        arguments, env={"GIT_NO_REPLACE_OBJECTS": "0", "PATH": os.environ.get("PATH", "")},
+    ) == "ok"
+    assert observed == [{"GIT_NO_REPLACE_OBJECTS": "1", "PATH": os.environ.get("PATH", "")}]
+
+
+def test_runtime_git_environment_canonicalizes_mixed_case_replacement_guards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[dict[str, str]] = []
+
+    def fake_run(_command, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(bootstrap_core.subprocess, "run", fake_run)
+    supplied = {
+        "git_no_replace_objects": "0",
+        "Git_No_Replace_Objects": "false",
+        "GIT_NO_REPLACE_OBJECTS": "disabled",
+        "CaseSensitiveUnrelated": "preserved",
+    }
+    assert bootstrap_core.run_git(["rev-parse", "HEAD"], env=supplied) == "ok"
+
+    child_environment = observed[0]
+    guard_keys = [
+        key for key in child_environment
+        if key.upper() == "GIT_NO_REPLACE_OBJECTS"
+    ]
+    assert guard_keys == ["GIT_NO_REPLACE_OBJECTS"]
+    assert child_environment["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert child_environment["CaseSensitiveUnrelated"] == "preserved"
+
+
+@pytest.mark.parametrize(
+    ("source_bytes", "policy_bytes", "message"),
+    [
+        (
+            b'{"schema_version":"synaptic-source-lock/v1","schema_version":"drift"}',
+            b"{}",
+            "duplicate object keys",
+        ),
+        (b'{"project":{"nested":1,"nested":2}}', b"{}", "duplicate object keys"),
+        (b"{}", b'{"allowed_hosts":[],"allowed_hosts":[]}', "duplicate object keys"),
+        (b"\xff", b"{}", "input JSON is invalid"),
+        (b'{"broken":', b"{}", "input JSON is invalid"),
+    ],
+)
+def test_remote_json_rejects_duplicate_keys_and_decode_errors_before_reconstruction(
+    source_bytes: bytes, policy_bytes: bytes, message: str, tmp_path: Path,
+) -> None:
+    destination = tmp_path / "must-not-exist"
+    with pytest.raises(bootstrap_core.BootstrapError, match=message) as error:
+        bootstrap_core.reconstruct_source_lock_json(
+            source_bytes, policy_bytes, destination,
+        )
+    assert not destination.exists()
+    assert "schema_version" not in str(error.value)
+    assert "allowed_hosts" not in str(error.value)
+
+
+def test_submodule_paths_reject_casefold_collisions_before_child_fetch(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / ".gitmodules").write_text("fixture\n", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def runner(arguments, **_kwargs):
+        calls.append(list(arguments))
+        if "--get-regexp" in arguments:
+            return "submodule.one.path Vendor/Plugin\nsubmodule.two.path vendor/plugin"
+        if arguments[-1] == "submodule.one.url":
+            return "https://git.example.test/team/plugin.git"
+        if "ls-tree" in arguments:
+            return f"160000 commit {'b' * 40}\tVendor/Plugin"
+        raise AssertionError(f"unexpected Git call: {arguments}")
+
+    policy = bootstrap_core.normalize_policy(
+        {
+            "allowed_hosts": ["git.example.test"],
+            "allowed_schemes": ["https"],
+            "nested_submodules": True,
+            "max_submodule_depth": 2,
+        }
+    )
+    parent = bootstrap_core.canonicalize_repository_url(
+        "https://git.example.test/team/host.git"
+    )
+    with pytest.raises(bootstrap_core.BootstrapError, match="unique and contained"):
+        bootstrap_core._read_submodules(
+            repository, parent, policy=policy, depth=0, command_runner=runner,
+        )
+    assert not any("clone" in call for call in calls)
+    assert sum("submodule.one.url" in call for call in calls) == 1
+    assert not any("submodule.two.url" in call for call in calls)
+
+
+def test_encoded_secret_forms_are_redacted_from_git_errors() -> None:
+    secret = "token value+/with?symbols"
+    raw = secret.encode("utf-8")
+    variants = (
+        secret,
+        quote(secret, safe=""),
+        quote_plus(secret, safe=""),
+        base64.b64encode(raw).decode("ascii"),
+        base64.b64encode(b"x-access-token:" + raw).decode("ascii").rstrip("="),
+    )
+    rendered = bootstrap_core.redact(" | ".join(variants) + " | useful-context", (secret,))
+    assert "useful-context" in rendered
+    assert all(variant not in rendered for variant in variants)
+
+
+def test_checkout_destination_rejects_real_junction_before_runner_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tuner.cloud.checkout as checkout_module
+
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    _directory_link(linked_parent, real_parent)
+    calls: list[list[str]] = []
+
+    def runner(arguments, **_kwargs):
+        calls.append(list(arguments))
+        raise AssertionError("Git runner must not execute through a linked destination")
+
+    monkeypatch.setattr(checkout_module, "_run_git", runner)
+    with pytest.raises(SourceLockError, match="links or reparse"):
+        checkout_source_lock(
+            _standalone_lock("a" * 40),
+            linked_parent / "checkout",
+            policy=CheckoutPolicy(frozenset({"git.example.test"}), frozenset({"https"})),
+        )
+    assert not calls
+    assert not (real_parent / "checkout").exists()
 
 
 def test_standalone_checkout_uses_exact_commit(tmp_path: Path) -> None:

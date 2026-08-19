@@ -19,6 +19,11 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 PUBLICATION_ENV = "SYNAPTIC_REQUIRE_SELF_CONTAINED_WHEEL"
 WHEEL_ENV = "SYNAPTIC_WHEEL_UNDER_TEST"
 RUNTIME_BUNDLE_PREFIX = "synaptic_tuner/runtime/"
+BOOTSTRAP_CAPSULE_MEMBERS = (
+    "tuner/cloud/bootstrap_core.py",
+    "tuner/cloud/bootstrap_capsule.py",
+)
+BOOTSTRAP_CAPSULE_SCHEMA = "schemas/synaptic-bootstrap-capsule-v1.schema.json"
 
 
 @dataclass(frozen=True)
@@ -259,6 +264,21 @@ def test_required_runtime_asset_families_are_present_in_source() -> None:
     assert "docker/mechinterp-runner/print_provenance.py" in assets
 
 
+def test_bootstrap_capsule_assets_are_explicit_and_run_agnostic() -> None:
+    for member in (*BOOTSTRAP_CAPSULE_MEMBERS, BOOTSTRAP_CAPSULE_SCHEMA):
+        assert (REPO_ROOT / member).is_file(), f"missing J0 bootstrap asset: {member}"
+
+    from tuner.cloud.bootstrap_capsule import CAPSULE_MODULE_PATHS
+
+    assert CAPSULE_MODULE_PATHS == BOOTSTRAP_CAPSULE_MEMBERS
+    assert all("source_lock" not in member and "policy" not in member for member in CAPSULE_MODULE_PATHS)
+
+
+def test_bootstrap_capsule_does_not_enable_self_contained_wheel_publication() -> None:
+    metadata = _runtime_asset_metadata()
+    assert metadata.get("self-contained-wheel", False) is False
+
+
 def test_runtime_asset_manifest_excludes_outputs_state_and_private_data() -> None:
     assets = _expanded_assets(SELF_CONTAINED_WHEEL_FAMILIES)
     violations = [
@@ -302,4 +322,3 @@ def test_self_contained_wheel_publication_gate() -> None:
         "wheel claims self-contained support but omits runtime assets; missing "
         f"{len(missing)} member(s): {missing[:25]}"
     )
-

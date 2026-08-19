@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import hashlib
 import configparser
+import os
 import re
-import shlex
-import shutil
-import subprocess
-import sys
-import tempfile
+import tempfile  # compatibility seam; bootstrap_core uses the same stdlib module object
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, Mapping
 
+from tuner.cloud import bootstrap_core
 from tuner.project.errors import RepositoryUrlError, SecretReferenceError, SourceLockError
 from tuner.project.context import ProjectContext
 from tuner.project.manifest import load_project_manifest
@@ -30,7 +27,6 @@ from tuner.project.source_bundle import (
 
 
 CloneUrlResolver = Callable[[RepositoryLocation], str]
-_GITMODULE_KEY = re.compile(r"^submodule\.(?P<name>.+)\.path$")
 
 
 @dataclass(frozen=True)
@@ -88,14 +84,6 @@ class CheckoutResult:
     source_lock: SourceLock
     project_root: Path
     engine_root: Path
-
-
-@dataclass(frozen=True)
-class _Submodule:
-    name: str
-    path: str
-    location: RepositoryLocation
-    commit: str
 
 
 def standalone_credential_from_environment(
@@ -360,47 +348,11 @@ def _committed_engine_identity(
 
 
 def _redact(text: object, secrets: tuple[str, ...] = ()) -> str:
-    rendered = str(text)
-    for secret in secrets:
-        if secret:
-            rendered = rendered.replace(secret, "<redacted>")
-    # Defense in depth for URL-like text returned by Git.
-    rendered = re.sub(r"(https?://)[^/@\s]+@", r"\1<redacted>@", rendered)
-    return rendered
+    return bootstrap_core.redact(text, secrets)
 
 
 def _git_environment(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Build a minimal cross-platform environment with no Git injection knobs."""
-
-    source = dict(os.environ)
-    if overrides:
-        source.update(overrides)
-    allowed = {
-        "PATH",
-        "PATHEXT",
-        "SYSTEMROOT",
-        "WINDIR",
-        "COMSPEC",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "CURL_CA_BUNDLE",
-    }
-    environment = {key: value for key, value in source.items() if key.upper() in allowed}
-    environment.update(
-        {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_ALLOW_PROTOCOL": "https:ssh",
-        }
-    )
-    return environment
+    return bootstrap_core.git_environment(overrides)
 
 
 def _run_git(
@@ -411,20 +363,38 @@ def _run_git(
     secrets: tuple[str, ...] = (),
 ) -> str:
     try:
-        completed = subprocess.run(
-            ["git", *arguments],
-            cwd=str(cwd) if cwd else None,
-            env=dict(env) if env is not None else _git_environment(),
-            capture_output=True,
-            text=True,
-            timeout=120,
+        return bootstrap_core.run_git(arguments, cwd=cwd, env=env, secrets=secrets)
+    except bootstrap_core.BootstrapError as exc:
+        raise SourceLockError(str(exc)) from exc
+
+
+def _policy_mapping(policy: CheckoutPolicy) -> dict[str, object]:
+    result: dict[str, object] = {
+        "allowed_hosts": sorted(host.lower() for host in policy.allowed_hosts),
+        "allowed_schemes": sorted(policy.allowed_schemes),
+        "nested_submodules": policy.nested_submodules,
+        "max_submodule_depth": policy.max_submodule_depth,
+    }
+    if policy.ssh is not None:
+        result["ssh"] = {
+            "executable": str(policy.ssh.ssh_executable.resolve()),
+            "agent_socket": policy.ssh.agent_socket,
+            "known_hosts": str(policy.ssh.known_hosts.resolve()),
+        }
+    return result
+
+
+def _credential_resolver(
+    *, environment: Mapping[str, str] | None, provider_secret: SecretResolver | None,
+    credential_helper: SecretResolver | None,
+) -> bootstrap_core.CredentialResolver:
+    def resolve(reference: Mapping[str, object]) -> str:
+        return resolve_secret(
+            SecretRef.from_dict(reference), environment=environment or os.environ,
+            provider_secret=provider_secret, credential_helper=credential_helper,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SourceLockError(f"Git checkout operation failed: {_redact(exc, secrets)}") from exc
-    if completed.returncode:
-        detail = _redact(completed.stderr.strip() or completed.stdout.strip(), secrets)
-        raise SourceLockError(f"Git checkout operation failed: {detail or 'unknown error'}")
-    return completed.stdout.strip()
+
+    return resolve
 
 
 @contextmanager
@@ -436,109 +406,21 @@ def _credential_scope(
     credential_helper: SecretResolver | None,
     ssh_policy: SSHCheckoutPolicy | None = None,
 ) -> Iterator[tuple[list[str], dict[str, str], tuple[str, ...], Path | None]]:
-    """Resolve one SecretRef and expose it only to an ephemeral scoped helper."""
+    """Adapt typed local credential callbacks to the shared stdlib core."""
 
-    helper_dir = Path(tempfile.mkdtemp(prefix="synaptic-git-credential-"))
-    home_dir = helper_dir / "home"
-    template_dir = helper_dir / "template"
-    hooks_dir = helper_dir / "hooks"
-    home_dir.mkdir()
-    template_dir.mkdir()
-    hooks_dir.mkdir()
-    process_env = _git_environment(environment)
-    process_env["HOME"] = str(home_dir)
-    process_env["USERPROFILE"] = str(home_dir)
-    config = [
-        "-c",
-        "credential.helper=",
-        "-c",
-        "protocol.file.allow=never",
-        "-c",
-        "protocol.ext.allow=never",
-        "-c",
-        f"core.hooksPath={hooks_dir}",
-        "-c",
-        f"init.templateDir={template_dir}",
-    ]
-    reference = location.credential
-    if reference is None:
-        if location.scheme == "ssh":
-            if ssh_policy is None:
-                shutil.rmtree(helper_dir, ignore_errors=True)
-                raise SourceLockError(
-                    "SSH checkout requires an explicit controlled agent and known_hosts policy"
-                )
-            process_env["SSH_AUTH_SOCK"] = ssh_policy.agent_socket
-            process_env["GIT_SSH_VARIANT"] = "ssh"
-            ssh_arguments = [
-                str(ssh_policy.ssh_executable.resolve()),
-                "-F", os.devnull,
-                "-oBatchMode=yes",
-                "-oStrictHostKeyChecking=yes",
-                f"-oUserKnownHostsFile={ssh_policy.known_hosts.resolve()}",
-                "-oGlobalKnownHostsFile=none",
-                "-oIdentityFile=none",
-                "-oIdentitiesOnly=no",
-                "-oProxyCommand=none",
-                "-oProxyJump=none",
-                "-oForwardAgent=no",
-                "-oClearAllForwardings=yes",
-                "-oPermitLocalCommand=no",
-                "-oLocalCommand=none",
-                "-oRequestTTY=no",
-            ]
-            process_env["GIT_SSH_COMMAND"] = " ".join(
-                shlex.quote(argument) for argument in ssh_arguments
-            )
-        try:
-            yield config, process_env, (), helper_dir
-        finally:
-            shutil.rmtree(helper_dir, ignore_errors=True)
-        return
-
-    if location.scheme != "https":
-        shutil.rmtree(helper_dir, ignore_errors=True)
-        raise SourceLockError(
-            "SecretRef-backed checkout currently requires HTTPS; SSH must use an external agent"
-        )
-
+    location_mapping = location.to_dict()
+    policy = CheckoutPolicy(allowed_hosts=frozenset({location.host}), ssh=ssh_policy)
     try:
-        value = resolve_secret(
-            reference,
-            environment=environment or os.environ,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-    except Exception:
-        shutil.rmtree(helper_dir, ignore_errors=True)
-        raise
-    helper = helper_dir / "credential_helper.py"
-    helper.write_text(
-        "import os, sys\n"
-        "request = dict(line.rstrip('\\n').split('=', 1) for line in sys.stdin if '=' in line)\n"
-        "if request.get('host', '').lower() != os.environ['SYNAPTIC_GIT_HOST'].lower():\n"
-        "    raise SystemExit(1)\n"
-        "print('username=x-access-token')\n"
-        "print('password=' + os.environ['SYNAPTIC_GIT_SECRET'])\n",
-        encoding="utf-8",
-    )
-    process_env["SYNAPTIC_GIT_HOST"] = location.host
-    process_env["SYNAPTIC_GIT_SECRET"] = value
-    helper_command = f"!\"{sys.executable}\" \"{helper}\""
-    config.extend(
-        [
-            "-c",
-            f"credential.https://{location.host}.helper={helper_command}",
-            "-c",
-            "credential.useHttpPath=true",
-        ]
-    )
-    try:
-        yield config, process_env, (value,), helper_dir
-    finally:
-        process_env.pop("SYNAPTIC_GIT_SECRET", None)
-        process_env.pop("SYNAPTIC_GIT_HOST", None)
-        shutil.rmtree(helper_dir, ignore_errors=True)
+        with bootstrap_core.credential_scope(
+            location_mapping, policy=_policy_mapping(policy), environment=environment,
+            credential_resolver=_credential_resolver(
+                environment=environment, provider_secret=provider_secret,
+                credential_helper=credential_helper,
+            ),
+        ) as (config, process_env, secrets):
+            yield config, process_env, secrets, None
+    except bootstrap_core.BootstrapError as exc:
+        raise SourceLockError(str(exc)) from exc
 
 
 def _authenticated_remote_proof(
@@ -598,160 +480,6 @@ def validate_source_lock_for_cloud(source_lock: SourceLock) -> None:
             raise SourceLockError("Locked engine commit does not match the host gitlink")
 
 
-def _clone_exact(
-    source: GitSource,
-    destination: Path,
-    *,
-    policy: CheckoutPolicy,
-    clone_url_resolver: CloneUrlResolver | None,
-    environment: Mapping[str, str] | None,
-    provider_secret: SecretResolver | None,
-    credential_helper: SecretResolver | None,
-) -> None:
-    location = policy.validate(source.location)
-    clone_url = clone_url_resolver(location) if clone_url_resolver else location.canonical_url
-    with _credential_scope(
-        location,
-        environment=environment,
-        provider_secret=provider_secret,
-        credential_helper=credential_helper,
-        ssh_policy=policy.ssh,
-    ) as (config, process_env, secrets, _helper_dir):
-        if clone_url_resolver:
-            # Local fixture transport is an explicit test seam; locked identity
-            # validation still applies to the declared canonical URL.
-            fixture_config: list[str] = []
-            for index in range(0, len(config), 2):
-                if config[index + 1] != "protocol.file.allow=never":
-                    fixture_config.extend(config[index : index + 2])
-            config = [*fixture_config, "-c", "protocol.file.allow=always"]
-            process_env["GIT_ALLOW_PROTOCOL"] = "https:ssh:file"
-        _run_git(
-            [
-                *config,
-                "clone",
-                f"--template={next(item.split('=', 1)[1] for item in config if item.startswith('init.templateDir='))}",
-                "--no-checkout",
-                "--no-recurse-submodules",
-                clone_url,
-                str(destination),
-            ],
-            env=process_env,
-            secrets=secrets,
-        )
-        # The resolved value is needed only by clone authentication. Checkout,
-        # verification, and hooks receive the same scrubbed env without it.
-        process_env.pop("SYNAPTIC_GIT_SECRET", None)
-        process_env.pop("SYNAPTIC_GIT_HOST", None)
-        _run_git([*config, "checkout", "--detach", source.commit], cwd=destination, env=process_env, secrets=secrets)
-        actual = _run_git(["rev-parse", "HEAD"], cwd=destination, env=process_env, secrets=secrets)
-    if actual.lower() != source.commit.lower():
-        raise SourceLockError("Checkout HEAD does not match the exact locked commit")
-
-
-def _read_submodules(
-    repository: Path,
-    parent_location: RepositoryLocation,
-    *,
-    policy: CheckoutPolicy,
-    depth: int,
-) -> list[_Submodule]:
-    document = repository / ".gitmodules"
-    if not document.is_file():
-        return []
-    paths = _run_git(["config", "--file", str(document), "--get-regexp", r"^submodule\..*\.path$"] , cwd=repository)
-    if not paths:
-        return []
-    if depth > 0 and not policy.nested_submodules:
-        raise SourceLockError("Nested submodules are disabled by project policy")
-    if depth >= policy.max_submodule_depth:
-        raise SourceLockError("Submodule graph exceeds the approved maximum depth")
-
-    entries: list[_Submodule] = []
-    seen_paths: set[str] = set()
-    for line in paths.splitlines():
-        key, separator, raw_path = line.partition(" ")
-        match = _GITMODULE_KEY.fullmatch(key)
-        if not separator or not match:
-            raise SourceLockError("Malformed .gitmodules submodule path entry")
-        path = raw_path.strip().replace("\\", "/")
-        if not path or path.startswith("/") or ".." in path.split("/") or path in seen_paths:
-            raise SourceLockError("Submodule path must be unique and contained")
-        seen_paths.add(path)
-        name = match.group("name")
-        raw_url = _run_git(["config", "--file", str(document), "--get", f"submodule.{name}.url"], cwd=repository)
-        try:
-            location = (
-                resolve_relative_repository_url(raw_url, parent_location)
-                if "://" not in raw_url and not re.match(r"^(?:[^@]+@)?[^:]+:.+$", raw_url)
-                else RepositoryLocation.parse(raw_url)
-            )
-            location = policy.validate(location)
-        except RepositoryUrlError as exc:
-            raise SourceLockError(f"Rejected .gitmodules repository URL: {_redact(exc)}") from exc
-        tree_line = _run_git(["ls-tree", "HEAD", "--", path], cwd=repository)
-        fields = tree_line.split()
-        if len(fields) < 3 or fields[0] != "160000":
-            raise SourceLockError("Submodule declaration does not match a committed gitlink")
-        entries.append(_Submodule(name=name, path=path, location=location, commit=fields[2]))
-    return entries
-
-
-def _materialize_submodules(
-    repository: Path,
-    parent_location: RepositoryLocation,
-    *,
-    policy: CheckoutPolicy,
-    depth: int,
-    locked_engine: GitSource,
-    clone_url_resolver: CloneUrlResolver | None,
-    environment: Mapping[str, str] | None,
-    provider_secret: SecretResolver | None,
-    credential_helper: SecretResolver | None,
-) -> None:
-    # All declarations at this level are parsed and policy-validated before
-    # the first child fetch, preventing partial traversal of a hostile graph.
-    entries = _read_submodules(repository, parent_location, policy=policy, depth=depth)
-    for entry in entries:
-        credential: SecretRef | None = None
-        if entry.path == locked_engine.submodule_path and depth == 0:
-            if entry.commit.lower() != locked_engine.commit.lower():
-                raise SourceLockError("Host gitlink does not match the locked engine commit")
-            if entry.location.canonical_url != locked_engine.location.canonical_url:
-                raise SourceLockError("Host engine submodule URL does not match the source lock")
-            credential = locked_engine.location.credential
-        elif entry.location.host == parent_location.host:
-            credential = parent_location.credential
-        child_location = RepositoryLocation.parse(entry.location.canonical_url, credential=credential)
-        child = GitSource(location=child_location, commit=entry.commit, pushed=True)
-        target = (repository / entry.path).resolve()
-        try:
-            target.relative_to(repository.resolve())
-        except ValueError as exc:
-            raise SourceLockError("Submodule destination escapes its parent checkout") from exc
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _clone_exact(
-            child,
-            target,
-            policy=policy,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-        _materialize_submodules(
-            target,
-            child_location,
-            policy=policy,
-            depth=depth + 1,
-            locked_engine=locked_engine,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-
-
 def checkout_source_lock(
     source_lock: SourceLock,
     destination: Path,
@@ -762,84 +490,33 @@ def checkout_source_lock(
     provider_secret: SecretResolver | None = None,
     credential_helper: SecretResolver | None = None,
 ) -> CheckoutResult:
-    """Reconstruct and verify a locked standalone, superproject, or dual clone."""
+    """Adapt typed local values to the one canonical reconstruction core."""
 
     validate_source_lock_for_cloud(source_lock)
-    project_location = policy.validate(source_lock.project_source.location)
-    policy.validate(source_lock.engine_source.location)
-    destination = Path(destination).resolve()
-    if destination.exists() and any(destination.iterdir()):
-        raise SourceLockError("Checkout destination must be empty")
-    destination.mkdir(parents=True, exist_ok=True)
 
-    if source_lock.mode == "standalone":
-        project_root = destination / "project"
-        _clone_exact(
-            source_lock.project_source,
-            project_root,
-            policy=policy,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
+    def resolve_clone(location: Mapping[str, object]) -> str:
+        typed = RepositoryLocation.parse(
+            str(location["url"]),
+            credential=location.get("credential") if isinstance(location.get("credential"), Mapping) else None,
         )
-        return CheckoutResult(source_lock, project_root, project_root)
+        return clone_url_resolver(typed) if clone_url_resolver else typed.canonical_url
 
-    project_root = destination / "project"
-    _clone_exact(
-        source_lock.project_source,
-        project_root,
-        policy=policy,
-        clone_url_resolver=clone_url_resolver,
-        environment=environment,
-        provider_secret=provider_secret,
-        credential_helper=credential_helper,
+    try:
+        result = bootstrap_core.reconstruct_source_lock(
+            source_lock.to_dict(), Path(destination), policy=_policy_mapping(policy),
+            clone_url_resolver=resolve_clone if clone_url_resolver else None,
+            environment=environment,
+            credential_resolver=_credential_resolver(
+                environment=environment, provider_secret=provider_secret,
+                credential_helper=credential_helper,
+            ),
+            command_runner=_run_git,
+            allow_legacy_metadata=True,
+        )
+    except bootstrap_core.BootstrapError as exc:
+        raise SourceLockError(str(exc)) from exc
+    return CheckoutResult(
+        source_lock=source_lock,
+        project_root=Path(str(result["project_root"])),
+        engine_root=Path(str(result["engine_root"])),
     )
-    engine_path = source_lock.engine_source.submodule_path or ""
-    root_entries = _read_submodules(project_root, project_location, policy=policy, depth=0)
-    matching = [entry for entry in root_entries if entry.path == engine_path]
-    if len(matching) != 1 or matching[0].commit.lower() != source_lock.engine_source.commit.lower():
-        raise SourceLockError("Locked host gitlink does not identify the locked engine commit")
-    if matching[0].location.canonical_url != source_lock.engine_source.location.canonical_url:
-        raise SourceLockError("Locked host submodule URL does not identify the locked engine source")
-
-    if source_lock.mode == "superproject":
-        _materialize_submodules(
-            project_root,
-            project_location,
-            policy=policy,
-            depth=0,
-            locked_engine=source_lock.engine_source,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-        engine_root = (project_root / engine_path).resolve()
-    else:
-        engine_root = destination / "engine"
-        _clone_exact(
-            source_lock.engine_source,
-            engine_root,
-            policy=policy,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-        _materialize_submodules(
-            engine_root,
-            source_lock.engine_source.location,
-            policy=policy,
-            depth=1,
-            locked_engine=source_lock.engine_source,
-            clone_url_resolver=clone_url_resolver,
-            environment=environment,
-            provider_secret=provider_secret,
-            credential_helper=credential_helper,
-        )
-
-    actual_engine = _run_git(["rev-parse", "HEAD"], cwd=engine_root)
-    if actual_engine.lower() != source_lock.engine_source.commit.lower():
-        raise SourceLockError("Reconstructed engine does not match the source lock")
-    return CheckoutResult(source_lock, project_root, engine_root)

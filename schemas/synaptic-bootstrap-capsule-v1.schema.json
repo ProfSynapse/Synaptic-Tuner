@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapticlabs.ai/schemas/synaptic-bootstrap-capsule-v1.schema.json",
+  "title": "Synaptic bootstrap capsule manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "engine_commit", "files", "limits"],
+  "properties": {
+    "schema_version": {"const": "synaptic-bootstrap-capsule/v1"},
+    "engine_commit": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"$ref": "#/$defs/coreMember"},
+        {"$ref": "#/$defs/capsuleMember"}
+      ],
+      "items": false
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_file_bytes", "max_total_bytes"],
+      "properties": {
+        "max_file_bytes": {"const": 2097152},
+        "max_total_bytes": {"const": 4194304}
+      }
+    }
+  },
+  "$defs": {
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "sha256", "mode"],
+      "properties": {
+        "path": {"type": "string"},
+        "size": {"type": "integer", "minimum": 0, "maximum": 2097152},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "mode": {"enum": [420, 493]}
+      }
+    },
+    "coreMember": {
+      "allOf": [
+        {"$ref": "#/$defs/member"},
+        {"properties": {"path": {"const": "tuner/cloud/bootstrap_core.py"}}}
+      ]
+    },
+    "capsuleMember": {
+      "allOf": [
+        {"$ref": "#/$defs/member"},
+        {"properties": {"path": {"const": "tuner/cloud/bootstrap_capsule.py"}}}
+      ]
+    }
+  }
+}

@@ -6,6 +6,18 @@ from importlib import import_module
 
 
 _EXPORT_MODULES = {
+    "BootstrapError": ".bootstrap_core",
+    "reconstruct_source_lock": ".bootstrap_core",
+    "reconstruct_source_lock_json": ".bootstrap_core",
+    "CAPSULE_MANIFEST": ".bootstrap_capsule",
+    "CAPSULE_MODULE_PATHS": ".bootstrap_capsule",
+    "CAPSULE_SCHEMA": ".bootstrap_capsule",
+    "CapsuleBuild": ".bootstrap_capsule",
+    "CapsuleError": ".bootstrap_capsule",
+    "authenticate_external_input": ".bootstrap_capsule",
+    "build_capsule": ".bootstrap_capsule",
+    "invoke_verified_capsule": ".bootstrap_capsule",
+    "verified_capsule_scratch": ".bootstrap_capsule",
     "CloudJobSpec": ".hf_jobs",
     "HF_BUCKET_SYNC_OVERLAY_PACKAGES": ".hf_jobs",
     "HFJobExecutor": ".hf_jobs",
@@ -36,6 +48,18 @@ _EXPORT_MODULES = {
 }
 
 __all__ = [
+    "BootstrapError",
+    "reconstruct_source_lock",
+    "reconstruct_source_lock_json",
+    "CAPSULE_MANIFEST",
+    "CAPSULE_MODULE_PATHS",
+    "CAPSULE_SCHEMA",
+    "CapsuleBuild",
+    "CapsuleError",
+    "authenticate_external_input",
+    "build_capsule",
+    "invoke_verified_capsule",
+    "verified_capsule_scratch",
     "CloudJobSpec",
     "HF_BUCKET_SYNC_OVERLAY_PACKAGES",
     "HFJobExecutor",

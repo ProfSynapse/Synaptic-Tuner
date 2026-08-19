@@ -2,7 +2,7 @@
 
 **Status:** Publication gate defined; self-contained wheel publication blocked
 
-**Prepared for:** Submodule-first agent engine, DAG node R
+**Prepared for:** Submodule-first agent engine, DAG nodes R and J0
 
 **Scope date:** 2026-08-16
 
@@ -39,6 +39,70 @@ An ordinary `[build-system]` table, a distribution name, or a successful
 `python -m build` is not a self-contained claim. That distinction allows Node B
 to land the public facade and editable console without misrepresenting the
 runtime boundary.
+
+## J0 Bootstrap Capsule Boundary
+
+Node J0 adds a deliberately separate, unpublished bootstrap artifact. It is
+not a wheel and does not change the self-contained-wheel decision above. A
+capsule is reusable for one exact committed engine revision and contains only:
+
+- exact Git-object bytes for `tuner/cloud/bootstrap_core.py`;
+- exact Git-object bytes for `tuner/cloud/bootstrap_capsule.py`; and
+- `synaptic-bootstrap-capsule/v1` manifest bytes binding those two paths,
+  their sizes, modes, SHA-256 digests, fixed limits, and the engine commit.
+
+The manifest schema is
+`schemas/synaptic-bootstrap-capsule-v1.schema.json`. The schema is an engine
+source/runtime asset used to validate the format; it is not embedded as a
+third capsule member.
+
+The capsule never contains a source lock, checkout policy, credential,
+configuration, plug-in, dataset, prompt, rubric, workload input, or run
+output. A later provider launcher transports source-lock and policy JSON as
+separate files, binds each file with a launcher-supplied SHA-256 digest, and
+passes their paths and digests to the already verified capsule entrypoint.
+J0 implements no provider upload, volume, client, authentication, network, or
+paid-compute behavior.
+
+After J has independently bound the expected capsule-manifest digest, its
+trusted launcher invokes the verified copy with this J0-owned wire contract:
+
+```text
+python -I tuner/cloud/bootstrap_capsule.py _run-verified \
+  --source-lock <path> --source-lock-sha256 <lowercase-sha256> \
+  --checkout-policy <path> --checkout-policy-sha256 <lowercase-sha256> \
+  --destination <empty-checkout-root>
+```
+
+The two JSON files contain only primitive canonical source-lock and checkout
+policy documents. Remote credentials remain opaque environment-backed
+references; controlled SSH executable, agent-socket, and known-hosts values
+are explicit policy inputs. Local callback resolvers remain adapters in
+`tuner/cloud/checkout.py` and are never serialized.
+
+The transport-neutral verifier accepts a capsule root plus an expected
+manifest digest. It permits only the exact two regular-file members above,
+enforces per-file and aggregate limits, rejects unsafe/duplicate paths and
+links or other special files, copies authenticated bytes into per-invocation
+private scratch, re-verifies the copies, and cleans scratch on success and
+failure. Only the verified copy authenticates the separate external input
+bytes and then imports the shared bootstrap core. Local checkout and capsule
+checkout therefore execute the same reconstruction implementation.
+
+The builder disables Git replacement-object lookup for every revision, tree,
+and blob read, so a requested literal commit cannot be substituted through
+`refs/replace`; the shared reconstruction runner independently forces that
+same setting for every runtime Git command. Runtime parsing is fail-closed:
+the remote entrypoint rejects duplicate JSON keys at any object depth and
+requires the complete canonical `synaptic-source-lock/v1` envelope, exact
+policy and manifest/member key sets, real JSON booleans, exact bounded JSON
+integers for every manifest limit, size, and mode, canonical member order, and
+case-insensitively unique submodule paths. Lexical path inspection rejects
+POSIX links and Windows reparse points/junctions before capsule reads, scratch
+writes, external-input reads, checkout writes, or Git runner calls. Scratch
+cleanup failure is itself a failure; when an integrity or execution error is
+already active, that primary error remains authoritative and receives a safe
+cleanup-failure note.
 
 ## Method
 
@@ -225,6 +289,7 @@ runtime knows where to find the files.
 | Self-contained wheel | Blocked until explicit claim, installed-resource resolution, real-wheel asset proof, and isolated smokes pass |
 | External-runtime-checkout distribution | Architecturally allowed later, but it must declare and verify the exact runtime checkout rather than call itself self-contained |
 | Provider/container distribution | Allowed only as a separately versioned, provenance-recorded artifact with complete build/template contexts |
+| J0 committed bootstrap capsule | Allowed as a local deterministic build artifact; unpublished, code-only, provider-neutral, and not a self-contained wheel claim |
 
 ## Follow-Up Owners
 
@@ -232,7 +297,9 @@ runtime knows where to find the files.
   marker; do not opt in during the public-facade commit.
 - **Nodes F/G:** route discovery, trainer, Evaluator, SynthChat, and MechInterp
   assets through `ProjectContext` and explicit engine-resource resolution.
-- **Nodes I/J/K/L:** reconstruct `/workspace/engine` and provider assets from
+- **Node J0:** retain the exact two-member committed capsule and keep per-run
+  inputs external and hash-bound; do not opt into wheel publication.
+- **Nodes J/K/L:** reconstruct `/workspace/engine` and provider assets from
   exact source locks; do not assume `/workspace/repo` is both host and engine.
 - **Node N:** build a wheel without publishing, run this test in forced
   publication mode, install it in a fresh environment, and keep publication
